@@ -35,18 +35,37 @@
 // contribution gone, proven — becomes IMPOSSIBLE rather than managed, and git
 // merges the directory add/add clean across concurrent worktrees.
 //
-// CONFLICT DETECTION IS NOT A WRITE-TIME ALGORITHM. There is no write order to
-// appeal to, so a conflict is simply what the FOLD OBSERVES: two rival recipes
-// over one (subject, quantity) are BOTH kept and BOTH flagged, and are
-// resolved by re-running both TODAY — never by whichever file arrived first.
-// (R4.) This module emits the `{ reason: "CONFLICT", … }` shape rather than
-// importing adjudicate.mjs's vocabulary — deliberately, and not merely because
-// that slice was unmerged when this was written. The DURABLE STORE must not
-// depend on the VERDICT ENGINE: the store is what a verifier writes at the end
-// of a phase, the engine is what a reviewer runs over facts in flight, and
-// making the cheap half import the expensive one couples them for one shared
-// string. The name is byte-identical to VERDICTS.CONFLICT on purpose, and the
-// constant below is the single place to re-point should that ever change.
+// RIVAL-METHOD IS THE PRODUCT, NOT A DEFECT SIGNAL — AND IT IS NOT `CONFLICT`.
+// There is no write order to appeal to, so what the FOLD OBSERVES is simply
+// this: two or more DISTINCT `rerun` commands exist for one (subject,
+// quantity). Both are kept, both are flagged, and the flag MEANS "multiple
+// checks exist for this — re-run them and compare what they answer NOW". That
+// is the ledger delivering exactly what it promises (an index of how to verify
+// fast, with more than one way in), not a report that something is wrong.
+//
+// It is deliberately NOT named CONFLICT, and does NOT import adjudicate.mjs's
+// vocabulary. The two mechanisms are structurally OPPOSITE, proven by a 2x2
+// probe over all four cells:
+//
+//   - THIS fold fires on ≥2 distinct rerun COMMAND STRINGS and has no value
+//     field to compare — so it fires on `wc -l /abs/path` vs `wc -l rel/path`,
+//     two commands both verified to answer `544`. Agreement, flagged.
+//   - adjudicate.mjs's `detectConflicts` fires on ≥2 distinct claim VALUES and
+//     never reads `rerun` — so it returned 0 on that same pair, and 2 on a
+//     genuine 544-vs-999 disagreement, which THIS fold is structurally
+//     incapable of seeing at all.
+//
+// One name for two incompatible meanings would discredit R4 on its first live
+// day: a reviewer told "CONFLICT" would go looking for a disagreement that the
+// firing mechanism cannot detect. (This retires the premise of the open task
+// `tgw2-ledger-adjudicator-vocab`, "the shape is identical by construction" —
+// it is false, and that task is cancelled separately.)
+//
+// THE HONESTY CHECKS ARE INJECTED, NOT IMPORTED. `admitRecipe(input, { now,
+// screen })` takes its clock bound and its safety screen as ARGUMENTS. Both
+// are optional and omitting them admits, so no existing caller breaks; the CLI
+// is what closes the opt-in (see the `now` note at the bound itself). Injection
+// is what keeps this module dependency-free and clock-free — see below.
 //
 // NO CLOCK, NO RANDOMNESS. `observed_at` and `run_id` are REQUIRED
 // writer-supplied arguments; nothing here calls the current time or a random
@@ -84,14 +103,55 @@ const VALUE_SHAPED_FIELDS = Object.freeze([
   "value", "values", "observed_value", "result", "measurement", "measured", "answer",
 ]);
 
-// The fold's flag for two rival recipes over one key. The adjudicator slice
-// (tgw1-adjudicator) owns the verdict vocabulary; it has not merged, so this
-// is the same shape emitted locally. One constant = one place to re-point.
-export const CONFLICT = "CONFLICT";
+// The fold's flag for two rival ways to re-derive one key. NOT "CONFLICT" —
+// see the header: this is the product ("more than one check exists, re-run and
+// compare"), and adjudicate.mjs's identically-named verdict fires on the
+// opposite input. One constant = one place to re-point.
+export const RIVAL_METHOD = "RIVAL-METHOD";
 
 // An instant, not a date and not prose. `observed_at` is load-bearing enough
-// that "2026-07-20" or "yesterday" must not pass as one.
+// that "2026-07-20" or "yesterday" must not pass as one. Offset forms match
+// here so that "not an instant at all" and "an instant in the wrong zone" get
+// DIFFERENT rejections — see UTC_INSTANT.
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+// Z ONLY, and this is not pedantry about formatting.
+//
+// Every ordering this module performs on `observed_at` — the future bound
+// below, and the fold's within-entry sort — is a LEXICAL string comparison,
+// which is correct ONLY for same-offset instants. `2026-07-21T02:00:00+02:00`
+// sorts AFTER `2026-07-21T01:00:00Z` and is in fact one hour EARLIER. So a
+// single admitted offset row makes the future bound silently wrong in one
+// direction and the sort silently wrong in the other.
+//
+// The fix is not to normalise: normalising an offset to UTC requires the
+// platform's date-parsing builtin, whose very name re-trips the clock-free
+// grep this module is built around (see the NO CLOCK note in the header). So
+// the offset form is REJECTED at the seam under its own name instead, and
+// every string that survives is directly comparable to every other.
+const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+
+// Z ALONE IS NOT ENOUGH — same-offset is necessary but not sufficient, and
+// this was found by the test that was written to prove the future bound worked.
+//
+//     "2026-07-21T00:00:00.001Z"  <  "2026-07-21T00:00:00Z"
+//
+// …lexically, because the strings diverge at the separator and "." (0x2E)
+// sorts below "Z" (0x5A). A row observed a millisecond in the FUTURE therefore
+// compared as PAST and was admitted, and the fold's within-entry sort put a
+// sub-second row before the whole-second row it followed. Variable fractional
+// precision breaks ISO ordering at exactly one character.
+//
+// Normalising is pure string surgery — pad the fraction to a fixed width and
+// drop the Z — so it stays clock-free and dependency-free, which is why the
+// answer is this rather than the platform's date parser. Input is always
+// UTC_INSTANT-shaped when this is called, so the split cannot fail.
+function comparableInstant(iso) {
+  const seconds = iso.slice(0, 19);            // YYYY-MM-DDTHH:MM:SS, fixed width
+  const dot = iso.indexOf(".", 19);
+  const fraction = dot === -1 ? "" : iso.slice(dot + 1, -1);
+  return `${seconds}.${fraction.padEnd(9, "0").slice(0, 9)}`;
+}
 
 // A run id names one production of rows. It goes in a filename, so it may not
 // carry a separator or anything a shell or a path would reinterpret.
@@ -101,15 +161,76 @@ function reject(reason, message, extra = {}) {
   return { reason, message: `${reason}: ${message}`, ...extra };
 }
 
-// admitRecipe(input) → { ok: true, recipe } | { ok: false, rejections: [...] }
+// admitRecipe(input, { now, screen }) → { ok: true, recipe } | { ok: false, rejections }
 //
 // Rejections ACCUMULATE (record.mjs's convention): a writer fixing a row
 // should see everything wrong with it in one pass, not one thing per attempt.
-export function admitRecipe(input = {}) {
+//
+// EVERY CHECK BEFORE THIS SLICE WAS A SHAPE CHECK, AND A FORGERY PASSED THEM
+// ALL. A run file holding two rows for commands that were never executed —
+// dated 2031-12-31 and 2087-01-01 — was ADMITTED, written to disk and folded
+// back as authoritative, one of them at L1 for the sole reason that the string
+// began with `ssh`. (The other, at L2, does not even execute: `git show
+// origin/main:tooling/grip/ledger/recipes.json` is `fatal: path … does not
+// exist`.) Shape checks cannot see that, because the forgery is perfectly
+// shaped. The two options below are the first checks here that ask whether a
+// row could be HONEST rather than whether it is well-formed:
+//
+//   now    — an ISO-8601 UTC instant the caller vouches for as "no later than
+//            right now". A row observed after it is rejected.
+//   screen — a predicate over the `rerun` command, for refusing commands that
+//            must never become recipes (a recipe is precisely a thing this
+//            epic exists to make agents re-run cheaply and OFTEN).
+//
+// BOTH ARE INJECTED AND BOTH ARE OPTIONAL, WHICH IS A REAL LIMITATION, STATED
+// PLAINLY: omitting them admits, so on its own this is an OPT-IN bound and not
+// a seam a forger has to get past. Two deliberate reasons, neither of which is
+// "it was easier":
+//
+//   - `now` is not read from a clock here because this module owns none. D19:
+//     the workflow host hard-refuses the clock builtins with "breaks resume",
+//     and the writer of these rows is one phase from a workflow file. It is
+//     also what keeps the SUITE deterministic — a clock in this module would
+//     silently make every fixture's verdict depend on what time CI ran.
+//   - `screen` is injected rather than imported so that this module keeps its
+//     "no dependency but level.mjs" property, and so the safety vocabulary can
+//     evolve without the durable store moving. Nothing here imports
+//     `screen.mjs`; the CLI is what wires the two together.
+//
+// THE OPT-IN IS CLOSED AT THE CLI, NOT HERE. `tgw3-write-verb` bakes `date -u`
+// into the write path so every real write passes a `now`, and wires the screen
+// beside it. Do not read this bound as a closed seam on its own — it is the
+// mechanism; the CLI is the enforcement.
+export function admitRecipe(input = {}, options = {}) {
   const rejections = [];
 
+  // The bounds are validated BEFORE the row, because a malformed bound
+  // disables the check it belongs to, and a check that silently stops
+  // checking is the vacuous green this whole epic exists to abolish. A caller
+  // that passes a broken `now` or a non-function `screen` is told so, loudly,
+  // rather than getting an admission that looks screened and is not.
+  const { now, screen } = options ?? {};
+  const boundNow = typeof now === "string" ? now.trim() : now;
+  const hasNow = boundNow !== undefined && boundNow !== null;
+  if (hasNow && (typeof boundNow !== "string" || !UTC_INSTANT.test(boundNow))) {
+    rejections.push(reject(
+      "BAD-OPTION",
+      `\`now\` must be an ISO-8601 UTC instant ending in Z (got ${JSON.stringify(now)}). It is compared to observed_at as a plain string, so a value in any other shape would not bound anything — and a bound that silently stops bounding is worse than no bound at all.`,
+      { option: "now" },
+    ));
+  }
+  const hasScreen = screen !== undefined && screen !== null;
+  if (hasScreen && typeof screen !== "function") {
+    rejections.push(reject(
+      "BAD-OPTION",
+      `\`screen\` must be a function (rerun) => true | false | { ok } (got ${typeof screen}). A non-function screen would admit every command while looking screened.`,
+      { option: "screen" },
+    ));
+  }
+
   if (input === null || typeof input !== "object" || Array.isArray(input)) {
-    return { ok: false, rejections: [reject("NOT-A-ROW", "a ledger row must be a plain object")] };
+    rejections.push(reject("NOT-A-ROW", "a ledger row must be a plain object"));
+    return { ok: false, rejections };
   }
 
   // (a) NO VALUES. Checked FIRST so the doctrinal rejection is the first thing
@@ -199,6 +320,70 @@ export function admitRecipe(input = {}) {
       "BAD-OBSERVED-AT",
       `${JSON.stringify(observed_at)} is not an ISO-8601 instant (YYYY-MM-DDTHH:MM:SS[.sss](Z|±HH:MM)) — a date or a phrase cannot order two runs of the same recipe`,
     ));
+  } else if (!UTC_INSTANT.test(observed_at.trim())) {
+    // (g) Z-ONLY. An instant, but not one this module can order. See
+    // UTC_INSTANT: every comparison here is lexical, and lexical ordering of
+    // mixed offsets is wrong in both directions at once.
+    rejections.push(reject(
+      "OFFSET-OBSERVED-AT",
+      `${JSON.stringify(observed_at)} carries a UTC offset — observed_at must be expressed in UTC and end in Z. Instants are compared as plain strings here, and lexical order is only true order at one offset: "2026-07-21T02:00:00+02:00" sorts after "2026-07-21T01:00:00Z" while being an hour EARLIER. Convert to UTC at the writer (\`date -u +%Y-%m-%dT%H:%M:%SZ\`).`,
+    ));
+  } else if (
+    hasNow && typeof boundNow === "string" && UTC_INSTANT.test(boundNow)
+    && comparableInstant(observed_at.trim()) > comparableInstant(boundNow)
+  ) {
+    // (h) THE FUTURE BOUND. Both sides are Z-form by the checks above and both
+    // are width-normalised, so the string comparison IS the instant
+    // comparison. A recipe cannot have last run later than now: a future
+    // observed_at means the row was composed rather than observed, which is
+    // exactly how the 2031/2087 forgery got in.
+    rejections.push(reject(
+      "FUTURE-OBSERVED-AT",
+      `observed_at ${JSON.stringify(observed_at.trim())} is later than the supplied now (${JSON.stringify(boundNow)}). observed_at means WHEN THIS RECIPE LAST RAN, and a run cannot have happened yet — a future instant is the signature of a row that was composed rather than observed.`,
+      { observed_at: observed_at.trim(), now: boundNow },
+    ));
+  }
+
+  // (i) THE SAFETY SCREEN, injected. Runs only on a command that exists, so a
+  // MISSING-RERUN row does not also collect a confusing screen verdict.
+  //
+  // A recipe is a standing invitation to re-run something, cheaply and often.
+  // `systemctl stop bp-crux-parent` and `rm -rf /opt/barkpark/releases` are
+  // both perfectly well-shaped recipes and were both admitted before this —
+  // the store's own product would have handed an agent an outage.
+  //
+  // Screen contract (tolerant on purpose, so a caller may pass the simplest
+  // thing that expresses a refusal):
+  //     true | { ok: true }            → allowed
+  //     false | { ok: false, … } | str → refused; `message`/the string is the reason
+  if (hasScreen && typeof screen === "function" && typeof rerun === "string" && rerun.trim() !== "") {
+    let verdict;
+    let threw = null;
+    try {
+      verdict = screen(rerun.trim());
+    } catch (err) {
+      threw = err;
+    }
+    if (threw !== null) {
+      // A screen that blew up has screened NOTHING. Admitting here would turn
+      // any bug in the safety layer into an open door, silently.
+      rejections.push(reject(
+        "SCREEN-FAILED",
+        `the injected screen threw on this command (${threw?.message ?? String(threw)}) — it therefore refused nothing and allowed nothing, so the row is not admitted. A safety check that fails open is not a safety check.`,
+      ));
+    } else {
+      const allowed = verdict === true || (verdict !== null && typeof verdict === "object" && verdict.ok === true);
+      if (!allowed) {
+        const why = typeof verdict === "string"
+          ? verdict
+          : (verdict !== null && typeof verdict === "object" && typeof verdict.message === "string" ? verdict.message : "the injected screen refused it");
+        rejections.push(reject(
+          "REFUSED-COMMAND",
+          `${JSON.stringify(rerun.trim())} was refused by the injected safety screen — ${why}. A ledger row is a standing invitation to re-run this command cheaply and often, so a command that can take something down must never become one.`,
+          { rerun: rerun.trim() },
+        ));
+      }
+    }
   }
 
   if (rejections.length > 0) return { ok: false, rejections };
@@ -271,14 +456,21 @@ function serialize(runFile) {
   return `${JSON.stringify(runFile, null, 2)}\n`;
 }
 
-// writeLedgerRun({ run_id, recipes, dir }) → one new file, or a named rejection.
+// writeLedgerRun({ run_id, recipes, dir, now, screen }) → one new file, or a
+// named rejection.
+//
+// `now` and `screen` are forwarded to admitRecipe for every row. They are
+// carried here rather than only on admitRecipe because THIS is the seam a
+// forged row has to cross to become durable — a bound reachable only from the
+// pure admission function would leave the write path exactly as forgeable as
+// it was, which is the defect this slice exists to close.
 //
 // The file NAME is `<run_id>-<key>.json` where key is a digest of the admitted
 // rows (D26's `<run>-<key>` shape). Content-addressing does two jobs: two
 // writers sharing a run_id but writing different rows cannot collide, and a
 // path collision therefore means the bytes are already identical, so the
 // idempotent answer is "already recorded" rather than a write.
-export function writeLedgerRun({ run_id, recipes, dir = DEFAULT_LEDGER_DIR } = {}) {
+export function writeLedgerRun({ run_id, recipes, dir = DEFAULT_LEDGER_DIR, now, screen } = {}) {
   if (typeof run_id !== "string" || !RUN_ID.test(run_id)) {
     return { ok: false, rejections: [reject("BAD-RUN-ID", `run_id must match ${RUN_ID} — it is part of a filename, and it is supplied by the caller because this module has no clock and no random source to invent one`)] };
   }
@@ -289,7 +481,7 @@ export function writeLedgerRun({ run_id, recipes, dir = DEFAULT_LEDGER_DIR } = {
   const admitted = [];
   const rejections = [];
   recipes.forEach((row, index) => {
-    const verdict = admitRecipe(row);
+    const verdict = admitRecipe(row, { now, screen });
     if (verdict.ok) admitted.push(verdict.recipe);
     else rejections.push(...verdict.rejections.map((r) => ({ ...r, index })));
   });
@@ -366,17 +558,24 @@ export function readLedgerRuns(dir = DEFAULT_LEDGER_DIR) {
 
 // ── the fold ─────────────────────────────────────────────────────────────────
 
-// foldLedger(dirOrRuns) → { entries, conflicts, unreadable, stats }
+// foldLedger(dirOrRuns) → { entries, rival_methods, unreadable, stats }
 //
 // Every entry is one (subject, quantity) with EVERY recipe ever written for
 // it. Nothing is superseded, nothing is deduplicated away, and write order is
 // never consulted — there is no write order to consult.
 //
-// A CONFLICT is two or more DISTINCT `rerun` commands over one key: two ways
-// to re-derive the same property that may not agree, both kept and both
-// flagged, resolved by running both today. The same command recorded twice is
-// CORROBORATION, not conflict — collapsing those two would make the flag fire
-// forever on ordinary repetition and be ignored within a wave.
+// RIVAL-METHOD is two or more DISTINCT `rerun` commands over one key: two ways
+// to re-derive the same property, both kept and both flagged. READ IT AS THE
+// PRODUCT — "this key has more than one cheap check; re-run them and compare
+// what they answer NOW" — never as a report that something is broken. Rival
+// methods that AGREE are the most valuable rows in the store, and this fold
+// cannot tell agreement from disagreement anyway: it has no value field to
+// compare, by design. (Deciding whether two answers disagree is
+// adjudicate.mjs's job, over facts in flight, on a completely different input.
+// See the header for why the two must not share a name.)
+//
+// The same command recorded twice is CORROBORATION and is not flagged —
+// a flag that fires on ordinary repetition is ignored within a wave.
 export function foldLedger(source = DEFAULT_LEDGER_DIR) {
   const { runs, unreadable } = Array.isArray(source)
     ? { runs: source, unreadable: [] }
@@ -421,45 +620,55 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR) {
   }
 
   const entries = [...byKey.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-  const conflicts = [];
+  const rivalMethods = [];
 
   for (const entry of entries) {
     // Deterministic ordering INSIDE an entry too — by (observed_at, file), so
-    // the fold reads the same on any machine. This is presentation only: it
-    // confers no precedence, and the conflict verdict does not consult it.
+    // the fold reads the same on any machine. Presentation only: it confers no
+    // precedence, and the RIVAL-METHOD flag does not consult it.
+    //
+    // Normalised through comparableInstant for the same reason the future
+    // bound is: without it a `.001Z` row sorts BEFORE the whole-second row it
+    // actually followed. Guarded, because THE WRITE PATH IS NOT THE READ PATH
+    // — an off-shape observed_at that admitRecipe would reject can still be in
+    // a file, and it falls back to raw string order rather than throwing.
+    const sortKey = (v) => {
+      const s = String(v);
+      return UTC_INSTANT.test(s) ? comparableInstant(s) : s;
+    };
     entry.recipes.sort((a, b) => {
-      const t = String(a.observed_at).localeCompare(String(b.observed_at));
+      const t = sortKey(a.observed_at).localeCompare(sortKey(b.observed_at));
       return t !== 0 ? t : String(a.file).localeCompare(String(b.file));
     });
 
     const rivals = [...new Set(entry.recipes.map((r) => String(r.rerun).trim()))];
     entry.distinct_reruns = rivals.length;
-    entry.conflict = rivals.length > 1;
+    entry.rival_method = rivals.length > 1;
 
-    if (entry.conflict) {
+    if (entry.rival_method) {
       const flag = {
-        reason: CONFLICT,
+        reason: RIVAL_METHOD,
         key: entry.key,
         subject: entry.subject,
         quantity: entry.quantity,
         rivals,
         recipes: entry.recipes,
-        message: `${CONFLICT}: ${rivals.length} rival recipes re-derive ${JSON.stringify(entry.quantity)} of ${JSON.stringify(entry.subject)}. Both are kept and neither wins by arrival order — there is no write order here. Resolve by running all ${rivals.length} today and comparing what they answer NOW.`,
+        message: `${RIVAL_METHOD}: ${rivals.length} independent recipes re-derive ${JSON.stringify(entry.quantity)} of ${JSON.stringify(entry.subject)}. This is a FEATURE of the row, not a defect report — all ${rivals.length} are kept and none wins by arrival order, because there is no write order here. Spend it: run all ${rivals.length} today and compare what they answer NOW.`,
       };
       entry.flag = flag;
-      conflicts.push(flag);
+      rivalMethods.push(flag);
     }
   }
 
   return {
     entries,
-    conflicts,
+    rival_methods: rivalMethods,
     unreadable,
     stats: {
       runs: runs.length,
       rows: rowCount,
       subjects: entries.length,
-      conflicts: conflicts.length,
+      rival_methods: rivalMethods.length,
       unreadable: unreadable.length,
     },
   };
@@ -488,12 +697,61 @@ function selftest() {
       const v = admitRecipe({ subject: "s", quantity: "q", rerun: "cat README.md", derived_level: "L1", observed_at: "2026-07-20T00:00:00Z" });
       return !v.ok && v.rejections.some((r) => r.reason === "LEVEL-SKIP");
     }],
-    ["the fold flags two rival recipes over one key", () => {
+    ["a future observed_at is rejected FUTURE-OBSERVED-AT against an injected now", () => {
+      // The forgery, verbatim: an ssh-shaped command dated 2031, admitted
+      // before this bound existed for the sole reason that it was well-shaped.
+      const v = admitRecipe(
+        { subject: "bp-crux-parent", quantity: "unit state", rerun: "ssh barkpark_indx@157.180.90.121 systemctl is-active bp-crux-parent", observed_at: "2031-12-31T23:59:59Z" },
+        { now: "2026-07-21T00:00:00Z" },
+      );
+      return !v.ok && v.rejections.some((r) => r.reason === "FUTURE-OBSERVED-AT");
+    }],
+    ["the same forged row is ADMITTED with no now supplied — the bound is opt-in, and the CLI is what closes it", () => {
+      const v = admitRecipe({ subject: "bp-crux-parent", quantity: "unit state", rerun: "ssh barkpark_indx@157.180.90.121 systemctl is-active bp-crux-parent", observed_at: "2031-12-31T23:59:59Z" });
+      return v.ok;
+    }],
+    ["a row a MILLISECOND in the future is rejected too — raw lexical order puts \".001Z\" before \"Z\"", () => {
+      const v = admitRecipe(
+        { subject: "s", quantity: "q", rerun: "cat README.md", observed_at: "2026-07-21T00:00:00.001Z" },
+        { now: "2026-07-21T00:00:00Z" },
+      );
+      return !v.ok && v.rejections.some((r) => r.reason === "FUTURE-OBSERVED-AT");
+    }],
+    ["an offset observed_at is rejected OFFSET-OBSERVED-AT (lexical order is only true order at one offset)", () => {
+      const v = admitRecipe({ subject: "s", quantity: "q", rerun: "cat README.md", observed_at: "2026-07-21T02:00:00+02:00" });
+      return !v.ok && v.rejections.some((r) => r.reason === "OFFSET-OBSERVED-AT");
+    }],
+    ["an outage-capable command is rejected REFUSED-COMMAND by an injected screen", () => {
+      const screen = (cmd) => (/\bsystemctl\s+(stop|restart)\b|\brm\s+-rf\b/.test(cmd) ? { ok: false, message: "it can take something down" } : true);
+      const refused = ["systemctl stop bp-crux-parent", "rm -rf /opt/barkpark/releases"].every((rerun) => {
+        const v = admitRecipe({ subject: "s", quantity: "q", rerun, observed_at: "2026-07-20T00:00:00Z" }, { screen });
+        return !v.ok && v.rejections.some((r) => r.reason === "REFUSED-COMMAND");
+      });
+      // …and the SAME commands admit with no screen: the rejection is the
+      // screen's doing, not some other rule that happened to fire.
+      const admittedUnscreened = admitRecipe({ subject: "s", quantity: "q", rerun: "systemctl stop bp-crux-parent", observed_at: "2026-07-20T00:00:00Z" }).ok;
+      return refused && admittedUnscreened;
+    }],
+    ["a screen that THROWS fails closed (SCREEN-FAILED), never open", () => {
+      const v = admitRecipe(
+        { subject: "s", quantity: "q", rerun: "cat README.md", observed_at: "2026-07-20T00:00:00Z" },
+        { screen: () => { throw new Error("boom"); } },
+      );
+      return !v.ok && v.rejections.some((r) => r.reason === "SCREEN-FAILED");
+    }],
+    ["a malformed bound is rejected BAD-OPTION rather than silently not bounding", () => {
+      const badNow = admitRecipe({ subject: "s", quantity: "q", rerun: "cat README.md", observed_at: "2026-07-20T00:00:00Z" }, { now: "yesterday" });
+      const badScreen = admitRecipe({ subject: "s", quantity: "q", rerun: "cat README.md", observed_at: "2026-07-20T00:00:00Z" }, { screen: "deny-all" });
+      return !badNow.ok && badNow.rejections.some((r) => r.reason === "BAD-OPTION" && r.option === "now")
+        && !badScreen.ok && badScreen.rejections.some((r) => r.reason === "BAD-OPTION" && r.option === "screen");
+    }],
+    ["the fold flags two rival methods over one key as RIVAL-METHOD", () => {
       const runs = [
         { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "q", rerun: "cat a", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:00Z" }] },
         { file: "b.json", run_id: "b", recipes: [{ subject: "s", quantity: "q", rerun: "cat b", derived_level: "L3", deps: [], observed_at: "2026-07-20T00:00:01Z" }] },
       ];
-      return foldLedger(runs).conflicts.length === 1;
+      const folded = foldLedger(runs);
+      return folded.rival_methods.length === 1 && folded.rival_methods[0].reason === "RIVAL-METHOD";
     }],
     ["a rotten on-disk row is reported, and does not take the fold down with it", () => {
       const folded = foldLedger([
@@ -506,6 +764,13 @@ function selftest() {
     ["an honest row is ADMITTED (the control does not just say no to everything)", () => {
       const v = admitRecipe({ subject: "api/lib/x.ex", quantity: "line count", rerun: "wc -l api/lib/x.ex", deps: [], observed_at: "2026-07-20T00:00:00Z" });
       return v.ok && !Object.hasOwn(v.recipe, "value");
+    }],
+    ["an honest row is STILL admitted with BOTH bounds armed — the new classes reject forgeries, not work", () => {
+      const v = admitRecipe(
+        { subject: "api/lib/x.ex", quantity: "line count", rerun: "wc -l api/lib/x.ex", deps: [], observed_at: "2026-07-20T00:00:00Z" },
+        { now: "2026-07-21T00:00:00Z", screen: (cmd) => !/\brm\s+-rf\b/.test(cmd) },
+      );
+      return v.ok && v.recipe.observed_at === "2026-07-20T00:00:00Z";
     }],
   ];
 
@@ -531,8 +796,8 @@ function main(argv) {
     const dir = rest[0] ? resolve(rest[0]) : DEFAULT_LEDGER_DIR;
     const folded = foldLedger(dir);
     process.stdout.write(`${JSON.stringify(folded, null, 2)}\n`);
-    // A conflict is a finding, not a failure: both rows are legitimately
-    // stored. Exit 0 and let the caller read `conflicts`.
+    // RIVAL-METHOD is a feature of the data, not a failure: both rows are
+    // legitimately stored. Exit 0 and let the caller read `rival_methods`.
     return folded.unreadable.length > 0 ? 1 : 0;
   }
   process.stderr.write("usage: node ledger.mjs [fold [dir] | --selftest]\n");

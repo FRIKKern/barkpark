@@ -55,14 +55,53 @@ deliberately unlike `tooling/research-coverage/research-ledger.json`, which is.
 That single line of `.gitignore` is why the same command at the same commit
 reported 50.1% in one checkout and 0% in another.
 
-## Conflicts are observed, not decided
+## Rival methods are observed, not decided — and they are the product
 
 There is no write order here, so nothing may be resolved by one. Two **rival**
 recipes over one `(subject, quantity)` — different `rerun` commands for the
-same property — are **both kept and both flagged** `CONFLICT` by the fold, and
-are resolved by running all of them *today* and comparing what they answer now.
-The same command recorded twice is **corroboration**, not a conflict; a flag
-that fires on ordinary repetition gets ignored within a wave.
+same property — are **both kept and both flagged** `RIVAL-METHOD` by the fold.
+Read the flag as *"this key has more than one cheap check; run them and compare
+what they answer now"*. It is the store delivering what it promises, not a
+report that something is wrong: rival methods that **agree** are the most
+valuable rows here. The same command recorded twice is **corroboration** and is
+not flagged; a flag that fires on ordinary repetition gets ignored within a wave.
+
+The flag is deliberately **not** called `CONFLICT`, because `adjudicate.mjs`
+already has a `CONFLICT` verdict that fires on the *opposite* input. This fold
+fires on ≥2 distinct `rerun` **command strings** and has no value field to
+compare at all; `detectConflicts` fires on ≥2 distinct claim **values** and
+never reads `rerun`. A 2x2 probe ran all four cells: on `wc -l /abs/path` vs
+`wc -l rel/path` (both verified to answer `544`) this fold flags and
+`detectConflicts` returns 0; on a genuine 544-vs-999 disagreement
+`detectConflicts` returns 2 and this fold sees nothing. One name for two
+opposite meanings would send a reviewer hunting a disagreement the firing
+mechanism cannot detect.
+
+## Honest-row checks are injected
+
+`admitRecipe(input, { now, screen })` takes two optional bounds. Both exist
+because every earlier check was a **shape** check, and a well-shaped forgery
+passed all of them — rows dated 2031 and 2087 for commands never executed were
+admitted, written and folded back as authoritative.
+
+- **`now`** — an ISO-8601 **UTC** instant. A row whose `observed_at` is later
+  is rejected `FUTURE-OBSERVED-AT`. Not read from a clock (see below).
+- **`screen`** — `(rerun) => true | false | { ok, message }`. A refused command
+  is rejected `REFUSED-COMMAND`; a screen that throws is `SCREEN-FAILED`, never
+  an admission. `systemctl stop …` and `rm -rf …` were admissible recipes
+  before this, and a recipe is a standing invitation to re-run something often.
+
+Both are **injected, not imported** — nothing here depends on `screen.mjs`. Both
+are **optional, and omitting them admits**, so on their own they are a mechanism
+rather than a sealed seam; the CLI write verb is what supplies `date -u` and a
+screen on every real write. A malformed `now` or a non-function `screen` is
+rejected `BAD-OPTION` rather than silently disabling the check it belongs to.
+
+`observed_at` must end in **`Z`** (`OFFSET-OBSERVED-AT` otherwise). Every
+ordering here is a string comparison, and that is only true ordering at one
+offset — `2026-07-21T02:00:00+02:00` sorts after `2026-07-21T01:00:00Z` while
+being an hour earlier. Fractional widths are normalised for the same reason:
+raw lexical order puts `…00.001Z` *before* `…00Z`.
 
 ## No clock
 
@@ -85,5 +124,5 @@ node --test tooling/grip/test/ledger.test.mjs
 import { admitRecipe, writeLedgerRun, foldLedger } from "../grip/ledger.mjs";
 
 writeLedgerRun({ run_id: "wf-0d2d3629", recipes: [row], /* dir defaults here */ });
-const { entries, conflicts, unreadable } = foldLedger();
+const { entries, rival_methods, unreadable } = foldLedger();
 ```
