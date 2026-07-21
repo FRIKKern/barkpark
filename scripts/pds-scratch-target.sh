@@ -69,10 +69,17 @@
 # PRE-WARM BEFORE ANY TIMED WINDOW OPENS. On a worktree that has not compiled
 # prod, pay that compile off the clock:
 #
-#   cd api && MIX_ENV=prod mix compile      # or: one throwaway up/teardown cycle
+#   cd api && CC=/usr/bin/clang MIX_ENV=prod mix compile   # or a throwaway cycle
+#
+# CC=/usr/bin/clang IS NOT OPTIONAL HERE. `cc` resolves to the Claude CLI
+# wrapper, not a C compiler, and argon2_elixir dies with "unknown option '-g'".
+# Without the override the pre-warm does not run slow, it FAILS — and the
+# throwaway-cycle alternative hits the same trap, because it runs the same
+# compile. Live-proven by the wave-13 crown-climb run, which hit exactly this.
 #
 # Then the run inside the window pays the ~9.8–20.2s WARM cycle instead of
-# another ~156s cold-prod compile on the critical path.
+# another ~156s cold-prod compile on the critical path. That same run measured
+# `up --verify` at ~10s wall once pre-warmed.
 #
 # Every WARM figure above was measured on a real host on 2026-07-20 with
 # api/_build populated; the COLD-PROD figure on 2026-07-21. The old "~90s warm"

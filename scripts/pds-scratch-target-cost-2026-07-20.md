@@ -228,8 +228,20 @@ The honest one-liner:
 ### The fix a climb can act on: pre-warm before the timed window opens
 
 ```bash
-cd api && MIX_ENV=prod mix compile      # or: one throwaway up/teardown cycle
+cd api && CC=/usr/bin/clang MIX_ENV=prod mix compile   # or: one throwaway up/teardown cycle
 ```
+
+**`CC=/usr/bin/clang` is not optional on this host, and omitting it is why a first attempt fails.**
+Added 2026-07-21 by review, from the wave-13 crown-climb run that executed this recipe for real: on
+a cold tree `mix deps.get` + compile **died** because `cc` resolves to the Claude CLI wrapper, not
+to a C compiler — `argon2_elixir` fails to build with `error: unknown option '-g'`. Re-run with
+`CC=/usr/bin/clang` and dev+prod compile clean. Without the override the operator does not get a
+slow pre-warm, they get a **failed** one, and the throwaway-cycle alternative inherits the same trap
+because it runs the same compile.
+
+**The recipe is now live-proven, and the payoff is larger than this section estimated.** After
+pre-warming, that same run measured `up --verify` at **~10s wall** — against the 155.72s COLD-PROD
+figure above. Pre-warming is the single highest-leverage step in the climb runbook.
 
 Do this **before** starting any timed window. The run inside the window then pays the ~9.8–20.2s
 warm cycle from §1 instead of a second ~156s prod compile on the critical path. This also composes
