@@ -112,6 +112,97 @@ test("defect 4 — grep anchors and quotes are stripped, so the anchored form ca
   );
 });
 
+// ── defect 5: the traversal guard, proven in BOTH directions ────────────────
+//
+// The guard `t.includes("..")` had NO test at all — grep for `traversal` or
+// `etc/passwd` in this file returned nothing before this slice. An untested
+// guard is indistinguishable from a deleted one, and defect 6 below relaxes
+// exactly this line, so the guard has to be pinned first or the relaxation is
+// a silent widening.
+
+test("defect 5 — the traversal guard REFUSES escapes, and is proven by mutation not by inspection", () => {
+  // a path that climbs out of the repo is never a subject
+  strictEqual(pathToken("../../../etc/passwd"), null);
+  strictEqual(pathToken("a/../../b"), null);
+  strictEqual(pathToken("./x/../../../y"), null);
+  strictEqual(pathToken("~/.claude/projects"), null);
+  strictEqual(pathToken("tooling/grip/*.mjs"), null);
+  // and the whole command falls back rather than minting the escape
+  strictEqual(subjectOf("wc -l ../../../etc/passwd"), "cmd:wc");
+  // THE OTHER DIRECTION — the guard must not be so wide it eats real paths.
+  // `..` inside a SEGMENT name is not a traversal, and a dotfile is not one
+  // either; if a "fix" widened the guard these would go null and the index
+  // would lose them silently.
+  strictEqual(pathToken("tooling/grip/mint.mjs"), "tooling/grip/mint.mjs");
+  strictEqual(pathToken(".github/workflows/doc-gates.yml"), ".github/workflows/doc-gates.yml");
+});
+
+// ── defect 6: the Go package wildcard is unconditionally rejected ────────────
+
+test("defect 6 — `./internal/cli/...` is a Go PACKAGE WILDCARD, not a traversal", () => {
+  // the ellipsis tripped `t.includes("..")`, so Go's own idiom minted nothing
+  strictEqual(pathToken("./internal/cli/..."), "internal/cli");
+  strictEqual(pathToken("internal/cli/..."), "internal/cli");
+  strictEqual(pathToken("./tooling/grip/..."), "tooling/grip");
+  strictEqual(subjectOf("go test ./internal/cli/ -run TestFoo"), "internal/cli");
+  strictEqual(subjectOf("go test -run TestCompletionNouns ./internal/cli/..."), "internal/cli");
+  // the three-way normalisation of defect 3 still holds ACROSS the wildcard:
+  // `internal/cli`, `internal/cli/` and `./internal/cli/...` are ONE subject
+  strictEqual(subjectOf("go vet ./internal/cli/..."), subjectOf("wc -l internal/cli"));
+  // a BARE `./...` names no directory, so there is nothing to extract
+  strictEqual(pathToken("./..."), null);
+  strictEqual(pathToken("..."), null);
+  strictEqual(subjectOf("go build ./..."), "cmd:go");
+  // and the relaxation is SUFFIX-only — an ellipsis mid-path is still refused
+  strictEqual(pathToken("internal/.../cli"), null);
+  strictEqual(pathToken("./internal/cli/.../x"), null);
+});
+
+// ── defect 7: a top-level directory is the coarsest subject an agent types ───
+
+test("defect 7 — a single-segment top-level directory mints ITSELF, not `cmd:<head>`", () => {
+  for (const dir of ["api", "js", "web", "docs", "deploy", "scaffy", "tooling", "internal"]) {
+    strictEqual(pathToken(`${dir}/`), dir, `${dir}/ must mint ${dir}`);
+    strictEqual(pathToken(`./${dir}`), dir, `./${dir} must mint ${dir}`);
+    strictEqual(pathToken(`./${dir}/...`), dir, `./${dir}/... must mint ${dir}`);
+  }
+  strictEqual(subjectOf("mix test api/"), "api");
+  // one directory, four spellings, ONE key — the defect-3 rule extended
+  const spellings = new Set(["api/", "./api", "./api/", "./api/..."].map(pathToken));
+  deepStrictEqual([...spellings], ["api"]);
+
+  // GUARD — a bare word wearing no path marker is NOT a directory. The mint
+  // has no repo listing and must not guess: `test`, `install` and `--help` are
+  // verbs and flags, and inventing subjects out of them is worse than the
+  // `cmd:` fallback it would replace.
+  strictEqual(pathToken("test"), null);
+  strictEqual(pathToken("install"), null);
+  strictEqual(pathToken("--help"), null);
+  strictEqual(pathToken("api"), null);
+  strictEqual(subjectOf("npm install"), "cmd:npm");
+});
+
+test("defect 7's PRICE is pinned: a single-segment subject is a NAME, never a location", () => {
+  // Enumerated over the frozen corpus in review: six extensionless
+  // single-segment subjects are new here. Three are real top-level names, three
+  // are RELATIVE — they arrive from a `cd api && … lib/`-shaped command, so
+  // `lib` cannot be told apart from any other `lib/` in the tree.
+  //
+  // The conflation is ACCEPTED (separating them needs a repo listing the mint
+  // deliberately does not hold) and pinned here so it is a stated property
+  // rather than a surprise the first ambiguous lead teaches somebody.
+  strictEqual(pathToken("lib/"), "lib");
+  strictEqual(pathToken("src/"), "src");
+  strictEqual(
+    subjectOf("grep -rn 'defmodule' lib/"),
+    subjectOf("grep -rn 'export' lib/"),
+    "two different lib/ directories collapse to ONE subject — the accepted price",
+  );
+  // And it is still strictly more than the `cmd:` fallback it replaced, which
+  // D45 excludes from leads entirely — i.e. no lead at all.
+  ok(!subjectOf("grep -rn 'defmodule' lib/").startsWith("cmd:"));
+});
+
 // ── the key must CLUSTER: the whole reason subject is not minted from prose ──
 
 test("the minted key is NOT injective — facts about one file share one subject", () => {
@@ -156,6 +247,91 @@ test("two rival ways to re-derive one property collide on the SAME key — RIVAL
   const b = mintRecipe({ rerun: "wc -l ./tooling/grip/ledger.mjs" }, { observed_at: NOW });
   strictEqual(a.recipe.subject, b.recipe.subject);
   strictEqual(a.recipe.quantity, b.recipe.quantity);
+});
+
+// ── defect 8: the quantity minted the FLAG, not the PROPERTY ─────────────────
+//
+// RIVAL-METHOD (charter D32/D33) is the product: two independent recipes on one
+// (subject, quantity) key mean "re-run both and compare what they answer NOW".
+// The flag-grain quantity made that flag FABRICATED — over the frozen 652-proof
+// corpus, 58 keys absorbed 261 rows (40%) and most of those groups answered
+// DIFFERENT questions. A quantity is the PROPERTY being derived, which for a
+// pipeline is decided by the LAST measuring stage and for a match count
+// includes the PATTERN.
+
+test("defect 8 — two greps counting DIFFERENT patterns are not rivals", () => {
+  const a = quantityPhrase("grep -c 'needs_worktree' tooling/grip/screen.mjs");
+  const b = quantityPhrase("grep -c 'isolation' tooling/grip/screen.mjs");
+  ok(a !== b, `a match count is a count OF something; got ${a} for both`);
+  // the pattern is what differs, so it is what the key must carry
+  ok(a.includes("needs_worktree"), a);
+  ok(b.includes("isolation"), b);
+  // the same pattern quoted three ways is still ONE property
+  strictEqual(quantityPhrase('grep -c "isolation" x.mjs'), b);
+  strictEqual(quantityPhrase("grep -c isolation x.mjs"), b);
+  // `-e` introduces the pattern rather than being one
+  strictEqual(quantityPhrase("grep -c -e 'isolation' x.mjs"), quantityPhrase("grep -c 'isolation' x.mjs"));
+  // an anchored regex is a DIFFERENT question from the unanchored one, so
+  // unlike the SUBJECT (defect 4) the quantity keeps its anchors
+  ok(quantityPhrase("grep -c '^isolation' x.mjs") !== b);
+});
+
+test("defect 8 — a line count and a match count over one file are not rivals", () => {
+  const lines = quantityPhrase("git show origin/main:tooling/grip/mint.mjs | wc -l");
+  const matches = quantityPhrase("git show origin/main:tooling/grip/mint.mjs | grep -c 'export'");
+  ok(lines !== matches, `both minted ${lines}`);
+  // the property is decided by the instrument that produces the NUMBER, which
+  // is the last stage of the pipeline — not by `git show`, which only supplies
+  // the bytes both stages read
+  strictEqual(lines, "wc:-l");
+  ok(matches.startsWith("grep:-c"), matches);
+  // a `|` inside a quoted regex is NOT a pipeline boundary
+  strictEqual(quantityPhrase("grep -c 'a|b' x.mjs"), "grep:-c:a|b");
+  // `||` is a logical operator, not a pipe
+  ok(quantityPhrase("test -f x.mjs || echo missing").startsWith("test"));
+});
+
+test("defect 8 — a pure FORMATTER at the end of a pipe is not the measurement", () => {
+  // `head`/`sort`/`cat` reshape bytes, they do not derive a property, so the
+  // scan walks back to the stage that does
+  strictEqual(quantityPhrase("grep -c 'export' tooling/grip/mint.mjs | head -1"), quantityPhrase("grep -c 'export' tooling/grip/mint.mjs"));
+  strictEqual(quantityPhrase("git log --oneline -20 | head -5"), "git:log");
+  // but a formatter that is the WHOLE command is still the command — the scan
+  // walks back only while there is an upstream stage to walk back TO
+  strictEqual(quantityPhrase("head -20 tooling/grip/mint.mjs"), "head");
+  strictEqual(quantityPhrase("cat tooling/grip/mint.mjs"), "cat");
+});
+
+test("defect 8 CONTROL — RIVAL-METHOD SURVIVES: genuinely different methods for ONE property still share a key", () => {
+  // The trap: a quantity made unique per command destroys D32's signal instead
+  // of repairing it, and would pass every test above. This is the control.
+  // `wc -l F` and `cat F | wc -l` are DIFFERENT commands deriving the SAME
+  // property — the line count of F — and MUST still collide.
+  const direct = mintRecipe({ rerun: "wc -l tooling/grip/ledger.mjs" }, { observed_at: NOW });
+  const piped = mintRecipe({ rerun: "cat tooling/grip/ledger.mjs | wc -l" }, { observed_at: NOW });
+  strictEqual(direct.recipe.subject, piped.recipe.subject);
+  strictEqual(direct.recipe.quantity, piped.recipe.quantity);
+  ok(direct.recipe.rerun !== piped.recipe.rerun, "two distinct methods is what makes it a RIVAL");
+
+  // and the fold must actually FIRE on them — the flag, not just the key
+  const dir = tmpDir();
+  const now = NOW.replace("00:00:00", "23:59:59");
+  writeLedgerRun({ run_id: "run-direct", recipes: [direct.recipe], dir, now, screen: screenCommand });
+  writeLedgerRun({ run_id: "run-piped", recipes: [{ ...piped.recipe, observed_at: "2026-07-21T00:00:01Z" }], dir, now, screen: screenCommand });
+  const folded = foldLedger(dir);
+  strictEqual(folded.entries.length, 1, "one property, one entry");
+  strictEqual(folded.entries[0].recipes.length, 2, "BOTH methods are kept");
+  strictEqual(folded.entries[0].rival_method, true, "the fold must still flag the rival");
+  strictEqual(folded.rival_methods.length, 1);
+
+  // the second control: the long spelling of a counting flag is the SAME
+  // property, so `-c` and `--count` must not split one rival into two keys.
+  // (Across TOOLS they still do — `rg --count` keys under `rg` — which is the
+  // pre-existing behaviour this slice does not widen.)
+  strictEqual(
+    quantityPhrase("grep --count 'def ' api/lib/barkpark/plugin.ex"),
+    quantityPhrase("grep -c 'def ' api/lib/barkpark/plugin.ex"),
+  );
 });
 
 // ── deps — R2 ────────────────────────────────────────────────────────────────
@@ -242,7 +418,9 @@ test("write mints, stores and folds back — round trip through the shell", () =
   strictEqual(folded.entries.length, 1);
   const entry = folded.entries[0];
   strictEqual(entry.subject, "tooling/grip/ledger.mjs");
-  strictEqual(entry.quantity, "grep:-c");
+  // the quantity carries the PATTERN, so this row can only ever be a rival of
+  // another recipe counting THAT symbol — not of every `grep -c` in the store
+  strictEqual(entry.quantity, "grep:-c:export function writeLedgerRun");
   ok(entry.recipes[0].rerun.includes("writeLedgerRun"));
   ok(entry.recipes[0].observed_at.endsWith("Z"));
   ok(entry.recipes[0].derived_level, "the fold must carry a derived level");
