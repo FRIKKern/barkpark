@@ -296,6 +296,147 @@ Still not closed by either file: the disk-headroom gap in `System.tmp_dir!()` na
 
 ---
 
+## 6c. The paired-control instrument (added 2026-07-20, wave 11)
+
+**What it is.** `scripts/pds-export-peak-measure.sh` — a standalone measurement tool that
+reproduces the frozen harness's RSS procedure *exactly* and adds the half PDS-D104 asked for
+and the harness never had: a **paired idle control**.
+
+**Why it had to be built.** §6b.1's 2235.43 MiB was taken by the sampler at
+`scripts/pds-pull-proof.sh:1373-1467`. That sampler states its rate (satisfying one half of
+PDS-D104) but has no control window at all — `grep -E 'idle|paired' scripts/pds-pull-proof.sh`
+returns **zero hits**. The root task
+(`pds-bl-streaming-workspace-export`) requires the post-fix number carry *both* halves. Since
+the harness is frozen at blob `e219e97ccf7f33797c86a2b84d998d599b6bda31`, the control had to
+live beside it, not inside it.
+
+### 6c.1 Relationship to the frozen sampler
+
+The instrument is deliberately **not** an improvement on the frozen procedure — a
+"better" measurement would not be comparable to 2235.43 MiB, and comparability is the whole
+point. Five properties are reproduced verbatim:
+
+| Property | Frozen harness | This instrument |
+|---|---|---|
+| Units | `kB / 1024` | `kB / 1024`, and `LC_ALL=C` so no comma locale renders `115.46` as `115,46` |
+| t=0 baseline (PDS-D185) | one-shot `ps -o rss=` strictly pre-fire | identical, and **re-taken per window** so the control's own drift never lands in the export delta |
+| Selector (PDS-D135) | `pgrep -o -x beam.smp`, peak = MAX across all slots | identical; slots re-enumerated on *every* tick |
+| Rate | 1 Hz, stated | 1 Hz, stated, with the PDS-D114 lower-bound caveat printed |
+| Compression | none requested | none requested; a `--path` carrying `--compressed`/`accept-encoding` is **refused** |
+
+Two things are *added*, both disclosed rather than silently applied:
+
+1. **The idle control.** An idle window of the same cadence runs immediately before the
+   measured window with zero requests issued. Both peak-minus-baseline figures are printed
+   with the subtraction shown. The control is **never subtracted** from the headline — it is
+   printed beside it, so a reader judges for themselves how much of the delta is drift.
+2. **The baseline asymmetry, named.** The frozen procedure takes its baseline from the
+   *primary slot alone* but its peak from the *MAX across all slots*. On a one-slot box these
+   agree; on a two-slot box the baseline can under-read the set and inflate the delta. The
+   instrument keeps the frozen arithmetic (comparability) and *also* prints the
+   max-across-set baseline as `*_baseline_set_kb` so the size of the asymmetry is visible.
+
+### 6c.2 First live run — and what it found
+
+Run `20260720T202617Z-17701`, deployed sha `bd2e72a8971da6e88091b3869b8c6e9e71cefeac`,
+acquisition `GET /api/workspaces/default/export?profile=dev&dataset=production` (HTTP 200,
+65,234,432 bytes), one comm-anchored slot, pid 1302615:
+
+| Window | baseline (kB) | peak (kB) | delta | wall | n |
+|---|---|---|---|---|---|
+| Measured (dev export) | 1,021,600 | 1,125,748 | **104,148 kB = 101.71 MiB** | 11 s | 11 |
+| **Paired idle control** | 862,876 | 1,164,916 | **302,040 kB = 294.96 MiB** | 31 s | 30 |
+
+**The control is 2.9× the measured delta.** Thirty-one seconds of an idle BEAM, with nothing
+asked of it, moved ~295 MiB — more than the export it was controlling for. This is the
+confound PDS-D104 was written about, now measured on this box at this sha. Two consequences
+worth recording:
+
+- For *this* acquisition the measurement is **drift-dominated**: 101.71 MiB is not resolvable
+  as the export's own cost. A small acquisition cannot be measured this way at all.
+- **The canonical 2235.43 MiB has itself never been drift-controlled.** Nothing here refutes
+  it — 295 MiB of drift against a 2235 MiB delta is ~13%, so the *sign* of §6b.1's finding
+  (the 2200 MiB floor sits below the demand it gates) is not in danger. But the figure's
+  error bar is now known to be non-trivial and was previously unstated.
+
+### 6c.3 How a future re-derivation is run
+
+```
+# the full-fidelity figure, directly comparable to 2235.43 MiB
+scripts/pds-export-peak-measure.sh --label post-spill --out /tmp/peak.line
+
+# a narrowed acquisition (skips the full-export headroom gate)
+scripts/pds-export-peak-measure.sh --window 30 \
+  --path '/api/workspaces/default/export?profile=dev&dataset=production'
+```
+
+Defaults: acquisition = the FULL workspace export; `--window` = 130 s, the canonical export's
+wall time, so the control pairs with a full run. The script **refuses** (exit 2) rather than
+guess when it cannot measure honestly:
+
+- SSH unavailable — the BEAM's RSS lives on the source box and nothing is quoted unsampled;
+- no process with `comm == beam.smp` — never falls back to a looser argv match;
+- the frozen harness's lock `/tmp/pds-full-export/lock` is held — **PDS-D31**, two concurrent
+  full exports OOM the box, so the two tools are mutually exclusive by construction;
+- a full acquisition with `MemAvailable` under `PDS_FULL_EXPORT_MIN_MEM_MB`;
+- **the acquisition window logged ZERO samples** — **PDS-D220a**. `peak_kb_of` returns 0 for an
+  empty log and the delta subtracts the baseline from it unguarded, so an acquisition returning
+  before the sampler's first ~1 s tick (a 404, a 500, a reset under memory pressure — exactly the
+  regime a crown run fires in) emitted `export_samples=0 export_delta_mib=-847.18` and **exited
+  0**. A negative demand is not a measurement; it is now a refusal that names the cause.
+- **either leg of the IDLE CONTROL window logged ZERO samples** — **PDS-D220a, applied to the
+  control**. The guard above was chartered for the acquisition leg; review found the identical
+  hole on the control leg, where it matters more. A dropped sampler `ssh` session left the RSS
+  log empty, and the run **printed `idle drift … = -1190.45 MiB [BEAM RSS]` as a reported
+  figure, carried on past the control, and fired a real 67 MB acquisition** before stopping.
+  This instrument exists to put a control *beside* the demand (**PDS-D104**, **PDS-D216**); a
+  control indistinguishable from a failed sampler is the exact failure it was built to prevent.
+  The `MemAvailable` leg refuses on the same rule for a sharper reason: an unsampled leg yields
+  min 0 / max 0 / **range 0.00 MiB**, which reads to a threshold check as *the quietest possible
+  box* and would **pass PDS-D221's 1048.16 MiB contamination abort vacuously**. The sample count
+  is therefore *enforced* here, not merely emitted for a downstream reader to remember to check.
+  Both refusals fire **before** the acquisition, so — unlike the export-leg guard — they also
+  spend no export. Proven by mutation against deployed `bc64d869a`: emptying the RSS log alone
+  gives exit 2 naming the −1196.71 MiB it declined to report; emptying the `MemAvailable` log
+  alone gives exit 2 naming the vacuous range; an unmutated run of the same script exits 0 with
+  both legs sampled, so neither guard false-positives.
+
+That `MemAvailable` gate is why wave 11 has no full-regime figure yet: `MemAvailable` read
+1312 MiB and 1490 MiB during this slice, against a 2200 MiB floor. The window was shut, and
+forcing it would have risked OOM-killing the live content API.
+
+**The floor: read here, and — under PDS-D219 — writable by the measure, as a declared bypass.**
+This instrument still only READS `PDS_FULL_EXPORT_MIN_MEM_MB`; it contains no code that moves it.
+The earlier sentence here said the floor is *"read, never written — moving it is
+`pds-w11-floor-rederivation`, not this instrument"*. **PDS-D219 amends that** at the campaign
+level, not in this script: the wave-12 measure fires with `PDS_FULL_EXPORT_MIN_MEM_MB` explicitly
+exported to a threshold **pre-declared before the run**, and that override is recorded **as a
+bypass** — named, with its value and its reason, in the run's own evidence — rather than being
+folded in as if it were the derived floor. The distinction that matters: a pre-declared,
+recorded bypass is auditable; a floor quietly lowered until the gate opens is the vacuous green
+PDS-D20 forbids. The gate's own code is unchanged by D219, and re-deriving the floor's *value*
+remains the floor-rederivation slice's work, not this instrument's.
+
+**What the idle control emits, and its unit class — PDS-D220b.** The control window samples two
+quantities. BEAM RSS (`idle_delta_mib`) is the frozen procedure's quantity and stays the
+headline. `/proc/meminfo` MemAvailable is sampled alongside it and emitted as
+`idle_memavail_min_kb`, `idle_memavail_max_kb`, `idle_memavail_range_kb`,
+`idle_memavail_range_mib` and `idle_memavail_samples`, because **PDS-D221 states its
+contamination-abort threshold (1048.16 MiB) on the RANGE of MemAvailable** — a whole-box figure.
+Attaching that threshold to a per-process RSS delta compares two different quantities: the same
+unit-class error **PDS-D185** exists to correct, one level up. The instrument makes the number
+exist and does **not** abort on it; applying the threshold is the measure slice's call.
+
+**Three bugs the first live run found that reading could not.** Recorded because they are the
+argument for always firing the instrument before trusting it: (a) `PID="$(start_sampler …)"`
+captured a *subshell's* `$!`, so `wait` returned instantly (the idle window collapsed to 0 s
+and logged nothing) and `kill` missed — **leaving the remote sampler loop alive on the source
+box**, confirmed by `ps` and killed by hand; (b) `grep -c . file || echo 0` printed `0\n0` on
+an empty file, because `grep -c` prints `0` *and* exits 1; (c) a comma locale rendered every
+MiB figure with a decimal comma, silently corrupting the machine-readable line.
+
+---
+
 ## 7. Provenance
 
 - Citations verified at `origin/main` `d1345255418fd336f8720d65728843c4a7de694e`, 2026-07-20.
