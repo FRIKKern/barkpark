@@ -1,0 +1,290 @@
+defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
+  @moduledoc """
+  A DRIFT CEILING over the side-effecting-GET fence: the shape of the router's
+  GET surface, re-derived from source on every run and pinned to committed
+  integers, plus the fence's deny-clause set pinned verbatim.
+
+  WHY A CENSUS AND NOT A "FIND THE MUTATING GET" CHECK. The obvious guard —
+  enumerate GET clauses whose bodies reach a `Repo` write and fail when one is
+  missing from `side_effecting_get?/1` — was BUILT AND MEASURED, and its
+  population is EMPTY: 0 of the 62 GET routes reach a `Repo.` write at depth 0
+  or 1. The whole 10k-line router holds FIVE textual `Repo.` references, none of
+  them a write a GET reaches:
+
+    * `:885`  — a prose comment ("runs inside ONE Repo.transaction")
+    * `:6700` — `Repo.preload(site, :barkpark)` — a READ
+    * `:7198` — `Repo.transaction` in `register/4`, reached only by POST /v1/auth/register
+    * `:7218` — `Repo.rollback` in that same transaction
+    * `:9851` — `Repo.get_by_uuid(...)` in `safe_get_job/1` — a READ
+
+  Every write in this app goes through a context module (the 62 GET blocks reach
+  103 distinct callees across 29 modules at depth 1). A check written to that
+  shape would enumerate NOTHING and pass forever — the exact vacuous green this
+  epic exists to delete. Do not rebuild it. This file replaces it.
+
+  D40 COVERAGE BOUNDARY — what this does and does NOT do.
+
+    DOES: pin four integers (total GET routes, and their split into
+    session-authenticated / agent-or-worker / public) and the exact set of
+    `side_effecting_get?/1` clauses, both re-derived from `router.ex` source on
+    every run. Any change to either has to be made DELIBERATELY, in this file,
+    next to the reason.
+
+    DOES NOT: prove any route is correctly authorized. The classifier is a
+    SYNTACTIC auth-SHAPE detector — it looks for a wrapper NAME in the route
+    body — not a semantic authorization prover. A route that calls
+    `Auth.require_user/2` and then ignores the halt still counts as
+    "authenticated" here.
+
+    DOES NOT: prove the deny-list is COMPLETE. It is a deny-list by decision
+    (D13), and it fails OPEN. Nothing syntactic can close that; this file only
+    makes the boundary MOVE LOUDLY.
+
+  HONEST MARGINAL VALUE (D57), measured, not asserted. Two mutations:
+
+    * plant a new authenticated side-effecting GET → this file reds AND
+      `router_moduledoc_table_test.exs` reds (that tripwire is already paid for
+      on main);
+    * silently drop an auth wrapper from an existing route → this file reds AND
+      `router_audit_test.exs` reds behaviourally.
+
+    So the coverage UNIQUE to this file is the narrow case where a new GET is
+    added, dutifully documented in the moduledoc route table, and nobody ever
+    rules on `side_effecting_get?/1` for it. Real, and narrow. It is NOT "the
+    deny-list can no longer fail open".
+
+  METHOD NOTES (each one is a bug that was measured, not a preference):
+
+    * The route regex is `^\\s*get[\\s(]+"..."` — the same one
+      `router_moduledoc_table_test.exs` uses. `^  get "` sees only 56 routes;
+      six more are parenthesized one-liners (`get("/", do: send_dashboard(conn))`)
+      and a regex blind to that form would be blind to a future side-effecting
+      GET written that way. Both 56 and 62 are correct populations of different
+      shapes; this file pins the WIDER one on purpose.
+    * The block end-matcher is the STRICT `^  end`. `^\\s*end$` truncates 44 of
+      the bodies at the first nested `end`; "scan to the next route macro"
+      overshoots ALL of them and swallows the following route's doc comment,
+      which is how an earlier probe mis-read `/v1/me` and `/v1/audit`.
+    * Auth classification is by wrapper NAME, ONE CALL DEEP. The three local
+      wrappers (`with_team_role`, `with_team_site`, `require_user_sse`) and
+      `proxy_instance_webhook` all call an `Auth.require_*` themselves, so
+      counting only the `Auth.*` names at depth 0 misses 9 authenticated routes.
+    * An AST census (`Code.string_to_quoted!` + `Macro.prewalk`) was also built
+      and is ROUTE-FOR-ROUTE IDENTICAL to this regex (D45). Regex it is: no new
+      dependency, DB-free, and the same house style as the moduledoc tripwire.
+  """
+  use ExUnit.Case, async: true
+
+  @router_source Path.expand("../../../lib/barkpark_cloud/web/router.ex", __DIR__)
+
+  # A GET declaration in either form: `get "/path" do` and `get("/path", do: …)`.
+  @route_re ~r/^\s*get[\s(]+"([^"]+)"/
+
+  # The block terminator at ROUTE indentation. Strict on purpose — see the
+  # moduledoc.
+  @block_end_re ~r/^  end\s*$/
+
+  # Every wrapper that establishes a HUMAN/session-token identity, directly or
+  # one call deep. `with_team_role` → `Auth.require_team_role`; `with_team_site`
+  # → `Auth.require_user` (or `require_user_or_pat` + `require_ability`);
+  # `require_user_sse` → `verify_user_session_token` / `consume_sse_ticket`;
+  # `proxy_instance_webhook` → `Auth.require_user`.
+  @session_wrappers [
+    "Auth.require_user",
+    "Auth.require_user_or_pat",
+    "Auth.require_team_admin",
+    "Auth.require_team_role",
+    "Auth.require_primary_team_admin",
+    "Auth.require_primary_team_owner",
+    "Auth.require_platform_operator",
+    "Auth.require_ability",
+    "with_team_role",
+    "with_team_site",
+    "require_user_sse",
+    "proxy_instance_webhook"
+  ]
+
+  # Machine identities: an agent token or the internal worker shared secret.
+  # Checked FIRST, so a route carrying both classifies as machine.
+  @machine_wrappers ["Auth.require_agent", "Auth.require_worker"]
+
+  # THE BASELINE. Four integers, re-derived from source above, changed only
+  # DELIBERATELY and with a reason written next to them.
+  #
+  # 2026-07-21 (cch-bl-head-denylist-tripwire): 62 / 45 / 5 / 12, re-derived on
+  # main after the SSE-ticket and HEAD-fence slices merged. The 45 does NOT drop
+  # when the SSE ticket lands: `require_user_sse` tries the Bearer header FIRST
+  # and still reaches `verify_user_session_token` → `touch_last_used`; the ticket
+  # is an ADDITIONAL fallback branch, not a replacement (D47).
+  @baseline_total 62
+  @baseline_session 45
+  @baseline_machine 5
+  @baseline_public 12
+
+  # THE FENCE. Every `side_effecting_get?/1` clause, as {path_segments, verdict}.
+  # The catch-all is excluded (it is the default, not a ruling).
+  #
+  # `/v1/auth/oauth/providers` => false is LOAD-BEARING and must stay FIRST: it
+  # shares the initiator's segment arity and would otherwise be 405'd (D14).
+  @deny_clauses [
+    {~s(["v1", "auth", "oauth", "providers"]), "false"},
+    {~s(["v1", "auth", "oauth", _provider]), "true"},
+    {~s(["v1", "auth", "oauth", _provider, "callback"]), "true"},
+    {~s(["v1", "events"]), "true"}
+  ]
+
+  ## Derivation
+
+  defp source, do: File.read!(@router_source)
+
+  # Every GET route as {path, body}. A parenthesized one-liner is its own body;
+  # a block form runs to the next line that is exactly `  end`.
+  defp get_routes do
+    lines = source() |> String.split("\n")
+
+    lines
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {line, i} ->
+      case Regex.run(@route_re, line) do
+        [_, path] -> [{path, route_body(line, lines, i)}]
+        _ -> []
+      end
+    end)
+  end
+
+  defp route_body(line, lines, i) do
+    if String.contains?(line, "do:") do
+      line
+    else
+      lines
+      |> Enum.drop(i + 1)
+      |> Enum.take_while(&(not Regex.match?(@block_end_re, &1)))
+      |> then(&Enum.join([line | &1], "\n"))
+    end
+  end
+
+  defp classify(body) do
+    cond do
+      Enum.any?(@machine_wrappers, &String.contains?(body, &1)) -> :agent_or_worker
+      Enum.any?(@session_wrappers, &String.contains?(body, &1)) -> :session
+      true -> :public
+    end
+  end
+
+  defp census do
+    routes = get_routes()
+    by_class = Enum.group_by(routes, fn {_p, b} -> classify(b) end, fn {p, _b} -> p end)
+
+    %{
+      total: length(routes),
+      session: length(Map.get(by_class, :session, [])),
+      agent_or_worker: length(Map.get(by_class, :agent_or_worker, [])),
+      public: length(Map.get(by_class, :public, [])),
+      by_class: by_class
+    }
+  end
+
+  defp declared_clauses do
+    Regex.scan(
+      ~r/^\s*defp side_effecting_get\?\((\[[^\]]*\])\), do: (true|false)/m,
+      source()
+    )
+    |> Enum.map(fn [_, pattern, verdict] -> {pattern, verdict} end)
+  end
+
+  defp fmt(paths), do: paths |> Enum.sort() |> Enum.map_join("\n", &("  " <> &1))
+
+  ## The pins
+
+  test "the extractor still reads the source (guard against a vacuous green)" do
+    # If the regex stopped matching, every count below would be 0 and every
+    # comparison would still be a comparison — of nothing.
+    c = census()
+
+    assert c.total > 50,
+           "expected >50 GET routes; @route_re has stopped matching router.ex"
+
+    assert c.session > 0 and c.public > 0,
+           "expected a mixed population; the auth classifier has stopped matching"
+
+    assert c.total == c.session + c.agent_or_worker + c.public,
+           "the classes must partition the population exactly once"
+
+    # The block-form subset must stay a strict SUBSET of what @route_re sees —
+    # i.e. the parenthesized one-liners are still being caught. If these ever
+    # equalize, the wider regex has silently narrowed.
+    block_form =
+      source() |> String.split("\n") |> Enum.count(&Regex.match?(~r/^  get "/, &1))
+
+    assert block_form < c.total,
+           "expected parenthesized one-liner GET routes to exist beyond the #{block_form} block-form ones"
+  end
+
+  test "the GET census matches the committed baseline" do
+    c = census()
+
+    assert {c.total, c.session, c.agent_or_worker, c.public} ==
+             {@baseline_total, @baseline_session, @baseline_machine, @baseline_public},
+           """
+           The router's GET surface changed shape.
+
+             total            #{@baseline_total} -> #{c.total}
+             session          #{@baseline_session} -> #{c.session}
+             agent_or_worker  #{@baseline_machine} -> #{c.agent_or_worker}
+             public           #{@baseline_public} -> #{c.public}
+
+           If you ADDED a GET route: rule on it explicitly. Does a bare HEAD of
+           it MUTATE anything (mint a row, burn a single-use credential, spend a
+           nonce)? If yes, add a `side_effecting_get?/1` clause in router.ex and
+           a behavioural test beside `router_sse_ticket_head_burn_test.exs`. If
+           no, just move the baseline here and say why in one line.
+
+           If a count moved WITHOUT a route being added or removed, an auth
+           wrapper was added to or dropped from an existing route — check that
+           first; it is the more dangerous of the two.
+
+           Current session-authenticated routes:
+           #{fmt(Map.get(c.by_class, :session, []))}
+
+           Current agent/worker routes:
+           #{fmt(Map.get(c.by_class, :agent_or_worker, []))}
+
+           Current public routes:
+           #{fmt(Map.get(c.by_class, :public, []))}
+           """
+  end
+
+  test "the side-effecting-GET deny clauses are exactly the committed set, in order" do
+    assert declared_clauses() == @deny_clauses, """
+    The `side_effecting_get?/1` clause set changed.
+
+      committed: #{inspect(@deny_clauses)}
+      in source: #{inspect(declared_clauses())}
+
+    Order matters: `["v1", "auth", "oauth", "providers"] => false` shares the
+    initiator's segment arity and MUST stay ahead of the `_provider` clause, or a
+    read-only route starts answering 405 (D14).
+
+    Adding a clause is the normal case — update this list and add its behavioural
+    test. REMOVING one re-opens a measured hole: /v1/events burns a live SSE
+    ticket, and the oauth pair spends a state nonce and can mint a session.
+    """
+  end
+
+  test "the fence's coverage-boundary comment still states the true clause count" do
+    # D41: this comment went stale the moment the /v1/events clause landed — the
+    # prose said TWO. Prose next to a list is a fact with no gate on it, so this
+    # is that gate: the spelled-out number must equal the true-verdict clause
+    # count.
+    true_clauses = Enum.count(declared_clauses(), fn {_p, v} -> v == "true" end)
+    spelled = %{2 => "TWO", 3 => "THREE", 4 => "FOUR", 5 => "FIVE", 6 => "SIX"}
+
+    expected = Map.fetch!(spelled, true_clauses)
+
+    assert source() =~ "this list fences exactly #{expected} routes", """
+    The fence has #{true_clauses} side-effecting clauses, but its COVERAGE
+    BOUNDARY comment in router.ex does not say "#{expected}". Fix the prose in
+    the same commit that changed the list.
+    """
+  end
+end

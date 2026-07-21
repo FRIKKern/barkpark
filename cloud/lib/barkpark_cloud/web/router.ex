@@ -498,8 +498,8 @@ defmodule BarkparkCloud.Web.Router do
   # would swallow the read-only providers list) and under-specific. The segment
   # arity does the discrimination for free.
   #
-  # COVERAGE BOUNDARY, stated deliberately: this list fences exactly TWO routes,
-  # and 2 is a FLOOR, not a ceiling. It does NOT cover the 45 authenticated GETs
+  # COVERAGE BOUNDARY, stated deliberately: this list fences exactly THREE routes,
+  # and 3 is a FLOOR, not a ceiling. It does NOT cover the 45 authenticated GETs
   # on which a bare HEAD also performs a DB write (every authenticated request
   # touches `user_tokens.last_used_at`) — that is a property of AUTHENTICATION,
   # not of any route, so there is no route subset to carve out, and denying HEAD
@@ -533,6 +533,17 @@ defmodule BarkparkCloud.Web.Router do
   # Consumes the single-use state nonce, may CREATE a user, and mints a live
   # session token that it returns in the `location` header.
   defp side_effecting_get?(["v1", "auth", "oauth", _provider, "callback"]), do: true
+
+  # BURNS a live single-use SSE ticket. `require_user_sse` reads `?ticket=` and
+  # hands it to `Accounts.consume_sse_ticket/1`, which takes a BARE BINARY and
+  # stamps `revoked_at` unconditionally — structurally method-blind, and rightly
+  # so: the credential is spent by REDEMPTION, not by a verb. Without this clause
+  # any unfurler's `HEAD /v1/events?ticket=…` (the URL is in every access log,
+  # because EventSource cannot set headers) spends a ticket the real stream has
+  # not yet redeemed, and the user's own connect then 401s. There is exactly ONE
+  # call site of `consume_sse_ticket/1` in lib/, so this one clause is
+  # SUFFICIENT, not a sample — see `router_sse_ticket_head_burn_test.exs`.
+  defp side_effecting_get?(["v1", "events"]), do: true
 
   defp side_effecting_get?(_path_info), do: false
 
