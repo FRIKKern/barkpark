@@ -577,7 +577,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   defp doc_action_glyph(assigns) do
     icon_name = doc_action_icon(assigns.action)
-    assigns = assign(assigns, :icon_name, icon_name)
+    assigns = assign(assigns, :icon_name, drawable_icon(icon_name))
 
     ~H"""
     <%= if @icon_name do %>
@@ -600,6 +600,25 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       _ -> nil
     end
   end
+
+  # A doc action's icon can arrive from a PLUGIN or a workspace SCHEMA, so the
+  # name is an unbounded string from outside the tree — `known_icon?/1` is the
+  # guard `BarkparkWeb.Icons` prescribes for exactly that case. An unknown name
+  # degrades to `nil`, which is the shape `doc_action_glyph/1` already handles
+  # by rendering the action's text label: a readable button rather than either
+  # a wrong picture or (in :test, where `icon/1` raises) a crashed render.
+  # Developer-authored names stay honest — the icons tripwire reds on those
+  # statically, before they can ever reach this fallback.
+  #
+  # Kept clear of any `attr` declaration: `attr` binds to the NEXT function
+  # defined, so a private helper sitting between `attr :action` and
+  # `doc_action_glyph/1` gets compiled as the component itself and is then
+  # called with an assigns map.
+  defp drawable_icon(name) when is_binary(name) do
+    if BarkparkWeb.Icons.known_icon?(name), do: name, else: nil
+  end
+
+  defp drawable_icon(_), do: nil
 
   defp doc_action_event(action) do
     case action["opts"] do
@@ -805,7 +824,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   # Per-group icon (task barkpark-sfzn). Plugins that omit "icon" still
   # render — falls back to a neutral "circle" so the tab bar never blanks.
-  defp tab_icon(%{"icon" => icon}) when is_binary(icon) and icon != "", do: icon
+  # A group's icon is workspace-schema data, so an unrecognised name gets the
+  # same neutral "circle" rather than reaching `icon/1`, which raises in :test.
+  defp tab_icon(%{"icon" => icon}) when is_binary(icon) and icon != "",
+    do: drawable_icon(icon) || "circle"
+
   defp tab_icon(_), do: "circle"
 
   @doc """
