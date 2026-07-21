@@ -168,7 +168,14 @@ defmodule Barkpark.Content.Mutations do
         _ -> nil
       end
 
+    # The create-family doors onto the ledger (cch-w2, epic decision D53).
+    # `existing` is nil for a genuine fresh create — both guards exempt that
+    # case structurally (see their heads), so the importer shape
+    # (migration 20260528100000 seeds already-`done` rows) keeps working while
+    # a write ONTO a live claimed/open task is fenced exactly like a patch.
     with :ok <- ensure_rev(existing, expected),
+         :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
+         :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          {:ok, doc} <- Content.create_document(type, attrs, dataset, with_if_rev(opts, expected)) do
       {:ok, doc, "createOrReplace"}
     end
@@ -245,8 +252,21 @@ defmodule Barkpark.Content.Mutations do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
 
+    # The with-chain is DELIBERATELY UNCHANGED apart from the two guard steps
+    # (epic decision D50). `replace` reads FIRST and propagates
+    # `{:error, :not_found}` for an absent id — that 404 is the documented
+    # contract (`docs/api-v1.md:105`: "overwrites an *existing* draft,
+    # `not_found` if none"). Binding `existing` to nil to "make the guard's nil
+    # fork reachable here" silently converts `replace` into an UPSERT (measured:
+    # HTTP 200 + row created, and the whole mutate + writer-fence suite stayed
+    # green through the regression). `existing` is therefore always a
+    # `%Document{}` by the time the guards run, and their nil heads are simply
+    # dead code on this path — load-bearing only for `createOrReplace` above.
+    # `test "replace against a non-existent id is 404"` pins the contract.
     with {:ok, existing} <- Content.get_document(id && DraftId.draft_id(id), type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(attrs)),
+         :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
+         :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          {:ok, doc} <-
            Content.create_document(type, attrs, dataset, with_if_rev(opts, if_rev(attrs))) do
       {:ok, doc, "replace"}
@@ -290,6 +310,7 @@ defmodule Barkpark.Content.Mutations do
       }
 
       with :ok <- ensure_task_close_is_cas(type, existing, merged, patch, opts),
+           :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            do: {:ok, doc, "update"}
@@ -318,6 +339,7 @@ defmodule Barkpark.Content.Mutations do
       }
 
       with :ok <- ensure_task_close_is_cas(type, existing, merged, patch, opts),
+           :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            do: {:ok, doc, "update"}
@@ -379,6 +401,34 @@ defmodule Barkpark.Content.Mutations do
   # its test, and close.ex exposes no public accessor.
   @terminal_lifecycle_statuses ~w(done cancelled blocked)
 
+  # WAVE-2 WIDENING (cch-w2, D53): the same guard now runs on `createOrReplace`
+  # and `replace`, which reach `Content.create_document` and therefore never
+  # touched `ensure_task_close_is_cas` before. Measured on pristine main:
+  #
+  #   createOrReplace %{"_id" => "probe1", "_type" => "task",
+  #     "content" => %{"kind" => "task", "lifecycle_status" => "done"}}
+  #   => :ok, lifecycle="done", claim=nil
+  #
+  # `create` / `createIfNotExists` are NOT wired, and the exemption is
+  # STRUCTURAL, not a preference: against an existing row `create` returns
+  # `{:error, :conflict}` (409, never writes) and `createIfNotExists` returns a
+  # `"noop"` with the row untouched, so neither can terminalise a live task.
+  # Against a FRESH id every create-family op is a birth with no prior revision
+  # — `ifRevisionID` is undefined there, so this guard would degrade from a
+  # FENCE into an unconditional ban on filing an already-`done` row and break
+  # the dataset importer the substrate anticipates (migration 20260528100000).
+  # That is what this nil head encodes, and it is why the residual harm below is
+  # named rather than closed.
+  #
+  # RESIDUAL HARM, MEASURED (not hand-waved): a forged FRESH create carrying
+  # `lifecycle_status: "done"` is still accepted, and `Tasks.Queue.ready` gates
+  # dependency satisfaction on exactly that value (queue.ex, `done_tasks` CTE) —
+  # so one forged create of a dependency id flips a dependent task from
+  # not-ready to ready. There is NO compensating control in this slice; the fix
+  # is an attribution requirement on task births, which is a separate fence.
+  # `test "AC7 residual harm"` pins the harm so it cannot be quietly forgotten.
+  defp ensure_task_close_is_cas("task", nil, _merged, _attrs, _opts), do: :ok
+
   defp ensure_task_close_is_cas("task", existing, merged, patch, opts) do
     was = (existing.content || %{})["lifecycle_status"]
     now = merged["lifecycle_status"]
@@ -412,6 +462,122 @@ defmodule Barkpark.Content.Mutations do
       ]
     }
   end
+
+  # ── The claim's own fence (cch-w2, epic decisions D51 / D52) ──────────────
+  #
+  # THE CLASS THIS CLOSES: any write routed through `Content.apply_mutations`
+  # that ERASES the `claim` of a live `type:task` document — at all four
+  # clauses that can reach one (both `patch` clauses, `createOrReplace`,
+  # `replace`). A claim is the ledger's only attribution: `Tasks.Close` fences
+  # on `claim.epoch` (close.ex:159) and `Tasks.Stamp` / `Tasks.Pulse` renew
+  # through it, so a dropped claim does not merely lose the worker's name — it
+  # detaches the row from every sanctioned lifecycle verb at once.
+  #
+  # WHY IT IS A SEPARATE FUNCTION AND NOT A BRANCH IN
+  # `ensure_task_close_is_cas` (D51). Proven by mutation, not by reading: a
+  # claim-drop branch APPENDED to that cond is DEAD CODE. Two earlier branches
+  # short-circuit `:ok` above it —
+  #   * `is_binary(if_rev(patch))`: a caller carrying a CORRECT `ifRevisionID`
+  #     returns `:ok` before the claim is ever inspected (measured: HTTP 200,
+  #     `claim=nil`); and
+  #   * `now == was or now not in @terminal_lifecycle_statuses`: a claim drop
+  #     with NO lifecycle change never reaches the cond body at all.
+  # Both are LOAD-BEARING for D22's own committed tests (the revision escape IS
+  # the sanctioned path; the no-change branch is what keeps bookkeeping on
+  # already-closed rows working), so they cannot be reordered. The claim fence
+  # is therefore orthogonal by construction: no revision escape, no lifecycle
+  # predicate.
+  #
+  # THREE SIBLINGS MEASURED OPEN ON MAIN, ALL HTTP 200 (D52 — the refutation of
+  # D37's "the patch door is already claim-safe"):
+  #   (a) `unset: ["claim"]` + terminal `set` + CORRECT rev — `"claim"` is
+  #       absent from the `protected` list, so `Map.drop` deletes it;
+  #   (b) `set: {"claim": null}` + terminal set + correct rev — straight
+  #       through the `Map.merge`;
+  #   (c) `unset: ["claim"]` with NO rev and NO lifecycle change — pure claim
+  #       theft, completely unfenced.
+  # There is no legitimate caller of these shapes: `api/lib/barkpark/tasks/`
+  # contains ZERO references to `Content.apply_mutations`, and every sanctioned
+  # verb that ends a claim (`Tasks.Release`, `Tasks.Close`, `Tasks.TtlSweeper`)
+  # `Map.put`s a REPLACEMENT claim map rather than deleting the key — so an
+  # honest release still satisfies this guard.
+  #
+  # WHAT IT DOES **NOT** COVER (D40 boundary — state it, do not imply it):
+  #   * direct `Repo`/`Ecto` writes and `Content.Writer` calls that bypass
+  #     `apply_mutations` entirely — this is a door guard, not a row invariant;
+  #   * the sanctioned `Barkpark.Tasks.*` modules, which are deliberately
+  #     upstream of it and keep full authority over a claim's lifetime;
+  #   * a claim REPLACED by a different claim map (theft-by-overwrite rather
+  #     than theft-by-erasure) — out of this slice's fence, and separately
+  #     guarded for the sanctioned path by the epoch CAS in `Tasks.Claim`;
+  #   * the FRESH-CREATE exemption above and its measured residual harm — a
+  #     forged birth has no claim to drop, so this guard cannot see it.
+  #
+  # REPLICATION IS EXEMPT, AND THE SCENARIO IS CONCRETE — not copy-paste from
+  # D22. `Sync.Applier.apply_upsert` mirrors an upstream row with
+  # `createOrReplace` + the FULL remote document (applier.ex:172-181). Pull a
+  # task that was claimed LOCALLY after the last push and the remote copy simply
+  # has no `claim` key: without this exemption the mirror write is refused, and
+  # because `apply_mutations` wraps the batch in one transaction the ENTIRE sync
+  # batch rolls back — the replica wedges permanently on that row with no
+  # operator recourse (`Sync.Applier` has no quarantine path). The exemption
+  # widens the attack surface by exactly ZERO: `:source` is server-set, and
+  # `MutateController` prepends `source: :api` (mutate_controller.ex:14) so a
+  # request body can never reach the `:sync` value.
+  defp ensure_claim_not_dropped("task", nil, _merged, _opts), do: :ok
+
+  defp ensure_claim_not_dropped("task", existing, merged, opts) do
+    was = (existing.content || %{})["claim"]
+    now = merged["claim"]
+
+    cond do
+      # Nothing to preserve — an unclaimed row is not this guard's business.
+      not is_map(was) or map_size(was) == 0 -> :ok
+      # The claim survived the write. (A REPLACED claim is out of scope; see the
+      # coverage boundary above.)
+      not is_nil(now) -> :ok
+      # Replication mirrors upstream rows verbatim.
+      Keyword.get(opts, :source, :api) != :api -> :ok
+      true -> {:error, {:invalid_task_content, claim_drop_error(was)}}
+    end
+  end
+
+  defp ensure_claim_not_dropped(_type, _existing, _merged, _opts), do: :ok
+
+  # Same `invalid_task_content` family the close guard uses (422
+  # `validation_failed` with a per-field details map) — no new error code, no
+  # new controller branch. Keyed on `claim` so the caller sees WHICH field it
+  # erased, and the message names the sanctioned verb for each intent.
+  defp claim_drop_error(claim) do
+    worker = if is_map(claim), do: claim["worker"], else: nil
+
+    %{
+      "claim" => [
+        "cannot be dropped through /v1/data/mutate" <>
+          if(is_binary(worker), do: " — this task is claimed by #{inspect(worker)}", else: "") <>
+          ". The claim is the ledger's only attribution: erasing it detaches the row from " <>
+          "every sanctioned lifecycle verb (`bp task close` fences on `claim.epoch`, so an " <>
+          "unclaimed-but-in-progress row becomes uncloseable). A revision precondition does " <>
+          "NOT unlock this — release it (`bp task release <id> <worker> <epoch>`, " <>
+          "POST /v1/tasks/:id/release) or close it (`bp task close <id> <worker> <epoch>`), " <>
+          "both of which record who let it go."
+      ]
+    }
+  end
+
+  # The content the write will ACTUALLY land, resolved through the same
+  # `Writer.from_envelope/1` the create path uses — so a create-family op in the
+  # FLAT Sanity shape (`%{"_id" => …, "_type" => "task", "lifecycle_status" =>
+  # "done"}`, no nested `content` map) is read exactly as it will be stored,
+  # rather than appearing to carry no content at all and slipping both guards.
+  defp incoming_content(%{} = attrs) do
+    case Writer.from_envelope(attrs) do
+      %{"content" => %{} = content} -> content
+      _ -> %{}
+    end
+  end
+
+  defp incoming_content(_attrs), do: %{}
 
   # Merge base for a patch MUST be the row the write will actually target. The
   # create/replace siblings read draft-first via DraftId.draft_id/1, and
