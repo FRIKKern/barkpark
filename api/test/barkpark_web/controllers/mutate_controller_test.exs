@@ -88,7 +88,8 @@ defmodule BarkparkWeb.MutateControllerTest do
          %{conn: conn} do
       create_task(conn, "guard-plain")
 
-      resp = mutate(conn, [%{"patch" => task_patch("guard-plain", %{"lifecycle_status" => "done"})}])
+      resp =
+        mutate(conn, [%{"patch" => task_patch("guard-plain", %{"lifecycle_status" => "done"})}])
 
       assert resp.status == 422
       body = Jason.decode!(resp.resp_body)
@@ -153,7 +154,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       # `lifecycle_status` is present and terminal in BOTH the existing row and
       # the merge result, but unchanged — bookkeeping on closed rows (retros,
       # digests, compaction) must not be collateral damage.
-      resp = mutate(conn, [%{"patch" => task_patch("guard-noop", %{"close_reason" => "shipped"})}])
+      resp =
+        mutate(conn, [%{"patch" => task_patch("guard-noop", %{"close_reason" => "shipped"})}])
 
       assert resp.status == 200
       assert task_content("guard-noop")["close_reason"] == "shipped"
@@ -186,10 +188,51 @@ defmodule BarkparkWeb.MutateControllerTest do
 
       assert {:error, {:invalid_task_content, _}} =
                Content.apply_mutations(
-                 [%{"patch" => task_patch("guard-sync-control", %{"lifecycle_status" => "done"})}],
+                 [
+                   %{"patch" => task_patch("guard-sync-control", %{"lifecycle_status" => "done"})}
+                 ],
                  "test",
                  source: :api
                )
+    end
+
+    # THE DRIFT TRIPWIRE. The guard's terminal set is DUPLICATED from
+    # `@closed_lifecycle_statuses` in `api/lib/barkpark/tasks/close.ex` (that
+    # module owns the definition and exposes no public accessor, and widening
+    # this slice's fence to add one was out of scope). A copied constant with
+    # nothing pinning it is a door that silently re-opens: add a terminal status
+    # to close.ex, and the guard misses it while every test above stays green.
+    #
+    # So this reads close.ex's OWN list out of its source and proves the guard
+    # refuses a blind patch into EVERY status in it. It is behavioural, not a
+    # string compare — it fails if the guard stops covering a status for any
+    # reason, not only if the literal drifts.
+    test "every terminal status close.ex owns is fenced — the copied list cannot drift silently",
+         %{conn: conn} do
+      source = File.read!(Path.join(__DIR__, "../../../lib/barkpark/tasks/close.ex"))
+
+      [_, inner] =
+        Regex.run(~r/@closed_lifecycle_statuses\s+~w\(([^)]*)\)/, source) ||
+          flunk(
+            "could not find @closed_lifecycle_statuses in close.ex — did it move or change shape?"
+          )
+
+      statuses = inner |> String.split(~r/\s+/, trim: true)
+      assert length(statuses) >= 3, "expected close.ex to own at least done/cancelled/blocked"
+
+      for status <- statuses do
+        id = "guard-drift-#{status}"
+        create_task(conn, id)
+
+        resp = mutate(conn, [%{"patch" => task_patch(id, %{"lifecycle_status" => status})}])
+
+        assert resp.status == 422,
+               "close.ex treats #{inspect(status)} as terminal, but /v1/data/mutate accepted a " <>
+                 "blind patch into it (HTTP #{resp.status}). Add it to " <>
+                 "@terminal_lifecycle_statuses in Barkpark.Content.Mutations."
+
+        assert task_content(id)["lifecycle_status"] == "open"
+      end
     end
 
     defp create_task(conn, id, content_extra \\ %{}) do
