@@ -280,15 +280,60 @@ function main() {
       });
     }
   }
-  if (P.dismiss_control_one_of && rt.dismiss_control != null) {
+  // THE DISMISS GRAMMAR IS READ PER WIDTH, AND ITS ABSENCE IS A MISS (D183).
+  //
+  // This check used to read the run-level `rt.dismiss_control` scalar and skip
+  // itself when that scalar was absent. Both halves were wrong once the
+  // instrument slice landed. D183 BANS the scalar by name — it was set from
+  // `widths[0]` alone and published one 1440px toggle re-click as the grammar of
+  // the whole sweep — so `studio-desk-measure.mjs` no longer emits it at all,
+  // and this check would have gone permanently, silently vacuous: a guard that
+  // cannot fail, on the exact affordance condition D161(ii) turns on.
+  //
+  // So: check EVERY control the sweep actually used, from the per-width table
+  // that D183 makes the citable form, and if a ran trip carries no grammar in
+  // any known shape, say so as a MISS. A check with nothing to read has not
+  // passed. The legacy scalar is still honoured if present, so this checker
+  // reads pre- and post-D183 artefacts alike.
+  if (P.dismiss_control_one_of) {
     const allowed = P.dismiss_control_one_of.predicted ?? [];
-    if (!allowed.includes(rt.dismiss_control)) {
+    const basis = P.dismiss_control_one_of.basis ?? 'ruling';
+
+    // Every shape, most-preferred first; each entry is {control, where}.
+    const used =
+      Array.isArray(rt.dismiss_controls_used) && rt.dismiss_controls_used.length
+        ? rt.dismiss_controls_used.map((u) => ({
+            control: u.control,
+            where: `widths ${(u.widths_px ?? []).join(', ')}px`,
+          }))
+        : Array.isArray(rt.dismiss_grammar_by_width) && rt.dismiss_grammar_by_width.length
+          ? rt.dismiss_grammar_by_width.map((w) => ({
+              control: w.control,
+              where: `viewport ${w.viewport_px}px`,
+            }))
+          : rt.dismiss_control != null
+            ? [{ control: rt.dismiss_control, where: 'run-level scalar (pre-D183 artefact)' }]
+            : [];
+
+    if (used.length === 0) {
       misses.push({
         kind: 'STRUCTURAL', key: 'round_trip.dismiss_control', field: 'dismiss_control',
-        basis: P.dismiss_control_one_of.basis ?? 'ruling',
-        predicted: allowed, observed: rt.dismiss_control,
-        detail: 'the trip happened, but through an affordance nobody ruled on',
+        basis, predicted: allowed, observed: null,
+        detail:
+          'the round trip RAN but records no dismiss grammar in any known shape ' +
+          '(dismiss_controls_used, dismiss_grammar_by_width, or the retired run-level scalar). ' +
+          'The trip happened through an affordance the artefact does not name, so the ruling ' +
+          'cannot be checked — which is a MISS, never a silent skip.',
       });
+    }
+    for (const u of used) {
+      if (!allowed.includes(u.control)) {
+        misses.push({
+          kind: 'STRUCTURAL', key: 'round_trip.dismiss_control', field: 'dismiss_control',
+          basis, predicted: allowed, observed: u.control,
+          detail: `the trip happened at ${u.where}, but through an affordance nobody ruled on`,
+        });
+      }
     }
   }
 
