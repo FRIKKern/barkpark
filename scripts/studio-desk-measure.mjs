@@ -590,6 +590,161 @@ function suppressVerdictForDestination(rec) {
   };
 }
 
+/**
+ * D171's PRECONDITION, ON EVERY READING (charter D185).
+ *
+ * THE TRAP. The pre-paint stamp in `root.html.heex` is not `bucket(w)` — it is
+ * `bucket(w, cur)`, with a WIDEN-ONLY +32px dead-band:
+ * `while (cur < raw && w >= EDGES[cur] + 32) cur++`. Widening from 1024 to 1280
+ * therefore stamps `standard`, live-confirmed, because 1280 < 1024 + 32 is false
+ * but the loop only advances ONE tier per settle and re-anchors to the bucket
+ * currently held. Narrowing has no dead-band at all. So any no-reload sweep that
+ * ARRIVES at 1280 or 1024 from below measures the WRONG TIER while every other
+ * assertion in the run passes. This sweep descends (D80) precisely to stay out
+ * of that hole — but "we descend, therefore we are fine" is an argument, not a
+ * measurement, and it is exactly the class of unchecked premise this epic keeps
+ * finding under a green run.
+ *
+ * WHY THE RAW BAND AND NOT A MIRROR OF `bucket(w, cur)`. A held-bucket-aware
+ * mirror recomputes what the browser computed, from the same inputs, by the same
+ * algorithm — so it agrees BY CONSTRUCTION, including in the one case D171
+ * exists to catch (arrive at 1280 from below: the mirror also says `standard`,
+ * the check passes, the row still measured the wrong tier). The RAW band is the
+ * tier the row CLAIMS to be measuring. Its disagreement with the stamp IS the
+ * signal, and nothing else in this file can produce it.
+ *
+ * REAL INNER WIDTH, NOT THE REQUESTED ONE. `page.setViewportSize` is a request;
+ * `window.innerWidth` is what the layout actually got. Deriving the expectation
+ * from the request would hide a viewport that never took, which fails the same
+ * way and reads the same in the artifact.
+ *
+ * IT REPORTS, IT NEVER `die()`s. A fatal abort mid-sweep discards every row
+ * collected so far and writes ZERO bytes, which D138 rules an INSTRUMENT FAILURE
+ * rather than a desk fact. R's criterion 4 imposes a REPORTING duty: warn, NULL
+ * that row's verdicts, and let the artifact reach disk carrying the finding.
+ */
+function bucketPrecondition(requestedWidth, realInnerWidth, stamped) {
+  const inner = Number.isFinite(realInnerWidth) ? realInnerWidth : requestedWidth;
+  const expected = bandNameFor(inner);
+  return {
+    requested_viewport_px: requestedWidth,
+    real_inner_width: inner,
+    expected_raw_band: expected,
+    width_bucket_stamped: stamped ?? null,
+    bucket_precondition_ok: stamped === expected,
+    basis: 'RAW bandNameFor(window.innerWidth) vs the pre-paint [data-width-bucket] stamp — NOT a ' +
+           'held-bucket mirror of root.html.heex bucket(w, cur), which would agree by construction ' +
+           'in exactly the widen-dead-band case D171 exists to catch.',
+  };
+}
+
+/** The run-level rollup. `checked`/`agreed` make a zero READABLE: a run with
+ *  `checked: 0` never asserted anything, which is a different (and worse) state
+ *  than `agreed === checked`. Every failure is named with its full context so a
+ *  reader can locate the row without re-running. */
+function emptyBucketPrecondition() {
+  return {
+    checked: 0,
+    agreed: 0,
+    failures: [],
+    note:
+      'Every reading in this run asserts that [data-width-bucket] equals the RAW band of the ' +
+      'viewport it actually got, as a PRECONDITION of the reading (charter D171/D185). A row that ' +
+      'fails carries bucket_precondition_ok:false, has BOTH 55ch verdicts withdrawn to NULL (never ' +
+      'FALSE — it measured the wrong tier, it did not measure a bad desk), and is listed here. This ' +
+      'never aborts the run: a mid-sweep abort writes zero bytes, which D138 rules an INSTRUMENT ' +
+      'FAILURE rather than a desk fact.',
+  };
+}
+
+function recordBucketPrecondition(run, where, pre) {
+  const acc = run.bucket_precondition ??= emptyBucketPrecondition();
+  acc.checked += 1;
+  if (pre.bucket_precondition_ok) { acc.agreed += 1; return pre; }
+  acc.failures.push({ where, ...pre });
+  run.warnings.push(
+    `BUCKET PRECONDITION FAILED at ${where}: the page stamps [data-width-bucket]=` +
+    `"${pre.width_bucket_stamped}" but window.innerWidth ${pre.real_inner_width}px (requested ` +
+    `${pre.requested_viewport_px}px) falls in the RAW band "${pre.expected_raw_band}". This row ` +
+    `measured a DIFFERENT TIER than it claims — D171's widen-only +32px dead-band, or a viewport ` +
+    `that never took. Its 55ch verdicts are withdrawn to NULL; the measurements are left intact and ` +
+    `are still readable as observations of whatever tier was actually on screen.`);
+  return pre;
+}
+
+/**
+ * The verdict withdrawal for a failed precondition. Same rule as D127 part 2 and
+ * for the same reason: a row that measured the wrong tier must not report FALSE
+ * on a criterion the seal turns on. FALSE would say "this desk fails 55ch";
+ * the honest sentence is "this reading does not describe the tier it names".
+ */
+function withdrawVerdictsForBucketPrecondition(rec, pre) {
+  return {
+    ...rec,
+    content_meets_55ch: null,
+    visible_meets_55ch: null,
+    verdicts_withdrawn_for_bucket_precondition: {
+      content_meets_55ch: rec.content_meets_55ch ?? null,
+      visible_meets_55ch: rec.visible_meets_55ch ?? null,
+      expected_raw_band: pre.expected_raw_band,
+      width_bucket_stamped: pre.width_bucket_stamped,
+      reason:
+        'BUCKET PRECONDITION FAILED. The stamp disagrees with the raw band of the viewport this row ' +
+        'actually got, so the row measured a different tier than it names. The raw verdicts are ' +
+        'preserved here; the reported verdicts are NULL, never FALSE (D171/D185, same rule as D127 ' +
+        'part 2). The measurements themselves are untouched — they are real observations of the ' +
+        'tier that was on screen.',
+    },
+  };
+}
+
+/**
+ * D186 — THE OVERLAY ASSERTION, NARROWED RATHER THAN DELETED.
+ *
+ * D108 turned on a real desk observation: below `wide`, an explicitly-opened
+ * inspector leaves flow and OVERLAYS the reading column. The wave-10 Tier-2
+ * ladder then made that false ON PURPOSE at `standard` — the rail yields and the
+ * inspector DOCKS IN FLOW when the panel still has room (measured: panel 980 at
+ * viewport 1024). The old predicate was `stamped !== 'wide'`, so it warned on
+ * three legitimate 1024/user-opened rows EVERY SINGLE RUN.
+ *
+ * A permanent unexplained warning is worse than no warning: it teaches the reader
+ * that this instrument's warnings are noise, and the next real one gets skipped.
+ * DELETING it is worse still — the signal goes entirely, and a reverted ladder
+ * would then read as a clean run.
+ *
+ * So the regime is narrowed to where overlay is still the ruling: narrow/phone
+ * always, and `standard` only BELOW the panel width at which the ladder's dock
+ * stops being possible. 860px is that edge — the same threshold the scrim flips
+ * at (861 -> `none`, 860 -> `""`, forced-container control, charter D153/D176).
+ * A `standard` row whose panel came in at or below it has no room to dock, so
+ * absolute is still the claim, and this tripwire STILL FIRES if the ladder is
+ * reverted or mis-scoped.
+ *
+ * A null panel_px does NOT assert: the check needs the number it is conditioned
+ * on, and a missing measurement is not evidence either way.
+ */
+const OVERLAY_ABSOLUTE_MAX_PANEL_PX = 860;
+const OVERLAY_REGIME =
+  `narrow/phone always; standard only when panel_px <= ${OVERLAY_ABSOLUTE_MAX_PANEL_PX}`;
+
+/** The two facts the precondition needs, read straight off the live page — for
+ *  callers that hold a page but no measured row (the round trip's per-width
+ *  loop, whose legs are not `PAGE_MEASURE` reads). */
+async function readBucketStamp(page) {
+  return page.evaluate(() => ({
+    real_inner_width: window.innerWidth,
+    width_bucket_stamped: document.documentElement.getAttribute('data-width-bucket'),
+  }));
+}
+
+function overlayShouldBeAbsolute(rec) {
+  const bucket = rec.width_bucket_stamped;
+  if (bucket === 'narrow' || bucket === 'phone') return true;
+  if (bucket !== 'standard') return false;
+  return typeof rec.panel_px === 'number' && rec.panel_px <= OVERLAY_ABSOLUTE_MAX_PANEL_PX;
+}
+
 const STATE_IDS = STATES.map((s) => s.id);
 const stateById = (id) => STATES.find((s) => s.id === id) ?? null;
 
@@ -1942,20 +2097,22 @@ export async function openInspectorByRealClick(page, { maxClicks = 3, fatal = tr
 /**
  * The controls that could DISMISS a user-opened inspector, in preference order.
  *
- * NOTHING PURPOSE-BUILT IS DEPLOYED YET. The dismissal grammar — an explicit
- * close affordance, Escape, a scrim click — ships in
- * `inspector-dismissal-and-return-grammar`. What IS deployed is the toggle
- * itself, and re-clicking it is a genuine dismissal (the handler flips
- * `sidebar_open`/`sidebar_user_opened` back off), so the round trip can run
- * TODAY rather than skipping until round 2 lands. Which control was used is
- * RECORDED on every round-trip result, because "returned bit-identical after a
- * toggle re-click" and "returned bit-identical after pressing Escape" are
- * different findings and the artifact must not blur them.
+ * THE SWEEP USES TWO OF THESE, NOT ONE — this comment used to say "nothing
+ * purpose-built is deployed yet", which stopped being true when #5086 shipped
+ * `[data-test-id="sidebar-dismiss"]` on the Tier-3 destination. Today the six
+ * destination widths (900 down to 500) dismiss through that purpose-built
+ * control, and 1440/1280/1024 fall through to a toggle re-click — still a
+ * genuine dismissal (the handler flips `sidebar_open`/`sidebar_user_opened`
+ * back off). Which control was used is RECORDED PER WIDTH and rolled up by
+ * control, never as one scalar borrowed from the widest row (D183), because
+ * "returned bit-identical after a toggle re-click" and "returned bit-identical
+ * after the purpose-built dismiss" are different findings about different
+ * affordances and the artifact must not blur them.
  */
 const DISMISS_CONTROLS = [
   { selector: '[data-test-id="sidebar-dismiss"]',      grammar: 'purpose-built dismiss control' },
   { selector: '[data-test-id="sidebar-close-panel"]',  grammar: 'purpose-built close control' },
-  { selector: '[data-test-id="sidebar-toggle-panel"]', grammar: 'toggle re-click — the only dismissal deployed today' },
+  { selector: '[data-test-id="sidebar-toggle-panel"]', grammar: 'toggle re-click — the fallback where no purpose-built dismiss renders (wide/standard)' },
 ];
 
 // DESTINATION_CONTROLS used to sit here — two selectors that summoned the third
@@ -2106,13 +2263,25 @@ const ROUND_TRIP_FIELDS = [
  * that ACCUMULATES across trips shows up as a widening delta instead of being
  * reset away by a fresh load at every step.
  */
-async function runRoundTrip(page, measureFace) {
+async function runRoundTrip(page, measureFace, run) {
   const widths = [];
-  let cells = 0, identicalCells = 0;
+  let cells = 0, identicalCells = 0, cellsWithdrawn = 0;
 
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 });
     await waitForDeskSettled(page);
+
+    // D171/D185 INSIDE THIS LOOP, not only in the two-state sweep — and this is
+    // the leg that needs it most. Every observed row until now came from the
+    // sweeps; NO row has ever come from in here, and this pass is the one that
+    // descends through nine widths WITHOUT a single reload, which is precisely
+    // the shape the widen dead-band ambushes. The baseline is checked before the
+    // trip, and again after the dismiss, because a bucket that moved DURING the
+    // trip would make the before/after comparison a comparison of two tiers.
+    const stampBefore = await readBucketStamp(page);
+    const preBefore = recordBucketPrecondition(
+      run, `round-trip baseline at viewport ${width}px`,
+      bucketPrecondition(width, stampBefore.real_inner_width, stampBefore.width_bucket_stamped));
 
     const before = {};
     for (const face of FACES) before[face.id] = await measureFace(face);
@@ -2148,6 +2317,25 @@ async function runRoundTrip(page, measureFace) {
     }
     await waitForDeskSettled(page);
 
+    const stampAfter = await readBucketStamp(page);
+    const preAfter = recordBucketPrecondition(
+      run, `round-trip post-dismiss at viewport ${width}px`,
+      bucketPrecondition(width, stampAfter.real_inner_width, stampAfter.width_bucket_stamped));
+
+    // D171/D185 REACHES THE CELLS, NOT JUST THE WARNING. A width whose stamp
+    // disagreed with the raw band — on either leg — compared two readings that
+    // may describe DIFFERENT TIERS, so its cells are no evidence about
+    // round-trip fidelity. Counting them would let `returns_bit_identical` (the
+    // headline this wave exists to establish) be computed partly over a
+    // comparison of two different desks, which is the exact defect class the
+    // sweep's verdict withdrawal already refuses. Withdrawn cells report
+    // `identical: null` — never FALSE, the column may well have come back; we
+    // simply did not measure it at the tier we name — and they are counted
+    // separately so the withdrawal is visible rather than a quietly shrinking
+    // denominator.
+    const widthPreconditionOk =
+      preBefore.bucket_precondition_ok && preAfter.bucket_precondition_ok;
+
     const faces = [];
     for (const face of FACES) {
       const after = await measureFace(face);
@@ -2156,12 +2344,28 @@ async function runRoundTrip(page, measureFace) {
         const b = get(before[face.id]), a = get(after);
         if (b !== a) diffs.push({ field: name, before: b, after: a });
       }
-      cells += 1;
-      if (diffs.length === 0) identicalCells += 1;
+      if (widthPreconditionOk) {
+        cells += 1;
+        if (diffs.length === 0) identicalCells += 1;
+      } else {
+        cellsWithdrawn += 1;
+      }
       faces.push({
         face: face.id,
-        identical: diffs.length === 0,
+        identical: widthPreconditionOk ? diffs.length === 0 : null,
         diffs,
+        ...(widthPreconditionOk ? {} : {
+          withdrawn_for_bucket_precondition: {
+            expected_raw_band: preBefore.expected_raw_band,
+            width_bucket_stamped: preBefore.width_bucket_stamped,
+            recomputable_identical: diffs.length === 0,
+            reason:
+              'BUCKET PRECONDITION FAILED on this width, so this cell is not counted toward ' +
+              'cells/identical_cells. The raw before/after figures are intact and the ' +
+              'recomputed answer is preserved above, but the two legs may describe different ' +
+              'tiers, which makes them no evidence about round-trip fidelity (D171/D185).',
+          },
+        }),
         before: Object.fromEntries(ROUND_TRIP_FIELDS.map(([n, g]) => [n, g(before[face.id])])),
         after: Object.fromEntries(ROUND_TRIP_FIELDS.map(([n, g]) => [n, g(after)])),
       });
@@ -2173,6 +2377,11 @@ async function runRoundTrip(page, measureFace) {
       dismiss_clicks: dismissed.clicks_needed,
       dismiss_control: dismissed.control,
       dismiss_grammar: dismissed.grammar,
+      bucket_precondition_ok: preBefore.bucket_precondition_ok && preAfter.bucket_precondition_ok,
+      expected_raw_band: preBefore.expected_raw_band,
+      real_inner_width: preBefore.real_inner_width,
+      bucket_precondition_before: preBefore,
+      bucket_precondition_after: preAfter,
       faces,
     });
   }
@@ -2180,12 +2389,42 @@ async function runRoundTrip(page, measureFace) {
   return {
     ran: true,
     protocol: 'default -> open -> dismiss, on the SAME page instance, no reload at any point',
-    dismiss_control: widths[0]?.dismiss_control ?? null,
-    dismiss_grammar: widths[0]?.dismiss_grammar ?? null,
+    // D183 — THE ROLLUP NO LONGER SPEAKS FOR WIDTHS IT NEVER SAW. This used to
+    // be two scalars taken from `widths[0]`, which meant one 1440px row's
+    // toggle re-click was published as the grammar of the whole sweep — and it
+    // was flatly false about two thirds of it: 1440/1280/1024 dismiss via the
+    // toggle, while every destination width (900 and below) dismisses via the
+    // purpose-built [data-test-id="sidebar-dismiss"] that #5086 shipped. The
+    // per-width data was always here; the defect was a summary that hid it.
+    dismiss_grammar_by_width: widths.map((w) => ({
+      viewport_px: w.viewport_px,
+      control: w.dismiss_control,
+      grammar: w.dismiss_grammar,
+    })),
+    dismiss_controls_used: [...new Set(widths.map((w) => w.dismiss_control))].map((control) => ({
+      control,
+      grammar: widths.find((w) => w.dismiss_control === control)?.dismiss_grammar ?? null,
+      widths_px: widths.filter((w) => w.dismiss_control === control).map((w) => w.viewport_px),
+    })),
+    dismiss_grammar_note:
+      'BY WIDTH, never one scalar. "Returned bit-identical after a toggle re-click" and "returned ' +
+      'bit-identical after the purpose-built dismiss" are DIFFERENT findings about DIFFERENT ' +
+      'affordances, and a sweep that used both must say so or it is claiming a coverage it does ' +
+      'not have.',
     compared_fields: ROUND_TRIP_FIELDS.map(([n]) => n),
     cells,
     identical_cells: identicalCells,
-    returns_bit_identical: cells > 0 && identicalCells === cells,
+    // COVERAGE IS PART OF THE CLAIM. `returns_bit_identical` gates the terminal
+    // run, so it may never read true off a PARTIAL sweep: withdrawing a width
+    // silently would shrink the denominator until the survivors all agreed and
+    // the headline read true over a fraction of the desk. That is D184's
+    // disease in a different organ — a thing that did not happen, certified as
+    // a pass. Full coverage or the claim is not made. (`cells > 0` already
+    // refuses the all-withdrawn case, where the denominator reaches zero.)
+    cells_withdrawn_for_bucket_precondition: cellsWithdrawn,
+    widths_withdrawn_for_bucket_precondition:
+      widths.filter((w) => !w.bucket_precondition_ok).map((w) => w.viewport_px),
+    returns_bit_identical: cells > 0 && identicalCells === cells && cellsWithdrawn === 0,
     widths,
     note:
       'Bit-identical means EVERY compared field matched exactly — not "within tolerance". These are ' +
@@ -2488,6 +2727,10 @@ async function main() {
       'absent from the printed output is a HARD FAILURE. It used to be a silent drop — a synthetic ' +
       'third-state row went in and "destination" appeared zero times in the output with no error ' +
       'raised anywhere, which is a measurement paid for and then thrown away.',
+    // D171/D185. Initialised EMPTY rather than lazily created, so a run that
+    // asserted nothing reports `checked: 0` instead of omitting the block — an
+    // absent precondition and a satisfied one must never read the same.
+    bucket_precondition: emptyBucketPrecondition(),
     warnings: [],
     rows: [],
   };
@@ -2570,7 +2813,17 @@ async function main() {
         // destination the column is covered BY DESIGN, so its visible verdict is
         // WITHDRAWN to NULL. A FALSE there is an instrument defect — see
         // suppressVerdictForDestination().
-        const rec = dest.is_destination ? suppressVerdictForDestination(measured) : measured;
+        let rec = dest.is_destination ? suppressVerdictForDestination(measured) : measured;
+        // D171/D185, on THIS row, before anything is read off it: does the tier
+        // the page stamps agree with the raw band of the viewport it actually
+        // got? A disagreement withdraws this row's verdicts and warns; it never
+        // aborts (a mid-sweep abort writes zero bytes — D138).
+        const bucketPre = recordBucketPrecondition(
+          run, `viewport ${width}px, state "${stateId}", face ${face.id}`,
+          bucketPrecondition(width, rec.viewport_px, rec.width_bucket_stamped));
+        if (!bucketPre.bucket_precondition_ok) {
+          rec = withdrawVerdictsForBucketPrecondition(rec, bucketPre);
+        }
         if (rec.fatal) {
           die(`a required element vanished mid-measure at viewport ${width}px, state "${stateId}", ` +
               `face ${face.id}: ${JSON.stringify(rec.counts)}`);
@@ -2585,6 +2838,10 @@ async function main() {
             inspector_state: stateId,
             is_destination: dest.is_destination,
             destination_evidence: dest,
+            bucket_precondition_ok: bucketPre.bucket_precondition_ok,
+            expected_raw_band: bucketPre.expected_raw_band,
+            real_inner_width: bucketPre.real_inner_width,
+            bucket_precondition: bucketPre,
             user_opened_overlay_asserted: null,
             face: face.id,
             face_forced_to: face.override,
@@ -2674,15 +2931,15 @@ async function main() {
         //    fatal, which would leave the harness unable to measure a fixed desk.
         let overlayAsserted = null;
         if (stateId === 'user-opened' && rec.inspector.present) {
-          const subWide = rec.width_bucket_stamped !== 'wide';
           overlayAsserted = rec.inspector.position === 'absolute';
-          if (subWide && !overlayAsserted) {
+          if (overlayShouldBeAbsolute(rec) && !overlayAsserted) {
             run.warnings.push(
               `viewport ${width}px / user-opened / face "${face.id}": bucket ` +
-              `"${rec.width_bucket_stamped}" is sub-wide and [data-user-opened] IS present, but the ` +
-              `inspector reports position "${rec.inspector.position}", not "absolute". D108 measured ` +
-              `absolute here. Either the desk changed (a successor fix landing — check before reading ` +
-              `these rows as the old defect) or the marker is not doing what it did.`);
+              `"${rec.width_bucket_stamped}" with panel ${rec.panel_px}px is inside the OVERLAY ` +
+              `REGIME (${OVERLAY_REGIME}) and [data-user-opened] IS present, but the inspector ` +
+              `reports position "${rec.inspector.position}", not "absolute". D108 measured absolute ` +
+              `here and the Tier-2 ladder does not reach this far down. Either the desk changed or ` +
+              `the marker is not doing what it did.`);
           }
         }
 
@@ -2703,6 +2960,12 @@ async function main() {
           // its own.
           is_destination: dest.is_destination,
           destination_evidence: dest,
+          // D171/D185: the tier this row CLAIMS to measure, checked against the
+          // tier the page stamps. False withdraws the verdicts above.
+          bucket_precondition_ok: bucketPre.bucket_precondition_ok,
+          expected_raw_band: bucketPre.expected_raw_band,
+          real_inner_width: bucketPre.real_inner_width,
+          bucket_precondition: bucketPre,
           user_opened_overlay_asserted: overlayAsserted,
           face: face.id,
           face_forced_to: face.override,
@@ -2802,7 +3065,7 @@ async function main() {
       await page.goto(srv.base + docPath, { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('.bp-paper-surface', { timeout: 30_000 });
       await waitForDeskSettled(page);
-      run.round_trip = await runRoundTrip(page, measureFace);
+      run.round_trip = await runRoundTrip(page, measureFace, run);
     } else {
       run.round_trip = { ran: false, skip_reason: '--no-round-trip was passed' };
     }
@@ -2946,6 +3209,11 @@ function writeRunArtifact(run, outPath) {
     destination_verdicts_withdrawn_all_null:
       run.rows.filter((r) => r.is_destination).every((r) => r.visible_meets_55ch !== false),
     destination_note: destinationNote(),
+    bucket_precondition_checked: run.bucket_precondition?.checked ?? 0,
+    bucket_precondition_agreed: run.bucket_precondition?.agreed ?? 0,
+    bucket_precondition_all_agreed:
+      (run.bucket_precondition?.checked ?? 0) > 0 &&
+      run.bucket_precondition.checked === run.bucket_precondition.agreed,
     states_measured: run.states_measured,
     states_skipped: run.states_skipped,
     states_in_rows: [...new Set(run.rows.map((r) => r.inspector_state))],
@@ -2955,7 +3223,9 @@ function writeRunArtifact(run, outPath) {
           returns_bit_identical: run.round_trip.returns_bit_identical ?? null,
           identical_cells: run.round_trip.identical_cells ?? null,
           cells: run.round_trip.cells ?? null,
-          dismiss_control: run.round_trip.dismiss_control ?? null,
+          cells_withdrawn_for_bucket_precondition:
+            run.round_trip.cells_withdrawn_for_bucket_precondition ?? null,
+          dismiss_controls_used: run.round_trip.dismiss_controls_used ?? null,
           skip_reason: run.round_trip.skip_reason ?? null,
         }
       : null,
@@ -3395,15 +3665,49 @@ export function printTable(run) {
         `${pc.guard_passed === true ? 'FIRED' : 'DID NOT FIRE'}: ${pc.verdict}`
       : `not run — ${pc.skip_reason}`}`);
   }
+  // D171/D185 — printed whether it passed or not. A precondition nobody can see
+  // in the human output is one nobody checks, and `checked: 0` must be as loud
+  // as a failure: it means the run asserted its own tier NOWHERE.
+  {
+    const bp = run.bucket_precondition ?? emptyBucketPrecondition();
+    L(`    BUCKET PRECOND.      ${bp.agreed} of ${bp.checked} readings stamp the RAW band of the ` +
+      `viewport they actually got` +
+      `${bp.checked === 0 ? ' — ZERO CHECKED, this run asserted its own tier nowhere' : ''}`);
+    for (const f of bp.failures) {
+      L(`      ${f.where}: stamped "${f.width_bucket_stamped}" but innerWidth ` +
+        `${f.real_inner_width}px is raw band "${f.expected_raw_band}" — verdicts withdrawn`);
+    }
+  }
   L(`    RESTORE byte-ident.  ${restored.length} of ${hitTested.length} hit-tested rows ` +
     `(injected sheet removed, host and ::after computed styles identical before/after)`);
   if (run.round_trip) {
     const rt = run.round_trip;
+    // The verdict line must never read as a contradiction. With cells withdrawn
+    // you can have `identical === cells` AND `returns_bit_identical false` — the
+    // survivors all came back, but the sweep did not cover the desk. "THE COLUMN
+    // DOES NOT COME BACK" would be a FALSE accusation there: nothing drifted, we
+    // just did not measure everything. Three outcomes, three sentences.
+    const rtVerdict = rt.returns_bit_identical
+      ? 'the column comes back exactly'
+      : (rt.cells_withdrawn_for_bucket_precondition ?? 0) > 0 && rt.identical_cells === rt.cells
+        ? 'NO CLAIM — every measured cell came back, but the sweep is INCOMPLETE (see withdrawals below)'
+        : 'THE COLUMN DOES NOT COME BACK';
     L(`    ROUND TRIP           ${rt.ran
       ? `${rt.identical_cells} of ${rt.cells} cells returned BIT-IDENTICAL after ` +
-        `default -> open -> dismiss on the same page instance via ${rt.dismiss_control} ` +
-        `(${rt.dismiss_grammar}) — ${rt.returns_bit_identical ? 'the column comes back exactly' : 'THE COLUMN DOES NOT COME BACK'}`
+        `default -> open -> dismiss on the same page instance — ${rtVerdict}`
       : `SKIPPED — ${rt.skip_reason}`}`);
+    // D183: the grammar is printed BY WIDTH. One line per control actually used,
+    // naming the widths it dismissed — never widths[0] speaking for the sweep.
+    for (const u of rt.dismiss_controls_used ?? []) {
+      L(`      dismissed via ${u.control} (${u.grammar}) at ${u.widths_px.join(', ')}px`);
+    }
+    // D171/D185: withdrawn cells are announced, never just missing from a total.
+    if (rt.ran && (rt.cells_withdrawn_for_bucket_precondition ?? 0) > 0) {
+      L(`      ${rt.cells_withdrawn_for_bucket_precondition} cell(s) WITHDRAWN at ` +
+        `${(rt.widths_withdrawn_for_bucket_precondition ?? []).join(', ')}px — the bucket ` +
+        `precondition failed there, so those legs may compare different tiers and are no ` +
+        `evidence either way. The fidelity claim is NOT made on a partial sweep.`);
+    }
     if (rt.ran && !rt.returns_bit_identical) {
       for (const w of rt.widths) {
         for (const f of w.faces.filter((x) => !x.identical)) {

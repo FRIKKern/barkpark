@@ -1229,3 +1229,267 @@ charter-to-local-main defect that Review again had to rescue, and because the wi
 provisioned by this wave but consummated only by the deferred R.
 
 Paper: `spd-inspector-exemption-paid-wave-12-2026-07-20`.
+
+## Wave-13 amendment (THE ROUND TRIP RAN, 2026-07-21) — D182–D189
+
+> Ground truth for every decision below: guerrilla serves `bc64d869a3a82beb1b39824196f60236b2082dbc`
+> on slot **blue**, ssh-read PRE and POST every run and unchanged throughout — identical to
+> `origin/main`. Wave 12's E (#5086), N (#5087) and I (#5088) are merged AND deployed. The charter
+> is NOT stranded this time: D172–D181 are on `origin/main` with zero diff, and the D68 disease did
+> not recur at the charter layer. It recurred one layer up instead: this wave's Paper
+> (`spd-round-trip-fidelity-wave-2026-07-21`) was found carrying **49 blocks of the Cloud GUI Remake
+> round-11 wave**, cross-written by a concurrent session. That content has its own home
+> (`cloud-gui-remake-wave-2026-07-21-seal`, 61 blocks, a superset), so the stray body was replaced
+> rather than rescued. **A shared ledger is a shared surface: a wave Paper id is not private.**
+
+- **D182 — ROUND-TRIP FIDELITY HOLDS ON THE DEPLOYED BUILD. D161(i) is PAID, by measurement.**
+  `default → open → dismiss`, on the SAME page instance with no reload at any point, returns the
+  reading column **bit-identical at 27 of 27 cells** — 9 widths (1440, 1280, 1024, 900, 800, 764,
+  700, 640, 500) × 3 faces — compared strictly (`!==`, no tolerance) over the six `ROUND_TRIP_FIELDS`
+  (`content_px`, `content_ch`, `px_per_ch`, `visible_content_px`, `visible_ch`, `gutter_px`). Three
+  independent sweeps (rt2, rt3, rt4) each report `cells 27 / identical_cells 27 /
+  returns_bit_identical true`; the non-identical `(viewport, face, field, before, after)` list D161
+  demands is **EMPTY in every run that ran**. Determinism of the SAME build: **0** round-trip cell
+  diffs rt2-vs-rt3 and rt2-vs-rt4, **0** matrix field diffs across all four runs, identical click
+  counts. Nothing drifts. This is the epic's oldest open thread, unmeasured since D127 was written,
+  and it is now closed in the affirmative. The 71-commit-behind 2026-07-20 baselines were NOT used
+  as comparands (D183's sibling ruling stands): determinism is run-1 vs run-2 of the SAME build.
+- **D183 — `round_trip.dismiss_control` is a HALF-TRUTH and may never be quoted; the per-width table
+  is the citable form. D161(ii) is MET.** The run-level scalar is set from `widths[0]` alone
+  (`studio-desk-measure.mjs:2183`), so it reads `[data-test-id="sidebar-toggle-panel"]` /
+  "toggle re-click — the only dismissal deployed today". That is false about two-thirds of the sweep.
+  The deployed grammar is **SPLIT**: the toggle re-click at 1440/1280/1024, and the purpose-built
+  `[data-test-id="sidebar-dismiss"]` at **all six destination widths** (900, 800, 764, 700, 640,
+  500). Every destination row — the only rows where the exit matters — has a real dismiss affordance.
+  With #5086's Escape and the visible control, the exit is cheap, plural and visible before it is
+  looked for: **(ii) is MET.** A bracket row quoting the scalar would understate the very condition
+  it is reporting on; that substitution is banned by name.
+- **D184 — THE EXIT CODE CANNOT GATE THE ROUND TRIP.** A failing open leg `return`s (not `continue`s)
+  out of `runRoundTrip` (`:2124-2136`), so one flaky width costs **all 27 cells, never a partial** —
+  and the skip is a returned value, not a throw, so `main()` completes, `writeRunArtifact` runs, and
+  the process **exits 0**. The only `process.exit(1)` is the top-level `.catch` (`:3505-3511`).
+  A gate reading `$?` certifies a skipped round trip as a pass. **Gate on
+  `round_trip.ran === true && returns_bit_identical === true`**, and the artefact that gets COMMITTED
+  must be one where `ran` is true. Observed once in four runs: three real clicks at 1440 never
+  produced `[data-user-opened]` (the wide sidebar sat at `width_px: 41` — click 1 collapsed a 300px
+  default, clicks 2-3 were no-ops). D138 already records this failure and PERMITS bounded retries on
+  it; that permission is the recipe. **No flake rate is recorded here** — four runs is not a rate
+  study, and D138's "observed 1 in 3" is a sibling observation, not a measurement. Note the failure
+  is a DIFFERENT one from D178's rename case (the control is present and clicked; the desk simply
+  does not re-open), so `open-leg-repro.mjs` should not be assumed to reproduce it.
+- **D185 — D171's bucket precondition DOES NOT EXIST IN CODE, and the RAW band is the only sound
+  form.** `width_bucket_stamped` is stamped on every row and printed, but **no line anywhere compares
+  it to an expected band** — the single warning that reads it (`:2677`) is about `inspector.position`,
+  not bucket agreement. The precondition is not weakly built; it is absent, and R's criterion 4
+  cannot be honestly stamped off a structural argument. **Ship the assertion, in the RAW
+  `bandNameFor(width)` form.** A held-bucket-aware mirror would recompute what the browser computed,
+  from the same inputs, by the same algorithm, and agree BY CONSTRUCTION — including in the precise
+  case D171 exists to catch: a sweep arriving at 1280 from below stamps `standard`, and the mirror,
+  fed the same held bucket, also predicts `standard` and certifies a row that tested the wrong tier.
+  It is a tautology wearing a guard's uniform. Raw disagreement with the stamp **is** the signal:
+  ascending the nine widths diverges at exactly 640, 1024 and 1280; over `w = 200..1600 × 4` held
+  buckets, narrowing-or-equal (`raw <= cur`) diverges **nowhere**. The structural guarantee is
+  therefore real — and `WIDTHS[0]`-dependent with nothing guarding the dependency: widening
+  500→1440 without reload lands `wide` (agrees), but 500→**1280** would stamp `standard` while the
+  raw band is `wide`. A ruling protects nothing against that edit; an assertion catches it on the
+  first run. **Report, never `die()`** — R's criterion 4 imposes a REPORTING duty ("reported as such,
+  not silently measured"), and a fatal mid-sweep abort discards every collected row and writes zero
+  bytes, which D138 rules an INSTRUMENT FAILURE.
+- **D186 — The 1024 `position: static` warnings are a STALE EXPECTATION — neither drift nor flake.**
+  D108 measured `absolute` at that cell **before the Tier-2 ladder shipped**. `display_state/5`
+  (`pane_builder.ex:913`, landed in `4074d1986` / #4922 — `git merge-base --is-ancestor` confirms it
+  is inside `65541e2d4..bc64d869a` and not before it) takes `visible_pane_widths_px` from `[44, 260]`
+  to `[44]`, so `panel` goes 720 → **980**, past the `@container panel (max-width: 860px)`
+  generator's threshold, and the inspector legitimately **docks in flow**. The reading column at that
+  cell went from 378.958px (37.90ch) to **600.000px (60.00ch)**; the ladder commit's message
+  pre-registered every one of those figures and the deployed build returns them to the digit
+  (60.00ch native MEET / 54.31ch forced Georgia FAIL — D149's inherited default shortfall, not a
+  ladder cost / 65.42ch Source Serif 4 MEET). The identical 6-warning set fired in **4 of 4** runs:
+  zero variance, so this is not the ~80% non-determinism. It is a single-cell change — 900 and below
+  still read `absolute`, and D108 still holds there — and that scoping is itself the confirmation
+  that the ladder moved precisely the cell it claimed. **The `overlayAsserted` gate must NARROW to
+  `standard AND panel <= 860`, not be silenced**: an unexplained permanent warning teaches the next
+  reader to ignore a live tripwire, and deleting it loses the signal that would catch the ladder
+  being reverted. The bracket carries these three rows as the ladder's **confirming** rows.
+- **D187 — D175's compound state is REACHABLE through real affordances, and it PAINTS. D96 is
+  REFUTED.** Executed end to end on the deployed build, no DOM injection and no fixture: open a Tasks
+  document → its header carries `[data-test-id="open-secondary-picker"]` (alive, **99 candidates
+  offered**, spd-w5's fix works) → the root pane is now a 44px collapsed strip, so click the strip to
+  expand it (spd-s6's own affordance) → Papers → a paper. `Scope.select/2` is `push_patch`, so the
+  LiveView never remounts and **`secondary_doc` survives the navigation**. At `standard` / innerWidth
+  1024 with the inspector user-opened: `.editor-panel` measures **620** — `1024 − 44 − 360`, D175's
+  arithmetic EXACTLY, not approximately — `::after` content `""`, background `rgba(0, 0, 0, 0.55)`,
+  position absolute, z-index 4. It is not merely computed: screenshotting the reading column, then
+  suppressing only the generator and re-shooting the identical 620×500 clip, mean luminance over
+  310,000 pixels moves **240.493 → 175.104 (Δ 65.389 darker)**. That is the exact D127 defect, on the
+  bucket this wave rules, reached through an orthogonal feature. **D96's "even with break 2 fixed,
+  D76's pressure case needs a cross-surface navigation no affordance offers" is refuted** — the
+  affordance exists (collapsed-strip `expand-pane` + nav `pane-item`, both real UI, both patch-level).
+  You cannot open a secondary pane FROM a paper, but you do not need to: you open it on a task and
+  carry it in. **A premise correction rides with it:** the plain 1024/standard cell is NOT "a clean
+  MEET by arithmetic, no guard applies". With a secondary pane open and the inspector at its server
+  default the panel is **560**, and the scrim is suppressed ONLY by b29's `:not([data-user-opened])`
+  clause — a guard whose sole discriminator is the attribute the user is one click away from setting.
+  `studio-desk-measure.mjs` has **no driver path** to this state (it drills root → Papers → paper and
+  never opens a secondary pane), so **the bracket must declare it OUT-OF-MATRIX in words**. Omitting
+  it in silence would let the artefact read as "no scrim renders anywhere post-ladder", which is now
+  demonstrably false. Coverage remains zero: `grep -rl secondary_doc api/test/` exits 1.
+- **D188 — The terminal run fires WITHOUT `--positive-control`, and `zero_cause` may not read
+  DESK-FIXED (proven).** D176's strike is no longer prose: it is EXECUTED. Taking P's fixture,
+  deleting the fenced 860px generator entirely (657 bytes, 5715 → 5058, no second generator
+  surviving), then injecting the LITERAL `POSITIVE_CONTROL_RULE` text from
+  `studio-desk-measure.mjs:2221-2224`, `::after` content flips `none` → `""` at bucket=wide /
+  panel=1136 — **on a fixture with no threshold to certify** — reproduced byte-identically on two
+  independently created worktrees. The mechanism is now understood, not just observed: **no real
+  suppressor uses `!important`**, so an unconditional `!important` `::after` wins over every one of
+  them regardless of specificity, with or without the generator. `zero_cause` is chosen only by
+  `run.positive_control` and host presence, so passing the flag would print DESK-FIXED (proven) for a
+  proof about a different, weaker claim (the hit-test plumbing works). The honest reading on this
+  build is **DESK-FIXED (unproven)** — `.editor-with-preview` present in 54/54 hit-tested rows, the
+  scrim rendering in **0** of them — with P's forced-container control quoted as a SIBLING section,
+  never as a desk row (D176). Any permanent assertion of this strike must READ `measure.mjs`'s source
+  text at runtime, never hand-copy the rule literal: a copy is the un-tied-snapshot failure already
+  filed against P's fixture, and it would silently certify a stale rule.
+- **D189 — The prediction is a COMMITTED FILE, split from its checker, and it may never quote a
+  trusted scalar.** No committed prediction file has ever existed in this repo (`git ls-files |
+  grep -i predict` is empty); every prior registration was prose in a task brief (D138) or a charter
+  Decision (D150, D161). The format, invented and mutation-proven here: rows keyed by the composite
+  **`viewport_px|inspector_state|face`** — never an index, never a summary scalar (rows key on
+  `viewport_px`, NOT `width`; tooling written against `width` silently indexes nothing). Every
+  predicted field carries a **`basis`** — `arithmetic` (a miss is real font drift), `recomputed`,
+  `ruling`, `prior-observation` (a miss is same-build non-determinism) — because without it every
+  failure reads identically and the reader cannot tell drift from flake, which is exactly the
+  ambiguity this epic keeps re-litigating. The checker **RECOMPUTES and never reads a row's own
+  verdict**: flipping one row's `content_meets_55ch` while leaving its raw numbers untouched goes RED
+  with `SELF_INCONSISTENT`, the precise class `studio-desk-compare.mjs:216-218` copies verbatim
+  without recompute. It refuses any prediction quoting `applies_in_rows`, `passed_in_rows` or
+  `vacuous` — and that is not theoretical: on the skipped run the guard reads `vacuous: true` with
+  `applies_in_rows: 0`, so `passed_in_rows: 0` is a pass proving nothing. **Three exit states, not
+  two** (green / mismatch / **unevaluated**), so "the run produced no evidence" can never be recorded
+  as either a pass or a wrong prediction. Use `probe_px_per_ch`, never `in_floor_px_per_ch` (unstable
+  per row, carries empty-string values). The prediction JSON is **frozen at registration**; the
+  checker `.mjs` stays fixable — it had a real misattribution bug within minutes of being written,
+  and freezing them together would force a choice between shipping a known-buggy checker and breaking
+  the freeze. The per-face figures are now OBSERVED FACT, not assumption, read off the round trip's
+  own before/after at 18px: **native 10.0000 → 55ch = 550.00px; georgia 11.0469 → 607.58px;
+  source-serif-4 9.1719 → 504.45px.** No cross-face division anywhere.
+
+## Roadmap — wave 13 (THE ROUND TRIP RAN)
+
+Per D19 every model column reads `opus` (Fable 5 is spend-limited). Round 1 is file-disjoint: P's
+rescue touches two pure-new files, the instrument slice owns `studio-desk-measure.mjs` alone, and the
+two `scripts/measurements/` slices add new files only. `root.html.heex` has **no owner this wave** —
+nothing here edits it, so D16 is satisfied trivially.
+
+| # | slice | task | round | files |
+|---|---|---|---|---|
+| A | Rescue P — land the forced-container control | `scrim-threshold-forced-container-control` | 1 | `scripts/studio-scrim-threshold-control.mjs`, `scripts/fixtures/` |
+| B | The instrument's bucket precondition + two honesty fixes | `spd-w13-instrument-bucket-precondition` | 1 | `scripts/studio-desk-measure.mjs` |
+| C | Register the prediction as a committed, frozen file | `spd-w13-prediction-registered` | 1 | `scripts/measurements/` (2 new files) |
+| D | Commit the D187 compound-state repro | `spd-w13-d175-compound-repro` | 1 | `scripts/measurements/` (1 new file) |
+| E | Fire the terminal bracketed run; commit the artefact | `inspector-shape-bracketed-deployed-run` | **2** | `scripts/measurements/` (artefact + bracket) |
+
+**E is round 2 by law, not by caution.** It must run the GATED instrument (B) against a REGISTERED
+prediction (C) — a prediction committed after the run it governs is worthless — and it quotes P's
+control (A) as D153's positive. Dispatching it beside its unmerged dependencies would burn a builder
+to produce a BLOCKED report. The lead dispatches E after A+B+C merge and guerrilla serves the merge
+SHA (D47/D63).
+
+**What the lead must know before merging.**
+1. **`pr-task-gate` will BLOCK slice A on ledger state, not on code.** `scripts/pr-task-gate.sh`
+   accepts only `in_progress` (with `claim.worker`) or `done` (with `claim.closed_by`); the task is
+   `open` with a claim that lapsed 2026-07-20T21:23Z, so a structurally correct PR carrying the
+   correct `Task:` line fails anyway. Every slice brief carries the re-claim instruction first.
+2. **`elixir.yml` fires on EVERY PR** — it has no `paths:` filter at all. These four slices change no
+   `.ex`/`.heex`, so it should pass trivially, but it is not skipped and a builder expecting silence
+   will be surprised. `main` has no branch protection and no rulesets; enforcement is doctrine-level.
+3. **The round trip is already PROVEN (D182).** E's job is to commit the artefact from the final
+   instrument against the registered prediction — it is a formalisation of a settled fact, not a
+   discovery. If E's open leg draws the 1-in-4 flake, retry per D138; do not report `ran:false` as
+   a finding.
+4. **`measurement-baselines-are-61-commits-stale` is DEFERRED, not closed.** Its criterion 3 requires
+   this wave's own post-ladder artefact as a precondition, and its criterion 2 edits
+   `pane_builder.ex`, outside this wave's file fence. It becomes actionable the moment E lands. The
+   distance is now **71** commits and grows daily — compute it fresh, never quote a fixed number.
+
+Paper: `spd-round-trip-fidelity-wave-2026-07-21`.
+
+## Wave log — wave 13
+
+### Wave 2026-07-21 — Wave 13 (THE ROUND TRIP RAN), Review. Grade A−.
+
+**The wish is PAID, and the payment survived being attacked.** D127(a) — round-trip fidelity, the
+epic's oldest unmeasured condition — is now measured on the deployed build and returns the reading
+column **bit-identical at 27 of 27 cells**, re-confirmed by Review in three further full runs against
+`bc64d869a3a82beb1b39824196f60236b2082dbc` / slot blue, bracketed PRE and POST. The wave's real
+achievement is not the green: it is that the green is now **defensible**, because the instrument
+asserts its own preconditions and the prediction that governs it was frozen before the run.
+
+**What landed, per slice (final branch = the `-r` carrier).**
+- **B — `spd-w13-instrument-bucket-precondition`**
+  (`…the-instrument-asserts-its-own-bucket-pr-1-r`, **carries the charter**). D171/D185's bucket
+  precondition, which did not exist in code, now checks **72 readings per run** (54 sweep + 18
+  round-trip legs) where the count was previously 0 — in the RAW `bandNameFor()` form D185 requires,
+  never a held-bucket mirror that would agree by construction. Reports, never `die()`s. D183's
+  dismiss half-truth is gone (per-width table + rollup replace the `widths[0]` scalar); D186's
+  `overlayAsserted` is narrowed to `standard AND panel <= 860` rather than silenced, warnings 6 → 3
+  with the survivors pre-existing and already filed.
+- **C — `spd-w13-prediction-registered`** (`…register-the-terminal-run-s-prediction-a-2-r`). The
+  repo's first committed prediction file, frozen, split from a fixable checker that RECOMPUTES every
+  verdict and never trusts a row's own — with four exit states demonstrated, `SELF_INCONSISTENT`
+  among them.
+- **D — `spd-w13-d175-compound-repro`** (`…commit-the-d175-compound-state-repro-the-3-r`). D187's
+  compound-state scrim made permanently re-runnable through real affordances only. Re-run live by
+  Review: 9/9 PASS, 620px geometry exact, `--simulate-fixed-build` goes RED on exactly the three
+  scrim-dependent checks.
+- **A — `scrim-threshold-forced-container-control`** was NOT rebuilt: the rescue had already been
+  performed by its claim holder, PR #5098 is open, rebases clean and its gate passes. It needs a
+  merge decision, not a builder.
+
+**Review fixed three things in place, two of them defects neither builder could have seen alone.**
+1. **The bucket precondition did not reach the round-trip CELLS** (B). A width whose stamp disagreed
+   with the raw band warned, but its three face cells still counted toward `cells`/`identical_cells`
+   — so `returns_bit_identical`, the headline this wave exists to establish and the value round 2's
+   gate asserts, could be computed partly over a comparison of two different TIERS. The builder found
+   this and filed it rather than fixing it; it sits on the wish's own metric, so Review closed it.
+   Withdrawn cells now report `identical: null`, are counted visibly, and full coverage is required
+   before the claim is made. **Proven by mutation:** band edge 640 → 700 gives 64/72 preconditions,
+   3 cells withdrawn at 640, and `returns_bit_identical` **false** on a 24-of-24-identical sweep that
+   would previously have read 27/27 **true**.
+2. **A genuine CROSS-SLICE defect** (C). C's dismiss-grammar check read the run-level
+   `rt.dismiss_control` scalar and skipped itself when absent — and B **deletes that scalar**, by
+   D183, by name. Merged as-is, two individually-correct slices would have produced a guard that
+   CANNOT FAIL on the exact affordance condition D161(ii) turns on, silently and green. The checker
+   now reads the per-width table and treats a missing grammar as a MISS; the frozen prediction is
+   untouched, which is precisely the split D189 exists to permit. Proven by four mutations.
+3. **A cold-reader gap** (D): L4's failure could not distinguish "the desk removed the picker" from
+   "today's unpinned first task lacks one". It now names the task and says to pin `--task`.
+
+**THE FINDING THIS WAVE PRODUCED BY ACCIDENT, AND IT MATTERS FOR ROUND 2.** Running C's checker
+against a real round-trip artefact — which no builder ever had — gives **exit 1, 24 misses, all at
+viewport 1280, all three faces**, with **0 self-inconsistencies and 27/27 cells returned unchanged**.
+`content_px` at 1280 reads **640**, where the 2026-07-20 table recorded **596**: exactly +44px, the
+collapsed-strip width, deterministic across three independent runs. This is **not** a round-trip
+failure — the round trip is clean — it is the desk having genuinely moved at one width since
+`65541e2d`, caught by a `prior-observation` basis doing exactly the job D189 designed it to do. The
+prediction stays FROZEN: a prediction edited to match the run it governs is worthless. **Round 2 must
+therefore NOT gate green on `check-prediction` exiting 0.** Gate on
+`round_trip.ran === true && returns_bit_identical === true` (D184), and REPORT the 1280 misses as the
+registered, correctly-labelled staleness they are.
+
+**Ledger audited.** All three built tasks claimed, stamped as they worked, left `in_progress` with
+merge-gated criteria open for the lead. A's task is honestly `in_progress` under its rescue holder.
+
+**What the lead must know before merging.**
+1. **B's `-r` branch carries the charter** (D182–D189 + this log). It was stranded on **local main**
+   — the **7th** recurrence of the D135/D68 disease. If B is dropped, the decisions C and D cite
+   resolve to nothing on `origin/main`.
+2. **Merge B BEFORE C.** They are file-disjoint and will not conflict, but C's fix is what keeps B's
+   scalar deletion from silently voiding a guard. Either order is safe on disk; B-then-C is the order
+   the evidence was gathered in.
+3. **A (#5098) needs a merge decision, not a builder.** Its remaining reds are content-impossible for
+   a two-`.mjs` diff.
+4. **Round 2 is `inspector-shape-bracketed-deployed-run`** — deferred BY DESIGN under the
+   sequenced-rounds law, not a failure of this wave.
+
+Paper: `spd-round-trip-fidelity-wave-2026-07-21`.
