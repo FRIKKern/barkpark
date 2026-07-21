@@ -289,7 +289,8 @@ defmodule Barkpark.Content.Mutations do
         "content" => merged
       }
 
-      with {:ok, doc} <-
+      with :ok <- ensure_task_close_is_cas(type, existing, merged, patch, opts),
+           {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            do: {:ok, doc, "update"}
     end
@@ -316,13 +317,101 @@ defmodule Barkpark.Content.Mutations do
         "content" => merged
       }
 
-      with {:ok, doc} <-
+      with :ok <- ensure_task_close_is_cas(type, existing, merged, patch, opts),
+           {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            do: {:ok, doc, "update"}
     end
   end
 
   defp apply_one(_, _, _), do: {:error, :malformed}
+
+  # The ledger's back door (cch-w1-ledger-close-guard, epic decision D22).
+  #
+  # OBSERVED LIVE: a published, unclaimed `type:task` row went `open` → `done`
+  # through a single `/v1/data/mutate` patch carrying `set:{"lifecycle_status":
+  # "done"}`. No claim, no epoch, no worker, no `ifRevisionID` — HTTP 200, and
+  # the row read back `lifecycle_status=done claim=None closed_by=None`. Zero
+  # attribution. This is the mechanism behind this repo's costliest recurring
+  # defect (11 tasks fake-done, then reopened). Worse, a `setIfMissing` in the
+  # same patch FORGES `closed_by`, and after such a close the honest claimant —
+  # correct worker AND correct epoch — gets `stale_claim` from the
+  # already-terminal guard at `Tasks.Close` (close.ex:92), so the row is
+  # permanently uncloseable through the sanctioned path and the error lies
+  # about why.
+  #
+  # WHY IT LIVES HERE, AND AT BOTH CALL SITES: the compound-op clause (the
+  # `setIfMissing`/`unset`/`inc`/… clause above) is exploitable through its OWN
+  # `set` merge, independently of the plain-set clause — a patch carrying
+  # `setIfMissing` + `unset` + `set:{"lifecycle_status":"done"}` matches the
+  # compound guard and never reaches the plain clause. Guarding one leaves the
+  # other fully open (D22). Both clauses call this after computing `merged`, so
+  # the check reads the write's ACTUAL resulting value rather than trying to
+  # re-derive which op supplied it.
+  #
+  # WHY IT IS SAFE:
+  #   * `:source` is already threaded and already read with an `:api` default
+  #     (write_scope.ex:39). `Sync.Applier` passes `source: :sync`
+  #     (applier.ex:177), `MutateController` passes `source: :api`
+  #     (mutate_controller.ex:14). Replication is allowed through verbatim — a
+  #     replica must be able to mirror an upstream close it did not perform —
+  #     and only direct API writes are fenced. No new plumbing.
+  #   * `api/lib/barkpark/tasks/` contains ZERO references to
+  #     `Content.apply_mutations`, so `bp task claim` / `bp task close` do not
+  #     route through here at all and cannot be collateral damage.
+  #   * It fires only on a CHANGE into a terminal state. A patch that touches
+  #     an unrelated field on an already-`done` task leaves `lifecycle_status`
+  #     equal to the existing value and passes untouched, so re-patching closed
+  #     rows (retros, digests, compaction bookkeeping) keeps working.
+  #
+  # THE ESCAPE IS A REVISION PRECONDITION, NOT A ROLE. Carrying
+  # `ifRevisionID`/`ifMatch` proves the caller read the row it is closing, and
+  # `ensure_rev/2` has already matched it against the live rev by the time we
+  # get here — a blind close becomes impossible, which is exactly the observed
+  # exploit. It is deliberately NOT an authorization check: the worker identity
+  # on a claim is still never compared, tracked separately as the epoch-only
+  # close fence (wave-2 candidate). Do not read this guard as proof that a
+  # CAS-carrying close is attributed.
+  #
+  # Terminal set mirrors `@closed_lifecycle_statuses` in
+  # `api/lib/barkpark/tasks/close.ex:26` — that module owns the definition; it
+  # is duplicated (not imported) because this slice's fence is this file plus
+  # its test, and close.ex exposes no public accessor.
+  @terminal_lifecycle_statuses ~w(done cancelled blocked)
+
+  defp ensure_task_close_is_cas("task", existing, merged, patch, opts) do
+    was = (existing.content || %{})["lifecycle_status"]
+    now = merged["lifecycle_status"]
+
+    cond do
+      # Not a transition into a terminal state — nothing to guard.
+      now == was or now not in @terminal_lifecycle_statuses -> :ok
+      # Replication mirrors upstream closes verbatim.
+      Keyword.get(opts, :source, :api) != :api -> :ok
+      # A revision precondition proves the caller read the row it is closing.
+      is_binary(if_rev(patch)) and if_rev(patch) != "" -> :ok
+      true -> {:error, {:invalid_task_content, close_bypass_error(now)}}
+    end
+  end
+
+  defp ensure_task_close_is_cas(_type, _existing, _merged, _patch, _opts), do: :ok
+
+  # Reuses the existing `invalid_task_content` family (422 `validation_failed`
+  # with a per-field details map) that `Content.Errors` already builds and
+  # `MutateController` already renders — no new error code, no new controller
+  # branch. The message is the retry instruction.
+  defp close_bypass_error(status) do
+    %{
+      "lifecycle_status" => [
+        "cannot be moved to the terminal state #{inspect(status)} through /v1/data/mutate " <>
+          "without a revision precondition — a blind patch closes a task with no claim, no " <>
+          "worker and no epoch, recording zero attribution. Close it through the task " <>
+          "lifecycle instead (`bp task close <id> <worker> <epoch>`, POST /v1/tasks/:id/close), " <>
+          "which records who closed it, or resend this patch with `ifRevisionID` set to the " <>
+          "revision you read."
+      ]
+    }
+  end
 
   # Merge base for a patch MUST be the row the write will actually target. The
   # create/replace siblings read draft-first via DraftId.draft_id/1, and
