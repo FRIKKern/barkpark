@@ -20,13 +20,35 @@ defmodule BarkparkWeb.IconsTripwireTest do
        shape; both were traced by hand and every clause of both returns a
        literal that is already in `@icons`, but that tracing is a point-in-time
        fact this test does not re-check.
+
+       This hole is what shipped four wrong pictures past the first version of
+       this test. `doc_action_glyph/1`
+       (`components/studio_components/editor.ex:584`) renders
+       `<.icon name={@icon_name} />`, where `@icon_name` comes from a doc-action
+       map — so `git-fork` and `rotate-ccw`, both written down as literals in
+       `studio_live/doc_actions.ex`, were invisible to the tag scanner while
+       painting documents on the desk. `tasks/schema.ex` hid `flag` and
+       `clipboard-list` the same way. The name is still a developer-authored
+       literal in the tree; it is just spelled as DATA rather than as an
+       attribute. The `"icon" => "…"` scan below closes exactly that class, so
+       the residue of hole 1 is now only names a function BUILDS or reads from
+       outside the tree (hole 2).
     2. **It structurally CANNOT catch a tenant-supplied name.** `tab_icon/1`
-       (`lib/barkpark_web/components/studio_components/editor.ex:808`) returns a
-       workspace's `schema["icon"]` string VERBATIM, and `@editor_schema.icon` /
+       (`lib/barkpark_web/components/studio_components/editor.ex`) reads a
+       workspace's `schema["icon"]` string, and `@editor_schema.icon` /
        `item.icon` are the same shape. That set is unbounded and lives in the
        database, not in the tree — no static scan can enumerate it. The guard
-       for that class is `Icons.known_icon?/1` at the call site, which is NOT
-       yet applied there (filed as follow-up work, not fixed here).
+       for that class is `Icons.known_icon?/1` at the call site, and it IS now
+       applied: `drawable_icon/1` sits in front of both `tab_icon/1` and
+       `doc_action_glyph/1`, so a schema-supplied name naming no glyph degrades
+       to the neutral "circle" or to the action's text label.
+
+       That guard is load-bearing, not decorative: it is the reason `icon/1`
+       raising in `:test` cannot be crashed by fixture data. `test/` schemas
+       carry names like `"pulled-icon"` precisely because the set is arbitrary,
+       and arbitrary data must never be a test failure — only a developer
+       WRITING a name that does not exist is a bug, and that is what the two
+       scans above catch.
     3. **It only reads literals in `lib/`.** Names built by interpolation
        (`"chevron-" <> dir`) are invisible, and `test/` is not scanned.
 
@@ -78,6 +100,45 @@ defmodule BarkparkWeb.IconsTripwireTest do
       body = ~s(<.icon name={if @open, do: "chevron-down", else: "chevron-right"} size={14} />)
 
       assert names_in_tag_body(body) == ["chevron-down", "chevron-right"]
+    end
+  end
+
+  describe "every icon name written as data in lib/" do
+    test "resolves to a real glyph — a doc action's icon paints just as silently" do
+      sites = icon_data_sites()
+
+      assert length(sites) > 10,
+             "expected the scanner to find the doc-action and schema-tab icon " <>
+               "declarations; found #{length(sites)} — a broken parser is a " <>
+               "vacuously green tripwire"
+
+      unknown = Enum.reject(sites, fn {_file, _line, name} -> Icons.known_icon?(name) end)
+
+      assert unknown == [], """
+      #{length(unknown)} icon name(s) declared as data in lib/ have no entry in
+      BarkparkWeb.Icons. These reach `icon/1` through `doc_action_glyph/1` and
+      friends, so they paint the "file" document glyph on a real control:
+
+      #{Enum.map_join(unknown, "\n", fn {file, line, name} -> "  #{name}  <-  #{file}:#{line}" end)}
+
+      Add the path to @icons in lib/barkpark_web/components/icons.ex.
+      """
+    end
+
+    test "the data scan reaches the registries that actually declare icons" do
+      files = icon_data_sites() |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+
+      assert Enum.any?(files, &String.contains?(&1, "doc_actions.ex")),
+             "the doc-action registry is the call site this scan exists for; " <>
+               "scanned only #{inspect(files)}"
+    end
+
+    test "the data scanner reads an emoji alias as the glyph it aliases" do
+      # `tasks/schema.ex` declares a tab icon as an emoji; `known_icon?/1`
+      # resolves the alias, so the scan must hand it over unresolved and let
+      # the predicate do that work rather than rejecting it as unknown.
+      assert icon_values_in(~s(%{"name" => "tags", "icon" => "🏷"})) == ["🏷"]
+      assert Icons.known_icon?("🏷")
     end
   end
 
@@ -207,6 +268,35 @@ defmodule BarkparkWeb.IconsTripwireTest do
 
   defp balanced_expr(<<c::utf8, rest::binary>>, depth, acc),
     do: balanced_expr(rest, depth, [<<c::utf8>> | acc])
+
+  # ── the data scanner ───────────────────────────────────────────────────────
+  #
+  # An icon name spelled as a map entry — `"icon" => "git-fork"` — rather than
+  # as a tag attribute. Same developer-authored literal, same silent fallback,
+  # invisible to the tag scanner because no `<.icon` sits anywhere near it.
+
+  defp icon_data_sites do
+    @lib_root
+    |> source_files()
+    |> Enum.flat_map(fn path ->
+      source = File.read!(path)
+      rel = Path.relative_to(path, Path.expand("..", @lib_root))
+
+      ~r/"icon"\s*=>\s*"([^"]*)"/
+      |> Regex.scan(source, return: :index)
+      |> Enum.map(fn [{whole_at, _}, {name_at, name_len}] ->
+        {rel, line_at(source, whole_at), binary_part(source, name_at, name_len)}
+      end)
+    end)
+  end
+
+  # Extracted so the parser is provable on a fixture rather than only on the
+  # tree, which changes under it.
+  defp icon_values_in(source) do
+    ~r/"icon"\s*=>\s*"([^"]*)"/
+    |> Regex.scan(source, capture: :all_but_first)
+    |> List.flatten()
+  end
 
   defp line_at(source, offset) do
     source

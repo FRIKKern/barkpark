@@ -219,4 +219,49 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
              "Delete must be held to the tail; order was #{inspect(names)}"
     end
   end
+
+  describe "a schema-declared action whose icon names no glyph" do
+    # `icon/1` RAISES on an unknown name in :test — that is the icons tripwire's
+    # teeth, and it is right for a name a developer wrote down. A plugin's or a
+    # workspace schema's icon string is not that: it is unbounded data from
+    # outside the tree, so `drawable_icon/1` guards it at the call site. Without
+    # that guard any workspace could crash its own editor by typing a glyph name
+    # we happen not to carry.
+    setup do
+      {:ok, _schema} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "icon" => "file-text",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{"name" => "body", "title" => "Body", "type" => "text"}
+            ],
+            "actions" => [
+              %{
+                "name" => "ghost-glyph",
+                "label" => "Ghost Glyph",
+                "kind" => "event",
+                "opts" => %{"event" => "ghost-glyph", "icon" => "definitely-not-a-glyph"}
+              }
+            ]
+          },
+          @dataset
+        )
+
+      :ok
+    end
+
+    test "renders the editor instead of crashing, and falls back to the label", %{conn: conn} do
+      {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/p1"))
+
+      # The action is present and usable...
+      assert html =~ "Ghost Glyph"
+      # ...and the unknown name never reached icon/1, so no <svg> was drawn for
+      # it and, critically, the render did not raise.
+      refute html =~ "definitely-not-a-glyph"
+    end
+  end
 end

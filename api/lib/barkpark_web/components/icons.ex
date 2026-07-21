@@ -100,12 +100,35 @@ defmodule BarkparkWeb.Icons do
       ~s(<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>),
     "history" =>
       ~s(<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>),
+    # Asked for by name at `studio_live/doc_actions.ex:183` — the "Revert to
+    # published" action — while absent here, so the revert button has been
+    # painting the "file" document glyph. Lucide `rotate-ccw`: the `history`
+    # arc without the clock hands.
+    "rotate-ccw" =>
+      ~s(<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>),
     "code" => ~s(<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>),
     "terminal" => ~s(<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>),
     "external-link" =>
       ~s(<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>),
     "git-compare" =>
       ~s(<circle cx="5" cy="6" r="3"/><path d="M12 6h5a2 2 0 0 1 2 2v7"/><path d="m15 9-3-3 3-3"/><circle cx="19" cy="18" r="3"/><path d="M12 18H7a2 2 0 0 1-2-2V9"/><path d="m9 15 3 3-3 3"/>),
+    # Asked for by name at `studio_live/doc_actions.ex:230` — "View blast
+    # radius", the only affordance that reaches the Canvas2D graph pane —
+    # while absent here. Lucide `git-fork`.
+    "git-fork" =>
+      ~s(<circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/>),
+    # Both asked for by name at `barkpark/tasks/schema.ex:67,69` — the task
+    # schema's "Brief" and "Close" tab groups — while absent here, so both
+    # tabs have been painting the "file" document glyph.
+    "clipboard-list" =>
+      ~s(<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>),
+    "flag" =>
+      ~s(<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>),
+    # The glyph every Sheets schema names for its grid tab. Schema-supplied, so
+    # no static scan of lib/ could ever have found it — it was traced from the
+    # tab bar painting a document on the Sheets desk. Lucide `grid-3x3`.
+    "grid" =>
+      ~s(<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/>),
     "panel-right-open" =>
       ~s(<rect width="18" height="18" x="3" y="3" rx="2"/><line x1="15" x2="15" y1="3" y2="21"/><path d="m10 15-3-3 3-3"/>),
     "download" =>
