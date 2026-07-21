@@ -187,7 +187,14 @@ const GH_API = /\bgh\s+api\b/;
 // Local readers / scoped search / local runs — the L3 family. Head-token
 // oriented: we look at the first command word (after env assignments and
 // harmless wrappers) plus a few whole-line runners.
-const L3_HEADS = new Set([
+//
+// EXPORTED so the suite can pin what is NOT here. `cd`, `for` and `env` are
+// deliberately absent: a navigation or looping wrapper is not a read, and
+// filing one at L3 would make `cd /opt && curl https://prod/health` derive the
+// LOCAL CHECKOUT's authority for a command that provably reaches production.
+// Compounds are handled by walking the segments (see splitSegments), never by
+// blessing a wrapper's head.
+export const L3_HEADS = new Set([
   "cat", "head", "tail", "less", "more", "sed", "awk", "cut", "sort", "uniq",
   "wc", "ls", "stat", "file", "diff", "jq", "grep", "rg", "ag", "find",
   "node", "go", "mix", "npm", "pnpm", "yarn", "make", "elixir", "python",
@@ -198,21 +205,91 @@ const L3_HEADS = new Set([
 // so `timeout 10 grep …` still levels on `grep`.
 const PREFIX_WRAPPERS = new Set(["timeout", "time", "env", "nice", "xargs", "sudo"]);
 
+// Shell keywords that can OPEN a segment once a compound is split on `;`.
+// `for pr in 1 2 3; do gh pr view $pr; done` splits into three segments and the
+// middle one starts with the bare keyword `do`. Skipping it finds `gh`, which
+// is the token that actually carries authority. These are NOT L3 heads — they
+// classify nothing on their own.
+const SEGMENT_KEYWORDS = new Set(["do", "then", "else", "elif", "!"]);
+
+// Heads that MOVE but never READ. A segment headed by one of these contributes
+// NO level at all — it is a wrapper, and the compound's authority comes from
+// its sibling segments. This is the honest half of "add cd to L3_HEADS": the
+// head is found past the wrapper without the wrapper inheriting a level.
+const NAVIGATION_HEADS = new Set(["cd", "pushd", "popd", "for", "while", "until", "if", "case", "done", "fi", "esac", "export", "set", "source", "."]);
+
 function headToken(command) {
-  const tokens = command.trim().split(/\s+/);
+  const tokens = command.trim().split(/\s+/).filter(Boolean);
   let i = 0;
-  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i += 1;
   while (i < tokens.length) {
-    const bare = tokens[i].replace(/^.*\//, ""); // basename for /usr/bin/grep
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) { i += 1; continue; }
+    const raw = tokens[i];
+    const bare = raw.replace(/^.*\//, ""); // basename for /usr/bin/grep
+    if (SEGMENT_KEYWORDS.has(bare)) { i += 1; continue; }
     if (PREFIX_WRAPPERS.has(bare)) {
       i += 1;
       // `timeout 10 cmd` — skip a numeric duration argument
       if (i < tokens.length && /^\d+[smh]?$/.test(tokens[i])) i += 1;
       continue;
     }
-    return { head: bare, rest: tokens.slice(i + 1) };
+    return { head: bare, raw, rest: tokens.slice(i + 1) };
   }
-  return { head: "", rest: [] };
+  return { head: "", raw: "", rest: [] };
+}
+
+// --- quote masking -----------------------------------------------------------
+
+// A SAME-LENGTH mask in which the CONTENT of every quoted span becomes `x`.
+// Offsets are preserved so a caller can slice the ORIGINAL string by positions
+// found in the mask. Everything structural — segment splitting, the prose
+// floor — reads the mask, so `grep -n 'a && b' file` is one segment and the
+// https:// literal inside `grep -n 'https://…' src.ts` is inert. That literal
+// is the exact string on which the refuted prose scanner stamped L1.
+function maskQuoted(command) {
+  let out = "";
+  let quote = null;
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i];
+    if (quote) {
+      out += ch === quote ? ch : ch === "\n" ? "\n" : "x";
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') { quote = ch; out += ch; continue; }
+    out += ch;
+  }
+  return out;
+}
+
+// --- segment walking ---------------------------------------------------------
+
+// Split a compound on its UNQUOTED control operators. Positions come from the
+// mask; the slices come from the original, so a segment keeps its real bytes.
+const SEGMENT_OPERATOR = /(\|\||&&|;;|;|\||\n)/g;
+
+function splitSegments(command, mask) {
+  const cuts = [];
+  SEGMENT_OPERATOR.lastIndex = 0;
+  let m;
+  while ((m = SEGMENT_OPERATOR.exec(mask)) !== null) {
+    cuts.push([m.index, m.index + m[0].length]);
+  }
+  const segments = [];
+  let from = 0;
+  for (const [start, end] of cuts) {
+    segments.push([from, start]);
+    from = end;
+  }
+  segments.push([from, command.length]);
+  return segments
+    .map(([a, b]) => ({ raw: command.slice(a, b), mask: mask.slice(a, b) }))
+    .filter((s) => s.raw.trim() !== "");
+}
+
+// Trim subshell/group punctuation and redirections that survive the split, so
+// `(cd x` and `tail -1)` still find their head.
+function trimSegment(text) {
+  return text.replace(/^[\s(){}]+/, "").replace(/[\s(){}]+$/, "").trim();
 }
 
 // Non-loopback URL anywhere in the command (curl/wget/http reads).
@@ -226,42 +303,241 @@ function firstRemoteUrlHost(command) {
   return null;
 }
 
+// --- the remote-API heads (L2) -----------------------------------------------
+
+// `bp` and `gh` are REMOTE-API clients, not local tools. `bp` talks to the
+// configured content server (~/.config/barkpark/config.json — guerrilla, in
+// practice) and `gh` talks to api.github.com. Filing either at L3 "local
+// checkout" would be a two-level SKIP that labels volatile remote state as
+// checkout-stable; filing them at L1 would be a promotion they have not
+// earned — they are not an ssh into a box nor a read of served bytes. They sit
+// exactly where `gh api` already sat: L2.
+//
+// The one carve-out mirrors the loopback-curl rule: `bp -s http://localhost:4001`
+// reads the LOCAL dev server, which is a property of the checkout — L3.
+const REMOTE_API_HEADS = new Set(["bp", "gh"]);
+
+function hasOnlyLoopbackTargets(command) {
+  URL_TOKEN.lastIndex = 0;
+  let seen = false;
+  let m;
+  while ((m = URL_TOKEN.exec(command)) !== null) {
+    seen = true;
+    if (!LOOPBACK_HOST.test(normalizeHost(m[1]))) return false;
+  }
+  return seen;
+}
+
+// --- the parseability floor --------------------------------------------------
+
+// 13.3% of the frozen corpus's rerun strings are PROSE, not commands. The
+// grammar inspects a head token and never asks whether the string PARSES, so
+// any prose beginning with — or containing — a blessed token inherits that
+// token's authority: `bp sites -o json | python3 (count)` would otherwise
+// derive L2 off `bp`, and `cd api && (Edit: add agent_state to the base map)
+// && CC=clang mix test …` would derive L3 off `mix` even though the run is not
+// reproducible without a human edit. A recipe that cannot be re-run is not a
+// recipe.
+//
+// STRUCTURAL, PURE, CLOCK-FREE: no child_process, no filesystem, no clock. It
+// cannot ask a shell to parse the string, so it looks for shapes prose has and
+// commands do not.
+//
+// BIASED TOWARD DEMOTING (D3). A false positive costs an L6 demotion, which the
+// charter already establishes as the safe error direction; a false negative
+// costs a promotion of unrunnable prose, which is the failure this exists to
+// stop. Where the two trade off, demote.
+
+// Heads a real invocation may plausibly start with. Deliberately MODEST — this
+// is the allowlist that SUPPRESSES a demotion, so every entry is a chance to
+// miss prose. Growth here should be evidence-driven, from real commands the
+// floor was measured to over-demote.
+const KNOWN_HEADS = new Set([
+  ...L3_HEADS,
+  ...PREFIX_WRAPPERS,
+  ...NAVIGATION_HEADS,
+  ...REMOTE_API_HEADS,
+  "curl", "wget", "ssh", "scp", "rsync", "npx", "echo", "printf", "cp", "mv",
+  "rm", "ln", "mkdir", "touch", "chmod", "chown", "tar", "kill", "pgrep",
+  "pkill", "systemctl", "psql", "dig", "docker", "sleep", "date", "which",
+  "command", "type", "test", "true", "false", "tee", "tr", "base64", "xxd",
+  "uptime", "df", "du", "ps", "claude", "defaults", "open", "diskutil", "pip",
+  "pip3", "cargo", "gofmt", "prettier", "eslint", "tsc", "vitest", "jest",
+]);
+
+// `<rev>`, `<remove workspace_id from connector_installs CREATE>`,
+// `diff -rq <tracked testdata> <scratch testdata>` — an angle-bracket PAIR is a
+// template slot, never a redirection (`2>&1`, `> out`, `< /dev/null` never
+// close). Process substitution `<(…)` is excluded by the character class.
+//
+// The brackets must HUG their content. Without that, `sort < in.txt > out.txt`
+// — one segment carrying both an input and an output redirect — reads as a
+// pair around " in.txt " and is falsely floored to L6. A template slot never
+// has whitespace just inside its brackets; a redirect pair almost always does.
+const PLACEHOLDER_ANGLE = /<[^<>()\s][^<>()\n]{0,78}[^<>()\s]>|<[^<>()\s]>/;
+// `bp onramp windsurf --write [--force]` — an optional-flag slot. Narrow on
+// purpose: `[::1]` and glob classes like `[0-9]` must not match.
+const PLACEHOLDER_BRACKET = /\[--/;
+// A standalone `...` / `…` is an elision. `./internal/cli/...` is a Go package
+// wildcard and is NOT standalone, so it is untouched.
+const ELISION = /(^|\s)(\.\.\.|…)(\s|$)/;
+// `grep/read api/lib/…/template.ex around lines 200-219` — a slash-joined verb
+// phrase in HEAD position. A real head is `./x`, `/usr/bin/x`, or a bare name;
+// a bare `a/b` head with no dot is two verbs, not a program.
+const SLASH_JOINED_HEAD = /^[A-Za-z][A-Za-z-]*\/[A-Za-z][A-Za-z-]*(\/[A-Za-z][A-Za-z-]*)*$/;
+// `gh pr view 4631/4632/4633`, `gh run view 295…/295…` — a slash-joined run of
+// numbers is shorthand for several commands, so it is not one command.
+const SLASH_JOINED_NUMBERS = /(^|\s)\d+(\/\d+)+(\s|$)/;
+
+// An unquoted parenthetical whose first word is not a plausible command head is
+// an aside: `(count)`, `(restore honest footer)`, `(15 per PREDICTED class, so
+// per-class precision is unbiased)`. A real subshell — `(cd __preview__ && node
+// smoke.mjs)` — opens on a known head and is left alone. A function-call paren
+// (`count(…)`) is attached to a word character and never examined.
+//
+// A BACKSLASH-ESCAPED paren is not a group at all — it is a literal argument
+// passed to a program, and `find . \( -name a -o -name b \)` is the shape that
+// matters: `-name` is not a plausible command head, so the escaped group read
+// as prose and floored a perfectly good `find` from L3 to L6. Zero occurrences
+// in the 651-command corpus, so the distribution measurement was blind to it,
+// exactly as it was blind to the `sort < in > out` cry-wolf the builder found
+// by hand. A corpus is a lower bound on cry-wolf, never a proof of its absence.
+const PAREN_GROUP = /(^|[^$\w\\])\(([^()\n]{0,240})\)/g;
+
+function parentheticalIsProse(mask) {
+  PAREN_GROUP.lastIndex = 0;
+  let m;
+  while ((m = PAREN_GROUP.exec(mask)) !== null) {
+    const inner = m[2].trim();
+    if (inner === "") continue;
+    const { head } = headToken(inner);
+    if (!KNOWN_HEADS.has(head)) return true;
+  }
+  return false;
+}
+
+// A SEGMENT is prose when it has several words, an unrecognisable head that is
+// not path-shaped, and none of the marks an invocation leaves behind — a flag,
+// a path argument, an assignment, a redirection. `edit studio_chat.ex:892-893
+// Map.take +[…]` and `flip PROBE-A to refute` are prose by this test;
+// `frobnicate --all --please` is not (it carries flags), and stays L6 by the
+// ordinary unknown-head route.
+function segmentIsProse(segment) {
+  const tokens = trimSegment(segment.mask).split(/\s+/).filter(Boolean);
+  if (tokens.length < 3) return false;
+  const { head, raw } = headToken(trimSegment(segment.mask));
+  if (!head) return false;
+  // `probe: add migration_lock: false to Ecto.Migrator.up/down` — a head ending
+  // in a colon is a NOTE LABEL. No program is invoked by that name, and the
+  // suppressors below (it carries a slash!) would otherwise wave it through.
+  if (head.endsWith(":")) return true;
+  if (KNOWN_HEADS.has(head)) return false;
+  if (/[./]/.test(raw)) return false;                       // ./run.sh, a.out, api/x
+  if (tokens.some((t) => /^-{1,2}[A-Za-z]/.test(t))) return false; // carries flags
+  if (tokens.some((t) => t.includes("/"))) return false;    // carries a path
+  if (tokens.some((t) => t.includes("=") || t.includes(">") || t.includes("<"))) return false;
+  return true;
+}
+
+// looksLikeProse(command, mask) → boolean. Exported for the suite and for any
+// caller that wants to explain a demotion rather than just apply it.
+export function looksLikeProse(command, mask = maskQuoted(String(command ?? ""))) {
+  if (PLACEHOLDER_ANGLE.test(mask)) return true;
+  if (PLACEHOLDER_BRACKET.test(mask)) return true;
+  if (ELISION.test(mask)) return true;
+  if (SLASH_JOINED_NUMBERS.test(mask)) return true;
+  if (parentheticalIsProse(mask)) return true;
+  const segments = splitSegments(command, mask);
+  for (const segment of segments) {
+    const { raw } = headToken(trimSegment(segment.mask));
+    if (raw && SLASH_JOINED_HEAD.test(raw)) return true;
+    if (segmentIsProse(segment)) return true;
+  }
+  return false;
+}
+
 // --- deriveLevel -------------------------------------------------------------
+
+// Only reader-shaped heads can reach L4 — `node design/emit.mjs` REGENERATES an
+// artifact (a local run, L3), it does not read one.
+const READER_HEADS = new Set(["cat", "head", "tail", "less", "more", "jq", "grep", "rg", "sed", "awk", "wc", "diff"]);
+
+// The level of ONE segment of a compound, or null when the segment classifies
+// nothing (a `cd`, a loop keyword, an unknown head).
+function segmentLevel(text) {
+  const command = trimSegment(text);
+  if (command === "") return null;
+
+  // L1 — a running system was touched.
+  if (SSH_READ.test(command)) return "L1";
+  const { head, raw, rest } = headToken(command);
+  if (head === "curl" || head === "wget") {
+    // The URL is read from the ORIGINAL segment, quotes and all: `curl 'https://…'`
+    // is a real remote target. The head gate is what keeps a MENTIONED url —
+    // `grep -n 'https://…' src.ts` — from ever reaching this branch.
+    return firstRemoteUrlHost(command) ? "L1" : "L3"; // no remote URL ⇒ loopback/local
+  }
+  if (!head) return null;
+
+  // L2 — origin/main, or another remote read through a remote-API client.
+  if (GIT_SHOW_REMOTE.test(command) || GH_API.test(command)) return "L2";
+  if (REMOTE_API_HEADS.has(head)) return hasOnlyLoopbackTargets(command) ? "L3" : "L2";
+
+  // L4 — the read's TARGET is a known generated artifact. Checked before the
+  // generic L3 family: `cat docs/openapi.json` is an artifact read, not source.
+  if (READER_HEADS.has(head) && rest.some((t) => isGeneratedArtifactPath(t.replace(/^['"]|['"]$/g, "")))) {
+    return "L4";
+  }
+
+  // L3 — local checkout: reads, scoped grep, local tests, node <script>.
+  if (L3_HEADS.has(head)) return "L3";
+  if (/^\.{0,2}\//.test(raw)) return "L3"; // ./script.sh, ../bin/tool, /path/tool
+
+  if (NAVIGATION_HEADS.has(head)) return null; // a wrapper reads nothing
+  return null;
+}
 
 // deriveLevel(rerun) → "L1" | "L2" | "L3" | "L4" | "L6"
 //
 // PURE over the command string alone. It never receives — and must never be
 // handed — the evidence prose, the claim, or any narrative field. Unknown
 // shapes DEMOTE to L6 (D3); nothing here throws on honest input.
+//
+// A COMPOUND IS WALKED, NOT SNIFFED AT THE HEAD. Every unquoted segment is
+// levelled on its own and the STRONGEST wins, because the derived level is a
+// CEILING on what the compound could have observed: `cd /opt && curl
+// https://prod/health` reaches production, and `curl https://prod/x | jq .`
+// must not be demoted to L3 by its pipe consumer — the suite's standing bar is
+// ZERO false demotions of honest L1/L2 commands. What keeps strongest-wins from
+// becoming a promotion engine is the parseability floor above: unrunnable prose
+// never reaches the walk at all.
 export function deriveLevel(rerun) {
   if (typeof rerun !== "string" || rerun.trim() === "") return "L6";
   const command = rerun.trim();
+  const mask = maskQuoted(command);
 
-  // L1 — a running system was touched.
-  if (SSH_READ.test(command)) return "L1";
-  const { head, rest } = headToken(command);
-  if ((head === "curl" || head === "wget") && firstRemoteUrlHost(command)) return "L1";
+  // The floor runs FIRST. A string that is not a command cannot derive a level
+  // above L6 no matter which blessed tokens it happens to contain.
+  if (looksLikeProse(command, mask)) return "L6";
 
-  // L2 — origin/main (or another remote) was read.
-  if (GIT_SHOW_REMOTE.test(command) || GH_API.test(command)) return "L2";
-
-  // L4 — the read's TARGET is a known generated artifact. Checked before the
-  // generic L3 family: `cat docs/openapi.json` is an artifact read, not a
-  // source read. Only reader-shaped heads qualify — `node design/emit.mjs`
-  // REGENERATES an artifact (a local run, L3), it does not read one.
-  const READER_HEADS = new Set(["cat", "head", "tail", "less", "more", "jq", "grep", "rg", "sed", "awk", "wc", "diff"]);
-  if (READER_HEADS.has(head) && rest.some((t) => isGeneratedArtifactPath(t.replace(/^['"]|['"]$/g, "")))) {
-    return "L4";
+  let best = null;
+  let sawArtifactRead = false;
+  for (const segment of splitSegments(command, mask)) {
+    const level = segmentLevel(segment.raw);
+    if (level === null) continue;
+    if (level === "L4") { sawArtifactRead = true; continue; }
+    if (best === null || LEVELS[level] < LEVELS[best]) best = level;
   }
 
-  // L3 — local checkout: reads, scoped grep, local tests, node <script>,
-  // loopback curl (the local dev server is a property of the checkout).
-  if (head === "curl" || head === "wget") return "L3"; // loopback-only URL
-  if (L3_HEADS.has(head)) return "L3";
-  if (/^\.?\.?\//.test(head)) return "L3"; // ./script.sh, ../bin/tool, /path/tool
+  // L4 is a statement about the read's TARGET, not a rung competing with L1-L3,
+  // and it sits BELOW L3 on the ladder. So a pipeline that reads an artifact
+  // and hands it to a local consumer — `cat docs/openapi.json | jq .` — is an
+  // artifact read, not a source read; but an artifact read beside a remote one
+  // never caps that remote read.
+  if (sawArtifactRead && (best === null || best === "L3")) return "L4";
 
   // Unclassifiable — demoted, never rejected (D3).
-  return "L6";
+  return best ?? "L6";
 }
 
 // --- checkCeiling ------------------------------------------------------------
