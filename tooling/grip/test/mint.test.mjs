@@ -482,3 +482,122 @@ test("ALL-OR-NOTHING — one bad row in a batch writes no file at all", () => {
   runCli(["write", facts, dir], { expectFail: true });
   deepStrictEqual(readdirSync(dir).filter((f) => f.startsWith("grip-")), []);
 });
+
+// ── tgw6: mint future recipes bound to the CALLER's tree (charter D73/D74) ────
+//
+// A `cd <absolute checkout> && <cmd>` rerun bakes a hard path to ONE box into the
+// stored recipe. mint STRIPS that leading cd — but ONLY when removing it provably
+// cannot change the answer, and the arbiter of that is classifyBinding (imported,
+// never restated): a ref-decided read (content-addressed / shared-ref) is invariant
+// to the tree it runs in, while a per-worktree / cwd-bound / foreign-tree read is
+// NOT and keeps its cd. The reason for either choice is recorded on the mint result.
+
+test("tgw6 — the leading cd is stripped ONLY for a ref-decided remainder; kept otherwise, reason recorded", () => {
+  const cases = [
+    { klass: "content-addressed",   strip: true,  rerun: `cd ${REPO} && git show 1a2b3c4:tooling/grip/mint.mjs | wc -l` },
+    { klass: "shared-ref",          strip: true,  rerun: `cd ${REPO} && git show origin/main:tooling/grip/mint.mjs | wc -l` },
+    { klass: "per-worktree",        strip: false, rerun: `cd ${REPO} && git show HEAD:tooling/grip/mint.mjs | wc -l` },
+    { klass: "cwd-bound",           strip: false, rerun: `cd ${REPO} && wc -l tooling/grip/mint.mjs` },
+    { klass: "foreign-tree-pinned", strip: false, rerun: `cd ${REPO} && wc -l ${REPO}/tooling/grip/mint.mjs` },
+  ];
+  for (const c of cases) {
+    const m = mintRecipe({ rerun: c.rerun }, { observed_at: NOW });
+    ok(m.ok, c.rerun);
+    strictEqual(m.binding.class, c.klass, `remainder class for: ${c.rerun}`);
+    strictEqual(m.binding.rebound, c.strip, `rebound for: ${c.rerun}`);
+    ok(m.binding.reason, "a reason is recorded either way");
+    if (c.strip) {
+      strictEqual(m.recipe.rerun, c.rerun.replace(/^cd \S+ && /, ""), "the cd prefix is gone, the remainder verbatim");
+      ok(!m.recipe.rerun.startsWith("cd "), m.recipe.rerun);
+      ok(m.binding.reason.startsWith("stripped"), m.binding.reason);
+    } else {
+      strictEqual(m.recipe.rerun, c.rerun, "the recipe keeps its cd prefix verbatim");
+      ok(m.binding.reason.startsWith("kept"), m.binding.reason);
+    }
+  }
+});
+
+test("tgw6 — a relative cd is left alone (the invariance argument is about an ABSOLUTE pin)", () => {
+  // `cd api && git show origin/main:x` would be ref-decided, but the narrow rule
+  // this slice ships only touches an absolute prefix, by design.
+  const m = mintRecipe({ rerun: "cd api && git show origin/main:tooling/grip/mint.mjs | wc -l" }, { observed_at: NOW });
+  ok(m.ok);
+  strictEqual(m.binding.rebound, false);
+  strictEqual(m.binding.reason, null);
+  ok(m.recipe.rerun.startsWith("cd api && "));
+});
+
+test("tgw6 — subject and deps are minted from the ORIGINAL command, so a strip never moves the index", () => {
+  const withCd = mintRecipe({ rerun: `cd ${REPO} && git show origin/main:tooling/grip/mint.mjs | wc -l` }, { observed_at: NOW });
+  const stripped = mintRecipe({ rerun: "git show origin/main:tooling/grip/mint.mjs | wc -l" }, { observed_at: NOW });
+  strictEqual(withCd.recipe.subject, stripped.recipe.subject);
+  deepStrictEqual(withCd.recipe.deps, stripped.recipe.deps);
+  strictEqual(withCd.recipe.quantity, stripped.recipe.quantity);
+  // the strip made the stored rerun identical to the natively-stripped one
+  strictEqual(withCd.recipe.rerun, stripped.recipe.rerun);
+});
+
+// ── REGRESSION FLOOR: the provable NO-OP over the committed corpus ────────────
+//
+// Re-minting every committed ledger row through the new mint must leave its
+// subject and deps unchanged for EVERY row (expected 0 moved). This is what makes
+// S1's data merge-order-independent of this slice: the transform only rewrites the
+// stored rerun, never the indexing keys.
+
+const LEDGER_DIR = fileURLToPath(new URL("../ledger", import.meta.url));
+
+test("REGRESSION FLOOR — re-minting every committed ledger row leaves subject and deps unchanged", () => {
+  const files = readdirSync(LEDGER_DIR).filter((f) => /^grip-.*\.json$/.test(f));
+  ok(files.length > 0, "there must be committed ledger runs to re-mint");
+  let rows = 0;
+  const moved = [];
+  for (const f of files) {
+    const run = JSON.parse(readFileSync(join(LEDGER_DIR, f), "utf8"));
+    for (const row of run.recipes ?? []) {
+      rows += 1;
+      const re = mintRecipe({ rerun: row.rerun }, { observed_at: row.observed_at });
+      if (!re.ok) { moved.push({ rerun: row.rerun, reason: re.reason }); continue; }
+      const subjMoved = re.recipe.subject !== row.subject;
+      const depsMoved = JSON.stringify(re.recipe.deps) !== JSON.stringify(row.deps ?? []);
+      if (subjMoved || depsMoved) moved.push({ rerun: row.rerun, from: [row.subject, row.deps], to: [re.recipe.subject, re.recipe.deps] });
+    }
+  }
+  strictEqual(moved.length, 0, `${moved.length} of ${rows} committed rows moved subject/deps: ${JSON.stringify(moved)}`);
+});
+
+// ── INVARIANCE: a stripped row answers identically from two different trees ───
+//
+// For a ref-decided remainder the four answers — original & stripped, each run
+// from two separate worktrees of this clone — must all agree. That agreement is
+// the proof that dropping the `cd` changed nothing. Tree B is a `--no-checkout`
+// linked worktree: it never materialises files (fast, and read-only over the
+// object DB is all `git show` needs).
+
+test("INVARIANCE — original and stripped rerun give four identical answers from two trees", () => {
+  const toplevel = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+  const original = `cd ${toplevel} && git show origin/main:internal/cli/tasks_next_cmd.go | wc -l`;
+  const strippedCmd = "git show origin/main:internal/cli/tasks_next_cmd.go | wc -l";
+
+  // the mint decides this row is stripped, and to exactly this remainder
+  const minted = mintRecipe({ rerun: original }, { observed_at: NOW });
+  ok(minted.ok);
+  strictEqual(minted.binding.rebound, true);
+  strictEqual(minted.recipe.rerun, strippedCmd);
+
+  const treeB = mkdtempSync(join(tmpdir(), "grip-treeB-"));
+  const run = (cmd, cwd) => execFileSync("sh", ["-c", cmd], { cwd, encoding: "utf8" }).trim();
+  try {
+    execFileSync("git", ["-C", toplevel, "worktree", "add", "--no-checkout", "--detach", treeB, "origin/main"], { stdio: "ignore" });
+    const answers = [
+      run(original, toplevel),      // original, tree A
+      run(strippedCmd, toplevel),   // stripped, tree A
+      run(original, treeB),         // original, tree B
+      run(strippedCmd, treeB),      // stripped, tree B
+    ];
+    strictEqual(new Set(answers).size, 1, `four answers must agree: ${JSON.stringify(answers)}`);
+    ok(Number(answers[0]) > 0, `the shared-ref file has a real line count: ${answers[0]}`);
+  } finally {
+    try { execFileSync("git", ["-C", toplevel, "worktree", "remove", "--force", treeB], { stdio: "ignore" }); } catch { /* prune below */ }
+    try { execFileSync("git", ["-C", toplevel, "worktree", "prune"], { stdio: "ignore" }); } catch { /* best effort */ }
+  }
+});
