@@ -1209,7 +1209,13 @@ export function envAssignmentReason(name, value) {
     return `environment assignment "${name}=" is not on the inert allowlist (${[...ENV_INERT_NAMES].sort().join(", ")}) — a prefix like GIT_EXTERNAL_DIFF=, GIT_PAGER=, PAGER=, NODE_OPTIONS= or PATH= changes WHICH PROGRAM the allowlisted head runs, which voids the head allowlist entirely`;
   }
   if (/[$`]/.test(value)) return `environment value "${name}=${value}" expands at run time — the screen cannot bound what it becomes`;
-  if (ENV_PROGRAM_NAMES.has(name) && !ENV_PROGRAM_VALUE.test(value)) {
+  // A value the author QUOTED is the same value. `CC="/usr/bin/clang"` is the
+  // identical assignment as `CC=/usr/bin/clang`, and refusing the first was a
+  // false refusal of the exact class D63 exists to close — the quotes are
+  // stripped for the shape test, never for the expansion test above, which
+  // must keep seeing the raw span.
+  const bare = /^(["'])(.*)\1$/.test(value) ? value.slice(1, -1) : value;
+  if (ENV_PROGRAM_NAMES.has(name) && !ENV_PROGRAM_VALUE.test(bare)) {
     return `${name}=${value} names a PROGRAM the toolchain executes; only a bare name or an absolute path is admitted (not a relative script)`;
   }
   return null;

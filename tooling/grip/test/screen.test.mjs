@@ -989,6 +989,10 @@ test("CONTROL: the benign environment prefixes the corpus actually uses stay ADM
     "CC=clang go vet ./internal/cli/...",
     "CC=/usr/bin/clang MIX_ENV=test mix test --seed 111",
     "MIX_TEST_PARTITION=w22v1 CC=clang mix test test/barkpark/secrets_castgap_probe_test.exs",
+    // The quoted spellings of the same two assignments — see the both-directions
+    // assertions in the envAssignmentReason test below.
+    'CC="/usr/bin/clang" mix test --seed 111',
+    "CC='clang' go vet ./...",
   ]) {
     assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
   }
@@ -1007,6 +1011,13 @@ test("envAssignmentReason is tested directly, both directions", () => {
   assert.equal(envAssignmentReason("CC", "clang"), null);
   assert.equal(envAssignmentReason("CC", "/usr/bin/clang"), null);
   assert.notEqual(envAssignmentReason("CC", "./evil.sh"), null);
+  // A QUOTED value is the SAME value, and refusing it was a false refusal of the
+  // exact class D63 exists to close. Both directions, so the quote strip cannot
+  // become a way to smuggle a relative script past the program bound.
+  assert.equal(envAssignmentReason("CC", '"/usr/bin/clang"'), null);
+  assert.equal(envAssignmentReason("CC", "'clang'"), null);
+  assert.notEqual(envAssignmentReason("CC", '"./evil.sh"'), null, "quoting a relative script must not admit it");
+  assert.notEqual(envAssignmentReason("CC", "'./evil.sh'"), null);
   assert.notEqual(envAssignmentReason("PATH", "/tmp/evil"), null);
   assert.notEqual(envAssignmentReason("GIT_PAGER", "less"), null);
   assert.notEqual(envAssignmentReason("MIX_ENV", "$(id)"), null, "a value that expands cannot be bounded");
