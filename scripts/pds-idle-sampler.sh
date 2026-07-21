@@ -163,7 +163,10 @@ while [ $# -gt 0 ]; do
     --window) IDLE_SECONDS="${2:-}"; shift 2 || die "--window needs a value" ;;
     --label)  LABEL="${2:-}"; shift 2 || die "--label needs a value" ;;
     --out)    OUT_FILE="${2:-}"; shift 2 || die "--out needs a value" ;;
-    -h|--help) sed -n '1,110p' "$0"; exit 0 ;;
+    # 1,114p — through the EXIT legend. The parent instrument stops at 80 and
+    # drops its own exit codes; an operator whose sampler REFUSED mid-climb needs
+    # to read "2 = refused" without opening the file.
+    -h|--help) sed -n '1,114p' "$0"; exit 0 ;;
     *) die "unknown argument '$1' (try --help). This instrument takes no --path: it fetches nothing." ;;
   esac
 done
