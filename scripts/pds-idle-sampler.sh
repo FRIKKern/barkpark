@@ -353,6 +353,17 @@ if [ "$IDLE_SAMPLES" -le 0 ]; then
   refuse "the IDLE CONTROL window logged ZERO samples over its ${IDLE_WALL} s, so there is no peak to subtract a baseline from. An empty log peaks at 0 kB, so the drift would have been reported as 0 − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB. A NEGATIVE control is not a control (PDS-D220a — the same defect as the acquisition window's, on the leg that gives the demand figure its meaning). The RSS sampler almost certainly lost its ssh session; re-run."
 fi
 
+# PDS-D220a KEYED ON THE QUANTITY, NOT ON A PROXY FOR IT (review, wave 13).
+# The refusal above tests SAMPLE COUNT, but the wreck its own text describes is a
+# VACUOUS PEAK. Those come apart: a log of well-formed-looking lines whose rss
+# field is absent or zero (a session torn mid-write, a `ps` that returned nothing)
+# counts as samples > 0 and still peaks at 0 kB. Reproduced in review — 1 sample,
+# peak 0 kB, drift −191.63 MiB, EXIT 0. A zero peak is vacuous however many lines
+# produced it, and no new threshold is invented to say so.
+if [ "$IDLE_PEAK_KB" -le 0 ]; then
+  refuse "the IDLE CONTROL window logged ${IDLE_SAMPLES} sample(s) but its PEAK is ${IDLE_PEAK_KB} kB, so the drift would have been reported as ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB = $(mib "$IDLE_DELTA_KB") MiB. A NEGATIVE control is not a control (PDS-D220a). A non-empty log with a zero peak means the rss field never arrived — the remote loop's \`ps\` returned nothing, or the session tore mid-write. Re-run."
+fi
+
 # The MemAvailable leg refuses on the same rule, for a sharper reason. Its range
 # is what PDS-D221's 1048.16 MiB contamination-abort threshold is stated on, and
 # a leg that logged nothing yields min 0 / max 0 / range 0.00 MiB — which reads
@@ -361,6 +372,20 @@ fi
 # here rather than merely emitted for a downstream reader to remember to check.
 if [ "$IDLE_MEMAVAIL_SAMPLES" -le 0 ]; then
   refuse "the idle window's MemAvailable leg logged ZERO samples, so its range is vacuously 0 kB = 0.00 MiB. PDS-D221 states its contamination-abort threshold (1048.16 MiB) on THIS range, and an unsampled leg would clear that threshold as though the box were perfectly quiet (PDS-D220a/PDS-D220b). A range that was never measured must not authorise a measurement; re-run."
+fi
+
+# A negative drift that survives the vacuous-peak refusal is REPORTED, never
+# refused. It is legitimately reachable on a healthy box: the baseline is a
+# one-shot on the PRIMARY slot, the peak is the MAX ACROSS THE SET, and this box
+# runs blue/green — so a primary that is retired mid-window leaves a successor
+# whose RSS is honestly lower. GC on a quiet slot does the same, smaller. Refusing
+# would invent a magnitude threshold this charter has not licensed (PDS-D232), and
+# per PDS-D237 an instrument beside the climb must never fail loud on a fact about
+# the box. So the reader is told the sign is suspect and why, and it rides the
+# machine line so a downstream consumer cannot miss it.
+IDLE_DRIFT_SIGN=ok
+if [ "$IDLE_DELTA_KB" -lt 0 ]; then
+  IDLE_DRIFT_SIGN=negative_suspect
 fi
 
 if [ "$IDLE_WALL" -gt 0 ]; then
@@ -383,6 +408,15 @@ say "    peak ................. ${IDLE_PEAK_KB} kB   (MAX across ${BEAM_N} slot(
 say "    drift ................ ${IDLE_PEAK_KB} − ${IDLE_BASELINE_KB} = ${IDLE_DELTA_KB} kB / 1024 = $(mib "$IDLE_DELTA_KB") MiB"
 say "    window ............... ${IDLE_WALL} s at ${SAMPLE_HZ} Hz · rate ${IDLE_RATE} MiB/s"
 say "    diagnostic ........... max across all slots at t=0 = ${IDLE_BASELINE_SET_KB} kB"
+if [ "$IDLE_DRIFT_SIGN" = negative_suspect ]; then
+say "    SIGN ................. NEGATIVE. The baseline is a one-shot on the PRIMARY"
+say "                           slot; the peak is the MAX ACROSS THE SET. On a"
+say "                           blue/green box a primary retired mid-window leaves"
+say "                           a successor with honestly lower RSS, and GC on a"
+say "                           quiet slot does the same, smaller. Not refused —"
+say "                           no magnitude threshold is licensed here (PDS-D232)."
+say "                           Treat this control as SUSPECT, not as a drift of 0."
+fi
 say ""
 say "  MemAvailable, WHOLE BOX (a DIFFERENT unit class — PDS-D220b)"
 say "    min .................. ${IDLE_MEMAVAIL_MIN_KB} kB   over ${IDLE_MEMAVAIL_SAMPLES} readings"
@@ -404,7 +438,7 @@ say "    Both figures are kB/1024 (MiB), never /1000, and both are LOWER BOUNDS:
 say "    a spike between 1 Hz ticks is invisible (PDS-D114)."
 say ""
 
-MACHINE_LINE="PDS_IDLE_SAMPLE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acquisition=none sample_hz=$SAMPLE_HZ units=kB_div_1024 selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_t0_kb=$MEM_AVAIL_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES threshold_applied=none"
+MACHINE_LINE="PDS_IDLE_SAMPLE run_id=$RUN_ID label=$LABEL deployed_sha=$DEPLOYED_SHA source=$SOURCE_BASE workspace=$SOURCE_WS acquisition=none sample_hz=$SAMPLE_HZ units=kB_div_1024 selector=pgrep_-o_-x_beam.smp peak_rule=max_across_slots beam_primary_pid=$BEAM_PRIMARY beam_slot_pids=${BEAM_ALL% } beam_slots=$BEAM_N mem_available_t0_kb=$MEM_AVAIL_KB idle_baseline_kb=$IDLE_BASELINE_KB idle_baseline_set_kb=$IDLE_BASELINE_SET_KB idle_peak_kb=$IDLE_PEAK_KB idle_delta_kb=$IDLE_DELTA_KB idle_delta_mib=$(mib "$IDLE_DELTA_KB") idle_samples=$IDLE_SAMPLES idle_window_s=$IDLE_WALL idle_drift_mib_per_s=$IDLE_RATE idle_drift_sign=$IDLE_DRIFT_SIGN idle_memavail_min_kb=$IDLE_MEMAVAIL_MIN_KB idle_memavail_max_kb=$IDLE_MEMAVAIL_MAX_KB idle_memavail_range_kb=$IDLE_MEMAVAIL_RANGE_KB idle_memavail_range_mib=$IDLE_MEMAVAIL_RANGE_MIB idle_memavail_samples=$IDLE_MEMAVAIL_SAMPLES threshold_applied=none"
 
 say "$MACHINE_LINE"
 say ""
