@@ -924,6 +924,25 @@ export function renderLedgerPreamble(source) {
   L.push(`  subjects         ${s.subjects}   one (subject, quantity) key each`);
   L.push(`  rival methods    ${s.rival_methods}   keys carrying more than one distinct recipe`);
   L.push(`  unreadable       ${s.unreadable}   rows or files the fold could not use — NOT counted as decay`);
+  // THE DRIFT THE FOLD ABSORBED, SAID OUT LOUD. `foldLedger` re-derives the
+  // quantity half of every key (and `derived_level`) from the command rather
+  // than trusting the row, because the mint's grammar moved after the rows were
+  // written and the store is immutable. Absorbing that silently would make the
+  // clean "0 rival methods" above look like a property of the DATA when it is a
+  // property of the READ — 57 of the 62 committed rows carry a stored key today's
+  // mint no longer produces. A FALLBACK is the one that bites: it is the only way
+  // the fold can still be keying on a stale value, so it prints even at zero once
+  // any restatement happened.
+  if (s.quantity_restated > 0 || s.level_restated > 0 || s.quantity_fallbacks > 0 || s.level_fallbacks > 0) {
+    L.push(
+      `  key re-derived   ${s.quantity_restated ?? 0} quantity, ${s.level_restated ?? 0} level` +
+        `   stored value disagrees with what the command mints TODAY — the fold keys on the re-derivation`,
+    );
+    L.push(
+      `  fell back        ${s.quantity_fallbacks ?? 0} quantity, ${s.level_fallbacks ?? 0} level` +
+        `   re-derivation could not answer, so the STORED value is the key — never silent`,
+    );
+  }
   L.push(`  recipes censused ${source.commands.length}${source.allRivals
     ? "   --all-rivals: every distinct recipe, including rivals"
     : `   one per key by default; ${source.skippedRivals} rival recipe(s) NOT run (add --all-rivals)`}`);

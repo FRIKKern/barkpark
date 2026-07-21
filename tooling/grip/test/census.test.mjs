@@ -749,6 +749,24 @@ test("the pre-census block prints the fold facts summarise() has NO FIELD FOR", 
   assert.equal("rival_methods" in report, false);
 });
 
+test("the pre-census block says how much of the key the FOLD re-derived — a clean '0 rivals' is a property of the READ", () => {
+  // The fold re-derives the quantity half of every key from the command,
+  // because the mint's grammar moved after the rows were written and the store
+  // is immutable. 57 of the 62 committed rows carry a stored key today's mint
+  // no longer produces. Absorbing that silently would let "rival methods 0"
+  // read as a fact about the DATA, and the fallback count is the only signal
+  // that the fold is still keying on a stale value anywhere.
+  const source = loadLedgerRecipes(LEDGER_DIR);
+  assert.ok(source.stats.quantity_restated > 0, "the committed store must still exercise this path");
+  const text = renderLedgerPreamble(source);
+  assert.match(text, /key re-derived\s+\d+ quantity, \d+ level/);
+  assert.match(text, /fell back\s+\d+ quantity, \d+ level/);
+  assert.ok(
+    text.includes(`key re-derived   ${source.stats.quantity_restated} quantity`),
+    `the rendered count must be the fold's own: ${text}`,
+  );
+});
+
 test("THE CALL SHAPE: censusRun is SYNCHRONOUS and already summarises — re-summarising CRASHES", () => {
   const report = censusRun(["grep -c screenCommand tooling/grip/census.mjs"], { corpusName: "shape" });
   // CORRECT: renderHuman over censusRun's return.
