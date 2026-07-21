@@ -90,6 +90,8 @@ import { foldLedger } from "./ledger.mjs";
 // The constant only — importing runRerun would put a second, differently-gated
 // execution path inside the census.
 import { SYNC_TIMEOUT_MS } from "./rerun.mjs";
+// Used ONLY inside the isMain block below, and only against stderr (D78).
+import { emitProvenance } from "./provenance.mjs";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TIMEOUT — generous on purpose
@@ -1002,6 +1004,12 @@ export function validateArgv(argv) {
 // reads exactly like a clean run.
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
+  // FIRST ACT, BEFORE ANY ANSWER (D78). A census run that says "9 recipes"
+  // means nothing until the operator knows WHICH tree's ledger it counted.
+  // STDERR only — `--json` writes a document to stdout and a banner there
+  // would break every `JSON.parse(stdout)` consumer.
+  emitProvenance();
+
   const argv = process.argv.slice(2);
   if (argv.includes("--help") || argv.includes("-h")) {
     console.log(HELP);

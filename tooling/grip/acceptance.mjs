@@ -71,10 +71,13 @@
 // them ssh to production.
 
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { adjudicate, VERDICTS } from "./adjudicate.mjs";
 import { deriveLevel } from "./level.mjs";
+// Used ONLY inside the isMain block below, and only against stderr (D78).
+import { emitProvenance } from "./provenance.mjs";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/level-skip-specimens.json", import.meta.url));
 
@@ -407,8 +410,13 @@ function report(outcome) {
   return lines.join("\n");
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
+  // FIRST ACT (D78). "ACCEPTANCE: PASS" is the most laundering-prone line grip
+  // prints — a pass from a 200-commit-stale tree looks identical to a pass from
+  // main. The banner is what tells those two apart.
+  emitProvenance();
+
   const outcome = runAcceptance();
   if (process.argv.includes("--json")) {
     console.log(JSON.stringify(outcome, null, 2));
