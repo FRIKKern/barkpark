@@ -28,15 +28,19 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import {
   FAMILY, OUTCOME, CENSUS_TIMEOUT_MS, CENSUS_TIMEOUT_FLOOR_MS, TIMEOUT_FLOOR_MULTIPLE,
   classifyFamily, classifyOutcome, naiveOutcome, isAnswering, isDecayed,
   censusOne, censusRun, summarise, renderHuman, toJson, isNullDistribution,
   isTestRunner, loadCorpusCommands, CORPUS_NAME,
+  pipelineSegments, networkTool, networkReach, validateArgv,
+  loadLedgerRecipes, renderLedgerPreamble, LEDGER_CORPUS_NAME,
 } from "../census.mjs";
 import { screenCommand, DANGER_SET } from "../screen.mjs";
 import { SYNC_TIMEOUT_MS } from "../rerun.mjs";
@@ -482,7 +486,16 @@ test("PREDICTION 3 is predeclared, compared to the measurement, and a contrary r
 
 test("census.mjs contains no write call and imports no writer", () => {
   assert.doesNotMatch(SOURCE, /writeFileSync|appendFileSync|createWriteStream|mkdirSync|rmSync|unlinkSync|renameSync/);
-  assert.doesNotMatch(SOURCE, /from\s*"\.\/(ledger|record|harvest)\.mjs"/, "the census must not import a writer");
+  assert.doesNotMatch(CODE, /from\s*"\.\/(record|harvest)\.mjs"/, "the census must not import a writer");
+
+  // ledger.mjs is BOTH a reader and a writer, so the ban is per-BINDING rather
+  // than per-module: `foldLedger` is a pure read and is the only name allowed
+  // to cross. A blanket module ban would have forced a hand-copied fold — this
+  // epic's own defect class — and a blanket allow would let the writer in.
+  const imported = [...CODE.matchAll(/import\s*\{([^}]*)\}\s*from\s*"\.\/ledger\.mjs"/g)]
+    .flatMap((m) => m[1].split(",").map((s) => s.trim()).filter(Boolean));
+  assert.deepEqual(imported, ["foldLedger"], "only the READER may cross from ledger.mjs");
+  assert.doesNotMatch(CODE, /writeLedgerRun|admitRecipe|mintRunId/, "no writer name may appear in census code");
 });
 
 const snapshotDir = (dir) =>
@@ -547,4 +560,325 @@ test("above the floor the prediction IS adjudicated — the floor is a bound, no
   assert.equal(report.decisive.admissible, 40);
   assert.match(report.prediction.verdict, /CONSISTENT/);
   assert.doesNotMatch(report.prediction.verdict, /UNDERPOWERED/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. D67 — THE SOURCE IS VISIBLE TO GREP
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A literal 0x00 in the quote-mask filler made file(1) call census.mjs "binary
+// data", so every grep wrapper that skips binaries returned ZERO LINES AND
+// EXIT 1 over a file with 7 real hits. An agent got a clean empty result
+// indistinguishable from genuine absence — this epic's disease inside this
+// epic's instrument — and one verifier concluded the census never screens.
+//
+// The assertion is on BYTES, not on the parsed string: `"\0"` and a raw NUL
+// produce the same runtime value, so a source-level check is the only one that
+// can tell the fix from the defect.
+
+test("D67: census.mjs contains no NUL byte, so grep can see it at all", () => {
+  const bytes = readFileSync(CENSUS_MJS);
+  assert.equal(bytes.indexOf(0), -1,
+    "a NUL byte makes this file 'binary data' — greps return zero lines and exit 1, which reads exactly like absence");
+});
+
+test("D67 CONTROL: the escaped filler masks IDENTICALLY, so the fix changed no behaviour", () => {
+  // The mask exists so a pipe inside quotes is not a segment boundary. If the
+  // filler's length or its collision with `|` had changed, these would move.
+  assert.deepEqual(pipelineSegments("grep -n 'a|b' f.js | wc -l"), ["grep -n 'a|b' f.js", "wc -l"]);
+  assert.equal(classifyFamily("grep -n 'a|b' f.js | wc -l"), FAMILY.QUERY_LISTER);
+  assert.equal(classifyFamily('git ls-tree -r HEAD | grep -i "x|y"'), FAMILY.MATCHER);
+  // A filler that were LONGER than one char per masked char would shift the
+  // pipe offsets and slice the raw command in the wrong place.
+  assert.deepEqual(pipelineSegments("echo 'aaaaaaaaaa' | head -1"), ["echo 'aaaaaaaaaa'", "head -1"]);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10. D68 — HERMETICITY: AN OUTAGE IS NOT DECAY
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 38 of 240 admitted rows reach a live service. bp and gh are QUERY-LISTER
+// heads, and that family's failure branch is RAN-AND-FAILED, which is DECAYED.
+// So one guerrilla or GitHub hiccup flipped up to 36 rows to decayed against a
+// published 14.6% — a single-cause spike wearing the costume of 36 independent
+// decay events.
+//
+// EVERY TEST HERE IS PAIRED WITH ITS CONTROL. A fix that classified real tool
+// failures as "the environment did it" would launder decay, which is worse than
+// the bug: it would make the census permanently, invisibly optimistic.
+
+const OUTAGE_STDERR = [
+  // captured from bp against a dead port
+  'Error: Get "http://127.0.0.1:1/v1/tasks": dial tcp 127.0.0.1:1: connect: connection refused',
+  // captured from bp against an unresolvable host
+  'Error: Get "https://nope.invalid/v1/tasks": dial tcp: lookup nope.invalid: no such host',
+  // captured from gh with the network down
+  "error connecting to api.github.com",
+];
+
+test("D68: real bp and gh OUTAGE stderr classifies SPAWN-ERROR — inadmissible, and NOT decay", () => {
+  for (const stderr of OUTAGE_STDERR) {
+    for (const cmd of ["bp task ls --limit 5", "gh api repos/FRIKKern/barkpark"]) {
+      const v = classifyOutcome(cmd, run(1, "", stderr));
+      assert.equal(v.outcome, OUTCOME.SPAWN_ERROR, `${cmd} :: ${stderr}`);
+      assert.equal(v.decayed, false, "an outage must never be published as decay");
+      assert.equal(v.answering, false, "nothing was measured, so it is not an answer either");
+      assert.equal(v.admissible, false, "it measures this host, not the ledger");
+    }
+  }
+});
+
+test("D68 CONTROL: a tool that CONNECTED and answered no is still RAN-AND-FAILED", () => {
+  // If these flipped to SPAWN-ERROR the fix would have laundered real decay
+  // into "the environment did it", and the census would read green forever.
+  const genuine = [
+    ["gh api repos/FRIKKern/nope", "gh: Not Found (HTTP 404)"],
+    ["bp task get does-not-exist", "Error: barkpark_not_found: no such task"],
+    ["bp doc ls tag", "Error: unauthorized: token expired"],
+    ["ls tooling/grip/gone", ""],
+  ];
+  for (const [cmd, stderr] of genuine) {
+    const v = classifyOutcome(cmd, run(1, "", stderr));
+    assert.equal(v.outcome, OUTCOME.RAN_AND_FAILED, `${cmd} must stay real decay`);
+    assert.equal(v.decayed, true);
+    assert.equal(v.admissible, true);
+  }
+});
+
+test("D68: an env fault on stderr beside a CLEAN exit is still not a fault", () => {
+  // The rc!==0 guard predates this change; broadening the patterns must not
+  // have widened it into "any mention of a refused connection poisons the row".
+  const v = classifyOutcome("bp task ls", run(0, "3 tasks", "warning: retried after connection refused"));
+  assert.equal(v.outcome, OUTCOME.ANSWERED);
+  assert.equal(v.admissible, true);
+});
+
+test("D68: curl transport failure is caught BY EXIT CODE, because `curl -s` leaves stderr EMPTY", () => {
+  // 27 of the corpus's 34 curl commands pass -s, which suppresses curl's own
+  // "Failed to connect" text. No stderr regex can ever reach these rows.
+  for (const exit of [6, 7]) {
+    const v = classifyOutcome("curl -s http://localhost:4000/api/schemas", run(exit, "", ""));
+    assert.equal(v.outcome, OUTCOME.SPAWN_ERROR, `curl exit ${exit} with empty stderr`);
+    assert.equal(v.decayed, false);
+    assert.equal(v.admissible, false);
+  }
+});
+
+test("D68 CONTROL: curl exit 22 is the SERVICE ANSWERING and stays decay", () => {
+  // --fail exits 22 on an HTTP >= 400: the socket opened, the server replied.
+  // Scoring that as an environment fault would delete the signal the census is
+  // for. Same for a nonzero exit from a NON-curl tool: the code check must be
+  // head-scoped, not a global "6 and 7 are always faults" rule.
+  const http = classifyOutcome("curl -sf http://localhost:4000/api/schemas", run(22, "", ""));
+  assert.equal(http.outcome, OUTCOME.RAN_AND_FAILED);
+  assert.equal(http.decayed, true);
+
+  const notCurl = classifyOutcome("bp task ls", run(7, "", ""));
+  assert.equal(notCurl.outcome, OUTCOME.RAN_AND_FAILED, "exit 7 means nothing outside curl's table");
+});
+
+test("D68: network reach is COUNTED over every pipeline segment and NAMED in the render", () => {
+  assert.equal(networkTool("bp task ls --limit 5"), "bp");
+  assert.equal(networkTool("gh api repos/x/y | jq .name"), "gh", "the head reached the network even though jq set the exit code");
+  assert.equal(networkTool("curl -s http://localhost:4000/api/schemas"), "curl");
+  assert.equal(networkTool("git ls-remote origin main"), "git ls-remote");
+  assert.equal(networkTool("grep -rn foo tooling/grip"), null);
+  assert.equal(networkTool("git ls-tree HEAD --name-only"), null, "local git is not network reach");
+
+  const rows = [
+    { command: "bp task ls", executed: true },
+    { command: "gh api repos/x/y | jq .name", executed: true },
+    { command: "curl -s http://x/y", executed: true },
+    { command: "grep -rn foo .", executed: true },
+    { command: "bp task ls --all", executed: false },
+  ];
+  const net = networkReach(rows);
+  assert.equal(net.executedReaching, 3, "the un-executed bp row reached nothing");
+  assert.deepEqual(net.byTool, { bp: 1, gh: 1, curl: 1 });
+
+  const report = summarise(
+    rows.filter((r) => r.executed).map((r) => ({ ...r, screened: true, level: "L3", ...classifyOutcome(r.command, run(0, "x")) })),
+    { corpusName: "a run with reach" },
+  );
+  assert.equal(report.reach.network.executedReaching, 3);
+  const text = renderHuman(report);
+  assert.match(text, /NETWORK REACH/);
+  assert.match(text, /bp=1/);
+  assert.match(text, /THIS HOST AT THIS TIME/, "the render must scope its own rate to this host and this moment");
+});
+
+test("D68: a hermetic run says so rather than printing nothing", () => {
+  const rows = [{ command: "grep -c x f.js", screened: true, executed: true, level: "L3", ...classifyOutcome("grep -c x f.js", run(0, "3")) }];
+  const text = renderHuman(summarise(rows, { corpusName: "hermetic" }));
+  assert.match(text, /reaching a live service {2}0 of 1/);
+  assert.match(text, /touched nothing off this checkout/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. `--ledger` — THE CENSUS POINTED AT THE PRODUCT, NOT THE QUARRY
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("--ledger folds the real store, dedupes to one recipe per key, and SURFACES the rivals", () => {
+  const source = loadLedgerRecipes(LEDGER_DIR);
+  assert.ok(source.stats.rows > 0, "the ledger is empty — wave 4's first row is missing");
+  assert.equal(source.commands.length, source.stats.subjects,
+    "deduped: exactly one recipe per (subject, quantity) key");
+  assert.ok(source.commands.every((c) => typeof c === "string" && c.trim()));
+  // The rivals are SKIPPED, never dropped in silence — summarise()'s report has
+  // no field for them, so flattening to a bare string[] would lose them.
+  assert.equal(source.skippedRivals, source.stats.rows - source.stats.subjects);
+  assert.equal(source.rivalMethods.length, source.stats.rival_methods);
+
+  const all = loadLedgerRecipes(LEDGER_DIR, { allRivals: true });
+  assert.ok(all.commands.length >= source.commands.length);
+  assert.equal(all.skippedRivals, 0);
+});
+
+test("the pre-census block prints the fold facts summarise() has NO FIELD FOR", () => {
+  const source = loadLedgerRecipes(LEDGER_DIR);
+  const text = renderLedgerPreamble(source);
+  assert.match(text, /tooling\/grip\/ledger/, "the render must NAME its corpus — a bare exit-0 gate is vacuous without it");
+  assert.match(text, /rows folded\s+\d+/);
+  assert.match(text, /subjects\s+\d+/);
+  assert.match(text, /rival methods\s+\d+/);
+  assert.match(text, /unreadable\s+\d+/);
+  // And these four are genuinely absent from the census report itself, which is
+  // the whole reason the block exists.
+  const report = censusRun([], { corpusName: "empty" });
+  assert.equal("unreadable" in report, false);
+  assert.equal("rival_methods" in report, false);
+});
+
+test("THE CALL SHAPE: censusRun is SYNCHRONOUS and already summarises — re-summarising CRASHES", () => {
+  const report = censusRun(["grep -c screenCommand tooling/grip/census.mjs"], { corpusName: "shape" });
+  // CORRECT: renderHuman over censusRun's return.
+  assert.ok(Array.isArray(report.rows), "censusRun returns a finished report, not rows");
+  assert.match(renderHuman(report), /CENSUS —/);
+  // WRONG, and it cost a verifier a crash. Kept executable so the trap stays
+  // provable rather than merely documented.
+  assert.throws(() => summarise(report, { corpusName: "shape" }), /rows\.filter is not a function/);
+  // It is not a thenable either — `await censusRun(...)` would silently work and
+  // then hand a report to code expecting rows.
+  assert.equal(typeof report.then, "undefined");
+});
+
+test("a --ledger-sized run reports UNDERPOWERED, and the measured rate is an OBSERVATION", () => {
+  // Charter P6's predicted null, shipping as a MECHANISM with an honest reading
+  // rather than as a result. Today's store is far below the 30-row floor.
+  const source = loadLedgerRecipes(LEDGER_DIR);
+  const report = censusRun(source.commands, { corpusName: LEDGER_CORPUS_NAME });
+  if (report.decisive.admissible < 30) {
+    assert.match(report.prediction.verdict, /UNDERPOWERED/);
+    assert.match(report.prediction.verdict, /observation only/);
+    assert.doesNotMatch(report.prediction.verdict, /^CONSISTENT|^CONTRARY/);
+  } else {
+    assert.doesNotMatch(report.prediction.verdict, /UNDERPOWERED/,
+      "the store crossed the floor — this branch is the honest alternative, not a skip");
+  }
+});
+
+test("censusing the ledger writes NOTHING back into it", () => {
+  const before = snapshotDir(LEDGER_DIR);
+  const source = loadLedgerRecipes(LEDGER_DIR);
+  const report = censusRun(source.commands, { corpusName: LEDGER_CORPUS_NAME });
+  assert.equal(snapshotDir(LEDGER_DIR), before, "the census mutated the store it was measuring");
+  assert.ok(report.reach.executed > 0, "nothing ran — the no-write proof would be vacuous");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. UNKNOWN FLAGS ARE REJECTED
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `--totally-bogus-flag-xyz` exited 0 having quietly run the default census,
+// which reads to an operator — and to a gate — exactly like the flag worked.
+// Same class as the `--limit NaN` defect: a request silently denied.
+
+test("an unknown flag is REJECTED by name, and the known ones are not", () => {
+  assert.equal(validateArgv(["--ledger", "--json"]).ok, true);
+  assert.equal(validateArgv(["--limit", "5"]).ok, true);
+  assert.equal(validateArgv(["--limit", "--json"]).ok, true, "--limit's value is adjudicated by the limit check, not here");
+  assert.equal(validateArgv([]).ok, true);
+
+  const bogus = validateArgv(["--totally-bogus-flag-xyz", "--limit", "5"]);
+  assert.equal(bogus.ok, false);
+  assert.match(bogus.reason, /--totally-bogus-flag-xyz/);
+  assert.match(bogus.reason, /--ledger/, "the rejection must print the valid set");
+
+  const stray = validateArgv(["bogus"]);
+  assert.equal(stray.ok, false);
+  assert.match(stray.reason, /unexpected argument/);
+});
+
+test("CONTROL: the CLI actually exits 2 on an unknown flag and 0 on --ledger", () => {
+  // validateArgv returning {ok:false} proves nothing if the CLI never calls it.
+  const bogus = spawnSync(process.execPath, [CENSUS_MJS, "--totally-bogus-flag-xyz", "--limit", "5"], { encoding: "utf8" });
+  assert.equal(bogus.status, 2, "an ignored flag exits 0 and looks exactly like an honoured one");
+  assert.match(bogus.stderr, /unknown flag/);
+
+  const ok = spawnSync(process.execPath, [CENSUS_MJS, "--ledger"], { encoding: "utf8" });
+  assert.equal(ok.status, 0);
+  // NON-VACUOUS: the render must NAME the ledger. On origin/main `--ledger` is
+  // an ignored flag that also exits 0 over the FIXTURE, and its output contains
+  // this string zero times — so a bare exit-0 gate would pass without the
+  // feature. The name is what makes the gate able to fail.
+  assert.match(ok.stdout, /tooling\/grip\/ledger/);
+});
+
+// ── THE UNREADABLE BRANCH, FIRED RATHER THAN INSPECTED ───────────────────────
+//
+// The preamble's unreadable block is dead on today's store (0 unreadable), so
+// the builder shipped it UNPROVEN BY EXECUTION and said so. A branch nobody has
+// run is a branch nobody knows the shape of — and this one exists precisely to
+// stop a partially-read store publishing itself as a smaller clean one, which
+// is the failure mode with the highest cost in this whole module. So it is
+// fired here against a synthesised rotten store rather than read.
+
+test("a rotten run file is REPORTED in the preamble and kept OUT of both rates", () => {
+  const dir = mkdtempSync(join(tmpdir(), "grip-census-rotten-"));
+  writeFileSync(join(dir, "grip-20260721T000000Z-rotten.json"), "{ this is not json");
+  writeFileSync(
+    join(dir, "grip-20260721T000001Z-good.json"),
+    JSON.stringify({
+      run_id: "grip-20260721T000001Z",
+      recipes: [{
+        subject: "tooling/grip/census.mjs", quantity: "wc:-l",
+        rerun: "wc -l tooling/grip/census.mjs",
+        derived_level: "L3", deps: [], observed_at: "2026-07-21T00:00:01Z",
+      }],
+    }),
+  );
+
+  const source = loadLedgerRecipes(dir);
+  assert.equal(source.stats.unreadable, 1, "precondition: the fold sees the rotten file");
+  assert.equal(source.commands.length, 1, "the readable row still censuses");
+
+  const text = renderLedgerPreamble(source);
+  assert.match(text, /unreadable       1/, "the count must be on the face of the report");
+  assert.match(text, /NOT ABOUT DECAY/, "and it must say what it is NOT, or a reader scores it as decay");
+  assert.match(text, /rotten\.json/, "naming the file is what makes it re-derivable");
+  assert.match(text, /UNPARSEABLE/);
+
+  // The load-bearing half: an unreadable row is in NEITHER rate. It never
+  // reached the engine, so it cannot be an answer and it cannot be decay.
+  const report = censusRun(source.commands, { corpusName: "rotten-store probe" });
+  assert.equal(report.reach.distinct, 1, "only the readable row was censused");
+  assert.equal("unreadable" in report, false, "summarise has no field for it — which is WHY the preamble exists");
+});
+
+test("CONTROL: a clean store's preamble does NOT print the unreadable block", () => {
+  const dir = mkdtempSync(join(tmpdir(), "grip-census-clean-"));
+  writeFileSync(
+    join(dir, "grip-20260721T000001Z-good.json"),
+    JSON.stringify({
+      run_id: "grip-20260721T000001Z",
+      recipes: [{
+        subject: "tooling/grip/census.mjs", quantity: "wc:-l",
+        rerun: "wc -l tooling/grip/census.mjs",
+        derived_level: "L3", deps: [], observed_at: "2026-07-21T00:00:01Z",
+      }],
+    }),
+  );
+  const text = renderLedgerPreamble(loadLedgerRecipes(dir));
+  assert.match(text, /unreadable       0/);
+  assert.doesNotMatch(text, /NOT ABOUT DECAY/, "a clean store must not cry wolf");
 });
