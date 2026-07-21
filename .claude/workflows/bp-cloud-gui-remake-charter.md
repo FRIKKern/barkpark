@@ -1761,9 +1761,12 @@ The two are distinct in **kind**, not merely in wording — which is a stronger 
 for. Criterion 2's doctrine anchor is `origin/main:.claude/agents/felix.md:61`, which cites
 `bp search <concept>` **without** the word `query`: `3f16c9f43` made a pre-existing doctrine sentence true.
 
-**Fifty-eight moves.** One to `task-96a908af98698118`, fifty-seven in census band order to
-`cloud-console-hardening-epic`, and `gr-p5r5-successor-seal` **last** — its children rode along, and no move
-line was written for them. `cloud-console-billing-live-gate` was never named; its parent stays
+**Fifty-nine moves — fifty-eight of them successor-bound.** One to `task-96a908af98698118`, fifty-seven in
+census band order to `cloud-console-hardening-epic`, and `gr-p5r5-successor-seal` **last** into the same
+successor — its children rode along, and no move line was written for them. The two counts are easy to
+conflate and the roster delta below depends on keeping them apart: **58** is the successor-bound figure that
+the `after − before == 58` invariant binds, **59** is the number of rows that left the epic.
+`cloud-console-billing-live-gate` was never named; its parent stays
 `cloud-console-goal`. Every move was paced ≥1.1 s and its response checked. Throttling was detected by `bp`
 **exit code 7** only, never by grepping output for `429` (that substring occurs in ordinary 200 payloads).
 **Zero exit-7 retries occurred.** One non-zero return is disclosed honestly: the first attempt at
@@ -1897,5 +1900,54 @@ material-failure rate at ~8% upper 95%; and the crown is dark.
 ```
 git diff --exit-code origin/main -- cloud/priv/static/__preview__/   -> exit 0   (files proven present)
 ```
+
+### Reviewer's independent reproduction — the seal is not one tree's accident
+
+The builder's own first doubt was that the green is **base-relative**: `seal-predicate.mjs:61` reads
+`process.cwd()`, so a green proves the tree it was run from and nothing else. That doubt is now closed by a
+second, independent run.
+
+At review, the predicate was re-run from a **different worktree** (the reviewer's, cut at the branch tip
+`19b526c66` — the actual merge candidate, not `d06f78eba`), on a **different port** (47313, cleared by the
+same explicit `if … exit 9` guard), by a **different agent**, seven minutes later, with a fresh
+`git fetch origin` first:
+
+```
+git status --porcelain                                             -> (empty)
+git diff --exit-code origin/main -- cloud/priv/static/__preview__/ -> exit 0   (after fresh fetch)
+OVERFLOW_GUARD_PORT=47313 node cloud/priv/static/__preview__/seal-predicate.mjs \
+    --successor cloud-console-hardening-epic
+  -> VERDICT: SEAL   ·   exit 0   ·   stderr 0 bytes   ·   read at 2026-07-21T03:36:31.029Z
+     roster: 81 children {"done":81}   ·   clause (a) 0 orphans   ·   bucket (c) 3/3   ·   clause (b) 3/3
+```
+
+The banner was identical to the builder's line for line apart from the timestamp. This also closes doubt 5
+(instrument freeze measured against a possibly-stale `origin/main`): the freeze was re-checked after a fresh
+fetch and still exits 0. The merge candidate itself seals.
+
+### Clause (b) is a live measurement — proven by mutation, not by trust
+
+A green is worthless unless the right thing produced it, so clause (b) was attacked directly. With
+`.topbar-right > *` forced to `min-width: 400px` in `cloud/priv/static/app.css`, the guard reported:
+
+```
+OVERFLOW GUARD FAIL — 44 finding(s) in: GR108-tablet-topbar-overflow
+  ✗ overview-past-due/dark@769: scrollWidth 1932 > viewport 769 — horizontal scrollbar
+```
+
+Chrome 150 launched, the server logged *"served bytes == disk bytes"*, and real `scrollWidth`/`clientWidth`
+numbers moved with the CSS. Clause (b) renders and measures; it is not a rubber stamp. `app.css` was restored
+and re-verified byte-identical to `origin/main` before this section was written.
+
+**One honest surprise from that probe, recorded rather than buried.** Setting `.topbar-right > *` to
+`min-width: auto` — which is exactly *removing* the landed GR108 fix, since `auto` is the flex-item default —
+did **not** reproduce the overflow: the guard still measured 0/44 with the chip at 169.78px. The GR108 defect
+is therefore **over-determined** at `origin/main`: some other landed rule (most likely the `min-width: 0` on
+`.topbar-left, .topbar-right` themselves at `app.css:776`) independently prevents it at these widths, so the
+child rule is belt-and-braces rather than the sole load-bearing fix. This does not weaken the seal — the
+defect is measured absent, which is what clause (b) certifies — but it means the charter's causal story
+("the CHILDREN escape because they are flex items at the default `min-width:auto`") is **not the whole
+mechanism** at the tree that shipped. Filed as `gr-bl-gr108-fix-overdetermined`, not fixed here: touching
+`app.css` at the seal would have been the eighth instrument by another name.
 
 The epic ends here. There is no round 13.
