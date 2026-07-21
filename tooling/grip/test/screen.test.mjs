@@ -720,9 +720,11 @@ test("the size of the gap is RE-DERIVED, never remembered", async () => {
   // test greps for it.
   //
   // The replacement is computed here, on every run, against the REAL
-  // classifySafety. Ratios are asserted, not counts, so growing DANGER_SET
+  // classifySafety. Where the number belongs to ANOTHER module, a MARGIN is
+  // asserted rather than a count, so growing DANGER_SET or tightening rerun.mjs
   // cannot make the claim stale — the failure this replacement exists to
-  // prevent.
+  // prevent, and one this test committed itself until the wave-4 merge caught
+  // it (see the classifySafety assertion below).
   const { classifySafety } = await import("../rerun.mjs");
 
   const csAdmits = DANGER_SET.filter((c) => classifySafety(c).safe);
@@ -745,8 +747,31 @@ test("the size of the gap is RE-DERIVED, never remembered", async () => {
   );
 
   assert.equal(commands.length, 651);
-  assert.equal(csCorpus, 572, "classifySafety's admission over the frozen corpus");
+  // THE SCREEN'S OWN NUMBER IS PINNED. 240 is this module's reach, this module
+  // is what this suite owns, and a silent change to it is the finding — every
+  // wave-4 slice re-derived it and it held at exactly 240.
   assert.equal(screenCorpus, 240, "the screen's admission over the frozen corpus");
+
+  // classifySafety's NUMBER IS NOT PINNED, AND THAT IS THE POINT — found by
+  // merging this wave's five branches into one tree, where each slice was green
+  // alone and the union went red. `assert.equal(csCorpus, 572)` froze a count
+  // belonging to rerun.mjs, a module this suite does not own and must not
+  // constrain. tgw4-rerun-silence-fixes legitimately moved it to 583 (the
+  // `merge(?!-base)` carve-out re-admits 11 `git merge-base` rows), and a
+  // correct fix in one slice turned another slice's test red at merge time.
+  //
+  // Two failures in one line, and the second is the sharper: the comment above
+  // claims "ratios are asserted, not counts" while three frozen counts sat
+  // below it — the retired-statistic disease this very test exists to cure,
+  // committed inside the cure. So the comparison is now stated as what it
+  // actually claims: the older gate is MUCH more permissive. The margin is
+  // asserted; the exact figure is printed, never frozen.
+  assert.ok(
+    csCorpus >= screenCorpus * 2,
+    `the comparison is only worth making while classifySafety is MUCH more permissive than the screen — ` +
+    `it admitted ${csCorpus} against the screen's ${screenCorpus}. If rerun.mjs has genuinely tightened to ` +
+    `within 2x, this comparison must be re-stated rather than re-baselined.`,
+  );
   assert.ok(screenCorpus < csCorpus, "the screen must be strictly tighter than the denylist it replaces");
 
   // The retired number must not be re-introduced into shipped source.
