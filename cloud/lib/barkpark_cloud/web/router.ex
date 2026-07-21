@@ -418,7 +418,9 @@ defmodule BarkparkCloud.Web.Router do
   defp trusted_peer?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
 
   defp trusted_peer?(peer) when is_tuple(peer) do
-    peer in Application.get_env(:barkpark_cloud, :trusted_proxy_peers, [])
+    # `|| []` because an explicit `nil` in config is a plausible operator typo
+    # and `x in nil` raises — a 500 on EVERY request. Fail closed, never loudly.
+    peer in (Application.get_env(:barkpark_cloud, :trusted_proxy_peers) || [])
   end
 
   defp trusted_peer?(_), do: false

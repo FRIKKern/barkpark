@@ -161,6 +161,23 @@ services:
 #
 # If you change this subnet, change TRUSTED_PROXY_PEERS to match its .1 gateway
 # in the SAME commit.
+#
+# DEPLOY NOTE — READ BEFORE MERGING THIS TO A LIVE BOX. The stack's network
+# ALREADY EXISTS on prod, created without an explicit `ipam` block. Compose
+# compares the declared network against the live one and refuses `up` with
+# "network ... needs to be recreated" when they differ, EVEN IF the subnet value
+# is identical, because the live network carries no ipam config to match. That
+# aborts deploy/cp-deploy.sh at the slot boot (exit 13) — which is the SAFE
+# failure (the active slot keeps serving and git resets), but the deploy will
+# not land until an operator recreates the network ONCE:
+#
+#     docker compose -f cloud/docker-compose.yml --profile blue --profile green down
+#     docker compose -f cloud/docker-compose.yml --profile blue up -d
+#
+# That down/up is the only brief interruption; every subsequent deploy is a
+# normal hot-swap again. Verified structurally only — this repo's build hosts
+# have no `docker compose` subcommand, so it was never executed against a live
+# network.
 networks:
   default:
     ipam:
