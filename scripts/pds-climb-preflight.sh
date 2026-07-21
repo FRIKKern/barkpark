@@ -398,13 +398,13 @@ check_prewarm_ready() {
     detail="there is no $api_dir — this is not a Barkpark checkout, so nothing here can be pre-warmed or climbed from."
   elif [ ! -d "$deps_dir" ] || [ "$deps_n" -eq 0 ]; then
     state=NO-GO
-    detail="COLD WORKTREE (PDS-D258): api/deps is ${deps_state}. \`arm\` will print the full ARMED banner and return 0, and the detached child will then die on \`** (Mix) Can't continue due to errors on dependencies\` -> \`prewarm: FAILED rc=1 — NOT firing\` -> EXIT 1, for ZERO draws — a dead climb you do not discover until \`collect\`. Pay the warm-up in THIS worktree first, then arm with --prewarm-now: cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile"
+    detail="COLD WORKTREE (PDS-D258): api/deps is ${deps_state}. \`arm\` will print the full ARMED banner and return 0, and the detached child will then die on \`** (Mix) Can't continue due to errors on dependencies\` -> \`prewarm: FAILED rc=1 — NOT firing\` -> EXIT 1, for ZERO draws — a dead climb you do not discover until \`collect\`. Pay the warm-up in THIS worktree first, then arm with --prewarm-now: cd api && mix deps.get && CC=/usr/bin/clang MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile"
   elif [ ! -d "$build_dir/prod" ]; then
     state=NO-GO
-    detail="COLD WORKTREE (PDS-D258): api/deps is warm but api/_build/prod is ABSENT, so the pre-warm is a full cold prod compile (~155 s) — paid inside the climb's own window under the default form, and its failure is invisible there until \`collect\`. Pay it here first, then arm with --prewarm-now: cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile"
+    detail="COLD WORKTREE (PDS-D258): api/deps is warm but api/_build/prod is ABSENT, so the pre-warm is a full cold prod compile (~155 s) — paid inside the climb's own window under the default form, and its failure is invisible there until \`collect\`. Pay it here first, then arm with --prewarm-now: cd api && mix deps.get && CC=/usr/bin/clang MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile"
   elif [ ! -d "$build_dir/dev" ]; then
     state=WARN
-    detail="api/deps and api/_build/prod are warm, but api/_build/dev is ABSENT. The pre-warm only ever compiles MIX_ENV=prod, so this one is not caught by --prewarm-now: \`pds-scratch-target.sh up --verify\` pays it instead, as a >10-minute cold dev compile. Pay it before you arm: cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile"
+    detail="api/deps and api/_build/prod are warm, but api/_build/dev is ABSENT. The pre-warm only ever compiles MIX_ENV=prod, so this one is not caught by --prewarm-now: \`pds-scratch-target.sh up --verify\` pays it instead, as a >10-minute cold dev compile. Pay it before you arm: cd api && mix deps.get && CC=/usr/bin/clang MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile"
   fi
   verdict 5 "PRE-WARM" "$state" "$detail"
 }

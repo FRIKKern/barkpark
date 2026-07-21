@@ -288,12 +288,17 @@ turn says so. You discover it at `collect`, possibly hours of window later.
 Pay it in the arming worktree, before the arm — **both** compiles:
 
 ```sh
-cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
+cd api && mix deps.get && CC=/usr/bin/clang MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
 ```
 
 The pre-warm only ever builds `MIX_ENV=prod`; the dev build is what
 `pds-scratch-target.sh up --verify` pays (§3) as a >10-minute cold compile once the climb is
 already running.
+
+`CC=/usr/bin/clang` goes on **both** legs. Bare `cc` on this host is the Claude CLI wrapper
+and `argon2_elixir` dies under it (`error: unknown option '-g'`); the dev leg builds the same
+NIF as the prod leg. Live-measured while arming run `1b515ee5`, at the cost of one wasted
+compile.
 
 Then arm with **`--prewarm-now`, always**. It does not fix a cold tree on its own — it still
 only runs `mix compile` — but it moves that compile into the **arming shell**, where a

@@ -264,18 +264,59 @@ hours later, having spent the whole window on a process that was already dead.
 **Pay the warm-up in the arming worktree, before the arm:**
 
 ```sh
-cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
+cd api && mix deps.get && CC=/usr/bin/clang MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
 ```
 
 Both compiles, not one. The pre-warm only ever builds `MIX_ENV=prod`; the dev build is what
 `pds-scratch-target.sh up --verify` pays, as a >10-minute cold compile, once the climb is
 already running.
 
+`CC=/usr/bin/clang` on **both** legs, not just prod. Bare `cc` on this host is the Claude
+CLI wrapper, and `argon2_elixir` fails under it with `error: unknown option '-g'` →
+`** (Mix) Could not compile with "make"`. The dev leg compiles the same NIF, so it needs the
+same `CC`. Live-measured while arming run `1b515ee5`, which paid one wasted compile for it.
+
 **Then arm with `--prewarm-now`, always.** It does *not* fix a cold tree by itself — it still
 only runs `mix compile` — but it moves the compile into the **arming shell**, where a failure
 `die`s loudly at `pds-crown-launch.sh:441-444` instead of vanishing into a detached child.
 The default form is **forbidden for a fresh worktree** for exactly that reason. Check 5 of
 the preflight asserts all of this before you get there.
+
+## The armed climb has NO TARGET — six rungs abort by construction
+
+**A warm worktree is necessary and not sufficient.** The launcher pins its own scratch root
+(PDS-D233), unconditionally, from a run tag it generates *inside* `arm`:
+
+```sh
+export BARKPARK_HOME="/tmp/pds-w14.$run_tag"          # pds-crown-launch.sh:197
+export PDS_SCRATCH_POINTER="/tmp/pds-scratch.pds-w14.$run_tag.last"
+```
+
+No `${…:-}` default, so it cannot be pre-set. But §2(a) of `pds-crown-runbook.md` requires
+`pds-scratch-target.sh up --verify` to have booted a target **in that same root**, and the
+root does not exist until the arm has already returned — by which time the child may have
+fired on draw 1, one second later. **Every armed climb therefore meets an unbooted target.**
+
+Live-proven by run `1b515ee5` (armed `09:55:12Z`, terminal `09:58:12Z`, `EXIT: 2`):
+
+```
+PASS  0a · PASS 0b · ABORT 0c · ABORT 1 · ABORT 2 · PASS 3 · ABORT 4
+ABORT 5 · ABORT 6 · PASS 7 · PASS 8            →  5 PASS · 6 ABORT · 0 FAIL
+ABORT  0c/1/2/5/6   waits on env:scratch-target-not-booted
+                    (/tmp/pds-w14.1b515ee5/scratch.env absent)
+ABORT  4            waits on step:1
+```
+
+Rungs **1, 2, 5 and 6 are the crown**, so a detached arm cannot pay it — not on a slow box,
+not on a good draw, not ever. And the run is not free: rung 3 legitimately consumed the one
+budgeted full export (`attempts` 3 → 4, 1,405,095,424 bytes, 151 s, beam RSS peak 477 MB).
+
+Until the launcher boots its own target, or accepts a pre-booted root, the sanctioned shape
+is the runbook's own hand-run climb from a shell where `BARKPARK_HOME` /
+`PDS_SCRATCH_POINTER` are pinned by you and `pds-scratch-target.sh up --verify` has already
+returned. Filed as `pds-w16-launcher-scratch-home-trap`. **Do not "fix" this by having the
+child boot a target mid-window** — that is a >10-minute cold dev compile inside the timed
+window, which PDS-D241 exists to prevent.
 
 ## PDS-D224 — the budget is `spent + 2`, derived at run time
 
@@ -409,10 +450,15 @@ Two limits remain, and neither is closed by code:
    - check 4 red → wait for the in-flight deploy to land.
    - check 5 red or WARN → warm the tree you are about to arm from (PDS-D258):
      ```sh
-     cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
+     cd api && mix deps.get && CC=/usr/bin/clang MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
      ```
      Fixing check 1 *creates* this red: a fresh `origin/main` worktree is cold by
      construction, and the two checks are satisfied together or not at all.
+   The preflight cannot see the sixth blocker — **no target**. `arm` pins its own
+   `BARKPARK_HOME` from a run tag that does not exist until it returns, so nothing can be
+   booted into it beforehand and rungs 0c/1/2/4/5/6 abort. See *The armed climb has NO
+   TARGET* above; measured on run `1b515ee5`. If the crown rungs are what you want, do not
+   arm — run the hand-run climb of `pds-crown-runbook.md` §2(a)/§3 instead.
 3. Re-run the preflight until it is GO (or GO with a warning you have consciously taken
    the named action on).
 4. Set the two §0 env lines **in the shell you are about to arm from**:
