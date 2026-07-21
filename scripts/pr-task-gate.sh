@@ -54,6 +54,46 @@
 
 set -uo pipefail
 
+# ── Trailer extraction ────────────────────────────────────────────────────────
+# `pr-task-gate.sh --extract-task-id` reads the PR description from PR_BODY and
+# prints the task id it references (nothing when there is no trailer). The
+# workflow calls this instead of carrying its own copy of the grammar.
+#
+# It lives HERE, not inline in .github/workflows/pr-task-gate.yml, because the
+# hermetic harness can only reach what the script exposes: while the grammar sat
+# in the YAML, no test could run it, and it silently dropped every trailer whose
+# id was wrapped in markdown backticks — PR #5290 went RED with a correct task
+# reference while #5307 went green with the same task written bare (run
+# 29804094521). A gate that reds on correct work spends the only thing it
+# produces, a reviewer's trust.
+#
+# ACCEPTED — case-insensitive, first match on its own line wins, leading
+# whitespace allowed, and surrounding backticks are stripped from the id:
+#     Task: cch-bl-some-slug
+#     Task: `cch-bl-some-slug`
+#     task:   `cch-bl-some-slug`
+#
+# DELIBERATELY NOT ACCEPTED — each of these would be its own decision, not a
+# wider character class, and each currently yields an empty id, which the gate
+# below turns into a definitive FAIL ("no task reference found on the PR"):
+#   • a trailer that is not at the start of its line — "see Task: x" mid-sentence
+#   • other markdown wrappers — **Task:** x, _x_, [x](url), <x>, "x"
+#   • a bare id with no `Task:` label, or a `Task:` label with no id after it
+# The id character class itself is unchanged (a-z 0-9 . _ / -), so the set of
+# ids this gate can name is exactly what it always was.
+extract_task_id() {
+  printf '%s' "${PR_BODY:-}" \
+    | grep -ioE '^[[:space:]]*task:[[:space:]]*`?[a-z0-9][a-z0-9._/-]*`?' \
+    | head -1 \
+    | sed -E 's/^[[:space:]]*[Tt][Aa][Ss][Kk]:[[:space:]]*//' \
+    | tr -d '`'
+}
+
+if [ "${1:-}" = "--extract-task-id" ]; then
+  extract_task_id
+  exit 0
+fi
+
 LEDGER_BASE="${LEDGER_BASE:-https://guerrilla.barkpark.cloud}"
 DATASET="${LEDGER_DATASET:-production}"
 

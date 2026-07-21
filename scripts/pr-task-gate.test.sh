@@ -114,6 +114,41 @@ check "spaced worker rejects prefix" 1 'TASK_ID=spacey EXPECTED_WORKER=fable'
 check "spaced closed_by passes"     0 'TASK_ID=spaceclosed'
 check "spaced closed_by matches"    0 'TASK_ID=spaceclosed EXPECTED_WORKER="lead truthgrip"'
 
+# ── Trailer extraction ────────────────────────────────────────────────────────
+# Turning a PR body into a task id is a SEPARATE contract from the ledger
+# decision above, and it went untested for months because it lived inline in
+# .github/workflows/pr-task-gate.yml, where no harness could run it. That is
+# exactly how the backtick-wrapped form came to red a correctly-referenced PR
+# (#5290 red / #5307 green, run 29804094521). It is now `pr-task-gate.sh
+# --extract-task-id`, so these cases can reach it.
+extract() { PR_BODY="$1" bash "$GATE" --extract-task-id; }
+check_extract() { # check_extract <label> <pr_body> <expected_id>
+  local label="$1" body="$2" want="$3" got
+  got="$(extract "$body")"
+  if [ "$got" = "$want" ]; then pass=$((pass+1)); printf 'ok   %-40s (id %s)\n' "$label" "${got:-<empty>}"
+  else fail=$((fail+1)); printf 'FAIL %-40s want %s got %s\n' "$label" "${want:-<empty>}" "${got:-<empty>}"; fi
+}
+
+check_extract "trailer: plain id"        $'Does a thing.\n\nTask: cch-bl-x\n'   'cch-bl-x'
+check_extract "trailer: backticked id"   $'Does a thing.\n\nTask: `cch-bl-x`\n' 'cch-bl-x'
+check_extract "trailer: backticked lower" $'task:   `cch-bl-x`\n'               'cch-bl-x'
+check_extract "trailer: first match wins" $'Task: first-one\nTask: second-one\n' 'first-one'
+check_extract "trailer: absent -> empty"  $'No trailer here at all.\n'          ''
+check_extract "trailer: label with no id" $'Task:\ncch-bl-x\n'                  ''
+check_extract "trailer: mid-sentence no"  $'Please see Task: cch-bl-x for why.\n' ''
+check_extract "trailer: bold wrapper no"  $'**Task:** cch-bl-x\n'               ''
+
+# End-to-end: the id a backticked trailer yields must be CLEAN, because it is
+# pasted straight into the ledger URL. A leaked backtick makes the GET
+# .../task/%60active%60, which the fixture server answers 404 → exit 1, so this
+# case cannot go green on a dirty id.
+backticked_id="$(extract 'Task: `active`')"
+echo "extracted from 'Task: \`active\`' -> [${backticked_id}] ; ledger URL -> ${BASE}/v1/data/doc/production/task/${backticked_id}"
+check "backticked trailer reaches ledger" 0 "TASK_ID='${backticked_id}'"
+# ...and a body with NO trailer at all must still be a definitive FAIL: the
+# empty id flows on and the gate rejects it. This is the RED that must survive.
+check "no-trailer body still fails"      1 "TASK_ID='$(extract 'nothing to see here')'"
+
 echo "---"
 echo "passed: $pass  failed: $fail"
 [ "$fail" = 0 ]

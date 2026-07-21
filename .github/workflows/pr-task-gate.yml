@@ -4,9 +4,11 @@ name: pr-task-gate
 # paper): every PR must be backed by a task that is actively being worked, on
 # the ledger-of-record (guerrilla — decision D4). No task, no merge.
 #
-# The pure ledger decision lives in scripts/pr-task-gate.sh (unit-tested); this
-# workflow only plumbs the GitHub PR context into it and applies two escape
-# hatches that are part of the design, not loopholes:
+# The pure parts live in scripts/pr-task-gate.sh (unit-tested by
+# scripts/pr-task-gate.test.sh): both the trailer grammar (`--extract-task-id`)
+# and the ledger decision. This workflow only plumbs the GitHub PR context into
+# them and applies two escape hatches that are part of the design, not
+# loopholes:
 #
 #   • Merge-base cutoff (D-rollout): a PR whose base commit predates this gate
 #     is grandfathered. Detected self-referentially — if this workflow file is
@@ -136,12 +138,14 @@ jobs:
         run: |
           set -uo pipefail
           # PR-controlled text arrives via env (never interpolated into the
-          # script body) so it cannot inject shell. Match a `Task: <doc_id>`
-          # trailer, case-insensitive, first occurrence.
-          task_id="$(printf '%s' "${PR_BODY:-}" \
-            | grep -ioE '^[[:space:]]*task:[[:space:]]*[a-z0-9][a-z0-9._/-]*' \
-            | head -1 \
-            | sed -E 's/^[[:space:]]*[Tt][Aa][Ss][Kk]:[[:space:]]*//')"
+          # script body) so it cannot inject shell. The trailer GRAMMAR — which
+          # forms are accepted, which are deliberately not, and why the id is
+          # stripped of backticks before it reaches the ledger URL — lives with
+          # the extractor in scripts/pr-task-gate.sh. Keeping one copy is the
+          # point: while the regex sat inline here, the hermetic harness could
+          # not reach it, and it silently dropped every backtick-wrapped trailer
+          # (PR #5290 red vs #5307 green, run 29804094521).
+          task_id="$(bash scripts/pr-task-gate.sh --extract-task-id)"
           echo "task_id=${task_id}" >> "$GITHUB_OUTPUT"
 
       # Optional author→worker map: .github/pr-task-workers.json = { "<gh-login>": "<worker-id>" }.
