@@ -19,7 +19,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import vm from "node:vm";
@@ -256,4 +256,171 @@ test("the verify serialisation site is DOWNSTREAM of the single verify intercept
 test("the code says out loud that this gates the wave's fact flow, not every repo write", () => {
   assert.match(SOURCE, /NOT every write in\s*\n?\/\/ the repo|and NOT every write in the repo/);
   assert.match(SOURCE, /wave'?s? fact flow|WAVE'?S FACT FLOW/i);
+});
+
+// ── 7. THE VERIFY-WRITES / DECIDE-COMMITS SEAM (D27 / D35) ───────────────────
+//
+// These four changes are PROMPT TEXT, not executable code, so `node --check`
+// can say nothing about them — it parses a template literal whether the clause
+// inside it is present, absent, or reversed. Wave 2 already paid for that
+// lesson: a fan-out floor whose only gate was `node --check` shipped a floor
+// the check could not distinguish from a floor of zero. So the seam is pinned
+// by reading the shipped source, the same way the wiring above is.
+
+// The verifier prompt branches on q.needs_worktree, and the two branches must
+// say DIFFERENT things — that asymmetry is the whole ruling, so parse them
+// apart rather than grepping the file as one blob.
+function verifyPromptBranches() {
+  const at = SOURCE.indexOf("never touch main${q.needs_worktree ?");
+  assert.notEqual(at, -1, "the verifier prompt's needs_worktree ternary moved or was rewritten — relocate by pattern");
+  const end = SOURCE.indexOf("}", at);
+  assert.notEqual(end, -1, "the ternary never closes");
+  const quoted = [...SOURCE.slice(at, end).matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
+  assert.equal(quoted.length, 2, "expected exactly two branch strings (worktree, shared checkout)");
+  return { worktree: quoted[0], shared: quoted[1] };
+}
+
+test("the SHARED-CHECKOUT verifier branch carries the narrow ledger carve-out and never authorises a commit", () => {
+  const { shared } = verifyPromptBranches();
+  assert.match(shared, /tooling\/grip\/ledger\//, "the shared-checkout branch must name the ONE directory the carve-out opens");
+  assert.match(shared, /carve-out/i);
+  assert.match(shared, /never commit|commit nothing|You never commit/i, "a write permission with no commit prohibition is the stranding bug, not the fix");
+  assert.match(shared, /Decide commits/i, "the branch must say WHO commits, or the verifier has no reason to believe the row survives");
+});
+
+test("the unqualified 'no repo edits' wording is gone — a blanket ban and a carve-out cannot both be live", () => {
+  assert.equal(
+    SOURCE.includes(" , no repo edits"),
+    false,
+    "the old unqualified ban is still in the verifier prompt: it contradicts the carve-out, and a model handed both instructions will obey the shorter one",
+  );
+});
+
+test("the WORKTREE verifier branch explicitly DENIES the carve-out, with the reason", () => {
+  const { worktree } = verifyPromptBranches();
+  assert.match(worktree, /DENIED/, "the second stranding path stays silently lossy unless the denial is explicit");
+  assert.match(worktree, /stranded/i);
+  assert.match(worktree, /distinct filesystem path|Decide .*never sees|never sees/i, "the denial must state WHY, or it reads as arbitrary and gets reasoned around");
+  assert.equal(worktree.includes("you may WRITE"), false, "the worktree branch must not also grant the write");
+});
+
+test("BOTH Digest sites tell the fleet that a ledger-writing assignment must not set needs_worktree", () => {
+  const schemaAt = SOURCE.indexOf("needs_worktree: { type: 'boolean'");
+  assert.notEqual(schemaAt, -1, "the needs_worktree schema property moved — relocate by pattern");
+  const schemaLine = SOURCE.slice(schemaAt, SOURCE.indexOf("\n", schemaAt));
+
+  const proseAt = SOURCE.indexOf("- needs_worktree: true only for probe edits");
+  assert.notEqual(proseAt, -1, "the Digest prose guidance for needs_worktree moved — relocate by pattern");
+  const proseLine = SOURCE.slice(proseAt, SOURCE.indexOf("\n", proseAt));
+
+  // The schema description is what a structured-output model reads; the prose
+  // is what it reasons over. One without the other is half-wired.
+  for (const [where, text] of [["schema description", schemaLine], ["Digest prose", proseLine]]) {
+    assert.match(text, /must NOT set it/, `${where} does not forbid needs_worktree for a ledger-writing assignment`);
+    assert.match(text, /tooling\/grip\/ledger\//, `${where} does not name the ledger directory it is ruling about`);
+  }
+});
+
+test("Decide is told to commit ledger rows BY EXPLICIT PATH, and to skip cleanly when there are none", () => {
+  const at = SOURCE.indexOf("THEN COMMIT THIS RUN'S LEDGER ROWS");
+  assert.notEqual(at, -1, "Decide's ledger-commit instruction is missing — Verify's rows would be written and never committed");
+  const step = SOURCE.slice(at, SOURCE.indexOf("\n", at));
+  assert.match(step, /git status --porcelain tooling\/grip\/ledger\//, "Decide must DISCOVER the rows, not guess at filenames it never saw");
+  assert.match(step, /BY EXPLICIT PATH/, "staging by anything but explicit path sweeps other sessions' work in this shared checkout");
+  assert.match(step, /never git add -A/);
+  assert.match(step, /skip the step silently/, "a run whose verifiers wrote nothing must not read as a failure");
+});
+
+test("'never git add -A' is restated at the ledger commit, not left to carry over from the charter commit", () => {
+  const bans = [...SOURCE.matchAll(/never git add -A/g)];
+  assert.equal(
+    bans.length,
+    2,
+    "expected the ban once at the charter commit and once at the ledger commit — a second staging instruction inheriting a ban stated two sentences earlier is how `git add -A` gets typed",
+  );
+});
+
+// ── 8. THE STRANDED-FILE CASE IS RULED IN WRITING ────────────────────────────
+//
+// Verify writes and Decide commits ONE PHASE LATER, so there is a window where
+// the rows are uncommitted. Silence about that window is the defect this
+// asserts against: an accepted loss and an unnoticed loss look identical in the
+// code, and only the comment tells them apart.
+
+function strandedRuling() {
+  const start = SOURCE.indexOf("// ── Phase 4: Verify");
+  assert.notEqual(start, -1, "the Verify phase banner moved — relocate by pattern");
+  const end = SOURCE.indexOf("phase('Verify')", start);
+  assert.notEqual(end, -1, "the Verify phase call moved");
+  const raw = SOURCE.slice(start, end).split("\n").filter((l) => l.trim().length > 0);
+  for (const line of raw) {
+    assert.match(line.trim(), /^\/\//, "the ruling must be a COMMENT — anything else here is code the host will run");
+  }
+  return raw.map((l) => l.trim().replace(/^\/\/\s?/, "")).join(" ").replace(/\s+/g, " ");
+}
+
+test("the ruling states the loss, accepts it, and refuses a sweep — with the reason", () => {
+  const ruling = strandedRuling();
+  assert.match(ruling, /STRANDED-FILE CASE IS RULED/, "the case is not named");
+  assert.match(ruling, /LOST/, "the ruling must say plainly that rows can be lost");
+  assert.match(ruling, /LOSS IS ACCEPTED/, "an unstated acceptance is indistinguishable from an oversight");
+  assert.match(ruling, /No sweep is built/, "the ruling must record that no sweep exists, so nobody looks for one");
+});
+
+test("the ruling gives BOTH reasons: a sweep is more dangerous, and a recipe is cheap to re-derive", () => {
+  const ruling = strandedRuling();
+  assert.match(ruling, /OTHER LIVE SESSIONS SHARE/, "reason 1 — the danger is that this checkout is shared");
+  assert.match(ruling, /RE-DERIVATION RECIPE, never a value/, "reason 2 — what is lost is a recipe, not a measurement");
+  assert.match(ruling, /cheap|re-run/i, "reason 2 must say the loss is cheap to undo, which is why it is tolerable");
+});
+
+test("the ruling also names the SECOND stranding path and how it is closed", () => {
+  const ruling = strandedRuling();
+  assert.match(ruling, /second stranding path/i, "a ruling that covers one path while a second stays open reads complete and is not");
+  assert.match(ruling, /DENYING the carve-out/, "the worktree path is closed by denial, not by recovery — the ruling must say so");
+});
+
+// ── 9. THE COPIES-THAT-MUST-AGREE CHECK (added in review) ────────────────────
+
+test("the verifier prompt exists in exactly ONE workflow file — no second copy to drift", () => {
+  // This epic exists because of copies that must agree and silently stop
+  // agreeing. Section 7-8 pins the WORDS in this file; that proves nothing if
+  // another workflow carries its own verifier prompt still granting the blanket
+  // ", no repo edits" ban, or still granting the ledger carve-out to a
+  // worktree verifier. Two prompts, one contract, no mechanism keeping them
+  // level — the exact shape the charter's D20 refuses to create by import.
+  //
+  // Measured: bp-epic-cycle.workflow.js is the only file with the string, so
+  // the seam is genuinely single-sourced today. This test is what makes that a
+  // property rather than an observation someone made once.
+  const dir = join(REPO, ".claude", "workflows");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".js"));
+  const carriers = files.filter((f) => readFileSync(join(dir, f), "utf8").includes("You are a VERIFIER on a Barkpark epic wave"));
+  assert.deepEqual(carriers, ["bp-epic-cycle.workflow.js"],
+    `the verifier prompt must live in exactly one file; found it in: ${carriers.join(", ")}. If a second workflow legitimately needs one, the two must be reconciled by hand HERE — there is no import to share (D19).`);
+
+  // And the retired blanket ban must be gone from every one of them, not just
+  // reworded in this one.
+  for (const f of files) {
+    const src = readFileSync(join(dir, f), "utf8");
+    assert.ok(!src.includes("' , no repo edits'"),
+      `${f} still carries the pre-carve-out ", no repo edits" ban, which now contradicts the ledger seam`);
+  }
+});
+
+test("the two verifier branches disagree on the carve-out, and BOTH say why", () => {
+  // The asymmetry IS the ruling, so it is asserted as an asymmetry rather than
+  // as two independent string matches: the worktree branch must DENY what the
+  // shared-checkout branch GRANTS, and neither may be silent about the reason.
+  const src = readFileSync(WORKFLOW, "utf8");
+  const at = src.indexOf("${q.needs_worktree");
+  assert.ok(at > 0, "the verifier prompt's branch point moved");
+  const ternary = src.slice(at, src.indexOf("}`", at));
+  assert.match(ternary, /carve-out below is DENIED to you/, "the worktree branch must deny the carve-out explicitly");
+  assert.match(ternary, /distinct filesystem path that Decide[^`]*never sees/, "the denial must carry its reason, or it reads as an arbitrary rule to route around");
+  assert.match(ternary, /you may WRITE re-derivation recipe rows under tooling\/grip\/ledger\//, "the shared-checkout branch must grant the carve-out");
+  assert.match(ternary, /You never commit them/, "the grant must state that Decide, not the verifier, commits");
+  // No stray space before the clause — the prompt is read by an agent, and a
+  // ragged "never touch main , and" reads as a truncation artifact.
+  assert.ok(!/\s+,\s/.test(ternary.slice(0, 400)), "stray whitespace before a comma in the granted branch");
 });

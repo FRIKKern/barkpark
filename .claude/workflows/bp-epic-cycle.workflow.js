@@ -179,7 +179,7 @@ const AIM_SCHEMA = {
           why: { type: 'string' },
           model: { type: 'string', enum: ['sonnet', 'opus'], description: 'sonnet for mapping/breadth follow-ups; opus for subtle correctness, cross-surface reasoning, or judgment-heavy verification' },
           verify_commands: { type: 'string', description: 'shell command(s) the verifier must RUN to prove/refute the claim (tests, gates, curl against localhost) — empty string when reading suffices' },
-          needs_worktree: { type: 'boolean', description: 'true only if verification requires a throwaway probe edit or an isolated build dir' },
+          needs_worktree: { type: 'boolean', description: 'true only if verification requires a throwaway probe edit or an isolated build dir. An assignment that will write ledger rows under tooling/grip/ledger/ must NOT set it — Decide commits from the shared checkout and never sees a throwaway worktree, so those rows would be stranded' },
         },
       },
     },
@@ -454,7 +454,7 @@ Your job:
 2. DESIGN THE VERIFY FLEET (1-15 assignments) — you choose, per assignment:
    - model: 'sonnet' for mapping/breadth follow-ups; 'opus' for subtle correctness, cross-surface reasoning, judgment-heavy digs. Spend Opus where being wrong is expensive.
    - verify_commands: where a survey claim (or your own assumption) is load-bearing, the verifier must PROVE it by RUNNING something — the surface's tests/gates, a targeted mix/go test, curl against localhost. Reading is not proof for claims like "the gate passes", "this endpoint returns X", "these tests pin that behavior" (distrust vacuous green — a pass only counts if the RIGHT thing produced it). Empty string when reading genuinely suffices.
-   - needs_worktree: true only for probe edits or isolated build dirs.
+   - needs_worktree: true only for probe edits or isolated build dirs. An assignment that will write ledger rows under tooling/grip/ledger/ must NOT set it — Decide commits from the shared checkout and never sees a throwaway worktree, so those rows would be stranded.
    Do not re-ask what the survey settled with evidence. This round closes unknowns; it does not browse.
 3. UPDATE THE WAVE PAPER (${WAVE_PAPER}) — append, then re-publish, BEFORE your fleet flies:
    - Survey digest: the synthesis, plus a coverage map distilled from the surveyors' coverage[] — what was checked and found, and JUST AS PROMINENTLY what was checked and NOT found (absences are decisions-in-waiting). Name which corners of the repo no surveyor reached.
@@ -474,11 +474,32 @@ if (verifyAssignments.length < VERIFY_FLOOR) {
 log(`Digest done; verify fleet: ${verifyAssignments.length} (${verifyAssignments.filter((v) => v.model === 'opus').length} opus, ${verifyAssignments.filter((v) => v.verify_commands).length} with live proofs)`)
 
 // ── Phase 4: Verify — the Fable-designed fleet closes the unknowns ──
+//
+// THE STRANDED-FILE CASE IS RULED, NOT LEFT SILENT (charter D27/D35). Verify
+// WRITES ledger rows under tooling/grip/ledger/ and Decide COMMITS them, one
+// phase apart. Between those two phases the rows are uncommitted, so there is
+// a real window: if Decide dies, throws, or cuts zero slices, whatever the
+// verifiers wrote stays uncommitted and is eventually LOST.
+//
+// THAT LOSS IS ACCEPTED. No sweep is built, here or anywhere:
+//   - A sweep would have to stage files in a checkout OTHER LIVE SESSIONS
+//     SHARE, on a path where nothing succeeded — riskier than the loss it
+//     prevents. Committing another session's in-flight work is unrecoverable
+//     in a way a missing recipe is not.
+//   - A row is a RE-DERIVATION RECIPE, never a value (D26). Losing one costs
+//     exactly one re-run of a command that, by construction, still exists and
+//     still works. Cheapness-to-re-derive is the whole point of the store; a
+//     store whose contents are cheap to rebuild does not deserve a dangerous
+//     rescue path.
+// The second stranding path — a needs_worktree verifier writing into its own
+// throwaway worktree, a distinct path Decide cannot reach no matter how its
+// commit is worded — is closed differently, by DENYING the carve-out on that
+// branch of the prompt below rather than by trying to recover from it.
 phase('Verify')
 const verifications = verifyAssignments.length === 0 ? [] : (await parallel(
   verifyAssignments.map((q) => () =>
     agent(
-      `You are a VERIFIER on a Barkpark epic wave — the LAST explorer before the plan is cut; nobody checks after you. No commits, no bp mutations, never touch main${q.needs_worktree ? ' (you are in your OWN throwaway worktree — probe edits are fine, but commit nothing)' : ' , no repo edits'}.
+      `You are a VERIFIER on a Barkpark epic wave — the LAST explorer before the plan is cut; nobody checks after you. No commits, no bp mutations, never touch main${q.needs_worktree ? ' (you are in your OWN throwaway worktree — probe edits are fine, but commit nothing; and the ledger carve-out below is DENIED to you: a row written here would be stranded, because your worktree is a distinct filesystem path that Decide — which commits from the shared checkout — never sees)' : ', and exactly ONE repo-write carve-out: you may WRITE re-derivation recipe rows under tooling/grip/ledger/ (one new file per write, never opening an existing one), and nothing else, anywhere. You never commit them — Decide commits them one phase later, this same run. No other repo edits'}.
 
 ${USER_WISH_BLOCK}
 
@@ -536,6 +557,7 @@ Your job:
 2. ${CHARTER_EXISTS
       ? `UPDATE the charter at ${CHARTER_PATH} (Read then Edit): reconcile with what landed, fold in decision changes, set the wave plan.`
       : `WRITE the epic charter to ${CHARTER_PATH} (Write tool): ## Vision, ## Decisions (each with a one-line why), ## Roadmap (all slices, ordered, sized), ## Wave log (empty). This file is the epic's memory — every future wave reads it.`} Then COMMIT it (one docs-only conventional commit, this file by explicit path only — never git add -A, other sessions share this checkout): builder worktrees branch from committed state, so an uncommitted charter is INVISIBLE to every builder (learned the hard way — a wave shipped wave-log entries citing decisions that existed only in a working copy). Set charter_written=true only after you wrote AND committed it.
+   THEN COMMIT THIS RUN'S LEDGER ROWS: the verify fleet may have written re-derivation recipe rows under tooling/grip/ledger/ and it is forbidden to commit them — that is YOUR step. Run \`git status --porcelain tooling/grip/ledger/\`; for each untracked *.json it names, \`git add\` that file BY EXPLICIT PATH (same commit as the charter, or a second docs-only commit — either is fine) — never git add -A, never a directory, never a glob you did not first expand and read, because other sessions share this checkout. If it names nothing, skip the step silently; touch nothing else under tooling/grip/.
 3. FILE THE TASKS: ${EPIC_TASK_LINE} Every slice gets a published bp task with rubric-quality acceptance criteria (include a merge-gated criterion the lead closes) and the wave Paper's id on it (flat wave_paper field) so task → story is one hop. A slice without a published task does not exist — wave[].task_id is required.
 4. SEED THE BACKLOG: everything exploration surfaced that is real but NOT this wave gets filed now as a published child task (honest description, sane priority) — record the ids in backlog_filed. The ledger must show the future, not just the present.
 5. PERFECT THE TASKS (you are also the task reviewer — there is no one behind you): after filing, re-read every wave task back from the server and verify it is published (not a stranded draft), parented under the epic task, linked to the wave Paper, and reads to the rubric — outcome-shaped title, description a cold builder could start from, concrete evidence-bearing criteria, sane priority. Fix every defect via bp (patch, publish, re-parent, dedup stranded drafts). Set tasks_verified=true only after this read-back pass is clean.

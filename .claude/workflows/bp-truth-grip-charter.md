@@ -408,3 +408,101 @@ schema with no contents. Backlog worth taking after that:
 a stored value by another name), `tgw2-l4-grip-corpus-selfref` (safe to apply
 once this wave's L3 citations have merged), and `tgw-bl-wild-bulk-roster-floor`
 (a fifth, still-unguarded fan-out).
+
+### Wave 2026-07-21 — round 1, survey-reads-leads. Grade A−.
+
+Paper: `source-of-truth-grip-wave-3-2026-07-21`. Four round-1 slices built and
+reviewed; the three round-2/3 slices deferred by design (sequenced-rounds law),
+not stalled. Every slice carries `builder_model: opus` — the wave's hard model
+constraint, verified on all four task documents.
+
+**Landed** (every final branch carries a reviewer `-r` commit):
+
+| Slice | Branch | What |
+|---|---|---|
+| `tgw3-census-screen` | `…ship-a-fail-closed-allowlist-screen-so-t-0-r` | `screen.mjs`: the three-layer fail-closed screen (host bound → head/sub-verb allowlist → write shapes), importing nothing from `rerun.mjs` (D29). 34 tests, three named sets, measured reach 240/651 = 36.9%. |
+| `tgw3-level-compound-fix` | `…close-the-compound-walk-level-skip-and-t-1-r` | `level.mjs` walks compound segments instead of sniffing a head, `bp`/non-`api` `gh` → L2, plus a parseability floor. L6 38.7% → 22.4% over the frozen 651. 71 tests. |
+| `tgw3-ledger-honesty` | `…make-a-forged-ledger-row-rejectable-the--2-r` | `admitRecipe(input, {now, screen})`: the injected future bound, Z-only instants, the injected safety screen, `CONFLICT` → `RIVAL-METHOD` (D31/D33/D39). 60 tests, 16 selftest controls. |
+| `tgw3-prompt-seam` | `…let-verify-write-ledger-rows-and-decide--3-r` | D27/D35 in `bp-epic-cycle.workflow.js`: Verify's narrow ledger carve-out, DENIED on the worktree branch, Decide staging rows by explicit path, the stranded-file loss ruled in a code comment. 28 source-reading tests. |
+
+**The reach number is HIGHER than D29's and that is the honest read.** D29
+records 194/651 = 29.8%; the shipped screen admits 240/651 = 36.9%, because it
+screens `cd X && <read>` and pipelines SEGMENT BY SEGMENT rather than refusing
+them whole. The builder reported what it measured instead of steering to the
+estimate. The two figures have not been proven to measure the same thing — the
+29.8% methodology was not reproduced — so **D29's 29.8% should be read as
+superseded by 36.9% for the shipped module, and neither number may be quoted as
+"coverage of 651 commands"** (the module's own `--census` says so in prose).
+
+**Defects the review found and fixed.** The wave-1 and wave-2 pattern held for a
+third time: the epic's own failure modes keep appearing inside the tooling built
+to prevent them.
+
+1. **D29's own named danger walked through both layers of the screen.** `curl -o
+   /opt/barkpark/deploy/site-deploy.sh` is refused; `curl -so /opt/barkpark/
+   deploy/site-deploy.sh` was **ADMITTED**. Short flags cluster, and both layer
+   (b) and layer (c) compared `-o` as an exact token. Six more of the same class
+   went with it: `curl -sO`, `gh repo clone`, `gh release download`,
+   `bp --server=<remote>` (walking straight past the loopback bound),
+   `journalctl --vacuum-size`, and `date -s` (a census able to move the system
+   clock the ledger's own now-bound compares against). The screen's error
+   direction was right; its *parser* was not.
+   **The instrument lesson is the real one:** the DANGER SET carried only the
+   unclustered spelling, so the measurement built to catch exactly this class
+   could not see it. A named set measures the spellings it contains and nothing
+   else. All seven now live in `DANGER_SET`, so the selftest carries them — and
+   the fixes cost the census **zero** reach (240/651 before and after, pinned by
+   a test), which is the check that separates a real fix from cry-wolf.
+2. **`gh` was a denylist inside the allowlist module.** `ghRule` carried only
+   `GH_WRITE_VERBS`, so any unlisted noun sailed through — the exact shape the
+   module's own header argues cannot be complete. Now a noun allowlist with
+   per-noun read sub-verbs, with the denylist kept behind it. Corpus reach
+   preserved exactly: the 23 `gh` rows use only `api`, `pr`, `issue`, `run`.
+3. **The two slices that must meet did not meet.** `ledger.mjs`'s injected
+   screen contract read `verdict.message`; `screen.mjs` returns `{ok, reason}`.
+   Built in the same round with disjoint file sets, both correct alone, and
+   nothing in either suite ever put them in a room together — so every refusal
+   printed the generic fallback and **discarded the screen's diagnosis**, in the
+   precise place `REFUSED_HEADS` authors a per-head explanation so the log would
+   not be a shrug. Verified by wiring the real `screenCommand` in. Both keys are
+   accepted now, and a cross-slice test pins the seam.
+4. **The prose floor floored a good command.** `find . \( -name a -o -name b \)`
+   went L3 → L6: a backslash-escaped paren read as a prose aside because
+   `-name` is not a plausible command head. **Zero occurrences in the 651-command
+   corpus**, so the before/after distribution was bit-identical with the bug
+   present and with it fixed — the same blindness that hid the builder's own
+   `sort < in.txt > out.txt` cry-wolf. *A corpus distribution is a LOWER BOUND on
+   cry-wolf, never a proof of its absence.* Both controls mutation-proven.
+5. **An async screen read as an over-aggressive screen.** A Promise is neither
+   `true` nor `{ok:true}`, so the tolerant contract failed it closed under
+   `REFUSED-COMMAND` — right verdict, wrong diagnosis, and it would have sent
+   whoever wires the CLI next round hunting the wrong bug. Now `SCREEN-NOT-SYNC`.
+6. **The copies-that-must-agree question, closed.** The builder flagged that a
+   second workflow file might still carry the pre-carve-out verifier prompt and
+   did not check. It does not — `bp-epic-cycle.workflow.js` is the only carrier
+   — and that is now a test rather than an observation someone made once.
+
+**What the wave did NOT prove, and must not be read as proving.** No dispatched
+verifier has yet written a ledger row and no Decide has yet committed one: the
+seam is prompt text plus tests that the words are in the shipped file, which is
+the ceiling of any prompt slice. **The ledger is still empty.** The loop reads as
+closed one wave before it is.
+
+**What the next wave inherits.** Merge round 1 (four branches, all green, all
+merging clean together — verified by merging all four onto `origin/main` in one
+tree: 272 tests pass, both selftests green, the workflow parses). Then dispatch
+strictly by dependency: `tgw3-write-verb` and `tgw3-census-verb` once
+`tgw3-census-screen` and `tgw3-ledger-honesty` are in, then `tgw3-leads-verb`
+once `tgw3-write-verb` is in. `tgw3-write-verb` is the slice that converts this
+wave's opt-in bounds into real seams — until it lands, `admitRecipe`'s `now`
+bound is a mechanism nobody passes, and a forger who omits `now` is admitted
+exactly as before.
+
+Backlog worth taking after that: `tgw-bl-screen-wire-into-rerun` (nothing calls
+the screen yet — a proven capability protecting nothing),
+`tgw3-decide-stages-foreign-rows` (Decide cannot tell this run's rows from a
+concurrent session's), `tgw3-bl-segment-relevance` (strongest-segment-wins
+over-permits when the authoritative segment is not the fact's source — the
+sharpest residual in the level grammar), and `tgw3-bl-ssh-bare-host-alias` (a
+bare `ssh <alias>` derives L6; pre-existing, and widening `SSH_READ` is a
+promotion rule change that needs a decision, not a review fix).
