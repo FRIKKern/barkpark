@@ -182,6 +182,27 @@ test("defect 7 — a single-segment top-level directory mints ITSELF, not `cmd:<
   strictEqual(subjectOf("npm install"), "cmd:npm");
 });
 
+test("defect 7's PRICE is pinned: a single-segment subject is a NAME, never a location", () => {
+  // Enumerated over the frozen corpus in review: six extensionless
+  // single-segment subjects are new here. Three are real top-level names, three
+  // are RELATIVE — they arrive from a `cd api && … lib/`-shaped command, so
+  // `lib` cannot be told apart from any other `lib/` in the tree.
+  //
+  // The conflation is ACCEPTED (separating them needs a repo listing the mint
+  // deliberately does not hold) and pinned here so it is a stated property
+  // rather than a surprise the first ambiguous lead teaches somebody.
+  strictEqual(pathToken("lib/"), "lib");
+  strictEqual(pathToken("src/"), "src");
+  strictEqual(
+    subjectOf("grep -rn 'defmodule' lib/"),
+    subjectOf("grep -rn 'export' lib/"),
+    "two different lib/ directories collapse to ONE subject — the accepted price",
+  );
+  // And it is still strictly more than the `cmd:` fallback it replaced, which
+  // D45 excludes from leads entirely — i.e. no lead at all.
+  ok(!subjectOf("grep -rn 'defmodule' lib/").startsWith("cmd:"));
+});
+
 // ── the key must CLUSTER: the whole reason subject is not minted from prose ──
 
 test("the minted key is NOT injective — facts about one file share one subject", () => {

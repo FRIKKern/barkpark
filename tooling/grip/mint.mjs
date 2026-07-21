@@ -168,6 +168,22 @@ export function pathToken(rawToken) {
   // defect 7 — a separatorless token is a path when it carries a real file
   // extension OR when it WORE a directory marker. A bare word carries neither
   // and stays null: the mint has no repo listing and must not guess.
+  //
+  // THE PRICE OF THAT, MEASURED RATHER THAN ASSUMED. Enumerating every
+  // single-segment subject this yields over the frozen 652-proof corpus returns
+  // 42, of which exactly six are extensionless and therefore new here: `api`,
+  // `cloud`, `internal` and `lib`, `src`, `sizer`. The first three are the
+  // repo's real top-level names and are exactly the coarse terms defect 7
+  // exists to recover. The last three are RELATIVE names — they reach the mint
+  // from a `cd api && … lib/`-shaped command, so `lib` conflates `api/lib`
+  // with every other `lib/` in the tree.
+  //
+  // That conflation is ACCEPTED, not overlooked, and the reasoning is the same
+  // sentence as above: separating them needs a repo listing, and a mint that
+  // holds one guesses. It is also strictly better than what it replaced — the
+  // alternative was `cmd:<head>`, which is coarser still AND excluded from
+  // leads by D45, i.e. no lead at all. The bound a reader needs is that a
+  // single-segment subject is a NAME, never a location.
   if (!t.includes("/") && !FILE_EXT.test(t) && !marked) return null;
   return t;
 }
