@@ -225,8 +225,15 @@ export function selectLeads(folded, query, { census = null, cmd = false } = {}) 
       if (!(cmd ? onCommand : onSubject)) continue;
       matchedKeys.add(entry.key ?? `${entry.subject}\u0000${entry.quantity}`);
       const rerun = String(recipe?.rerun ?? "");
-      const stored = recipe?.derived_level ?? null;
-      // RE-DERIVED HERE, EVERY TIME. Never `recipe.derived_level`.
+      // THE ON-DISK LEVEL, and it moved one key over. `foldLedger` re-derives
+      // `derived_level` itself (tgw6-fold-rederives-key) and carries the stored
+      // value as `stored_level`. Reading `recipe.derived_level` alone would
+      // compare the re-derived value to ITSELF and report `level_restated:
+      // false` forever — the drift annotation silently retired. The `??` chain
+      // keeps a fold that predates that change working unchanged, so this line
+      // is correct on either side of that merge.
+      const stored = recipe?.stored_level ?? recipe?.derived_level ?? null;
+      // RE-DERIVED HERE, EVERY TIME. Never trusted from storage.
       const derived = deriveLevel(rerun);
       rows.push({
         subject: String(entry.subject ?? ""),
