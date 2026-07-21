@@ -226,3 +226,57 @@ test("parseLevelSkip reads both the plain and the straddling forms", () => {
     { read: [], claimed: [] });
   assert.deepEqual(parseLevelSkip(undefined), { read: [], claimed: [] });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The escape hatch has to cost something (added in review)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// DECLARED_DIVERGENCES silences a real finding. Its "each entry must be paid
+// off by a filed task" rule lived only in a comment, so an entry with an empty
+// `filed_as` — or a label that does not diverge from what actually fires —
+// silenced the finding exactly as well as an honest declaration did. The shape
+// check is now fatal on import; these tests prove it FIRES, in both directions,
+// by importing a mutated copy of the module rather than by trusting the source.
+
+// THE COPY GOES IN A TEMP DIR, NEVER BESIDE THE ORIGINAL. Writing it into
+// tooling/grip made this suite flaky one run in three: another test in the same
+// `node --test` process enumerates every file in tooling/grip (the D4 authorship
+// wording scan), and it raced the copy's creation and deletion. So the copy
+// lives outside the tree and its relative sibling imports are rewritten to
+// absolute file:// URLs of the REAL modules — the module under test is still
+// the shipped source plus one mutation, not a stub.
+let declGuardSeq = 0;
+const mutatedModule = async (mutate) => {
+  const srcUrl = new URL("../acceptance.mjs", import.meta.url);
+  const gripDir = new URL("../", import.meta.url).href.replace(/\/$/, "");
+  const src = mutate(readFileSync(srcUrl, "utf8")).replace(/(from\s*")\.\//g, `$1${gripDir}/`);
+  const dir = mkdtempSync(join(tmpdir(), "grip-declguard-"));
+  const path = join(dir, `acceptance-${declGuardSeq++}.mjs`);
+  writeFileSync(path, src, "utf8");
+  try {
+    await import(`file://${path}`);
+    return null; // imported clean — the guard did NOT fire
+  } catch (err) {
+    return err;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+test("a declaration with no filed task is FATAL — the hatch cannot be padded with a shrug", async () => {
+  const err = await mutatedModule((s) => s.replace(/filed_as: "tgw4-r3-has-no-adjudicator-check"/, 'filed_as: ""'));
+  assert.ok(err, "an empty filed_as imported cleanly — the guard is not enforcing its own rule");
+  assert.match(String(err.message), /DECLARED_DIVERGENCES\[5\] is malformed/);
+  assert.match(String(err.message), /filed_as/);
+});
+
+test("a declaration whose label does not actually diverge is FATAL", async () => {
+  const err = await mutatedModule((s) => s.replace(/actually: "R1"/, 'actually: "R3"'));
+  assert.ok(err, "a non-divergent declaration imported cleanly");
+  assert.match(String(err.message), /not a divergence/);
+});
+
+test("the shipped declaration passes its own guard — the check is not simply always-fatal", async () => {
+  const err = await mutatedModule((s) => s);
+  assert.equal(err, null, `the unmutated module failed its own declaration guard: ${err?.message}`);
+});

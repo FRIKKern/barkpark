@@ -146,6 +146,36 @@ const DECLARED_DIVERGENCES = Object.freeze({
   },
 });
 
+// THE ESCAPE HATCH HAS TO COST SOMETHING (added in review).
+//
+// "Each entry must be paid off by a filed task, named here" was a COMMENT, and
+// nothing read it. An entry with `filed_as: ""`, a typo'd key, or no task at all
+// silenced a divergence just as well as an honest one — a guard whose only
+// enforcement is the prose above it. This module's own thesis is that a control
+// which cannot fire is not a control, so the shape is checked at module scope
+// and the failure is FATAL on import, exactly like PROBE-DRIFT: a malformed
+// declaration must never be discovered by reading a report that says PASS.
+//
+// It still cannot prove the task EXISTS — that needs the network, and this
+// module is hermetic by design. It proves the declaration was WRITTEN as a
+// payoff rather than as a shrug, which is the half a local check can hold.
+const TASK_SLUG = /^[a-z][a-z0-9-]{6,}$/;
+for (const [id, d] of Object.entries(DECLARED_DIVERGENCES)) {
+  const bad = (what) => {
+    throw new Error(
+      `DECLARED_DIVERGENCES[${id}] is malformed: ${what}. A declaration silences a real ` +
+      "finding, so it must name the label, what actually fires, why, and the task that pays " +
+      "it off. Fix the declaration or delete it and let the divergence fail the run.",
+    );
+  };
+  for (const key of ["labelled", "actually", "finding", "filed_as"]) {
+    if (typeof d?.[key] !== "string" || d[key].trim() === "") bad(`\`${key}\` is missing or empty`);
+  }
+  if (d.labelled === d.actually) bad("`labelled` equals `actually` — that is not a divergence");
+  if (!TASK_SLUG.test(d.filed_as)) bad(`\`filed_as\` (${JSON.stringify(d.filed_as)}) is not a task slug`);
+  if (d.finding.trim().length < 80) bad("`finding` is too short to be an explanation");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** The "read at Lx" / "claimed at Ly" clauses, from the specimen's own prose. */
