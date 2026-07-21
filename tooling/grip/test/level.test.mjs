@@ -10,6 +10,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { readFileSync } from "node:fs";
+
 import {
   deriveLevel,
   LEVELS,
@@ -17,6 +19,8 @@ import {
   classifyRef,
   isDiscretePredicate,
   GENERATED_ARTIFACT_PATTERNS,
+  L3_HEADS,
+  looksLikeProse,
 } from "../level.mjs";
 import { admitFact, findRefs, FACT_FIELDS } from "../record.mjs";
 
@@ -471,4 +475,257 @@ test("admitFact rejects a subject-less or claim-less record with named reasons",
   assert.equal(rejected.ok, false);
   const reasons = rejected.rejections.map((r) => r.reason).sort();
   assert.deepEqual(reasons, ["MISSING-CLAIM", "MISSING-SUBJECT"]);
+});
+
+// =============================================================================
+// COMPOUND COMMANDS — the blind spot (charter D30)
+// =============================================================================
+//
+// Everything above this line tests a SINGLE command. The suite had ZERO `&&`
+// tests, so a green run proved nothing about the shape that dominates real
+// evidence: `cd <path> && <command>`. That gap is why the Digest's three-word
+// recommendation — add `bp`, `gh`, `cd` to L3_HEADS — read as safe.
+//
+// It was not. `deriveLevel` short-circuited on the FIRST head token, so
+// blessing `cd` would have made `cd /opt/barkpark && curl https://prod/health`
+// derive L3 — LOCAL-CHECKOUT authority for a command that reaches production,
+// a two-level skip with no test able to see it. The fix walks every segment of
+// the compound instead, and no wrapper is ever blessed with a level.
+
+test("L3_HEADS blesses no wrapper — cd, for and env are NOT local-read heads", () => {
+  // The naive fix, pinned as absent. If a future edit adds `cd` here, the
+  // compound tests below are what will catch what it costs.
+  assert.equal(L3_HEADS.has("cd"), false, "cd is navigation, not a read");
+  assert.equal(L3_HEADS.has("for"), false, "for is a loop, not a read");
+  assert.equal(L3_HEADS.has("env"), false, "env is a prefix wrapper, not a read");
+  assert.equal(L3_HEADS.has("bp"), false, "bp is a remote-API client — L2, not L3");
+  assert.equal(L3_HEADS.has("gh"), false, "gh is a remote-API client — L2, not L3");
+});
+
+test("cd + curl to a non-loopback host derives L1, not L3 and not L6", () => {
+  // Pre-fix this was L6 (safe by accident: the head was `cd`). The naive
+  // L3_HEADS fix would have made it L3 — authority INFLATION on a command that
+  // provably reaches production. Neither is right: the compound touches a
+  // running system, so its ceiling is L1.
+  const level = deriveLevel("cd /opt/barkpark && curl https://guerrilla.barkpark.cloud/health");
+  assert.equal(level, "L1");
+  assert.equal(deriveLevel("cd api && curl -s -o /dev/null -w '%{http_code}' http://89.167.28.206/api/schemas"), "L1");
+});
+
+test("cd + wget to a non-loopback host derives L1", () => {
+  assert.equal(deriveLevel("cd /opt/barkpark && wget -qO- https://guerrilla.barkpark.cloud/health"), "L1");
+});
+
+test("cd + LOOPBACK curl stays L3 — the local dev server is a checkout property", () => {
+  assert.equal(deriveLevel("cd /opt/barkpark && curl -s http://localhost:4000/v1/capabilities"), "L3");
+  assert.equal(deriveLevel("cd api && curl -s http://[::1]:4000/api/schemas"), "L3");
+});
+
+test("cd + ssh derives L1", () => {
+  assert.equal(
+    deriveLevel("cd /opt/barkpark && ssh -o BatchMode=yes root@157.180.90.121 'systemctl is-active barkpark'"),
+    "L1",
+  );
+});
+
+test("cd + gh api derives L2", () => {
+  assert.equal(
+    deriveLevel("cd /Volumes/SATECHI/github/barkpark && gh api repos/FRIKKern/barkpark/pulls/4294 --jq .state"),
+    "L2",
+  );
+});
+
+test("cd + bp derives L2", () => {
+  assert.equal(
+    deriveLevel('cd /Volumes/SATECHI/github/barkpark && bp search query "research coverage ledger"'),
+    "L2",
+  );
+});
+
+test("cd + a local test run derives L3 — the head is found PAST the wrapper", () => {
+  assert.equal(
+    deriveLevel("cd /Volumes/SATECHI/github/barkpark/api && CC=clang mix test test/barkpark_web/live/studio/connectors_live_test.exs 2>&1 | tail -20"),
+    "L3",
+  );
+  assert.equal(deriveLevel("cd js && pnpm --filter @barkpark/react test"), "L3");
+});
+
+test("an env-assignment prefix does not hide the head", () => {
+  assert.equal(deriveLevel("CC=clang MIX_ENV=test mix test test/barkpark/content/validation_test.exs"), "L3");
+  assert.equal(deriveLevel("HCLOUD_TOKEN=fake curl -s https://api.hetzner.cloud/v1/servers"), "L1");
+  assert.equal(deriveLevel("BARKPARK_TOKEN=bogus bp task get foo -o json"), "L2");
+});
+
+test("a for-loop wrapper does not hide the head — the `do` segment is levelled", () => {
+  assert.equal(
+    deriveLevel("for pr in 4566 4567; do gh pr view $pr --json number,state,mergedAt; done"),
+    "L2",
+  );
+  assert.equal(
+    deriveLevel('for f in internal/chat/testdata/*.json; do grep -c workflow_agent "$f"; done'),
+    "L3",
+  );
+  assert.equal(
+    deriveLevel("for host in a b; do curl -s https://guerrilla.barkpark.cloud/health; done"),
+    "L1",
+  );
+});
+
+test("the STRONGEST segment sets the ceiling — a pipe consumer never demotes a remote read", () => {
+  // The standing bar is ZERO false demotions of honest L1/L2 commands. If the
+  // weakest segment won, `curl <prod> | jq .` would derive L3 off `jq` and the
+  // gate would start rejecting honest L1 claims — the fastest way to get a
+  // gate routed around.
+  assert.equal(deriveLevel("curl -s https://guerrilla.barkpark.cloud/v1/capabilities | jq .ok"), "L1");
+  assert.equal(deriveLevel("gh pr list --state open --json number | jq length"), "L2");
+  assert.equal(deriveLevel("cat Makefile && gh api repos/FRIKKern/barkpark --jq .name"), "L2");
+});
+
+test("an artifact read piped into a local consumer stays L4", () => {
+  // L4 is a statement about the read's TARGET, not a rung competing with L1-L3.
+  assert.equal(deriveLevel("cat docs/openapi.json | jq '.paths | keys'"), "L4");
+  assert.equal(deriveLevel("cd /opt && cat docs/openapi.json | wc -l"), "L4");
+  // ...but it never caps a remote read standing beside it.
+  assert.equal(deriveLevel("cat docs/openapi.json && curl -s https://guerrilla.barkpark.cloud/health"), "L1");
+});
+
+test("a quoted operator does not split a segment, and a quoted URL is not a curl target", () => {
+  // Quote-masking is what keeps the refuted prose scanner's failure mode dead:
+  // a MENTIONED url can never reach the curl branch.
+  assert.equal(deriveLevel("grep -n 'a && b' src/main.ts"), "L3");
+  assert.equal(deriveLevel("grep -rn 'https://guerrilla.barkpark.cloud' api/lib/"), "L3");
+  // A genuinely QUOTED curl target still counts — quotes on a real target are
+  // ordinary shell hygiene, not a mention.
+  assert.equal(deriveLevel("curl -s 'https://guerrilla.barkpark.cloud/v1/capabilities'"), "L1");
+});
+
+// =============================================================================
+// bp and gh are REMOTE-API READS — L2 (charter D30 (c))
+// =============================================================================
+
+test("bp derives L2 — it reads the configured remote content server", () => {
+  assert.equal(deriveLevel("bp task get foo -o json"), "L2");
+  assert.equal(deriveLevel("bp doc ls tag -o json"), "L2");
+  assert.equal(deriveLevel("bp search query 'scaffy engine reanchor' -o json"), "L2");
+});
+
+test("non-api gh derives L2, the level gh api already held", () => {
+  assert.equal(deriveLevel("gh pr view 4159 --json state,mergeCommit,mergedAt"), "L2");
+  assert.equal(deriveLevel("gh pr list --state open"), "L2");
+  assert.equal(deriveLevel("gh run list --workflow elixir.yml --branch main --limit 5"), "L2");
+  assert.equal(deriveLevel("gh issue view 1598 --json title,body"), "L2");
+});
+
+test("bp and gh are NOT L1 — they are not ssh and not a read of served bytes", () => {
+  assert.notEqual(deriveLevel("bp task get foo -o json"), "L1");
+  assert.notEqual(deriveLevel("gh pr view 4159 --json state"), "L1");
+});
+
+test("bp pointed at a LOOPBACK server is a local read: L3, mirroring loopback curl", () => {
+  assert.equal(deriveLevel("bp -s http://localhost:4001 --token bp_admin_x cloud workspace export default"), "L3");
+  assert.equal(deriveLevel("bp -s http://127.0.0.1:4077 task ready -o json"), "L3");
+  // An EXPLICIT remote server is still L2, not a promotion.
+  assert.equal(deriveLevel("bp -s https://guerrilla.barkpark.cloud task ready -o json"), "L2");
+});
+
+// =============================================================================
+// THE PARSEABILITY FLOOR — prose can never be graded as evidence (D30 (d))
+// =============================================================================
+//
+// 13.3% of the frozen corpus's rerun strings are prose, not commands. The
+// grammar reads a head token and never asked whether the string PARSES, so any
+// prose carrying a blessed token inherited that token's authority. Each
+// specimen below is REAL — lifted from tooling/grip/fixtures/evidence-corpus.json
+// — and each would have derived L2 or L3 through the segment walk above.
+
+test("real prose specimens from the frozen corpus are floored at L6", () => {
+  const specimens = [
+    // would derive L3 off `python3`
+    "python3 confusion matrix (15 per PREDICTED class, so per-class precision is unbiased)",
+    // would derive L2 off `bp`
+    "bp sites -o json | python3 (count)",
+    // would derive L3 off a `grep`-shaped head
+    "grep/read api/lib/barkpark/content/papers/template.ex around lines 200-219",
+    // would derive L2 off `bp`
+    "bp doc patch … --dry-run",
+    // would derive L2 off `bp` — an unfilled optional-flag slot
+    "bp onramp gemini-cli/zed --write [--force] --server https://guerrilla.barkpark.cloud",
+    // would derive L3 off `mix` — a HUMAN EDIT stands between the reader and the run
+    "probe: add migration_lock: false to Ecto.Migrator.up/down; mix test codelist_issue_version_test.exs --include flaky",
+    // would derive L2 off `gh` — shorthand for four commands, not one
+    "gh pr view 4631/4632/4633 --json state,mergedAt,mergeCommit",
+    // would derive L3 off `git checkout` — an unfilled template slot
+    "git checkout origin/main -- <55 files>; mix compile; CC=/usr/bin/clang MIX_ENV=test mix test --seed 111",
+  ];
+  for (const specimen of specimens) {
+    assert.equal(deriveLevel(specimen), "L6", `prose must floor at L6: ${specimen}`);
+  }
+});
+
+test("the floor demotes a REAL command carrying an unrunnable prose annotation", () => {
+  // Both are real corpus rows. As literal strings neither runs: the
+  // parenthetical would be executed as a subshell. What the grammar certifies
+  // is re-derivability of THIS string (D4), so L6 is the honest answer — and
+  // the ten-second fix is to delete the aside.
+  assert.equal(deriveLevel("curl -s https://guerrilla.barkpark.cloud/papers/x (no auth header) | grep vs-003"), "L6");
+  assert.equal(deriveLevel("node grip-mutation.mjs (section F)"), "L6");
+});
+
+test("the floor NEVER fires on an honest command — the cry-wolf controls", () => {
+  // Every shape the floor could plausibly mistake for prose, pinned. A floor
+  // that cries wolf gets routed around within a wave.
+  const honest = [
+    ["curl -s http://[::1]:4000/api/schemas", "L3"],                    // [ is not [--
+    ["grep -n '[0-9]\\{3\\}' api/lib/foo.ex", "L3"],                    // a glob class
+    ["go test ./internal/cli/...", "L3"],                               // trailing ... is a Go wildcard
+    ["cat Makefile 2>&1 | tail -20", "L3"],                             // > without a closing >
+    ["bp task --help < /dev/null", "L2"],                               // < without a closing >
+    ["sort < in.txt > out.txt", "L3"],                                  // BOTH redirects in one segment
+    ["diff -rq <(cat a) <(cat b) > /tmp/d.txt", "L3"],                  // process substitution + redirect
+    ["node -e \"console.log(1 < 2 && 3 > 2)\"", "L3"],                  // quoted angles
+    ["(cd __preview__ && node smoke.mjs | tail -1)", "L3"],             // a real subshell
+    ["diff <(cat a.txt) <(cat b.txt)", "L3"],                           // process substitution
+    ["jq '.paths | keys' docs/openapi.json", "L4"],                     // a quoted pipe
+    ["ps aux | grep 'bp login' | grep -v grep", "L3"],                  // a 3-token unknown-head segment WITH flags
+    ["frobnicate --all --please", "L6"],                                // unknown head, but flags: not prose
+    ["S=$(head -1 run.log|cut -d' ' -f1); echo $S", "L3"],              // command substitution
+  ];
+  for (const [command, expected] of honest) {
+    assert.equal(deriveLevel(command), expected, `must NOT be floored: ${command}`);
+  }
+});
+
+test("looksLikeProse is exported and explains a demotion rather than only applying it", () => {
+  assert.equal(typeof looksLikeProse, "function");
+  assert.equal(looksLikeProse("bp sites -o json | python3 (count)"), true);
+  assert.equal(looksLikeProse("bp sites -o json | jq length"), false);
+});
+
+// =============================================================================
+// PURITY — deriveLevel stays pure, synchronous and clock-free
+// =============================================================================
+
+test("level.mjs imports nothing, shells out to nothing and reads no clock", () => {
+  // A grammar that shells out could not run inside the in-loop gate, and one
+  // that reads a clock is non-deterministic — the same command would level
+  // differently on two runs, which is the drift this epic exists to abolish.
+  const source = readFileSync(new URL("../level.mjs", import.meta.url), "utf8");
+  const code = source
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+  for (const forbidden of ["child_process", "execSync", "spawnSync", "Date.now", "new Date", "require(", "readFileSync", "await ", "async "]) {
+    assert.equal(code.includes(forbidden), false, `level.mjs must not contain ${forbidden}`);
+  }
+  assert.equal(/^\s*import\s/m.test(code), false, "level.mjs must import nothing");
+  // And it is deterministic: the same input levels the same twice.
+  const command = "cd /opt/barkpark && curl https://guerrilla.barkpark.cloud/health";
+  assert.equal(deriveLevel(command), deriveLevel(command));
+});
+
+test("deriveLevel never throws on hostile input", () => {
+  for (const hostile of [null, undefined, 42, {}, [], "", "   ", "((((", "'unterminated", "&&&&", "|||", ";;;;", "<<<>>>", "\n\n\n"]) {
+    const level = deriveLevel(hostile);
+    assert.ok(Object.keys(LEVELS).includes(level), `${JSON.stringify(hostile)} → ${level}`);
+  }
 });
