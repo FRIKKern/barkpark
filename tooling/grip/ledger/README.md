@@ -6,6 +6,11 @@ Every `*.json` beside this file is **one immutable run file**. Written once,
 never modified, never deleted by tooling. The store is read by folding all of
 them together: `node tooling/grip/ledger.mjs fold`.
 
+**If you came here to write a row, jump to [How to write a row](#how-to-write-a-row).**
+You do not hand-author these files. There is a verb, and this README predated
+it long enough that a verifier needed nine independent discovery steps to write
+one row through it. Every one of those nine is answered below.
+
 ## What a row is — and what it is not
 
 ```json
@@ -36,6 +41,154 @@ catch that: the invalidation signal is not in the fact. A stored value is an
 assertion with a timestamp on it. The ratified anti-goal — *the ledger is an
 INDEX OF HOW TO VERIFY FAST, never a substitute for verification* — stops being
 a discipline someone has to remember and becomes a property of the schema.
+
+## How to write a row
+
+```bash
+node tooling/grip/ledger.mjs write <facts.json> [dir]
+```
+
+That is the whole write path. There is no other supported way in; hand-editing
+a `*.json` here bypasses every honesty bound below and the fold will happily
+read your forgery back as authoritative.
+
+**The third positional `dir` is where the run file lands.** Omit it and the
+write goes to `DEFAULT_LEDGER_DIR`, which is `fileURLToPath(new URL("./ledger/",
+import.meta.url))` — resolved relative to `ledger.mjs`'s **own module location**,
+not to your cwd. So from anywhere in this checkout, omitting it is correct and
+lands here. Pass `dir` when you are running the module from outside the repo, or
+when you want a scratch store you are not committing (every command in this
+README was proven against a scratch dir for exactly that reason).
+
+### You must materialise `facts.json` yourself
+
+Nothing writes it for you. Not the workflow host, not `cli.mjs`, not `mint.mjs`.
+The file is either a bare JSON array of facts, or `{ "facts": [ … ] }` — both
+shapes load, matching `cli.mjs`'s loader exactly. Anything else exits 2 with
+`must be a JSON array of facts, or an object with a "facts" array`.
+
+### The fact shape — and the two fields that are DROPPED
+
+A fact carries exactly three keys:
+
+```json
+[
+  {
+    "claim":    "free prose — what you think is true",
+    "evidence": "free prose — how you came to think so",
+    "rerun":    "grep -c 'export function' tooling/grip/screen.mjs"
+  }
+]
+```
+
+**`claim` and `evidence` are DROPPED by the mint and never reach the store.**
+This is not a bug and not a trim you can opt out of. A ledger row's
+`RECIPE_FIELDS` is a frozen six-key allowlist — `{subject, quantity, rerun,
+derived_level, deps, observed_at}` — and the two schemas share **no field at
+all**. Only `rerun` survives, and `subject`/`quantity` are minted **out of the
+rerun command**, never out of your prose. Write your `rerun` as if it were the
+only thing you were saying, because it is.
+
+Why the command and not the prose: subjects minted from claim prose were
+measured perfectly injective over 119 facts — 119 distinct keys for 119 facts,
+so the fold's `(subject, quantity)` key could never collide, `RIVAL-METHOD`
+could never fire, and nothing in the index was ever a lead to anything else. A
+dead index that looks full. The rerun's path token gave 51 keys for the same
+119 facts: it **clusters**, which is the entire point of an index.
+
+### `mint` is a REQUIRED intermediate, not an optimisation
+
+Do not try to feed facts to `admitRecipe` directly. Every raw fact
+**quadruple-rejects**: `UNKNOWN-FIELD` on `claim`, `UNKNOWN-FIELD` on
+`evidence`, `MISSING-SUBJECT`, `MISSING-QUANTITY`. `mint.mjs` is a
+**transformer**, never a pass-through. The `write` verb runs it for you — that
+is most of what the verb is.
+
+### The write is ALL-OR-NOTHING — prescreen first
+
+One refused row loses the **whole batch**. Nothing is written, including the
+rows that passed:
+
+```
+REJECTED — nothing was written (all-or-nothing: a file holding only the rows that
+happened to pass IS the silent-strip defect at file granularity)
+  REFUSED-COMMAND x1
+  row 1: REFUSED-COMMAND: "node --test …" was refused by the injected safety screen …
+```
+
+That rule is right — a run file holding only the survivors *is* the silent-strip
+defect at file granularity — but you should not have to lose a batch to learn
+it. **There is no `prescreen` verb.** `tgw3-leads-verb` was sequenced into a
+later round and has not shipped; `node ledger.mjs` accepts exactly `write`,
+`fold` and `--selftest`. Until it does, screen your batch yourself with the
+module the write verb injects:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { screenCommand } from "./tooling/grip/screen.mjs";
+const p = JSON.parse(readFileSync(process.argv[1], "utf8"));
+for (const [i, f] of (Array.isArray(p) ? p : p.facts).entries()) {
+  const r = screenCommand(f.rerun);          // .ok — NOT .safe
+  console.log(`${r.ok ? "ADMIT " : "REFUSE"} [${i}] ${f.rerun}${r.ok ? "" : "\n         " + r.reason}`);
+}
+' path/to/facts.json
+```
+
+### `screenCommand` returns `.ok`, NOT `.safe` — and the mistake reads as its own opposite
+
+This is the single most expensive trap on the write path, because it fails in
+the direction that looks like diligence. `screenCommand` returns
+`{ ok, reason }`. It has no `safe` key. Read `.safe` and you get `undefined`,
+which is falsy, so **every row scores refused** — and the `reason` string on an
+admitted command still reads `"admitted: …"`, so your own output says the
+opposite of your own verdict:
+
+```
+r.ok     = true
+r.safe   = undefined    <-- the trap
+r.reason = admitted: within the host bound, allowlisted head and sub-verb, no write shape
+verdict if you read .safe: REFUSED — admitted: within the host bound, allowlisted head and sub-verb, no write shape
+```
+
+A careful agent pre-screening its batch this way concludes its commands are all
+inadmissible, scores 0 out of 40, and is looking at the word "admitted" while it
+does so. The `.safe` key belongs to `rerun.mjs`'s `classifySafety`, a different
+module with a different reach — that is why the mistake is available at all.
+
+### The clock is the shell's
+
+`observed_at` is **not** read from your `facts.json`. The CLI reads `date -u`
+once and supplies both `observed_at` and the `run_id` (sanitised — `RUN_ID`
+rejects the colons in the raw `date` string). Forging a timestamp takes editing
+`ledger.mjs`, not editing a payload. Stated honestly: a forger who controls the
+caller controls the bound. This stops accidents and staleness, not a determined
+forger.
+
+### A real run, end to end
+
+```
+$ node tooling/grip/ledger.mjs write /tmp/facts.json /tmp/demo-ledger
+ledger write — now 2026-07-21T06:32:08Z (read from `date -u`, never from the input)
+  facts read           1
+  minted               1
+  subject from PATH    1 (100% of minted) ← the coverage number
+  subject from cmd:    0 (0% of minted) ← a FLOOR, not coverage; never add these together and call it yield
+  distinct subjects    1
+
+wrote  /tmp/demo-ledger/grip-20260721T063208Z-7936031f4366151d.json
+  run_id grip-20260721T063208Z — sanitised from the `date -u` stamp; the raw form carries colons and RUN_ID rejects it
+  1 rows admitted, 0 rejected
+```
+
+Exit codes: `0` written (or `already recorded` — the write is idempotent), `1`
+rejected or nothing mintable, `2` usage/IO.
+
+### Your checkout may not have the verb
+
+`write` landed in wave 3. If `node tooling/grip/ledger.mjs write …` prints the
+usage line instead of running, you are on a checkout that predates it — that is
+an L3-is-a-claim-about-L2 problem, not a bug. Pull.
 
 ## Why one file per run
 
@@ -90,6 +243,10 @@ admitted, written and folded back as authoritative.
   is rejected `REFUSED-COMMAND`; a screen that throws is `SCREEN-FAILED`, never
   an admission. `systemctl stop …` and `rm -rf …` were admissible recipes
   before this, and a recipe is a standing invitation to re-run something often.
+  The screen refuses **every** `node` command, so grip's own `node --test …` and
+  `node tooling/grip/ledger.mjs --selftest` recipes can never be stored here.
+  That refusal is a reach bound this epic chooses, not a security invariant —
+  read the honest statement of it in `../README.md`, "The node refusal".
 
 Both are **injected, not imported** — nothing here depends on `screen.mjs`. Both
 are **optional, and omitting them admits**, so on their own they are a mechanism
@@ -114,6 +271,7 @@ stays callable from a phase that has no clock at all.
 ## Use
 
 ```bash
+node tooling/grip/ledger.mjs write <facts.json> [dir]   # THE WRITE PATH — see above
 node tooling/grip/ledger.mjs fold            # fold this directory to JSON
 node tooling/grip/ledger.mjs fold <dir>      # fold another store
 node tooling/grip/ledger.mjs --selftest      # prove the controls can fire (exit 3 = a control stayed silent)
