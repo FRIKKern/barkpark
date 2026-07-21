@@ -9,6 +9,8 @@
 //       consumed token must be part of the contract).
 //   E2  a class name emitted by index.html or an app.js template string /
 //       classList call / className assignment that has no rule in app.css.
+//       LITERAL CLASS TOKENS ONLY — attribute-driven state is out of scope by
+//       technique; the boundary and its ruling are declared in full below.
 //   E3  a dynamic class composition site in app.js (e.g. 'dot ' + kind) whose
 //       static head is not explicitly allowlisted below — dynamic names cannot
 //       be statically resolved, so every such site must be a conscious entry.
@@ -68,6 +70,67 @@
 //       (app.js is owned by another slice — leave, don't touch).
 //   R4  raw px font-sizes in app.css rules outside the token blocks — the
 //       type-scale migration backlog for the decision-24 sweep.
+//
+// ── E2 COVERAGE BOUNDARY (charter D40/D49) ──────────────────────────────────
+// Declared because a gate that cannot see a whole class of defect must SAY so:
+// an UNDECLARED boundary reads as coverage, and a reader who assumes "the class
+// checker checks what the SPA puts on elements" is wrong in a way this file
+// never told them.
+//
+//   WHAT E2 SEES. Exactly two extractors, both over double-quoted LITERALS:
+//     /\.className\s*=\s*"([^"]*)"(\s*\+)?/g
+//     /classList\.(?:add|remove|toggle)\(\s*"([^"]+)"/g
+//   A class token has to be written out in the source to be checked at all.
+//
+//   WHAT E2 CANNOT SEE. `el.setAttribute("data-x", someVar)` — the attribute
+//   NAME is a literal but the VALUE is a variable, and no regex over the call
+//   site can enumerate what that variable holds. `el.dataset.x = v` is the same
+//   defect in property form. So `[data-x="…"]` rules in app.css are, to E2,
+//   neither emitted nor dead: they are invisible.
+//
+//   THE MEASURED POPULATION (app.js at 8eeaf68 — five attribute-state writes,
+//   NOT the "three" earlier recon claimed):
+//     app.js:3312   documentElement.setAttribute("data-theme", t)
+//     app.js:3344   documentElement.setAttribute("data-bp-theme", t)
+//     app.js:16442  root.setAttribute("data-theme", theme)   — coherenceStampTheme
+//     app.js:16445  root.dataset.theme = theme               — same fn, DOM fallback
+//     app.js:12013  chip.setAttribute("data-state", state)   — renderLivenessChip
+//   FOUR of the five are data-theme / data-bp-theme and are NOT an E2 gap —
+//   E5 owns them. The contrast engine parses the `[data-theme="dark"]` and
+//   `html[data-bp-theme="…"]` blocks straight out of app.css (parseTokenBlocks
+//   and the identity-ramp scan below) and fans every theme x identity pair
+//   through WCAG. Do not fold them into E2; that would double-own them.
+//   ONE is genuinely E2-blind: `data-state` on the liveness chip, whose value
+//   comes from liveDotState(). __preview__/cssom-parity.mjs does not cover it
+//   either (`grep -c data-state __preview__/cssom-parity.mjs` → 0) and could
+//   not in principle — it diffs authored CSS against the browser CSSOM and
+//   never reads app.js.
+//
+//   THE RULING — E2 IS NOT EXTENDED TO ATTRIBUTE VALUES. Reaching a variable
+//   attribute value is not a generalization of E2's technique: literal
+//   extraction has no path there, so an attribute check added HERE would be a
+//   parallel bolt-on with its own fragile function-body regex, carrying E2's
+//   name without E2's method. The cheaper and stronger shape asserts over the
+//   EMITTING FUNCTION instead, and it is already on main (#5377):
+//     git show origin/main:cloud/priv/static/__app.test.mjs \
+//       | grep -n 'carries a paint rule for EVERY chip state'
+//     4713:test("liveness chip: app.css carries a paint rule for EVERY chip state", …
+//   That test loops the REAL liveDotState return set against app.css, and its
+//   sibling ("liveDotState: the return set is a CLOSED enum of exactly four
+//   states") pins the set itself, so a fifth state cannot slip past unpainted.
+//   Hence no check is added here and no second test is added there — that pair
+//   would be duplicate coverage of the identical liveDotState/app.css seam.
+//
+//   KNOWN GRANULARITY LIMIT (stated, not papered over). That fence proves
+//   SELECTOR-PREFIX PRESENCE in app.css TEXT, not per-property survival — the
+//   same substring-presence technique E2 itself uses. Measured on this tree:
+//   deleting ONLY `.live-chip[data-state="stale"] .live-dot { background: … }`
+//   while the `.live-chip-label` rule with the same prefix survives reds
+//   NEITHER check (both green); deleting BOTH reds __app.test.mjs with
+//   `no paint rule for stale`. __css_check stays green in both mutations — it
+//   never sees data-state at all, which is exactly this boundary. A state can
+//   therefore lose its DOT colour silently. Closing that needs a
+//   per-declaration CSSOM assertion, not another text scan.
 //
 // Zero dependencies. Run: node __css_check.mjs
 
