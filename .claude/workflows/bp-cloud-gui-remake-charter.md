@@ -1332,6 +1332,44 @@ epic did. The census exists because of that, not despite it. **THE CROWN IS DARK
 console shipped fully built and remains unreachable because `PLATFORM_ADMIN_EMAILS` is still unset on the
 control plane. **"Seal" means CODE seal only, and the ending must say so in plain words.**
 
+### Wave 2026-07-21 (round 12) — THE ACT RAN. VERDICT: SEAL. Grade A.
+
+Wave Paper `cloud-gui-remake-wave-2026-07-21-r12`. One slice, one agent, one instant. After seven attempts and
+a round 11 that wrote a perfect runbook and executed **none** of it, round 12 did the two mechanical acts and
+took the verdict.
+
+**WHAT LANDED.** `gr-p5r12-terminal-act`, final branch
+`loop-epic/the-terminal-act-executed-move-the-58-cl-0-r`. One close
+(`gr-backlog-bp-search-verb-discoverability` → done 3/3 on merge SHA `3f16c9f43`, first attempt, no fallback).
+**Fifty-nine re-parentings** — 58 successor-bound (57 banded + `gr-p5r5-successor-seal` self-orphaned LAST) and
+1 to `task-96a908af98698118`. Rosters verified live by the reviewer, independently of the builder's report:
+epic `task-47bc4168392dec17` **140 children / 60 live → 81 / 0 live**, successor `cloud-console-hardening-epic`
+**10 → 68**, `task-96a908af98698118` **46 → 47**. The frozen predicate ran **once**, from a pristine worktree,
+`--successor cloud-console-hardening-epic`, no `--ledger`, no `--guard-cmd`: **VERDICT: SEAL, exit 0, stderr 0
+bytes.** 211 lines of terminal artifact appended to this charter. **No eighth instrument** — both `.mjs` files
+byte-identical to `origin/main`, the charter the only file in the commit.
+
+**WHAT THE REVIEW ADDED.** The seal was **independently reproduced twice** from a second worktree at the branch
+tip (the actual merge candidate), on different ports, after a fresh `git fetch` — banner identical line for
+line. Clause (b) was **mutation-proved**: forcing `.topbar-right > *` to `min-width:400px` made the guard FAIL
+with 44 real findings under Chrome 150 serving disk bytes, so the green is a live measurement, not a rubber
+stamp. One prose defect fixed: the artifact's "Fifty-eight moves" heading undercounted by one against its own
+(correct) roster-delta table.
+
+**WHAT DID NOT GET SOLVED, and is not pretended otherwise.** The seal is a **CODE seal**. The crown is still
+DARK (`gr-ops-platform-admin-emails` is a human shell act; no commit can set an unset prod env var). The
+done-set was never fully audited — 81 rows carry a close record, which is not 81 rows verified; one named
+false-done (`gr-blk-shootsh-scen-suggester`) is a **FLOOR, not a ceiling**, and
+`gr-bl-doneset-merge-sha-reaudit` stays OPEN. The 58 forwarded rows are **moved, not solved**: the successor now
+carries 68 open children and no plan. Two rows filed at review under the successor:
+`gr-bl-gr108-fix-overdetermined` (the GR108 fix turns out to be over-determined — removing it does not
+reproduce the overflow, so the charter's causal story is not the whole mechanism) and the builder's
+`bl-task-move-stdin-refusal`.
+
+**NEXT.** Nothing, for this epic — it ends here, there is no round 13. The work continues under
+`cloud-console-hardening-epic`, whose first job is to plan its 68 inherited rows and whose highest-value early
+row is the done-set re-audit.
+
 ---
 
 ## Wave 2026-07-21 — phase-5 seal round 11: THE TERMINAL WAVE (execute and disclose, then END)
