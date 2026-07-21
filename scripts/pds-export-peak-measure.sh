@@ -421,6 +421,25 @@ fi
 if [ "$FULL_ACQ" = yes ]; then
   info "attempt ledger  $(full_attempts) of $FULL_BUDGET spent so far · $FULL_ATTEMPTS_FILE (shared with the frozen harness)"
   info "                this acquisition is FULL-fidelity, so it will charge 1 attempt — written just before the request, never here"
+  # This instrument RECORDS; the frozen harness's cond_c ENFORCES. That split is
+  # deliberate (measuring must stay reachable), but "3 of 1 spent so far" said in
+  # the same calm voice as "0 of 5" is the very defect the REFUSAL block below
+  # exists to kill — an unusable number emitted as though it were usable. So the
+  # over-budget case is stated OUT LOUD, at the last moment it can still be
+  # cancelled by hand. Whether it should REFUSE is a policy call above this
+  # script: pds-bl-peak-budget-enforcement.
+  if [ "$(full_attempts)" -ge "$FULL_BUDGET" ]; then
+    info ""
+    info "                ⚠ OVER BUDGET — $(full_attempts) attempt(s) already spent against a budget of $FULL_BUDGET."
+    info "                  The frozen harness's cond_c would REFUSE the crown climb in this state."
+    info "                  This instrument does not enforce that gate, so it is ABOUT TO FIRE a"
+    info "                  ~2.2 GiB export anyway and charge attempt $(( $(full_attempts) + 1 )). If that is not"
+    info "                  what you want, interrupt now, or narrow the acquisition with"
+    info "                  --path '/api/workspaces/$SOURCE_WS/export?profile=dev&dataset=production'."
+    info "                  Raise the ceiling honestly with PDS_FULL_EXPORT_BUDGET; NEVER reset the"
+    info "                  counter (PDS-D212)."
+    info ""
+  fi
 else
   info "attempt ledger  $(full_attempts) of $FULL_BUDGET spent so far · $FULL_ATTEMPTS_FILE (read only)"
   info "                this acquisition is NARROWED, so it charges 0 attempts and leaves that file's value and mtime untouched"
