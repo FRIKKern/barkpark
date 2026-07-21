@@ -3635,3 +3635,86 @@ merges: six named states, `ps -p` never `pgrep`, D248 stranded-lock recovery, th
 cross-check BEFORE any stamp, criterion text fetched to a file and passed by `"$(cat f)"`, evidence
 terse against the ~9–11 KB request-line ceiling, 0–9 from the one transcript, 10 on merge, 11 LAST
 and ALONE. **ZERO NEW SCRIPTS** and the frozen harness blob is untouched.
+
+### Wave 18 — BOOT THE SCRATCH TARGET AND RE-FIRE THE CROWN (decided 2026-07-21, PDS-D265–PDS-D267, paper `pds-wave-18-2026-07-21`)
+
+**WHAT LANDED / WHAT MOVED.** Wave 16 pulled the trigger for real (run `1b515ee5`, run_id
+`20260721T095512Z-60807`, the REAL frozen harness): DRAW 1 mem 2578 ≥ 2200 → FIRE, a genuine 1.4 GB
+full export was taken (`/tmp/pds-full-export/full-default.tar`, 1,405,095,424 bytes, attempts 3→4),
+result **5 PASS · 6 ABORT · 0 FAIL rc=2** — the transcript's own words: "This is the honest partial
+artifact … it is NOT a green." The **sole** blocker was `env:scratch-target-not-booted`, not an
+engine failure. Wave 17 died at Digest under the spend limit with no slices built. Wave 18 is a FRESH
+wave that removes that one blocker and re-fires. Three premises the lead built wave 18 on were
+re-measured this turn and TWO of them moved.
+
+- **PDS-D265 — THE FREE RE-FIRE IS DEAD; WAVE 18 PAYS ONE FRESH FULL EXPORT AT BUDGET spent+2.**
+  Wave 16 fired against served_sha `8eeaf688…` which WAS the live deployed sha at 09:55Z (the lead's
+  own p0 recorded the match — correct at the time). Guerrilla has since auto-deployed: live HEAD read
+  fresh over SSH this turn is **`e16869ac06e2861f91b4359599d7f8311e035f6f`** (`.instance-deploy-last`
+  matches, deployed 2026-07-21T16:12:13Z). The parked `full-default.tar.meta` still reads
+  `8eeaf688…` (v0.2.25.1494) — a **MISMATCH**, so `acquire_full_bundle`'s PDS-D20/D223 provenance gate
+  REFUSES the parked bundle and rungs 3/4 must take a **fresh export, spending one attempt**. Local
+  `/tmp/pds-full-export/attempts` reads **4** (host-authoritative, D156). CRITICAL: `FULL_BUDGET`
+  defaults to **1**, so gate (c) `spent < budget` is ALREADY FAILING (4 ≥ 1) unless the budget is set —
+  `fire_detached` computes `PDS_FULL_EXPORT_BUDGET=spent+2` in one contiguous shell at fire time (=6
+  now, D224/D249), never a literal; the slice **re-cats `attempts` at fire time** and asserts
+  `budget > attempts`. The brief's quoted "069c6e98 / v1505 live" is ITSELF already stale — never quote
+  a cached sha; re-ssh at fire time. **The economics revert from wave 16:** the expensive, dangerous
+  export is NOT pre-paid, so **HEADROOM is now the gating risk**, not the attempt count.
+
+- **PDS-D266 — THE BOOT PRECEDES THE ARM AT THE RUN_TAG-DERIVED HOME; THAT AGREEMENT IS
+  OPERATOR-ENFORCED THIS WAVE.** Wave 16's one blocker is fully diagnosed and live-reproduced:
+  `cmd_arm` **neither boots the scratch target nor asserts `scratch.env` exists**. It unconditionally
+  exports `BARKPARK_HOME=/tmp/pds-w14.$run_tag` where `run_tag = $(printf '%s' "$PDS_RUN_ID" | cksum |
+  awk '{printf "%x",$1}')`, and if `PDS_RUN_ID` is unset it invents a `date+$$` run_tag that no
+  pre-boot could ever target; the harness reads `$BARKPARK_HOME/scratch.env` and **ABORTS if absent**
+  (it never boots). That is exactly why rungs 0c/1/2/5/6 aborted in wave 16 and burned attempt 3→4.
+  **RULING:** the fire slice (a) PINS `PDS_RUN_ID`, (b) derives `run_tag` by the identical cksum
+  recipe, (c) pre-boots with `BARKPARK_HOME=/tmp/pds-w14.$run_tag
+  PDS_SCRATCH_POINTER=/tmp/pds-scratch.pds-w14.$run_tag.last scripts/pds-scratch-target.sh up
+  --verify`, (d) **ASSERTS `test -f /tmp/pds-w14.$run_tag/scratch.env` BEFORE arming**, (e) arms with
+  the SAME `PDS_RUN_ID`. If `scratch.env` is absent → **HONEST ABORT, do not arm** (zero attempts).
+  The boot is PROVEN GREEN on a fresh origin/main worktree this turn: `up --verify` → exit 0, a valid
+  9-export `scratch.env` (quoted `PDS_SCRATCH_DB` conninfo, w6 trap held), the negative control fires
+  (`env -u BARKPARK_MEDIA_DIR` resolves to the running tree's `api/uploads`), no OOM, **~188 s fully
+  cold** (deps absent + both compiles) — pre-warm OFF the clock per D258. Teaching `cmd_arm` to assert
+  `scratch.env` at its derived home is the durable class-fix but is **BACKLOG**
+  (`pds-bl-launcher-assert-scratch-env`), not built this wave: a launcher edit makes the fire round 2
+  and delays the seal, against ZERO-NEW-SCRIPTS and the finish mandate.
+
+- **PDS-D267 — HEADROOM IS MARGINAL BUT 2200 STAYS; DO NOT TIGHTEN.** The "phantom headroom" framing
+  did not survive a real window. A 30-sample / 6-minute live sampling this turn read **min 2037.8 /
+  mean 2145.0 / max 2238.7 MiB, only 3/30 (10%) clearing 2200** — yet within ~2 minutes MemAvailable
+  recovered to ~2950 MiB and kept climbing (the box swings 900+ MiB in minutes; a single point sample
+  in EITHER direction is the D92/D112 trough trap). The 2200 floor is nonetheless hugely conservative:
+  the deployed **spill** engine's real peak from wave-16's own fire is **~477 MiB** (parked `.meta`
+  `rss_peak_kb 488564 / rss_baseline_kb 388044`, +98 MiB incremental — apples-to-apples with the
+  RETIRED in-memory engine's 2235.43 MiB via the same 1 Hz `ps` sampler). **RULING (reaffirms D257):**
+  leave `PDS_LAUNCH_MEM_FLOOR_MIB` and `PDS_FULL_EXPORT_MIN_MEM_MB` UNSET — the floor is tighten-only
+  and RAISING it above 2200 only shrinks an already-thin window for zero real safety (engine needs
+  ~477). The arm polls up to `--max-draws 2160 --interval 10` (6 h) and either FIRES on a
+  high-regime draw or STANDS DOWN honestly (exit 5, ZERO attempts). Per D262 there are THREE honest
+  outcomes — FIRE-and-climb, draws-exhausted STAND-DOWN, or FIRE-then-immediate-`cond_b`-refusal
+  (zero attempts, window spent). A NAMED ABORT that never opens a safe window is a WIN, not a failure;
+  the crown stays honestly at 9/12 with the scratch target proven bootable for the next attempt.
+
+**WAVE 18 PLAN.** One round-1 slice; one round-2 LEAD-only seal (returned as a deferral, NOT built
+this run). **Round 1 — `pds-w18-crown-fire` — THE RE-FIRE** (`scripts/pds-w18-fire-record.md`): cut
+a FRESH **persistent** worktree at origin/main (it must OUTLIVE the turn for the detached child — not
+an ephemeral builder tree), pay `deps.get` + both compiles off the clock, PIN `PDS_RUN_ID`, pre-boot
+scratch at `/tmp/pds-w14.$run_tag` with `up --verify`, **assert `scratch.env` exists**, re-cat
+`attempts` and re-ssh guerrilla HEAD in the same breath as the arm to confirm reuse-dead and set the
+budget, `unset PDS_LAUNCH_HARNESS PDS_AMMO_FILE PDS_FULL_EXPORT_MIN_MEM_MB PDS_LAUNCH_MEM_FLOOR_MIB`,
+`export PDS_CONTROL_PG=postgres`, arm `--prewarm-now --max-draws 2160 --interval 10` with `PDS_RUN_ID`
+set, prove `child.sh` line 7 = the fire worktree's `pds-pull-proof.sh` (D259), confirm the child ONCE
+with `ps -p`, record run_id + run_tag + pid + transcript path + scratch home + budget + floor in the
+fire record, push, open the PR, END THE TURN — **no polling**. builder: opus. **Round 2 (deferred,
+LEAD dispatches after the fire merges) — `pds-w18-crown-collect-and-seal`**: LEAD-ONLY, never the
+agent that fired. Collect via six named states (`ps -p` never `pgrep`), D248 stranded-lock recovery,
+the D261 bundle cross-check (`file` / `tar -tf` / manifest `profile == full`) BEFORE any stamp,
+criterion text fetched to a file and passed by `"$(cat f)"`, evidence terse. Re-stamp **ALL of 0–9**
+(not just the unmet rows — the currently-met criteria carry NO shared run_id, so criterion 11's
+byte-identical check fails unless every one is re-stamped) with the ONE wave-18 run_id, **10 on merge
+with the merge SHA recorded**, **11 LAST and ALONE** (disarms the cmux Stop-hook false-close). If any
+rung refused: stamp NOTHING, record the refusal in the paper, file the successor. **ZERO NEW SCRIPTS**
+and the frozen harness blob is untouched.
