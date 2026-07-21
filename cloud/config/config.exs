@@ -16,6 +16,23 @@ config :barkpark_cloud,
 # is the prod API host so an unset env still points at a real receiver.
 config :barkpark_cloud, :public_url, "https://api.barkpark.cloud"
 
+# cch-w1-peer-ip-pin: the peers whose X-Forwarded-For may move conn.remote_ip
+# (Web.Router.trusted_peer?/1). Loopback is ALWAYS trusted in code; this list is
+# the extra front-door peers on top of it.
+#
+# The default is the docker bridge gateway, because Caddy runs as a HOST service
+# proxying to localhost:4100 and Docker's hairpin NAT rewrites the source the
+# container sees to the gateway — so in prod the peer is the gateway, never
+# 127.0.0.1. This value is PINNED to a single address, never a CIDR range: with
+# a 172.16/12 widening, peer {172,18,0,77} was measured forging 203.0.113.5, and
+# cloud-postfix-1 sits on 172.18.0.2 publishing 0.0.0.0:587 to the internet.
+#
+# It MUST agree with the `networks.default.ipam` subnet pinned in
+# cloud/docker-compose.yml; runtime.exs overrides it from TRUSTED_PROXY_PEERS so
+# an operator who moves the bridge changes both in one place. Entries are :inet
+# address tuples.
+config :barkpark_cloud, :trusted_proxy_peers, [{172, 18, 0, 1}]
+
 # Configure Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
