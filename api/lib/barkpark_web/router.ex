@@ -1880,6 +1880,7 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_admin])
 
     get("/", SecretController, :index)
+    get("/:name/audit", SecretController, :audit)
     get("/:name", SecretController, :show)
     put("/:name", SecretController, :update)
     delete("/:name", SecretController, :delete)
@@ -2306,6 +2307,7 @@ defmodule BarkparkWeb.Router do
     pipe_through([:scoped_api, :scoped_admin])
 
     get("/v1/secrets", SecretController, :index)
+    get("/v1/secrets/:name/audit", SecretController, :audit)
     get("/v1/secrets/:name", SecretController, :show)
     put("/v1/secrets/:name", SecretController, :update)
     delete("/v1/secrets/:name", SecretController, :delete)
