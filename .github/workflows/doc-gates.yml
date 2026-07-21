@@ -67,6 +67,11 @@ on:
       - "design/themes/**"
       # theme-system Wave 4 (D24) — the N-theme emission proof + its fixture theme.
       - "design/theme-emit.test.mjs"
+      # cloud-console-hardening wave-5 (D41): the standing regression test for the
+      # emit --write attribution fence. Rides the design/emit.mjs + design/check.mjs
+      # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
+      # fence can still REFUSE an unattributed write.
+      - "design/emit-fence.test.mjs"
       - "design/paper-editor-mirror.mjs"
       - "design/fixtures/**"
       - "cloud/priv/static/app.css"
@@ -186,6 +191,11 @@ on:
       - "design/themes/**"
       # theme-system Wave 4 (D24) — the N-theme emission proof + its fixture theme.
       - "design/theme-emit.test.mjs"
+      # cloud-console-hardening wave-5 (D41): the standing regression test for the
+      # emit --write attribution fence. Rides the design/emit.mjs + design/check.mjs
+      # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
+      # fence can still REFUSE an unattributed write.
+      - "design/emit-fence.test.mjs"
       - "design/paper-editor-mirror.mjs"
       - "design/fixtures/**"
       - "cloud/priv/static/app.css"
@@ -361,6 +371,13 @@ jobs:
           # paper-editor mirror-scoping proofs, driven by a fixture theme OUTSIDE
           # design/themes/ so a second theme is exercised without a shipped skin.
           node design/theme-emit.test.mjs
+          # cloud-console-hardening wave-5 (D41): the emit --write attribution
+          # fence's standing regression test. Drives the real emit.mjs CLI against
+          # a throwaway copy of the tree and asserts the fence REFUSES an
+          # unattributed marker-span AND whole-file write, --force deletes while
+          # naming the lines, and it does NOT over-fire on a legitimate token edit.
+          # Deleting the run() pre-flight block reds this (proven able to fail).
+          node design/emit-fence.test.mjs
 
       # Studio literal-color gate (unified-aesthetic W2.6). Studio chrome
       # (api/lib/barkpark_web/ heex + ex) must consume the emitted design tokens
