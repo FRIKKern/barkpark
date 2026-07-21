@@ -1,0 +1,95 @@
+{
+  "run_id": "grip-20260721T034616Z",
+  "recipes": [
+    {
+      "subject": "tooling/grip/ledger",
+      "quantity": "git:ls-tree",
+      "rerun": "git ls-tree HEAD --name-only tooling/grip/ledger/",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/grip/ledger"
+      ],
+      "observed_at": "2026-07-21T03:46:16Z"
+    },
+    {
+      "subject": "tooling/grip/ledger.mjs",
+      "quantity": "grep:-c",
+      "rerun": "grep -c 'export function writeLedgerRun' tooling/grip/ledger.mjs",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/grip/ledger.mjs"
+      ],
+      "observed_at": "2026-07-21T03:46:16Z"
+    },
+    {
+      "subject": "tooling/grip/ledger.mjs",
+      "quantity": "grep:-n",
+      "rerun": "grep -n -A 2 'export const RECIPE_FIELDS' tooling/grip/ledger.mjs",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/grip/ledger.mjs"
+      ],
+      "observed_at": "2026-07-21T03:46:16Z"
+    },
+    {
+      "subject": "tooling/grip/ledger.mjs",
+      "quantity": "grep:-n",
+      "rerun": "grep -n 'date -u' tooling/grip/ledger.mjs",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/grip/ledger.mjs"
+      ],
+      "observed_at": "2026-07-21T03:46:16Z"
+    },
+    {
+      "subject": "tooling/grip/ledger.mjs",
+      "quantity": "grep:-n",
+      "rerun": "grep -n 'screenCommand: screen' tooling/grip/ledger.mjs",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/grip/ledger.mjs"
+      ],
+      "observed_at": "2026-07-21T03:46:16Z"
+    },
+    {
+      "subject": "tooling/grip/mint.mjs",
+      "quantity": "wc:-l",
+      "rerun": "wc -l tooling/grip/mint.mjs",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/grip/mint.mjs"
+      ],
+      "observed_at": "2026-07-21T03:46:16Z"
+    },
+    {
+      "subject": "tooling/grip/test/mint.test.mjs",
+      "quantity": "grep:-c",
+      "rerun": "grep -c 'NOT injective' tooling/grip/test/mint.test.mjs",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/grip/test/mint.test.mjs"
+      ],
+      "observed_at": "2026-07-21T03:46:16Z"
+    },
+    {
+      "subject": "tooling/grip/screen.mjs",
+      "quantity": "grep:-c",
+      "rerun": "grep -c 'refuse(' tooling/grip/screen.mjs",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/grip/screen.mjs"
+      ],
+      "observed_at": "2026-07-21T03:46:16Z"
+    },
+    {
+      "subject": "tooling/grip/ledger",
+      "quantity": "git:ls-files",
+      "rerun": "git ls-files tooling/grip/ledger/",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/grip/ledger"
+      ],
+      "observed_at": "2026-07-21T03:46:16Z"
+    }
+  ]
+}
