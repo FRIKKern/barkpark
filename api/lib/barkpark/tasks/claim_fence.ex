@@ -20,14 +20,24 @@ defmodule Barkpark.Tasks.ClaimFence do
   @doc "Validate one live Task lease without renewing or mutating it."
   @spec verify(Ecto.UUID.t(), map()) :: {:ok, map()} | {:error, reason()}
   def verify(task_id, expected) when is_binary(task_id) and is_map(expected) do
-    case Repo.one(
-           from(d in Document,
-             where: d.id == ^task_id and d.type == "task",
-             lock: "FOR SHARE"
-           )
-         ) do
-      nil -> {:error, :task_not_found}
-      %Document{} = task -> verify_task(task, expected)
+    # Cast before the query: `id` is the Document :binary_id PK, and a non-UUID
+    # binary would RAISE Ecto.Query.CastError, violating the {:ok,_}|{:error,_}
+    # contract. A non-UUID can never name a live task — collapse it to
+    # :task_not_found (the same reason the catch-all clause returns).
+    case Ecto.UUID.cast(task_id) do
+      {:ok, id} ->
+        case Repo.one(
+               from(d in Document,
+                 where: d.id == ^id and d.type == "task",
+                 lock: "FOR SHARE"
+               )
+             ) do
+          nil -> {:error, :task_not_found}
+          %Document{} = task -> verify_task(task, expected)
+        end
+
+      :error ->
+        {:error, :task_not_found}
     end
   end
 
