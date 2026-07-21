@@ -2576,6 +2576,86 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 16 2026-07-21 — "Dispatch the Fire" — REVIEWED. **THE CLIMB FIRED. THE CROWN DID NOT MOVE.** Grade B+ (paper `pds-wave-16-2026-07-21`)
+
+**THE SHOT WAS TAKEN — five waves of "we built another instrument" ended here.** `pds-w14-crown-fire`
+had been filed and open since wave 14 and had never been dispatched. It was dispatched, it armed at
+`09:55:12Z` (`run_tag=1b515ee5`, pid `60879`, `ppid 1`, `pgid==pid`, `STAT Ss`), and **it fired on
+draw 1** — `mem_mib=2578 >= 2200` with the `bp-site-build-*` listing empty. Against the UNMODIFIED
+2200 floor: `PDS_LAUNCH_MEM_FLOOR_MIB` and `PDS_FULL_EXPORT_MIN_MEM_MB` both unset, exactly as
+PDS-D257 rules. `child.sh:7` read `HARNESS=/private/tmp/pdsw16-fire/scripts/pds-pull-proof.sh` — the
+REAL harness at the frozen blob, closing PDS-D259's wave-15 hole inside the arming turn.
+
+**AND THE CROWN IS STILL UNPAID, FOR A REASON NOBODY HAD NAMED.** The run reached a terminal state
+three minutes later, not six hours later: `collect 1b515ee5` → `STATE: FINISHED`, `RESULT: BLOCKED`,
+`EXIT: 2` at `09:58:12Z`. **5 PASS · 6 ABORT · 0 FAIL.** Rungs `0c/1/2/5/6` all aborted on
+`env:scratch-target-not-booted` and rung 4 on `step:1`. **Rungs 1, 2, 5 and 6 ARE the crown.**
+
+**THE ROOT CAUSE IS STRUCTURAL AND IT INDICTS THE LAUNCHER, NOT THE BOX.** `pds-crown-launch.sh:197`
+exports `BARKPARK_HOME="/tmp/pds-w14.$run_tag"` **unconditionally** (PDS-D233) — no `${…:-}` default —
+from a run tag generated *inside* `cmd_arm`. `pds-crown-runbook.md` §2(a) requires
+`pds-scratch-target.sh up --verify` to have booted a target **in that same root**. The root does not
+exist until `arm` has returned, and the child can fire one second later (it did). **No armed climb can
+ever have a target.** Not on a slow box, not on a good draw, not ever. Sixteen waves of memory-floor
+apparatus were gating a path that aborts on a different precondition entirely. Filed **priority 0** as
+`pds-w16-launcher-scratch-home-trap`, documented in the climb runbook under *The armed climb has NO
+TARGET*, and it is the next wave's whole job.
+
+**THIS IS A FOURTH OUTCOME PDS-D262 DID NOT NAME.** Not (a) fire-and-climb, not (b) draws-exhausted
+stand-down, not (c) fire-then-`cond_b`-refusal-at-zero-cost. It is **(d) FIRE, harness runs to a
+BLOCKED partial, one attempt SPENT** — the harness summarised itself honestly, so it is not a crash,
+and the export was taken, so it is not free. `attempts` moved **3 → 4** of a budget of 5.
+
+**WHAT THE SPENT ATTEMPT BOUGHT, AND IT IS NOT NOTHING.** Rung 3 PASSED on a real full bundle, and the
+PDS-D261 cross-check was run before anything was stamped: `file -b` → `POSIX tar archive`, manifest
+`"profile": "full"`, `"grain": "workspace"`, `"format": "bp-export-v1"`. **Not a proxy error page.**
+`.meta`: `1405095424 bytes`, `151 s`, `attempt 4 of 5`, `rss_peak_kb 488564` over
+`rss_baseline_kb 388044`. **~98 MiB of beam RSS for a 1.4 GB export.** That retires the last of the
+scarcity premise on its own terms — PDS-D185's 2235.43 MiB was the RETIRED in-memory engine's demand,
+and the deployed spill engine has now been measured end-to-end against the live box. The 35.43 MiB
+pre-spill shortfall D257 recorded as an accepted risk **was never a risk**. The bundle carries the
+deployed sha `8eeaf688f`, so **the next `--all` reuses it for ZERO attempts** — a crown retry is cheap.
+
+**WHAT LANDED (two slices, both green, file-disjoint):**
+
+- `pds-w14-crown-fire` → **already merged** as `dcbf0a56d` (#5427). `scripts/pds-w15-fire-record.md`,
+  397 lines, every PDS-D254 field, no env dump, no `.sh` touched, one `ps -p` and never `pgrep`. The
+  builder held the arm **13 minutes** for in-flight `deploy.yml` run `29819328000` rather than move
+  guerrilla's sha under the climb (PDS-D78) — correct, and it produced the wave's second finding: doing
+  so **aims the climb at the post-restart transient D93 forbids** (the firing draw recorded
+  `slot_uptime=02:03`, beam RSS 344.6 MiB, `mem_mib=2578` against a 1200-sample steady-state max of
+  1948.13). Filed as `pds-w16-cond-d-warmth-coupling`. **Review defers that ruling** rather than
+  granting or refusing it: rungs 1/2/5/6 never ran, so this transcript cannot support the crown claim
+  either way and there is nothing yet to rule on. Review appended §12 to the record with the collected
+  outcome — the record's §5 claim "outcome (a), fired and climbing" was true at arm time and is now
+  superseded in place, not silently rewritten.
+- `pds-w16-cold-worktree-trap` → `scripts/pds-climb-preflight.sh` gains check 5 (`check_prewarm_ready`),
+  strictly read-only — four `test -d`s and one `find -L`, no `mix`, no lock, no `$FULL_DIR`. Proven by
+  MUTATION across four branches on one script blob (cold → NO-GO naming the remedy; deps-warm/no-prod →
+  NO-GO; no-dev → WARN; warm → GO). `find -L` was not the first draft: bare `find` called a
+  symlinked-`deps` warm tree cold, and the mutation test is what caught it. Both runbooks now route
+  arming through `deps.get` + both compiles + `--prewarm-now`, and both gained PDS-D262 and the
+  `systemctl list-units 'bp-site-build-*'` selector (the ssh-remote `pgrep -c -f` **self-matches** and
+  returns a phantom 1).
+
+**REVIEW FIXED IN PLACE (on `…-teach-the-pr-1-r`):** the prescribed pre-warm recipe was shipped in six
+places **without `CC=/usr/bin/clang` on the DEV leg**, and an operator following it verbatim dies on
+`argon2_elixir` (`error: unknown option '-g'` — bare `cc` on this host is the Claude CLI wrapper). The
+fire builder paid one wasted compile discovering this and filed `pds-w16-prewarm-cc-dev-leg`. **It was
+already known:** wave 13's own review entry raised it as candidate decision #1, and D258 was drafted
+three waves later without it. A finding that reaches the wave log but not a D-number is a finding the
+epic will re-buy. All six occurrences corrected; the climb runbook also gained the no-target trap.
+
+**WHAT WAVE 17 SHOULD TAKE — ONE SLICE, AND IT IS NOT AN INSTRUMENT.** Merge round 1 (take the `-r`
+branches), then `pds-w16-launcher-scratch-home-trap`: rule the contradiction between PDS-D233 and
+crown-runbook §2(a) **one way** — either `cmd_arm` accepts a pre-booted `BARKPARK_HOME`/
+`PDS_SCRATCH_POINTER` pair and asserts `scratch.env` before arming, or the detached launcher is ruled a
+memory-window instrument only and the crown is paid by the hand-run climb of `pds-crown-runbook.md` §3.
+**Do not build both, and do not have the child boot a target mid-window** — that is a >10-minute cold
+dev compile inside the timed window, which PDS-D241 exists to prevent. Then re-fire, reusing the parked
+bundle at zero attempt cost. `pds-w14-crown-collect-stamp` (round 2, LEAD-ONLY) is **not dispatchable
+against run `1b515ee5`**: the crown is not stampable off a transcript whose crown rungs never ran.
+
 ### Wave 13 2026-07-21 — "Fire the Climb" — REVIEWED. THE CLIMB DID NOT FIRE. Grade C+ (paper `pds-wave-13-2026-07-21`)
 
 **THE HEADLINE IS THE FAILURE, AND IT IS THE FOURTH IN A ROW.** The wave's stated success condition was
