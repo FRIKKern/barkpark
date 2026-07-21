@@ -372,7 +372,18 @@ async function drill(page, base, { taskSlug, docSlug }) {
       'the task editor header carries no [data-test-id="open-secondary-picker"] control, so the ' +
       'secondary pane cannot be reached by a real click. If that control has genuinely been ' +
       'removed, the compound state is unreachable — which is a DESK finding worth filing, not a ' +
-      'reason to call D175 fixed.');
+      'reason to call D175 fixed.',
+      // TWO CAUSES, AND THEY ARE NOT THE SAME FINDING. L3 takes the FIRST task row
+      // unless --task pins one, so this can equally mean "the desk removed the
+      // control" (a real finding) or "today's first task happens to render an
+      // editor without it" (a moving target — D97's problem, which --doc already
+      // solves for the paper but --task leaves open for the task). A cold reader
+      // must be told the second one exists, or they will file the first.
+      `    Opened task: ${openedTask}${taskSlug ? ' (pinned by --task)' : ' — UNPINNED, the first row of the list'}\n` +
+      (taskSlug ? '' :
+        '    Before filing this as a desk regression, re-run with --task=<slug> pinning a task you\n' +
+        '    KNOW renders the picker. The unpinned first row is a moving target (D97); a control\n' +
+        '    missing on one arbitrary document is not the same finding as a control removed.'));
   }
   await picker.click();
   await page.waitForSelector('[data-test-id="secondary-picker-modal"]', { timeout: 10_000 });
