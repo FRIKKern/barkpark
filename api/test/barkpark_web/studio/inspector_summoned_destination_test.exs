@@ -145,7 +145,8 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
                ~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened])|,
              "the b29/D91 geometry default lost its `:not([data-user-opened])` carve-out"
 
-      assert src =~ ~S|.editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after|,
+      assert src =~
+               ~S|.editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after|,
              "the b29/D91 scrim guard lost its `:not([data-user-opened])` carve-out"
     end
 
@@ -197,7 +198,11 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
       # A server emitting an escape route no reader can see is worse than not
       # emitting it: the DOM then asserts an affordance the desk does not
       # offer, and AT announces a link out of a trap that does not exist.
-      block = block!([~S|html[data-width-bucket="narrow"] .bp-desk-crumbs|, ~S|html[data-width-bucket="phone"] .bp-desk-crumbs|])
+      block =
+        block!([
+          ~S|html[data-width-bucket="narrow"] .bp-desk-crumbs|,
+          ~S|html[data-width-bucket="phone"] .bp-desk-crumbs|
+        ])
 
       assert value!(block, "display") == "flex",
              "the narrow crumb trail is emitted by desk_crumbs/1 but not painted by this sheet"
@@ -211,7 +216,8 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
     test "no motion property is introduced on the summoned panel" do
       block = block!([@narrow, @phone])
 
-      for prop <- ~w(transition animation transform filter will-change backdrop-filter perspective) do
+      for prop <-
+            ~w(transition animation transform filter will-change backdrop-filter perspective) do
         refute Regex.match?(~r/(?:^|;)\s*#{prop}\s*:/, block),
                """
                `#{prop}` landed on the summoned-destination rule.
@@ -412,7 +418,8 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
              "the mutation matched nothing — the control below is vacuous and the " <>
                "standard suppressor has been reshaped without this test noticing"
 
-      assert winning_content(%{bucket: "standard", user_opened: true, pane: 620}, mutated) == ~s|""|,
+      assert winning_content(%{bucket: "standard", user_opened: true, pane: 620}, mutated) ==
+               ~s|""|,
              """
              With the standard suppressor deleted the scrim STILL does not
              render, so something other than this slice is suppressing the
@@ -445,7 +452,8 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
       refute unsuppressed == decommented(css()),
              "the forced-container mutation matched nothing — the witness below is vacuous"
 
-      assert winning_content(%{bucket: "standard", user_opened: true, pane: 860}, unsuppressed) == ~s|""|,
+      assert winning_content(%{bucket: "standard", user_opened: true, pane: 860}, unsuppressed) ==
+               ~s|""|,
              """
              NOTHING in this sheet generates a scrim any more.
 
@@ -458,7 +466,8 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
 
       # …and one pixel the other side of the generator's own threshold, nothing
       # matches at all — which is what makes the row above a threshold test.
-      assert winning_content(%{bucket: "standard", user_opened: true, pane: 861}, unsuppressed) == nil
+      assert winning_content(%{bucket: "standard", user_opened: true, pane: 861}, unsuppressed) ==
+               nil
     end
   end
 
@@ -681,7 +690,9 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
         """)
 
       many ->
-        flunk("that selector list now has #{length(many)} rules — the winner is source-order dependent")
+        flunk(
+          "that selector list now has #{length(many)} rules — the winner is source-order dependent"
+        )
     end
   end
 
@@ -696,7 +707,9 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
         flunk("the summoned-destination rule no longer declares `#{prop}` — its geometry is gone")
 
       many ->
-        flunk("`#{prop}` is declared #{length(many)} times — the winner is source-order dependent")
+        flunk(
+          "`#{prop}` is declared #{length(many)} times — the winner is source-order dependent"
+        )
     end
   end
 
