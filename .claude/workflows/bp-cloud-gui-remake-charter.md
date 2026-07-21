@@ -1331,3 +1331,60 @@ epic did. The census exists because of that, not despite it. **THE CROWN IS DARK
 (`/v1/me` → `platform_operator:false`; `/v1/operator/warm-pool` → 403 against an anonymous 401): the operator
 console shipped fully built and remains unreachable because `PLATFORM_ADMIN_EMAILS` is still unset on the
 control plane. **"Seal" means CODE seal only, and the ending must say so in plain words.**
+
+### Wave 2026-07-21 (round 11) — the successor's charter is made true; the terminal act is armed — REVIEW
+
+Wave Paper `cloud-gui-remake-wave-2026-07-21-seal`. Grade **A−**. **One slice built, one deferred by design.**
+
+**Landed — `gr-p5r11-successor-charter-refresh` (ledger-only, ZERO repo files, no branch).** The successor
+`cloud-console-hardening-epic` now names every row it is about to inherit. Bands went B1 5/5, B2 8/8, B3 15/15,
+B4 13/13, B5 15/15, B6 2/2; the gate's Band-3+4 set went **15/28 → 28/28** and was proven able to fail (the same
+gate exited 1 before the patch). The three chartered traps are all handled in plain words:
+`cloud-console-billing-live-gate` is stated as **deliberately not inherited** (GR138; bucket (c) reaches it by
+hardcoded parent-independent `filter[_id]`), `gr-blk-studio-presence-perf-flake` is stated as **routed to Felix
+pristine `task-96a908af98698118` and not arriving**, and `gr-p5r4-spa-b` is inherited as a **wave slice for
+section (E) only** with its five already-forwarded sub-workstreams named so they cannot be double-counted.
+
+The builder also found, and disclosed, something Decide did not anticipate: the successor **already held TEN
+native `gr-bl-*` children**, filed by rounds 9–10 as findings about the seal machinery itself, none of which has
+a census line. They are now enumerated by id as a **single CLOSED, fully-listed exception** — deliberately not
+an open-ended carve-out, which would have reintroduced the remainder clause the census exists to abolish.
+Without that paragraph, the first correct application of the arrival rule would have re-triaged ten legitimate
+rows.
+
+**Review fix, in place, in the live published description — GR153.** The intake arithmetic was **off by one and
+self-invalidating**. The builder correctly separated *58 censused* from *57 inherited* for the Felix routing,
+but the census disposes **60** live rows, not 58: two are disposed **outside the bands** and so were never
+counted — `gr-backlog-bp-search-verb-discoverability` (CLOSED by name, never arrives) and
+**`gr-p5r5-successor-seal` itself**, the self-orphan that STEP 5 of the terminal act re-parents in **LAST**.
+The successor's own text therefore promised a roster of 67 and instructed the reader that "if the roster is ever
+wider than this text, the text is wrong" — and the roster was always going to be **68**. That is precisely the
+number the round-2 terminal-act gate already asserts (`successor count >= 68`), so the charter as written
+contradicted the gate that will judge it. The published description now reads **60 censused / 58 arriving / 68
+post-move**, and names the seal as the 58th arrival belonging to no band, adding that **its own children ride
+along unnamed and already done** because clause (a) reads DIRECT children only — no move lines for them, and
+they are not unnamed arrivals. Live roster re-verified before and after the fix: **60 live under the epic, 10
+under the successor, zero rows added or removed by this review.**
+
+**Deliberately NOT filed.** The builder flagged two discoveries (the native-child count is a prose snapshot that
+can decay; the ten natives were never checked for semantic duplication against the census) and was barred from
+filing them. **The reviewer upholds that bar and files nothing** — a new row under `task-47bc4168392dec17` would
+make the roster **61**, breaking the frozen census and the move-set the terminal act executes verbatim; a new row
+under the successor would break the *closed, fully-listed* ten-native exception. Both findings are recorded in
+the Paper and in the slice's `reviewer_note` instead. **Filing work is the default; here it is the defect.**
+
+**Deferred by design — `gr-p5r11-terminal-act` (round 2).** Unblocked the moment round 1 merges. It is the
+terminal act: one agent, one instant, one run — the CLOSE, the Felix route, the 57 banded moves, the self-orphan
+LAST, then the frozen predicate ONCE from the repo root with `--successor cloud-console-hardening-epic`, no
+`--ledger`, no `--guard-cmd`. Exit 0 = SEAL, exit 1 = **NO SEAL, a pre-committed terminal outcome**. There is no
+round 12 and no seventh instrument.
+
+**A dated correction to this charter's own tail.** The round-10 text closes by re-proving THE CROWN IS DARK with
+"`/v1/me` → `platform_operator:false`". The terminal act is chartered to state the crown as a **mechanism**
+(the allowlist resolves to `[]` at every layer, the value lives in a gitignored `.env`, no deploy script
+references it, and an empty allowlist means 403 for every *authenticated* user) and **not** to claim an observed
+`platform_operator:false` body. The two passages are in tension; the **mechanism form is the one that ships** in
+the terminal artifact, because an anonymous probe returns 401 at `require_user` before the allowlist is ever
+consulted.
+
+**What the next wave takes: nothing new.** Merge round 1, then run round 2 and take the verdict either way.
