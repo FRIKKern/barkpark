@@ -118,6 +118,29 @@ defmodule Barkpark.Plugins.Indx.PersistenceTest do
     assert all["c"].dataset == "dc"
   end
 
+  test "load_all skips a corrupt scope file and returns only the valid scopes", %{dir: dir} do
+    # One good scope, saved through the normal path.
+    Persistence.save("good", %{dataset: "dg", key_map: %{1 => "x"}})
+
+    # One corrupt .term file sitting in the same dir. Recovery.recover/1 calls
+    # load_all/0 FIRST, so a single unreadable file must not disable recovery
+    # for every other scope. Pre-fix, the `for ... into: %{}` comprehension
+    # collected the `:error -> nil` branch as a bare `nil`, which
+    # :maps.from_list/1 raised ArgumentError on mid-collect (before the trailing
+    # Map.drop([nil]) could run) — taking the whole scope table down with it.
+    File.write!(Persistence.path_for("bad"), "not a binary term")
+
+    # A stray non-.term file must be ignored entirely (belt-and-suspenders).
+    File.write!(Path.join(dir, "README.txt"), "not a scope file")
+
+    all = Persistence.load_all()
+
+    assert map_size(all) == 1
+    assert all["good"].dataset == "dg"
+    assert all["good"].key_map == %{1 => "x"}
+    refute Map.has_key?(all, "bad")
+  end
+
   test "load_all on a fresh dir returns empty map" do
     # Reset to a clean dir.
     fresh = Path.join(System.tmp_dir!(), "fresh-#{System.unique_integer([:positive])}")
