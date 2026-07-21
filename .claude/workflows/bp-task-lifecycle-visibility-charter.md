@@ -185,4 +185,41 @@ liveness plumbing, generated JS vocabulary + drift gate.
 
 ## Wave log
 
-(empty — wave 1 building)
+### Wave 2026-07-21 — correctness spine (wave 3), grade A−
+
+Reviewed and pushed 5 round-1 slices (all gates re-run green by the reviewer, file-disjoint → no
+inter-slice conflicts). PRs #5529–#5533, held for the lead to merge.
+
+**Landed:**
+- `tlv-bl-ready-allowlist-consolidation` (#5529) — `Validation.claimable_statuses/0` single-sources
+  the `~w(open blocked)` allowlist; queue.ex Ecto `in`, queue.ex raw-SQL CTE (`= ANY(?)`), and
+  claim.ex guard all derive from it. `@canonical capability:task-claimable-statuses` stamped.
+  board.ex:1001 4th copy stays deferred to `tlv-bl-board-ready-allowlist-4th-copy` (round 2).
+- `tlv-s7-transition-gate-stage-verb` (#5530, `-r`) — pure `Transitions.legal?/2` D7 table + the
+  sanctioned `bp task stage` verb (`POST /v1/tasks/:doc_id/stage`), engagement map write/clear, no
+  epoch machinery. Writer-seam enforcement + D7a flip remain handed to the felix Writer-seam slice
+  (`tlv-bl-writer-seam-transition-gate`) — stage is sanctioned but NOT yet the only guarded path.
+  Reviewer fixed the plugins/tasks moduledoc verb census (12→13).
+- `tlv-bl-release-epoch-and-restore` (#5531) — ruling-pins release's always-open landing (doctrine
+  comment, no restore) + regression-guards the missing/blank observed_epoch loud error.
+- `tlv-s6-engagement-lease-sweeper-briefcard` (#5532) — second TTL sweep lapses stale
+  considering/researching engagement; additive `task.engagement_lapsed`; brief-card 14th key
+  `engagement` (omit-when-absent); CLI+MCP create receipts echo the born lifecycle_status. Two
+  pre-existing macOS help-test pipe deadlocks skipped locally (filed `task-cab17fc3d93d8c71`); linux
+  CI is the merge authority.
+- `tlv-bl-axis2-cancelled-strand` (#5533) — documents the fail-closed axis-2 ruling (D6) + two
+  protective tests; zero production code. Escape hatch (cancelled→open) is reachable via the new
+  stage verb.
+
+**Cross-slice coherence proven:** stage writes `engagement{object,holder,ts}` in ISO8601; the S6
+sweep reads/clears it with matching parse semantics; brief card omits when absent; the axis-2 escape
+hatch rides the stage verb. All five slices touch disjoint files.
+
+**Ledger truthful:** no fabricated `done`; every merge-gated "PR merged" criterion left `met=False`
+for the lead. (Four slice tasks sit `open` — claims released; S6 sits `in_progress` with a stale
+claim. Both honest; the lead closes the merge criteria on merge.)
+
+**Next wave — dispatch order:** merge round-1 (#5529–#5533, any order). THEN the 3 round-2 backlog
+slices as their deps land: `tlv-bl-outcome-resolution-unenforced` + `tlv-bl-board-ready-allowlist-4th-copy`
+(after #5529 merges — both extend validation.ex), and `tlv-bl-tasks-ls-offset-broken` (after #5530
+merges — S7 restructures tasks_controller.ex). Then the felix Writer-seam slice closes D7/D7a.
