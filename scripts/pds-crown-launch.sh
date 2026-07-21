@@ -521,7 +521,7 @@ classify() { # $1 = transcript · $2 = pid file  -> prints the state token
 }
 
 cmd_collect() {
-  local tag="" t="" p="" state pid rc lines
+  local tag="" t="" p="" state pid rc lines sd_stamp fire_stamp
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -570,7 +570,26 @@ cmd_collect() {
       # That is a materially different diagnosis from a mid-rung abort, and the
       # grammar is fixed at six states (PDS-D247) — so rather than invent a
       # seventh, say which of the two this is, by name.
-      if [ "$(grep -c 'STAND-DOWN' "$t" 2>/dev/null || true)" != "0" ]; then
+      #
+      # PDS-D252: the discriminator MUST be anchored. The child prints
+      # `verdict=STAND-DOWN:mem<floor` on EVERY refused DRAW line (:352), so a
+      # bare `grep -c 'STAND-DOWN'` reads non-zero on a transcript that refused
+      # once and then FIRED — i.e. it called a genuine mid-rung abort a free
+      # stand-down and invited the reader to re-arm. Per D250 the floor clears
+      # ~0 times in 862 build-idle draws, so a draw-1 fire is the improbable
+      # case and that misread was the DEFAULT for a real crash.
+      #
+      # Only the terminal stamp (:373) is anchored `[<ts>] STAND-DOWN — `, and
+      # it is printed ONLY on the never-fired path. The FIRE stamp (:358) is
+      # its mutually-exclusive twin. Require both legs — stand-down stamp
+      # present AND no FIRE — so the free-to-re-arm claim needs positive proof;
+      # anything else falls to the crash branch, which is the safe direction.
+      sd_stamp="$(grep -cE '^\[[^]]+\] STAND-DOWN — ' "$t" 2>/dev/null || true)"
+      fire_stamp="$(grep -cE '^\[[^]]+\] FIRE — draw ' "$t" 2>/dev/null || true)"
+      is_int "$sd_stamp"   || sd_stamp=0
+      is_int "$fire_stamp" || fire_stamp=0
+
+      if [ "$sd_stamp" -gt 0 ] && [ "$fire_stamp" -eq 0 ]; then
         info "STAND-DOWN, not a crash. The poll loop exhausted its draws and the"
         info "harness was NEVER INVOKED — so there is no RESULT: line to find."
         info "A closed gate costs ZERO export attempts; re-arming is free."
@@ -578,6 +597,11 @@ cmd_collect() {
         info "Sentinel present, no ^RESULT: — the harness died mid-rung under its"
         info "own \`set -euo pipefail\` (:85). This is NOT an OOM-kill (those keep"
         info "no sentinel at all) and the exit code below is the harness's own."
+        info ""
+        info "The harness RAN. An export attempt WAS SPENT — re-arming is NOT"
+        info "free, and any refused DRAW lines above are draws, not the verdict."
+        info "Before you re-arm, re-read /tmp/pds-full-export/attempts against"
+        info "the PDS-D224 budget of 5; a second arm burns a second real attempt."
       fi
       ;;
     FINISHED)
@@ -789,6 +813,69 @@ DUMMY
   printf 'STEP 3 — the full export\nEXIT: 1\n' > "$scratch/crashed.log"
   state="$(classify "$scratch/crashed.log" "$scratch/dummy.pid")"
   check "$state" "CRASHED" "sentinel without RESULT classifies"
+
+  # CRASHED, sub-diagnosis — a refused draw must NOT buy a free stand-down.
+  #
+  # PDS-D252. Both fixtures below classify CRASHED; what is under test is which
+  # of the two CRASHED messages collect prints. The old carve-out grepped the
+  # bare substring 'STAND-DOWN', which the per-draw verdict field carries on
+  # every refusal — so this first fixture (refuse once, then FIRE, then die
+  # mid-rung) reported an attempt-spending crash as a free stand-down.
+  {
+    printf '[2026-07-21T07:00:00Z] child up — pid=1234\n'
+    printf 'DRAW\t1\t2026-07-21T07:00:00Z\tmem_mib=1800\tfloor=2200\tbuilds=<empty>\trecorded_rss_kb=?\trecorded_slot_uptime=?\tverdict=STAND-DOWN:mem<floor\n'
+    printf '[2026-07-21T07:05:00Z] FIRE — draw 2 of 240 qualified.\n'
+    printf 'STEP 3 — the full export\n'
+    printf '[2026-07-21T07:40:00Z] harness returned rc=1 after 2 draw(s)\n'
+    printf 'EXIT: 1\n'
+  } > "$scratch/crash-after-standdown.log"
+  state="$(classify "$scratch/crash-after-standdown.log" "$scratch/dummy.pid")"
+  check "$state" "CRASHED" "refused-draw-then-FIRE-then-abort classifies"
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/crash-after-standdown.log" \
+          --pid-file "$scratch/dummy.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"harness was NEVER INVOKED"*)
+      bad "a spent attempt is reported as 'the harness was NEVER INVOKED' (PDS-D252 regression)" ;;
+    *) ok "a refused draw ahead of the FIRE does NOT claim the harness was never invoked" ;;
+  esac
+  case "$out" in
+    *"re-arming is free"*)
+      bad "a spent attempt is reported as free to re-arm (PDS-D252 regression)" ;;
+    *) ok "a refused draw ahead of the FIRE does NOT call re-arming free" ;;
+  esac
+  case "$out" in
+    *"An export attempt WAS SPENT"*) ok "the crash branch says the attempt was SPENT" ;;
+    *)                               bad "the crash branch does not say the attempt was spent" ;;
+  esac
+  case "$out" in
+    *"re-arming is NOT"*) ok "the crash branch says re-arming is NOT free" ;;
+    *)                    bad "the crash branch does not deny that re-arming is free" ;;
+  esac
+
+  # …and the true never-fired stand-down must still read as one, verbatim.
+  {
+    printf 'DRAW\t1\t2026-07-21T07:00:00Z\tmem_mib=1800\tfloor=2200\tbuilds=<empty>\trecorded_rss_kb=?\trecorded_slot_uptime=?\tverdict=STAND-DOWN:mem<floor\n'
+    printf '[2026-07-21T15:00:00Z] STAND-DOWN — 240 draws taken, none qualified. The climb NEVER FIRED;\n'
+    printf '[2026-07-21T15:00:00Z]   A closed gate costs ZERO export attempts, so re-arming is free.\n'
+    printf 'EXIT: 5\n'
+  } > "$scratch/standdown.log"
+  state="$(classify "$scratch/standdown.log" "$scratch/dummy.pid")"
+  check "$state" "CRASHED" "a draws-exhausted stand-down still classifies CRASHED (six states, no seventh)"
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/standdown.log" --pid-file "$scratch/dummy.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"harness was NEVER INVOKED"*) ok "the true stand-down still names the harness as never invoked" ;;
+    *)                             bad "the true stand-down lost its never-invoked wording" ;;
+  esac
+  case "$out" in
+    *"re-arming is free"*) ok "the true stand-down still says re-arming is free" ;;
+    *)                     bad "the true stand-down lost its re-arming-is-free guidance" ;;
+  esac
 
   # FINISHED — both
   printf 'RESULT: PASS — the whole ladder ran and held.\nEXIT: 0\n' > "$scratch/finished.log"
