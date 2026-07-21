@@ -698,11 +698,27 @@ test("the committed ledger directory is NOT gitignored — D10's exact trap, che
   assert.equal(git.status, 1, `tooling/grip/ledger/ IS gitignored: ${git.stdout.trim()}`);
 });
 
-test("DEFAULT_LEDGER_DIR points inside tooling/grip and this test never wrote to it", () => {
+// This guard was written while the store was empty and asserted it held ZERO
+// rows, which read as "no test row leaked into the committed store" only for
+// as long as the real answer was also zero. Once tgw3-write-verb put the first
+// real rows in, the assertion started failing on the store WORKING — and a
+// guard that fires on the system succeeding is a guard that gets deleted.
+//
+// So it now tests what it always MEANT: every row in the committed store is
+// TRACKED. A test that wrote into the real directory leaves an untracked file
+// and still trips this, which is the leak that mattered; deliberate, committed
+// rows do not.
+test("DEFAULT_LEDGER_DIR points inside tooling/grip and holds no UNTRACKED rows", () => {
   assert.match(DEFAULT_LEDGER_DIR, /tooling\/grip\/ledger\/$/);
   mkdirSync(DEFAULT_LEDGER_DIR, { recursive: true });
-  const stray = readdirSync(DEFAULT_LEDGER_DIR).filter((f) => f.endsWith(".json"));
-  assert.deepEqual(stray, [], `the committed store must hold no test rows, found: ${stray.join(", ")}`);
+  const onDisk = readdirSync(DEFAULT_LEDGER_DIR).filter((f) => f.endsWith(".json"));
+
+  const git = spawnSync("git", ["ls-files", "tooling/grip/ledger/"], { cwd: REPO_ROOT, encoding: "utf8" });
+  if (git.error || git.status !== 0) return; // no git here — the shell gate still checks it
+  const tracked = new Set(git.stdout.split("\n").filter(Boolean).map((p) => p.slice(p.lastIndexOf("/") + 1)));
+
+  const stray = onDisk.filter((f) => !tracked.has(f));
+  assert.deepEqual(stray, [], `the committed store must hold no untracked rows — a test wrote into it: ${stray.join(", ")}`);
 });
 
 // ── the D18 control ──────────────────────────────────────────────────────────

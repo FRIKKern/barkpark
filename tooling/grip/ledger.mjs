@@ -80,6 +80,7 @@
 //
 // node: builtins only, no dependencies, no side effect on import.
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
@@ -829,9 +830,97 @@ function selftest() {
   return 3;
 }
 
-function main(argv) {
+// ── the write verb ───────────────────────────────────────────────────────────
+
+// THE CLOCK IS THE SHELL'S, AND IT IS READ HERE AND NOWHERE ELSE.
+//
+// This module reads no clock (D19 — the workflow host refuses the clock
+// builtins outright because they break resume), and `now`/`observed_at` are
+// caller-supplied by design. The CLI is the caller, so the CLI reads
+// `date -u` and supplies both from ONE reading. Sourcing observed_at here
+// rather than from the input JSON is what turns tgw3-ledger-honesty's opt-in
+// bound into a real seam: forging a timestamp now takes editing this file,
+// not editing a payload.
+//
+// CEILING, STATED HONESTLY (D4). A forger who controls the caller controls the
+// bound. This stops accidents, staleness and sloppiness — not a determined
+// forger. Authorship is out of jurisdiction.
+function shellNow() {
+  return execFileSync("date", ["-u", "+%Y-%m-%dT%H:%M:%SZ"], { encoding: "utf8" }).trim();
+}
+
+// RUN_ID is a filename fragment and rejects `:` — so the raw `date -u` string
+// CANNOT be a run_id, and a naive `run_id: now` write fails BAD-RUN-ID. The
+// sanitisation is load-bearing, and test/mint.test.mjs proves the raw form is
+// refused so it cannot be quietly dropped later.
+export function mintRunId(utcInstant) {
+  return `grip-${String(utcInstant ?? "").trim().replace(/[-:]/g, "")}`;
+}
+
+async function writeCommand(rest) {
+  const [factsPath, dirArg] = rest;
+  if (!factsPath) {
+    process.stderr.write("ledger: write needs a facts file — node ledger.mjs write <facts.json> [dir]\n");
+    return 2;
+  }
+  const resolved = resolve(factsPath);
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(resolved, "utf8"));
+  } catch (err) {
+    process.stderr.write(`ledger: ${resolved} is not readable JSON — ${err?.message ?? String(err)}\n`);
+    return 2;
+  }
+  // Both shapes, matching cli.mjs's loader exactly — a bare array or {facts}.
+  const facts = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.facts) ? parsed.facts : null;
+  if (facts === null) {
+    process.stderr.write(`ledger: ${resolved} must be a JSON array of facts, or an object with a "facts" array\n`);
+    return 2;
+  }
+
+  const now = shellNow();
+  const { mintAll } = await import("./mint.mjs");
+  // Injected, never imported by the library half — the README's promise that
+  // ledger.mjs itself depends on nothing in screen.mjs stays true, because the
+  // dependency lives in this CLI branch alone.
+  const { screenCommand: screen } = await import("./screen.mjs");
+
+  const { recipes, skipped, yield: mintYield } = mintAll(facts, { observed_at: now });
+  const dir = dirArg ? resolve(dirArg) : DEFAULT_LEDGER_DIR;
+
+  process.stdout.write(`ledger write — now ${now} (read from \`date -u\`, never from the input)\n`);
+  process.stdout.write(`  facts read           ${mintYield.facts}\n`);
+  process.stdout.write(`  minted               ${mintYield.rerun_bearing}\n`);
+  process.stdout.write(`  subject from PATH    ${mintYield.path_token} (${mintYield.path_token_pct}% of minted) ← the coverage number\n`);
+  process.stdout.write(`  subject from cmd:    ${mintYield.fallback} (${mintYield.fallback_pct}% of minted) ← a FLOOR, not coverage; never add these together and call it yield\n`);
+  process.stdout.write(`  distinct subjects    ${mintYield.distinct_subjects}\n`);
+  for (const s of skipped) process.stdout.write(`  skipped[${s.index}]         ${s.reason}\n`);
+
+  if (recipes.length === 0) {
+    process.stderr.write("ledger: nothing mintable — no fact carried a rerun command\n");
+    return 1;
+  }
+
+  const run_id = mintRunId(now);
+  const result = writeLedgerRun({ run_id, recipes, dir, now, screen });
+  if (!result.ok) {
+    const byClass = new Map();
+    for (const r of result.rejections) byClass.set(r.reason, (byClass.get(r.reason) ?? 0) + 1);
+    process.stderr.write(`\nREJECTED — nothing was written (all-or-nothing: a file holding only the rows that happened to pass IS the silent-strip defect at file granularity)\n`);
+    for (const [reason, count] of byClass) process.stderr.write(`  ${reason} x${count}\n`);
+    for (const r of result.rejections.slice(0, 10)) process.stderr.write(`  row ${r.index}: ${r.message}\n`);
+    return 1;
+  }
+  process.stdout.write(`\n${result.written ? "wrote" : "already recorded"}  ${result.path}\n`);
+  process.stdout.write(`  run_id ${run_id} — sanitised from the \`date -u\` stamp; the raw form carries colons and RUN_ID rejects it\n`);
+  process.stdout.write(`  ${result.recipes.length} rows admitted, 0 rejected\n`);
+  return 0;
+}
+
+async function main(argv) {
   const [cmd = "fold", ...rest] = argv;
   if (cmd === "--selftest" || cmd === "selftest") return selftest();
+  if (cmd === "write") return writeCommand(rest);
   if (cmd === "fold") {
     const dir = rest[0] ? resolve(rest[0]) : DEFAULT_LEDGER_DIR;
     const folded = foldLedger(dir);
@@ -840,10 +929,21 @@ function main(argv) {
     // legitimately stored. Exit 0 and let the caller read `rival_methods`.
     return folded.unreadable.length > 0 ? 1 : 0;
   }
-  process.stderr.write("usage: node ledger.mjs [fold [dir] | --selftest]\n");
+  process.stderr.write("usage: node ledger.mjs [write <facts.json> [dir] | fold [dir] | --selftest]\n");
+  process.stderr.write("  write  mint {claim,evidence,rerun} facts into recipe rows and store one immutable run file\n");
+  process.stderr.write("  fold   read every run file in the store back as one index\n");
   return 2;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  process.exit(main(process.argv.slice(2)));
+  // `main` became async when `write` landed (it dynamically imports mint.mjs
+  // and screen.mjs). An unhandled rejection is a NAMED failure here, never a
+  // bare stack trace and never a silent exit: a store whose CLI dies quietly
+  // is indistinguishable from a store that wrote nothing on purpose.
+  main(process.argv.slice(2))
+    .then((code) => process.exit(code))
+    .catch((err) => {
+      process.stderr.write(`ledger: crashed before any write — ${err?.stack ?? err?.message ?? String(err)}\n`);
+      process.exit(2);
+    });
 }
