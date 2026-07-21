@@ -1,0 +1,409 @@
+{
+  "run_id": "grip-20260721T054733Z",
+  "recipes": [
+    {
+      "subject": "internal/cli",
+      "quantity": "git:ls-tree",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git ls-tree -r origin/main --name-only internal/cli/ | grep -c _test.go",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli",
+        "_test.go"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "internal/cli/tasks_next_cmd.go",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:internal/cli/tasks_next_cmd.go | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/tasks_next_cmd.go"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "internal/cli/builtins.go",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:internal/cli/builtins.go | grep -c 'func '",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/builtins.go"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "internal/cli/cli.go",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:internal/cli/cli.go | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/cli.go"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "internal/cli/chat_cmd.go",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:internal/cli/chat_cmd.go | grep -c 'func '",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/chat_cmd.go"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "internal/cli/chrome_table.go",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:internal/cli/chrome_table.go | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/chrome_table.go"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "internal/cli/cli_test.go",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:internal/cli/cli_test.go | grep -c 'func Test'",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/cli_test.go"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "internal/cli/builtins_test.go",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:internal/cli/builtins_test.go | grep -c 'func Test'",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/builtins_test.go"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "internal/cli/tasks_next_cmd.go",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:internal/cli/tasks_next_cmd.go | grep -c 'lifecycle_status'",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/tasks_next_cmd.go"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "internal/cli/tasks_next_cmd.go",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:internal/cli/tasks_next_cmd.go | grep -c 'ready'",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/tasks_next_cmd.go"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".github/workflows",
+      "quantity": "git:ls-tree",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git ls-tree -r origin/main --name-only .github/workflows/ | wc -l",
+      "derived_level": "L3",
+      "deps": [
+        ".github/workflows"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".github/workflows/go-tests.yml",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.github/workflows/go-tests.yml | grep -c 'runs-on'",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/go-tests.yml"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".github/workflows/elixir.yml",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.github/workflows/elixir.yml | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/elixir.yml"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".github/workflows/ci.yml",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.github/workflows/ci.yml | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/ci.yml"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".github/workflows/doc-gates.yml",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.github/workflows/doc-gates.yml | grep -c 'paths'",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/doc-gates.yml"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".github/workflows/js-tests.yml",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.github/workflows/js-tests.yml | grep -c 'npm test'",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/js-tests.yml"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".github/workflows/cli-release.yml",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.github/workflows/cli-release.yml | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/cli-release.yml"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".github/workflows/deploy.yml",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.github/workflows/deploy.yml | grep -c 'jobs:'",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/deploy.yml"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".github/workflows/cloud.yml",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.github/workflows/cloud.yml | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/cloud.yml"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".github/workflows/architecture.yml",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.github/workflows/architecture.yml | grep -c 'run:'",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/architecture.yml"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "js/packages",
+      "quantity": "git:ls-tree",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git ls-tree -r origin/main --name-only js/packages/ | grep -c 'package.json'",
+      "derived_level": "L3",
+      "deps": [
+        "js/packages",
+        "package.json"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "js/packages/groq/package.json",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:js/packages/groq/package.json | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "js/packages/groq/package.json"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "js/packages/codegen/package.json",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:js/packages/codegen/package.json | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "js/packages/codegen/package.json"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "js/packages/nextjs-query/package.json",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:js/packages/nextjs-query/package.json | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "js/packages/nextjs-query/package.json"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "js/packages/core/package.json",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:js/packages/core/package.json | grep -c '\"scripts\"'",
+      "derived_level": "L2",
+      "deps": [
+        "js/packages/core/package.json"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "docs/ops",
+      "quantity": "git:ls-tree",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git ls-tree -r origin/main --name-only docs/ops/ | wc -l",
+      "derived_level": "L3",
+      "deps": [
+        "docs/ops"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "docs/ops/PROD_OPS.md",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:docs/ops/PROD_OPS.md | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "docs/ops/PROD_OPS.md"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "docs/ops/merge-gates.md",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:docs/ops/merge-gates.md | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "docs/ops/merge-gates.md"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "docs/ops/adding-a-domain.md",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:docs/ops/adding-a-domain.md | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "docs/ops/adding-a-domain.md"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "docs/ops/npm-rollback-playbook.md",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:docs/ops/npm-rollback-playbook.md | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "docs/ops/npm-rollback-playbook.md"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -c 'ledger.mjs'",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js",
+        "ledger.mjs"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -c 'needs_worktree'",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -c 'isolation'",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -c 'facts.json'",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js",
+        "facts.json"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": ".claude/workflows/wild-bulk-cycle.workflow.js",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:.claude/workflows/wild-bulk-cycle.workflow.js | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/wild-bulk-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "package.json",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:package.json | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "package.json"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "apps/hundesteder/package.json",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:apps/hundesteder/package.json | wc -l",
+      "derived_level": "L2",
+      "deps": [
+        "apps/hundesteder/package.json"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "web/package.json",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:web/package.json | grep -c 'node --test'",
+      "derived_level": "L2",
+      "deps": [
+        "web/package.json"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    },
+    {
+      "subject": "templates/astro-search-starter/package.json",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:templates/astro-search-starter/package.json | grep -c 'node --test'",
+      "derived_level": "L2",
+      "deps": [
+        "templates/astro-search-starter/package.json"
+      ],
+      "observed_at": "2026-07-21T05:47:33Z"
+    }
+  ]
+}

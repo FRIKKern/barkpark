@@ -573,6 +573,208 @@ bolted on afterward, which is worth nothing.
   the backfill rival on the merits. Naming it beats absorbing it: the claim "only one execution
   path exists" was false, and a charter that says so stays trustworthy.*
 
+- **D56 — the fleet-as-factory is DEFERRED, not attempted; wave 5's volume comes from
+  RE-EXECUTION BACKFILL.** *Why: the join blocker is worse than "the prompt never names
+  `ledger.mjs`". At Verify time the shared checkout the D35 carve-out points at was 26 commits
+  behind `origin/main` and had NO write verb — `node tooling/grip/ledger.mjs write /tmp/f.json`
+  printed the old `[fold | --selftest]` usage and exited 2. A verifier that got past that needed
+  NINE independent discovery steps (that a tool exists at all; the verb and its arity; that it must
+  MATERIALISE `facts.json` itself, since the harness never writes one; that raw `{claim, evidence,
+  rerun}` facts are not rows and `mint` is a required intermediate; that the third positional `dir`
+  exists; that `screenCommand` returns `.ok`, not `.safe`). Then all-or-nothing killed the batch
+  anyway: 9 refusals over 22 real foreign survey facts — 7 of them `sed -n 'N,Mp'` — discarded ALL
+  22 rows, exit 1, nothing written. Two of those three failure modes sit outside this epic's
+  surface fence. A wave that bets its headline on that seam mints zero rows.*
+
+- **D57 — directory density does NOT cluster subjects; QUESTION density does. P4 is REFUTED
+  BACKWARDS.** *Why: P4 predicted foreign singletons below 65%; deliberate directory-dense aim
+  measured 92.3% (39 foreign subjects, 36 singletons) — WORSE than D46's 79.5% under scatter. The
+  bucket histogram is `{1:36, 2:1, 3-20:2}`, with only 28.3% of rows in the band D46 identified as
+  the only one where leads beats grep. The mechanism is that the mint's subject is the FILE PATH:
+  ten questions about ten files in one directory mint ten singletons. The only clusters produced
+  were the two files asked about REPEATEDLY (n=11, n=4), and the survey's unengineered facts
+  clustered BETTER than the engineered ones — 22 facts to 9 subjects — because surveyors kept
+  re-interrogating the same two artifacts. Every future aim instruction reads "many questions per
+  FILE", never "many files per directory".*
+
+- **D58 — the census is the MINTING INSTRUMENT: a corpus command becomes a ledger row only by
+  ANSWERING on re-execution today.** *Why: the corpus's `proofs[]` carry `run` as a workflow id
+  (`wf_009b2433-388`), never a timestamp, so a backfill cannot honestly derive `observed_at`, and
+  stamping `now` on a weeks-old command is exactly the freshness claim this epic exists to forbid.
+  Re-execution fixes it BY CONSTRUCTION — `observed_at` is true because the command was just run.
+  This also settles D55's backfill disqualification precisely rather than reversing it: D55 killed
+  the EVIDENCE half (1,902 prose entries, no `rerun` field, "100% of these strings are prose"). The
+  PROOFS half is 652 entries carrying `.command`, which IS a rerun. Backfill is re-admitted on the
+  proofs half ONLY, gated on answering, and a command that no longer answers is not stored at all.*
+
+- **D59 — `leads` SHIPS, and P5 is RE-WORDED BEFORE it is quoted: an honest-empty rate is
+  meaningless without a stated query granularity.** *Why: two independent measurements disagreed
+  because P5 never named the variable that decides it. Over 20 router-vocabulary queries on the
+  62-row store: 65.0% honest-empty → SHIP (threshold >70%). Over coarse queries on a 279-row store:
+  5–40% → SHIP. Over 20 INDEPENDENTLY-derived exact file paths: 75.0% → CUT. The 75% is a
+  STORE-COVERAGE reading, not a verb reading — 19 of its 20 query paths exist in the checkout, not
+  one has a stored recipe in 279 rows, and applying the cut literally returns the same 166 subjects
+  for the agent to eyeball, making an under-covered store HARDER to read, not easier. Where the
+  filter does work it is decisive: `mix test` → 35 subjects, `api/lib` → 26, `internal/cli` → 12 —
+  exactly D46's 3–20 band. P5 as re-worded and re-committed: measured at SUBSYSTEM granularity, and
+  both readings published whenever it is quoted.*
+
+- **D60 — RIVAL-METHOD is a FALSE-POSITIVE GENERATOR today, so fixing the mint is a PRECONDITION of
+  the ledger census, not backlog.** *Why: `quantityPhrase` mints the command FLAG, not the
+  property. `grep -c "needs_worktree" X` and `grep -c "isolation" X` both mint `grep:-c`, collide
+  on one key, and the fold emits "N independent recipes re-derive Q … run all N today and compare
+  what they answer NOW" — for commands answering different questions. Reproduced independently
+  twice, and once in a stronger form: `git show <path> | wc -l` and `git show <path> | grep -c
+  'needs_worktree'` both mint `git:show`, so a line count was flagged as a rival of a match count.
+  Over the 652-command corpus, 449 distinct keys hold 652 rows: 58 keys collide, absorbing 261 rows
+  (40%), and 41 of those 58 sit on a `cmd:<head>` fallback subject absorbing 222 rows (34%), where
+  four unrelated trees were presented as four ways to derive one property. D45 hides `cmd:` from
+  leads but NOT from the fold, and `census --ledger` consumes `rival_methods` directly — so
+  measuring decay on the store before fixing the mint measures a signal the mint invented.*
+
+- **D61 — the safety enumeration is THREE exec primitives, and the two sharpest holes sit UPSTREAM
+  of every head rule.** *Why: D55's "TWO" is corrected on three counts. The primitives are
+  `harvest.mjs:78` (`execFileSync`, fixed module constant, zero import sites), `rerun.mjs:360` —
+  which is `spawnSync("/bin/sh", ["-c", cmd])`, NOT `execFileSync`, so a tranche grepping
+  `execFileSync` MISSES the only primitive that takes caller data — and `ledger.mjs:849`
+  (`execFileSync("date", ["-u", …])`, fixed argv, feeding every write's `observed_at`). Two new RCE
+  primitives are live-proven below the allowlist: (a) DOUBLE-QUOTED COMMAND SUBSTITUTION EXECUTES —
+  `maskQuotedSpans` blanks double-quoted spans identically to single-quoted ones, but `sh` DOES
+  expand `$()` inside double quotes, and `censusOne('grep -n "$(id > /tmp/MARK)" .')` returns
+  `screened:true, executed:true` with the marker written carrying live `id` output, on the census's
+  own supposedly fail-closed path; (b) THE ENVIRONMENT-ASSIGNMENT STRIP IS A GENERAL RCE PRIMITIVE
+  — `screenSegment` strips `VAR=value` prefixes and never screens the variable, so
+  `GIT_EXTERNAL_DIFF=./evil.sh git diff HEAD~1` is ADMITTED and live-executes the script, with
+  `GIT_PAGER=`, `PAGER=` and `NODE_OPTIONS=--require=` the same shape. Both are reachable before any
+  head rule runs, which is why no amount of tightening a head rule reaches them.*
+
+- **D62 — the node refusal STANDS (option a), documented as a REACH BOUND, never as a security
+  invariant.** *Why: measured yield of the narrow `node --test <in-repo-path>` form over 651 real
+  proof commands is ONE. 0.15%. The JS test evidence agents actually type is `npx vitest run`,
+  `pnpm --filter @barkpark/react test`, `npm run typecheck` — 13 commands option (b) recovers NONE
+  of — and 2 of the repo's 3 real `npm test` scripts carry `--import` or `--test-reporter=spec` and
+  fail the narrow form anyway. The narrow form is also DEFEATED below its own grammar by D61(b): 7
+  of 29 escapes were admitted and `NODE_OPTIONS=--require=./evil.cjs node --test ok.test.mjs`
+  live-executed attacker JavaScript. Option (b) as literally filed on `tgw4-screen-refuses-node`
+  (`node <path-under-the-repo>`) is straightforward RCE needing no escape at all. The honesty
+  clause is mandatory: the screen ALREADY admits `mix test` and `go test`, which execute arbitrary
+  repo code — this repo's own ExUnit files call `System.cmd("python3", ["-c", …])` — so "we refuse
+  arbitrary code execution" is not a principle the screen holds, it is a rule applied to node and
+  not to Elixir or Go. The refusal is a bound this epic CHOOSES; the cost (grip's own `node --test`
+  recipes can never be stored) is paid knowingly and written into the README.*
+
+- **D63 — the screen's two FALSE REFUSALS are fixed in the SAME slice as the tightenings, because a
+  screen that only ever tightens gets routed around.** *Why: (a) the host bound runs on the RAW
+  string before `maskQuotedSpans`, so a purely local `grep -c "ssh" docs/ops/PROD_OPS.md` is
+  refused as "names ssh (remote execution)" — a PATTERN read as a TARGET — and the densest planned
+  foreign targets are ops docs whose most quotable lines all contain `ssh`. (b) `sed -n 'N,Mp'`,
+  read-only line citation, is refused on the head as a stream editor, and it is the single largest
+  refusal class in real foreign output: 7 of 9 refusals over the survey's own facts. The kicker is
+  that the harness's own `rerun` schema description gives `git show origin/main:path | sed -n
+  40,60p` as its FIRST worked example — the instrument instructs its producers to write exactly
+  what it refuses. Shipping the tightenings alone would raise the refusal rate on honest work in
+  the same wave that multiplies stored commands.*
+
+- **D64 — all-or-nothing writes STAY, and a PRE-SCREEN verb ships beside them.** *Why:
+  all-or-nothing is correct — a file holding only the rows that happened to pass IS the silent-strip
+  defect at file granularity — but it is currently UNLEARNABLE. Nine refusals discarded all 22 rows
+  with exit 1 and nothing written, and there is no cheap way to find out first, so a verifier learns
+  the rule by losing a whole batch. `ledger.mjs prescreen <facts.json>` reports per-row verdicts and
+  writes nothing. Pinned in the same breath because a verifier got it exactly backwards in the
+  field: `screenCommand` returns `.ok`, NOT `.safe` — reading `.safe` yields `undefined`, scores
+  0/40, and the reason string still reads "admitted", so a careful agent pre-screening its batch
+  concludes the precise opposite of the truth.*
+
+- **D65 — the level-mention promotion is a CORRECTNESS fix, NOT a volume precondition, and it is a
+  RULING because the suite ENFORCES the bug.** *Why: `SSH_READ`/`GIT_SHOW_REMOTE`/`GH_API` are
+  tested against the raw unmasked segment at `level.mjs:472`/`:483`, unlike curl/wget which was
+  deliberately head-gated with its own regression test, so `grep -rn "ssh root@…"
+  docs/ops/PROD_OPS.md` derives L1 and `checkCeiling` — which accepts any claim at or below the
+  derived ceiling — then accepts ANY claimed level. The strings are real: PROD_OPS.md carries them
+  at :17, :36, :82. But measured exposure is 0 of 652 corpus commands and 1 of 103 wave reruns (and
+  that one is a probe OF this bug), and the L1 half is already unreachable through the screened
+  write path because the screen refuses `ssh` — only the L2 inflation is storable. Decisively,
+  `level.test.mjs` test 131 ("the ssh forms the corpus actually uses are never demoted") ENFORCES
+  the current behaviour, so any fix reds the suite BY DESIGN. That is a decision to reverse with a
+  no-false-demotion bar, not a patch to slip into a volume wave — a first attempt at the fix
+  false-demoted a genuine origin read through `diff <(git show origin/main:…)`, and only the
+  corpus-distribution test caught it.*
+
+- **D66 — `foldLedger`'s read path admits every defect the write path refuses, and hardening is
+  round 2 because the only actor who could exploit it is the fleet D56 defers.** *Why: 6/6
+  run-proven — a row carrying `value`, a screen-refused `rm -rf` rerun, a year-2099 `observed_at`
+  and a false L1 all fold clean with `unreadable: []` and exit 0. `usableRow` checks exactly three
+  things (subject, quantity, rerun non-empty); it consults no screen, no clock and no derivation,
+  while `admitRecipe` does all four. One nuance cuts the epic's way and is WHY leads may ship over
+  an unhardened store: `foldLedger`'s projection rebuilds each recipe from six NAMED fields, so
+  `value` and every other unknown key is DROPPED before reaching `entries[]` — `leads`, as a filter
+  over `entries[]`, structurally CANNOT hand back a value even from a forged file. The wish's
+  central guarantee holds at the read layer; it is the STORE that is unguarded, silently. Hardening
+  routes rejections into the existing `unreadable[]`, which already drives the fold CLI's exit
+  code — a CI-usable tripwire for free.*
+
+- **D67 — `census.mjs` is INVISIBLE TO GREP, and that is this epic's own disease inside its own
+  instrument.** *Why: a literal NUL byte at `census.mjs:148` (offset 8398), written into a mask
+  expression as a raw `0x00` instead of the `\0` escape, makes `file(1)` classify the file as
+  binary. The Claude Code `grep` wrapper (ugrep with `-I`) therefore returns ZERO LINES AND EXIT 1
+  while `/usr/bin/grep -anc screenCommand census.mjs` returns 7 — an agent grepping for census
+  internals gets a clean empty result indistinguishable from genuine absence. This is the most
+  likely explanation for "census-adjacent corners no surveyor reached"; one verifier nearly filed
+  two false absences from it and caught itself, concluding at first that census does NOT call
+  `screenCommand`, the exact opposite of the truth. One-character fix, zero behaviour change.
+  **METHOD RULING: any negative anywhere in this epic that rests on the grep wrapper over
+  `census.mjs` is VOID and must be re-derived with `/usr/bin/grep -a`.***
+
+- **D68 — the census is NOT hermetic, and the fix is a broadened `ENV_FAULT` plus a NAMED reach,
+  not `--offline`.** *Why: 38 of 240 admitted rows reach live services (bp=21, gh=15, curl=2), and
+  the real outage stderr of those binaries — "connect: connection refused", "no such host", "error
+  connecting to <host>" — matches NONE of the three `ENV_FAULT` regexes, so `bp`/`gh` fall through
+  `QUERY-LISTER` to `RAN-AND-FAILED`, which is in the DECAYED set. One hiccup flips up to 36 rows
+  to false DECAYED against a published 14.6% — a single-cause spike, not 36 independent decay
+  events. `--offline` costs reach unconditionally (240→202 executed, 36.9%→31.0%) to dodge a
+  failure mode the regex fixes surgically, so it ships opt-in at most. One residual is NAMED rather
+  than glossed: `curl -s` — 27 of the corpus's 34 curl commands — SUPPRESSES its own
+  connection-refused text, leaving empty stderr with exit 7, so no stderr regex can reach it; curl
+  exit codes 6 and 7 are therefore treated as environment faults directly, by code, not by text.*
+
+- **D69 — P2 FALSIFIES, and BOTH readings are published rather than the flattering one.** *Why:
+  predicted 68–85% strict path-token yield. Real fleet output measured 62.5% (65 of 104 survey
+  facts) — below the floor. The frozen corpus measures 48.8% (318/652), reproduced independently
+  three times to the digit. Deliberately-AIMED facts measure 85–100%, above the ceiling. Yield is a
+  function of AIM, not of the miner, and the honest forecast for unprompted fleet output is the
+  62.5% figure. Two mint defects surfaced while measuring, neither previously filed: `pathToken`
+  rejects Go's `./internal/cli/...` because the `..` traversal guard fires on the ellipsis
+  (go-family yield 24.2%, the worst of any family, and `internal/cli` is a named dense target); and
+  it returns null for EVERY single-segment top-level directory — `api/`, `js/`, `web/`, `docs/`,
+  `deploy/`, `scaffy/` — so the repo's own subsystem names, precisely the coarse terms an agent
+  types, can never become leads subjects.*
+
+- **D70 — P3 is RE-WORDED BEFORE it is measured, because the naive reading overstates outward reach
+  2.6x.** *Why: over the wave's 104 survey facts, the naive all-non-grip share is 61.5% (64/104),
+  but the corrected leads-VISIBLE non-grip share — excluding `cmd:<head>` per D45 — is 24.0%
+  (25/104). `cmd:bp` alone is the single largest bucket at 20 rows, D45's dumping ground appearing
+  live in this wave's own output. Quoting the naive figure would have claimed 2.6x the outward
+  reach the store actually has. P3 counts leads-visible subjects only, permanently.*
+
+- **D71 — the zombie roster closes by CONTENT, and `lifecycle_status: done` is CONFIRMED sufficient
+  to leave the ready pool.** *Why: measured rather than assumed. The ten tasks named in
+  `tgw3-bl-close-ten-merged-slices` all carry `lifecycle_status: done` with `claim.closed_at` from
+  `tgw4-decide`, and NONE of the ten appears in a fresh 968-document `bp task ready --all` — so
+  `done` does remove a task from the pool, and that backlog task's own description ("all ten
+  currently surface in ready --all") is itself now a stale truth inside the epic that hunts them.
+  `tgw1-adjudicator` and `tgw1-acceptance-suite` are self-documenting zombies whose own briefs open
+  "SUPERSEDED … must NOT be built from" — closed by content. `tgw1-workflow-gate-wiring` is NOT
+  pure bookkeeping and is NOT closed: it has 17 children of which 10 are still open, including
+  `tgw2-acceptance-suite` at 0/7, so closing it would orphan real work behind a closed parent.*
+
+- **D72 — wave 4's Paper UNDERCOUNTS its own filed debt by seven tasks.** *Why: seven `tgw4-*` /
+  `tgw-*` tasks are real, published, direct children of `truth-grip-epic`, inserted between
+  03:02:36Z and 03:52:26Z — after the wave-4 charter landed (03:30Z) and before the wave-4 review
+  commit (04:44Z) — and NONE of the seven appears anywhere in the 346KB wave-4 Paper. The Paper is
+  not lying: its blocks were frozen before its own Decide-phase filing sweep ran. The effect on a
+  reader is identical to lying, which is the point. From now on the wave-log entry is written AFTER
+  the filing sweep, and the Paper's wave plan names every task id it filed.*
+
 ## Roadmap
 
 Ordered. Round = dispatch round; a slice never dispatches beside an unmerged dependency.
@@ -663,6 +865,52 @@ the zombie-task disease this wave is treating.
 
 Round 2 does NOT dispatch this run. `tgw3-leads-verb` waits on 1 (it needs rows to read) and on 2
 (its staleness column renders the census's verdict, and both edit `ledger.mjs`'s CLI routing).
+
+### Wave 5 — the ledger becomes readable. Parent task `truth-grip-epic`. Paper `source-of-truth-grip-wave-5-2026-07-21`.
+
+The direction that opened this wave was "the fleet is the factory, aimed outward". Verification
+refuted its mechanism (D57) and its seam (D56), and replaced both. The store still leaves home —
+53 of the 62 committed rows are foreign — but it leaves home in a Decide commit of rows a verifier
+minted by hand, and the volume that makes `leads` worth typing comes from RE-EXECUTION BACKFILL
+(D58), not from dispatched verifiers.
+
+**Committed with this charter:** the two carve-out run files a wave-5 verifier wrote through the
+real CLI under D35, staged by explicit path. The store goes 9 rows → 62, 7 subjects → 48, 100%
+self-portrait → 85% foreign, with zero `value` fields, zero L1 rows and zero unreadable rows.
+That is D35's Decide step executed for the first time, one wave after it shipped.
+
+| # | Slice | Round | Size | Surface |
+|---|---|---|---|---|
+| 1 | `tgw5-screen-hardening` — two upstream RCE primitives, four write-flag holes, two false refusals | 1 | large | tooling/grip |
+| 2 | `tgw5-leads-verb` — `grip leads` + `grip prescreen`, reduced per D43–D46 | 1 | medium | tooling/grip |
+| 3 | `tgw5-mint-fixes` — the go-glob, the single-segment hole, and the quantity that fabricates rivals | 1 | medium | tooling/grip |
+| 4 | `tgw5-census-ledger` — `census --ledger`, the NUL byte, the hermeticity caveat | 1 | medium | tooling/grip |
+| 5 | `tgw5-probehttp-argv` — close the fact-derived-URL injection with argv, not a better gate | 1 | small | tooling/grip |
+| 6 | `tgw5-write-path-docs` — the nine discovery steps, answered where a writer looks | 1 | small | tooling/grip |
+| 7 | `tgw5-corpus-backfill` — the census mints; only commands that answer TODAY become rows | 2 | medium | tooling/grip |
+| 8 | `tgw5-fold-hardening` — the read path stops admitting what the write path refuses | 2 | medium | tooling/grip |
+
+Round 2 does NOT dispatch this run. `tgw5-corpus-backfill` waits on 1, 3 and 4: it re-executes
+historical commands, so it must not dispatch beside an unhardened screen (D61); it writes rows, so
+minting them with the colliding quantity would bake fabricated rivals into the store permanently
+(D60); and it mints THROUGH the census classifier (D58). `tgw5-fold-hardening` waits on 2 — both
+edit `ledger.mjs`, and leads owns the CLI dispatch chain this wave.
+
+**The one thing this wave is for.** After round 1, an agent types
+`node tooling/grip/ledger.mjs leads <substring>` and gets back RECIPES — command, derived level,
+dependency paths — for questions somebody already answered cheaply. Never a value, and not by
+promise: `RECIPE_FIELDS` has no `value` field, and `foldLedger`'s projection drops unknown keys
+before they reach `entries[]` (D66), so the verb CANNOT hand back a stale truth even from a forged
+file. After round 2 it reads a store roughly four times larger, every row of which re-derived an
+answer on the day it was written.
+
+**What this wave will NOT have proven, stated in advance.** The dispatched-verifier write path
+remains unexercised end to end (D56) — the prompt and harness edits that would close it are outside
+this epic's surface fence and are filed as `tgw5-bl-join-prompt-closure` for the lead. The level
+mention-promotion still derives a false L1 from a grep of an ops doc (D65). And P5's SHIP verdict
+rests on a 5-point margin at 62 rows, with 5 of 7 non-empty queries returning a SINGLE row — a
+one-row lead is not measurably better than a grep, so P5 is re-measured after round 2 at the larger
+row count before it is called settled.
 
 ## Wave log
 
