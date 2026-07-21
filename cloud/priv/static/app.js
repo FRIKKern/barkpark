@@ -4844,20 +4844,56 @@
     return null;
   }
 
-  function loadOverview() {
+  // ---------------------------------------------------- overview refresh scope
+  // Overview binds to FIVE reads: /v1/barkparks, /v1/audit?limit=5,
+  // /v1/usage/summary, /v1/subscription, /v1/onboarding. A cold paint needs
+  // every one. An SSE tick needs ONLY the collection its event actually named —
+  // until this scope existed every tick re-ran the whole loader (measured:
+  // 1 cold boot + 7 fleet ticks = 40 requests, 8 per endpoint). The fix is
+  // scope-narrowing, NOT debounce: the ticks are evenly spaced, so a time
+  // window suppresses nothing.
+  var OVERVIEW_FULL = "full";             // route entry / cold paint: all five
+  var OVERVIEW_FLEET = "fleet";           // instances changed: /v1/barkparks only
+  var OVERVIEW_ONBOARDING = "onboarding"; // a step self-healed: /v1/onboarding only
+
+  // What the Overview last painted from. `fleetCache` is a SHARED freshness
+  // cache any view may drop; this is the Overview's own last-known snapshot, so
+  // a scoped refresh can repaint the regions it did NOT refetch from memory
+  // instead of re-issuing their GETs. (`subCache` is already the module-level
+  // truth for the subscription, and meCache.onboarding for the boot fold.)
+  var overviewData = { list: null, usage: null, onboarding: null };
+
+  function loadOverview(scope) {
+    scope = scope || OVERVIEW_FULL;
     var body = $("#overview-body");
     if (!body) return;
-    body.innerHTML = '<div class="loading">Loading overview&hellip;</div>';
+    // A tick that beat the first paint — or one that lands on the empty-fleet
+    // runway, which never fetched usage/subscription/onboarding — has no
+    // snapshot to repaint from. That one is a full load, so a scoped refresh can
+    // never render a half-empty dashboard from caches that were never filled.
+    if (scope !== OVERVIEW_FULL && !(overviewData.list && overviewData.list.length)) {
+      scope = OVERVIEW_FULL;
+    }
+    if (scope === OVERVIEW_ONBOARDING) { refreshOverviewOnboarding(); return; }
+    var full = scope === OVERVIEW_FULL;
+    // Only a cold paint blanks the surface; a scoped refresh must not flash a
+    // spinner over a dashboard somebody is reading.
+    if (full) body.innerHTML = '<div class="loading">Loading overview&hellip;</div>';
     api("GET", "/v1/barkparks").then(function (r) {
       body = $("#overview-body");
       if (!body) return;
       if (!r.ok) {
+        // A BACKGROUND refresh that fails keeps the last good dashboard —
+        // replacing a working screen with an error state on one blip is the
+        // louder lie, and the liveness chip already reports a broken stream.
+        if (!full) return;
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load your fleet</h2><p>' +
           esc(friendly(r.data)) + "</p></div>";
         return;
       }
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
+      overviewData.list = list;
       setHeaderLaunchHidden("overview-launch", !list.length);
       paintOverviewHead(list);
       if (!list.length) {
@@ -4890,12 +4926,20 @@
               (sum.inflight === 1 ? " instance in flight." : " instances in flight.")) +
           "</p></div>";
       }
+      // Rebuilding the body blanks the activity digest. It is AUDIT-derived and
+      // no audit event fired, so a scoped refresh carries its markup across
+      // rather than re-issuing GET /v1/audit. Absent (the empty-fleet runway was
+      // on screen a moment ago) it is a first paint of that region → fetch it.
+      var carriedDigest = full ? null : digestMarkup($("#overview-digest"));
       body.innerHTML = '<div id="overview-state"></div>' +
         queueHtml +
         '<div id="overview-instances"></div>' +
         '<div id="overview-digest"></div>';
       wireFleetRows(body); // wires each attention row's Open Studio button
-      loadOverviewDigest();
+      var digestBox = $("#overview-digest");
+      if (carriedDigest != null && digestBox) digestBox.innerHTML = carriedDigest;
+      else loadOverviewDigest();
+      if (!full) { paintOverviewData(list); return; } // scoped: repaint from the snapshot
       // ONE combined fetch feeds every data-dependent region: the slots meter +
       // instance-card stats (usage/summary), the trial/past-due state band
       // (subscription + onboarding). Each painter re-queries its mount so a
@@ -4906,17 +4950,49 @@
         api("GET", "/v1/onboarding"),
       ]).then(function (res) {
         var usage = (res[0].ok && res[0].data && res[0].data.usage) ? res[0].data.usage : null;
-        var sub = res[1];
         var ob = (res[2].ok && res[2].data) ? res[2].data.onboarding : null;
         // Self-heal the boot fold (GET /v1/onboarding recomputes server-side); if
         // the read failed, keep the last-known fold rather than blanking it.
         if (ob && meCache) meCache.onboarding = ob;
         else if (!ob && meCache) ob = meCache.onboarding;
-        paintOverviewSlots(usage, list.length);
-        var grid = $("#overview-instances");
-        if (grid) { grid.innerHTML = overviewInstancesHtml(list, usage, sub); wireFleetRows(grid); }
-        paintOverviewState(list, sub, ob);
+        overviewData.usage = usage;
+        overviewData.onboarding = ob;
+        paintOverviewData(list);
       });
+    });
+  }
+
+  function digestMarkup(box) { return box ? box.innerHTML : null; }
+
+  // Paint every data-dependent region of the Overview from the snapshot. A cold
+  // paint calls it with freshly-fetched data already folded into overviewData; a
+  // scoped refresh calls it with only the collection it refetched updated. ONE
+  // painter, so the two paths cannot drift.
+  function paintOverviewData(list) {
+    var usage = overviewData.usage;
+    var sub = subCache;
+    paintOverviewSlots(usage, list.length);
+    var grid = $("#overview-instances");
+    if (grid) { grid.innerHTML = overviewInstancesHtml(list, usage, sub); wireFleetRows(grid); }
+    paintOverviewState(list, sub, overviewData.onboarding);
+  }
+
+  // C-02 scoped: an onboarding tick means a STEP self-healed (subscribed /
+  // launched / published — possibly in another tab). Refetch the fold and
+  // repaint the state band; the fleet, usage and subscription the rest of the
+  // Overview draws are untouched by that event.
+  function refreshOverviewOnboarding() {
+    api("GET", "/v1/onboarding").then(function (r) {
+      var ob = (r.ok && r.data) ? r.data.onboarding : null;
+      if (!ob) return; // failed read → keep the last-known fold, never blank it
+      if (meCache) meCache.onboarding = ob;
+      overviewData.onboarding = ob;
+      var list = overviewData.list;
+      // An empty fleet shows the welcome runway, whose only live text is the
+      // trial subline (subscription-derived, not onboarding) — nothing here to
+      // repaint. The runway refreshes on the next Overview visit.
+      if (!list || !list.length) return;
+      paintOverviewState(list, subCache, ob);
     });
   }
 
@@ -11966,10 +12042,14 @@
   function currentView() { return parseHash().view; }
 
   // The instance list changed (or an instance's state did): drop the cache and
-  // refetch whichever fleet-backed view is on screen.
+  // refetch whichever fleet-backed view is on screen. On Overview that is the
+  // FLEET collection alone — the activity digest, usage quota, subscription and
+  // onboarding fold this event did not touch are repainted from the snapshot.
+  // Every unregistered `barkpark.*` type reaches Overview through this same
+  // call, so the version-skew fallback inherits the narrowing.
   function invalidateFleet(v) {
     fleetCache = null; // any cached fleet is now stale
-    if (v === "overview") loadOverview();
+    if (v === "overview") loadOverview(OVERVIEW_FLEET);
     else if (v === "fleet") loadFleet(parseHash().filter || null);
     else if (v === "instance") reloadInstanceView();
   }
@@ -11988,13 +12068,15 @@
   }
 
   // C-02: an onboarding tick means a step self-healed (subscribed / launched /
-  // published — possibly in another tab). The Overview runway binds to that
-  // truth, so refetch it; loadOverview re-reads /v1/onboarding server-side and
-  // repaints the state band. Off-Overview it is a no-op beyond dropping the
+  // published — possibly in another tab). The Overview state band binds to that
+  // truth, so refetch it — and ONLY it: GET /v1/onboarding, repaint the band.
+  // The instance list is not onboarding-derived (a launch broadcasts its own
+  // "fleet" event), so this no longer drags the fleet, audit, usage and
+  // subscription reads along. Off-Overview it stays a no-op beyond dropping the
   // fleet cache (the boot fold refreshes on the next Overview visit).
   function invalidateOnboarding(v) {
     fleetCache = null;
-    if (v === "overview") loadOverview();
+    if (v === "overview") loadOverview(OVERVIEW_ONBOARDING);
   }
 
   // Registered so the vocabulary stays closed; handled conservatively (same
@@ -15594,6 +15676,13 @@
       subCache = null;
       subLoaded = false;
       subError = false;
+      // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
+      // standing, a scoped tick racing the next sign-in could repaint the new
+      // account's Overview from the previous one's fleet/usage/fold. Cleared
+      // alongside subCache so the next paint is unambiguously a cold one.
+      overviewData.list = null;
+      overviewData.usage = null;
+      overviewData.onboarding = null;
       hide($("#app-shell"));
       show($("#auth-screen"));
       // A partial 2FA challenge is abandoned by any fresh logged-out render
@@ -16609,6 +16698,16 @@
       renderActivateResult: renderActivateResult, renderActivateError: renderActivateError,
       renderActivateRateLimited: renderActivateRateLimited,
       failureCopy: failureCopy, failureTone: failureTone, liveEventTypes: Object.keys(TYPE_ACTIONS),
+      // cch-w1-refetch-storm: the SSE→Overview refetch path, exported so the
+      // harness can COUNT the requests one event actually costs. These are
+      // impure (they fetch and paint), unlike every pure helper above — the
+      // storm they closed was invisible to a pure-helper-only harness, and an
+      // uncounted refetch path is exactly how it regresses.
+      handleLiveEvent: handleLiveEvent, currentView: currentView,
+      loadOverview: loadOverview, invalidateFleet: invalidateFleet,
+      applyRoute: applyRoute,
+      overviewScopes: { full: OVERVIEW_FULL, fleet: OVERVIEW_FLEET, onboarding: OVERVIEW_ONBOARDING },
+      overviewData: overviewData, // stable object identity — the harness resets its fields
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
       // worker's report vocabulary + the ProvisionJob @steps whitelist.
       serverStepOrder: SERVER_STEP_ORDER, serverStepLabels: SERVER_STEP_LABELS,
