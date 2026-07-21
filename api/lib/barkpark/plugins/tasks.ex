@@ -448,7 +448,7 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Twelve verbs over twelve routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
+  Thirteen verbs over thirteen routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
   `:api + :require_token`, NOT admin — claim/close/release are bearer-gated workflow ops,
   not document mutations):
 
@@ -471,6 +471,10 @@ defmodule Barkpark.Plugins.Tasks do
       receipt.
     * `pulse` — `POST /v1/tasks/:doc_id/pulse` (now-line heartbeat + lease
       renewal, one atomic write; no epoch arg — pulse survives fences). WRITES,
+      minimal receipt.
+    * `stage` — `POST /v1/tasks/:doc_id/stage` (sanctioned thought-state
+      transition: considering | researching | open — enforces the Transitions
+      legality table, writes/clears content.engagement, no epoch fence). WRITES,
       minimal receipt.
   """
   @impl Barkpark.Plugin
