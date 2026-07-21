@@ -356,12 +356,30 @@ const HTTP_URL = /\bhttps?:\/\/[^\s'"|<>]+/;
 const SSH_DENIED = /permission denied|no such identity|could not resolve hostname|host key verification failed/i;
 
 function shell(cmd, timeoutMs) {
-  const started = Date.now();
-  const r = spawnSync("/bin/sh", ["-c", cmd], {
+  return finishSpawn(Date.now(), spawnSync("/bin/sh", ["-c", cmd], {
     encoding: "utf8",
     timeout: timeoutMs,
     maxBuffer: 8 * 1024 * 1024,
-  });
+  }));
+}
+
+/**
+ * Run one program with an ARGUMENT VECTOR — no shell, no word splitting, no
+ * expansion. Every byte of every argv entry reaches the program as inert data.
+ *
+ * This exists because `shell()` is the wrong primitive for anything carrying
+ * caller-supplied text. It is not a hardening layer on top of a gate; it is the
+ * absence of the interpreter the gate would otherwise have to out-guess.
+ */
+function spawnArgv(file, args, timeoutMs) {
+  return finishSpawn(Date.now(), spawnSync(file, args, {
+    encoding: "utf8",
+    timeout: timeoutMs,
+    maxBuffer: 8 * 1024 * 1024,
+  }));
+}
+
+function finishSpawn(started, r) {
   return {
     exit: r.status,
     signal: r.signal,
@@ -377,10 +395,29 @@ function shell(cmd, timeoutMs) {
  * Probe an HTTP URL for the (code, exit) pair. Separate minimal request so the
  * code is measured rather than scraped out of whatever the literal command
  * happened to print. Read-only GET.
+ *
+ * ARGV, NOT A SHELL STRING — and not a tighter URL regex either. `url` is
+ * fact-derived untrusted input: it comes out of HTTP_URL scanning a rerun
+ * command an author wrote. This once built a `/bin/sh -c` string with the URL
+ * double-quoted, and double quotes do NOT stop `$( )`: probing
+ * `http://localhost:1/$(echo INJECTED > /tmp/INJMARK)` created the file, with
+ * curl itself failing exit 7 — the substitution ran BEFORE curl did, so the
+ * request never had to succeed.
+ *
+ * classifySafety did not save it. It read safe=false only because that payload
+ * happened to be `touch`, a WRITE_SHAPES name; the same injection carrying
+ * `reboot` reads safe=true. The gate caught a class of PAYLOAD, never the
+ * INJECTION — which is exactly the denylist-on-a-sink failure this epic exists
+ * to name. Passing an argument vector removes the interpreter instead of
+ * out-guessing it, so every metacharacter is inert data to curl.
  */
 export function probeHttp(url, timeoutMs = SYNC_TIMEOUT_MS) {
   const secs = Math.max(1, Math.ceil(timeoutMs / 1000));
-  const r = shell(`curl -s -o /dev/null -w '%{http_code}' --max-time ${secs} ${JSON.stringify(url)}`, timeoutMs + 500);
+  const r = spawnArgv(
+    "curl",
+    ["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", String(secs), String(url)],
+    timeoutMs + 500,
+  );
   const code = Number.parseInt(r.stdout.trim(), 10);
   return { code: Number.isNaN(code) ? 0 : code, exit: r.exit ?? -1, ms: r.ms };
 }

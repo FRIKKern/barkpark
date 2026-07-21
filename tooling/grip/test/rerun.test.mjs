@@ -14,13 +14,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  runRerun, classifyHttp, classifySafety, classifyScope, mixEnvOf, isBuildWarm,
+  runRerun, classifyHttp, classifySafety, classifyScope, mixEnvOf, isBuildWarm, probeHttp,
   blankQuotedSpans, classifyFamily, classifySilence,
   admitsPassClaim, admitsAbsenceClaim, assertAbsenceClaim,
   VERDICT, SCOPE, FAMILY, GripError,
@@ -90,6 +90,47 @@ test("a downed host reads HOST-UNREACHABLE, never ASYNC-DEFERRED", () => {
 test("reachable is TRI-STATE — null when the command is not an HTTP probe", () => {
   const r = runRerun("git rev-parse --show-toplevel");
   assert.equal(r.reachable, null); // NOT false — unknown must never impersonate down
+});
+
+// ── 1b. THE PROBE URL IS UNTRUSTED INPUT, AND NO SHELL PARSES IT ─────────────
+// probeHttp once built a `/bin/sh -c` string with the URL double-quoted, and
+// double quotes do NOT stop `$( )`. Proven live in this worktree before the fix:
+// probing `http://localhost:1/$(echo INJECTED > /tmp/INJMARK)` CREATED the file
+// while curl itself failed exit 7 — the substitution ran before curl did, so the
+// request never had to succeed. HTTP_URL (the regex that harvests the URL out of
+// a rerun command) excludes whitespace, quotes, pipe and angle brackets but
+// permits `$ ( ) `` — and it is deliberately NOT tightened here, because a
+// denylist on an injection sink is the failure this epic exists to name.
+//
+// These assertions are shape-sensitive by construction: they pass ONLY while the
+// spawn is an argument vector. Restore the shell-string form and the marker gets
+// created, failing the first test — the mutation was run, not assumed.
+
+test("a command substitution in the probe URL does NOT execute — argv, not a shell string", () => {
+  const marker = join(mkdtempSync(join(tmpdir(), "grip-inj-")), "INJMARK");
+  // The payload is a WRITE, so the filesystem itself is the witness.
+  const probe = probeHttp(`http://127.0.0.1:1/$(echo INJECTED > ${JSON.stringify(marker).slice(1, -1)})`, 2000);
+  assert.equal(existsSync(marker), false, "a shell expanded the URL — the substitution ran");
+  // curl received the metacharacters as inert data and rejected the literal URL
+  // (exit 3 = URL malformed). Under the shell form curl never saw them at all.
+  assert.notEqual(probe.exit, 0, "a malformed literal URL must not report success");
+  assert.equal(probe.code, 0, "no HTTP status was ever received");
+});
+
+test("backticks and `;` in the probe URL are inert data too", () => {
+  const marker = join(mkdtempSync(join(tmpdir(), "grip-inj-")), "TICKMARK");
+  const lit = JSON.stringify(marker).slice(1, -1);
+  probeHttp(`http://127.0.0.1:1/\`echo T > ${lit}\``, 2000);
+  probeHttp(`http://127.0.0.1:1/;echo T > ${lit}`, 2000);
+  assert.equal(existsSync(marker), false, "a shell parsed the URL");
+});
+
+test("classifySafety rates the INJECTION safe — which is why argv, not the gate, is the fix", () => {
+  // This is the tell, pinned so nobody re-solves the sink with a better denylist.
+  // The identical injection reads UNSAFE only when its payload happens to be a
+  // WRITE_SHAPES name; swap in a verb the list does not carry and it goes safe.
+  assert.equal(classifySafety("curl -s http://localhost/$(touch /tmp/x)").safe, false);
+  assert.equal(classifySafety("curl -s http://localhost/$(reboot)").safe, true);
 });
 
 // ── 2. UNAVAILABLE — neither a pass nor a rejection ──────────────────────────
