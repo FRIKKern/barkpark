@@ -1493,3 +1493,56 @@ merge-gated criteria open for the lead. A's task is honestly `in_progress` under
    sequenced-rounds law, not a failure of this wave.
 
 Paper: `spd-round-trip-fidelity-wave-2026-07-21`.
+
+## Wave log — wave 15
+
+### Wave 2026-07-21 — Wave 15 (KILL THE LAST REACHABLE CRUSH), Review. Grade A−.
+
+**What landed.** Both round-1 slices are built, gate-green on final state, mutation-proven in both
+directions, and pushed as PRs. The last reachable standard-bucket scrim crush is paid in BOTH halves.
+
+- **S1 · FIX 1 · `spd-w13-secondary-doc-zero-coverage`** — final branch
+  `loop-epic/fix-1-identity-gated-secondary-doc-clear-0` (reviewer changed nothing; already clean),
+  commit `a3e00f625`. Identity-gated secondary-pane clear in `shared.ex` ONLY, at the **rebuild_panes
+  seam** — NOT in `paper.ex`'s `clear_paper_view/1` / `setup_paper_view/2` as the tentative slice
+  shape first guessed. That guess was already reversed by V1's decisive correction (dec-1002): an
+  unconditional clear there fires on the `_ ->` branch on every same-doc save and wipes a live pane.
+  Built form: `same_doc? = same_editor_doc?(old,new)` computed once (:740), piped
+  `|> clear_secondary_on_doc_change(same_doc?)` (:780), the trio cleared only on an actual
+  primary-document identity change (:829-832). New test `studio_live_secondary_doc_test.exs` drives
+  the real handlers for both legs. Reviewer re-mutation-proved: removing the pipe reds the nav-clears
+  leg (:135) by name; an unconditional clear reds the D199 preserve leg (:159) by name. Gate 2/2.
+- **S2 · FIX 2 · `spd-standard-bucket-scrim-unruled`** — final branch
+  `loop-epic/fix-2-standard-bucket-scrim-suppressor-d-1-r` (reviewer added one follow-up commit
+  `fc3b9ee4f`: `mix format` on the test file, the advisory format gate), builder commit `32d8ebf73`.
+  ONE suppressor in `root.html.heex` (:2177), pane-unbounded outside the 860px `@container`, mirroring
+  the narrow/phone sibling. Test extends `inspector_summoned_destination_test.exs` (15/0 → 17/0) with
+  a cascade-evaluating guard, an in-memory mutation control, and the repaired D176 forced-container
+  positive control. Reviewer re-mutation-proved: deleting the suppressor from the REAL sheet reds
+  exactly the three guards by name. All four doc/design gates (mirror, literal, link-lint,
+  design/check.mjs) PASS.
+
+**What stalled.** Nothing. No round-2+ slices were deferred — both slices were round 1 and are built.
+
+**Ledger audited.** Both slice tasks claimed, stamped as they worked, left `in_progress` with only
+the merge-gated criterion open for the lead (6/7 and 7/8). Both carry
+`wave_paper = spd-standard-scrim-crush-wave-2026-07-21`. No lies, no premature done-flips, no
+out-of-wave tasks touched.
+
+**What the lead must know before merging.**
+1. **Both PRs are file-disjoint** (`shared.ex` + new test vs `root.html.heex` + existing test) — no
+   inter-slice ordering constraint. Both wait on the Elixir Test / `mix-test` gate (`.heex/.ex`).
+2. On each merge the LEAD closes that task's merge-gated criterion.
+3. **The CSS half's proof is a faithful cascade MODEL, not a live rendered pixel.** The
+   "scrim no longer paints at standard/620" claim rests on the specificity/source-order model.
+   Live-render confirmation via `studio-desk-measure.mjs` at the compound `secondary_doc` state
+   (dg-23 corner) is the one gap left between this wave and D127's live standard — it is next-wave
+   seal work, not a builder slice.
+
+**What the next wave should take.** Merge round 1 (both, parallel) → lead closes merge-gated criteria
+→ then the seal path: SEAL-BLOCKER 1 (push slice C `spd-w13-prediction-registered`, still unpushed);
+the LIVE-RENDER PROOF the model defers (drive the measure instrument to the compound state and
+photograph the luminance recovery); and the D195/D197 LEDGER RECONCILE (14 merged-but-open tasks +
+spd-b39's own criteria).
+
+Paper: `spd-standard-scrim-crush-wave-2026-07-21`.
