@@ -1332,59 +1332,359 @@ epic did. The census exists because of that, not despite it. **THE CROWN IS DARK
 console shipped fully built and remains unreachable because `PLATFORM_ADMIN_EMAILS` is still unset on the
 control plane. **"Seal" means CODE seal only, and the ending must say so in plain words.**
 
-### Wave 2026-07-21 (round 11) — the successor's charter is made true; the terminal act is armed — REVIEW
+---
 
-Wave Paper `cloud-gui-remake-wave-2026-07-21-seal`. Grade **A−**. **One slice built, one deferred by design.**
+## Wave 2026-07-21 — phase-5 seal round 11: THE TERMINAL WAVE (execute and disclose, then END)
 
-**Landed — `gr-p5r11-successor-charter-refresh` (ledger-only, ZERO repo files, no branch).** The successor
-`cloud-console-hardening-epic` now names every row it is about to inherit. Bands went B1 5/5, B2 8/8, B3 15/15,
-B4 13/13, B5 15/15, B6 2/2; the gate's Band-3+4 set went **15/28 → 28/28** and was proven able to fail (the same
-gate exited 1 before the patch). The three chartered traps are all handled in plain words:
-`cloud-console-billing-live-gate` is stated as **deliberately not inherited** (GR138; bucket (c) reaches it by
-hardcoded parent-independent `filter[_id]`), `gr-blk-studio-presence-perf-flake` is stated as **routed to Felix
-pristine `task-96a908af98698118` and not arriving**, and `gr-p5r4-spa-b` is inherited as a **wave slice for
-section (E) only** with its five already-forwarded sub-workstreams named so they cannot be double-counted.
+**This wave does not plan. It executes a plan that is already merged, runs the frozen predicate once, and
+writes down whatever it says.** There is no round 12. Whichever way the exit code lands, the epic ends here:
+exit 0 seals it as a CODE seal, exit 1 hands it to the named successor. Both endings were pre-authorised at
+round 10 and neither is a failure. **No seventh instrument is built, and no instrument is widened.**
 
-The builder also found, and disclosed, something Decide did not anticipate: the successor **already held TEN
-native `gr-bl-*` children**, filed by rounds 9–10 as findings about the seal machinery itself, none of which has
-a census line. They are now enumerated by id as a **single CLOSED, fully-listed exception** — deliberately not
-an open-ended carve-out, which would have reintroduced the remainder clause the census exists to abolish.
-Without that paragraph, the first correct application of the arrival rule would have re-triaged ten legitimate
-rows.
+### GR153 — the wave's own premise was WRONG, and the way it was wrong is the finding
 
-**Review fix, in place, in the live published description — GR153.** The intake arithmetic was **off by one and
-self-invalidating**. The builder correctly separated *58 censused* from *57 inherited* for the Felix routing,
-but the census disposes **60** live rows, not 58: two are disposed **outside the bands** and so were never
-counted — `gr-backlog-bp-search-verb-discoverability` (CLOSED by name, never arrives) and
-**`gr-p5r5-successor-seal` itself**, the self-orphan that STEP 5 of the terminal act re-parents in **LAST**.
-The successor's own text therefore promised a roster of 67 and instructed the reader that "if the roster is ever
-wider than this text, the text is wrong" — and the roster was always going to be **68**. That is precisely the
-number the round-2 terminal-act gate already asserts (`successor count >= 68`), so the charter as written
-contradicted the gate that will judge it. The published description now reads **60 censused / 58 arriving / 68
-post-move**, and names the seal as the 58th arrival belonging to no band, adding that **its own children ride
-along unnamed and already done** because clause (a) reads DIRECT children only — no move lines for them, and
-they are not unnamed arrivals. Live roster re-verified before and after the fix: **60 live under the epic, 10
-under the successor, zero rows added or removed by this review.**
+Strategize asserted, as a ground-truth correction, that *"the 62-row census (#5079) is NOT yet a written
+artifact — the charter carries only the census PLAN."* **That is false.** Five surveyors refuted it with
+`file:line` + `gh` evidence and Decide re-verified at L2: `git merge-base --is-ancestor 0f72dfd76 origin/main`
+exits 0 against `origin/main = bc64d869a`. PR #5079 merged 2026-07-20T20:46:50Z and appended the complete
+per-row census at charter lines ~967–1173.
 
-**Deliberately NOT filed.** The builder flagged two discoveries (the native-child count is a prose snapshot that
-can decay; the ten natives were never checked for semantic duplication against the census) and was barred from
-filing them. **The reviewer upholds that bar and files nothing** — a new row under `task-47bc4168392dec17` would
-make the roster **61**, breaking the frozen census and the move-set the terminal act executes verbatim; a new row
-under the successor would break the *closed, fully-listed* ten-native exception. Both findings are recorded in
-the Paper and in the slice's `reviewer_note` instead. **Filing work is the default; here it is the defect.**
+**Why the error happened matters more than the correction.** The two surveyors who agreed with the false
+premise both read `gr-p5r10-census`'s stale `claim.now` note — *"committed 0bf8fe29e … Not pushed."*
+`0bf8fe29e` is **not** an ancestor of `origin/main`; the squash-merge `0f72dfd76` is. This is **GR130's
+branch-SHA-vs-merge-SHA trap recurring at the level of the wave's own premise** — the exact error that made
+round 9 believe four landed defects were unfixed. A `claim.now` note is a worker's assertion about a local
+branch. `--is-ancestor` is the running system. **The rule stands: no disposition is ever written from a claim
+note; every SHA in this epic is ancestor-verified or it is not cited.**
 
-**Deferred by design — `gr-p5r11-terminal-act` (round 2).** Unblocked the moment round 1 merges. It is the
-terminal act: one agent, one instant, one run — the CLOSE, the Felix route, the 57 banded moves, the self-orphan
-LAST, then the frozen predicate ONCE from the repo root with `--successor cloud-console-hardening-epic`, no
-`--ledger`, no `--guard-cmd`. Exit 0 = SEAL, exit 1 = **NO SEAL, a pre-committed terminal outcome**. There is no
-round 12 and no seventh instrument.
+### GR154 — the move-set, re-derived at Decide against a fresh roster: 60/60, exact, zero remainder
 
-**A dated correction to this charter's own tail.** The round-10 text closes by re-proving THE CROWN IS DARK with
-"`/v1/me` → `platform_operator:false`". The terminal act is chartered to state the crown as a **mechanism**
-(the allowlist resolves to `[]` at every layer, the value lives in a gitignored `.env`, no deploy script
-references it, and an empty allowlist means 403 for every *authenticated* user) and **not** to claim an observed
-`platform_operator:false` body. The two passages are in tension; the **mechanism form is the one that ships** in
-the terminal artifact, because an anonymous probe returns 401 at `require_user` before the allowlist is ever
-consulted.
+Live roster at Decide: **140 children, `{done: 80, open: 60}`, `in_progress: 0`.** (Strategize's `{80, 59, 1}`
+was already stale within hours — GR126 proving itself on this wave's own numbers.) The 60 live ids were
+diffed both directions against the census: **`comm -23` empty, `comm -13` empty — an exact 60/60 cover.**
+All census-named ids resolve; the one apparent `NOT_FOUND`, `gr-w2-cloudchrome-bridge`, is a **git branch
+name** quoted inside another row's prose, not a task. The feared `gr-blk-`/`gr-bl-` id slip **does not exist
+in the charter** — the census writes `gr-bl-peer-ip-container` and it resolves.
 
-**What the next wave takes: nothing new.** Merge round 1, then run round 2 and take the verdict either way.
+The 60 decompose exactly: **57 move to `cloud-console-hardening-epic` · 1 CLOSES · 1 moves elsewhere ·
+1 is the seal itself, disposed by running.**
+
+- **The one CLOSE — `gr-backlog-bp-search-verb-discoverability`.** The census declared it CLOSED on
+  `3f16c9f43`; **the ledger action was never executed.** It reads `open 0/3`, unclaimed, still under the epic.
+  The SHA is a genuine ancestor and the fix is genuinely live (`soleReadVerb` on `origin/main`;
+  `bp search "seal predicate successor"` runs the query and returns hits). **CLOSE it — both CLOSE and MOVE
+  clear clause (a), only CLOSE is honest.** Pre-authorised fallback: if the claim/close does not land in two
+  attempts, MOVE it and **disclose in the artifact that the census's CLOSE was executed as a forward.**
+- **The one row that does NOT go to the successor — `gr-blk-studio-presence-perf-flake`** → `task-96a908af98698118`,
+  its real home, exactly as the census says in bold. **A blind 60-row sweep against the successor would
+  silently violate the census it is executing.** This is the sharpest mis-routing hazard in the set, and it is
+  not the billing gate.
+- **`cloud-console-billing-live-gate` is NOT MOVED.** It resolves `open` under `cloud-console-goal`, its true
+  owner, and the predicate reaches it by hardcoded id via a parent-independent `filter[_id]`. **Any move line
+  naming it is a defect.**
+- **The two in-roster human gates DO move** (`gr-ops-platform-admin-emails`, `gr-backlog-qr-live-scan-proof`).
+  The predicate does not require it — `PERMANENT_HUMAN_GATES` is checked **before** the forwarded set, so a
+  live gate under the epic lands in `gatedLive`, never `orphans`. They move because the census forwards them
+  to Band 6 and **a forwarding address that does not actually hold the row is prose, not a handoff.**
+  Expected visible effect: bucket (c) prints `in-epic-roster=false` on **all three** gate lines. **That is the
+  correct output, not a defect.**
+
+### GR155 — GR148's "honest caveat" is itself wrong, in the row's favour, and is corrected here
+
+The census records that `gr-backlog-bp-search-verb-discoverability`'s criterion 3 *"asks for a doctrine
+sentence that lives OUTSIDE this repository, so the criterion is satisfied in substance, not in letter."*
+**Refuted at source.** `git grep -n "before grepping" origin/main` returns
+`origin/main:.claude/agents/felix.md:61` — a tracked, agent-facing doc carrying exactly
+`- **bp search first**: before grepping the tree, \`bp search <concept>\``. That line cites `bp search <concept>`
+**without** the word `query` — meaning `3f16c9f43` made a **pre-existing doctrine sentence true** rather than
+the doc being edited to match the CLI. `docs/cheatsheets/bp.md:21` is a second in-repo anchor.
+**Criterion 3 is met IN LETTER, at `.claude/agents/felix.md:61`.** The close must say so, and the terminal
+artifact must not repeat the retired caveat. *(Note the recursion: GR113 once recorded that `bp search <term>`
+errors `unknown command`. It did, then. This epic's own fix made its own charter line stale.)*
+
+### GR156 — the banner will understate the wave, and the charter pre-empts it rather than widening the tool
+
+`fwd` counts only forwarded rows **still in the epic roster**. A row that has been moved is gone from
+`children` and never reaches the forwarded check — GR132's dead-code finding, now landing on the exact line
+the seal is signed on. **After a perfect triage the SEAL banner reads
+`Sealed 81 children: 81 evidence-closed, 0 forwarded by name`.** Read alone it says nothing was forwarded.
+
+**Therefore the roster delta is part of the terminal artifact, in plain words, beside the verbatim stdout:**
+
+| | before | after (expected) |
+|---|---|---|
+| epic `task-47bc4168392dec17` | 140 children, 60 live | **81 children, 0 live, all `done`** |
+| successor `cloud-console-hardening-epic` | **10 children** | **68 children** (10 + 57 + the seal) |
+| `task-96a908af98698118` | 46 children | 47 (studio-presence) |
+
+**The successor's "before" is 10, not the 7 that Verify measured** — Decide filed three inherited backlog rows
+under it (GR158's false-done, and two instrument defects found while proving the preconditions). Read the
+successor's count live before the moves rather than trusting either number; **the invariant that matters is
+`after − before = 58`, not any absolute.** If the CLOSE was executed as a forward instead, the shape is
+**80 children / 0 live** and successor **69** — record whichever actually happened. **Any live row remaining after the moves is an orphan: catch it in the
+re-read, not from the exit code.**
+
+### GR157 — the four SCOPE caveats print on the SEAL branch ONLY, so the charter carries them itself
+
+The predicate's entire `SCOPE —` block, including all four *"NOT asserted by this green"* points, sits inside
+`if (ok)`. **A NO SEAL run emits none of it** and ends four lines after the verdict. A NO SEAL ending would
+otherwise lose this epic's whole honesty disclosure. So it is recorded here, **independent of verdict**:
+
+1. **Defect coverage is bounded by what was REGISTERED.** Clause (b) certifies the word *known* over three
+   hand-registered defects. A defect nobody looked for is invisible to it.
+2. **The overflow sweep covered 86/86 scenarios × 2 themes at 768px (default accent), plus 12/86 × 5 accents.**
+   NOT swept: 74 of 86 scenarios under the four non-default accents; widths outside 721–1440 were measured on
+   the two past-due screens only.
+3. **21 clean-CAS children are sealed on evidence nobody read.** 0 of 39 checked failed, bounding the true
+   material-failure rate at ~8% upper-95% — so **up to ~2 of the 21 may carry one.** They are enumerated by
+   name in this charter, never described as a subtraction.
+4. **THE CROWN IS DARK, and structurally so.** `PLATFORM_ADMIN_EMAILS` resolves to `[]` at every layer; the
+   real value lives in a gitignored `.env`; **zero deploy scripts reference it, so no commit can set it.**
+   Because the allowlist is empty, every *authenticated* user gets 403 — the console is dark for everyone, not
+   selectively lit. *(Correction to round 10's wording: the anonymous probe returns **401**, not 403, because
+   `require_user` precedes the allowlist check. The artifact must state the MECHANISM — empty allowlist,
+   un-settable by commit — never claim an observed `platform_operator:false` body.)* **"Seal" here means CODE
+   seal, never "this feature is live for any human."**
+
+### GR158 — one named false-done in the done-set, DISCLOSED and forwarded, never reopened
+
+`gr-blk-shootsh-scen-suggester` is a genuine false-done. Its sole evidence is
+*"Fixed in review on loop-epic/land-the-shoot-sh-watchdog-bound-the-rea-1-r (8a1545bd7)"*. Re-verified at
+Decide: `8a1545bd7` is a real local object, `git branch -r --contains` is **empty**, `--is-ancestor` exits
+**1**, and `origin/main`'s `shoot.sh` has **zero** occurrences of the described near-match ladder
+(`did you mean` / `resembles`) — it still carries the older bare `Closest by prefix:` mechanism. Its sibling
+on the same branch family (`gr-blk-shootsh-reap-timeout`, PR #4834) **did** land, which is exactly why the
+false-done is easy to miss: one twin shipped, the other sat on an unpushed review branch and was marked done
+anyway.
+
+**It is NOT reopened.** Reopening it would create a new live row under the epic — a clause-(a) orphan and a
+clerical NO SEAL — and re-auditing the done-set to prevent a green **is the seventh instrument in miniature**.
+It is named here, and filed as a fresh row **under the successor**, where clause (a) cannot see it and a human
+can. **The done-set honesty claim is therefore: one named false-done, not "no false-dones found."** The
+20 named PR-only rows were separately resolved — all 17 distinct PRs merged, all 17 merge commits
+ancestor-verified, zero failures; `gr-backlog-email-fleet-mapping`'s apparent `#14181` is the hex literal
+`#14181f`, a regex artifact.
+
+### GR159 — the mechanical preconditions, each measured, none re-litigated
+
+- **Clause (b) is satisfiable now.** `#5060` (`b47e1ecc1`) registered `0261ace15` in all three
+  `KNOWN_DEFECTS`; both are ancestors of `origin/main`. `gr-p5r8-register-defect-commits` is **lead-closed 5/5**
+  at Decide, and `gr-p5r10-census` **lead-closed 8/8** on `0f72dfd76`.
+- **The guard is healthy and the port is the whole story.** `OVERFLOW_GUARD_PORT=4231`: **20/20 clean** —
+  5 runs in the literal shape plus **15 in the predicate's true per-defect `spawnSync` shape**, every one
+  exit 0 with **0 bytes of stderr** and all three defects PASS. Port **4199 is squatted right now** (node pid
+  92003), confirming GR142 was contention and GR143 is the cure. **Probe with `lsof`, never a zsh `/dev/tcp`
+  test — the latter reported 4199 free while `lsof` showed the listener.** Fallbacks: 4233, 4241.
+- **A clause-(b)-only NO SEAL is MECHANICAL until proven otherwise.** The predicate reads only the guard's
+  `.status` and **never reads `r.stderr`**, so a guard that exits 2 because it could not bind a port prints,
+  verbatim, `guard exited 2 — the defect is still measurable at origin/main` — **a false statement about
+  pixels**, with the predicate's own stderr at 0 bytes. The **one** pre-authorised repair is to re-run the
+  guard **standalone with stderr captured**. Guard green standalone + predicate red on (b) ⇒ clerical, repair
+  and re-run once. Guard genuinely red ⇒ **that is the verdict.**
+- **The predicate must run from the repo root with `origin/main` freshly fetched** — `--repo` defaults to
+  `process.cwd()` and clause (b) is `git -C REPO merge-base --is-ancestor`.
+- **`--successor cloud-console-hardening-epic` is mandatory.** Omit it and the header still reads
+  `(none filed)` while the SCOPE line interpolates bare: **`to null`** — and the run still **exits 0**. A
+  forgotten flag yields a SEAL whose own disclosure says the epic was forwarded *to null*. **That is worse
+  than a red.** *(A third rendering exists that GR132 did not name: a fixture omitting the key prints
+  `to undefined`.)*
+- **`--guard-cmd` MUST NOT appear in the terminal run.** It is a mutation-proof flag; stubbing it turns the
+  epic's only pixel-level assertion into a tautology.
+- **Write budget: measured, not assumed.** `bp` ignores `BARKPARK_TOKEN` entirely and always reads the single
+  host `~/.config/barkpark/config.json` — **every sibling agent on this host shares one token and one global
+  60/min write bucket** (`refill = 1.0/sec`, no per-verb component). A live 15-write probe at 1.1s pacing
+  under concurrent sibling load: **15/15 exit 0, zero throttled**, effective ~0.52 writes/sec. Pace ≥1.1s.
+  **Detect throttling by `bp`'s exit code 7 — never by text-matching "429" in a body**, which is precisely how
+  round 9 burned 12 spurious epochs (the substring occurs in ordinary 200 payloads).
+- **Re-parent mechanics, corrected.** Round 10 recorded that a same-parent no-op move *"still emits a
+  `task.reparented` event and still burns a slot."* **The event half is false**: `Move.move/3` returns
+  `{:noop, doc}` with *"no write, no event"* and never reaches `insert_mutation_event!`. **The slot half is
+  true**: the rate-limit Plug bills by HTTP method before the controller runs. Moot in practice — the
+  successor's 7 children have **zero overlap** with the 60, so no move in this set is a no-op.
+- **`bp task move <doc_id> <new_parent_id>` takes no epoch** and needs `--yes` (a non-TTY session is refused,
+  not prompted). Moving an `in_progress` row auto-bumps its `claim.epoch`; irrelevant here — `in_progress` is 0.
+- **Doc gates cannot block this charter.** `check-doc-budgets.sh` contains **zero** occurrences of `.claude`;
+  `docs-anchors-check.sh` prunes `.claude` by name. The blocking drift-ceiling job PR #5046 is **CLOSED and
+  unmerged**, and main's only format job is advisory. **The census may be as long as honesty requires.**
+
+### GR160 — GR150 is mechanically sound, and the self-orphan is the last thing that moves
+
+`seal-predicate.mjs` reads `children = fetchRoster(EPIC)` = `filter[parent_id]` = **direct children only**.
+The seal's sub-slices are **children of a child** and are structurally invisible to clause (a); they travel
+automatically when the seal moves. **Write no move lines for them.** Proven by fixture: leaving
+`gr-p5r5-successor-seal` live under the epic at run time makes it **its own orphan** and the epic cannot seal
+(`UNNAMED RESIDUE (orphans): 1 · ✗ gr-p5r5-successor-seal`). **"Re-parented LAST" means last among the moves
+and strictly BEFORE the run.** *(Census nit, corrected: it says both round-9 self-orphans are `done`;
+`gr-p5r8-register-defect-commits` was `open` when the census was written. It is `done` now, lead-closed at
+Decide — but the artifact must not repeat an unverified claim.)*
+
+### Two charter task ids do not exist, and are corrected
+
+Round 10's wave section names `gr-p5r10-land-defect-commits` and `gr-p5r10-terminal-run`. **Both 404.** The
+real ids are **`gr-p5r8-register-defect-commits`** and **`gr-p5r5-successor-seal`**. `gr-p5r10-census` is the
+one round-10 name that was real. Same class as this lead's invented `cloud-gui-remake-epic`. **Every id is
+re-verified at L1 before it is passed to `bp`.**
+
+### The wave — two slices, two rounds, no new instrument
+
+- **`gr-p5r11-successor-charter-refresh`** (round 1, opus, **ledger-only, zero repo files**) — the successor's
+  own published description under-lists **Band 3 (8 of 15)** and **Band 4 (7 of 13)** and still claims
+  *"three children"* when it holds seven. It must name every row it is about to receive **before** 57 rows
+  arrive, or the successor's roster is wider than its own charter and the "a row without a census line arrived
+  by accident" rule cannot be applied by a reader.
+- **`gr-p5r11-terminal-act`** (round 2, opus, `after: [gr-p5r11-successor-charter-refresh]`,
+  `.claude/workflows/bp-cloud-gui-remake-charter.md`) — **ONE agent, ONE instant** (GR126): close the one row,
+  execute 57 + 1 moves, move the seal LAST, **re-read the roster and prove 0 live**, then run the frozen
+  predicate **once** and record its verbatim stdout, stderr, exit code, ISO stamp, roster count **and the
+  roster delta**, whichever way it exits. **The terminal act is never split across agents** — a verdict is
+  valid only at an instant, and the roster drifts.
+
+**The ending, pre-committed.** The census is the deliverable; the exit code is only the signature. The
+predicate can only ask *"does this row's parent equal the successor id"* — **a chartered successor and an
+empty junk-drawer pass it identically.** That is why the honesty lives in the census, which the predicate
+structurally cannot express, and why a NO SEAL is an ending and not a defect. **This epic tried to seal six
+times and each round answered with a new instrument, the seal receding by one instrument per round. Round 11
+answers with a verdict.**
+
+---
+
+## Wave 2026-07-21 — phase-5 seal round 12: THE EXECUTION (two acts, one verdict, no round 13)
+
+**Round 11 wrote a line-exact runbook and ran nothing.** The disposition was re-derived at L1 twice more this
+round — by an independent surveyor and again by a verifier — and both times `LIVE-NOT-PLANNED = []` and
+`PLANNED-NOT-LIVE = []`. There is no planning left. 59 `bp task move` calls at 1.1 s is ~65 seconds; plus one
+close and one predicate run the entire mechanical act is about two minutes of wall clock. **Seven rounds have
+failed to spend two minutes.** Round 12 spends them.
+
+### GR161 — the runbook contradicted itself, and the stale copy is the one a builder reads first
+
+`gr-p5r11-terminal-act` carries the runbook **twice**. `doc.content.description` (17 121 B) and
+`acceptance_criteria[6]/[9]` are **canonical and correct**. `doc.content.brief.blocks[1].content[0].value`
+(16 817 B) and `brief.blocks[5].items[6]/[9]` are a **frozen earlier revision** — the two texts differ in
+exactly **28 unified-diff lines across 4 hunks and nothing else**. In the raw `bp task get` output the stale
+brief sits at byte 5 084 and the correct description at byte 27 099: **the poisoned copy is 22 KB earlier in
+reading order.** The probable mechanism is already filed as `pds-bl-large-task-write-500` (task writes past
+~5 KB hang and silently cap a brief), which means **patching the mirror cannot be trusted to stick.**
+
+**RULING: round 12 does not patch the mirror. It files `gr-p5r12-terminal-act` with ONE authoritative runbook
+field and no brief mirror at all.** A document that cannot contradict itself is cheaper than a document
+repaired into agreement.
+
+### GR162 — the stale copy's worst line is not the arithmetic, it is a path that fails SILENTLY GREEN
+
+The stale brief cites `cloud/priv/static/preview/` in four places. **That directory does not exist**; the
+instruments live at `cloud/priv/static/__preview__/`. Proven live:
+
+    git diff --exit-code origin/main -- cloud/priv/static/preview/seal-predicate.mjs   →  exit 0
+
+git exits 0 on a pathspec matching nothing. A builder following the brief pastes *"exit=0, both instruments
+byte-clean vs origin/main"* as evidence **for the one gate whose entire job is proving the instruments were
+not tampered with — having verified nothing.** The same path then yields `MODULE_NOT_FOUND` on the terminal
+act itself, so round 12 would end having run nothing, for the eighth time, over a path typo. **The arithmetic
+bug produces a wrong verdict; the path bug produces no verdict at all.**
+
+### GR163 — 68, not 65; and the only number worth trusting is a difference
+
+Live at Decide: epic `task-47bc4168392dec17` = 140 {done 80, open 60}; `cloud-console-hardening-epic` = **10**;
+`task-96a908af98698118` = 46. So **10 + 57 banded + 1 self-moved seal = 68**, and the stale `7 → 65` is a
+Verify-time measurement that Decide's own backlog filings invalidated. The stale copy also carries its own
+copy of the embedded gate at `s["count"]>=65` — **three rows loose**: a run that moved only 55 of 58 rows
+would print `GATE: PASS` and exit 0. The canonical gate asserts `>=68`.
+
+**The invariant that binds is `after − before == 58`, true regardless of which absolute any field carries.**
+Read the successor's count LIVE immediately before the moves and assert the difference.
+
+### GR164 — the predicate has no provenance control, and "at origin/main" is a sentence it never earned
+
+`seal-predicate.mjs:61` — `const REPO = arg('--repo') || process.cwd()` — and the guard is spawned under that
+REPO; `serve.mjs` roots at `cloud/priv/static`. **Clause (b) measures the app.css sitting on disk in whatever
+tree you `cd` into.** Its only contact with `origin/main` is the `--is-ancestor` commit check. Yet on failure
+it prints, verbatim, *"guard exited 1 — the defect is still measurable at origin/main"*.
+
+Fired twice this round, both on verified-free ports:
+
+| run from | clause (b) |
+|---|---|
+| the repo root — *what the round-11 runbook literally says* | **RED on all three** |
+| a pristine detached worktree | **GREEN on all three**, `OVERFLOW GUARD PASS … measured fixed in a real browser` |
+
+The primary checkout is 9 commits behind origin/main **and** carries an uncommitted, unowned `app.css` edit
+that deletes the GR108 rule outright (`.topbar-right > * { min-width: 0 }` exists at app.css:787 on main and
+has zero occurrences locally). Correct code, correct guard, **wrong bytes**. This is a **third** clause-(b)
+failure mode beside the port squat and a genuine regression, and it is textually identical to both — because
+the predicate captures the guard's stderr and reads only `r.status`.
+
+**RULING: the terminal act runs from a PRISTINE DETACHED WORKTREE, never from the repo root.** The disarm is a
+`cd`, not an instrument.
+
+### GR165 — the charter fork is closed by cutting the worktree at the charter commit, not at origin/main
+
+GR154–GR160 exist only in unpushed commit `1ccf6206a` on the primary checkout's local main. A builder cutting
+from `origin/main` gets green pixels and **dangling GR157/GR160 citations**; a builder using the repo root
+gets resolving citations and a **false red**. Neither side is clean — and the charter-marker gate cannot tell
+them apart, because it is a four-substring *post-append presence* check whose other three markers already
+exist in both copies (pre-append both FAIL identically on the one marker naming the terminal-artifact heading;
+post-append both PASS). *This charter deliberately never writes that marker string in full — doing so would
+pre-satisfy the gate and hand the builder a vacuous green before it appended anything.*.
+
+**RULING: the builder cuts its worktree at the round-12 charter commit** — which contains `1ccf6206a`, is
+byte-identical to `origin/main` on `cloud/priv/static/app.css` and on `cloud/priv/static/__preview__/`
+(`git diff --stat HEAD origin/main -- <those paths>` is empty), and carries GR154–GR168. **Both columns are
+satisfied at once. Do not strengthen the marker gate; that would be the eighth instrument.**
+
+### GR166 — clause (a) will red on 58, not 60, and bucket (c) will flip two flags on purpose
+
+The predicate buckets the two permanent human gates **before** the orphan count, so 60 live = **58 orphans +
+2 gated + 0 forwarded**. *An artifact that says "60 orphans" contradicts the banner the run actually printed.*
+And after the moves, the bucket-(c) lines for `gr-ops-platform-admin-emails` and `gr-backlog-qr-live-scan-proof`
+flip `in-epic-roster=true → false`. **That is informational output, not a regression** — `resolved` only
+requires the doc to exist. A builder who reads that flip as a failure will abort a successful run.
+
+`cloud-console-billing-live-gate` resolves parent-independently via `filter[_id]`, confirmed live at the exact
+required string: `✓ cloud-console-billing-live-gate  status=open parent=cloud-console-goal in-epic-roster=false`.
+
+### GR167 — the shell shape is load-bearing: `&&/||` can fabricate a verdict
+
+Observed live: `lsof … && echo 'PORT BUSY' || node seal-predicate.mjs …; echo "EXIT=$?"` printed **`EXIT=0`
+with zero stdout, having started no process** — `$?` was the echo's. That is the precise signature GR133
+defines as a crash, arriving from a command that never ran. **Use an explicit `if … then exit 9; fi` guard.**
+Ports are actively contested (4199 held by orphaned pid 92003 for 7 h; 4241 went free→busy→free inside 60 s
+under sibling `serve.mjs` instances). **Pick from the 47xxx band and re-verify immediately before spawning.**
+
+Two more hard-won mechanics for STEP 1: `criteria_mismatch` **exits 2, not 1** — branch on the JSON
+`error.code`, never the exit code. Criterion [0] contains a literal **U+2014 em dash**; extract the criterion
+strings programmatically from `bp task get`, never retype them. A `criteria_mismatch` 409 was proven by
+mutation to write **absolutely nothing** (rev byte-identical before and after, claim survives, same epoch
+re-closes cleanly), so a retry is safe and needs no re-claim. **Reserve the pre-authorised
+close→forward fallback for a server-side refusal, never for a client-side typo.**
+
+### GR168 — GR157 caveat 4 must NOT be transcribed verbatim; here is the corrected mechanism
+
+GR157's fourth caveat asserts *"zero deploy scripts reference it, so no commit can set it."* The second half
+holds; **the first half is falsified on main by `cloud/docker-compose.yml:67`**, which bare-lists
+`PLATFORM_ADMIN_EMAILS` as a valueless passthrough — landed as GR60 step 1 and recorded DONE by GR68 **in this
+same charter.** Transcribing it verbatim publishes a claim the charter itself contradicts.
+
+**The sentence the artifact uses instead, every clause read from source:**
+
+> The crown is DARK, structurally. `cloud/docker-compose.yml:67` bare-lists `PLATFORM_ADMIN_EMAILS` as a
+> **valueless passthrough**; `cloud/.env.example:51` ships it empty; `cloud/config/runtime.exs:314` defaults it
+> to `""` → `[]`. The only value source is `/opt/barkpark/cloud/.env`, which is **not tracked by git — so no
+> commit can set it.** `Notifications.platform_admin_emails/0` additionally drops any address without a
+> registered user. `Auth.require_platform_operator/2` runs `require_user` **first**, so an anonymous probe gets
+> **401** and every authenticated user gets **403** — the console is dark for everyone, not selectively lit.
+> This is a MECHANISM read from source; no live body was observed. **"Seal" here means CODE seal only.**
+
+And the other disclosure the banner cannot make: **"one named false-done" is a FLOOR, not a ceiling.** No full
+80-row done-set audit was ever completed — the only prior audit covered 35/56, predates the discovery of
+`gr-blk-shootsh-scen-suggester`, and `gr-bl-doneset-merge-sha-reaudit` is OPEN saying to treat the done-set as
+UNCHECKED. Say it in those words. `gr-blk-studio-presence-perf-flake` leaves the epic **without arriving at
+the successor**, and the predicate — reading only `(_id, lifecycle_status, parent_id)` — is blind to it in
+both places. Name it.
+
+### The wave
+
+One slice. One opus builder. One claim. `gr-p5r12-terminal-act` — execute the census, run the frozen
+predicate LAST and ONCE from a pristine worktree, and append the terminal-artifact section under a heading carrying the marker string the gate looks for. **Exit 0 and exit 1 are
+equally acceptable endings; the deliverable is a `VERDICT:` line and a roster-delta table a cold reader can
+act on. There is no round 13.**
