@@ -60,7 +60,30 @@ const WRITE_SHAPES = [
   [/\b(mkdir|touch|chmod|chown|ln)\s/, "filesystem mutation"],
   [/\btee\b/, "tee"],
   [/\bsed\s+-[a-z]*i\b/, "sed -i"],
-  [/\bgit\s+(push|commit|checkout|switch|reset|rebase|merge|clean|apply|am|tag|stash)\b/, "git write verb"],
+  // `merge(?!-base)` — the ONLY carve-out in this list, and it is narrow by
+  // construction. `\bmerge\b` matched inside `merge-base`, so
+  // `git merge-base --is-ancestor A B` was refused UNSAFE-RERUN: the epic's own
+  // D40 merge-by-content rule and every stranded-branch ancestry check could not
+  // be re-run by its own instrument (11 of 652 corpus commands, 1.7%).
+  // `git merge-base` only READS — it prints a commit id and writes no ref, no
+  // index and no working tree. The lookahead is anchored to the exact five
+  // characters that follow, so `git merge`, `git merge --abort` and
+  // `git merge origin/main` all stay refused (proven in rerun.test.mjs §6c).
+  // `mergetool` is listed explicitly, and it is a TIGHTENING, not part of the
+  // carve-out: the pre-change `\bmerge\b` never matched it either (no word
+  // boundary between "merge" and "tool"), so `git mergetool` classified SAFE on
+  // main and this module would have launched an interactive tree-rewriting
+  // session. Found by writing the protective test for the carve-out. Ordered
+  // before `merge` so the alternation reaches it.
+  // GIT'S GLOBAL OPTIONS SIT BETWEEN `git` AND ITS VERB, and the rule demanded
+  // the verb IMMEDIATELY after `git`. So `git -C /tmp/repo push origin main`,
+  // `git -C /tmp/repo commit -m x` and `git --no-pager reset --hard origin/main`
+  // all classified SAFE — verified against origin/main's own module on
+  // 2026-07-21 — and this file would then have EXECUTED them. A false
+  // PERMISSION on a command about to run, and the `-C <path>` form is exactly
+  // how an agent addresses ANOTHER worktree. Consuming the global options first
+  // closes it. This narrows the gate; nothing here widens it.
+  [/\bgit\s+(?:(?:-[cC]\s+\S+|-{1,2}[\w-]+(?:=\S+)?)\s+)*(push|commit|checkout|switch|reset|rebase|mergetool|merge(?!-base)|clean|apply|am|tag|stash)\b/, "git write verb"],
   [/\b(npm|pnpm|yarn)\s+(publish|install|add|remove)\b/, "package mutation"],
   [/--write\b/, "--write"],
   [/--fix\b/, "--fix"],
@@ -362,28 +385,219 @@ export function probeHttp(url, timeoutMs = SYNC_TIMEOUT_MS) {
   return { code: Number.isNaN(code) ? 0 : code, exit: r.exit ?? -1, ms: r.ms };
 }
 
-/**
- * Did this run produce a real read, or nothing at all?
- *
- * D6 — NULL-READ IS ITS OWN VERDICT. An empty stdout, a zero-byte read or a
- * tool-level failure may NEVER be converted into an admissible negative claim
- * ("X is absent"). This is not theoretical: a surveyor reported a fixture as
- * 0 bytes. The file is 2693 bytes in the working tree, 2693 on origin/main and
- * 2693 in every one of 993 worktree copies. There was no 0-byte artifact
- * anywhere to blame — a read returned empty and became a fact.
- *
- * grep is the one tool whose empty output IS a real read: exit 1 means "ran
- * fine, matched nothing", which is a legitimate absence. exit 2 is an error.
- */
-function readIsNull(cmd, run) {
-  const isGrep = /\b(grep|rg)\b/.test(cmd);
-  if (isGrep) {
-    if (run.exit === 0 && run.stdout.trim() === "") return "grep exited 0 (match) yet produced no output";
-    if (run.exit !== 0 && run.exit !== 1) return `grep errored (exit ${run.exit})`;
-    return null; // exit 0 with output, or exit 1 = a genuine no-match
+// ── (d2) SILENCE — classified by TOOL FAMILY first, exit code second (D50) ───
+//
+// D6 — NULL-READ IS ITS OWN VERDICT. An empty stdout, a zero-byte read or a
+// tool-level failure may NEVER be converted into an admissible negative claim
+// ("X is absent"). This is not theoretical: a surveyor reported a fixture as
+// 0 bytes. The file is 2693 bytes in the working tree, 2693 on origin/main and
+// 2693 in every one of 993 worktree copies. There was no 0-byte artifact
+// anywhere to blame — a read returned empty and became a fact.
+//
+// The pre-family rule protected grep BY NAME and nothing else, which failed in
+// BOTH directions and both were reproduced by running the shipped module:
+//
+//   diff README.md NOPE.mjs   → exit 2, 0 bytes, verdict FAILED, absence=TRUE
+//   grep -n zzz NOPE.mjs      → exit 2, 0 bytes, verdict NULL-READ, absence=false
+//
+// The same tool error — a missing operand — became a manufactured absence claim
+// for every tool that is not grep. That is strictly worse than discarding a true
+// answer: the D6 failure class, one tool away from where D6 was patched. In the
+// other direction a clean `git log --grep=<no such commit>` (rc0, empty) is a
+// real EMPTY-SET answer and was discarded as NULL-READ.
+//
+// THERE IS NO FLAT RULE. grep's rc1 means "no match" (an ABSENCE answer) while
+// diff's rc1 means "differences found" — measured at 33,609 bytes of real
+// content on this very file. So the tempting one-liner ("any rc1 is a real
+// read") INVERTS diff's polarity: it would let a diff that found differences be
+// cited as proof that something is missing. Family first, exit code second.
+export const FAMILY = Object.freeze({
+  MATCHER: "MATCHER",             // grep/rg   rc1 = a genuine no-match
+  PREDICATE: "PREDICATE",         // is-ancestor/test  answers with the exit code alone
+  DIFFER: "DIFFER",               // diff/cmp  rc1 = DIFFERENCES FOUND, not absence
+  QUERY_LISTER: "QUERY-LISTER",   // git log/ls/go vet  rc0+empty = an EMPTY SET
+  CONTENT_FETCH: "CONTENT-FETCH", // git show/cat-file  rc128 needs a stderr rule
+  UNKNOWN: "UNKNOWN",             // unrecognised — keeps the conservative default
+});
+
+// DISPATCH ON THE HEAD TOKEN, never on a loose word match. `git log
+// --grep=zzz` contains the substring `grep` and a `\bgrep\b` rule read it as a
+// MATCHER — which would have graded a clean commit search (rc0, empty) as
+// "grep exited 0 yet printed nothing", i.e. a NULL-READ, the exact discard this
+// table exists to end. The head is the first real token: leading `VAR=value`
+// assignments are stripped and a path is reduced to its basename, so
+// `LC_ALL=C /usr/bin/grep` is still a MATCHER.
+const MATCHER_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "ugrep", "ug", "ag", "ack"]);
+const LISTER_HEADS = new Set(["ls", "find"]);
+const GIT_CONTENT_FETCH = new Set(["show", "cat-file"]);
+const GIT_LISTERS = new Set([
+  "diff", "log", "ls-tree", "ls-files", "rev-list", "rev-parse",
+  "status", "show-ref", "for-each-ref", "blame", "describe", "shortlog",
+]);
+const GO_LISTERS = new Set(["vet", "build", "list"]);
+
+/** Tokens of a command segment, with env assignments stripped. */
+function tokens(segment) {
+  const all = segment.trim().split(/\s+/).filter(Boolean);
+  let i = 0;
+  while (i < all.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(all[i])) i++;
+  return all.slice(i);
+}
+
+/** git's first NON-option token — `git -C /tmp show` is still a `show`. */
+function gitSubcommand(rest) {
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (!t.startsWith("-")) return { verb: t, args: rest.slice(i + 1) };
+    // `-C <path>` and `-c <k=v>` consume the token after them.
+    if (t === "-C" || t === "-c") i++;
   }
-  if (run.exit === 0 && run.stdout.trim() === "") return "command succeeded but produced no output";
-  return null;
+  return { verb: "", args: [] };
+}
+
+// A pipeline's exit code is its LAST command's, so the family must be read from
+// the last stage: `git show HEAD:x | grep -c foo` exits 1 as a grep no-match,
+// not as a git failure. `||`, `&&` and `;` are NOT pipes — for `a || b` the exit
+// code belongs to a when a succeeds and to b when it does not, so the provenance
+// is genuinely ambiguous and the family stays UNKNOWN (the conservative default)
+// rather than being guessed.
+const AMBIGUOUS_LIST = /\|\||&&|;/;
+
+/** Which tool family's exit-code grammar governs this command? Pure. */
+export function classifyFamily(command) {
+  const cmd = String(command || "").trim();
+  if (!cmd) return FAMILY.UNKNOWN;
+  // Scan SYNTAX, not text — a `|` or the word `diff` inside a quoted pattern is
+  // data, exactly as in classifySafety. An unterminated quote falls back to raw.
+  const blanked = blankQuotedSpans(cmd) ?? cmd;
+  if (AMBIGUOUS_LIST.test(blanked)) return FAMILY.UNKNOWN;
+
+  // Find the pipe on the BLANKED text (a quoted `|` is data, not a pipeline),
+  // then slice the ORIGINAL at that offset — blanking is 1:1, so the offsets
+  // line up. Tokenising the blanked text instead DELETES quoted arguments
+  // entirely, and `git -C "<path>" show X` then reads its own subcommand as the
+  // argument to -C: the whole command falls to UNKNOWN.
+  const pipe = blanked.lastIndexOf("|");
+  const parts = tokens(pipe === -1 ? cmd : cmd.slice(pipe + 1));
+  if (parts.length === 0) return FAMILY.UNKNOWN;
+
+  const head = parts[0].split("/").pop();
+  const rest = parts.slice(1);
+  const has = (...flags) => rest.some((t) => flags.some((f) => t === f || t.startsWith(`${f}=`)));
+
+  if (MATCHER_HEADS.has(head)) return FAMILY.MATCHER;
+  if (head === "test" || head === "[") return FAMILY.PREDICATE;
+  // `cmp -s` answers with its exit code alone; bare `cmp` prints the first
+  // difference, so it reads as a DIFFER.
+  if (head === "cmp") return has("-s", "--quiet", "--silent") ? FAMILY.PREDICATE : FAMILY.DIFFER;
+  if (head === "diff") return FAMILY.DIFFER;
+  if (LISTER_HEADS.has(head)) return FAMILY.QUERY_LISTER;
+
+  if (head === "git") {
+    const { verb, args } = gitSubcommand(rest);
+    const hasArg = (...flags) => args.some((t) => flags.some((f) => t === f || t.startsWith(`${f}=`)));
+    if (verb === "merge-base") return hasArg("--is-ancestor") ? FAMILY.PREDICATE : FAMILY.QUERY_LISTER;
+    if (GIT_CONTENT_FETCH.has(verb)) return FAMILY.CONTENT_FETCH;
+    if (verb === "diff" && hasArg("--quiet", "--exit-code")) return FAMILY.DIFFER;
+    if (GIT_LISTERS.has(verb)) return FAMILY.QUERY_LISTER;
+    return FAMILY.UNKNOWN;
+  }
+  if (head === "go") {
+    const verb = rest.find((t) => !t.startsWith("-")) ?? "";
+    return GO_LISTERS.has(verb) ? FAMILY.QUERY_LISTER : FAMILY.UNKNOWN;
+  }
+  return FAMILY.UNKNOWN;
+}
+
+// FOUR SEMANTICS SHARE EXIT 128, and only one of them is decay. Keying decay on
+// the exit code alone lets a worktree that never fetched `origin` report the
+// ENTIRE ledger as decayed — an outage forging a decay wave. rc128 is a
+// NECESSARY PRECONDITION; the stderr pattern is the discriminator. All four
+// wordings were captured from this host's git on 2026-07-21:
+//   fatal: path 'x' does not exist in 'HEAD'                    → PATH-GONE
+//   fatal: path 'x' exists on disk, but not in 'HEAD'           → PATH-GONE
+//   fatal: invalid object name 'no-such-ref'.                   → REF-GONE
+//   fatal: not a git repository (or any of the parent …)        → WRONG-CWD
+const GIT_PATH_GONE = /does not exist in|exists on disk, but not in/i;
+const GIT_REF_GONE = /invalid object name|unknown revision or path not in the working tree|bad revision|ambiguous argument/i;
+const GIT_WRONG_CWD = /not a git repository/i;
+
+/**
+ * Rule on a completed run's (family, exit, output) triple. Pure — separable from
+ * execution so every branch is provable without spawning anything.
+ *
+ * `absenceEligible: false` marks a result that RAN and answered decisively but
+ * whose answer is not an absence — DIFFER's rc1 is "these differ", with content,
+ * and citing it as "X is not there" is the polarity inversion this table exists
+ * to prevent. It is a SEPARATE channel from the verdict on purpose: the verdict
+ * vocabulary is shared with adjudicate.mjs (EXECUTION_MAP), and a new enum name
+ * would fail closed to UNKNOWN-VERDICT there — correct, but it would silently
+ * make the whole DIFFER family unusable downstream.
+ *
+ * @returns {{family: string, verdict: string, reason: string, absenceEligible: boolean}}
+ */
+export function classifySilence(command, run = {}) {
+  const family = classifyFamily(command);
+  const exit = run.exit;
+  const stdout = String(run.stdout ?? "");
+  const stderr = String(run.stderr ?? "");
+  const empty = stdout.trim() === "";
+  const bytes = Buffer.byteLength(stdout, "utf8");
+  const ok = (verdict, reason, absenceEligible = true) => ({ family, verdict, reason, absenceEligible });
+
+  switch (family) {
+    // grep rc0 must PRINT: "matched" with nothing to show is a broken read.
+    case FAMILY.MATCHER:
+      if (exit === 0 && empty) return ok(VERDICT.NULL_READ, "grep exited 0 (match) yet produced no output");
+      if (exit === 0) return ok(VERDICT.OK, `matched, ${bytes} bytes of output`);
+      if (exit === 1) return ok(VERDICT.FAILED, "ran fine and matched nothing — a genuine no-match");
+      // ugrep (this host's `grep`) words its rc2 warning differently from GNU
+      // grep, so this keys on the EXIT CODE, never on the message.
+      return ok(VERDICT.NULL_READ, `the matcher errored (exit ${exit}) — a tool error is not an absence`, false);
+
+    // The exit code IS the answer, so silence is expected and admissible.
+    case FAMILY.PREDICATE:
+      if (exit === 0) return ok(VERDICT.OK, "the predicate holds (exit 0)");
+      if (exit === 1) return ok(VERDICT.FAILED, "the predicate does not hold (exit 1)");
+      return ok(VERDICT.NULL_READ, `the predicate errored (exit ${exit}) — neither true nor false`, false);
+
+    // rc1 means DIFFERENCES FOUND — a presence answer carrying content, and the
+    // single most dangerous cell in this table to get wrong.
+    case FAMILY.DIFFER:
+      if (exit === 0) return ok(VERDICT.OK, "identical — no differences (an answer, not an empty read)");
+      if (exit === 1) return ok(VERDICT.FAILED, `differences found (${bytes} bytes) — a DIFFERENCE, never an absence`, false);
+      return ok(VERDICT.NULL_READ, `the differ errored (exit ${exit}): ${firstLine(stderr) || "(no stderr)"} — it never compared anything`, false);
+
+    // rc0 + empty is the EMPTY SET: a clean `go vet` is the canonical green.
+    case FAMILY.QUERY_LISTER:
+      if (exit === 0 && empty) return ok(VERDICT.OK, "exited 0 with no rows — an EMPTY SET, which is the answer");
+      if (exit === 0) return ok(VERDICT.OK, `exited 0 with ${bytes} bytes of output`);
+      return ok(VERDICT.FAILED, `exited ${exit}: ${firstLine(stderr) || "(no stderr)"}`);
+
+    case FAMILY.CONTENT_FETCH:
+      if (exit === 0 && empty) return ok(VERDICT.NULL_READ, "the fetch exited 0 but returned no bytes");
+      if (exit === 0) return ok(VERDICT.OK, `fetched ${bytes} bytes`);
+      if (exit === 128) {
+        if (GIT_WRONG_CWD.test(stderr)) {
+          return ok(VERDICT.UNAVAILABLE, "not a git repository here — an environment fault, never decay", false);
+        }
+        if (GIT_REF_GONE.test(stderr)) {
+          return ok(VERDICT.UNAVAILABLE, `the ref could not be resolved here (unfetched or renamed): ${firstLine(stderr)} — an environment fault, never decay`, false);
+        }
+        if (GIT_PATH_GONE.test(stderr)) {
+          return ok(VERDICT.FAILED, `the ref resolved and the path is NOT in it: ${firstLine(stderr)}`);
+        }
+        return ok(VERDICT.UNAVAILABLE, `git exited 128 with an unrecognised reason: ${firstLine(stderr) || "(no stderr)"}`, false);
+      }
+      return ok(VERDICT.FAILED, `exited ${exit}: ${firstLine(stderr) || "(no stderr)"}`);
+
+    // Unrecognised: keep the pre-existing conservative default exactly. An
+    // unknown tool's silence proves nothing, so it stays a NULL-READ.
+    default:
+      if (exit === 0 && empty) return ok(VERDICT.NULL_READ, "command succeeded but produced no output");
+      if (exit === 0) return ok(VERDICT.OK, `exited 0 with ${bytes} bytes of output`);
+      return ok(VERDICT.FAILED, `exited ${exit}: ${firstLine(stderr) || "(no stderr)"}`);
+  }
 }
 
 /**
@@ -414,6 +628,11 @@ export function runRerun(command, opts = {}) {
     stdout: "",
     stderr: "",
     reason: "",
+    family: null,
+    // Defaults TRUE so an untouched shape behaves exactly as it did before the
+    // family table existed; only a family rule that has PROVEN the answer is not
+    // an absence ever sets it false.
+    absenceEligible: true,
   };
 
   // 1. SAFETY FIRST — refuse before executing, never after.
@@ -473,10 +692,17 @@ export function runRerun(command, opts = {}) {
         // the HTTP response itself, which the probe already measured — and
         // `curl -o /dev/null` deliberately discards stdout, so testing it for
         // emptiness would reject an honest probe (D3: never punish honest work).
-        const nullWhy = cmd.includes("|") ? readIsNull(cmd, { exit: lit.exit, stdout: lit.stdout }) : null;
-        if (nullWhy) {
+        const silence = cmd.includes("|")
+          ? classifySilence(cmd, { exit: lit.exit, stdout: lit.stdout, stderr: lit.stderr })
+          : null;
+        if (silence?.verdict === VERDICT.NULL_READ) {
           httpOut.verdict = VERDICT.NULL_READ;
-          httpOut.reason = `host answered code=${probe.code}, but the read was null: ${nullWhy}`;
+          httpOut.reason = `host answered code=${probe.code}, but the read was null: ${silence.reason}`;
+        } else if (silence && silence.absenceEligible === false) {
+          // The filter RAN and answered, but its answer is not an absence.
+          httpOut.verdict = silence.verdict;
+          httpOut.absenceEligible = false;
+          httpOut.reason = `host answered code=${probe.code}; ${silence.reason}`;
         } else if (lit.exit !== 0) {
           httpOut.verdict = VERDICT.FAILED;
           httpOut.reason = `host answered code=${probe.code} (reachable) but the literal command exited ${lit.exit}: ${firstLine(lit.stderr) || "(no stderr)"}`;
@@ -527,19 +753,19 @@ export function runRerun(command, opts = {}) {
     return decorate({ ...out, verdict: VERDICT.UNAVAILABLE, reason: "ssh credentials are ambient host state and are absent here" });
   }
 
-  // 6. NULL-READ before any negative verdict, so an empty read can never be
-  //    laundered into "X is absent".
-  const nullWhy = readIsNull(cmd, run);
-  if (nullWhy) {
-    return decorate({ ...out, verdict: VERDICT.NULL_READ, reason: nullWhy });
-  }
-
-  if (run.exit === 0) {
-    return decorate({ ...out, verdict: VERDICT.OK, reason: `exited 0 with ${out.stdoutBytes} bytes of output` });
-  }
-  // A tool that RAN and answered "no" is a real refutation — this is the branch
-  // doc-truth never reached, because it stopped at PATH resolution.
-  return decorate({ ...out, verdict: VERDICT.FAILED, reason: `exited ${run.exit}: ${firstLine(out.stderr) || "(no stderr)"}` });
+  // 6. FAMILY-DISPATCHED SILENCE (D50). One table rules on every remaining
+  //    outcome, so a tool error can never be laundered into an absence claim and
+  //    a legitimately silent answer (a clean `go vet`, a byte-identical `diff`,
+  //    an ancestry predicate) is no longer discarded as a null read. This is the
+  //    branch doc-truth never reached, because it stopped at PATH resolution.
+  const silence = classifySilence(cmd, run);
+  return decorate({
+    ...out,
+    verdict: silence.verdict,
+    family: silence.family,
+    absenceEligible: silence.absenceEligible,
+    reason: silence.reason,
+  });
 }
 
 function firstLine(s) { return String(s || "").split("\n").find(Boolean)?.trim() ?? ""; }
@@ -570,9 +796,15 @@ export function admitsPassClaim(result) {
  * absent) while HOST-UNREACHABLE does not (the host said nothing at all). That
  * single distinction is what stops an outage from forging a pass-shaped
  * absence claim.
+ *
+ * `absenceEligible: false` is the family table's veto (D50): a DIFFER that
+ * exited 1 RAN and answered decisively, but its answer is "these differ" with
+ * content attached — never "X is not there". Absent the field (a bare
+ * `{verdict}` object) the answer is unchanged from before the table existed.
  */
 export function admitsAbsenceClaim(result) {
   if (!result || INADMISSIBLE.has(result.verdict)) return false;
+  if (result.absenceEligible === false) return false;
   return result.verdict === VERDICT.FAILED || result.verdict === VERDICT.WRONG_ROUTE;
 }
 

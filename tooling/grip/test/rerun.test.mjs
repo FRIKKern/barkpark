@@ -21,9 +21,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   runRerun, classifyHttp, classifySafety, classifyScope, mixEnvOf, isBuildWarm,
-  blankQuotedSpans,
+  blankQuotedSpans, classifyFamily, classifySilence,
   admitsPassClaim, admitsAbsenceClaim, assertAbsenceClaim,
-  VERDICT, SCOPE, GripError,
+  VERDICT, SCOPE, FAMILY, GripError,
 } from "../rerun.mjs";
 
 // ── INVOCATION-AGNOSTIC BY CONSTRUCTION ──────────────────────────────────────
@@ -153,6 +153,226 @@ test("a real read comes back OK with bytes", () => {
   assert.equal(r.verdict, VERDICT.OK);
   assert.ok(r.stdoutBytes > 0);
   assert.equal(admitsPassClaim(r), true);
+});
+
+// ── 3b. SILENCE IS CLASSIFIED BY TOOL FAMILY FIRST, EXIT CODE SECOND (D50) ───
+//
+// The pre-family rule protected grep BY NAME and nothing else. Reproduced by
+// running the shipped module on 2026-07-21, from this worktree:
+//
+//   diff README.md NOPE.mjs  → exit 2, 0 bytes, FAILED, admits.absence = TRUE
+//   grep -n zzz NOPE.mjs     → exit 2, 0 bytes, NULL-READ, admits.absence = false
+//
+// One tool error; two opposite rulings. For everything that is not grep, a
+// missing operand MANUFACTURED an absence claim — strictly worse than dropping
+// a true answer, and the D6 failure class one tool from where D6 was patched.
+//
+// There is no flat repair. grep's rc1 is "no match" (an ABSENCE) while diff's
+// rc1 is "differences found" — measured at 33,609 bytes of real content in the
+// probe below. "Any rc1 is a real read" would let a diff that FOUND something be
+// cited as proof that something is MISSING: a polarity inversion, not a fix.
+
+const ADJUDICATE_MJS = JSON.stringify(fileURLToPath(new URL("../adjudicate.mjs", import.meta.url)));
+
+test("FAIL-BEFORE: a differ that could not open its operand may NOT claim absence", () => {
+  // THE DEFECT. Pre-fix this returned verdict=FAILED with admits.absence=true:
+  // a tool error laundered into "the thing is not there".
+  const r = runRerun(`diff ${RERUN_MJS} /no/such/path/NOPE_9f3a.mjs`);
+  assert.equal(r.exit, 2, "diff exits 2 when it cannot open an operand");
+  assert.equal(r.stdoutBytes, 0, "it compared nothing, so it read nothing");
+  assert.equal(r.verdict, VERDICT.NULL_READ, `a tool error is a null read, got ${r.verdict}: ${r.reason}`);
+  assert.equal(admitsAbsenceClaim(r), false, "THE BUG: this must never support an absence claim");
+  assert.equal(admitsPassClaim(r), false);
+  assert.throws(() => assertAbsenceClaim(r, "the file is absent"), GripError);
+});
+
+test("the differ's rc1 is a DIFFERENCE with content, never an absence", () => {
+  // The polarity trap. This ran, answered decisively and carries bytes — so it
+  // is NOT a null read — yet "these two files differ" is not evidence that
+  // anything is missing. Measured on this host: 33,609 bytes.
+  const r = runRerun(`diff ${RERUN_MJS} ${ADJUDICATE_MJS}`);
+  assert.equal(r.exit, 1);
+  assert.equal(r.family, FAMILY.DIFFER);
+  assert.ok(r.stdoutBytes > 1000, `differences carry content, got ${r.stdoutBytes} bytes`);
+  assert.notEqual(r.verdict, VERDICT.NULL_READ, "a run that produced 33kB is not a null read");
+  assert.equal(admitsAbsenceClaim(r), false, "differences-found is a PRESENCE answer");
+});
+
+test("grep's two exit codes did not regress — rc1 admits, rc2 does not", () => {
+  // The one family that was already correct. A fix that broke it would trade one
+  // false claim for a fleet of discarded true ones.
+  const noMatch = runRerun(`grep 'zzz_no_such_string_9f3a' ${RERUN_MJS}`);
+  assert.equal(noMatch.exit, 1);
+  assert.equal(noMatch.family, FAMILY.MATCHER);
+  assert.equal(admitsAbsenceClaim(noMatch), true, "rc1 is a genuine no-match");
+
+  const toolError = runRerun("grep -n zzz_9f3a /no/such/path/NOPE_9f3a.mjs");
+  assert.ok(toolError.exit >= 2, `expected a matcher tool error, got exit ${toolError.exit}`);
+  assert.equal(toolError.verdict, VERDICT.NULL_READ);
+  assert.equal(admitsAbsenceClaim(toolError), false);
+});
+
+test("the two rc1s are OPPOSITE, and the table keeps them opposite", () => {
+  // The single assertion that a blanket "rc1 means absence" cannot satisfy.
+  const grepRc1 = runRerun(`grep 'zzz_no_such_string_9f3a' ${RERUN_MJS}`);
+  const diffRc1 = runRerun(`diff ${RERUN_MJS} ${ADJUDICATE_MJS}`);
+  assert.equal(grepRc1.exit, 1);
+  assert.equal(diffRc1.exit, 1);
+  assert.equal(admitsAbsenceClaim(grepRc1), true);
+  assert.equal(admitsAbsenceClaim(diffRc1), false);
+});
+
+test("a QUERY-LISTER's rc0 with no rows is an EMPTY SET, not a discarded read", () => {
+  // 12 non-grep silent-PASS specimens — including a clean `go vet`, the
+  // canonical green — were thrown away as NULL-READ. rc0 + empty is the ANSWER.
+  const noCommits = runRerun(`git -C ${REPO_ROOT} log --oneline --grep=zzz_no_such_commit_9f3a`);
+  assert.equal(noCommits.exit, 0);
+  assert.equal(noCommits.family, FAMILY.QUERY_LISTER);
+  assert.equal(noCommits.verdict, VERDICT.OK, `an empty set is an answer, got ${noCommits.reason}`);
+  assert.equal(admitsPassClaim(noCommits), true);
+
+  const noFiles = runRerun(`git -C ${REPO_ROOT} ls-files -- tooling/grip/NOPE_9f3a.mjs`);
+  assert.equal(noFiles.exit, 0);
+  assert.equal(noFiles.verdict, VERDICT.OK);
+
+  // The canonical green, ruled on purely — no Go toolchain required to prove it.
+  const goVet = classifySilence("go vet ./...", { exit: 0, stdout: "", stderr: "" });
+  assert.equal(goVet.family, FAMILY.QUERY_LISTER);
+  assert.equal(goVet.verdict, VERDICT.OK);
+});
+
+test("a PREDICATE answers with its exit code alone, and silence is the answer", () => {
+  const isAncestor = runRerun("git merge-base --is-ancestor HEAD HEAD");
+  assert.equal(isAncestor.family, FAMILY.PREDICATE);
+  assert.equal(isAncestor.exit, 0);
+  assert.equal(isAncestor.stdoutBytes, 0, "a predicate prints nothing by design");
+  assert.equal(isAncestor.verdict, VERDICT.OK, `silence IS the answer here, got ${isAncestor.reason}`);
+  // …and the false arm is a real refutation, not a null read.
+  assert.equal(classifySilence("test -f /nope", { exit: 1 }).verdict, VERDICT.FAILED);
+  assert.equal(classifySilence("test -f /nope", { exit: 2 }).verdict, VERDICT.NULL_READ);
+});
+
+// ── 3c. FOUR SEMANTICS SHARE EXIT 128 — the discriminator is STDERR ──────────
+// Keying decay on rc128 alone lets a worktree that never fetched `origin`
+// report the ENTIRE ledger as decayed: an outage forging a decay wave. All
+// three wordings below were captured from this host's git on 2026-07-21.
+
+test("CONTENT-FETCH rc128 'does not exist in' is PATH-GONE — real, admissible decay", () => {
+  const r = runRerun(`git -C ${REPO_ROOT} show HEAD:tooling/grip/NOPE_9f3a.mjs`);
+  assert.equal(r.exit, 128);
+  assert.equal(r.family, FAMILY.CONTENT_FETCH);
+  assert.match(r.stderr, /does not exist in/);
+  assert.equal(r.verdict, VERDICT.FAILED, "the ref RESOLVED and the path is genuinely not in it");
+  assert.equal(admitsAbsenceClaim(r), true);
+});
+
+test("CONTENT-FETCH rc128 'invalid object name' is REF-GONE — an environment fault", () => {
+  // Same exit code, opposite meaning: the ref never resolved, so the read never
+  // happened. Admitting this is how an unfetched worktree forges a decay wave.
+  const r = runRerun(`git -C ${REPO_ROOT} show no_such_ref_9f3a:README.md`);
+  assert.equal(r.exit, 128);
+  assert.match(r.stderr, /invalid object name/);
+  assert.equal(r.verdict, VERDICT.UNAVAILABLE);
+  assert.equal(admitsAbsenceClaim(r), false, "an unresolvable ref may NEVER be reported as decay");
+  assert.equal(admitsPassClaim(r), false);
+});
+
+test("CONTENT-FETCH rc128 'not a git repository' is WRONG-CWD — an environment fault", () => {
+  const outside = mkdtempSync(join(tmpdir(), "grip-nogit-"));
+  try {
+    const r = runRerun(`git -C ${JSON.stringify(outside)} show HEAD:README.md`);
+    assert.equal(r.exit, 128);
+    assert.match(r.stderr, /not a git repository/);
+    assert.equal(r.verdict, VERDICT.UNAVAILABLE);
+    assert.equal(admitsAbsenceClaim(r), false, "running in the wrong directory proves nothing");
+  } finally { rmSync(outside, { recursive: true, force: true }); }
+});
+
+test("the three rc128 semantics are ruled apart by MESSAGE, never by the code", () => {
+  // Asserting the VERDICT alone is not enough to hold this rule: three of the
+  // four cases end in UNAVAILABLE, so deleting the ref-gone branch entirely
+  // leaves a verdict-only test green (verified by mutation). Each branch must be
+  // pinned by the REASON it gives, or the discriminator is untested.
+  const at = (stderr) => classifySilence("git show REF:path", { exit: 128, stdout: "", stderr });
+
+  const pathGone = at("fatal: path 'x' does not exist in 'HEAD'");
+  assert.equal(pathGone.verdict, VERDICT.FAILED);
+  assert.match(pathGone.reason, /the ref resolved and the path is NOT in it/);
+  assert.equal(at("fatal: path 'x' exists on disk, but not in 'HEAD'").verdict, VERDICT.FAILED);
+
+  const refGone = at("fatal: invalid object name 'origin/main'.");
+  assert.equal(refGone.verdict, VERDICT.UNAVAILABLE);
+  assert.match(refGone.reason, /the ref could not be resolved here/,
+    "an unfetched origin must be named as an environment fault, not left to the catch-all");
+
+  const wrongCwd = at("fatal: not a git repository (or any of the parent directories): .git");
+  assert.equal(wrongCwd.verdict, VERDICT.UNAVAILABLE);
+  assert.match(wrongCwd.reason, /not a git repository here/);
+
+  // An unrecognised 128 fails CLOSED: inadmissible, never decay.
+  const unknown = at("fatal: something nobody has seen before");
+  assert.equal(unknown.verdict, VERDICT.UNAVAILABLE);
+  assert.match(unknown.reason, /unrecognised/);
+
+  // THE DEFECT THIS RULE EXISTS FOR: if rc128 alone decided, every one of these
+  // would be decay, and one unfetched worktree would forge a whole decay wave.
+  const decayed = [pathGone, refGone, wrongCwd, unknown]
+    .filter((r) => admitsAbsenceClaim({ ...r, absenceEligible: r.absenceEligible }));
+  assert.equal(decayed.length, 1, "exactly ONE of the four rc128 shapes may be read as decay");
+});
+
+// ── 3d. the family is read from the HEAD TOKEN of the last pipeline stage ────
+
+test("family dispatch keys on the head token, not on a loose word match", () => {
+  assert.equal(classifyFamily("grep -n foo x.md"), FAMILY.MATCHER);
+  assert.equal(classifyFamily("LC_ALL=C /usr/bin/grep -n foo x.md"), FAMILY.MATCHER);
+  // THE NEAR MISS: `--grep=` contains "grep". Read as a MATCHER, a clean commit
+  // search (rc0, empty) would be graded "exited 0 yet printed nothing".
+  assert.equal(classifyFamily("git log --oneline --grep=zzz"), FAMILY.QUERY_LISTER);
+  assert.equal(classifySilence("git log --oneline --grep=zzz", { exit: 0, stdout: "" }).verdict, VERDICT.OK);
+  // git's global options must not hide the subcommand.
+  assert.equal(classifyFamily("git -C /tmp show HEAD:x.md"), FAMILY.CONTENT_FETCH);
+  assert.equal(classifyFamily("git -c core.pager=cat diff --quiet -- x"), FAMILY.DIFFER);
+  assert.equal(classifyFamily("git diff -- x"), FAMILY.QUERY_LISTER);
+  // cmp -s answers with its exit code; bare cmp prints the first difference.
+  assert.equal(classifyFamily("cmp -s a b"), FAMILY.PREDICATE);
+  assert.equal(classifyFamily("cmp a b"), FAMILY.DIFFER);
+});
+
+test("a pipeline is classified by its LAST stage, because that owns the exit code", () => {
+  assert.equal(classifyFamily("git show HEAD:notes.md | grep -c NEEDLE"), FAMILY.MATCHER);
+  assert.equal(classifyFamily("ls -la | wc -l"), FAMILY.UNKNOWN);
+  // A quoted pipe is DATA, not a pipeline.
+  assert.equal(classifyFamily(`grep -n 'a | b' x.md`), FAMILY.MATCHER);
+});
+
+test("an && / || / ; list keeps the conservative UNKNOWN default", () => {
+  // For `a || b` the exit code belongs to a when a SUCCEEDS and to b when it
+  // does not, so the provenance is genuinely ambiguous — guessing a family here
+  // would attach one tool's grammar to another tool's exit code.
+  assert.equal(classifyFamily("go vet ./... || true"), FAMILY.UNKNOWN);
+  assert.equal(classifyFamily("cd x && grep -n foo y.md"), FAMILY.UNKNOWN);
+  assert.equal(classifySilence("go vet ./... || true", { exit: 0, stdout: "" }).verdict, VERDICT.NULL_READ);
+});
+
+test("an unrecognised tool keeps the pre-family behaviour EXACTLY", () => {
+  // The table must not quietly widen what counts as an answer. Anything it does
+  // not recognise still falls to "exit 0 with no output is a NULL-READ".
+  const r = runRerun("true");
+  assert.equal(r.family, FAMILY.UNKNOWN);
+  assert.equal(r.verdict, VERDICT.NULL_READ);
+  assert.equal(classifySilence("some-unknown-tool --x", { exit: 0, stdout: "" }).verdict, VERDICT.NULL_READ);
+  assert.equal(classifySilence("some-unknown-tool --x", { exit: 3, stderr: "boom" }).verdict, VERDICT.FAILED);
+});
+
+test("a bare {verdict} object still rules exactly as it did before the table", () => {
+  // admitsAbsenceClaim gained a second input (absenceEligible). Callers that
+  // pass a bare verdict — including this suite's own section 1 — must be unmoved.
+  assert.equal(admitsAbsenceClaim({ verdict: VERDICT.FAILED }), true);
+  assert.equal(admitsAbsenceClaim({ verdict: VERDICT.WRONG_ROUTE }), true);
+  assert.equal(admitsAbsenceClaim({ verdict: VERDICT.NULL_READ }), false);
+  // …and the veto only bites when a family has PROVEN the answer is not absence.
+  assert.equal(admitsAbsenceClaim({ verdict: VERDICT.FAILED, absenceEligible: false }), false);
 });
 
 // ── 4. SCOPE + BUILD WARMTH ──────────────────────────────────────────────────
@@ -371,6 +591,83 @@ test("the quote fix did not reopen any shape section 6 already refused", () => {
     "node tooling/research-coverage/coverage.mjs scan",
   ]) {
     assert.equal(classifySafety(cmd).safe, false, `must stay refused: ${cmd}`);
+  }
+});
+
+// ── 6c. THE MERGE-BASE CARVE-OUT — the one widening, and its fence ───────────
+//
+// `\bmerge\b` matched inside `merge-base`, so `git merge-base --is-ancestor A B`
+// was refused UNSAFE-RERUN: the epic's own D40 merge-by-content rule and every
+// stranded-branch ancestry check could not be re-run by its own instrument
+// (11 of 652 corpus commands, 1.7%). The fix is `merge(?!-base)`, and it sits
+// INSIDE the safety allowlist — so the protective half matters more than the
+// fix. A widening no one fenced is how "fixing safety" becomes weakening it.
+
+test("git merge-base --is-ancestor is re-runnable — the epic can check its own merge proof", () => {
+  const s = classifySafety("git merge-base --is-ancestor abc123 origin/main");
+  assert.equal(s.safe, true, `should allow a pure ancestry read — refused as ${s.reason}`);
+  assert.equal(classifySafety("git merge-base HEAD origin/main").safe, true);
+  // …and it actually runs, rather than merely classifying.
+  const r = runRerun("git merge-base --is-ancestor HEAD HEAD");
+  assert.notEqual(r.verdict, VERDICT.UNSAFE_RERUN);
+  assert.equal(r.exit, 0);
+});
+
+test("PROTECTIVE: every real git merge is STILL refused after the carve-out", () => {
+  // The lookahead is five characters wide. If it ever widens to `merge.*` or the
+  // entry is dropped, every line here goes green and this module starts running
+  // commands that rewrite the working tree.
+  for (const cmd of [
+    "git merge",
+    "git merge --abort",
+    "git merge --continue",
+    "git merge origin/main",
+    "git merge --no-ff feature/x",
+    "git -C /tmp/repo merge origin/main",
+    "git merge -s ours origin/main",
+    "git mergetool",
+  ]) {
+    const s = classifySafety(cmd);
+    assert.equal(s.safe, false, `MUST STAY REFUSED: ${cmd}`);
+    assert.match(s.reason, /git write verb|write-shaped/, `refused for the right reason: ${cmd}`);
+  }
+  // The rest of the git denylist is untouched by the carve-out.
+  for (const cmd of [
+    "git push origin main", "git commit -m x", "git checkout main", "git switch main",
+    "git reset --hard origin/main", "git rebase origin/main", "git clean -fd",
+    "git apply p.patch", "git am p.patch", "git tag v1", "git stash",
+  ]) {
+    assert.equal(classifySafety(cmd).safe, false, `MUST STAY REFUSED: ${cmd}`);
+  }
+});
+
+test("a git GLOBAL OPTION no longer hides the write verb behind it", () => {
+  // FOUND BY WRITING THE PROTECTIVE TEST ABOVE, and verified against
+  // origin/main's own module on 2026-07-21: every one of these classified SAFE
+  // there, and runRerun would have EXECUTED it. `git -C <path>` is precisely how
+  // an agent reaches ANOTHER worktree, so the blast radius was other people's
+  // working trees. This is a TIGHTENING; nothing about it widens the gate.
+  for (const cmd of [
+    "git -C /tmp/repo push origin main",
+    "git -C /tmp/repo commit -m x",
+    "git -C /tmp/repo merge origin/main",
+    "git -C /tmp/repo reset --hard origin/main",
+    "git --no-pager reset --hard origin/main",
+    "git -c user.name=x commit -m y",
+    "git --git-dir=/tmp/r/.git checkout main",
+  ]) {
+    assert.equal(classifySafety(cmd).safe, false, `a global option must not launder a write verb: ${cmd}`);
+  }
+  // …while the same global options in front of a READ still pass. Tightening
+  // the gate must not cost the honest path (D3).
+  for (const cmd of [
+    "git -C /tmp merge-base --is-ancestor A B",
+    "git -C /tmp show HEAD:README.md",
+    "git --no-pager diff --stat",
+    "git -c core.pager=cat log --oneline",
+  ]) {
+    const s = classifySafety(cmd);
+    assert.equal(s.safe, true, `MUST ALLOW: ${cmd} — refused as ${s.reason}`);
   }
 });
 
