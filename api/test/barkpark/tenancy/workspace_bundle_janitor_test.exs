@@ -162,8 +162,21 @@ defmodule Barkpark.Tenancy.WorkspaceBundleJanitorTest do
       # The SAME key the engine's Archive.spill_dir/0 reads — sweep where it
       # writes. (Set here explicitly rather than relying on config.exs, whose
       # default lands on the engine branch, not this one.)
+      #
+      # RESTORE the prior value, never delete it: config.exs SETS this key and
+      # `Archive.spill_dir/0` reads it with `fetch_env!`, so leaving it unset
+      # makes every later export in the same run raise ArgumentError. Whether
+      # that lands is pure module-ordering luck, which is exactly the shape of
+      # flake that took main red on seeds where this module sorts first.
+      prior = Application.get_env(:barkpark, :bundle_spill_dir)
+
+      on_exit(fn ->
+        if is_nil(prior),
+          do: Application.delete_env(:barkpark, :bundle_spill_dir),
+          else: Application.put_env(:barkpark, :bundle_spill_dir, prior)
+      end)
+
       Application.put_env(:barkpark, :bundle_spill_dir, "/var/lib/barkpark/spill")
-      on_exit(fn -> Application.delete_env(:barkpark, :bundle_spill_dir) end)
 
       assert Janitor.spill_dir() == "/var/lib/barkpark/spill"
     end
