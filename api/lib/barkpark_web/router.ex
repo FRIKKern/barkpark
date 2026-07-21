@@ -1694,6 +1694,11 @@ defmodule BarkparkWeb.Router do
     # obvious order.
     get("/events", ChatController, :fleet_events)
 
+    # The workspace fleet rollup (herd charter D64h): agent_state counts + one
+    # precedence state, DB-scoped by chat_scope. STATIC, declared with /events
+    # before the dynamic /sessions/:id routes.
+    get("/rollup", ChatController, :rollup)
+
     get("/sessions", ChatController, :index)
     post("/sessions", ChatController, :create)
     get("/sessions/:id", ChatController, :show)

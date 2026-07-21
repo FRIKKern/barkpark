@@ -519,7 +519,11 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert entry["agent_state"] == "working"
 
       assert {:ok, at, 0} = DateTime.from_iso8601(entry["agent_state_at"])
-      assert DateTime.compare(DateTime.truncate(at, :second), DateTime.truncate(now, :second)) in [:eq, :gt]
+
+      assert DateTime.compare(DateTime.truncate(at, :second), DateTime.truncate(now, :second)) in [
+               :eq,
+               :gt
+             ]
     end
 
     # ── wave-session-card compact wire (wsc charter D3/D6 — amends D14) ──────
@@ -1263,6 +1267,57 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert json_conn(a1)
              |> get("/v1/chat/sessions/#{Ecto.UUID.generate()}/events")
              |> json_response(404)
+    end
+  end
+
+  # ── J. GET /v1/chat/rollup — the workspace fleet rollup (herd D64h) ─────────
+
+  describe "GET /v1/chat/rollup" do
+    test "auth runs first: missing bearer 401, non-admin reader 403", %{reader: reader} do
+      assert build_conn() |> get("/v1/chat/rollup") |> json_response(401)
+      assert json_conn(reader) |> get("/v1/chat/rollup") |> json_response(403)
+    end
+
+    test "admin sees the four-key counts + precedence shape over the whole herd",
+         %{admin: admin} do
+      body = json_conn(admin) |> get("/v1/chat/rollup") |> json_response(200)
+
+      assert %{"counts" => counts, "precedence" => precedence} = body
+      assert Map.keys(counts) |> Enum.sort() == ["blocked", "idle", "unknown", "working"]
+      assert precedence in ["blocked", "working", "idle", "unknown"]
+      # The setup session (default agent_state "idle") is in the :global herd.
+      assert counts["idle"] >= 1
+    end
+
+    test "a workspace connector's rollup is DB-scoped — another tenant's blocked session never leaks",
+         %{admin: admin} do
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+      conn_a_raw = "chat-rollup-a-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(conn_a_raw, "rollup-a", @dataset, ["read", "chat"], ws_a.id)
+
+      # ws-A owns one working session; ws-B owns one BLOCKED session. If the
+      # scope filter leaked, ws-A's precedence would flip to "blocked".
+      {:ok, a_sess} =
+        StudioChat.create_session(%{id: Ecto.UUID.generate()}, {:workspace, ws_a.id})
+
+      {:ok, b_sess} =
+        StudioChat.create_session(%{id: Ecto.UUID.generate()}, {:workspace, ws_b.id})
+
+      StudioChat.set_agent_state(a_sess.id, "working")
+      StudioChat.set_agent_state(b_sess.id, "blocked")
+
+      body = json_conn(conn_a_raw) |> get("/v1/chat/rollup") |> json_response(200)
+
+      assert body == %{
+               "counts" => %{"working" => 1, "blocked" => 0, "idle" => 0, "unknown" => 0},
+               "precedence" => "working"
+             }
+
+      # The :global admin still sees both tenants' rows (D21 authority unchanged).
+      global = json_conn(admin) |> get("/v1/chat/rollup") |> json_response(200)
+      assert global["counts"]["blocked"] >= 1
+      assert global["precedence"] == "blocked"
     end
   end
 
