@@ -94,9 +94,9 @@
 //    CHROME=/path/to/chrome  node cssom-parity.mjs
 //
 //  Exit codes: 0 = every authored selector reached the CSSOM · 1 = at least one
-//  MISS or a breached count floor — a fact about the CSS · 2 = GUARD (no Chrome,
-//  no stylesheet, wrong Node) — a fact about the ENVIRONMENT, refused before
-//  anything is spawned. The 1/2 split is load-bearing, see D19 below.
+//  MISS or a baseline-count mismatch — a fact about the CSS · 2 = GUARD (no Chrome,
+//  no stylesheet, no baseline sidecar, wrong Node) — a fact about the ENVIRONMENT,
+//  refused before anything is spawned. The 1/2 split is load-bearing, see D19 below.
 //
 //  WIRED INTO CI (cch-w1-cssom-ci-wiring, epic decisions D17-D20). It runs as its
 //  OWN job in .github/workflows/console-harness.yml — deliberately not a fourth
@@ -120,13 +120,22 @@
 //  a gate that misreports its own environment failure as a content failure is
 //  self-defeating.
 //
-//  D20 — THE COUNT FLOOR closes a measured blind spot in the mutation proof below.
-//  The proof only ever exercised the DE-OPENED direction (a `/*` removed). Going the
-//  other way — INSERTING a stray `/*` before `.modal-root` — passed with MISSES 0:
-//  the brace-tracking parser and Chrome both swallow the commented-out region
-//  symmetrically (measured 1201 heads → 1188 on BOTH sides), so the diff stays empty
-//  while 13 rules silently leave the stylesheet. Equality alone cannot see a
-//  symmetric loss; only an absolute floor can. See MIN_AUTHORED_HEADS.
+//  D20/D65 — THE EXACT-MATCH SIDECAR RATCHET closes a measured blind spot in the
+//  mutation proof below. The proof only ever exercised the DE-OPENED direction (a
+//  `/*` removed). Going the other way — INSERTING a stray `/*` before `.modal-root`
+//  — passed with MISSES 0: the brace-tracking parser and Chrome both swallow the
+//  commented-out region symmetrically (measured 1201 heads → 1188 on BOTH sides),
+//  so the diff stays empty while 13 rules silently leave the stylesheet. Equality
+//  between the two SIDES cannot see a symmetric loss; only a count assertion can.
+//
+//  D20 first shipped that as a STATIC absolute (`MIN_AUTHORED_HEADS = 1201`). That
+//  floor DECAYS: it only ever catches a swallow that drops the count below the
+//  baked-in number, and app.css legitimately grows. By the time this file read 1203
+//  the 1201 floor could no longer see a two-rule swallow — the D20 hole silently
+//  re-opening itself while the gate still reported green. D65 replaces the static
+//  floor with a committed sidecar (`cssom-heads.baseline`) and asserts authored
+//  heads EQUAL it (not `>=`), so a swallow AND unrecorded growth both red, and every
+//  legitimate CSS change must bump the sidecar in the same commit. See readBaseline().
 //
 //  ZERO DEPENDENCIES — Node 22 native fetch + native WebSocket speak CDP
 //  directly, matching __preview__'s doctrine. It reads the file from disk rather
@@ -160,28 +169,59 @@ const BROWSER_CLOSE_CAP = 2000;
 const TERM_POLL_CAP = 3000;
 const KILL_POLL_CAP = 2000;
 
-// ── D20: the count floor — a RATCHET, and deliberately a tight one ────────────
-// `heads == CSSOM rules` is a SYMMETRIC assertion, so it cannot see a loss that
-// hits both sides equally — which is exactly what commenting out a region does.
-// This is the only absolute in the file, and it exists to make that one blind
-// spot visible.
+// ── D65: the exact-match sidecar ratchet — replaces D20's static floor ────────
+// `heads == CSSOM rules` is a SYMMETRIC assertion between the two SIDES, so it
+// cannot see a loss that hits both equally — which is exactly what commenting out a
+// region does. A count assertion is the only thing that can. D20 shipped that as a
+// static absolute; a static absolute DECAYS (see the header). D65 pins the count to
+// a committed sidecar and asserts EQUALITY.
 //
-// WHY NO SLACK. The tempting version is `baseline - 20` so ordinary churn never
-// trips it. But any margin M re-opens the identical hole for every swallow of
-// M rules or fewer — the same defect, merely quieter, which is the worse of the
-// two failure modes. So the floor sits ON the measured count.
+// WHY EXACT (`==`), NOT A FLOOR (`>=`). A floor only catches a drop BELOW its
+// baked-in number, and any margin re-opens the identical hole for every swallow of
+// that size or smaller — the same defect, merely quieter. Worse, a `>=` floor lets
+// the baseline go stale silently as CSS grows, so the very growth that is normal is
+// what erodes the protection (this file read 1203 while the floor still said 1201 —
+// a two-rule swallow already sailed over it). Under `==`, a swallow reds (count
+// fell) AND unrecorded growth reds (count rose), which forces the sidecar to be
+// bumped in the SAME commit as any legitimate CSS change. That co-commit IS the
+// ratchet: the count can only move through a reviewed diff, never drift.
 //
-// THIS MEANS DELETING CSS REDS THE GATE, AND THAT IS THE INTENDED COST. Adding
-// rules never trips it (the check is `>=`). Removing them is rare, and when it
-// is deliberate the fix is this one line, lowered in the same reviewed commit as
-// the deletion. A red here is never "the gate is broken" — it is "the stylesheet
-// shrank; say whether you meant it."
+// WHY A COMMITTED SIDECAR, NOT `git show origin/main:…app.css` (candidate a). A
+// git-derived baseline is self-maintaining but adds a git dependency to an
+// instrument whose header law is ZERO DEPENDENCIES / runnable-in-a-worktree: it
+// would break in a bare archive, a detached checkout, a shallow CI clone with no
+// `origin/main` ref, or the fixture proof below — the exact contexts this gate must
+// run in. A file on disk needs nothing but `fs`.
 //
-// Measured 2026-07-21 on app.css @ sha256 bdd604164450…: 1201 authored heads,
-// 1201 CSSOM rules, 1170/1170 flattened, MISSES 0 (Chrome 150.0.7871.129,
-// node v22.22.0). The GR100 census read 1189; #4733 then gave six shipped class
-// families their CSS. Do not "restore" an older number from a comment upstream.
-const MIN_AUTHORED_HEADS = 1201;
+// WHY NOT A RELATIVE DROP TOLERANCE vs the previous run (candidate c). CI keeps no
+// cross-run state — every run is a fresh checkout with no memory of the last run's
+// count — so "a drop of >N since last time" has no "last time" to compare against.
+// The committed count IS the persistent state, versioned with the code it guards.
+//
+// THIS MEANS EVERY CSS CHANGE REDS UNTIL THE SIDECAR IS BUMPED, AND THAT IS THE
+// INTENDED COST. A red here is never "the gate is broken" — it is "the authored-
+// head count moved; say whether you meant it and record the new count."
+//
+// Measured 2026-07-21 on app.css @ sha256 176f441387bc…: 1203 authored heads,
+// 1203 CSSOM rules, 1172/1172 flattened, MISSES 0 (Chrome 150.0.7871.129,
+// node v22.22.0). That number lives in cssom-heads.baseline, NOT here — a constant
+// in this file would decay exactly as MIN_AUTHORED_HEADS did.
+const DEFAULT_BASELINE = path.resolve(HERE, "cssom-heads.baseline");
+
+// The sidecar is a committed text file: `#` lines are human context, the first
+// bare-integer line is the count. Override with HEADS_BASELINE=/path (pair it with
+// CSS= when certifying a non-default stylesheet — the fixture proof does exactly
+// that). A missing or unparseable sidecar is an ENVIRONMENT fact — the gate cannot
+// know what to assert — so it GUARDS on exit 2 in the preflight below, never reds as
+// though the CSS were broken.
+function parseBaseline(text) {
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    return /^\d+$/.test(line) ? Number(line) : null; // first non-comment line decides
+  }
+  return null; // no count line at all
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -433,6 +473,28 @@ async function main() {
     process.exit(2);
   }
 
+  // D65 — the committed baseline, read on the GUARD path before anything is spawned.
+  // A missing/unparseable sidecar means the gate cannot know what to assert; that is
+  // an environment fault (exit 2), never a stylesheet defect (exit 1).
+  const baselinePath = path.resolve(process.env.HEADS_BASELINE || DEFAULT_BASELINE);
+  if (!fs.existsSync(baselinePath)) {
+    process.stderr.write(
+      `!! GUARD (exit 2): no authored-head baseline sidecar at ${baselinePath}\n` +
+        `   This gate asserts the authored-head count EQUALS the committed sidecar. Without it there\n` +
+        `   is nothing to assert against — an environment fault, not a CSS defect. Restore\n` +
+        `   cssom-heads.baseline, or set HEADS_BASELINE=/path when certifying a different stylesheet.\n`,
+    );
+    process.exit(2);
+  }
+  const baseline = parseBaseline(fs.readFileSync(baselinePath, "utf8"));
+  if (baseline === null) {
+    process.stderr.write(
+      `!! GUARD (exit 2): baseline sidecar ${baselinePath} carries no parseable count.\n` +
+        `   Expected a file whose first non-\`#\` line is a bare integer (the authored-head count).\n`,
+    );
+    process.exit(2);
+  }
+
   const css = fs.readFileSync(cssPath, "utf8");
   const bytes = Buffer.byteLength(css);
   const sha = crypto.createHash("sha256").update(css).digest("hex");
@@ -574,10 +636,11 @@ async function main() {
   for (const [key, where] of authored) if (!cssomSet.has(key)) misses.push({ key, ...where });
 
   const wall = Date.now() - t0;
-  const floorBreach = heads.length < MIN_AUTHORED_HEADS;
+  const baselineMismatch = heads.length !== baseline;
+  const grew = heads.length > baseline;
 
   process.stdout.write(
-    `   authored rule heads   ${heads.length} (floor ${MIN_AUTHORED_HEADS}${floorBreach ? " ← BREACHED" : ""})\n` +
+    `   authored rule heads   ${heads.length} (baseline ${baseline}${baselineMismatch ? (grew ? " ← ABOVE" : " ← BELOW") : ""})\n` +
       `   CSSOM style rules     ${cssom.rules.length}\n` +
       `   flattened selectors   ${authored.size} authored / ${cssomSet.size} CSSOM\n` +
       `   MISSES                ${misses.length}\n`,
@@ -598,31 +661,45 @@ async function main() {
     );
   }
 
-  // D20 — the count floor. FATAL, and checked independently of `misses`, because
-  // the whole point is the case where MISSES is 0 and the stylesheet is still
-  // missing rules. It is reported BEFORE the miss list: under a stray-`/*` insert
+  // D65 — the exact-match baseline. FATAL, and checked independently of `misses`,
+  // because the whole point is the case where MISSES is 0 and the stylesheet is
+  // still missing rules. Reported BEFORE the miss list: under a stray-`/*` insert
   // this is the ONLY signal, and under a real swallow it is the more legible one.
-  if (floorBreach) {
-    const lost = MIN_AUTHORED_HEADS - heads.length;
+  if (baselineMismatch) {
+    const delta = Math.abs(heads.length - baseline);
     process.stderr.write(
-      `\n!! COUNT FLOOR BREACHED: ${heads.length} authored rule heads, floor is ${MIN_AUTHORED_HEADS} (${lost} missing).\n\n` +
-        `   MISSES above may well be 0 and that 0 IS NOT A PASS. The authored-vs-CSSOM diff is\n` +
-        `   symmetric, so a region commented out by a stray \`/*\` opener vanishes from BOTH sides\n` +
-        `   at once and the diff stays empty while the rules leave the stylesheet. This floor is\n` +
-        `   the only assertion in this file that can see that.\n\n` +
-        `   TWO CAUSES, AND YOU MUST SAY WHICH:\n` +
-        `     1. A stray \`/*\` opener commented out a live region — a real defect, of the same\n` +
-        `        family as #4592. Find it: \`node cloud/priv/static/__css_check.mjs\` (E10), or\n` +
-        `        diff the comment openers against \`git show origin/main:cloud/priv/static/app.css\`.\n` +
-        `     2. You deliberately deleted ${lost} rule head(s). Then lower MIN_AUTHORED_HEADS to\n` +
-        `        ${heads.length} in cssom-parity.mjs, IN THE SAME COMMIT as the deletion, so the\n` +
-        `        ratchet stays honest and the next reader sees the count was reviewed.\n`,
+      `\n!! BASELINE MISMATCH: ${heads.length} authored rule heads, sidecar baseline is ${baseline} ` +
+        `(${grew ? "+" : "−"}${delta}).\n` +
+        `   sidecar: ${path.relative(process.cwd(), baselinePath)}\n\n`,
     );
+    if (grew) {
+      process.stderr.write(
+        `   The stylesheet GREW without recording it. This is not a defect by itself — it is an\n` +
+          `   UNRECORDED change, which the ratchet refuses on purpose so the count can only move\n` +
+          `   through a reviewed diff. Bump the sidecar to ${heads.length} IN THE SAME COMMIT as the\n` +
+          `   CSS change, so the next reader sees the new count was reviewed. (Confirm MISSES is 0\n` +
+          `   first — a mismatch with misses is a genuine parity defect, not just an unrecorded add.)\n`,
+      );
+    } else {
+      process.stderr.write(
+        `   MISSES above may well be 0 and that 0 IS NOT A PASS. The authored-vs-CSSOM diff is\n` +
+          `   symmetric, so a region commented out by a stray \`/*\` opener vanishes from BOTH sides\n` +
+          `   at once and the diff stays empty while ${delta} rule(s) leave the stylesheet. This count\n` +
+          `   assertion is the only thing in this file that can see that.\n\n` +
+          `   TWO CAUSES, AND YOU MUST SAY WHICH:\n` +
+          `     1. A stray \`/*\` opener commented out a live region — a real defect, of the same\n` +
+          `        family as #4592. Find it: \`node cloud/priv/static/__css_check.mjs\` (E10), or\n` +
+          `        diff the comment openers against \`git show origin/main:cloud/priv/static/app.css\`.\n` +
+          `     2. You deliberately deleted ${delta} rule head(s). Then lower the sidecar to\n` +
+          `        ${heads.length}, IN THE SAME COMMIT as the deletion, so the ratchet stays honest\n` +
+          `        and the next reader sees the count was reviewed.\n`,
+      );
+    }
   }
 
-  if (misses.length === 0 && !floorBreach) {
+  if (misses.length === 0 && !baselineMismatch) {
     process.stdout.write(
-      `\nPARITY PASS — every authored selector reached the CSSOM · ` +
+      `\nPARITY PASS — every authored selector reached the CSSOM, count matches baseline · ` +
         `${(wall / 1000).toFixed(1)}s wall · teardown ${teardownMs}ms\n`,
     );
     process.exit(0);
@@ -630,7 +707,7 @@ async function main() {
 
   if (misses.length === 0) {
     process.stderr.write(
-      `\nPARITY FAIL — count floor breached with 0 misses · ${(wall / 1000).toFixed(1)}s wall · ` +
+      `\nPARITY FAIL — baseline mismatch with 0 misses · ${(wall / 1000).toFixed(1)}s wall · ` +
         `teardown ${teardownMs}ms\n`,
     );
     process.exit(1);
