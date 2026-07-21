@@ -1153,6 +1153,10 @@ test("read-only sed is ADMITTED — the largest refusal class in real foreign ou
     "sed -e '1,5p' -e '9q' notes.md",
     "sed -E 's/[0-9]+/N/g' notes.md",
     "cat notes.md | sed -n '1,10p' | head -3",
+    // `--` ends the flags; only the FIRST bare positional is a script. Taking
+    // every positional after `--` made these screen the FILENAME as a script.
+    "sed '1p' -- notes.md",
+    "sed -n '1,5p' -- notes.md",
   ]) {
     assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} — ${screenCommand(cmd).reason}`);
   }

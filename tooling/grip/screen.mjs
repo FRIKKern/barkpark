@@ -946,8 +946,13 @@ const sedRule = {
     for (let i = 1; i < argv.length; i++) {
       const t = argv[i];
       if (t === "--") {
+        // Only the FIRST bare positional is a script, and only when nothing has
+        // supplied one yet. Taking `rest[0]` unconditionally made
+        // `sed '1p' -- notes.md` screen the FILENAME as a script and refuse it
+        // ("script command \"o\"") — a false refusal found by probing the
+        // separator after the rule was otherwise green.
         const rest = argv.slice(i + 1);
-        if (!sawExpression && rest.length) scripts.push(rest[0]);
+        if (!sawExpression && scripts.length === 0 && rest.length) scripts.push(rest[0]);
         break;
       }
       if (t === "-i" || t === "--in-place" || /^--in-place=/.test(t)) return "sed -i EDITS ITS INPUT FILES IN PLACE";
