@@ -28,6 +28,31 @@ defmodule Barkpark.SelfUpdate.Checker do
   @default_initial_delay_ms 10_000
   @default_check_interval_ms 3_600_000
 
+  # The most SEQUENTIAL client HTTP calls run_check/0 can make on any single
+  # path — the fork-mode :behind path, which fires all four in order:
+  #   1. client.latest_release(repo)       — run_check/0
+  #   2. client.latest_release(canonical)  — fork_advice/4 (when repo != canonical)
+  #   3. fetch_notes -> client.release_notes(repo, tag)
+  #   4. fetch_digest -> client.digest(repo, from_tag, to_tag)
+  # Keep this constant in lockstep with those four call sites below: adding a
+  # fifth sequential request MUST bump it, or the derived :check_now call
+  # budget (SelfUpdate.check_now_timeout_ms/0) stops covering the real worst
+  # case — the check-timeout test in checker_test.exs fails until it is raised.
+  @max_sequential_http_requests 4
+
+  @doc """
+  Worst-case wall-clock budget (ms) for the sequential HTTP calls run_check/0
+  makes: `@max_sequential_http_requests` × the client's per-request receive
+  timeout, read from the client module so the 10s literal lives in exactly
+  one place (`Barkpark.SelfUpdate.Client.GitHub.receive_timeout_ms/0`). The
+  `:check_now` GenServer.call timeout is derived to cover this — see
+  `Barkpark.SelfUpdate.check_now_timeout_ms/0`.
+  """
+  @spec worst_case_http_budget_ms() :: pos_integer()
+  def worst_case_http_budget_ms do
+    @max_sequential_http_requests * Barkpark.SelfUpdate.Client.GitHub.receive_timeout_ms()
+  end
+
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end

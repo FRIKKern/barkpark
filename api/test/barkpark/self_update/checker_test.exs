@@ -27,6 +27,26 @@ defmodule Barkpark.SelfUpdate.CheckerTest do
 
   defp prime(script), do: Application.put_env(:barkpark, @fake, script)
 
+  test "the :check_now call timeout covers the checker's worst-case HTTP budget" do
+    # Mutation-provable relationship (no network, no sleep-stub theater):
+    # run_check/0 can make FOUR sequential client HTTP calls on the fork-mode
+    # :behind path, each bounded by the client's 10s receive_timeout, so the
+    # worst case is 40_000ms. The :check_now GenServer.call timeout MUST be
+    # >= that budget, or a merely-slow upstream exits the caller :timeout
+    # (masquerading as :unknown) while the fresh result is thrown away.
+    #
+    # Fail-before (this slice): with the timeout still a hand-tuned 30_000 this
+    # is RED (30_000 < 40_000); GREEN once it is DERIVED from the budget. It
+    # goes RED again if a fifth sequential request is added without bumping
+    # @max_sequential_http_requests — the count and its call sites are
+    # co-located in checker.ex for exactly that reason.
+    assert Checker.worst_case_http_budget_ms() == 4 * 10_000
+
+    assert SelfUpdate.check_now_timeout_ms() >= Checker.worst_case_http_budget_ms(),
+           "check_now call timeout #{SelfUpdate.check_now_timeout_ms()}ms must cover the " <>
+             "worst-case HTTP budget #{Checker.worst_case_http_budget_ms()}ms"
+  end
+
   test "status/0 without a running Checker returns the :disabled map, never raises" do
     # test.exs has enabled: false, so no Checker is in the supervision tree.
     assert Process.whereis(Checker) == nil

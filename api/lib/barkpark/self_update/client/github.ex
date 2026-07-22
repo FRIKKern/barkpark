@@ -29,6 +29,14 @@ defmodule Barkpark.SelfUpdate.Client.GitHub do
   # map / Studio bar. The full text is always one click away via the URL.
   @notes_cap 4_000
 
+  @doc """
+  The per-request HTTP receive timeout, in ms. Public so the Checker can
+  derive its worst-case sequential HTTP budget from this single source of
+  truth — no caller duplicates the `@receive_timeout` literal.
+  """
+  @spec receive_timeout_ms() :: pos_integer()
+  def receive_timeout_ms, do: @receive_timeout
+
   @impl true
   def latest_release(repo) do
     case request("#{@api_base}/repos/#{repo}/tags?per_page=100") do
