@@ -1,0 +1,39 @@
+{
+  "id": "ae-seal-descope-mechanics",
+  "wave": "authoring-excellence wave 10 (2026-07-22)",
+  "author": "verifier[seal-descope-mechanics]",
+  "purpose": "Re-derivation recipes for the criterion-0 honest-close mechanics on guerrilla. Decide leans on these to script the seal.",
+  "facts": [
+    {
+      "claim": "cancelled is a legal task lifecycle_status; task.close accepts lifecycle_status = done|cancelled|blocked",
+      "rerun": "bp capabilities -o json | python3 -c \"import json,sys;s=json.dumps(json.load(sys.stdin));i=s.find('done | cance');print(s[i-40:i+80])\""
+    },
+    {
+      "claim": "cancelled tasks are genuinely CLOSED (carry claim.closed_at) and carry close_reason evidence; already used to seal epics",
+      "rerun": "bp task get spd-b25-task-ls-all-pagination-stalled -o json | python3 -c \"import json,sys;d=json.load(sys.stdin)['doc'];print(d['lifecycle_status'],d['claim']['closed_at'],d['claim']['closed_by']);print(d['content'].get('close_reason','')[:120])\""
+    },
+    {
+      "claim": "epic authoring-excellence claim is LAPSED (worker None, expired 2026-07-15, epoch 2) -> must re-claim before any stamp/close",
+      "rerun": "bp task get authoring-excellence -o json | python3 -c \"import json,sys;print(json.load(sys.stdin)['doc']['claim'])\""
+    },
+    {
+      "claim": "40 children: 37 done, 3 open (ae-search-or-arm-restructure, ae-seeds-published-insert-audit-note, onb-backlog-authoring-parity-crosslink)",
+      "rerun": "curl -s -H \"Authorization: Bearer $(python3 -c \\\"import json;print(json.load(open('$HOME/.config/barkpark/config.json'))['token'])\\\")\" 'https://guerrilla.barkpark.cloud/v1/data/query/production/task?filter%5Bparent_id%5D=authoring-excellence&limit=100&fields=lifecycle_status' | python3 -c \"import json,sys;from collections import Counter;d=json.load(sys.stdin)['result'];print(d['count']);print(dict(Counter(x.get('lifecycle_status') for x in d['documents'])));print([x['_id'] for x in d['documents'] if x.get('lifecycle_status')=='open'])\""
+    },
+    {
+      "claim": "epic content carries BOTH a live 'wave_status' (wave 10) and a stale dotted 'content.wave_status' (frozen wave-7 D49-D55) key",
+      "rerun": "bp task get authoring-excellence -o json | python3 -c \"import json,sys;c=json.load(sys.stdin)['doc']['content'];print('DOTTED:',c.get('content.wave_status','')[:60]);print('LIVE  :',c.get('wave_status','')[:60])\""
+    },
+    {
+      "claim": "onboarding-composition-epic is dormant (wave_status 'complete grade A- 07-16'; newest child touched 07-19) -> D65 concurrency deferral has lapsed; re-parenting onb-crosslink out is now safe",
+      "rerun": "bp task get onboarding-composition-epic -o json | python3 -c \"import json,sys;d=json.load(sys.stdin)['doc'];print(d['content'].get('wave_status','')[:120])\""
+    }
+  ],
+  "close_sequence_for_decide": [
+    "1. Dispose the 3 open children FIRST (they do not touch the epic doc rev): ae-seeds -> BUILD+close done (demo.ex ~:559 audit comment, D66); ae-search-or-arm-restructure -> rule build-or-descope, if descope close with lifecycle_status=cancelled + reason (LEAD-1 index was live-tried+dropped, so any build must REWRITE criteria first); onb-crosslink -> close done with the triage routing table as evidence (triage IS the deliverable) OR re-parent to onboarding-composition-epic (now dormant).",
+    "2. Resync design paper /papers/authoring-excellence Ratified table D56-D67 (stale two waves).",
+    "3. Re-claim the lapsed epic: bp task claim authoring-excellence <worker>  -> fresh epoch (lapsed claim cannot stamp).",
+    "4. Close epic in ONE atomic write flipping all 4 criteria: bp task close authoring-excellence <worker> <epoch> --set 'criteria:=[...]'  -- criterion 0 evidence must enumerate the 40-child disposition (37 done + ae-seeds done + onb done + ae-search done|cancelled); criterion 3 evidence points at the resynced paper.",
+    "5. Dotted content.wave_status: KEEP (D61 default). Scrub ONLY via a literal-key-escaped unset of content['content.wave_status']; a naive dot-path unset of content.wave_status hits the LIVE nested field. Cosmetic; does not block the seal."
+  ]
+}
