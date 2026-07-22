@@ -29,10 +29,12 @@ same scope. (To serve a different project, the operator switches context with `b
 starting you.)
 
 Publish your presence so the orchestrator's roster can see you. Beat the native `listener` record
-at every turn boundary — on start, on claiming an order, and on closing one:
+at every turn boundary — on start, on claiming an order, and on closing one, and carry your
+**measured capacity** on the same beat (see §4):
 
 ```
-bp fleet beat <WORKER> --status idle --ttl 900 --agent claude-code
+bp fleet beat <WORKER> --status idle --ttl 900 --agent claude-code \
+  --capacity '{"size_class":"heavy","slots_total":1,"slots_free":1,"budget":42.5}'
 ```
 
 `<WORKER>` is a REQUIRED POSITIONAL — never `--worker` (that exits 2 "unknown flag"). Declare
@@ -44,6 +46,17 @@ and an SSE-parked idle session runs no code between turns, so 900s is the mechan
 **Honesty note (PDF-D32):** `offline` means only "no beat within the TTL" — for a quietly-parked
 listener in sparse personal use it means *quiet, not dead*. An alive-but-idle session that reads
 `offline` on the roster is this design's steady state, not an error.
+
+**Busy ≡ offline is CORRECT (PDF-D40):** while you execute an order in-turn no code runs to beat,
+so your row goes stale and the roster reads you `offline` mid-order — that is right, not a bug. A
+busy listener has zero free slots; the offline guard and the zero-free-slots guard refuse a new
+order *identically*, so nothing routes to you either way. There is no mid-turn heartbeat and none
+is needed — do not invent a sidecar to fake liveness while working (PDF-D22 ban holds).
+
+**Offline never un-lists you (PDF-D41):** reading `offline` does not remove your `listener` row
+from the ledger or block an order addressed to you *by name* — a task routed to your `assignee`
+still lands and wakes you. `offline` only makes the best-fit auto-router skip you while you look
+quiet; a named assignment is a direct address, not a routing decision.
 
 ## 2. Arm the doorbell (SSE), then go idle
 
@@ -99,9 +112,19 @@ For each new task id, run this sequence exactly:
 - **Only your queue.** Never touch a task not routed to your `assignee`.
 - **Disposability:** if you get wedged, it is safe for the operator to kill and restart you —
   your claims lapse, your fences free on lease expiry, your next self starts clean.
-- **Capacity (optional).** If asked to report capacity, on each heartbeat emit a one-line
-  envelope in your now-line: `slots F/T · ram <mb> · gate ~<s>` — measured, never guessed. The
-  orchestrator reads declared capacity as a CEILING, so under-report rather than over-report.
+- **Capacity (structured, on the same beat).** Advertise capacity as a JSON string on **every**
+  beat via `--capacity` — it is no longer optional free-text:
+  `--capacity '{"size_class":"heavy","slots_total":1,"slots_free":1,"budget":42.5}'`.
+  - `size_class` is derived from **real total RAM** (light `<4`, standard `4–<16`, heavy
+    `16–<64`, xl `≥64` GiB), clamped by `FLEET_MAX_CLASS` — never guessed.
+  - `slots_total` is 1; `slots_free` is your own loop state: `1` while idle, `0` from claim to
+    close — **never an OS probe**.
+  - `budget` is `FLEET_SPEND_CAP` minus your running spend ledger, re-read each beat; omit it
+    when uncapped.
+  **Measured, never guessed; under-report rather than over-report** — the orchestrator reads
+  declared capacity as a CEILING (it dispatches on the *min* of declared and observed), so a
+  modest self-report can only lose you work you couldn't safely take anyway. The bash runner
+  (`tooling/fleet/fleet-run.sh`) computes this envelope for you; `fleet-run.sh capacity` prints it.
 
 ## What "done" looks like
 
