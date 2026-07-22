@@ -3926,11 +3926,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
       nil ->
         id = Ecto.UUID.generate()
 
+        # Every session BELONGS to the workspace it is created in — managed and
+        # registered-host alike (herd charter D43h: `BlockedSweeper` is
+        # fail-closed on NULL owners, so a `nil`-owned session can never fire
+        # `chat_blocked`). Stamp the resolved scope workspace, falling back to
+        # the seeded Default Workspace; `:global` (a `nil`-owned session) is
+        # reserved for a pre-tenancy instance with no Default Workspace.
         scope =
-          if socket.assigns.execution_target == "registered_host" do
-            socket.assigns.current_workspace.id
-          else
-            :global
+          case socket.assigns[:current_workspace] do
+            %{id: ws_id} when is_binary(ws_id) ->
+              {:workspace, ws_id}
+
+            _ ->
+              case Barkpark.Tenancy.get_default_workspace() do
+                %{id: ws_id} -> {:workspace, ws_id}
+                nil -> :global
+              end
           end
 
         # De-fanged strict match (charter D24): a create failure must NOT crash
