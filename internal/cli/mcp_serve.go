@@ -181,6 +181,16 @@ func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 		}
 	}
 
+	// The four curated chat session tools (herd charter D74h) ride BOTH tasks
+	// and all — this single assembly is what `bp mcp serve` (default tasks) and
+	// the Studio loopback (`--tools all`, registered as "barkpark") build, so
+	// registering here is what puts them on both surfaces. Hardcoded /v1/chat
+	// wrappers, deliberately NOT manifest-backed (chat.* is existence-hidden at
+	// write tier — a Lookup would silently skip them on the loopback); infallible,
+	// so the batch-first invariant holds. The noun-subset surface above stays
+	// bridge-only by design and does not carry them.
+	registerChatTools(srv, ctx)
+
 	// Published papers as read-only MCP resources — independent of --tools (the
 	// 40-tool Cursor cap is about TOOLS, not resources). Wholly best-effort: on
 	// any failure (unreachable API, missing doc verbs) it warns to stderr and
@@ -451,7 +461,9 @@ func printMCPServeHelp(out *writer) {
 flags:
   --tools <sel>       Which tools to expose. "tasks" (default) is the curated
                       eight — task_ready, task_next, task_show, task_close,
-                      task_create, task_prime, task_stamp, task_pulse. "all"
+                      task_create, task_prime, task_stamp, task_pulse — plus
+                      the four chat session tools (chat_spawn_session,
+                      chat_send, chat_read_tail, chat_wait_for_state). "all"
                       additionally bridges every other bp capability into a
                       generic tool. A comma-separated NOUN list (e.g.
                       "media,doc") serves ONLY those nouns' commands as generic

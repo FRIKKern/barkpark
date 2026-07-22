@@ -877,6 +877,15 @@ func mcpRun(status int, body []byte, err error) *mcp.CallToolResult {
 // byte total plus the exact escape commands that retrieve the rest. Small
 // payloads pass through untouched.
 func clampMCPToolResult(text string) string {
+	return clampMCPToolResultWithHint(text,
+		"narrow the call (a smaller limit, or a single-task read via task_show <doc_id>)")
+}
+
+// clampMCPToolResultWithHint is clampMCPToolResult with a caller-supplied
+// escape-hatch hint, so a surface with a different paging mechanism (the chat
+// tools page by `since`, not limit/task_show) can keep the truncation notice
+// honest about how to fetch the rest.
+func clampMCPToolResultWithHint(text, hint string) string {
 	if len(text) <= mcpToolResultMaxBytes {
 		return text
 	}
@@ -885,8 +894,8 @@ func clampMCPToolResult(text string) string {
 		cut--
 	}
 	return text[:cut] + fmt.Sprintf(
-		"\n[truncated: %d bytes total, first %d shown — narrow the call (a smaller limit, or a single-task read via task_show <doc_id>) to fetch the rest]",
-		len(text), cut)
+		"\n[truncated: %d bytes total, first %d shown — %s to fetch the rest]",
+		len(text), cut, hint)
 }
 
 // mcpArgError is an IsError result for a bad tool argument (before any request).

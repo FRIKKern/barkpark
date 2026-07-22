@@ -39,6 +39,18 @@ import (
 // (transport.go precedent) — a mid-ring reconnect that replays flips must not
 // wipe state. A mid-life 4xx stays fatal. ctx cancellation always exits nil.
 func (c *Client) FleetEvents(ctx context.Context, lastEventID string, onEvent func(event, data string) error, onReconnect func()) error {
+	return c.FleetEventsWithCursor(ctx, lastEventID, onEvent, onReconnect, nil)
+}
+
+// FleetEventsWithCursor is FleetEvents with a nil-safe onCursor observer (herd
+// charter D76h): onCursor fires with the fresh "<epoch>:<seq>" value each time
+// an id-bearing frame advances the internal cursor — and only then, so the value
+// stays pinned across id-less heartbeats. It exists for callers that must hand
+// the resume position OUT mid-stream (chat_wait_for_state returns {resolved:
+// false, cursor} on its bound so a re-call replays exactly the missed flips);
+// callers that only need internal reconnect-resume keep calling FleetEvents,
+// whose signature and behaviour are unchanged (nil onCursor is byte-identical).
+func (c *Client) FleetEventsWithCursor(ctx context.Context, lastEventID string, onEvent func(event, data string) error, onReconnect func(), onCursor func(cursor string)) error {
 	const (
 		maxBackoff      = 30 * time.Second
 		maxTransient5xx = 5
@@ -109,7 +121,7 @@ func (c *Client) FleetEvents(ctx context.Context, lastEventID string, onEvent fu
 
 		connected = true
 		consecutive5xx = 0
-		cbErr := scanListenFrames(resp.Body, &cursor, &backoff, floorBackoff, onEvent)
+		cbErr := scanListenFrames(resp.Body, &cursor, &backoff, floorBackoff, onEvent, onCursor)
 		resp.Body.Close()
 
 		if cbErr != nil {

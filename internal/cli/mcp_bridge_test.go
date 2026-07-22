@@ -176,11 +176,16 @@ func TestBridgeInputSchema_Derivation(t *testing.T) {
 	}
 }
 
-// TestBridgeShadowing proves the seven curated-twin IDs are shadowed while the
+// TestBridgeShadowing proves the curated-twin IDs are shadowed while the
 // distinct by-id claim and a non-covered doc verb still generate — over a real
 // MCP session's tools/list. doc.create is synthesised (the fixture carries only
-// doc.get/ls/query/mutate) so the test asserts the shadow set is scoped to
-// EXACTLY the seven twins and never over-shadows a sibling verb.
+// doc.get/ls/query/mutate), and the three chat.* verbs are synthesised too (herd
+// charter D75h — the fixture full-manifest.json has NO chat.* because the verbs
+// are existence-hidden at write tier; the fixture is deliberately not churned).
+// The test asserts the shadow set is scoped to EXACTLY the curated twins and
+// never over-shadows a sibling verb — and, on a combined curated+bridge server
+// (the shape `--tools all` actually assembles), that each shadowed chat verb's
+// capability is present under its curated name, never twice.
 func TestBridgeShadowing(t *testing.T) {
 	m := loadFixtureManifest(t)
 	// Synthesize doc.create so we can assert it generates (not covered by the
@@ -193,21 +198,81 @@ func TestBridgeShadowing(t *testing.T) {
 		HTTP:   manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
 		Args:   []manifest.Arg{{Name: "type", Required: true, Type: "string", Summary: "doc type"}},
 	})
+	// Synthesize the three chat verbs the curated chat tools cover (D75h): a
+	// future manifest that carries them (admin-tier projection / the D36 remap)
+	// must NOT generate bp_chat_* twins. chat.interrupt is synthesised as the
+	// control: a chat verb with NO curated twin must still generate.
+	m.Commands = append(m.Commands,
+		manifest.Command{
+			ID: "chat.create_session", Noun: "chat", Verb: "create_session", Writes: true,
+			HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/chat/sessions"},
+		},
+		manifest.Command{
+			ID: "chat.send_message", Noun: "chat", Verb: "send_message", Writes: true,
+			HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/chat/sessions/:id/messages"},
+			Args: []manifest.Arg{{Name: "id", Required: true, Type: "string", Summary: "session id"}},
+		},
+		manifest.Command{
+			ID: "chat.get_session", Noun: "chat", Verb: "get_session",
+			HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/chat/sessions/:id"},
+			Args: []manifest.Arg{{Name: "id", Required: true, Type: "string", Summary: "session id"}},
+		},
+		manifest.Command{
+			ID: "chat.interrupt", Noun: "chat", Verb: "interrupt", Writes: true,
+			HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/chat/sessions/:id/interrupt"},
+			Args: []manifest.Arg{{Name: "id", Required: true, Type: "string", Summary: "session id"}},
+		},
+	)
 
 	cs := newBridgeSession(t, globals{}, manifest.Context{Server: "http://x"}, m)
 	tools := listAllTools(t, cs)
 
-	absent := []string{"bp_task_ready", "bp_task_next", "bp_task_get", "bp_task_close", "bp_task_prime", "bp_task_stamp", "bp_task_pulse"}
+	absent := []string{
+		"bp_task_ready", "bp_task_next", "bp_task_get", "bp_task_close", "bp_task_prime", "bp_task_stamp", "bp_task_pulse",
+		"bp_chat_create_session", "bp_chat_send_message", "bp_chat_get_session",
+	}
 	for _, name := range absent {
 		if _, ok := tools[name]; ok {
 			t.Errorf("shadowed tool %q should be absent (curated twin covers it)", name)
 		}
 	}
 
-	present := []string{"bp_task_claim", "bp_task_ls", "bp_doc_create"}
+	present := []string{"bp_task_claim", "bp_task_ls", "bp_doc_create", "bp_chat_interrupt"}
 	for _, name := range present {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("tool %q should generate; have %v", name, toolNames(tools))
+		}
+	}
+
+	// Combined curated+bridge server (what `--tools all` assembles): the chat
+	// capabilities exist ONCE, under the curated names — never as bp_chat_* twins.
+	combined := mcp.NewServer(&mcp.Implementation{Name: "combined-test", Version: "0"}, nil)
+	registerChatTools(combined, manifest.Context{Server: "http://x"})
+	if err := registerBridgeToolsFiltered(combined, globals{}, manifest.Context{Server: "http://x"}, m, nil); err != nil {
+		t.Fatalf("registerBridgeToolsFiltered: %v", err)
+	}
+	serverT, clientT := mcp.NewInMemoryTransports()
+	bg := context.Background()
+	ss, err := combined.Connect(bg, serverT, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { ss.Close() })
+	client := mcp.NewClient(&mcp.Implementation{Name: "combined-test-client", Version: "0"}, nil)
+	ccs, err := client.Connect(bg, clientT, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { ccs.Close() })
+	combinedTools := listAllTools(t, ccs)
+	for _, name := range []string{"chat_spawn_session", "chat_send", "chat_read_tail", "chat_wait_for_state"} {
+		if _, ok := combinedTools[name]; !ok {
+			t.Errorf("curated chat tool %q missing from the combined surface; have %v", name, toolNames(combinedTools))
+		}
+	}
+	for _, name := range []string{"bp_chat_create_session", "bp_chat_send_message", "bp_chat_get_session"} {
+		if _, ok := combinedTools[name]; ok {
+			t.Errorf("bridge twin %q must be shadowed on the combined surface (never-double-expose)", name)
 		}
 	}
 }

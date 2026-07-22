@@ -580,7 +580,7 @@ func (c *Client) ChatEvents(ctx context.Context, id, lastEventID string, onEvent
 
 		connected = true
 		consecutive5xx = 0
-		cbErr := scanListenFrames(resp.Body, &cursor, &backoff, floorBackoff, onEvent)
+		cbErr := scanListenFrames(resp.Body, &cursor, &backoff, floorBackoff, onEvent, nil)
 		resp.Body.Close()
 
 		if cbErr != nil {
