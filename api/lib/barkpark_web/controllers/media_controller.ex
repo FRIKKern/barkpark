@@ -48,10 +48,25 @@ defmodule BarkparkWeb.MediaController do
     })
   end
 
-  @doc "Get a single media file metadata."
+  @doc """
+  Get a single media file metadata.
+
+  Gated by `Access.allowed?/4` at `:view`, mirroring `serve/2` (`:original`)
+  and `serve_rendition/2` (`:preview`) — without it an anonymous caller could
+  read a private asset's filename/path/size here while being refused the bytes
+  (the felix W14 field-visibility leak). Fails CLOSED: private + anonymous → 403.
+  """
   def show(conn, %{"id" => id}) do
-    with {:ok, file} <- Media.get_file(id, scope_opts(conn)) do
+    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+         doc <- Media.asset_doc_for_file(file, file.dataset),
+         true <- Access.allowed?(conn, file, doc, :view) do
       json(conn, render_file(file, conn))
+    else
+      {:error, :not_found} ->
+        not_found(conn, "file not found")
+
+      false ->
+        forbidden(conn)
     end
   end
 
