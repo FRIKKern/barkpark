@@ -673,11 +673,15 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
 
     test "an enabled plugin whose owned types are UNREGISTERED shows the 'no content types' truth",
          %{conn: conn} do
-      # Remove the (globally-registered) `paper` schema for this test's scope, so
-      # bulldocs — enabled by declaration default, owner of the `paper` type —
-      # owns a type registered NOWHERE in this workspace. Enabling it surfaced
-      # nothing, and the row says so honestly (the common Default-stamp case).
+      # Remove BOTH globally-registered bulldocs schemas for this test's scope,
+      # so bulldocs — enabled by declaration default, owner of the `paper` and
+      # `form_response` types — owns a type registered NOWHERE in this
+      # workspace. Enabling it surfaced nothing, and the row says so honestly
+      # (the common Default-stamp case). One unregister per owned type: leaving
+      # any of them registered flips the hint to the softer "types registered"
+      # truth (exactly what this assertion exists to distinguish).
       unregister_type!("paper")
+      unregister_type!("form_response")
 
       {:ok, view, _html} = live(conn, scoped_settings_path())
 
