@@ -312,6 +312,19 @@ config :barkpark, Oban,
 # daily).
 config :barkpark, :task_lease_ttl_seconds, 2700
 
+# tlv-s6 — engagement honesty lease (TLV charter D4). The THOUGHT states
+# (considering/researching) carry a content.engagement companion whose `ts`
+# the holder refreshes; the TtlSweeper's second sweep lapses rows whose ts
+# went stale (researching → considering, engagement cleared; considering →
+# engagement cleared, stays considering). 900 s / 15 min: thought idles much
+# faster than the 45-min work lease above — an investigation that hasn't
+# touched its engagement in 15 minutes belongs back in the considering pool,
+# and lapsing is cheap (no epoch fence, no re-claim ceremony; the next cycle
+# just re-engages). Tests override to 0/1 for determinism. Runtime override:
+# BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS (see runtime.exs). Cadence rides the
+# same per-minute Oban.Cron job as the lease sweep.
+config :barkpark, :task_engagement_ttl_seconds, 900
+
 # One-way PULL sync (Barkpark.Sync) — DORMANT default so a fresh install boots
 # with sync OFF. runtime.exs maps the BARKPARK_SYNC_* env vars and flips
 # `enabled` on only when explicitly requested; without them this default keeps

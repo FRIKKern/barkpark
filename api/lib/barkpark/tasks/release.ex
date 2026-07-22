@@ -126,6 +126,15 @@ defmodule Barkpark.Tasks.Release do
       |> Map.put("released_by", worker_id)
       |> Map.put("released_at", ts_iso)
 
+    # RULING (task-lifecycle-visibility wave, 2026-07-21): release ALWAYS
+    # lands "open" — deliberately NOT a restore of the pre-claim status.
+    # `claim.ex` snapshots no pre-claim lifecycle (a "blocked" label is
+    # already gone the moment the task is claimed), and the TtlSweeper reap
+    # twin makes the same unconditional landing. A true restore would
+    # entangle both twins for a board column that was lost at claim time;
+    # a released task goes back to being claimable, and claimable means
+    # "open". Protected by "a blocked-born task … releases to open" in
+    # release_test.exs — do not make this conditional.
     new_content =
       doc.content
       |> Map.put("lifecycle_status", "open")

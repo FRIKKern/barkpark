@@ -15,6 +15,22 @@ defmodule Barkpark.Tasks.QueueTest do
        down to 1 (only the highest-priority task comes back).
     4. `ready/1` with no workspace_id fails CLOSED (zero rows from
        `Scope.scope_to_workspace/3`), including when called with []).
+
+  ## Axis-2 ruling: a cancelled blocker strands its dependents — BY DESIGN
+
+  `content.dependencies` (axis 2) is satisfied ONLY by a same-scope task with
+  `lifecycle_status: "done"`; the anti-join fails CLOSED for any non-done id.
+  A CANCELLED blocker therefore gates its dependents exactly like an open one.
+  RULING (tlv-bl-axis2-cancelled-strand, charter D6): this fail-closed behavior
+  is correct-by-design — there is NO query-time carve-out treating cancelled as
+  satisfying, because that would change claim semantics repo-wide (`ready/1`,
+  `Claim.claim/2`, and every readiness consumer share `ready_query/1`) and
+  there is no reverse-lookup for `content.dependencies` today. The stranding is
+  RECOVERABLE, not permanent: charter D7 makes `cancelled -> open` a legal
+  transition, so a stranded dependent is un-stuck by reopening the blocker and
+  driving it to done (or by re-pointing its `content.dependencies`). Automatic
+  carve-out and kill-time warnings are an explicitly deferred future survey.
+  Section (8) below holds the protective tests for both halves of this ruling.
   """
 
   use Barkpark.DataCase, async: false
@@ -651,6 +667,82 @@ defmodule Barkpark.Tasks.QueueTest do
       # So we assert the COMPUTATION-once property, not the join's read count.
       assert done_cte["Actual Loops"] == 1,
              "done-task CTE was not computed once (materialized) — Actual Loops: #{inspect(done_cte["Actual Loops"])}"
+    end
+  end
+
+  # ─── (8) axis-2 cancelled-blocker stranding — fail-closed correct-by-design ─
+  #
+  # Protective tests for the tlv-bl-axis2-cancelled-strand ruling (see the
+  # moduledoc): a cancelled dependency does NOT satisfy axis 2 (no carve-out),
+  # and the D7 escape hatch (cancelled -> open -> done) un-strands dependents.
+
+  # Flip a task's lifecycle_status by direct DB write. Deliberately bypasses
+  # the Content.Writer seam (where D7 transition legality is enforced): this
+  # file tests QUEUE readiness semantics, not transition legality, and the
+  # `open -> done` leg below is only legal in the real system via the close
+  # verb — an engine primitive that also writes the row directly.
+  defp set_lifecycle!(doc, status) do
+    doc = Repo.get!(Document, doc.id)
+
+    doc
+    |> Ecto.Changeset.change(content: Map.put(doc.content, "lifecycle_status", status))
+    |> Repo.update!()
+  end
+
+  describe "ready/1 — axis-2 cancelled-blocker stranding (ruling: fail-closed)" do
+    test "one cancelled dependency => NOT ready and NOT claimable via queue-claim",
+         %{scope: scope} do
+      phase_id = "phase-dep-cancelled-#{System.unique_integer([:positive])}"
+      dep_id = "dep-cancelled-#{System.unique_integer([:positive])}"
+      # Mirror of the "one open dependency" fixture with the blocker CANCELLED:
+      # axis 2 satisfies only on done, so cancelled must gate exactly like open.
+      # Mutation-provable — a query-time carve-out (cancelled admitted to the
+      # done set, or the anti-join loosened) makes `main` ready and fails this.
+      # The dependency is deliberately parentless so the phase-scoped ready set
+      # contains ONLY `main` — an empty result then proves `main` is excluded.
+      _dep = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "cancelled"})
+
+      main =
+        mk_task!("main-dep-cancelled-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => [dep_id]
+        })
+
+      assert Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]) == []
+      refute main.id in ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
+      # Nothing else is in this phase, so queue-claim finds nothing to claim.
+      assert {:ok, nil} =
+               Tasks.claim(
+                 "dep-cancelled-worker",
+                 scope ++ [dataset: @dataset, phase_id: phase_id]
+               )
+    end
+
+    test "escape hatch: reopening a cancelled blocker (cancelled -> open -> done) un-strands the dependent",
+         %{scope: scope} do
+      phase_id = "phase-dep-reopen-#{System.unique_integer([:positive])}"
+      dep_id = "dep-reopen-#{System.unique_integer([:positive])}"
+      dep = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "cancelled"})
+
+      main =
+        mk_task!("main-dep-reopen-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => [dep_id]
+        })
+
+      opts = scope ++ [dataset: @dataset, phase_id: phase_id]
+
+      # Stranded while the blocker is cancelled.
+      refute main.id in ids_of(Queue.ready(opts))
+
+      # D7 makes cancelled -> open legal: reopened, the blocker gates like any
+      # open dependency — still not ready (recoverable, not yet recovered).
+      set_lifecycle!(dep, "open")
+      refute main.id in ids_of(Queue.ready(opts))
+
+      # Driven to done, the dependency satisfies axis 2 — dependent is ready.
+      set_lifecycle!(dep, "done")
+      assert main.id in ids_of(Queue.ready(opts))
     end
   end
 end
