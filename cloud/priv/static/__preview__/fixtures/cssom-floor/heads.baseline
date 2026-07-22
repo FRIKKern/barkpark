@@ -1,0 +1,4 @@
+# Baseline for heads.css (the cssom-floor ratchet proof fixture).
+# 1300 authored heads — deliberately ABOVE app.css's live count so proof.sh can
+# show a swallow ABOVE the app.css baseline still reds. Regenerate via build-fixture.mjs.
+1300

@@ -1,0 +1,1605 @@
+{
+  "run_id": "grip-20260721T152122Z",
+  "recipes": [
+    {
+      "subject": "repos/FRIKKern/barkpark/branches/main/protection",
+      "quantity": "gh:api",
+      "rerun": "gh api repos/FRIKKern/barkpark/branches/main/protection 2>&1 | head -5",
+      "derived_level": "L2",
+      "deps": [
+        "repos/FRIKKern/barkpark/branches/main/protection"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/scaffy",
+      "quantity": "grep:-i:internal/scaffy",
+      "rerun": "git ls-tree -r origin/main --name-only | grep -i \"internal/scaffy\"",
+      "derived_level": "L3",
+      "deps": [
+        "internal/scaffy"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-connectors-charter.md",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '866,870p' .claude/workflows/bp-connectors-charter.md",
+      "derived_level": "L3",
+      "deps": [
+        ".claude/workflows/bp-connectors-charter.md"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/router.ex",
+      "quantity": "grep:-n:AdminStudioRedirectController",
+      "rerun": "grep -n 'AdminStudioRedirectController' api/lib/barkpark_web/router.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/router.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "docs/cards/studio.md",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '18p' docs/cards/studio.md",
+      "derived_level": "L3",
+      "deps": [
+        "docs/cards/studio.md"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "scripts/pr-task-gate.sh",
+      "quantity": "grep:-n:lifecycle\\|worker\\|in_progress",
+      "rerun": "grep -n 'lifecycle\\|worker\\|in_progress' /Volumes/SATECHI/github/barkpark/scripts/pr-task-gate.sh",
+      "derived_level": "L3",
+      "deps": [
+        "scripts/pr-task-gate.sh"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:pr",
+      "rerun": "gh pr view 4159 --json state,mergeCommit,mergedAt,title,baseRefName",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/components/studio_components/editor.ex",
+      "quantity": "grep:-rn:save-status\\|role=\"status\"\\|role=\"alert\"",
+      "rerun": "grep -rn 'save-status\\|role=\"status\"\\|role=\"alert\"\\|aria-live' api/lib/barkpark_web/components/studio_components/editor.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/components/studio_components/editor.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web",
+      "quantity": "grep:-vE::info|:error",
+      "rerun": "grep -rnoE 'put_flash\\([^,]*,\\s*:[a-z_]+' api/lib/barkpark_web/ | grep -vE ':info|:error'",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "deploy/site-deploy.sh",
+      "quantity": "grep:-n:template",
+      "rerun": "grep -n 'template' deploy/site-deploy.sh deploy/site-deploy-node.sh",
+      "derived_level": "L3",
+      "deps": [
+        "deploy/site-deploy.sh",
+        "deploy/site-deploy-node.sh"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cloud/lib/barkpark_cloud/sites/deploy.ex",
+      "quantity": "grep:-n:framework",
+      "rerun": "grep -n 'framework' cloud/lib/barkpark_cloud/sites/deploy.ex",
+      "derived_level": "L3",
+      "deps": [
+        "cloud/lib/barkpark_cloud/sites/deploy.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/scaffy",
+      "quantity": "go:vet",
+      "rerun": "CC=clang go vet ./internal/scaffy/...",
+      "derived_level": "L3",
+      "deps": [
+        "internal/scaffy"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "lib/barkpark_web/controllers",
+      "quantity": "wc:-l",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && grep -rln \"action_fallback BarkparkWeb.FallbackController\" lib/barkpark_web/controllers/ | wc -l",
+      "derived_level": "L3",
+      "deps": [
+        "lib/barkpark_web/controllers"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:search",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && bp search query \"research coverage ledger\"",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "docs/cli/HANDBOOK.md",
+      "quantity": "grep:-n:bp search",
+      "rerun": "grep -n 'bp search' docs/cli/HANDBOOK.md docs/cheatsheets/bp.md",
+      "derived_level": "L3",
+      "deps": [
+        "docs/cli/HANDBOOK.md",
+        "docs/cheatsheets/bp.md"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "test/fixtures/claude_chat/epic_cycle_progress.ndjson",
+      "quantity": "grep:-o:\"startedAt\"[^,}]*",
+      "rerun": "grep -o '\"startedAt\"[^,}]*' test/fixtures/claude_chat/epic_cycle_progress.ndjson | head -3",
+      "derived_level": "L3",
+      "deps": [
+        "test/fixtures/claude_chat/epic_cycle_progress.ndjson"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:log",
+      "rerun": "git log --oneline --grep=\"1581\" -5 && git show --stat b4e3256f",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",
+      "quantity": "grep:-n:@inputs\\|def types\\|chat-approval\\|chat-",
+      "rerun": "grep -n \"@inputs\\|def types\\|chat-approval\\|chat-plan\\|chat-question\\|chat-thinking\\|chat-todo\\|chat-tool-diff\" api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/cli",
+      "quantity": "go:vet",
+      "rerun": "CC=clang go vet ./internal/cli/... 2>&1 | tail -60",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/apiclient/client.go",
+      "quantity": "grep:-n:type taskEnvelope struct",
+      "rerun": "grep -n 'type taskEnvelope struct' -A 12 internal/apiclient/client.go",
+      "derived_level": "L3",
+      "deps": [
+        "internal/apiclient/client.go"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "grep:/Volumes/SATECHI/github/barkpark",
+      "rerun": "git worktree list | grep '/Volumes/SATECHI/github/barkpark'",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "lib",
+      "quantity": "grep:-v:_build",
+      "rerun": "grep -rn '\"type\" *=> *\"code\"|\"type\": *\"code\"' lib/ priv/ | grep -v _build",
+      "derived_level": "L3",
+      "deps": [
+        "lib",
+        "priv"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/cli",
+      "quantity": "go:vet",
+      "rerun": "CC=clang go vet ./internal/cli/...",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/caddyfile",
+      "quantity": "wc:-l",
+      "rerun": "grep -rn \"file_server\" internal/caddyfile internal/builder internal/cli/sites_cmd.go cloud/lib | wc -l",
+      "derived_level": "L3",
+      "deps": [
+        "internal/caddyfile",
+        "internal/builder",
+        "internal/cli/sites_cmd.go",
+        "cloud/lib"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:pr",
+      "rerun": "gh pr list --state open",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/leaks",
+      "quantity": "grep:-c:offload",
+      "rerun": "cd /Volumes/SATECHI/github/noo-noo && go list -deps ./internal/leaks | grep -c offload",
+      "derived_level": "L3",
+      "deps": [
+        "internal/leaks"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "_test.go",
+      "quantity": "grep:-v:_test.go",
+      "rerun": "grep -rn 'func.*RecordAction|RecordAction(' --include='*.go' . | grep -v _test.go",
+      "derived_level": "L3",
+      "deps": [
+        "_test.go"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:diff",
+      "rerun": "git diff --stat",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get pdrender-block-parity -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get tr-preview-dataviz-editor-parity -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:issue",
+      "rerun": "gh issue view 1598 --json title,body",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:search",
+      "rerun": "bp search query \"replica lease socket poll\" -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib",
+      "quantity": "grep:-rn:Workers.Smoke",
+      "rerun": "grep -rn \"Workers.Smoke\" api/lib api/test",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib",
+        "api/test"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "test/barkpark_web/controllers/chat_controller_test.exs",
+      "quantity": "grep:-n:Map.keys\\|sidebar\\|total_cost_usd\\|asser",
+      "rerun": "grep -n 'Map.keys\\|sidebar\\|total_cost_usd\\|assert json' test/barkpark_web/controllers/chat_controller_test.exs | head -30",
+      "derived_level": "L3",
+      "deps": [
+        "test/barkpark_web/controllers/chat_controller_test.exs"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/priv/repo/migrations/20260703170000_add_source_kind_and_snapshot_to_webhook_deliveries.exs",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '26,34p' api/priv/repo/migrations/20260703170000_add_source_kind_and_snapshot_to_webhook_deliveries.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/priv/repo/migrations/20260703170000_add_source_kind_and_snapshot_to_webhook_deliveries.exs"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib",
+      "quantity": "grep:-rn:Notifier.notify",
+      "rerun": "grep -rn 'Notifier.notify' api/lib",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/cli",
+      "quantity": "go:vet",
+      "rerun": "CC=/usr/bin/clang go vet ./internal/cli/...",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get connectors-cloud-shim-sdk-auth -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get bp-token-create-scoped-prefix-404",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:grep",
+      "rerun": "git grep -nE 'BARKPARK_CLOUD_URL' origin/main | head -40",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal",
+      "quantity": "grep:-v:_test",
+      "rerun": "git grep -nE 'CaddySteps' origin/main -- internal/ | grep -v _test",
+      "derived_level": "L3",
+      "deps": [
+        "internal"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/pdrender/component_golden_test.go",
+      "quantity": "grep:-nE:Contains|net/html|goquery",
+      "rerun": "grep -nE 'Contains|net/html|goquery' internal/pdrender/component_golden_test.go internal/pdrender/*.go",
+      "derived_level": "L3",
+      "deps": [
+        "internal/pdrender/component_golden_test.go"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:grep",
+      "quantity": "grep:-nE:bp-card--|bp-board__col--|bp-heat--|bp-p",
+      "rerun": "grep -nE 'bp-card--|bp-board__col--|bp-heat--|bp-pnode--|bp-rm__bar--|bp-callout--|--b0|--z' api/lib/barkpark/portable_doc/render/{components,data_viz,compose}.ex | head -40",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/portable_doc/render/walk.ex",
+      "quantity": "grep:-n:callout_tone_class",
+      "rerun": "grep -n 'callout_tone_class' -A15 api/lib/barkpark/portable_doc/render/walk.ex | head -20",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/portable_doc/render/walk.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/cli",
+      "quantity": "grep:-iv:timestamp\\|Timestamp",
+      "rerun": "grep -rn 'stamp\\|pulse' internal/cli/ internal/taskboard/ --include='*.go' | grep -iv 'timestamp\\|Timestamp' | head",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli",
+        "internal/taskboard"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:log",
+      "rerun": "git log -1 --format='%H %ad %s' --date=iso edda689085fc1683a1bc9a2d378c8792e4f0f6e7",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "connectors/src/db/schema.ts",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '84,93p' connectors/src/db/schema.ts",
+      "derived_level": "L3",
+      "deps": [
+        "connectors/src/db/schema.ts"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:search",
+      "rerun": "bp search \"tool connector MCP\"",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".github/workflows/connectors.yml",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '40,44p' .github/workflows/connectors.yml",
+      "derived_level": "L3",
+      "deps": [
+        ".github/workflows/connectors.yml"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".github/workflows/elixir.yml",
+      "quantity": "grep:-n:paths:",
+      "rerun": "grep -n 'paths:' .github/workflows/elixir.yml",
+      "derived_level": "L3",
+      "deps": [
+        ".github/workflows/elixir.yml"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/test/barkpark_web/studio/claude_chat_test.exs",
+      "quantity": "grep:-n:argv_echo_binary\\|bogus_key_shim",
+      "rerun": "git show origin/main:api/test/barkpark_web/studio/claude_chat_test.exs | grep -n \"argv_echo_binary\\|bogus_key_shim\"",
+      "derived_level": "L2",
+      "deps": [
+        "api/test/barkpark_web/studio/claude_chat_test.exs"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get scaffy-backlog-blocks-editable-studio -o json | head -60",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "node_modules/next",
+      "quantity": "ls",
+      "rerun": "ls node_modules/next 2>/dev/null && echo PRESENT || echo ABSENT",
+      "derived_level": "L3",
+      "deps": [
+        "node_modules/next"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "templates/search-starter/components/finder.tsx",
+      "quantity": "wc:-l",
+      "rerun": "wc -l templates/search-starter/components/finder.tsx web/components/finder.tsx",
+      "derived_level": "L3",
+      "deps": [
+        "templates/search-starter/components/finder.tsx",
+        "web/components/finder.tsx"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "lib",
+      "quantity": "grep:-rn:receive_timeout",
+      "rerun": "cd api && grep -rn 'receive_timeout' lib/ | head",
+      "derived_level": "L3",
+      "deps": [
+        "lib"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/apiclient",
+      "quantity": "go:vet",
+      "rerun": "CC=clang go vet ./internal/apiclient/... ./internal/chat/...",
+      "derived_level": "L3",
+      "deps": [
+        "internal/apiclient",
+        "internal/chat"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:status",
+      "rerun": "git status && git log -1 --oneline && git rev-parse HEAD",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".github/workflows/cloud.yml",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '1,7p' .github/workflows/cloud.yml",
+      "derived_level": "L3",
+      "deps": [
+        ".github/workflows/cloud.yml"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-enterprise-ready-auth-charter.md",
+      "quantity": "tail",
+      "rerun": "tail -60 /Volumes/SATECHI/github/barkpark/.claude/workflows/bp-enterprise-ready-auth-charter.md",
+      "derived_level": "L3",
+      "deps": [
+        ".claude/workflows/bp-enterprise-ready-auth-charter.md"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get gp-w5-epic-close -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:npm",
+      "quantity": "npm:view",
+      "rerun": "npm view astro version && npm view astro dist-tags",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:find",
+      "quantity": "find:-maxdepth",
+      "rerun": "find . -maxdepth 8 -iname \"*workflow_agent_detail*\" -not -path \"*/worktrees/*\"",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "priv/repo/migrations",
+      "quantity": "grep:-iE:exempt|ratchet|legacy|authoring|label|gr",
+      "rerun": "ls priv/repo/migrations/ | grep -iE 'exempt|ratchet|legacy|authoring|label|grandfather'",
+      "derived_level": "L3",
+      "deps": [
+        "priv/repo/migrations"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:go",
+      "quantity": "go:vet",
+      "rerun": "CC=/usr/bin/clang go vet ./...",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/crypto/field_cipher.ex",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:api/lib/barkpark/crypto/field_cipher.ex",
+      "derived_level": "L2",
+      "deps": [
+        "api/lib/barkpark/crypto/field_cipher.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/priv/repo/migrations/20260629160000_data_keys_one_active_per_scope.exs",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:api/priv/repo/migrations/20260629160000_data_keys_one_active_per_scope.exs",
+      "derived_level": "L2",
+      "deps": [
+        "api/priv/repo/migrations/20260629160000_data_keys_one_active_per_scope.exs"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "grep:-iE:healthy|guerrilla|157\\.180|89\\.167",
+      "rerun": "gh run view 29112942807 --log | grep -iE 'healthy|guerrilla|157\\.180|89\\.167'",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "web/app/sitemap.ts",
+      "quantity": "grep:-n:paperTags",
+      "rerun": "grep -n \"paperTags\" web/app/tags/\\[tag\\]/page.tsx web/app/sitemap.ts",
+      "derived_level": "L3",
+      "deps": [
+        "web/app/sitemap.ts"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/content/errors.ex",
+      "quantity": "grep:-c:^+def build(",
+      "rerun": "git log --no-merges --since=2025-07-17 -p 591fdcd53... -- api/lib/barkpark/content/errors.ex | grep -c '^+def build('",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/content/errors.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/content/query.ex",
+      "quantity": "git:log",
+      "rerun": "git log --oneline 790aeaf08..origin/main -- api/lib/barkpark/content/query.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/content/query.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/priv/repo",
+      "quantity": "git:grep",
+      "rerun": "git grep -rn 'status.*published' origin/main -- api/priv/repo api/lib/barkpark/plugins/obsidian",
+      "derived_level": "L3",
+      "deps": [
+        "api/priv/repo",
+        "api/lib/barkpark/plugins/obsidian"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/content/schema_definition.ex",
+      "quantity": "git:grep",
+      "rerun": "git grep -n 'schema_hash' origin/main -- api/lib/barkpark/content/schema_definition.ex api/priv/repo/migrations",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/content/schema_definition.ex",
+        "api/priv/repo/migrations"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/content/authoring_wall.ex",
+      "quantity": "git:log",
+      "rerun": "git log origin/main --oneline --follow -- api/lib/barkpark/content/authoring_wall.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/content/authoring_wall.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".claude/workflows/pbp-tui-slate-2-charter.md",
+      "quantity": "grep:-n:D12\\|D21\\|D22\\|D23",
+      "rerun": "grep -n 'D12\\|D21\\|D22\\|D23' .claude/workflows/pbp-tui-slate-2-charter.md",
+      "derived_level": "L3",
+      "deps": [
+        ".claude/workflows/pbp-tui-slate-2-charter.md"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/config/test.exs",
+      "quantity": "grep:-n:StudioChat",
+      "rerun": "grep -n \"StudioChat\" api/config/test.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/config/test.exs"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/media/delivery/cdn.ex",
+      "quantity": "grep:-n:media_cdn\\|Application.get_env",
+      "rerun": "grep -n \"media_cdn\\|Application.get_env\" api/lib/barkpark/media/delivery/cdn.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/media/delivery/cdn.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cloud/lib",
+      "quantity": "grep:-rln:tls_mode\\|proxied\\|origin_ca\\|OriginCA",
+      "rerun": "grep -rln \"tls_mode\\|proxied\\|origin_ca\\|OriginCA\" cloud/lib cloud/test",
+      "derived_level": "L3",
+      "deps": [
+        "cloud/lib",
+        "cloud/test"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cloud/config",
+      "quantity": "grep:-rn:BarkparkCloud.Cloudflare",
+      "rerun": "grep -rn 'BarkparkCloud.Cloudflare' cloud/config/",
+      "derived_level": "L3",
+      "deps": [
+        "cloud/config"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "src",
+      "quantity": "grep:-v:policy/whatsapp-window.ts",
+      "rerun": "grep -rn 'proactive|scheduled|businessInitiated|sendTemplate|postText' src/ | grep -v policy/whatsapp-window.ts",
+      "derived_level": "L3",
+      "deps": [
+        "src",
+        "policy/whatsapp-window.ts"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get pds-bl-bp-search-verb-missing",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:search",
+      "rerun": "bp search query \"scaffy engine reanchor\" -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/chat/keys.go",
+      "quantity": "grep:-n:wfExpanded|wfPhase|workflowDetailMaxAgen",
+      "rerun": "grep -n 'wfExpanded|wfPhase|workflowDetailMaxAgents' internal/chat/keys.go internal/chat/model.go internal/chat/render.go",
+      "derived_level": "L3",
+      "deps": [
+        "internal/chat/keys.go",
+        "internal/chat/model.go",
+        "internal/chat/render.go"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "FRIKKern/barkpark",
+      "quantity": "gh:issue",
+      "rerun": "gh issue list --repo FRIKKern/barkpark --search THROWAWAY --state all --json number,title,state",
+      "derived_level": "L2",
+      "deps": [
+        "FRIKKern/barkpark"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "router.ex",
+      "quantity": "grep:-n",
+      "rerun": "grep -n \"live_session\\|LiveAuth\" router.ex | grep -n \"\"",
+      "derived_level": "L3",
+      "deps": [
+        "router.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:doc",
+      "rerun": "bp doc get task airdrop-grants -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/config/config.exs",
+      "quantity": "grep:-n:playground_ttl\\|PlaygroundReaper",
+      "rerun": "grep -n \"playground_ttl\\|PlaygroundReaper\" api/config/config.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/config/config.exs"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "grep:-v:def reveal_fields\\|@spec reveal_fields",
+      "rerun": "git grep -n 'reveal_fields(' -- 'api/**/*.ex' 'api/**/*.exs' | grep -v 'def reveal_fields\\|@spec reveal_fields'",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/sync/dead_letter.ex",
+      "quantity": "git:grep",
+      "rerun": "git grep -n 'source.*dataset\\|def get\\|def put\\|def record' api/lib/barkpark/sync/dead_letter.ex api/lib/barkpark/sync/push_cursor.ex api/lib/barkpark/sync/push_conflict.ex api/lib/barkpark/sync/push_doc_rev.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/sync/dead_letter.ex",
+        "api/lib/barkpark/sync/push_cursor.ex",
+        "api/lib/barkpark/sync/push_conflict.ex",
+        "api/lib/barkpark/sync/push_doc_rev.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "components/portable-doc",
+      "quantity": "grep:-rniE:components/portable-doc",
+      "rerun": "grep -rniE \"components/portable-doc\" web --include='*.ts' --include='*.tsx'",
+      "derived_level": "L3",
+      "deps": [
+        "components/portable-doc"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "js/packages/react/src/index.ts",
+      "quantity": "grep:export",
+      "rerun": "git show origin/main:js/packages/react/src/index.ts | grep export",
+      "derived_level": "L2",
+      "deps": [
+        "js/packages/react/src/index.ts"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-chat-tui-charter.md",
+      "quantity": "grep:-n:team",
+      "rerun": "grep -n -i \"team\" .claude/workflows/bp-chat-tui-charter.md",
+      "derived_level": "L3",
+      "deps": [
+        ".claude/workflows/bp-chat-tui-charter.md"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:log",
+      "rerun": "git log -L '/defp adoptable_intake?/,+3:api/lib/barkpark/plugins/github.ex'",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:rev-parse",
+      "rerun": "git rev-parse HEAD origin/main && git rev-list --left-right --count HEAD...origin/main",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/studio/claude_chat.ex",
+      "quantity": "sed:-n",
+      "rerun": "git show origin/main:api/lib/barkpark_web/studio/claude_chat.ex | sed -n '201,216p'",
+      "derived_level": "L2",
+      "deps": [
+        "api/lib/barkpark_web/studio/claude_chat.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:pr",
+      "rerun": "gh pr list --state open --json number,title,files",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "deploy/site-deploy.sh",
+      "quantity": "grep:-n:MODE\\|case \"",
+      "rerun": "grep -n 'MODE\\|case \"' deploy/site-deploy.sh",
+      "derived_level": "L3",
+      "deps": [
+        "deploy/site-deploy.sh"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:search",
+      "rerun": "bp search query \"task\" -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/priv/repo/migrations",
+      "quantity": "grep:-rn:github_sync_conflicts",
+      "rerun": "grep -rn 'github_sync_conflicts' api/priv/repo/migrations/",
+      "derived_level": "L3",
+      "deps": [
+        "api/priv/repo/migrations"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get bpb-delete-e3-string-keyed-sweep -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:status",
+      "rerun": "git status --porcelain",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib",
+      "quantity": "grep:-v:test",
+      "rerun": "grep -rn bind_quiz api/lib | grep -v test",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "connectors/src",
+      "quantity": "grep:-rn:FROM secrets\\|INTO secrets\\|UPDATE secre",
+      "rerun": "grep -rn 'FROM secrets\\|INTO secrets\\|UPDATE secrets\\|\"secrets\"' connectors/src cloud/ 2>/dev/null | head -20",
+      "derived_level": "L3",
+      "deps": [
+        "connectors/src",
+        "cloud"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".github/workflows/elixir.yml",
+      "quantity": "grep:ecto.migrate",
+      "rerun": "grep ecto.migrate .github/workflows/elixir.yml",
+      "derived_level": "L3",
+      "deps": [
+        ".github/workflows/elixir.yml"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:pr",
+      "rerun": "gh pr list --state open --json number,title,headRefName --search secrets",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cloud",
+      "quantity": "grep:-rli:cloudflare",
+      "rerun": "grep -rli cloudflare cloud/ | head",
+      "derived_level": "L3",
+      "deps": [
+        "cloud"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:search",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && bp search query \"cloudflare capability provider\" -o json 2>&1 | head -c 1500",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/priv/repo/migrations",
+      "quantity": "grep:-rn:create table.*schema_definitions\\|table(",
+      "rerun": "grep -rn 'create table.*schema_definitions\\|table(:schema_definitions)' /Volumes/SATECHI/github/barkpark/api/priv/repo/migrations/ | head -5",
+      "derived_level": "L3",
+      "deps": [
+        "api/priv/repo/migrations"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get task-felix-ledger-restamp -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:show",
+      "rerun": "git show 3c7f5de1 --format=%B",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "connectors/src",
+      "quantity": "grep:-rn:signOAuthState\\|verifyOAuthState",
+      "rerun": "grep -rn 'signOAuthState\\|verifyOAuthState' connectors/src connectors/test",
+      "derived_level": "L3",
+      "deps": [
+        "connectors/src",
+        "connectors/test"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:curl",
+      "quantity": "curl:-s",
+      "rerun": "curl -s https://docs.cline.bot/llms.txt | head -200",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/assets/paper-editor/src/canvas/slash-insert.js",
+      "quantity": "grep:-n:card",
+      "rerun": "grep -n \"card\" api/assets/paper-editor/src/canvas/slash-insert.js api/assets/paper-editor/src/canvas/command-palette.js api/assets/paper-editor/src/slash-menu.js",
+      "derived_level": "L3",
+      "deps": [
+        "api/assets/paper-editor/src/canvas/slash-insert.js",
+        "api/assets/paper-editor/src/canvas/command-palette.js",
+        "api/assets/paper-editor/src/slash-menu.js"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:pr",
+      "rerun": "gh pr list --state open --json number,files,headRefName,title",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "lib/barkpark_web/plugs/assign_default_scope.ex",
+      "quantity": "sed:-n",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && sed -n '1,35p' lib/barkpark_web/plugs/assign_default_scope.ex",
+      "derived_level": "L3",
+      "deps": [
+        "lib/barkpark_web/plugs/assign_default_scope.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "docs/setup/REMOTE.md",
+      "quantity": "grep:-i:mcp\\|/mcp",
+      "rerun": "grep -rn 'http' docs/setup/REMOTE.md docs/setup/CURSOR-CLOUD.md docs/setup/AGENT-ONRAMPS.md 2>/dev/null | grep -i 'mcp\\|/mcp'",
+      "derived_level": "L3",
+      "deps": [
+        "docs/setup/REMOTE.md",
+        "docs/setup/CURSOR-CLOUD.md",
+        "docs/setup/AGENT-ONRAMPS.md"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "docs/setup/CURSOR.md",
+      "quantity": "grep:-n:six\\|Six\\|eight",
+      "rerun": "grep -n 'six\\|Six\\|eight' docs/setup/CURSOR.md docs/cli/HANDBOOK.md internal/cli/mcp_serve.go docs/ops/mcp-serve-validation.md",
+      "derived_level": "L3",
+      "deps": [
+        "docs/setup/CURSOR.md",
+        "docs/cli/HANDBOOK.md",
+        "internal/cli/mcp_serve.go",
+        "docs/ops/mcp-serve-validation.md"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:log",
+      "rerun": "git log --oneline -1 15e057f83ba0c59a809364202e5eed91e1650fad",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/layouts/root.html.heex",
+      "quantity": "grep:-n:\\.pane-layout {",
+      "rerun": "grep -n -A6 '    \\.pane-layout {' api/lib/barkpark_web/layouts/root.html.heex | head -20",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/layouts/root.html.heex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:grep",
+      "rerun": "git grep -n '720' -- 'api/test/*' 'test/*'",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:version",
+      "rerun": "bp version",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:doc",
+      "rerun": "bp doc ls tag -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task move legendary-quality-takeover-review-remediation legendary-quality-takeover-root --dry-run -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/priv/repo/migrations",
+      "quantity": "wc:-l",
+      "rerun": "ls api/priv/repo/migrations | tail -8 && git diff --stat HEAD origin/main -- api/priv/repo/migrations/ && git ls-tree -r HEAD --name-only -- api/priv/repo/migrations | wc -l && git ls-tree -r origin/main --name-only -- api/priv/repo/migrations | wc -l",
+      "derived_level": "L3",
+      "deps": [
+        "api/priv/repo/migrations"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/test/barkpark/studio_chat/mcp_wire_fixture_test.exs",
+      "quantity": "grep:-n:task_ready\\|search_chip\\|docs\\b",
+      "rerun": "grep -n \"task_ready\\|search_chip\\|docs\\b\" api/test/barkpark/studio_chat/mcp_wire_fixture_test.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/test/barkpark/studio_chat/mcp_wire_fixture_test.exs"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/tasks/close.ex",
+      "quantity": "grep:-n:Repo.update_all|Repo.insert|upsert_docum",
+      "rerun": "grep -n 'Repo.update_all|Repo.insert|upsert_document|create_document' api/lib/barkpark/tasks/close.ex api/lib/barkpark/tasks/ttl_sweeper.ex api/lib/barkpark/tasks/compactor.ex api/lib/barkpark/tasks/fence.ex api/lib/barkpark/tasks/move.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/tasks/close.ex",
+        "api/lib/barkpark/tasks/ttl_sweeper.ex",
+        "api/lib/barkpark/tasks/compactor.ex",
+        "api/lib/barkpark/tasks/fence.ex",
+        "api/lib/barkpark/tasks/move.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".github/workflows/elixir.yml",
+      "quantity": "grep:-n:^on:",
+      "rerun": "grep -n -A5 '^on:' .github/workflows/elixir.yml",
+      "derived_level": "L3",
+      "deps": [
+        ".github/workflows/elixir.yml"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/cloudclient/client.go",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '544,554p' internal/cloudclient/client.go",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cloudclient/client.go"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/cli/config.go",
+      "quantity": "grep:-n:InstanceID|Aliases|TrimPrefix|0xEF",
+      "rerun": "grep -n \"InstanceID|Aliases|TrimPrefix|0xEF\" internal/cli/config.go",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli/config.go"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cloud",
+      "quantity": "grep:-rn:BARKPARK_CLOUD_URL|cloud_url|CLOUD_URL",
+      "rerun": "grep -rn \"BARKPARK_CLOUD_URL|cloud_url|CLOUD_URL\" cloud/",
+      "derived_level": "L3",
+      "deps": [
+        "cloud"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/cli/builtins.go",
+      "quantity": "grep:-n:instance_id|aliases|mcp|catalog|reload|t",
+      "rerun": "grep -n 'instance_id|aliases|mcp|catalog|reload|team' internal/cli/builtins.go",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli/builtins.go"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib",
+      "quantity": "grep:-rn:chat_workflow",
+      "rerun": "grep -rn \"chat_workflow\" api/lib/",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/test/support/fixtures/workflow_summary/workflow_summary.json",
+      "quantity": "diff",
+      "rerun": "diff api/test/support/fixtures/workflow_summary/workflow_summary.json internal/chat/testdata/workflow_summary.json && echo FIXTURES_BYTE_IDENTICAL",
+      "derived_level": "L3",
+      "deps": [
+        "api/test/support/fixtures/workflow_summary/workflow_summary.json",
+        "internal/chat/testdata/workflow_summary.json"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".github/workflows/js-tests.yml",
+      "quantity": "grep:-n:playwright\\|browser",
+      "rerun": "grep -n \"playwright\\|browser\" .github/workflows/js-tests.yml",
+      "derived_level": "L3",
+      "deps": [
+        ".github/workflows/js-tests.yml"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "js/packages/next-parity/vitest.config.ts",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:js/packages/next-parity/vitest.config.ts",
+      "derived_level": "L2",
+      "deps": [
+        "js/packages/next-parity/vitest.config.ts"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/controllers/tasks_controller.ex",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '466,470p' /Volumes/SATECHI/github/barkpark/api/lib/barkpark_web/controllers/tasks_controller.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/controllers/tasks_controller.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/tasks/board.ex",
+      "quantity": "grep:-n:@columns\\|blocked",
+      "rerun": "grep -n \"@columns\\|blocked\" /Volumes/SATECHI/github/barkpark/api/lib/barkpark/tasks/board.ex | head -10",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/tasks/board.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get pds-w8-tagregistry-guard",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "elixir.yml",
+      "quantity": "gh:run",
+      "rerun": "gh run list --workflow elixir.yml --branch main --limit 5",
+      "derived_level": "L2",
+      "deps": [
+        "elixir.yml"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:pr",
+      "rerun": "gh pr list --state merged --limit 20 --json number,title,mergedAt,baseRefName",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/sync/pusher.ex",
+      "quantity": "sed:-n",
+      "rerun": "git show origin/main:api/lib/barkpark/sync/pusher.ex | sed -n '235,300p'",
+      "derived_level": "L2",
+      "deps": [
+        "api/lib/barkpark/sync/pusher.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:rev-parse",
+      "rerun": "git rev-parse HEAD && git rev-parse origin/main",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/webhooks/dispatcher.ex",
+      "quantity": "sed:-n",
+      "rerun": "git show origin/main:api/lib/barkpark/webhooks/dispatcher.ex | sed -n '780,808p'",
+      "derived_level": "L2",
+      "deps": [
+        "api/lib/barkpark/webhooks/dispatcher.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/test/barkpark_web/integration/preview_routes_test.exs",
+      "quantity": "grep:-n:post\\|publish_document\\|create_document",
+      "rerun": "git show origin/loop-epic/ae-w4-seal-last-bypass-integrated:api/test/barkpark_web/integration/preview_routes_test.exs | grep -n 'post\\|publish_document\\|create_document'",
+      "derived_level": "L2",
+      "deps": [
+        "api/test/barkpark_web/integration/preview_routes_test.exs"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/test/support/data_case.ex",
+      "quantity": "grep:shared",
+      "rerun": "git show origin/loop-epic/ae-w4-seal-last-bypass-integrated:api/test/support/data_case.ex | grep shared",
+      "derived_level": "L2",
+      "deps": [
+        "api/test/support/data_case.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:grep",
+      "quantity": "grep:-v:func |_test",
+      "rerun": "grep -rn 'emitWarnings|emitNotices|renderSuccess(|handleResponse(' internal/cli/*.go | grep -v 'func |_test'",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/live/studio/chat_live.ex",
+      "quantity": "sed:-n",
+      "rerun": "git show origin/main:api/lib/barkpark_web/live/studio/chat_live.ex | sed -n '3784,3800p'",
+      "derived_level": "L2",
+      "deps": [
+        "api/lib/barkpark_web/live/studio/chat_live.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/test/barkpark/connectors/cloud_policy_test.exs",
+      "quantity": "git:diff",
+      "rerun": "git diff --stat origin/main HEAD -- api/test/barkpark/connectors/cloud_policy_test.exs api/test/barkpark_web/studio/claude_chat_test.exs api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/test/barkpark/connectors/cloud_policy_test.exs",
+        "api/test/barkpark_web/studio/claude_chat_test.exs",
+        "api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:grep",
+      "quantity": "grep:-n:allowedDomains\\|allowed_domains\\|network",
+      "rerun": "grep -n 'allowedDomains\\|allowed_domains\\|networkPolicy' .../vercel/node_modules/sandbox/dist/*.mjs | head",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/plugins",
+      "quantity": "grep:-rln:editor-panel\\|editor-with-preview\\|edito",
+      "rerun": "grep -rln 'editor-panel\\|editor-with-preview\\|editor-body\\|bp-paper-surface\\|bp-paper-shell\\|bp-onix-preview\\|bp-doc-sidebar\\|bp-secondary-pane' api/lib/barkpark/plugins/",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/plugins"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get task-eal-bl-mcp-stamp-pulse -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/cli/mcp_tasks.go",
+      "quantity": "grep:-n:Name:",
+      "rerun": "grep -n 'Name:' internal/cli/mcp_tasks.go",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli/mcp_tasks.go"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:ps",
+      "quantity": "grep:-v:grep",
+      "rerun": "ps aux | grep 'bp login' | grep -v grep",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/cli/cloud_instance_archive_cmd.go",
+      "quantity": "grep:-n:BARKPARK_BUNDLE_KEK\\|HETZNER_S3_\\|--fast",
+      "rerun": "grep -n 'BARKPARK_BUNDLE_KEK\\|HETZNER_S3_\\|--fast\\|noArchive\\|no-archive' internal/cli/cloud_instance_archive_cmd.go internal/cli/hetzner_instance_cmd.go internal/cli/cloud_instance_resurrect_cmd.go | head -40",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli/cloud_instance_archive_cmd.go",
+        "internal/cli/hetzner_instance_cmd.go",
+        "internal/cli/cloud_instance_resurrect_cmd.go"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-cloud-gui-remake-charter.md",
+      "quantity": "grep:-n:gr-backlog-deliveries-filters",
+      "rerun": "git show origin/main:.claude/workflows/bp-cloud-gui-remake-charter.md | grep -n 'gr-backlog-deliveries-filters'",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-cloud-gui-remake-charter.md"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get gr-bl-peer-ip-container",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cloud/priv/repo/migrations/20260627150000_create_sites.exs",
+      "quantity": "grep:-n:unique_index",
+      "rerun": "grep -n unique_index cloud/priv/repo/migrations/20260627150000_create_sites.exs",
+      "derived_level": "L3",
+      "deps": [
+        "cloud/priv/repo/migrations/20260627150000_create_sites.exs"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/net/safe_outbound.ex",
+      "quantity": "grep:-n:a == 127\\|private\\|link-local\\|100 and b",
+      "rerun": "git show origin/main:api/lib/barkpark/net/safe_outbound.ex | grep -n 'a == 127\\|private\\|link-local\\|100 and b'",
+      "derived_level": "L2",
+      "deps": [
+        "api/lib/barkpark/net/safe_outbound.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/content/scope.ex",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '113,128p' api/lib/barkpark/content/scope.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/content/scope.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:show",
+      "rerun": "git show --stat 45c34d3d",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/media/image_backend/magick.ex",
+      "quantity": "grep:-n:limit\\|timeout\\|Task.async\\|Port.open",
+      "rerun": "grep -n 'limit\\|timeout\\|Task.async\\|Port.open' api/lib/barkpark/media/image_backend/magick.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/media/image_backend/magick.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "scripts/pr-task-gate.sh",
+      "quantity": "grep:-n:in_progress|state|FAIL|open",
+      "rerun": "grep -n \"in_progress|state|FAIL|open\" scripts/pr-task-gate.sh",
+      "derived_level": "L3",
+      "deps": [
+        "scripts/pr-task-gate.sh"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/layouts/root.html.heex",
+      "quantity": "grep:-n:font-mono\\|IBMPlexMono\\|IBM Plex Mono\\|\\",
+      "rerun": "git show origin/main:api/lib/barkpark_web/layouts/root.html.heex | grep -n 'font-mono\\|IBMPlexMono\\|IBM Plex Mono\\|\\.text-xs\\|bp-secondary-pane\\|sheet-toolbar'",
+      "derived_level": "L2",
+      "deps": [
+        "api/lib/barkpark_web/layouts/root.html.heex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark/tenancy.ex",
+      "quantity": "grep:-nE:dataset = ANY|scope = ANY",
+      "rerun": "grep -nE 'dataset = ANY|scope = ANY' api/lib/barkpark/tenancy.ex api/lib/barkpark/tenancy/workspace_bundle.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/tenancy.ex",
+        "api/lib/barkpark/tenancy/workspace_bundle.ex"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "grep:-E:tenancy.ex|workspace_bundle",
+      "rerun": "git diff --name-only origin/main...loop-epic/playground-front-door-ephemeral-workspac-0 | grep -E 'tenancy.ex|workspace_bundle'",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "grep:-n:isolation:",
+      "rerun": "grep -n \"isolation:\" .claude/workflows/bp-epic-cycle.workflow.js",
+      "derived_level": "L3",
+      "deps": [
+        ".claude/workflows/bp-epic-cycle.workflow.js"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": ".claude/workflows/bp-studio-space-priority-charter.md",
+      "quantity": "grep:-oE:\\*\\*D1[0-9]{2}",
+      "rerun": "git show origin/main:.claude/workflows/bp-studio-space-priority-charter.md | grep -oE '\\*\\*D1[0-9]{2} ' | sort -u | tail -8",
+      "derived_level": "L2",
+      "deps": [
+        ".claude/workflows/bp-studio-space-priority-charter.md"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    },
+    {
+      "subject": "internal/cli/mcp_serve.go",
+      "quantity": "grep:-n:http\\|Streamable\\|transport",
+      "rerun": "grep -n 'http\\|Streamable\\|transport' internal/cli/mcp_serve.go",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli/mcp_serve.go"
+      ],
+      "observed_at": "2026-07-21T15:21:22Z"
+    }
+  ]
+}

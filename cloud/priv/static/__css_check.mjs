@@ -63,6 +63,19 @@
 //       assertions could not either (they regex app.css as TEXT). The mirror
 //       case — EOF reached while still inside a comment — is the same defect
 //       from the other end and is reported too.
+//   E11 banned source line-number citation (charter D41; bp-honest-gates D5):
+//       any scanned SPA / preview-harness file (top-level *.js|*.mjs +
+//       __preview__/*) citing `app.js:<line>` (also `app.js ~<line>` or an
+//       `app.js:<a>-<b>` range). THE RULING is a BAN,
+//       not a resolver: three separate blocks in one wave cited line numbers
+//       that were wrong on arrival or wrong the moment a sibling slice shifted
+//       the file +39 lines, so every live occurrence was ALREADY stale — there
+//       is nothing correct for a line-resolving verifier to preserve, and that
+//       verifier's own anchor heuristic would rot in turn (bp-honest-gates D5:
+//       "ban the SHAPE, do not enumerate"). Re-anchor to the enclosing FUNCTION
+//       name plus a grep. Cross-language `router.ex:<line>` cites are OUT — the
+//       boundary is stated in full on bannedSourceCitationErrors below (filed
+//       follow-up cch-bl-citation-drift-cross-language).
 //
 // REPORTS (printed, never exit-affecting):
 //   R2  tokens defined in app.css that nothing consumes yet.
@@ -88,13 +101,14 @@
 //   defect in property form. So `[data-x="…"]` rules in app.css are, to E2,
 //   neither emitted nor dead: they are invisible.
 //
-//   THE MEASURED POPULATION (app.js at 8eeaf68 — five attribute-state writes,
-//   NOT the "three" earlier recon claimed):
-//     app.js:3312   documentElement.setAttribute("data-theme", t)
-//     app.js:3344   documentElement.setAttribute("data-bp-theme", t)
-//     app.js:16442  root.setAttribute("data-theme", theme)   — coherenceStampTheme
-//     app.js:16445  root.dataset.theme = theme               — same fn, DOM fallback
-//     app.js:12013  chip.setAttribute("data-state", state)   — renderLivenessChip
+//   THE MEASURED POPULATION (five attribute-state writes, NOT the "three"
+//   earlier recon claimed) — anchored to the enclosing FUNCTION, never a line
+//   number (grep to re-derive: `grep -n 'setAttribute("data-' app.js`):
+//     applyTheme()           documentElement.setAttribute("data-theme", t)
+//     applyBpTheme()         documentElement.setAttribute("data-bp-theme", t)
+//     coherenceStampTheme()  root.setAttribute("data-theme", theme)
+//     coherenceStampTheme()  root.dataset.theme = theme   — same fn, DOM fallback
+//     renderLivenessChip()   chip.setAttribute("data-state", state)
 //   FOUR of the five are data-theme / data-bp-theme and are NOT an E2 gap —
 //   E5 owns them. The contrast engine parses the `[data-theme="dark"]` and
 //   `html[data-bp-theme="…"]` blocks straight out of app.css (parseTokenBlocks
@@ -121,16 +135,22 @@
 //   Hence no check is added here and no second test is added there — that pair
 //   would be duplicate coverage of the identical liveDotState/app.css seam.
 //
-//   KNOWN GRANULARITY LIMIT (stated, not papered over). That fence proves
-//   SELECTOR-PREFIX PRESENCE in app.css TEXT, not per-property survival — the
-//   same substring-presence technique E2 itself uses. Measured on this tree:
-//   deleting ONLY `.live-chip[data-state="stale"] .live-dot { background: … }`
-//   while the `.live-chip-label` rule with the same prefix survives reds
-//   NEITHER check (both green); deleting BOTH reds __app.test.mjs with
-//   `no paint rule for stale`. __css_check stays green in both mutations — it
-//   never sees data-state at all, which is exactly this boundary. A state can
-//   therefore lose its DOT colour silently. Closing that needs a
-//   per-declaration CSSOM assertion, not another text scan.
+//   KNOWN GRANULARITY LIMIT — CLOSED (D41/D66). The original HEAD fence proved
+//   SELECTOR-PREFIX PRESENCE in app.css TEXT, not per-property survival: deleting
+//   ONLY `.live-chip[data-state="stale"] .live-dot { background: … }` (app.css:3470)
+//   while the same-prefix `.live-chip-label` rule on :3471 survived red NEITHER
+//   check, so a state could lose its DOT colour — its one severity signal —
+//   silently. That gap is now closed by a PER-DECLARATION probe in __app.test.mjs:
+//   the test `every state's .live-dot rule DECLARES a background (per-declaration
+//   fence)` loops hooks.liveDotStates, isolates each state's OWN `.live-dot {…}`
+//   block (first-occurrence indexOf over the ` .live-dot {` marker, which skips the
+//   `.live-dot.is-ping::after` decoy and the @media duplicate), and asserts a
+//   `background:` declaration survives INSIDE it — so a background-ONLY deletion
+//   reds as well as a whole-rule deletion. Mutation-proved: deleting app.css:3470
+//   reds it with `no .live-dot paint rule for the "stale" state … falls back to
+//   var(--dim)` while the prefix fence stayed green. __css_check itself is
+//   UNCHANGED and still never reads data-state — that E2 boundary declared above
+//   stands; the closure lives in the app.js/app.css-paired test, not here.
 //
 // Zero dependencies. Run: node __css_check.mjs
 
@@ -465,6 +485,67 @@ export function orphanCommentErrors(cssRawText, file = "app.css") {
     );
   }
   return errs;
+}
+
+// ── E11: banned source line-number citation (charter D41; bp-honest-gates D5) ─
+// THE RULING — a BAN, not a resolver. Argued from maintenance cost and from the
+// three measured occurrences, not taste: (a) every live `app.js:<line>` was
+// ALREADY stale (a +39-line sibling shift moved all five in the block above onto
+// unrelated code), so a line-resolving verifier has nothing correct to preserve
+// and would ship green over the exact drift it exists to catch; (b) such a
+// verifier needs an "does the cited line still look right?" anchor heuristic
+// that itself rots — negative maintenance; (c) the ban is one regex with zero
+// per-citation upkeep (bp-honest-gates D5: "ban the SHAPE, do not enumerate").
+// The re-anchor convention it enforces — enclosing FUNCTION name + a grep —
+// survives any sibling shift a line number cannot.
+//
+// SCANS THE WHOLE SOURCE TEXT, not a comment subset. A comment-only walk was
+// prototyped and REJECTED: a {string, //, /* */} state machine over 893 KB of
+// app.js (template literals, regex literals) desyncs and MISSES real citations
+// — a false-negative in a tripwire, the exact disease this epic removes. Full
+// text cannot desync and cannot miss a citation that migrates into a string.
+// The shape `app.js:<digits>` is citation-specific: measured on this tree every
+// one of the seven live occurrences is a comment citation, zero are in code, so
+// full-text scanning is both robust AND false-positive-free today.
+//
+//   COVERAGE BOUNDARY (charter D40 — an enforcement mechanism states its limits):
+//     • CROSS-LANGUAGE `router.ex:<line>` cites are OUT. Re-anchoring a JS
+//       comment that points at Elixir source means grepping the .ex file — a
+//       distinct move filed as cch-bl-citation-drift-cross-language. E11 flags
+//       only the same-repo `app.js:` shape; `router.ex:<line>` stays UNFLAGGED
+//       here by design (live on this tree: __app.test.mjs + two app.js comments).
+//     • SHAPE-SCOPED. Only `app.js:<digits>` (also `app.js ~<n>` / a range) is a
+//       citation to E11. A prose reference like "the app.js file" is untouched;
+//       a NON-numeric anchor (a function name + grep) is exactly what it asks
+//       for. It cannot judge whether a cited function name is itself correct —
+//       that is a semantic claim no regex owns.
+export function bannedSourceCitationErrors(src, file) {
+  const errs = [];
+  const CITATION = /\bapp\.js[:~ ]+~?\d{2,}(?:-\d{2,})?/g;
+  for (const m of src.matchAll(CITATION)) {
+    const line = src.slice(0, m.index).split("\n").length;
+    errs.push(
+      `E11 ${file}:${line}  banned source line citation ${JSON.stringify(m[0].trim())} — ` +
+        `line numbers rot on any sibling shift (charter D41 / bp-honest-gates D5). ` +
+        `Re-anchor to the enclosing FUNCTION name + a grep that re-derives it ` +
+        `(e.g. renderLivenessChip() with grep -n 'function renderLivenessChip'). ` +
+        `Cross-language router.ex cites are OUT (cch-bl-citation-drift-cross-language).`,
+    );
+  }
+  return errs;
+}
+
+// The files E11 scans: every top-level *.js|*.mjs plus __preview__/*.js|*.mjs.
+// Read from the directory (never a hardcoded list) so a NEW harness file is
+// covered the moment it lands — a fixed list is the enumerate-don't-ban shape
+// bp-honest-gates D5 forbids.
+function citationScanFiles() {
+  const out = [];
+  const jsLike = (f) => /\.m?js$/.test(f);
+  for (const f of fs.readdirSync(dir)) if (jsLike(f)) out.push(f);
+  const pv = path.join(dir, "__preview__");
+  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (jsLike(f)) out.push(path.join("__preview__", f));
+  return out.sort();
 }
 
 // Targeted fixture mode: `node __css_check.mjs --swallow-check <file.css>` runs
@@ -944,6 +1025,15 @@ for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
 // E10 — comment nesting coherence: an orphan `*/` swallows the next whole rule
 // (#4592 — the modal root). Runs alongside E9, which sees only token blocks.
 for (const e of orphanCommentErrors(cssRaw)) errors.push(e);
+
+// E11 — banned source line-number citation (charter D41 / bp-honest-gates D5):
+// `app.js:<line>` in a comment of any scanned SPA / harness file. The shape is
+// banned outright; router.ex cross-language cites are OUT (see the boundary on
+// bannedSourceCitationErrors). Scans this file too, so its own citations cannot
+// go stale unseen.
+for (const rel of citationScanFiles()) {
+  for (const e of bannedSourceCitationErrors(read(rel), rel)) errors.push(e);
+}
 
 // E8 — scoped-theme alias integrity. var() inside a custom property substitutes
 // where the property is DECLARED, so a :root-only alias whose value references

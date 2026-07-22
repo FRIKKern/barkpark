@@ -23,10 +23,17 @@
 # verbatim subset of what pds-window-sentinel.sh already samples. No new metric,
 # no new floor, no new predicate is introduced by this file.
 #
-# THE THREE NON-ACTIONS — load-bearing, not decoration:
-#   * It never lowers PDS_FULL_EXPORT_MIN_MEM_MB. It never SETS it. The floor
-#     stays at the harness's unmodified 2200 (PDS-D244 — the derivation refused
-#     itself with a NEGATIVE -7.55 MiB delta).
+# THE FLOOR IT ARMS, AND TWO NON-ACTIONS — load-bearing, not decoration:
+#   * It arms the DERIVED floor of 897 MiB (PDS-D276/D277), against the DEPLOYED
+#     streaming spill engine, in all three floor knobs at once: the poll
+#     predicate (:348), the arm-refusal guard (:412-414), and
+#     PDS_FULL_EXPORT_MIN_MEM_MB exported to the harness (fire_detached). The old
+#     2200 was a FOSSIL of the retired in-RAM engine; the streaming engine's real
+#     BEAM RSS peak-minus-baseline demand is 98.16 MiB, and 98.16 + 798.81 margin
+#     rounds up to 897 (D244's earlier refusal, with its NEGATIVE -7.55 MiB
+#     delta, was derived against that retired engine and no longer applies). It
+#     never LOWERS the floor below that derived law — the predicate tightens
+#     only. Full arithmetic: scripts/pds-w20-floor-derivation.md.
 #   * It never splits the climb. `--all`, unsplit, once. `--only` runs touching
 #     rungs 2-6 are FORBIDDEN (W6-C).
 #   * It never writes to the real attempts counter or the real export lock. It
@@ -121,8 +128,13 @@ FULL_LOCK="$FULL_DIR/lock"
 # floor can be dialled down is a rubber stamp with extra steps.
 INTERVAL="${PDS_LAUNCH_INTERVAL:-10}"
 MAX_DRAWS="${PDS_LAUNCH_MAX_DRAWS:-360}"
-MEM_FLOOR_MIB="${PDS_LAUNCH_MEM_FLOOR_MIB:-2200}"
-MEM_FLOOR_LAW=2200
+# PDS-D276/D277: the DERIVED floor is 897 MiB, against the deployed streaming
+# spill engine (98.16 demand + 798.81 margin). Both the poll-predicate default
+# and the tighten-only guard-law move off the fossil 2200 together — moving one
+# without the other leaves the predicate defaulting to 2200 and the child
+# standing down forever. scripts/pds-w20-floor-derivation.md.
+MEM_FLOOR_MIB="${PDS_LAUNCH_MEM_FLOOR_MIB:-897}"
+MEM_FLOOR_LAW=897
 
 SSH_HOST="${PDS_LAUNCH_SSH_HOST:-root@guerrilla.barkpark.cloud}"
 SSH_KEY="${PDS_LAUNCH_SSH_KEY:-$HOME/.ssh/barkpark_indx}"
@@ -185,7 +197,14 @@ fire_detached() {
   spent="$(cat "$attempts_file" 2>/dev/null || echo 0)"
   is_int "$spent" || spent=0
   export PDS_FULL_EXPORT_BUDGET=$(( spent + 2 ))                    # PDS-D224
-  # PDS_FULL_EXPORT_MIN_MEM_MB is deliberately LEFT UNSET (PDS-D244).
+  # PDS-D276/D277: export the DERIVED 897 MiB floor to the frozen harness's own
+  # cond_b (b) gate. This REVERSES D244's deliberate UNSET — that refusal was
+  # taken against the retired in-RAM engine's NEGATIVE -7.55 MiB delta; the
+  # deployed streaming engine's real demand is 98.16 MiB + 798.81 margin = 897.
+  # It is set HERE, contiguous with the budget, so it crosses the fork/exec into
+  # the child with everything else (D249) — a later export would silently hand
+  # the child the harness default and revert the floor with nothing visible.
+  export PDS_FULL_EXPORT_MIN_MEM_MB=897
   # The harness re-derives its OWN RUN_TAG as cksum(PDS_RUN_ID) (:112), but only
   # to build DEFAULT paths — and all three of those are overridden just below, so
   # that derivation reaches nothing. What PDS_RUN_ID DOES reach is the banner
@@ -244,7 +263,8 @@ sentinel() { printf 'EXIT: %s\n' "$1"; }
 stamp "child up — pid=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ') sid_leader=$(ps -o stat= -p $$ | tr -d ' ')"
 stamp "run_tag=$RUN_TAG"
 stamp "budget PDS_FULL_EXPORT_BUDGET=${PDS_FULL_EXPORT_BUDGET:-<UNSET — the child did not inherit it>}"
-stamp "floor  PDS_FULL_EXPORT_MIN_MEM_MB=${PDS_FULL_EXPORT_MIN_MEM_MB:-<unset, as required by PDS-D244 — the harness floor of 2200 stands>}"
+stamp "poll   MEM_FLOOR_MIB=$MEM_FLOOR_MIB (the launcher's poll predicate — PDS-D276/D277 derived floor)"
+stamp "floor  PDS_FULL_EXPORT_MIN_MEM_MB=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET — expected 897 per PDS-D276/D277; UNSET here means the export did NOT cross the fork>}"
 stamp "home   BARKPARK_HOME=${BARKPARK_HOME:-<unset>}"
 stamp "point  PDS_SCRATCH_POINTER=${PDS_SCRATCH_POINTER:-<unset>}"
 stamp "art    PDS_PROOF_ARTIFACTS=${PDS_PROOF_ARTIFACTS:-<unset>}"
@@ -380,6 +400,47 @@ CHILD_BODY
   chmod +x "$dest"
 }
 
+# ── the floor record (PDS-D276/D277) ─────────────────────────────────────────
+#
+# ONE producer for the two floor knobs this arm carries, emitted as key=value
+# lines. run_dir/meta, the arm banner, and the selftest ALL read this — so the
+# recording can never silently drift from what is actually armed, and a revert
+# of ANY of the three knobs moves one of these two numbers. This is what closes
+# pds-bl-w16-arm-never-records-its-own-floor: the arm now records its own floor,
+# and pds-bl-floor-env-silent-revert: a reverted PDS_FULL_EXPORT_MIN_MEM_MB
+# prints <UNSET> here instead of vanishing unremarked.
+#
+#   mem_floor_mib           — the launcher's own poll predicate (:348)
+#   full_export_min_mem_mb  — what fire_detached exported to the harness gate
+arm_floor_record() {
+  printf 'mem_floor_mib=%s\n'          "$MEM_FLOOR_MIB"
+  printf 'full_export_min_mem_mb=%s\n' "${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET>}"
+}
+
+# The human-facing rendering of the same two values for the arm banner.
+arm_floor_summary() {
+  info "poll floor  mem_floor_mib=$MEM_FLOOR_MIB — the launcher's poll predicate (:348)"
+  info "harness flr full_export_min_mem_mb=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET>} — exported to the frozen harness's cond_b gate"
+  if [ "$MEM_FLOOR_MIB" != 2200 ] || [ "${PDS_FULL_EXPORT_MIN_MEM_MB:-}" != 2200 ]; then
+    info "            DERIVED floor (PDS-D276/D277) — the fossil 2200 of the retired in-RAM engine no longer applies; see scripts/pds-w20-floor-derivation.md"
+  fi
+}
+
+# run_dir/meta writer, extracted so the selftest can exercise the SAME code the
+# arm uses and prove — hermetically — that meta carries the derived floor.
+# $1 run_dir · $2 run_tag · $3 run_id · $4 pid · $5 transcript
+write_run_meta() {
+  {
+    printf 'run_tag=%s\n'    "$2"
+    printf 'run_id=%s\n'     "$3"
+    printf 'pid=%s\n'        "$4"
+    printf 'armed_at=%s\n'   "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'budget=%s\n'     "${PDS_FULL_EXPORT_BUDGET:-}"
+    arm_floor_record
+    printf 'transcript=%s\n' "$5"
+  } > "$1/meta"
+}
+
 # ── arm ──────────────────────────────────────────────────────────────────────
 
 cmd_arm() {
@@ -454,14 +515,10 @@ cmd_arm() {
   printf '%s\n' "$pid" > "$pid_file"
   printf '%s\n' "$run_tag" > "$STATE_DIR/last"
 
-  {
-    printf 'run_tag=%s\n'    "$run_tag"
-    printf 'run_id=%s\n'     "$run_id"
-    printf 'pid=%s\n'        "$pid"
-    printf 'armed_at=%s\n'   "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'budget=%s\n'     "${PDS_FULL_EXPORT_BUDGET:-}"
-    printf 'transcript=%s\n' "$log"
-  } > "$run_dir/meta"
+  # meta records BOTH floor knobs distinctly (mem_floor_mib AND
+  # full_export_min_mem_mb) via arm_floor_record, so a revert of either is
+  # individually diagnosable from the run directory (PDS-D276/D277).
+  write_run_meta "$run_dir" "$run_tag" "$run_id" "$pid" "$log"
 
   t1="$(date +%s)"
 
@@ -473,7 +530,7 @@ cmd_arm() {
   info "transcript  $log"
   info "child       $child"
   info "budget      PDS_FULL_EXPORT_BUDGET=${PDS_FULL_EXPORT_BUDGET:-?} (attempts spent + 2)"
-  info "floor       PDS_FULL_EXPORT_MIN_MEM_MB left UNSET — harness floor 2200 stands (PDS-D244)"
+  arm_floor_summary
   info "poll        every ${INTERVAL}s, up to $MAX_DRAWS draws, inside the child"
   info "armed in    $(( t1 - t0 ))s"
   rule
@@ -804,8 +861,41 @@ DUMMY
   if [ "${budget:-1}" = "1" ]; then
     bad "the child read 1 — that is the silent default, i.e. the export never crossed the fork"
   fi
+  # PDS-D276/D277: fire_detached exports the derived 897 floor, so the DUMMY
+  # child MUST inherit it across the fork. Mutation-provable: remove the
+  # `export PDS_FULL_EXPORT_MIN_MEM_MB=897` knob and the child prints `unset`
+  # here and this check FAILS (this is the pds-bl-floor-env-silent-revert guard).
   out="$(grep '^DUMMY-FLOOR=' "$scratch/dummy.log" 2>/dev/null | head -1 | cut -d= -f2 || true)"
-  check "${out:-unset}" "unset" "PDS_FULL_EXPORT_MIN_MEM_MB left UNSET (PDS-D244 — the floor stays 2200)"
+  check "${out:-unset}" "897" "PDS_FULL_EXPORT_MIN_MEM_MB=897 crosses the fork (PDS-D276/D277 — was UNSET under D244)"
+
+  # …and the arm's OWN floor record carries the derived 897 in BOTH knobs. This
+  # is the single producer that meta AND the banner read (arm_floor_record /
+  # arm_floor_summary), proven here hermetically — no real climb, no network.
+  # fire_detached above set PDS_FULL_EXPORT_MIN_MEM_MB in this shell; MEM_FLOOR_MIB
+  # is the source default. A revert of knob 1/2 moves mem_floor_mib; a revert of
+  # knob 3 makes full_export_min_mem_mb read <UNSET> — either FAILS a check.
+  rec="$(arm_floor_record)"
+  poll_floor="$(printf '%s\n' "$rec"    | grep '^mem_floor_mib='          | cut -d= -f2)"
+  harness_floor="$(printf '%s\n' "$rec" | grep '^full_export_min_mem_mb=' | cut -d= -f2)"
+  check "$poll_floor"    "897" "arm_floor_record: mem_floor_mib is the derived 897"
+  check "$harness_floor" "897" "arm_floor_record: full_export_min_mem_mb is the derived 897"
+
+  # The banner (arm_floor_summary) renders the SAME two values operators read.
+  out="$(arm_floor_summary)"
+  case "$out" in *mem_floor_mib=897*)          ok   "arm summary shows mem_floor_mib=897" ;;
+                 *)                             bad  "arm summary lost mem_floor_mib=897" ;; esac
+  case "$out" in *full_export_min_mem_mb=897*)  ok   "arm summary shows full_export_min_mem_mb=897" ;;
+                 *)                              bad  "arm summary lost full_export_min_mem_mb=897" ;; esac
+
+  # run_dir/meta must carry both, produced by the EXACT code cmd_arm runs
+  # (write_run_meta), written to scratch here so the real climb is untouched.
+  mkdir -p "$scratch/metarun"
+  write_run_meta "$scratch/metarun" deadbeef selftest-id 1234 "$scratch/x.log"
+  out="$(grep '^mem_floor_mib=' "$scratch/metarun/meta" | cut -d= -f2 || true)"
+  check "${out:-<none>}" "897" "run_dir/meta records mem_floor_mib=897"
+  out="$(grep '^full_export_min_mem_mb=' "$scratch/metarun/meta" | cut -d= -f2 || true)"
+  check "${out:-<none>}" "897" "run_dir/meta records full_export_min_mem_mb=897"
+
   out="$(grep '^DUMMY-HOME=' "$scratch/dummy.log" 2>/dev/null | head -1 | cut -d= -f2 || true)"
   case "${out:-}" in
     *deadbeef*) ok "BARKPARK_HOME carries the run tag ($out)" ;;

@@ -42,8 +42,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  CMD_SUBJECT_PREFIX, MATCH_RULE, NO_VALUE_FOOTER, STRUCTURAL_MISSES,
-  censusIndex, isCommandShapeSubject, matchesQuery, renderLeads, selectLeads,
+  CMD_SUBJECT_PREFIX, MATCH_RULE, NO_VALUE_FOOTER, STRUCTURAL_MISSES, SUBSYSTEM_BAND,
+  ancestorPrefixCount, censusIndex, childBreakdown, isCommandShapeSubject, matchesQuery,
+  renderLeads, selectLeads, subjectSegmentMatch, subsystemBand,
 } from "../leads.mjs";
 import { foldLedger, DEFAULT_LEDGER_DIR } from "../ledger.mjs";
 import { screenCommand } from "../screen.mjs";
@@ -86,23 +87,23 @@ function storeFingerprint(dir) {
 // ── 1. leads hand over METHOD, never a value ─────────────────────────────────
 
 test("a FORGED run file carrying `value` on every row cannot put that value on the screen", () => {
-  // Hand-written on disk, bypassing admitRecipe entirely — the write-path
-  // rejection (VALUE-STORED) is not what is under test here. What is under test
-  // is that the READ path is structurally incapable of surfacing it, because
-  // foldLedger's projection rebuilds each recipe from a NAMED ALLOWLIST of
-  // fields — the guarantee is the allowlist, never its length (it went from six
-  // fields to twelve when the fold began re-deriving its own key).
+  // Hand-written on disk, bypassing admitRecipe. Post tgw5 the READ path
+  // (foldLedger) re-admits what the write path admits, so these rows are now
+  // REJECTED at the fold (VALUE-STORED / UNKNOWN-FIELD) and never reach an
+  // entry — and leads is a filter over entries[], so it surfaces nothing. That
+  // is the FIRST of two layers: even if a value row reached entries[],
+  // foldLedger's twelve-field projection allowlist would still drop it (that
+  // second layer is pinned in ledger.test.mjs's projection-guarantee test).
   const dir = tempStore([
     { ...row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex"), value: 544 },
     { ...row("api/lib/y.ex", "wc:-l", "wc -l api/lib/y.ex"), observed_value: "42 modules", answer: "yes" },
   ]);
-  const result = selectLeads(foldLedger(dir), "api/lib");
-  assert.equal(result.rows.length, 2);
-  for (const r of result.rows) {
-    assert.ok(!Object.hasOwn(r, "value"), "no row may carry a value field");
-    assert.ok(!Object.hasOwn(r, "observed_value"));
-    assert.ok(!Object.hasOwn(r, "answer"));
-  }
+  const folded = foldLedger(dir);
+  assert.equal(folded.entries.length, 0, "forged rows are rejected at the fold, not folded with the value merely stripped");
+  assert.ok(folded.unreadable.some((u) => u.reason === "VALUE-STORED"), "the value carrier is named VALUE-STORED, into unreadable[]");
+
+  const result = selectLeads(folded, "api/lib");
+  assert.equal(result.rows.length, 0, "no entry means no lead — the forged value cannot reach the screen");
   const rendered = renderLeads(result);
   assert.ok(!rendered.includes("544"), "the forged value must not reach the human render");
   assert.ok(!rendered.includes("42 modules"));
@@ -306,8 +307,10 @@ test("the hit list states how many rows came from command text, in BOTH modes", 
     row("api/lib/x.ex", "wc:-l", "git show origin/main:api/lib/x.ex | wc -l"),
   ]));
   // Default mode, one subject hit: the OTHER row is one flag away, and the
-  // reader is told so with a number rather than left to wonder.
-  const narrow = renderLeads(selectLeads(folded, "grip"));
+  // reader is told so with a number rather than left to wonder. `tooling` is a
+  // LEADING path-segment prefix of `tooling/grip/leads.mjs` (D91) — `grip` alone
+  // would NOT match it, because `grip` is a middle segment there.
+  const narrow = renderLeads(selectLeads(folded, "tooling"));
   assert.ok(narrow.includes("tooling/grip/leads.mjs"), narrow);
   const wideResult = selectLeads(folded, "origin/main", { cmd: true });
   assert.equal(wideResult.rows.length, 1);
@@ -317,27 +320,45 @@ test("the hit list states how many rows came from command text, in BOTH modes", 
   );
 });
 
-test("KNOWN LIMIT, MEASURED — the mode split does NOT fix SUBJECT-side substring noise", () => {
-  // Honest scope, pinned so nobody later reads the mode split as a general
-  // precision fix. On the real 62-recipe store `leads js` returned 30 rows
-  // before this change and returns the SAME 30 after (cmd_only_recipes = 0),
-  // because every one of those 30 matched on the subject already: `.mjs` ends
-  // in "js" and `package.json` contains it via ".json". That noise is a
-  // property of substring matching over paths, not of the haystack width, and
-  // closing it needs a separate ratified decision (filed as
-  // tgw6-leads-subject-segment-noise).
+test("SUBSYSTEM-BOUNDARY MATCHING closes the `leads js` noise (charter D91) — segment prefix, not substring", () => {
+  // FAIL-BEFORE / PASS-AFTER of the live 25-of-30 defect, on the same corpus
+  // shape that produced it. Before D91, `leads js` matched all three by raw
+  // substring: `.mjs` ENDS in "js" and `package.json` CONTAINS it via ".json".
+  // After D91 the needle is compared to path SEGMENTS, so only the subject that
+  // actually sits UNDER js/ matches.
   const folded = foldLedger(tempStore([
     row("js/packages/core/package.json", "wc:-l", "wc -l js/packages/core/package.json"),
     row("tooling/grip/leads.mjs", "wc:-l", "wc -l tooling/grip/leads.mjs"),
     row("web/package.json", "wc:-l", "wc -l web/package.json"),
+    row(".claude/workflows/x.workflow.js", "wc:-l", "wc -l .claude/workflows/x.workflow.js"),
   ]));
+
+  // FAIL-FIRST: the OLD raw-substring subject filter, re-implemented over the
+  // same corpus. It returns all four — the noise D91 abolishes — and without
+  // this half the assertion below would pass against a filter that found nothing.
+  const oldSubstring = folded.entries.flatMap((e) => e.recipes.filter(
+    () => e.subject.toLowerCase().includes("js"),
+  ));
+  assert.equal(oldSubstring.length, 4, "precondition: raw substring matches all four (the defect)");
+
   const result = selectLeads(folded, "js");
-  assert.equal(result.rows.length, 3, "all three still match — .mjs and package.json both contain `js`");
-  assert.equal(result.cmd_only_recipes, 0, "and NONE of it came from the command text, so --cmd is not the lever");
-  assert.equal(
-    result.rows.filter((r) => r.subject.startsWith("js/")).length, 1,
-    "only one of the three is actually under js/ — the measured imprecision that SURVIVES this slice",
-  );
+  assert.equal(result.rows.length, 1, "only the subject UNDER js/ survives the segment rule");
+  assert.equal(result.rows[0].subject, "js/packages/core/package.json");
+  // The 3 noise rows do not vanish silently: their COMMANDS literally contain
+  // the string "js" (`wc -l web/package.json`), so they are demoted to
+  // command-text-only matches — counted honestly, surfaced only under --cmd,
+  // never in the default subject view. That is the precision fix: the subject
+  // index is clean, the recall is behind a named, counted flag.
+  assert.equal(result.cmd_only_recipes, 3, "the noise is command-text-only now, not a subject match");
+  assert.equal(selectLeads(folded, "js", { cmd: true }).rows.length, 4, "--cmd restores the wide substring behaviour");
+
+  // The three noise mechanisms, each pinned at the unit so none can regrow:
+  assert.equal(subjectSegmentMatch("js/packages/core/package.json", "js"), true, "leading segment prefix matches");
+  assert.equal(subjectSegmentMatch("web/package.json", "js"), false, "`json` must NOT match `js` via substring");
+  assert.equal(subjectSegmentMatch(".claude/workflows/x.workflow.js", "js"), false, "a file extension must NOT match a segment query");
+  assert.equal(subjectSegmentMatch("js/x", "js"), true);
+  assert.equal(subjectSegmentMatch("js", "js"), true, "an exact whole-subject match is a match");
+  assert.equal(subjectSegmentMatch("jscramble/x", "js"), false, "a segment that merely STARTS with the needle is not a segment match");
 });
 
 test("under --cmd a needle cannot match ACROSS the subject/rerun boundary and invent a hit", () => {
@@ -361,10 +382,13 @@ test("the NUL separator is written as the ESCAPE, never as a raw byte (charter D
 
 // ── 3. observed_at: three states, no band ────────────────────────────────────
 
-test("state 1 — the RAW observed_at is rendered, and no staleness band is computed from it", () => {
+test("state 1 — the RAW observed_at is rendered (--full), and no staleness band is computed from it", () => {
+  // observed_at lives in the --full block; the dense default carries only
+  // subject/quantity/binding. Either way, no band is ever computed.
   const dir = tempStore([row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex", { observed_at: "2024-01-02T03:04:05Z" })]);
-  const rendered = renderLeads(selectLeads(foldLedger(dir), "api"));
+  const rendered = renderLeads(selectLeads(foldLedger(dir), "api"), { full: true });
   assert.ok(rendered.includes("2024-01-02T03:04:05Z"), "the raw instant, not a band");
+  assert.ok(!renderLeads(selectLeads(foldLedger(dir), "api")).includes("2024-01-02T03:04:05Z"), "and the dense default omits it");
   for (const banned of ["STALE", "stale", "aging", "fresh", "days old", "ago"]) {
     assert.ok(!rendered.includes(banned), `charter D43 cut the staleness band — "${banned}" must not appear`);
   }
@@ -376,46 +400,47 @@ test("state 2 — the CENSUS VERDICT is rendered when one exists for that exact 
   const census = censusIndex({
     rows: [{ command: rerun, outcome: "STILL-ANSWERING", answering: true, decayed: false, admissible: true }],
   });
-  const rendered = renderLeads(selectLeads(foldLedger(dir), "api", { census }));
+  const rendered = renderLeads(selectLeads(foldLedger(dir), "api", { census }), { full: true });
   assert.ok(rendered.includes("census STILL-ANSWERING"), rendered);
   assert.ok(!rendered.includes("never re-checked"));
 });
 
 test("state 3 — `never re-checked` when no census verdict exists, which is the normal case (census.mjs stores nothing)", () => {
   const dir = tempStore([row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex")]);
-  // No census at all…
-  assert.ok(renderLeads(selectLeads(foldLedger(dir), "api")).includes("never re-checked"));
+  // No census at all… (the verdict column lives in the --full block)
+  assert.ok(renderLeads(selectLeads(foldLedger(dir), "api"), { full: true }).includes("never re-checked"));
   // …and a census that simply does not carry THIS command is the same state,
   // never a silently blank column.
   const census = censusIndex({ rows: [{ command: "wc -l some/other/file.ex", outcome: "STILL-ANSWERING", admissible: true }] });
-  assert.ok(renderLeads(selectLeads(foldLedger(dir), "api", { census })).includes("never re-checked"));
+  assert.ok(renderLeads(selectLeads(foldLedger(dir), "api", { census }), { full: true }).includes("never re-checked"));
 });
 
 test("an INADMISSIBLE census verdict says so — it measured this host, not the ledger", () => {
   const rerun = "wc -l api/lib/x.ex";
   const dir = tempStore([row("api/lib/x.ex", "wc:-l", rerun)]);
   const census = censusIndex({ rows: [{ command: rerun, outcome: "WRONG-CWD", decayed: false, admissible: false }] });
-  assert.match(renderLeads(selectLeads(foldLedger(dir), "api", { census })), /census WRONG-CWD \(inadmissible/);
+  assert.match(renderLeads(selectLeads(foldLedger(dir), "api", { census }), { full: true }), /census WRONG-CWD \(inadmissible/);
 });
 
 // ── 4. no ranking, no rival-method flag ──────────────────────────────────────
 
 test("NO RANKING — the order is a deterministic (subject, observed_at desc) sort, stable across two runs", () => {
   const dir = tempStore([
-    row("b/two.ex", "wc:-l", "wc -l b/two.ex", { observed_at: "2026-07-21T03:00:00Z" }),
-    row("a/one.ex", "wc:-l", "wc -l a/one.ex", { observed_at: "2026-07-20T03:00:00Z" }),
-    row("a/one.ex", "grep:-c", "grep -c x a/one.ex", { observed_at: "2026-07-21T03:00:00Z" }),
+    row("src/b/two.ex", "wc:-l", "wc -l src/b/two.ex", { observed_at: "2026-07-21T03:00:00Z" }),
+    row("src/a/one.ex", "wc:-l", "wc -l src/a/one.ex", { observed_at: "2026-07-20T03:00:00Z" }),
+    row("src/a/one.ex", "grep:-c", "grep -c x src/a/one.ex", { observed_at: "2026-07-21T03:00:00Z" }),
   ]);
   const folded = foldLedger(dir);
-  const once = selectLeads(folded, ".ex").rows.map((r) => r.rerun);
-  const twice = selectLeads(foldLedger(dir), ".ex").rows.map((r) => r.rerun);
+  // `src` is a leading path-segment prefix of all three subjects (D91).
+  const once = selectLeads(folded, "src").rows.map((r) => r.rerun);
+  const twice = selectLeads(foldLedger(dir), "src").rows.map((r) => r.rerun);
   assert.deepEqual(once, twice, "two runs, identical order");
   assert.deepEqual(once, [
-    "grep -c x a/one.ex",   // a/ first; newest of a/'s two rows first
-    "wc -l a/one.ex",
-    "wc -l b/two.ex",
+    "grep -c x src/a/one.ex",   // src/a/ first; newest of a/'s two rows first
+    "wc -l src/a/one.ex",
+    "wc -l src/b/two.ex",
   ]);
-  const rendered = renderLeads(selectLeads(folded, ".ex"));
+  const rendered = renderLeads(selectLeads(folded, "src"));
   for (const banned of ["rank", "Rank", "score", "best match", "top match"]) {
     assert.ok(!rendered.includes(banned), `charter D43 cut the ranking — "${banned}" must not appear`);
   }
@@ -423,11 +448,11 @@ test("NO RANKING — the order is a deterministic (subject, observed_at desc) so
 
 test("the CLI renders byte-identically across two invocations", () => {
   const dir = tempStore([
-    row("a/one.ex", "wc:-l", "wc -l a/one.ex"),
-    row("a/one.ex", "grep:-c", "grep -c x a/one.ex"),
+    row("src/one.ex", "wc:-l", "wc -l src/one.ex"),
+    row("src/one.ex", "grep:-c", "grep -c x src/one.ex"),
   ]);
-  const a = runCli(["leads", ".ex", "--dir", dir]);
-  const b = runCli(["leads", ".ex", "--dir", dir]);
+  const a = runCli(["leads", "src", "--dir", dir]);
+  const b = runCli(["leads", "src", "--dir", dir]);
   assert.equal(a.status, 0);
   assert.equal(a.stdout, b.stdout);
 });
@@ -516,7 +541,8 @@ test("a deliberately STALE stored derived_level is contradicted, not printed", (
   assert.equal(result.rows[0].stored_level, "L3", "the stored value is carried, so the disagreement is visible");
   assert.notEqual(result.rows[0].derived_level, "L3", "…and it is NOT what gets rendered as the level");
   assert.equal(result.rows[0].level_restated, true);
-  const rendered = renderLeads(result);
+  // The level column and its drift marker live in the --full block.
+  const rendered = renderLeads(result, { full: true });
   assert.match(rendered, /stored L3, NOT trusted: re-derived from the command/);
 });
 
@@ -706,4 +732,137 @@ test("CONTROL: a clean store says nothing about unreadability and keeps the hone
   const rendered = renderLeads(clean);
   assert.ok(!rendered.includes("PARTIALLY UNREADABLE"), "a clean store must not cry wolf");
   assert.match(rendered, /This is an answer, not a blank\./);
+});
+
+// ── 10. DENSE by default; --full restores the block (charter D-render) ────────
+
+test("DENSE by default — ONE line per recipe (subject + quantity + binding); --full restores the block", () => {
+  const rows = [];
+  for (let i = 0; i < 5; i += 1) rows.push(row("internal/cli", `wc:-l:${i}`, `wc -l internal/cli/f${i}.go`));
+  const folded = foldLedger(tempStore(rows));
+  const result = selectLeads(folded, "internal/cli");
+  const dense = renderLeads(result);
+  const full = renderLeads(result, { full: true });
+
+  // ONE physical line per recipe, carrying subject + quantity + binding + the
+  // re-runnable command — nothing to scroll past.
+  const denseRowLines = dense.split("\n").filter((l) => l.includes("$ wc -l internal/cli"));
+  assert.equal(denseRowLines.length, 5, "five recipes → five dense lines");
+  // the fold re-derives the quantity from the command (D77), so these are five
+  // rival methods on one key; the dense line carries subject, quantity, binding.
+  assert.match(dense, /internal\/cli\s+wc:-l\s+cwd-bound\s+\$ wc -l internal\/cli\/f0\.go/);
+  assert.ok(!dense.includes("2026-07-21T03:46:16Z"), "the dense line omits the observed_at value (block-only)");
+  assert.ok(!/level        L\d/.test(dense), "…and the level provenance block");
+
+  // --full is materially taller — a multi-line block per row.
+  assert.ok(full.split("\n").length > dense.split("\n").length * 2, `--full block is much taller (${full.split("\n").length} vs ${dense.split("\n").length})`);
+  assert.match(full, /observed_at/);
+  assert.match(full, /binding      cwd-bound · portable to this cwd/);
+
+  // And the CLI honours --full through argv (leadsCommand strips it from the
+  // query, but the render still sees it).
+  const denseCli = runCli(["leads", "internal/cli", "--dir", tempStore(rows)]);
+  assert.ok(!denseCli.stdout.includes("2026-07-21T03:46:16Z"), "CLI dense default omits the block");
+  const fullCli = runCli(["leads", "internal/cli", "--full", "--dir", tempStore(rows)]);
+  assert.match(fullCli.stdout, /observed_at  2026-07-21T03:46:16Z/, "CLI --full restores the block");
+});
+
+// ── 11. subsystem rollup: ALL-ANCESTOR-PREFIX MATCH-COUNT (charter D87) ───────
+
+test("SUBSYSTEM ROLLUP is ALL-ANCESTOR-PREFIX MATCH-COUNT, not a greedy partition (charter D87)", () => {
+  const entries = [
+    { subject: "api/lib/a.ex", recipes: [{}] },
+    { subject: "api/lib/b.ex", recipes: [{}] },
+    { subject: "api/lib/c.ex", recipes: [{}] },
+    { subject: "api/test/x.ex", recipes: [{}] },
+  ];
+  // A recipe under api/lib counts toward BOTH `api` and `api/lib` — the
+  // all-ancestor rule. A greedy disjoint partition assigns each recipe to one.
+  assert.equal(ancestorPrefixCount(entries, "api"), 4);
+  assert.equal(ancestorPrefixCount(entries, "api/lib"), 3);
+  assert.equal(ancestorPrefixCount(entries, "api/test"), 1);
+  assert.equal(ancestorPrefixCount(entries, "ap"), 0, "matched at a SEGMENT boundary — `ap` never absorbs `api/*`");
+
+  const band = subsystemBand(entries);
+  assert.deepEqual(band, ["api", "api/lib"], "`api`(4) and `api/lib`(3) are in [3,20]; `api/test`(1) is below it");
+  // OVERLAP is the signature of all-ancestor: the band keys sum to MORE than the
+  // 4 recipes, because each nested recipe is counted at every depth. A greedy
+  // partition would sum to exactly 4.
+  const sum = band.reduce((n, P) => n + ancestorPrefixCount(entries, P), 0);
+  assert.equal(sum, 7, "4 + 3 — the overlap a greedy partition (sum 4) cannot produce");
+  assert.equal(SUBSYSTEM_BAND.min, 3);
+  assert.equal(SUBSYSTEM_BAND.max, 20);
+});
+
+test("a key whose all-ancestor count EXCEEDS the band renders the CHILD BREAKDOWN, not a per-recipe dump (D87)", () => {
+  const rows = [];
+  for (let i = 0; i < 15; i += 1) rows.push(row(`api/lib/f${i}.ex`, "wc:-l", `wc -l api/lib/f${i}.ex`));
+  for (let i = 0; i < 10; i += 1) rows.push(row(`api/test/t${i}.ex`, "wc:-l", `wc -l api/test/t${i}.ex`));
+  const folded = foldLedger(tempStore(rows));
+  const result = selectLeads(folded, "api");
+  assert.equal(result.rows.length, 25, "25 recipes match the api subsystem — over the band");
+
+  const rendered = renderLeads(result);
+  assert.match(rendered, /api → 25 recipes/, "the rollup names the subsystem and its size");
+  assert.match(rendered, /api\/lib\s+15/, "and the child counts");
+  assert.match(rendered, /api\/test\s+10/);
+  assert.match(rendered, /leads api\/lib/, "it names the narrower query to run");
+  assert.equal((rendered.match(/\$ wc -l/g) || []).length, 0, "the breakdown REPLACES the per-recipe dump");
+
+  // childBreakdown at the unit: the child counts use the same all-ancestor rule.
+  const bd = childBreakdown(result.rows, "api");
+  assert.deepEqual(bd.children.map((c) => [c.path, c.count]), [["api/lib", 15], ["api/test", 10]]);
+  assert.equal(bd.exact, 0, "no recipe sits exactly at `api`");
+
+  // A key INSIDE the band (11 recipes, like the live internal/cli) is NOT rolled
+  // up — it lists densely.
+  const inBand = [];
+  for (let i = 0; i < 11; i += 1) inBand.push(row("internal/cli", `q${i}`, `wc -l internal/cli/f${i}.go`));
+  const banded = renderLeads(selectLeads(foldLedger(tempStore(inBand)), "internal/cli"));
+  assert.ok(!banded.includes("→ 11 recipes — over"), "11 is in-band: no rollup");
+  assert.equal((banded.match(/\$ wc -l/g) || []).length, 11, "…it lists all 11 densely");
+});
+
+test("the rollup band EXCLUDES cmd:<head> subjects, so the reader's number matches the tool's (charter D45/D87)", () => {
+  const withCmd = [
+    { subject: "api/lib/a.ex", recipes: [{}] },
+    { subject: "api/lib/b.ex", recipes: [{}] },
+    { subject: "api/lib/c.ex", recipes: [{}] },
+    { subject: "cmd:bp", recipes: [{}, {}, {}, {}] },   // a big dumping ground
+    { subject: "cmd:git", recipes: [{}, {}] },
+  ];
+  const band = subsystemBand(withCmd);
+  assert.ok(!band.some((k) => k.startsWith("cmd")), "no cmd:<head> key ever enters the band");
+  assert.deepEqual(band, ["api", "api/lib"], "the band is computed over LEADS-INDEXED subjects only");
+  // A store of ONLY cmd: subjects yields an empty band, never a `cmd` bucket —
+  // exactly so the band count matches what `leads` will actually show.
+  assert.deepEqual(subsystemBand([{ subject: "cmd:bp", recipes: [{}, {}, {}, {}, {}] }]), []);
+});
+
+// ── 12. per-row binding, imported from binding.mjs (charter D73/D74) ──────────
+
+test("EVERY row declares its binding class, IMPORTED from binding.mjs and never re-derived here", () => {
+  // The import itself: a second regex in leads.mjs would be the
+  // copy-paste-the-grammar defect this whole epic abolishes.
+  assert.ok(/from "\.\/binding\.mjs"/.test(LEADS_SRC), "leads.mjs imports the binding grammar");
+  assert.ok(LEADS_SRC.includes("classifyBinding(rerun)"), "…and calls it per recipe, on the command");
+
+  const dir = tempStore([
+    row("api/lib/x.ex", "wc:-l", "wc -l api/lib/x.ex"),                        // cwd-bound
+    row("api/lib/y.ex", "wc:-l", "git show origin/main:api/lib/y.ex | wc -l"), // shared-ref
+  ]);
+  const result = selectLeads(foldLedger(dir), "api");
+  const byRerun = Object.fromEntries(result.rows.map((r) => [r.rerun, r]));
+  assert.equal(byRerun["wc -l api/lib/x.ex"].binding_class, "cwd-bound");
+  assert.equal(byRerun["wc -l api/lib/x.ex"].portable_scope, "this cwd");
+  assert.equal(byRerun["git show origin/main:api/lib/y.ex | wc -l"].binding_class, "shared-ref");
+  assert.equal(byRerun["git show origin/main:api/lib/y.ex | wc -l"].portable_scope, "any worktree of this clone");
+
+  // The dense line carries the class; --json carries class + scope on every row.
+  assert.match(renderLeads(result), /api\/lib\/x\.ex\s+wc:-l\s+cwd-bound/);
+  const parsed = JSON.parse(runCli(["leads", "api", "--json", "--dir", dir]).stdout);
+  assert.ok(
+    parsed.rows.every((r) => typeof r.binding_class === "string" && typeof r.portable_scope === "string"),
+    "--json carries binding_class + portable_scope per row",
+  );
 });

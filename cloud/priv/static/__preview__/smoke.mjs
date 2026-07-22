@@ -55,7 +55,7 @@ const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
 //   • The whitelist is DELIBERATELY only `button` and `a` — the leaf controls a
 //     click oracle needs. It must NOT be widened to containers. app.js has
 //     paths shaped like `var box = panel.querySelector(".fleet-body") || panel;`
-//     (mountUsageTab, app.js:14321), which fall back to the panel precisely
+//     (mountUsageTab), which fall back to the panel precisely
 //     because a harness may not resolve the sub-query. Parsing `div` hands
 //     those paths a DETACHED stub instead: the write lands on a node whose
 //     content this flat parse cannot reflect back into its parent, so the panel
@@ -483,8 +483,9 @@ const EXPECTATIONS = {
   //
   // COVERAGE BOUNDARY (D40 — an enforcement mechanism states its own limits).
   // Of the 8 unfixtured destructive DELETEs this slice is scoped to, exactly
-  // ONE — /v1/account/sessions (app.js:1021) — interpolates a server value into
-  // its toast, so it is the only one where a missing fixture is visible AS TEXT
+  // ONE — /v1/account/sessions (the "Signed out other devices" revoke-all toast
+  // in openAccountModal) — interpolates a server value into its toast, so it is
+  // the only one where a missing fixture is visible AS TEXT
   // ("0 session(s) revoked."). This oracle covers it by TEXT. The per-row
   // sibling (:1112) is covered by WIRE + STATE + its own success toast.
   // The remaining six — /v1/auth/logout (:1050), /v1/github/installation
@@ -524,7 +525,7 @@ const EXPECTATIONS = {
       await ctx.settle();
 
       // The session list rendered through the REAL loadSessions, which is only
-      // possible because the shim now answers isConnected (app.js:1095).
+      // possible because the shim now answers isConnected (loadSessions' box guard).
       const box = reg.get("sessions-box");
       const rendered = box.innerHTML || "";
       assert.ok(rendered.includes("session-row"),
@@ -640,7 +641,8 @@ const EXPECTATIONS = {
       const toasts = (reg.get("toast-stack") || {}).innerHTML || "";
       assert.ok(toasts.includes("Signed out other devices"), "the success toast must actually mount");
       // Two sessions remained revokable after the per-row revoke, so the SERVER
-      // says 2. app.js:1021 renders `((r.data && r.data.revoked) || 0)` — with no DELETE
+      // says 2. The "Signed out other devices" revoke-all toast renders
+      // `((r.data && r.data.revoked) || 0)` — with no DELETE
       // fixture the generic `/v1/` 200 {} answers `{}`, `revoked` is undefined,
       // and the console cheerfully announces a revoke of nothing.
       assert.ok(!toasts.includes("0 session(s) revoked"),

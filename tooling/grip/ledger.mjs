@@ -95,6 +95,14 @@ import { deriveLevel, checkCeiling, LEVELS } from "./level.mjs";
 // re-derived rather than trusted.
 import { quantityPhrase } from "./mint.mjs";
 
+// The SELF-PROVENANCE banner (D78). Static and side-effect-free on import: it
+// only prints when a verb calls it, on STDERR, so every verb — leads, fold,
+// prescreen, write — inherits one honest "here is which tree answered you"
+// line without any of them re-deriving it. Read provenance.mjs for why the
+// banner is stderr-only: stdout is the verb's answer and a banner in it would
+// corrupt a `| JSON.parse` the moment a caller piped the fold.
+import { emitProvenance } from "./provenance.mjs";
+
 // ── the row ──────────────────────────────────────────────────────────────────
 
 // The COMPLETE set of keys a ledger row may carry. Anything else is rejected
@@ -710,7 +718,17 @@ export function readLedgerRuns(dir = DEFAULT_LEDGER_DIR) {
 //
 // The same command recorded twice is CORROBORATION and is not flagged —
 // a flag that fires on ordinary repetition is ignored within a wave.
-export function foldLedger(source = DEFAULT_LEDGER_DIR) {
+// `now` and `screen` are the SAME two bounds admitRecipe takes on the write
+// path, and they are here for the same reason: without a clock the future bound
+// cannot fire, and without a screen an outage-capable recipe cannot be caught.
+// The library reads neither (D19) — the CLI reads `date -u` and injects
+// screenCommand, exactly as `write` does — so a fold called with no bounds
+// still rejects the two forgeries that need no external input (a stored `value`
+// and an over-claimed derived_level) and simply cannot check the other two.
+// THE WRITE PATH IS NOW THE READ PATH for admission: the fold COMPOSES
+// admitRecipe rather than re-deriving any rejection class, so a sixth hand-copy
+// of the grammar — this epic's own defect — is impossible by construction.
+export function foldLedger(source = DEFAULT_LEDGER_DIR, { now, screen } = {}) {
   const { runs, unreadable } = Array.isArray(source)
     ? { runs: source, unreadable: [] }
     : readLedgerRuns(source);
@@ -737,6 +755,30 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR) {
           reason: "MALFORMED-ROW",
           message: `MALFORMED-ROW: ${run.file} row ${index} — ${bad}. The row is NOT folded; every other row is.`,
         });
+        return;
+      }
+      // ── THE READ PATH RE-ADMITS WHAT THE WRITE PATH ADMITTED ──────────────
+      // usableRow is only the crash-safety gate (a non-string key that would
+      // throw out of recipeKey). It rejects no FORGERY: a row carrying `value`,
+      // an outage-capable rerun, a future observed_at and an over-claimed
+      // derived_level were all admitted by the fold and folded into clean
+      // entries with exit 0 — the module's own header promised "THE WRITE PATH
+      // IS NOT THE READ PATH" and left every doctrinal rejection unenforced on
+      // read. admitRecipe is the write path's adjudicator; running it here
+      // routes every rejection it names into the EXISTING unreadable[] channel,
+      // which already drives the fold CLI's nonzero exit — a CI tripwire for
+      // free. Rejections ACCUMULATE (one forged row can trip several classes);
+      // the row is not folded, every other row is.
+      const verdict = admitRecipe(row, { now, screen });
+      if (!verdict.ok) {
+        for (const r of verdict.rejections) {
+          unreadable.push({
+            file: run.file,
+            index,
+            reason: r.reason,
+            message: `${r.reason}: ${run.file} row ${index} — ${r.message} The row is NOT folded; every other row is.`,
+          });
+        }
         return;
       }
       rowCount += 1;
@@ -770,6 +812,14 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR) {
         entry.stored_quantities.push(quantity.stored_quantity);
       }
       if (quantity.quantity_restated) entry.quantity_restated = true;
+      // THE PROJECTION IS A NAMED ALLOWLIST (D89). entries[] is rebuilt from
+      // exactly the TWELVE fields named below — never `...row` — so any key the
+      // row carried and this list does not, `value` first among them, is DROPPED
+      // before it can reach a consumer. This is defence in depth behind the
+      // admitRecipe gate above: even a `value` that somehow reached here cannot
+      // leave, which is WHY leads could ship a filter over entries[] and be
+      // structurally unable to hand back a stored answer. The guarantee is the
+      // ALLOWLIST, not its cardinality — "six" was the stale count.
       entry.recipes.push({
         rerun: row?.rerun ?? null,
         derived_level: level.derived_level,
@@ -1213,7 +1263,7 @@ async function leadsCommand(rest) {
     }
   }
 
-  const folded = foldLedger(dirArg ? resolve(dirArg) : DEFAULT_LEDGER_DIR);
+  const folded = foldLedger(dirArg ? resolve(dirArg) : DEFAULT_LEDGER_DIR, await cliBounds());
   const result = selectLeads(folded, query, { census, cmd: withCmd });
   process.stdout.write(asJson ? `${JSON.stringify(result, null, 2)}\n` : renderLeads(result));
   // An honest empty is an ANSWER, not an error — exit 0. A nonzero here would
@@ -1221,7 +1271,23 @@ async function leadsCommand(rest) {
   return 0;
 }
 
+// THE READ-PATH BOUNDS, read from the shell exactly as `write` reads them. The
+// library owns no clock and imports no screen (D19); the CLI is the caller, so
+// the CLI supplies `date -u` and screenCommand to every read that admits rows.
+// One reading, shared by fold and leads, so a forged-future or outage-capable
+// row cannot fold on one verb and be caught on the other.
+async function cliBounds() {
+  const { screenCommand } = await import("./screen.mjs");
+  return { now: shellNow(), screen: screenCommand };
+}
+
 async function main(argv) {
+  // D78: the self-provenance banner, once, on STDERR, BEFORE any verb runs — so
+  // leads, fold, prescreen and write all inherit "here is which tree answered".
+  // stderr, never stdout: stdout is the verb's answer and a banner in it would
+  // corrupt a piped `| JSON.parse`. emitProvenance swallows a broken stderr.
+  emitProvenance();
+
   const [cmd = "fold", ...rest] = argv;
   if (cmd === "--selftest" || cmd === "selftest") return selftest();
   if (cmd === "write") return writeCommand(rest);
@@ -1229,10 +1295,12 @@ async function main(argv) {
   if (cmd === "leads") return leadsCommand(rest);
   if (cmd === "fold") {
     const dir = rest[0] ? resolve(rest[0]) : DEFAULT_LEDGER_DIR;
-    const folded = foldLedger(dir);
+    const folded = foldLedger(dir, await cliBounds());
     process.stdout.write(`${JSON.stringify(folded, null, 2)}\n`);
     // RIVAL-METHOD is a feature of the data, not a failure: both rows are
     // legitimately stored. Exit 0 and let the caller read `rival_methods`.
+    // A row admitRecipe refuses lands in `unreadable`, so a forged store folds
+    // nonzero — the CI tripwire this slice bought for free.
     return folded.unreadable.length > 0 ? 1 : 0;
   }
   process.stderr.write("usage: node ledger.mjs [leads <substring> | prescreen <facts.json> | write <facts.json> [dir] | fold [dir] | --selftest]\n");
@@ -1249,10 +1317,19 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   // and screen.mjs). An unhandled rejection is a NAMED failure here, never a
   // bare stack trace and never a silent exit: a store whose CLI dies quietly
   // is indistinguishable from a store that wrote nothing on purpose.
+  // process.exit(code) TRUNCATES a not-yet-flushed pipe. `fold` and `leads`
+  // write multi-kilobyte JSON to stdout, and Node flushes a pipe
+  // asynchronously — so `.then((code) => process.exit(code))` tore the output
+  // at ~512 bytes the instant a caller added `| cat` or `| jq`, and a piped
+  // JSON.parse threw on truncated bytes while a redirect to a file got the
+  // whole thing. Set process.exitCode instead and let the event loop drain:
+  // Node flushes stdout to the OS on a natural exit, never on process.exit().
+  // This module opens no lingering handles (readFileSync, dynamic imports —
+  // nothing that keeps the loop alive), so the natural exit is immediate.
   main(process.argv.slice(2))
-    .then((code) => process.exit(code))
+    .then((code) => { process.exitCode = code; })
     .catch((err) => {
       process.stderr.write(`ledger: crashed before any write — ${err?.stack ?? err?.message ?? String(err)}\n`);
-      process.exit(2);
+      process.exitCode = 2;
     });
 }

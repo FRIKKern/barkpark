@@ -26,9 +26,27 @@ import {
   RIVAL_METHOD,
   DEFAULT_LEDGER_DIR,
 } from "../ledger.mjs";
+import { existsSync } from "node:fs";
+import { screenCommand } from "../screen.mjs";
 
 const LEDGER_SRC = fileURLToPath(new URL("../ledger.mjs", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+
+// A fixed clock for the fold's future bound — the SAME shape admitRecipe wants
+// (Z-form UTC). Injected so the future-observed_at tests are deterministic and
+// never drift with wall-clock time.
+const FOLD_NOW = "2026-07-21T00:00:00Z";
+
+// The committed store's contents AT MODULE LOAD, captured BEFORE any test body
+// runs. It is the anchor for the re-scoped "no untracked rows" guard below: a
+// charter-D35 carve-out row is present at load and therefore in this baseline,
+// while a test that writes into the real store during the run creates a file
+// that is NOT — which is the leak that guard exists to catch. See that test.
+const LEDGER_BASELINE_AT_LOAD = new Set(
+  existsSync(DEFAULT_LEDGER_DIR)
+    ? readdirSync(DEFAULT_LEDGER_DIR).filter((f) => f.endsWith(".json"))
+    : [],
+);
 
 function tmpLedger() {
   return mkdtempSync(join(tmpdir(), "grip-ledger-"));
@@ -287,14 +305,26 @@ test("the fold's within-entry sort is chronological across mixed precision, not 
   );
 });
 
-test("an off-shape observed_at on disk does not throw the sort — the write path is not the read path", () => {
-  // admitRecipe rejects offsets, but nothing re-admits what the fold READS.
+test("an off-shape observed_at on disk is REJECTED into unreadable and never throws the fold — tgw5 inverts 'the read path tolerates'", () => {
+  // Before tgw5 the fold TOLERATED an off-shape observed_at, folding it with a
+  // raw-string sort fallback: "the write path is not the read path." The read
+  // path now re-admits what the write path admits, so an offset instant is
+  // OFFSET-OBSERVED-AT and a null one is MISSING-OBSERVED-AT — both routed to
+  // unreadable, named, never a crash and never a silent fold. The crash-safety
+  // that test always guarded survives: one unorderable timestamp costs only its
+  // own row, and the honest row alongside still folds.
   const folded = foldLedger([
+    { file: "good.json", run_id: "g", recipes: [{ subject: "s", quantity: "q", rerun: "wc -l s", derived_level: "L3", deps: [], observed_at: "2026-07-21T00:00:00Z" }] },
     { file: "a.json", run_id: "a", recipes: [{ subject: "s", quantity: "q", rerun: "wc -l s", derived_level: "L3", deps: [], observed_at: "2026-07-21T02:00:00+02:00" }] },
     { file: "b.json", run_id: "b", recipes: [{ subject: "s", quantity: "q", rerun: "cat s | wc -l", derived_level: "L3", deps: [], observed_at: null }] },
   ]);
-  assert.equal(folded.entries.length, 1);
-  assert.equal(folded.entries[0].recipes.length, 2, "both rows are folded — an unorderable timestamp is not a malformed row");
+  assert.equal(folded.entries.length, 1, "only the honest row folds");
+  assert.equal(folded.entries[0].recipes.length, 1);
+  assert.deepEqual(
+    folded.unreadable.map((u) => u.reason).sort(),
+    ["MISSING-OBSERVED-AT", "OFFSET-OBSERVED-AT"],
+    "each off-shape timestamp is named in unreadable, not crashed on",
+  );
 });
 
 test("a malformed `now` is rejected BAD-OPTION — a bound that silently stops bounding is the vacuous green", () => {
@@ -824,12 +854,33 @@ test("THE WRITE PATH IS UNTOUCHED: admitRecipe still REQUIRES a stored quantity,
   assert.deepEqual(Object.keys(admitRecipe(goodRow()).recipe).sort(), [...RECIPE_FIELDS].sort());
 });
 
-test("the static mint.mjs import creates no cycle — mint.mjs imports NOTHING", () => {
+test("the static mint.mjs import creates no cycle — mint imports ONLY the binding rule, and that chain is acyclic (tgw6)", () => {
   // Checked, not assumed: the brief said "verify before relying on it", and a
   // cycle here would be a load-order bug that only shows up in one entry order.
-  const mintSrc = readFileSync(fileURLToPath(new URL("../mint.mjs", import.meta.url)), "utf8");
-  const imports = mintSrc.split("\n").filter((l) => /^\s*import\b/.test(l) || /\brequire\s*\(/.test(l));
-  assert.deepEqual(imports, [], `mint.mjs must import nothing, or the ledger's dependency story is a lie: ${imports.join(" | ")}`);
+  //
+  // tgw6 gave mint.mjs a single dependency on purpose: it IMPORTS the
+  // caller-tree binding rule from binding.mjs rather than restating a second
+  // copy of it (the hand-copied-grammar defect this epic exists to abolish). So
+  // the invariant here is no longer "mint imports nothing" — it is "no import
+  // CYCLE": mint -> binding -> level bottoms out with no path back into the
+  // ledger chain.
+  const importsOf = (rel) => {
+    const src = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+    return src.split("\n").filter((l) => /^\s*import\b/.test(l) || /\brequire\s*\(/.test(l));
+  };
+  assert.deepEqual(
+    importsOf("../mint.mjs"),
+    ['import { classifyBinding } from "./binding.mjs";'],
+    "mint.mjs imports exactly the binding rule — not zero (it must not restate the rule), and not more (the ledger's dependency story stays legible)",
+  );
+  for (const mod of ["../binding.mjs", "../level.mjs"]) {
+    for (const line of importsOf(mod)) {
+      assert.ok(
+        !/["']\.\/(mint|ledger)\.mjs["']/.test(line),
+        `${mod} must not import back into the ledger chain, or mint's static import is a cycle: ${line}`,
+      );
+    }
+  }
   const ledgerSrc = readFileSync(LEDGER_SRC, "utf8");
   assert.match(ledgerSrc, /^import \{ quantityPhrase \} from "\.\/mint\.mjs";$/m,
     "the ledger imports the mint STATICALLY — a dynamic import would make the key derivation an optional extra that can silently not happen");
@@ -887,21 +938,30 @@ test("the committed ledger directory is NOT gitignored — D10's exact trap, che
 // real rows in, the assertion started failing on the store WORKING — and a
 // guard that fires on the system succeeding is a guard that gets deleted.
 //
-// So it now tests what it always MEANT: every row in the committed store is
-// TRACKED. A test that wrote into the real directory leaves an untracked file
-// and still trips this, which is the leak that mattered; deliberate, committed
-// rows do not.
-test("DEFAULT_LEDGER_DIR points inside tooling/grip and holds no UNTRACKED rows", () => {
+// Its second form asserted every on-disk row was git-TRACKED. That reads a
+// legitimate charter-D35 carve-out as a defect: D35 empowers a verify-time
+// actor to write real rows that live UNTRACKED from Verify until Decide commits
+// them, so for the whole of that window (run-proven this wave: two carve-out
+// files present → `not ok`, git-added → green) the guard fired on sanctioned
+// work — again the "fires when the system succeeds" failure, one layer over.
+//
+// RE-SCOPED to a SNAPSHOT DELTA. The real leak is a TEST writing into the store
+// DURING this run — every test here promises to write only to a mkdtemp dir. So
+// the guard anchors on the store's contents captured at MODULE LOAD, before any
+// test body runs (LEDGER_BASELINE_AT_LOAD), and fails only if a .json appeared
+// SINCE. A carve-out row is present at load → in the baseline → not flagged. A
+// test that writes into DEFAULT_LEDGER_DIR creates a file after load → absent
+// from the baseline → flagged, by file name. Git-tracked-ness is no longer the
+// question; "did a test leak a row into the real store this run" is, which is
+// what the guard always MEANT and the only thing it can honestly answer during
+// a carve-out window.
+test("DEFAULT_LEDGER_DIR points inside tooling/grip and grows NO rows during a test run", () => {
   assert.match(DEFAULT_LEDGER_DIR, /tooling\/grip\/ledger\/$/);
   mkdirSync(DEFAULT_LEDGER_DIR, { recursive: true });
   const onDisk = readdirSync(DEFAULT_LEDGER_DIR).filter((f) => f.endsWith(".json"));
 
-  const git = spawnSync("git", ["ls-files", "tooling/grip/ledger/"], { cwd: REPO_ROOT, encoding: "utf8" });
-  if (git.error || git.status !== 0) return; // no git here — the shell gate still checks it
-  const tracked = new Set(git.stdout.split("\n").filter(Boolean).map((p) => p.slice(p.lastIndexOf("/") + 1)));
-
-  const stray = onDisk.filter((f) => !tracked.has(f));
-  assert.deepEqual(stray, [], `the committed store must hold no untracked rows — a test wrote into it: ${stray.join(", ")}`);
+  const appeared = onDisk.filter((f) => !LEDGER_BASELINE_AT_LOAD.has(f));
+  assert.deepEqual(appeared, [], `a test wrote ${appeared.length} row(s) into the committed store this run: ${appeared.join(", ")} — every test must write only to a mkdtemp dir`);
 });
 
 // ── the D18 control ──────────────────────────────────────────────────────────
@@ -1058,4 +1118,177 @@ test("the injected-screen contract MEETS screen.mjs's real return shape", () => 
   // And `{ok:true, reason}` — the ADMIT shape screen.mjs actually returns, which
   // carries a reason string on the success side too — must still admit.
   assert.equal(admitRecipe(row("cat README.md"), { screen: screenLike }).ok, true);
+});
+
+// ── THE READ PATH RE-ADMITS WHAT THE WRITE PATH ADMITTED (tgw5) ──────────────
+//
+// usableRow is only the crash-safety gate. The fold admitted EVERY forgery
+// class admitRecipe refuses: a stored `value`, an outage-capable rerun, a
+// future observed_at and an over-claimed derived_level all folded into clean
+// entries with `"unreadable": []` and exit 0. Each test below is RED against
+// that pre-hardening fold (unreadable was empty) and GREEN now that the fold
+// composes admitRecipe and routes every rejection into unreadable[]. Each
+// mutates ONE field of an honest row, so a rejection can only be that field's.
+
+// The honest baseline these forgery tests each mutate one field of. Folds clean.
+function foldRow(over = {}) {
+  return {
+    file: "probe.json",
+    run_id: "grip-probe",
+    recipes: [{
+      subject: "api/lib/barkpark/plugin.ex",
+      quantity: "callback count",
+      rerun: "grep -c 'def ' api/lib/barkpark/plugin.ex",
+      derived_level: "L3",
+      deps: [],
+      observed_at: "2026-07-20T00:00:00Z",
+      ...over,
+    }],
+  };
+}
+
+test("the fold REJECTS a row carrying `value` — VALUE-STORED, into unreadable[] (RED before hardening)", () => {
+  const clean = foldLedger([foldRow()]);
+  assert.equal(clean.unreadable.length, 0, "the honest baseline must fold clean, or the rejection is not the value's doing");
+  assert.equal(clean.entries.length, 1);
+
+  const folded = foldLedger([foldRow({ value: 42 })]);
+  assert.equal(folded.entries.length, 0, "a forged row is NOT folded");
+  assert.equal(folded.stats.unreadable, 1);
+  assert.equal(folded.unreadable[0].reason, "VALUE-STORED");
+  assert.equal(folded.unreadable[0].file, "probe.json");
+  assert.equal(folded.unreadable[0].index, 0, "the report must name WHICH row, or it cannot be found by hand");
+});
+
+test("the fold REJECTS a screen-refused rerun — REFUSED-COMMAND, only when a screen is injected (RED before hardening)", () => {
+  // derived_level L6 so `rm -rf` (which re-derives L6) does NOT also trip
+  // LEVEL-SKIP — the ONLY reason this row can be refused is the screen.
+  const row = foldRow({ rerun: "rm -rf /opt/barkpark/releases", derived_level: "L6" });
+
+  // No screen: the fold cannot know the command is unsafe — it has no screen,
+  // exactly as admitRecipe has none unless the caller injects one. Folds.
+  const unscreened = foldLedger([row]);
+  assert.equal(unscreened.unreadable.length, 0, "with no screen there is nothing to refuse it — the rejection must be the screen's doing");
+  assert.equal(unscreened.entries.length, 1);
+
+  // Screen injected (as the CLI injects screenCommand): refused.
+  const folded = foldLedger([row], { screen: screenCommand });
+  assert.equal(folded.entries.length, 0);
+  assert.equal(folded.stats.unreadable, 1);
+  assert.equal(folded.unreadable[0].reason, "REFUSED-COMMAND");
+  assert.match(folded.unreadable[0].message, /rm/, "the screen's own reason must survive into the report");
+});
+
+test("the fold REJECTS a future observed_at — FUTURE-OBSERVED-AT, against an injected now (RED before hardening)", () => {
+  const row = foldRow({ observed_at: "2099-01-01T00:00:00Z" });
+
+  // No `now`: the module owns no clock (D19), so with no bound the future
+  // instant is not a future — the fold cannot check it, and does not pretend to.
+  const unbounded = foldLedger([row]);
+  assert.equal(unbounded.unreadable.length, 0, "no now means no future bound — the rejection must be the clock's doing");
+  assert.equal(unbounded.entries.length, 1);
+
+  const folded = foldLedger([row], { now: FOLD_NOW });
+  assert.equal(folded.entries.length, 0);
+  assert.equal(folded.stats.unreadable, 1);
+  assert.equal(folded.unreadable[0].reason, "FUTURE-OBSERVED-AT");
+});
+
+test("the fold REJECTS an over-claimed derived_level — LEVEL-SKIP, needing no external input (RED before hardening)", () => {
+  // `grep -c … <path>` re-derives at L3 (a local scoped grep). A stored L1 is
+  // the exact laundering the epic exists to abolish: an L6 claim about an L1
+  // fact, wearing the doctrine's uniform. The fold used to hand that L1 to
+  // every consumer via restateLevel-as-DRIFT; it must now REFUSE it, because an
+  // over-claim is a forgery, not drift.
+  const clean = foldLedger([foldRow({ derived_level: "L3" })]);
+  assert.equal(clean.unreadable.length, 0, "the honest under-or-equal claim folds clean");
+
+  const folded = foldLedger([foldRow({ derived_level: "L1" })]);
+  assert.equal(folded.entries.length, 0);
+  assert.equal(folded.stats.unreadable, 1);
+  assert.equal(folded.unreadable[0].reason, "LEVEL-SKIP");
+});
+
+test("THE COMBINED PROBE: value + `rm -rf` + observed_at 2099 + a false L1, all at once, fold to unreadable — not a clean entry with exit 0", () => {
+  // The finding verbatim: one row tripping all four classes folded into a clean
+  // entry with `"unreadable": []`, `"stats": {"unreadable": 0}` and exit 0.
+  const probe = foldRow({
+    value: 42,
+    rerun: "rm -rf /tmp/x",
+    observed_at: "2099-01-01T00:00:00Z",
+    derived_level: "L1",
+  });
+  const folded = foldLedger([probe], { now: FOLD_NOW, screen: screenCommand });
+
+  assert.equal(folded.entries.length, 0, "the forged row must reach NO entry");
+  assert.ok(folded.stats.unreadable > 0, "and it must land in unreadable, driving the fold CLI's nonzero exit");
+  const reasons = new Set(folded.unreadable.map((u) => u.reason));
+  for (const r of ["VALUE-STORED", "REFUSED-COMMAND", "FUTURE-OBSERVED-AT", "LEVEL-SKIP"]) {
+    assert.ok(reasons.has(r), `the combined probe must trip ${r} — rejections accumulate, they do not abort at the first`);
+  }
+});
+
+test("THE COMBINED PROBE, END TO END: the fold CLI exits NONZERO on a forged store", () => {
+  const dir = tmpLedger();
+  writeFileSync(join(dir, "grip-forged-aaaaaaaa.json"), JSON.stringify({
+    run_id: "grip-forged",
+    recipes: [{
+      subject: "forged/subject",
+      quantity: "unit state",
+      rerun: "rm -rf /tmp/x",
+      derived_level: "L1",
+      deps: [],
+      observed_at: "2099-01-01T00:00:00Z",
+      value: 42,
+    }],
+  }));
+  const run = spawnSync(process.execPath, [LEDGER_SRC, "fold", dir], { encoding: "utf8" });
+  assert.equal(run.status, 1, `the forged store must fold nonzero — stdout: ${run.stdout.slice(0, 200)}`);
+  const folded = JSON.parse(run.stdout);
+  assert.equal(folded.entries.length, 0, "the forged row reaches no entry");
+  const reasons = new Set(folded.unreadable.map((u) => u.reason));
+  for (const r of ["VALUE-STORED", "REFUSED-COMMAND", "FUTURE-OBSERVED-AT", "LEVEL-SKIP"]) {
+    assert.ok(reasons.has(r), `the CLI must report ${r} — it injects both the shell clock and screenCommand`);
+  }
+  // The banner is STDERR only (D78): stdout stayed pure JSON, so the pipe above
+  // parsed. A banner in stdout would have thrown here.
+  assert.match(run.stderr, /\[grip-provenance\]/, "the self-provenance banner must ride on stderr");
+});
+
+test("THE PROJECTION GUARANTEE: entries[] is a TWELVE-named-field allowlist, so `value` can never leave the fold (D89)", () => {
+  // Defence in depth behind the admitRecipe gate. An honest folded recipe must
+  // carry EXACTLY the twelve named fields — never `value`, never a spread of
+  // the raw row. This is the property that let leads ship a filter over
+  // entries[] and be structurally unable to hand back a stored answer; it lives
+  // in ONE projection, not in the schema, so it is pinned by its exact key set.
+  const folded = foldLedger([foldRow()]);
+  assert.equal(folded.entries.length, 1);
+  const recipe = folded.entries[0].recipes[0];
+  const TWELVE = [
+    "rerun", "derived_level", "stored_level", "level_restated", "level_fallback",
+    "stored_quantity", "quantity_restated", "quantity_fallback",
+    "deps", "observed_at", "run_id", "file",
+  ];
+  assert.deepEqual(Object.keys(recipe).sort(), [...TWELVE].sort(), "the projection must be EXACTLY the twelve-field allowlist — a `...row` spread would grow this set");
+  assert.equal("value" in recipe, false, "the guarantee is the allowlist, not its count — `value` is not named, so it cannot appear");
+
+  // And a forged `value` row never even reaches entries[] now — it is rejected
+  // by the gate AND could not carry `value` through the projection if it did.
+  const forged = foldLedger([foldRow({ value: 99 })]);
+  assert.ok(forged.entries.every((e) => e.recipes.every((r) => !("value" in r))), "no entry recipe may ever carry `value`");
+});
+
+test("CONTROL: the committed rows fold CLEAN under the hardening — unreadable 0, and 0 rows restate level (D89, #5442)", () => {
+  // A hardening that rejects the epic's own real store is broken, not strict.
+  // Folded WITH both bounds armed exactly as the CLI arms them (a REAL clock,
+  // stripped to Z like `date -u` — a fixed past `now` would read the committed
+  // rows as future). Also CONFIRMS derived_level is re-derived at fold time
+  // (tgw2-fold-reread-derived-level, shipped #5442): stats.level_restated is 0
+  // because every committed row's stored level already equals what its command
+  // re-derives today — stated, not assumed.
+  const realNow = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+  const folded = foldLedger(DEFAULT_LEDGER_DIR, { now: realNow, screen: screenCommand });
+  assert.equal(folded.unreadable.length, 0, `the committed store must fold clean: ${JSON.stringify(folded.unreadable.slice(0, 3))}`);
+  assert.ok(folded.stats.rows >= 1, "the store is non-empty — a vacuous clean fold proves nothing");
+  assert.equal(folded.stats.level_restated, 0, "0 of the committed rows change level under re-derivation");
 });

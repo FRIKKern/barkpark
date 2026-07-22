@@ -737,8 +737,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     {editor_blocks, editor_blocks_synth?} =
       Content.resolve_blocks_for_edit(editor_doc, editor_type, socket.assigns.dataset)
 
+    same_doc? = same_editor_doc?(socket.assigns[:editor_doc], editor_doc)
+
     editor_mode =
-      if same_editor_doc?(socket.assigns[:editor_doc], editor_doc),
+      if same_doc?,
         do: socket.assigns[:editor_mode] || :classic,
         else: :classic
 
@@ -755,7 +757,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_blocks: editor_blocks,
         editor_blocks_synth?: editor_blocks_synth?,
         save_status:
-          if(same_editor_doc?(socket.assigns[:editor_doc], editor_doc),
+          if(same_doc?,
             do: socket.assigns[:save_status] || "",
             else: ""
           ),
@@ -775,6 +777,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             editor_doc != nil && is_draft && has_published
       )
       |> maybe_refresh_content_preview()
+      |> clear_secondary_on_doc_change(same_doc?)
 
     case editor && editor[:view] do
       :paper ->
@@ -813,6 +816,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         |> assign(editor_view: :form, media_kind_filter: "all")
     end
   end
+
+  # The secondary (split-view) pane belongs to the PRIMARY document it was
+  # opened beside, so it clears on an ACTUAL primary-document identity change
+  # only. rebuild_panes runs on every nav AND on same-document Save/reload
+  # (the `_ ->` branch reaches clear_paper_view/1 either way), so the clear
+  # must be gated here on the identity result — an unconditional clear inside
+  # clear_paper_view/1 or setup_paper_view/2 wipes a live .bp-secondary-pane
+  # on the very next same-doc save (D199). Left uncleaned, a surviving
+  # secondary pane shrinks .editor-panel below the 860px scrim threshold at
+  # standard/1024 and paints a scrim over live prose (D175/D187).
+  defp clear_secondary_on_doc_change(socket, true), do: socket
+
+  defp clear_secondary_on_doc_change(socket, false),
+    do: assign(socket, secondary_doc: nil, secondary_schema: nil, secondary_type: nil)
 
   @doc false
   def setup_sheet_view(socket, %{} = doc) do

@@ -300,6 +300,39 @@ epic has **91** children (85 open / 6 done). Do not size a slice against the old
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-07-21 — wave 5 REVIEW (five boundaries paid, grade A-)
+
+Fresh wave after wave 4 died at Digest. Thesis: pay D41 (a coverage boundary must be MACHINE-CHECKED,
+a comment is not a tripwire) across five documented-but-unenforced fences. All five built on opus,
+all round 1, file-disjoint, **all green and mutation-proven**, reviewed and re-gated on the review
+worktree with **zero fixes needed**:
+
+- **cch-bl-cssom-floor-decays-as-css-grows** — static `MIN_AUTHORED_HEADS=1201` floor (which a
+  2-rule swallow already sailed over at 1203) → committed `cssom-heads.baseline` asserted with
+  EQUALITY; permanent committed proof (`fixtures/cssom-floor/proof.sh`, green=0 red=1). Gate re-ran
+  green (1203==1203, MISSES 0).
+- **cch-bl-state-rule-per-declaration-gate** — selector-prefix fence → per-declaration probe (test
+  314) asserting each state's `.live-dot` block declares a `background`. Gate 662/662; mutation reds
+  exactly the new probe. Residual: passes `background:transparent` (documented).
+- **cch-bl-source-citation-line-drift** — E11 bans the `app.js:<digits>` citation SHAPE (bp-honest-
+  gates D5) + re-anchored every live drift to function names. Gate 0 errors; mutation reds naming the
+  citation. Cross-language `router.ex:<line>` cites are OUT (follow-up `cch-bl-citation-drift-cross-language`).
+- **cch-w1-emit-fence-regression-test** — the live `emit --write` attribution fence gets its first
+  test (real-CLI-against-throwaway-tree), wired into `doc-gates.yml`. 5/5 + `check.mjs` PASS; mutation
+  reds the two REFUSE tests.
+- **cch-w3-claim-overwrite-fence** — D52 residue: `ensure_claim_not_dropped/4` predicate `not is_nil(now)`
+  → `now == was`, refusing claim SUBSTITUTION (theft-by-overwrite) at the mutate door. Compiled + gated
+  green in-worktree (36/0), `mix format` clean; mutation reds the substitution tests. **Lead: cch-w3
+  WAITS for the CI Elixir Test gate before merge (full suite not run locally, OOM).**
+
+Ledger fully honest: every task `in_progress`, published, all provable criteria stamped, only the
+explicit MERGE-GATED row left open for the lead. **Process gap (not code):** the wave Paper was never
+opened mid-flight — the Reviewer created `cloud-console-hardening-wave-5-2026-07-21` at close as the
+debrief. Epic **NOT yet sealable** (~110 open children). Next wave: land these five, then triage the
+remaining LIVE claim/reality divergences (HEAD-burns-a-live-ticket, the `172.18.0.1` session-IP lie,
+the rate-limiter single-user lie) over further instrument hardening; pick up `cch-bl-citation-drift-cross-language`.
+Paper: `cloud-console-hardening-wave-5-2026-07-21`.
+
 ### 2026-07-21 — wave 3 DECIDE (build in flight)
 
 **The charter itself was the wave's first finding (D60).** Every verifier reported this file missing;

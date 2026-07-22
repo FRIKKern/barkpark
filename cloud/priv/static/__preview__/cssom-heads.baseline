@@ -1,0 +1,12 @@
+# cssom-heads.baseline — the exact authored-rule-head count of app.css.
+#
+# cssom-parity.mjs asserts authoredHeads(app.css) == this number (EXACT, not >=).
+# A /* swallow drops the count and reds; a new rule raises it and reds — until you
+# bump this number IN THE SAME COMMIT as the CSS change. That co-commit is the whole
+# ratchet: the count can only move through a reviewed diff, never drift. See
+# cssom-parity.mjs "THE EXACT-MATCH SIDECAR RATCHET" for why not git-derived and why
+# not a relative tolerance.
+#
+# Measured 2026-07-21 on app.css @ sha256 176f441387bc… (Chrome 150.0.7871.129,
+# node v22.22.0): 1203 authored heads == 1203 CSSOM rules, MISSES 0.
+1203

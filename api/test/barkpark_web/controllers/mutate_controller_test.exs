@@ -662,6 +662,104 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert task_content("cchw2-blocked")["lifecycle_status"] == "blocked"
     end
 
+    # ── cch-w3 (D52 residue): theft-by-OVERWRITE, not just erasure ──────────
+
+    # MEASURED on pristine main before the fence was extended (see the task
+    # ledger for the quoted probe): patch `set:{"claim":{"worker":"attacker",…}}`
+    # on a claimed task returned HTTP 200, the stored claim BECAME the attacker's,
+    # and the honest holder of epoch 1 then got `{:error, :fenced_off}` from
+    # `Barkpark.Tasks.close` — locked out of its own row. wave 2's guard returned
+    # :ok on any non-nil `merged["claim"]`, so a foreign claim satisfied it. The
+    # fence now refuses ANY api-door change to a live claim.
+    test "SUBSTITUTION: set:{\"claim\":{foreign}} through mutate is refused, and the honest owner can still close",
+         %{conn: conn} do
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      create_task(conn, "cchw3-sub")
+
+      {:ok, claimed} =
+        Barkpark.Tasks.claim_by_id("cchw3-sub", "honest-worker",
+          workspace_id: ws.id,
+          project_id: project.id
+        )
+
+      epoch = claimed.content["claim"]["epoch"]
+
+      # The attack: overwrite the claim with a foreign map. No lifecycle change,
+      # so the close guard's first cond branch returns :ok before it — only the
+      # claim fence's `now == was` predicate catches this.
+      resp =
+        mutate(conn, [
+          %{
+            "patch" =>
+              task_patch("cchw3-sub", %{
+                "claim" => %{
+                  "worker" => "attacker",
+                  "epoch" => 99,
+                  "ts_iso" => "2026-07-21T00:00:00Z"
+                }
+              })
+          }
+        ])
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "validation_failed"
+      assert [message] = body["error"]["details"]["claim"]
+      assert message =~ "cannot be reassigned"
+      assert message =~ "honest-worker"
+      assert message =~ "revision precondition does NOT unlock this"
+
+      # The stored claim never changed — the honest worker still owns the row…
+      content = task_content("cchw3-sub")
+      assert content["claim"]["worker"] == "honest-worker"
+      assert content["claim"]["epoch"] == epoch
+
+      # …and the sanctioned front door is NOT collateral damage: the honest owner
+      # closes with its real epoch, attribution intact.
+      assert {:ok, %Barkpark.Content.Document{} = closed} =
+               Barkpark.Tasks.close(claimed.id, "honest-worker", observed_epoch: epoch)
+
+      assert closed.content["lifecycle_status"] == "done"
+      assert closed.content["claim"]["closed_by"] == "honest-worker"
+    end
+
+    test "SUBSTITUTION via createOrReplace carrying a foreign claim is refused even with a correct rev",
+         %{conn: conn} do
+      create_claimed_task(conn, "cchw3-sub-cor")
+
+      # A whole-document write whose `claim` is a DIFFERENT map. The revision
+      # precondition unlocks the lifecycle guard; the claim fence stops the
+      # substitution anyway.
+      attrs =
+        "cchw3-sub-cor"
+        |> task_doc(%{
+          "claim" => %{"worker" => "attacker", "epoch" => 99, "ts_iso" => "2026-07-21T00:00:00Z"}
+        })
+        |> Map.put("ifRevisionID", task_rev("cchw3-sub-cor"))
+
+      resp = mutate(conn, [%{"createOrReplace" => attrs}])
+
+      assert resp.status == 422
+      assert [message] = Jason.decode!(resp.resp_body)["error"]["details"]["claim"]
+      assert message =~ "cannot be reassigned"
+      assert task_content("cchw3-sub-cor")["claim"]["worker"] == "honest-worker"
+    end
+
+    test "an unrelated patch that leaves the claim byte-identical is NOT fenced", %{conn: conn} do
+      create_claimed_task(conn, "cchw3-unrelated")
+
+      # `now == was` — the claim is untouched, so a patch to any other field must
+      # pass. This is the guard-rail against over-broad refusal (the collateral
+      # the fence must not cause).
+      resp =
+        mutate(conn, [%{"patch" => task_patch("cchw3-unrelated", %{"priority" => 3})}])
+
+      assert resp.status == 200
+      content = task_content("cchw3-unrelated")
+      assert content["priority"] == 3
+      assert content["claim"]["worker"] == "honest-worker"
+    end
+
     # ── fixtures ───────────────────────────────────────────────────────────
 
     defp create_claimed_task(conn, id, content_extra \\ %{}) do

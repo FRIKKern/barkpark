@@ -66,6 +66,8 @@
 // commands; doc-truth's matchPath inspects only the FIRST whitespace token,
 // which on a shell rerun is always the interpreter (`cd`, `node`, `git`).
 
+import { classifyBinding } from "./binding.mjs";
+
 // Roots to strip off an absolute token. The worktree pattern is tried first
 // because it is the longer match and a worktree path also contains the
 // checkout pattern. Both are matched against the token with a trailing slash
@@ -386,10 +388,75 @@ export function quantityPhrase(rerun) {
   return pattern === null ? phrase : `${phrase}:${pattern}`;
 }
 
+// ── binding the recipe to the CALLER's tree (charter D73/D74, slice tgw6) ─────
+//
+// A rerun harvested as `cd <absolute checkout> && <cmd>` bakes a hard path to ONE
+// box into the stored recipe. For most reads that path is load-bearing — a bare
+// `wc -l x` answers about whatever tree you stand in, `git show HEAD:x` about
+// whichever worktree ran it — so it MUST be kept, or the recipe silently starts
+// measuring a different thing. But when the answer is decided by a REF rather
+// than by the working tree (`git show <sha>:x`, `git show origin/main:x`), the
+// `cd` provably cannot change the result, and storing it pins a PORTABLE recipe
+// to a checkout that will be pruned. This strips the leading `cd <absolute> && `
+// in exactly that case and only that case.
+//
+// It does NOT restate the invariance rule — it IMPORTS it. `classifyBinding`
+// (binding.mjs) is the single authority on whether the remainder is ref-decided;
+// a second regex written here to re-decide content-addressed vs per-worktree is
+// precisely the hand-copied-grammar defect this epic exists to abolish. The only
+// thing owned locally is the mechanical shape of the prefix being removed.
+
+// The ONLY prefix shape this touches: a leading `cd <target> && `. The target may
+// be single- or double-quoted. Everything past the first `&&` is the remainder,
+// handed to classifyBinding verbatim and never itself rewritten.
+const LEADING_CD = /^cd\s+('[^']*'|"[^"]*"|\S+)\s+&&\s+/;
+
+/**
+ * bindToCaller(rerun) → { rerun, rebound, binding_class, reason }
+ *
+ * Strips a leading `cd <ABSOLUTE> && ` prefix iff classifyBinding rates the
+ * REMAINDER content-addressed or shared-ref. Otherwise the rerun is returned
+ * untouched with the reason it was KEPT recorded. Never inspects or alters
+ * subject/deps — those are minted from the original command by the caller, which
+ * is what makes this transform a provable no-op over the index.
+ */
+function bindToCaller(rerun) {
+  const m = rerun.match(LEADING_CD);
+  if (!m) return { rerun, rebound: false, binding_class: null, reason: null };
+
+  const target = m[1].replace(/^['"]/, "").replace(/['"]$/, "");
+  // The invariance argument is about an ABSOLUTE checkout pin. A relative `cd api`
+  // is a different, narrower case and is left alone here.
+  if (!target.startsWith("/")) return { rerun, rebound: false, binding_class: null, reason: null };
+
+  const remainder = rerun.slice(m[0].length);
+  const verdict = classifyBinding(remainder);
+  const klass = verdict.binding_class;
+
+  if (klass === "content-addressed" || klass === "shared-ref") {
+    return {
+      rerun: remainder,
+      rebound: true,
+      binding_class: klass,
+      reason: `stripped \`cd ${target} &&\` — classifyBinding rates the remainder ${klass} (${verdict.rule}): the answer is decided by ${verdict.anchor ?? "a ref"} and re-derives identically from ${verdict.portable_scope}, so the cd cannot change it`,
+    };
+  }
+  return {
+    rerun,
+    rebound: false,
+    binding_class: klass,
+    reason: `kept \`cd ${target} &&\` — classifyBinding rates the remainder ${klass} (${verdict.rule}): the cwd/tree IS this answer's binding, so stripping it would silently change what the recipe measures`,
+  };
+}
+
 /**
  * mintRecipe(fact, { observed_at }) →
- *   { ok: true, recipe, subject_source: "path-token" | "fallback" }
+ *   { ok: true, recipe, subject_source: "path-token" | "fallback", binding }
  * | { ok: false, reason }
+ *
+ * `binding` is { class, rebound, reason }: the recorded verdict of the caller-tree
+ * rebind, kept OFF the recipe itself so RECIPE_FIELDS stays the frozen six-key
+ * allowlist (D74) — an extra key on `recipe` would be UNKNOWN-FIELD at admit.
  *
  * `derived_level` is deliberately NOT minted: admitRecipe derives it from the
  * rerun alone, and a supplied value is only ever a ceiling-checked claim (D2).
@@ -414,8 +481,18 @@ export function mintRecipe(fact, { observed_at } = {}) {
   const quantity = quantityPhrase(rerun);
   if (quantity === "") return { ok: false, reason: "NO-QUANTITY" };
 
-  const recipe = { subject, quantity, rerun, deps: paths, observed_at };
-  return { ok: true, recipe, subject_source: paths.length > 0 ? "path-token" : "fallback" };
+  // subject, quantity and deps are all minted from the ORIGINAL command above.
+  // Only the STORED rerun is rebound — so re-minting a row can never move its
+  // subject or deps, which is the provable no-op the regression floor asserts.
+  const bound = bindToCaller(rerun);
+
+  const recipe = { subject, quantity, rerun: bound.rerun, deps: paths, observed_at };
+  return {
+    ok: true,
+    recipe,
+    subject_source: paths.length > 0 ? "path-token" : "fallback",
+    binding: { class: bound.binding_class, rebound: bound.rebound, reason: bound.reason },
+  };
 }
 
 /**
