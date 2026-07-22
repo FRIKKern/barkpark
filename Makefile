@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
+.PHONY: deploy rebuild restart status logs seed setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -154,6 +154,25 @@ cli-build: cli-assets-sync ## Build native bp binary into dist/ (this host's GOO
 	@echo ">> Building native bp $(VERSION) -> dist/bp..."
 	CGO_ENABLED=0 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp ./cmd/barkpark
 	@echo ">> Done: dist/bp"
+
+# Where the installed `bp` lands on PATH. Default mirrors doctor.sh's hint and
+# the common `~/.local/bin` user-bin dir; override for a different prefix,
+# e.g. `make cli-install BINDIR=/usr/local/bin`.
+BINDIR ?= $(HOME)/.local/bin
+
+cli-install: cli-build ## LOCAL: build + install the STAMPED bp onto PATH ($(BINDIR)/bp)
+	@# cli-build stamps cliCommit/cliVersion/cliDate via -ldflags; install (not a
+	@# bare `go build`) PRESERVES that stamp so `make doctor` can prove provenance.
+	@mkdir -p "$(BINDIR)"
+	@install -m 0755 dist/bp "$(BINDIR)/bp"
+	@echo ">> Installed stamped bp -> $(BINDIR)/bp"
+	@# Fail loudly if the copy we just placed lacks a commit stamp — an unstamped
+	@# binary is exactly the drift doctor.sh reds on, so never call it installed.
+	@"$(BINDIR)/bp" version -o json 2>/dev/null | grep -q '"commit"' \
+	  || { echo "!! installed bp has NO commit stamp (built without -ldflags) — provenance broken"; exit 1; }
+	@echo ">> Provenance OK: $$("$(BINDIR)/bp" version -o json 2>/dev/null)"
+	@command -v bp >/dev/null 2>&1 && [ "$$(command -v bp)" != "$(BINDIR)/bp" ] \
+	  && echo ">> NOTE: PATH resolves bp to $$(command -v bp), not $(BINDIR)/bp — adjust PATH or BINDIR" || true
 
 # The pdrender→TUI wasm the paper reader lazy-loads (api/.../bulldocs.html.heex
 # fetches /assets/bp-pdrender.wasm.gz). Built from #1357's entry (cmd/pdrender-wasm)

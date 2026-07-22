@@ -80,15 +80,21 @@ fi
 # bp embeds its build commit; it is stale only if Go-side inputs changed since.
 if command -v bp >/dev/null 2>&1; then
   BP_COMMIT="$(bp version 2>/dev/null | sed -n 's/.*"commit": *"\([0-9a-f]*\)".*/\1/p')"
-  if [ -z "$BP_COMMIT" ] || ! git cat-file -e "$BP_COMMIT^{commit}" 2>/dev/null; then
-    skip "bp build commit unknown ($BP_COMMIT) — staleness check skipped"
+  if [ -z "$BP_COMMIT" ]; then
+    # No commit field at all → the binary was built by a bare `go build` with no
+    # -ldflags, so its provenance is unverifiable. This is the PATH/dist
+    # divergence trap: the same `bp` name can mean different code across workers.
+    # RED loudly (do not skip); the fix installs a commit-stamped bp.
+    bad "installed bp has NO build-commit stamp (built without -ldflags) — run: make cli-install"
+  elif ! git cat-file -e "$BP_COMMIT^{commit}" 2>/dev/null; then
+    skip "bp build commit not in this checkout ($BP_COMMIT) — staleness check skipped"
   elif [ -n "$(git diff --name-only "$BP_COMMIT" HEAD -- '*.go' go.mod go.sum internal cmd 2>/dev/null | head -1)" ]; then
-    bad "installed bp ($BP_COMMIT) predates Go changes in HEAD — run: make update"
+    bad "installed bp ($BP_COMMIT) predates Go changes in HEAD — run: make cli-install"
   else
     ok "installed bp ($BP_COMMIT) is current"
   fi
 else
-  skip "no bp on PATH — install: make cli-build && install -m 0755 dist/bp ~/.local/bin/bp"
+  skip "no bp on PATH — install: make cli-install"
 fi
 
 # ── 3. Pending migrations on the local dev DB? ──────────────────────────────
