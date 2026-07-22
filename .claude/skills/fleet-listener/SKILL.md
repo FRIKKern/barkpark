@@ -36,7 +36,9 @@ bp fleet beat <WORKER> --status idle --ttl 900 --agent claude-code
 ```
 
 `<WORKER>` is a REQUIRED POSITIONAL — never `--worker` (that exits 2 "unknown flag"). Declare
-`--status idle | working | blocked` (never `online` — it 422s; online/offline are server-derived).
+`--status idle | working | blocked` (never `online` — it 422s; online/offline are server-derived):
+`working` when beating at a claim boundary, back to `idle` at close — the orchestrator dispatches
+off that pill.
 The `--ttl 900` is honest, not generous: a resident skill can only beat while a turn is running,
 and an SSE-parked idle session runs no code between turns, so 900s is the mechanical ceiling.
 **Honesty note (PDF-D32):** `offline` means only "no beat within the TTL" — for a quietly-parked
