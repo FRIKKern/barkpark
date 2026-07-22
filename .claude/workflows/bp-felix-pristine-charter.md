@@ -1310,6 +1310,38 @@ self_update budget fix, and REFUSES the rest with reasons (D97). 3 slices, all r
 
 ## Wave log
 
+- **Wave 16 — 2026-07-22 — REVIEWED (A−, per `felix-pristine-wave-16-2026-07-22`). Arm: E (E1).**
+  COMPLETE the FK-abort scar-class sweep W14 opened on MediaFile. E1 = arm-D straight-to-build cost
+  profile PLUS one real ~5-minute premise-smoke scout (no survey fleet). **2 round-1 slices, opus,
+  file-disjoint, both landed on their branches with PRs, both reviewer-verified with ZERO code fixes
+  needed:**
+  (1) **bulldocs Event.changeset FK-constraint** (`task-felix-w13-bulldocs-event-fk-constraint`,
+  PR #5714, `loop-epic/bulldocs-event-fk-constraint-restore-blo-0`) — reworked from the W13 refusal
+  (D93 overrides D79). `paper_events.workspace_id/project_id` are real CASCADE FKs cast with zero
+  `foreign_key_constraint`; a concurrent scope-delete raised `Ecto.ConstraintError` out of
+  `Events.create_event/1`'s bare `Repo.insert`, escaping `block_ops.ex maybe_append_paper_event/3`'s
+  documented "logged, never raised" contract and 500ing paper ingest. Fix maps the abort to
+  `{:error, cs}`. `dataset_id` correctly untouched (not cast). Gate 3/0; RED-first re-proven by
+  mutation (reviewer).
+  (2) **SchemaDefinition.changeset FK-constraint** (`task-felix-w16-schemadef-fk-constraint`,
+  PR #5715, `loop-epic/schemadefinition-fk-constraint-concurren-1`) — casts all three scope FKs +
+  two `unique_constraint`, zero `foreign_key_constraint`; `Content.upsert_schema/3`'s raw
+  `Repo.insert()/update()` raised on concurrent scope-delete. Fix appends the three FK constraints
+  after the untouched unique ones. Gate 4/0; RED-first re-proven by mutation (reviewer).
+  **E1 experiment reading (no kill signal):** the single premise-smoke confirmed every premise both
+  slices lean on at L1 on origin/main AND correctly REFUTED candidate 3 (codelists Value/Translation)
+  as non-reachable BEFORE a builder was dispatched — a real pre-build premise-failure catch, echoing
+  D79's earlier W13 refusal. No builder hit a premise surprise at build time; reviewer independently
+  re-verified every premise TRUE against real code + mutation gates. Cost ~1 scout (well under half a
+  survey fleet). **Verdict: CONSISTENT with the E1 hypothesis but UNDER-POWERED** — n=3 candidates
+  (2 built + 1 smoke-killed), all premises accurate, so this wave cannot distinguish "smoke caught
+  everything" from "nothing to catch." Honest count of 2 is a valid E1 result; the DATA is that the
+  smoke killed the one non-reachable candidate cheaply and left zero build-time premise failures.
+  Backlog seeded: `task-felix-w16-fk-abort-class-census-remainder` (P4 — census the FK-abort corners
+  the smoke did not scan: sync/, oban workers, remaining plugins schemas). Ledgers honest (both
+  in_progress, 2/3, merge-gated criterion open for lead). Next: lead merges both PRs (Elixir Test
+  gate) and closes criterion [2] on each.
+
 - **Wave 15 — 2026-07-22 — DECIDED (building). Arm: C.** Ratified D92–D97. Minimal-research wave on a
   well-chartered epic: strategist solo read → ONE premise smoke (3/3 CONFIRMED, collision-free) → 2
   RUN-verifiers → 3 round-1 file-disjoint slices under `task-96a908af98698118`, all linked to
