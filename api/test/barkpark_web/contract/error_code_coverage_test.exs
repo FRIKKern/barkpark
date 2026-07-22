@@ -58,6 +58,10 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
                    # (server-to-server), not a client-facing API.
                    "inbound_failed",
                    "intake_failed",
+                   # pull_request merge event → merge-gate autostamp reconcile
+                   # (same github-webhook receiver family; fail-closed 500 when
+                   # the reconcile raises).
+                   "merge_reconcile_failed",
                    # github-adopt operational bridge — `bp github adopt`.
                    "adopt_failed",
                    "not_intake"
