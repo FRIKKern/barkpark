@@ -16,6 +16,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
   import Phoenix.LiveViewTest
 
+  import Barkpark.TenancyFixtures, only: [ensure_default_scope!: 0]
+
   alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.StudioChat
@@ -6640,6 +6642,27 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "/studio/chat/#{tenant.id}"
       assert html =~ "/studio/chat/#{global.id}"
       assert has_element?(view, ~s([data-test-id="chat-session-row"]))
+    end
+
+    # Herd charter D43h: `BlockedSweeper` is fail-closed on NULL owners, so a
+    # `nil`-owned session can never fire `chat_blocked`. The Studio create path
+    # used to stamp `:global` (NULL) for managed sessions — this pins the fix:
+    # the first send creates a store row OWNED by the resolved workspace
+    # (Default Workspace fallback on the unscoped admin route).
+    test "the first send stamps the created session's owner_workspace_id (D43h)", %{conn: conn} do
+      {default_ws, _project} = ensure_default_scope!()
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+
+      sid = store_id(view)
+      assert sid, "the first send must create the store session row"
+
+      owner = StudioChat.get_session(sid).owner_workspace_id
+
+      assert owner == default_ws.id,
+             "a Studio-created managed session must carry a non-NULL owner " <>
+               "(got #{inspect(owner)}) — a NULL owner is invisible to BlockedSweeper forever"
     end
   end
 

@@ -37,8 +37,13 @@ defmodule BarkparkWeb.ChatController do
       guessing a UUID.
 
   Ownership is stamped at create by the store from the scope threaded into
-  `create_session/2`; a session an admin creates is `nil`-owned (instance-global,
-  visible only to `:global`).
+  `create_session/2`. An admin (`:global`) caller keeps instance-wide READ and
+  CONTROL authority (D21 unchanged), but the session it CREATES is still stamped
+  with an owner — the admin token's bound workspace, falling back to the seeded
+  Default Workspace (herd charter D43h: `BlockedSweeper` is fail-closed on NULL
+  owners, so a `nil`-owned session can never fire `chat_blocked`). Only a
+  pre-tenancy instance with no Default Workspace still creates a `nil`-owned
+  (instance-global) session.
 
   ## Secret safety (D23)
 
@@ -102,12 +107,13 @@ defmodule BarkparkWeb.ChatController do
     with {:ok, attrs} <- validate_create(params) do
       id = Ecto.UUID.generate()
 
-      # Thread the caller's scope into the sealed store (charter D17/D18): the
-      # store stamps `owner_workspace_id` from the scope — a workspace Connector
-      # owns what it creates, an admin (`:global`) creates a `nil`-owned
-      # instance-global session. The scope is authoritative in the store, so it
-      # is passed as the second arg, NOT smuggled through `attrs` (the store
-      # overrides any owner in `attrs`).
+      # Thread the caller's CREATE scope into the sealed store (charter
+      # D17/D18): the store stamps `owner_workspace_id` from the scope — a
+      # workspace Connector owns what it creates, and an admin stamps its own
+      # workspace via `create_scope/1` (herd D43h — a `nil`-owned session is
+      # invisible to `BlockedSweeper` forever). The scope is authoritative in
+      # the store, so it is passed as the second arg, NOT smuggled through
+      # `attrs` (the store overrides any owner in `attrs`).
       case StudioChat.create_session(
              %{
                id: id,
@@ -117,7 +123,7 @@ defmodule BarkparkWeb.ChatController do
                cwd: provider_cwd(attrs.provider),
                mode: attrs.mode
              },
-             scope(conn)
+             create_scope(conn)
            ) do
         {:ok, _session} ->
           if attrs.model, do: StudioChat.set_model_choice(id, attrs.model)
@@ -717,6 +723,42 @@ defmodule BarkparkWeb.ChatController do
   # ─────────────────────────────────────────────────────────────────────────
 
   defp scope(conn), do: conn.assigns.chat_scope
+
+  # The scope that STAMPS `owner_workspace_id` at create (herd charter D43h).
+  # READ/CONTROL authority stays exactly `chat_scope/1` (`:global` admins keep
+  # instance-wide reach, D21) — but `BlockedSweeper` is fail-closed on NULL
+  # owners, so a `nil`-owned session can NEVER fire `chat_blocked`. A workspace
+  # Connector stamps its own workspace (unchanged); an admin stamps the
+  # workspace its token is bound to, falling back to the seeded Default
+  # Workspace. Only a pre-tenancy instance with NO Default Workspace still
+  # yields `:global` (a `nil`-owned instance-global session — honest: there is
+  # no tenant to own it).
+  defp create_scope(conn) do
+    case scope(conn) do
+      {:workspace, _ws} = scoped -> scoped
+      :global -> admin_owner_scope(conn)
+    end
+  end
+
+  defp admin_owner_scope(conn) do
+    token_ws =
+      case conn.assigns[:api_token] do
+        %{workspace_id: ws} when is_binary(ws) -> ws
+        _ -> nil
+      end
+
+    case token_ws || default_workspace_id() do
+      nil -> :global
+      ws -> {:workspace, ws}
+    end
+  end
+
+  defp default_workspace_id do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: id} -> id
+      nil -> nil
+    end
+  end
 
   # Map the controller's `chat_scope` onto the store funnel's `scope` arg
   # (`:global | workspace_id binary`, charter D17): `{:workspace, ws}` → `ws`.

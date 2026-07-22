@@ -16,7 +16,10 @@ defmodule BarkparkWeb.ChatControllerTest do
 
   alias Barkpark.Auth
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.BlockedSweeper
+  alias Barkpark.StudioChat.Message
   alias Barkpark.StudioChat.Recorder
+  alias Barkpark.Webhooks
   alias BarkparkWeb.ChatController
   alias BarkparkWeb.Studio.ClaudeChat
 
@@ -35,6 +38,20 @@ defmodule BarkparkWeb.ChatControllerTest do
     # {:error, :unknown_approval}. chat_controller.approval/2 must swallow this
     # (soft-match) and still flip the status + 204, never MatchError → 500.
     def answer_approval(_ref, _request_id, _decision), do: {:error, :unknown_approval}
+  end
+
+  defmodule SweepEcho do
+    @moduledoc false
+    # Webhook HTTP adapter that echoes each delivery to the test pid — makes a
+    # BlockedSweeper fire observable (blocked_sweeper_test's PidEcho twin).
+    def post(url, body, _headers) do
+      case Application.get_env(:barkpark, :chat_owner_stamp_test_pid) do
+        pid when is_pid(pid) -> send(pid, {:sweep_delivered, url, body})
+        _ -> :ok
+      end
+
+      {:ok, 200}
+    end
   end
 
   setup do
@@ -478,6 +495,106 @@ defmodule BarkparkWeb.ChatControllerTest do
              |> json_response(400)
 
       assert length(StudioChat.list_sessions()) == before, "a rejected create wrote a session row"
+    end
+  end
+
+  # ── create: owner_workspace_id stamp (herd charter D43h seal) ───────────────
+
+  describe "POST /sessions — owner_workspace_id stamp feeds BlockedSweeper (D43h)" do
+    # `BlockedSweeper` is deliberately fail-closed on NULL owners: a `nil`-owned
+    # session can NEVER fire `chat_blocked`. The live-proof on guerrilla found
+    # EVERY real session NULL-owned — created by admin (`:global`) tokens, which
+    # used to stamp NULL. These tests pin the fix at the wire: an admin-created
+    # session carries a real owner AND the fail-closed sweeper actually fires
+    # for it. Breaking the create-scope stamp (reverting `create_scope/1` to
+    # `scope/1`) reds BOTH assertions — the sweep returns 0 again.
+
+    setup do
+      prev = Application.get_env(:barkpark, :webhook_http_adapter)
+      Application.put_env(:barkpark, :webhook_http_adapter, SweepEcho)
+      Application.put_env(:barkpark, :chat_owner_stamp_test_pid, self())
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :webhook_http_adapter, prev),
+          else: Application.delete_env(:barkpark, :webhook_http_adapter)
+
+        Application.delete_env(:barkpark, :chat_owner_stamp_test_pid)
+      end)
+
+      :ok
+    end
+
+    test "a workspace-bound admin stamps its workspace — and BlockedSweeper fires for the session" do
+      ws = create_workspace!()
+      raw = "chat-admin-ws-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(raw, "chat-admin-ws", @dataset, ["read", "write", "admin"], ws.id)
+
+      body = json_conn(raw) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
+      session = StudioChat.get_session(body["id"])
+
+      assert session.owner_workspace_id == ws.id,
+             "a wire-created admin session must carry a non-NULL owner " <>
+               "(BlockedSweeper is fail-closed on NULL, D43h)"
+
+      # The stamp is what makes the session VISIBLE to the fail-closed sweeper:
+      # a chat_blocked webhook + one over-threshold pending ask ⇒ EXACTLY one
+      # fire, carrying this session id and the stamped workspace.
+      {:ok, _wh} =
+        Webhooks.create_webhook(
+          %{
+            "name" => "cb-#{System.unique_integer([:positive])}",
+            "url" => "https://sink.example/blocked",
+            "secret" => "sek",
+            "blocked_threshold_s" => 300
+          },
+          workspace_id: ws.id
+        )
+
+      {:ok, _ask} =
+        %Message{}
+        |> Message.changeset(%{
+          session_id: session.id,
+          seq: System.unique_integer([:positive]),
+          role: "approval",
+          metadata: %{"approval_status" => "pending"}
+        })
+        |> Barkpark.Repo.insert()
+
+      assert BlockedSweeper.sweep(DateTime.add(DateTime.utc_now(), 360, :second)) == 1,
+             "the sweeper must pick up the wire-created session via its stamped owner"
+
+      assert_received {:sweep_delivered, "https://sink.example/blocked", delivered}
+      payload = Jason.decode!(delivered)
+      assert payload["session_id"] == session.id
+      assert payload["workspace_id"] == ws.id
+    end
+
+    test "a pre-tenancy (unbound) admin token falls back to the seeded Default Workspace" do
+      {default_ws, _project} = ensure_default_scope!()
+
+      # Insert the token row DIRECTLY: `Auth.create_token/5` always binds to the
+      # Default Workspace when one exists, but guerrilla's real admin token is
+      # pre-tenancy — `workspace_id` NULL. That shape must exercise the
+      # create-time fallback arm, not stamp NULL.
+      raw = "chat-admin-unbound-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        %Auth.ApiToken{}
+        |> Auth.ApiToken.changeset(%{
+          token_hash: Auth.ApiToken.hash_token(raw),
+          label: "pre-tenancy-admin",
+          dataset: @dataset,
+          permissions: ["read", "write", "admin"]
+        })
+        |> Barkpark.Repo.insert()
+
+      body = json_conn(raw) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
+
+      assert StudioChat.get_session(body["id"]).owner_workspace_id == default_ws.id,
+             "an unbound admin's session must fall back to the seeded Default Workspace"
     end
   end
 
