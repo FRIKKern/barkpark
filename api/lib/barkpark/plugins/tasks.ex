@@ -938,7 +938,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "stage",
         summary:
-          "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open. Enforces the transition-legality table (considering⇄researching; considering|researching→open; open→considering; same→same). Writes content.engagement {object,holder,ts,note} on →considering/researching and clears it on →open; emits a task.staged event. Kills go through `bp task close` (→ cancelled), claims through `bp task claim` (→ in_progress); an illegal transition (e.g. → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
+          "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,note} on →considering/researching and clears it on →open; emits a task.staged event. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stage"},
         auth_tier: "read",
         args: [

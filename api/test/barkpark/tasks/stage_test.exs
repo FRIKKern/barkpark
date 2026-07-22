@@ -70,6 +70,14 @@ defmodule Barkpark.Tasks.StageTest do
 
   defp reload(%Document{id: id}), do: Repo.get!(Document, id)
 
+  # The task.stage verb summary as `/v1/capabilities` (and `bp task stage
+  # --help`) advertise it — the single source we assert the reopen edges into.
+  defp stage_verb_summary do
+    Barkpark.Plugins.Tasks.cli_commands()
+    |> Enum.find(&(&1.id == "task.stage"))
+    |> Map.fetch!(:summary)
+  end
+
   describe "POST /v1/tasks/:doc_id/stage — thought round-trip" do
     test "open → considering → researching → open writes then clears engagement",
          %{conn: conn, scope: scope} do
@@ -168,6 +176,67 @@ defmodule Barkpark.Tasks.StageTest do
       resp = stage(conn, doc_id, %{state: "cancelled", worker: "cycle-1"})
       assert resp.status == 422
       assert Jason.decode!(resp.resp_body)["reason"] == "illegal_transition"
+    end
+  end
+
+  describe "POST /v1/tasks/:doc_id/stage — terminal-reopen truth (S1)" do
+    # The manifest description (bp task stage --help) MUST enumerate the reopen
+    # edges the enforced gate (Transitions.legal?/2 for a stageable target)
+    # sanctions. If a well-meaning edit trims one of these from the string, this
+    # reds — the mutation-proof that the help text can no longer lie.
+    test "manifest description names every terminal/blocked reopen edge" do
+      summary = stage_verb_summary()
+
+      for edge <- ~w(done→open cancelled→open blocked→open in_progress→open) do
+        assert summary =~ edge,
+               "task.stage manifest description omits the sanctioned reopen edge #{edge} — " <>
+                 "bp task stage --help would lie about the enforced legal set"
+      end
+
+      # …and it still teaches the guarded truth: done/in_progress are NOT
+      # user-stageable inbound; they are reached only through close/claim.
+      assert summary =~ "done is reached ONLY through"
+      assert summary =~ "in_progress ONLY through"
+    end
+
+    test "the four named reopen edges are exactly what Transitions.legal?/2 sanctions to a stageable target" do
+      # Ground-truth: for every stageable target, which from-states are legal?
+      # `open` is the only stageable target with terminal/blocked inbounds, and
+      # they are precisely done, cancelled, blocked, in_progress (plus the
+      # thought edges already advertised).
+      statuses = Barkpark.Tasks.Transitions.statuses()
+      # Cross-state inbounds to `open` (excluding the open→open same→same no-op).
+      reopen_froms =
+        for f <- statuses, f != "open", Barkpark.Tasks.Transitions.legal?(f, "open"), do: f
+
+      assert Enum.sort(reopen_froms) ==
+               Enum.sort(~w(considering researching blocked in_progress done cancelled))
+    end
+
+    test "stage(done-task-with-claim, open) SUCCEEDS and KEEPS the claim untouched",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-reopen")
+      # A terminally-done task that still carries a claim map (the false-done
+      # reopen recipe: a task marked done while a stale claim sits on it).
+      claim = %{
+        "worker" => "ghost-worker",
+        "epoch" => 7,
+        "ts_iso" => "2026-07-01T00:00:00Z",
+        "now" => %{"text" => "stranded", "ts" => "2026-07-01T00:00:00Z"}
+      }
+
+      task =
+        mk_task!(doc_id, scope, %{"lifecycle_status" => "done", "claim" => claim})
+
+      resp = stage(conn, doc_id, %{state: "open", worker: "reconciler"})
+      assert resp.status == 200
+      assert Jason.decode!(resp.resp_body)["doc"]["lifecycle_status"] == "open"
+
+      row = reload(task)
+      assert row.content["lifecycle_status"] == "open"
+      # The claim survives verbatim — stage reopens without epoch machinery and
+      # never rewrites the claim. Nobody may "fix" this sanctioned edge.
+      assert row.content["claim"] == claim
     end
   end
 
