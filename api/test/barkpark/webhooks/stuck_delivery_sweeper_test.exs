@@ -92,6 +92,23 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeperTest do
     ev.id
   end
 
+  # Struct-insert a DOCUMENT-kind row with a NULL `event_id`. The changeset would
+  # REJECT this (document requires event_id), so we bypass it via a direct struct
+  # insert to simulate the crash-orphan poison row: the catch-all rebuild's
+  # `Repo.get(MutationEvent, nil)` raises ArgumentError. Backdated past the cutoff.
+  defp seed_poison_document_delivery(wh_id, age_seconds) do
+    ts = DateTime.utc_now() |> DateTime.add(-age_seconds, :second)
+
+    Repo.insert!(%Delivery{
+      endpoint_id: wh_id,
+      event_id: nil,
+      source_kind: "document",
+      status: "pending",
+      inserted_at: ts,
+      updated_at: ts
+    })
+  end
+
   # Insert a delivery row for (webhook, event) in the given status, with its
   # updated_at backdated by `age_seconds` — simulating a row claimed that long
   # ago (a crashed dispatcher leaves it `pending`).
@@ -215,6 +232,38 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeperTest do
     # The claim-CAS still bumped updated_at, so the next sweep won't re-select it
     # until it ages past the threshold again (no tight loop).
     assert Repo.get(Delivery, stuck.id).status == "pending"
+  end
+
+  test "a NULL-event_id document poison row is skipped, never aborting the batch",
+       %{webhook: wh} do
+    :ok = FakeHTTP.start([{:ok, 200}])
+
+    # A crash-orphan poison row: document-kind but `event_id` NULL. Pre-fix the
+    # catch-all's `Repo.get(MutationEvent, nil)` raised ArgumentError inside the
+    # unguarded reduce, aborting recovery for the WHOLE batch — the recoverable
+    # row below then starved forever, every cron pass.
+    poison = seed_poison_document_delivery(wh.id, 600)
+
+    # A genuinely recoverable document row in the SAME batch.
+    eid = new_event_id()
+    _good = seed_delivery(wh.id, eid, "pending", 600)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert %{swept: 1, skipped: 1} = StuckDeliverySweeper.sweep(300)
+      end)
+
+    # The recoverable row delivered to a terminal status — it no longer starves
+    # behind the poison row.
+    assert length(FakeHTTP.calls()) == 1
+    assert Webhooks.get_delivery(wh.id, eid).status == "ok"
+
+    # The poison row was claimed-and-skipped (:gone): still pending, no HTTP, and
+    # LOUDLY logged with its id / source_kind / event_id.
+    assert Repo.get(Delivery, poison.id).status == "pending"
+    assert log =~ "unrecoverable"
+    assert log =~ ~s(source_kind="document")
+    assert log =~ "event_id=nil"
   end
 
   test "re-dispatch reuses the same row — no second delivery row, UNIQUE intact",
