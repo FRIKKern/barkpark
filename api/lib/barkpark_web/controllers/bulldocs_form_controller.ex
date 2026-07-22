@@ -54,27 +54,29 @@ defmodule BarkparkWeb.BulldocsFormController do
         conn |> put_status(201) |> json(%{ok: true})
 
       {:error, :rate_limited} ->
-        conn |> put_status(429) |> json(%{ok: false, error: %{code: "rate_limited"}})
+        envelope(conn, 429, "rate_limited", "too many submissions from this address")
 
       {:error, :not_found} ->
-        conn |> put_status(404) |> json(%{ok: false, error: %{code: "paper_not_found"}})
+        envelope(conn, 404, "not_found", "paper not found")
 
       {:error, :no_form} ->
-        conn
-        |> put_status(422)
-        |> json(%{ok: false, error: %{code: "no_form", message: "paper has no form block"}})
+        envelope(conn, 422, "validation_failed", "paper has no form block")
 
       {:error, :no_answers} ->
-        conn
-        |> put_status(422)
-        |> json(%{
-          ok: false,
-          error: %{code: "no_answers", message: "no valid answers for this form's questions"}
-        })
+        envelope(conn, 422, "validation_failed", "no valid answers for this form's questions")
 
       {:error, _} ->
-        conn |> put_status(422) |> json(%{ok: false, error: %{code: "invalid"}})
+        envelope(conn, 422, "validation_failed", "invalid submission")
     end
+  end
+
+  # Error envelopes stay inside the ratified public vocabulary
+  # (Content.Errors.known_codes/0 — the ErrorCodeCoverage contract): the code
+  # is canonical, the MESSAGE carries the per-cause detail.
+  defp envelope(conn, status, code, message) do
+    conn
+    |> put_status(status)
+    |> json(%{ok: false, error: Barkpark.Content.Errors.stamp(%{code: code, message: message}, conn)})
   end
 
   # ── guards ─────────────────────────────────────────────────────────────────

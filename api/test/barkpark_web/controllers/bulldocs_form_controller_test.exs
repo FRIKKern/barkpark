@@ -83,7 +83,7 @@ defmodule BarkparkWeb.BulldocsFormControllerTest do
 
     slug2 = seed_paper!(form_blocks())
 
-    assert %{"error" => %{"code" => "no_answers"}} =
+    assert %{"error" => %{"code" => "validation_failed", "message" => "no valid answers" <> _}} =
              conn
              |> post(path(slug2), %{"answers" => %{"smuggled" => "x"}})
              |> json_response(422)
@@ -97,10 +97,10 @@ defmodule BarkparkWeb.BulldocsFormControllerTest do
         %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "hi"}]}
       ])
 
-    assert %{"error" => %{"code" => "no_form"}} =
+    assert %{"error" => %{"code" => "validation_failed", "message" => "paper has no form block"}} =
              conn |> post(path(slug), %{"answers" => %{"q" => "a"}}) |> json_response(422)
 
-    assert %{"error" => %{"code" => "paper_not_found"}} =
+    assert %{"error" => %{"code" => "not_found"}} =
              conn
              |> post(path("never-published-#{System.unique_integer([:positive])}"), %{
                "answers" => %{"q" => "a"}
