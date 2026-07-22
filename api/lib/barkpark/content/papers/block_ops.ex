@@ -26,7 +26,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.{AuthoringWall, Broadcast, Document, DraftId, Encryption, Labels, Sheets}
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.Hollow
-  alias Barkpark.PortableDoc.{HtmlSanitizer, Patch, Projection, Render}
+  alias Barkpark.PortableDoc.{HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.Preview
 
   @paper_type "paper"
@@ -176,6 +176,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # published paper. HTML-only writes (no blocks list) stay exempt.
     with [] <- Papers.Template.validate(blocks),
          :ok <- reject_hollow_result(blocks),
+         :ok <- reject_new_field_loss(existing_paper_blocks(existing), blocks),
          {:ok, blocks} <-
            encrypt_paper_blocks(
              blocks,
@@ -419,6 +420,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # still-hollow paper (seeded title + empty tpl-body) stays freely
          # editable: the ratchet only fires on the non-hollow → hollow edge.
          :ok <- ratchet_hollow(blocks, patched),
+         # Field-loss RATCHET (pd-note-block): the same clean → lossy edge for a
+         # note/card block whose prose was authored under a key the renderer
+         # ignores. An already-lossy block persists; a clean one cannot be edited
+         # into the lossy shape.
+         :ok <- reject_new_field_loss(blocks, patched),
          # Route the op-applied list through the SAME chokepoint before
          # persisting: a NEW op-inserted block carrying no id (clients normally
          # mint ids, but the op payload is not guaranteed to) would otherwise be
@@ -543,6 +549,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # atomic batch RESULT: the whole batch is refused (paper unchanged)
          # when it would hollow out a non-hollow paper.
          :ok <- ratchet_hollow(blocks, folded),
+         # Same field-loss RATCHET as the single-op path, on the atomic batch
+         # RESULT: the whole batch is refused (paper unchanged) when it would
+         # newly strand a note/card block's prose under an unread key.
+         :ok <- reject_new_field_loss(blocks, folded),
          # Same chokepoint as the single-op path: an op-inserted block lacking an
          # id is filled, and any flat-string list item is canonicalized, before
          # persistence. Both additive + idempotent, so a batch of well-formed
@@ -933,6 +943,70 @@ defmodule Barkpark.Content.Papers.BlockOps do
       :ok
     end
   end
+
+  # Silent-content-loss RATCHET (pd-note-block-silent-content-loss). A note/card
+  # block in the lossy shape (`Slots.lossy_shape?/1`: renders no prose while an
+  # unknown key holds authored text) is refused with the plugin-veto halt shape —
+  # but ONLY when it is NEWLY lossy. Ratchet by block id: a block already lossy in
+  # `prev_blocks` may persist (the existing live losses stay editable, so their
+  # next save does not brick, and they get repaired deliberately), while a clean
+  # block edited into the lossy shape — or a fresh lossy block — is rejected. Runs
+  # on EVERY paper write with NO locked-block precondition (unlike
+  # Papers.Template.validate/1, which 416/419 papers skip). Non-list blocks
+  # (HTML-only writes) flatten to [] and are exempt.
+  defp reject_new_field_loss(prev_blocks, new_blocks) do
+    already_lossy = lossy_block_ids(prev_blocks)
+
+    new_blocks
+    |> flatten_typed_blocks()
+    |> Enum.find(fn block ->
+      Slots.lossy_shape?(block) and not MapSet.member?(already_lossy, Map.get(block, "id"))
+    end)
+    |> case do
+      nil -> :ok
+      block -> {:error, {:halted, field_loss_message(block)}}
+    end
+  end
+
+  # The ids of blocks ALREADY in the lossy shape, so the ratchet never bricks an
+  # existing loss (an id-less lossy block is treated as new — it cannot be matched).
+  defp lossy_block_ids(blocks) do
+    blocks
+    |> flatten_typed_blocks()
+    |> Enum.filter(&Slots.lossy_shape?/1)
+    |> Enum.map(&Map.get(&1, "id"))
+    |> Enum.reject(&is_nil/1)
+    |> MapSet.new()
+  end
+
+  # Flatten a block list to every typed block, recursing through `section`
+  # containers (their child list under `"blocks"`), so a note/card nested in a
+  # section is checked too. A non-list input yields [].
+  defp flatten_typed_blocks(blocks) when is_list(blocks) do
+    Enum.flat_map(blocks, fn
+      %{"blocks" => children} = block when is_list(children) ->
+        [block | flatten_typed_blocks(children)]
+
+      block ->
+        [block]
+    end)
+  end
+
+  defp flatten_typed_blocks(_), do: []
+
+  defp field_loss_message(block) do
+    type = Map.get(block, "type", "block")
+
+    "This #{type} block would render empty — its text is authored under a key " <>
+      "the renderer ignores. Move the prose into the block's content field."
+  end
+
+  # The stored blocks of the existing paper row (the prev side of the upsert
+  # ratchet), or [] for a brand-new paper / an HTML-only row.
+  defp existing_paper_blocks(nil), do: []
+
+  defp existing_paper_blocks(%Document{} = existing),
+    do: get_in(existing.content || %{}, ["blocks"]) || []
 
   # Resolve which block an op affected (post-apply) plus its top-level position.
   # Identical to the former Barkpark.Papers.locate_affected/2, except the

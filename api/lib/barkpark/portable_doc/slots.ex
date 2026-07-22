@@ -169,6 +169,43 @@ defmodule Barkpark.PortableDoc.Slots do
 
   def query_decl(_), do: []
 
+  @typedoc """
+  A block type's **consumed-field vocabulary** — the keys its renderer actually
+  reads. `consumed` are the content-bearing keys (their emptiness means the
+  block renders no prose); `chrome` are presentational keys the renderer also
+  honors. A key OUTSIDE `consumed ++ chrome ++` the structural set is UNKNOWN to
+  the renderer — authored prose placed there is silently dropped behind an
+  HTTP 200. This is the THIRD parallel declaration surface (after `slot_decls/1`
+  and `query_decl/1`); its checker is `lossy_shape?/1`.
+  """
+  @type field_vocab :: %{consumed: [String.t()], chrome: [String.t()]}
+
+  # Keys that are STRUCTURE on any block, never a content field.
+  @vocab_structural_keys ~w(id type role locked style level lang language)
+
+  @doc """
+  The consumed-field vocabulary for a block type whose renderer reads a FIXED,
+  known key set — the surface the silent-content-loss gate (`lossy_shape?/1`)
+  keys off. Only the two types this cycle gates declare one:
+
+    * `note` consumes `label` / `lead` / `text` (the flat legacy fields) plus
+      `slots` (the materialized form); no chrome.
+    * `card` is slots-native — it consumes `slots` alone (title/body/media/action
+      all live under it) plus the `tone` accent chrome.
+
+  Every other type returns `nil` (UNGATED — the wider per-type census is
+  `pt-backlog-block-field-census`), so no existing block of an undeclared type
+  can ever be flagged. Never raises.
+  """
+  @spec field_vocab(term()) :: field_vocab() | nil
+  def field_vocab(%{"type" => "note"}),
+    do: %{consumed: ["label", "lead", "text", "slots"], chrome: []}
+
+  def field_vocab(%{"type" => "card"}),
+    do: %{consumed: ["slots"], chrome: ["tone"]}
+
+  def field_vocab(_), do: nil
+
   @doc """
   The element-tier children of the named slot. Returns `block["slots"][name]` when a
   `slots` map carries it, else the legacy synthesis: for a callout `body` slot, a
@@ -227,7 +264,9 @@ defmodule Barkpark.PortableDoc.Slots do
   # A plain-text implicit paragraph: an empty string wraps to `content: []`, a
   # non-empty string to a single inline text node (the flatten-to-plain twin).
   defp note_para(""), do: %{"type" => "paragraph", "content" => []}
-  defp note_para(text), do: %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
+
+  defp note_para(text),
+    do: %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
 
   # A note's flat field as a plain string (nil-safe, non-map-safe): the legacy
   # `notes` item vocab where `body` lives under the `text` key.
@@ -553,4 +592,65 @@ defmodule Barkpark.PortableDoc.Slots do
   end
 
   def query_type_errors(_), do: []
+
+  @doc """
+  The SILENT-CONTENT-LOSS predicate — the checker paired with `field_vocab/1`.
+  A block is in the lossy shape when BOTH hold:
+
+    1. it RENDERS NO PROSE — every consumed content field, read through the SAME
+       byte-identity accessors the renderer uses (`note_*_text/1`,
+       `card_*_text/1` / `card_media|action/1`), is blank/absent; AND
+    2. it carries an UNKNOWN key whose value holds SEMANTIC TEXT — authored prose
+       stranded under a key the renderer never reads.
+
+  This is the NARROW rule (measured ZERO false alarms across the live corpus):
+  a block whose consumed fields ARE populated is never flagged, however many
+  extra chrome/experimental keys ride alongside — the emptiness gate, not an
+  allowlist. A genuinely-empty block (no unknown loud key) is not "loss" either.
+  Only `note` / `card` declare a vocabulary, so every other type is `false`.
+  Never raises.
+  """
+  @spec lossy_shape?(term()) :: boolean()
+  def lossy_shape?(block) when is_map(block) do
+    case field_vocab(block) do
+      nil -> false
+      vocab -> renders_no_prose?(block) and loud_unknown_key?(block, vocab)
+    end
+  end
+
+  def lossy_shape?(_), do: false
+
+  # Does the block render NO prose? Asked through the renderer's own accessors so
+  # "empty" means exactly "the reader shows nothing".
+  defp renders_no_prose?(%{"type" => "note"} = block) do
+    blank?(note_label_text(block)) and blank?(note_lead_text(block)) and
+      blank?(note_body_text(block))
+  end
+
+  defp renders_no_prose?(%{"type" => "card"} = block) do
+    blank?(card_title_text(block)) and blank?(card_body_text(block)) and
+      is_nil(card_media(block)) and is_nil(card_action(block))
+  end
+
+  defp renders_no_prose?(_), do: false
+
+  defp blank?(s) when is_binary(s), do: String.trim(s) == ""
+  defp blank?(_), do: true
+
+  # Is there a key OUTSIDE the recognized vocabulary whose value carries semantic
+  # text (a letter or number, recursively)? A loud unknown key is the tell of
+  # stranded prose — a bare structural/boolean stray never trips it.
+  defp loud_unknown_key?(block, vocab) do
+    recognized = @vocab_structural_keys ++ vocab.consumed ++ vocab.chrome
+
+    block
+    |> Map.drop(recognized)
+    |> Map.values()
+    |> Enum.any?(&loud_value?/1)
+  end
+
+  defp loud_value?(v) when is_binary(v), do: Regex.match?(~r/[\p{L}\p{N}]/u, v)
+  defp loud_value?(v) when is_list(v), do: Enum.any?(v, &loud_value?/1)
+  defp loud_value?(%{} = m), do: m |> Map.values() |> Enum.any?(&loud_value?/1)
+  defp loud_value?(_), do: false
 end
