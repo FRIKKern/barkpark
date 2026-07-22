@@ -588,3 +588,29 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   roster read per PDF-D53). Net-new backlog: `pdf-bl-listener-status-schema-drift`,
   `pdf-bl-doctor-bp-staleness-regex`. Honestly open: adapter-rate-card (remote leg only),
   scratch-orphan-janitor. Wave Paper: `personal-dev-fleet-wave-b-2026-07-22-r2`.
+- **2026-07-23 · Wave B round-2 REVIEW (grade A).** All 3 round-1 slices green and adversarially
+  re-verified; ZERO code fixes needed — the review's only commit is this log entry.
+  `pdf-wb-efficiency-proof`: the full gate (--plan + full run + --negctl + transcript non-empty)
+  was independently re-run cold in the review worktree — 9/9 PASS + negctl 5/5, exit 0; the
+  committed transcript is a genuine earlier passing run of the same script (run-ids differ from
+  the gate re-runs by design; content matches the asserts line for line, token-scanned clean).
+  All D54 pins honored verbatim; dispatch.sh/route.py/transform.py byte-untouched; the charter
+  content-copy (D46-D54 + round-2 wave log) is faithful to 7df6c9aeb. Final branch
+  `loop-epic/the-proof-that-must-fire-r0-r7-efficienc-0-r` (this entry only).
+  `pdf-bl-worker-protocol-paper-sync`: no branch (live Paper patch, rev 4fbf224fce9e9cf2);
+  gate re-run CLEAN against the published paper; task correctly closed done (nothing to merge).
+  `pdf-bl-file-order-env-override`: final branch
+  `loop-epic/file-order-sh-honors-bp-fleet-server-bp--2` UNCHANGED — the 7/4-line diff is
+  exactly the briefed shape; gate re-proven (OVERRIDE-HONORED); the `-s`→`-sS` curl change is
+  load-bearing for the gate and byte-identical on the happy path. Ledger audit: CLEAN — every
+  builder claimed, stamped mid-work with evidence, left lifecycle truthful (proof + env-override
+  in_progress with only merge-gated criteria open; paper-sync done); round-2 stamp tasks
+  (`pdf-wb-epic-crit2-stamp`, `pdf-bl-presence-honesty-sparse`) sit open/unclaimed as designed.
+  LEAD's merge order: (1) merge the proof `-r` branch (carries charter D46-D54 — close its
+  criterion 5), (2) merge the env-override branch (skills-only, own gate — close both criteria +
+  lifecycle), (3) THEN dispatch `pdf-wb-epic-crit2-stamp` (PDF-D33 recipe, epic criterion 2 from
+  the merged transcript) and `pdf-bl-presence-honesty-sparse` (AC1 from the transcript's RAW
+  roster GET per PDF-D53). Note for a future wave: the proof's inline-curl filing predates the
+  env-override seam — a later simplification could point file-order.sh at scratch via
+  BP_FLEET_*, but D42's inline-curl pin stands for this transcript. Wave Paper closed as the
+  debrief: `personal-dev-fleet-wave-b-2026-07-22-r2`.
