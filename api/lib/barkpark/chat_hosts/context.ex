@@ -172,11 +172,20 @@ defmodule Barkpark.ChatHosts do
     |> Enum.map(&public_host/1)
   end
 
-  def get_host(workspace_id, host_id) do
+  # A registered host is ALWAYS workspace-owned (enrollment requires a binary
+  # `workspace_id`), so a nil workspace or host id can never match one. Guard
+  # both to a binary before the query: a `:global`-scoped chat session carries
+  # `owner_workspace_id == nil` (charter D82), and that nil used to reach the
+  # `h.workspace_id == ^nil` comparison, which Ecto REFUSES ("comparing … with
+  # nil is forbidden as it is unsafe") — crashing `resolve/2` and 500-ing every
+  # registered-host send. Fail closed instead: no scope ⇒ no host (host_not_found).
+  def get_host(workspace_id, host_id) when is_binary(workspace_id) and is_binary(host_id) do
     RegisteredHost
     |> where([h], h.workspace_id == ^workspace_id and h.id == ^host_id)
     |> Repo.one()
   end
+
+  def get_host(_workspace_id, _host_id), do: nil
 
   @impl true
   def resolve(workspace_id, host_id) do
