@@ -94,9 +94,16 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
   # for a test — would crash the sweeper / RetryWorker instead of skipping.
   def rebuild(%Delivery{source_kind: "test"}), do: :gone
 
-  def rebuild(%Delivery{} = delivery) do
+  # Document catch-all — the DEFAULT rebuild path. Guarded on an INTEGER
+  # `event_id`: the durable `mutation_events` row is the source of truth, so
+  # `Repo.get(MutationEvent, event_id)` must never be handed a nil (Ecto raises
+  # ArgumentError "cannot perform Ecto.Repo.get/2 because the given value is nil"
+  # at query-build time — BEFORE any DB round-trip — so the `with/else nil` arm
+  # can NEVER catch it; a crash-orphan document row with a NULL event_id, or any
+  # future untyped kind, would abort the whole StuckDeliverySweeper batch).
+  def rebuild(%Delivery{event_id: event_id} = delivery) when is_integer(event_id) do
     with %Webhook{} = webhook <- Repo.get(Webhook, delivery.endpoint_id),
-         %MutationEvent{} = event <- Repo.get(MutationEvent, delivery.event_id) do
+         %MutationEvent{} = event <- Repo.get(MutationEvent, event_id) do
       body =
         Dispatcher.build_payload(
           event.mutation,
@@ -113,5 +120,20 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
     else
       nil -> :gone
     end
+  end
+
+  # Terminal fallback: any delivery that matched no typed clause AND has no
+  # integer `event_id` to rebuild from is unrecoverable. Return `:gone` (the
+  # caller skips) rather than fall into the guarded catch-all's
+  # `Repo.get(MutationEvent, nil)` raise — a single such poison row must never
+  # crash RetryWorker or abort a StuckDeliverySweeper batch. Logged LOUDLY,
+  # naming the row so an operator can see what stranded.
+  def rebuild(%Delivery{} = delivery) do
+    Logger.warning(
+      "Webhook delivery ##{delivery.id} is unrecoverable " <>
+        "(source_kind=#{inspect(delivery.source_kind)}, event_id=#{inspect(delivery.event_id)}); skipping"
+    )
+
+    :gone
   end
 end

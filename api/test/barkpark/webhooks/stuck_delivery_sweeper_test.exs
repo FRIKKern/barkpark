@@ -92,6 +92,44 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeperTest do
     ev.id
   end
 
+  # Struct-insert a DOCUMENT-kind row with a NULL `event_id`. The changeset would
+  # REJECT this (document requires event_id), so we bypass it via a direct struct
+  # insert to simulate the crash-orphan poison row: the catch-all rebuild's
+  # `Repo.get(MutationEvent, nil)` raises ArgumentError. Backdated past the cutoff.
+  defp seed_poison_document_delivery(wh_id, age_seconds) do
+    ts = DateTime.utc_now() |> DateTime.add(-age_seconds, :second)
+
+    Repo.insert!(%Delivery{
+      endpoint_id: wh_id,
+      event_id: nil,
+      source_kind: "document",
+      status: "pending",
+      inserted_at: ts,
+      updated_at: ts
+    })
+  end
+
+  # Struct-insert an AUDIT-kind row with a NULL `endpoint_id`. The audit rebuild
+  # clause runs `Repo.get(Webhook, endpoint_id)`, which RAISES ArgumentError on a
+  # nil id (before the `with/else` can catch it) — a DIFFERENT poison class than
+  # the nil-`event_id` one the PayloadRebuild `is_integer` guard turns into
+  # `:gone`. It reaches the sweeper still RAISING, so it is what the per-row
+  # `try/rescue` net must isolate (the event_id guard never sees this clause).
+  # Backdated past the cutoff.
+  defp seed_poison_audit_delivery(age_seconds) do
+    ts = DateTime.utc_now() |> DateTime.add(-age_seconds, :second)
+
+    Repo.insert!(%Delivery{
+      endpoint_id: nil,
+      event_id: nil,
+      source_kind: "audit",
+      payload_snapshot: %{"body" => "{}"},
+      status: "pending",
+      inserted_at: ts,
+      updated_at: ts
+    })
+  end
+
   # Insert a delivery row for (webhook, event) in the given status, with its
   # updated_at backdated by `age_seconds` — simulating a row claimed that long
   # ago (a crashed dispatcher leaves it `pending`).
@@ -215,6 +253,70 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeperTest do
     # The claim-CAS still bumped updated_at, so the next sweep won't re-select it
     # until it ages past the threshold again (no tight loop).
     assert Repo.get(Delivery, stuck.id).status == "pending"
+  end
+
+  test "a NULL-event_id document poison row is skipped, never aborting the batch",
+       %{webhook: wh} do
+    :ok = FakeHTTP.start([{:ok, 200}])
+
+    # A crash-orphan poison row: document-kind but `event_id` NULL. Pre-fix the
+    # catch-all's `Repo.get(MutationEvent, nil)` raised ArgumentError inside the
+    # unguarded reduce, aborting recovery for the WHOLE batch — the recoverable
+    # row below then starved forever, every cron pass.
+    poison = seed_poison_document_delivery(wh.id, 600)
+
+    # A genuinely recoverable document row in the SAME batch.
+    eid = new_event_id()
+    _good = seed_delivery(wh.id, eid, "pending", 600)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert %{swept: 1, skipped: 1} = StuckDeliverySweeper.sweep(300)
+      end)
+
+    # The recoverable row delivered to a terminal status — it no longer starves
+    # behind the poison row.
+    assert length(FakeHTTP.calls()) == 1
+    assert Webhooks.get_delivery(wh.id, eid).status == "ok"
+
+    # The poison row was claimed-and-skipped (:gone): still pending, no HTTP, and
+    # LOUDLY logged with its id / source_kind / event_id.
+    assert Repo.get(Delivery, poison.id).status == "pending"
+    assert log =~ "unrecoverable"
+    assert log =~ ~s(source_kind="document")
+    assert log =~ "event_id=nil"
+  end
+
+  test "a rebuild that RAISES (audit row, NULL endpoint_id) is caught by the per-row rescue, batch continues",
+       %{webhook: wh} do
+    :ok = FakeHTTP.start([{:ok, 200}])
+
+    # This poison row's rebuild RAISES (audit clause's `Repo.get(Webhook, nil)`),
+    # NOT the nil-`event_id` class the PayloadRebuild guard degrades to `:gone`.
+    # So it exercises the sweeper's OWN `try/rescue` net — remove that net and the
+    # raise propagates out of the reduce, aborting the whole batch (the recoverable
+    # row below then starves). This is the test the nil-event_id case cannot be:
+    # there the rebuild returns `:gone` and the rescue never fires.
+    poison = seed_poison_audit_delivery(600)
+
+    # A genuinely recoverable document row in the SAME batch.
+    eid = new_event_id()
+    _good = seed_delivery(wh.id, eid, "pending", 600)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert %{swept: 1, skipped: 1} = StuckDeliverySweeper.sweep(300)
+      end)
+
+    # The recoverable row delivered — it did not starve behind the raising row.
+    assert length(FakeHTTP.calls()) == 1
+    assert Webhooks.get_delivery(wh.id, eid).status == "ok"
+
+    # The raising row was rescued: still pending, and logged by the SWEEPER's
+    # rescue clause (distinct from PayloadRebuild's `:gone` log), naming the error.
+    assert Repo.get(Delivery, poison.id).status == "pending"
+    assert log =~ "StuckDeliverySweeper skipped delivery ##{poison.id}"
+    assert log =~ "ArgumentError"
   end
 
   test "re-dispatch reuses the same row — no second delivery row, UNIQUE intact",

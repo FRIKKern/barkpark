@@ -151,6 +151,37 @@ defmodule Barkpark.Webhooks.PayloadRebuildAuditTest do
     end
   end
 
+  describe "PayloadRebuild.rebuild/1 — catch-all guarded against a NULL event_id (poison class)" do
+    test "a document-kind row with NULL event_id returns :gone, never Repo.get(MutationEvent, nil)",
+         %{webhook: wh} do
+      # Pre-fix this fell to the catch-all, whose Repo.get(MutationEvent, nil)
+      # raised ArgumentError ("cannot perform Ecto.Repo.get/2 because the given
+      # value is nil"). The `is_integer(event_id)` guard + terminal fallback now
+      # return :gone loudly instead of crashing the recovery drivers.
+      poison = %Delivery{id: 424_242, endpoint_id: wh.id, event_id: nil, source_kind: "document"}
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert PayloadRebuild.rebuild(poison) == :gone
+        end)
+
+      assert log =~ "unrecoverable"
+      assert log =~ ~s(source_kind="document")
+      assert log =~ "event_id=nil"
+    end
+
+    test "an unknown/future source_kind with NULL event_id also returns :gone (not a raise)",
+         %{webhook: wh} do
+      # The catch-all is the fallback for EVERY untyped kind; a future kind that
+      # forgot to add a clause must degrade to :gone, never crash the batch.
+      poison = %Delivery{id: 515_151, endpoint_id: wh.id, event_id: nil, source_kind: "future_x"}
+
+      assert ExUnit.CaptureLog.capture_log(fn ->
+               assert PayloadRebuild.rebuild(poison) == :gone
+             end) =~ "unrecoverable"
+    end
+  end
+
   describe "StuckDeliverySweeper.sweep/1 — an audit row no longer aborts the batch" do
     test "a batch with one audit row plus a document row completes without raising; both reach terminal status",
          %{webhook: wh} do

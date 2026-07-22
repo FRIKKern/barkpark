@@ -14,11 +14,18 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
 
   This Oban cron worker is that recovery path. Once per minute it:
 
-    1. SELECTs every delivery still `"pending"` whose `updated_at` is older than
-       `webhook_stuck_delivery_after_seconds` (default 300s). The threshold sits
-       far above the worst-case in-flight window (max_attempts × HTTP timeout +
-       fixed retry backoff ≈ tens of seconds), so a genuinely in-flight delivery
+    1. SELECTs deliveries still `"pending"` whose `updated_at` is older than
+       `webhook_stuck_delivery_after_seconds` (default 300s), OLDEST first and
+       bounded to `webhook_stuck_delivery_batch_limit` (default 500) per pass so
+       one tick never drags an unbounded backlog into memory — the remainder is
+       picked up next tick, and oldest-first means nothing starves. The threshold
+       sits far above the worst-case in-flight window (max_attempts × HTTP timeout
+       + fixed retry backoff ≈ tens of seconds), so a genuinely in-flight delivery
        is NEVER a candidate — only crash-orphaned rows are.
+
+    Each candidate is recovered under a per-row `try/rescue`: a rebuild that
+    raises (e.g. a poison row) is counted `skipped` and logged, and the sweep
+    CONTINUES — one bad row can never abort recovery for the rest of the batch.
 
     2. For each candidate, atomically **claims the sweep** with a CAS
        `update_all` guarded on `(id, status="pending", updated_at=<observed>)`
@@ -49,8 +56,9 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
       It re-uses the existing claimed row (CAS update + terminal update, both by
       primary key), so the dedup constraint is untouched.
 
-  Configuration: `Application.get_env(:barkpark, :webhook_stuck_delivery_after_seconds, 300)`.
-  Tests override this (e.g. to 0) to make the sweep deterministic.
+  Configuration: `Application.get_env(:barkpark, :webhook_stuck_delivery_after_seconds, 300)`
+  and `Application.get_env(:barkpark, :webhook_stuck_delivery_batch_limit, 500)`.
+  Tests override the threshold (e.g. to 0) to make the sweep deterministic.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
@@ -62,6 +70,11 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
   alias Barkpark.Webhooks.{Delivery, Dispatcher, PayloadRebuild}
 
   @default_stuck_after_seconds 300
+  # Upper bound on candidates recovered per pass. Keeps one cron tick from
+  # dragging an unbounded backlog into memory / a single long transaction; the
+  # oldest rows go first (order_by asc updated_at), so nothing starves — a
+  # remaining backlog is simply picked up next tick. Runtime-overridable.
+  @default_batch_limit 500
 
   @impl Oban.Worker
   def perform(%Oban.Job{} = _job) do
@@ -80,9 +93,24 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
 
     stuck_candidates(cutoff)
     |> Enum.reduce(%{swept: 0, skipped: 0}, fn %Delivery{} = d, acc ->
-      case redispatch_one(d) do
-        :swept -> %{acc | swept: acc.swept + 1}
-        :skipped -> %{acc | skipped: acc.skipped + 1}
+      # Per-row isolation: one poison row (a rebuild that raises, an FK cascade
+      # mid-flight, any unexpected error) is counted `skipped`, logged, and the
+      # sweep CONTINUES. Before this, a single raise propagated out of the reduce
+      # and aborted the whole batch — every later candidate starved forever.
+      try do
+        case redispatch_one(d) do
+          :swept -> %{acc | swept: acc.swept + 1}
+          :skipped -> %{acc | skipped: acc.skipped + 1}
+        end
+      rescue
+        e ->
+          Logger.error(
+            "StuckDeliverySweeper skipped delivery ##{d.id} " <>
+              "(source_kind=#{inspect(d.source_kind)}, event_id=#{inspect(d.event_id)}) " <>
+              "after #{inspect(e.__struct__)}: #{Exception.message(e)}"
+          )
+
+          %{acc | skipped: acc.skipped + 1}
       end
     end)
   end
@@ -95,12 +123,18 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
     )
   end
 
+  defp batch_limit do
+    Application.get_env(:barkpark, :webhook_stuck_delivery_batch_limit, @default_batch_limit)
+  end
+
   # Candidate set: still `pending` and untouched since before the cutoff. The
   # per-row CAS re-validates atomically, so the SELECT is intentionally advisory
   # (a row bumped between SELECT and CAS simply loses the CAS and is skipped).
   defp stuck_candidates(%DateTime{} = cutoff) do
     from(d in Delivery,
-      where: d.status == "pending" and d.updated_at < ^cutoff
+      where: d.status == "pending" and d.updated_at < ^cutoff,
+      order_by: [asc: d.updated_at],
+      limit: ^batch_limit()
     )
     |> Repo.all()
   end
