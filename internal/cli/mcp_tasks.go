@@ -240,7 +240,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_show",
 		Title:       "Show a task",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
-		Description: "Fetch one task by its doc_id — full detail including description, acceptance_criteria, lifecycle_status, any claim, and children + child_count. Read-only. Use it to re-read a brief (e.g. after a close 409'd with doc_changed_since_claim, read the task again before closing) or to inspect a task you already hold. To START work, prefer task_next (which claims atomically) over showing an id and hoping it's still free.",
+		Description: "Fetch one task by its doc_id — full detail including description, acceptance_criteria, lifecycle_status, any claim, and children + child_count. Read-only. Use it to re-read a brief (e.g. after a close 409'd with doc_changed_since_claim, read the task again, reconcile, then close passing observed_rev=current_rev — a bare re-read then close repeats the 409 because your claim's work digest is preserved) or to inspect a task you already hold. To START work, prefer task_next (which claims atomically) over showing an id and hoping it's still free.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -272,7 +272,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_close",
 		Title:       "Close a claimed task",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
-		Description: "Close a task you hold, under epoch-CAS. Pass the SAME worker_id you claimed with and the observed_epoch from that claim (doc.claim.epoch). lifecycle_status is the done-signal — \"done\" for completed work, \"cancelled\" to drop it, \"blocked\" if it can't proceed; it is what marks the task finished, NOT the claim record. Mark acceptance criteria in the same write via `criteria` — an array of {index, met, evidence, criterion} — so the ledger records WHAT you proved and HOW. `criterion` (the criterion's EXACT stored wording, copied verbatim from acceptance_criteria[index].criterion) is REQUIRED on every entry with met:true: the 0-based index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping a NEIGHBOURING criterion, and a text that does not match the row at index is REJECTED (409 criteria_mismatch) with nothing written. An entry with met:false needs no text. If the close returns 409 doc_changed_since_claim, the brief changed under your claim: task_show it again, reconcile, then close again. If your claim lapsed (epoch moved on), re-claim the task with task_next / a fresh claim to get a new epoch, then close with that.",
+		Description: "Close a task you hold, under epoch-CAS. Pass the SAME worker_id you claimed with and the observed_epoch from that claim (doc.claim.epoch). lifecycle_status is the done-signal — \"done\" for completed work, \"cancelled\" to drop it, \"blocked\" if it can't proceed; it is what marks the task finished, NOT the claim record. Mark acceptance criteria in the same write via `criteria` — an array of {index, met, evidence, criterion} — so the ledger records WHAT you proved and HOW. `criterion` (the criterion's EXACT stored wording, copied verbatim from acceptance_criteria[index].criterion) is REQUIRED on every entry with met:true: the 0-based index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping a NEIGHBOURING criterion, and a text that does not match the row at index is REJECTED (409 criteria_mismatch) with nothing written. An entry with met:false needs no text. If the close returns 409 doc_changed_since_claim, the brief changed under your claim and the 409 names current_rev + changed_fields: task_show it, reconcile the changes, then close again passing observed_rev set to that current_rev (strict full-rev CAS, bypasses the digest fence). A plain task_show then close REPEATS the 409 — a same-worker re-read preserves the claim-time work digest, so observed_rev is the only escape. If your claim lapsed (epoch moved on), re-claim the task with task_next / a fresh claim to get a new epoch, then close with that.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -289,6 +289,10 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     "observed_epoch": {
       "type": "integer",
       "description": "The epoch from your claim (doc.claim.epoch). Close is a compare-and-swap on this — a stale epoch 409s."
+    },
+    "observed_rev": {
+      "type": "string",
+      "description": "Recovery from a 409 doc_changed_since_claim: the current_rev the 409 named (the rev you just re-read and reconciled). Passing it switches the close to strict full-rev CAS and BYPASSES the claim-time work-digest fence, so the close succeeds against exactly the revision you reviewed. A stale rev still 409s. Omit for a normal close."
     },
     "lifecycle_status": {
       "type": "string",
@@ -322,6 +326,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			DocID           string            `json:"doc_id"`
 			WorkerID        string            `json:"worker_id"`
 			ObservedEpoch   *int              `json:"observed_epoch"`
+			ObservedRev     string            `json:"observed_rev"`
 			LifecycleStatus string            `json:"lifecycle_status"`
 			Reason          string            `json:"reason"`
 			Criteria        []json.RawMessage `json:"criteria"`
@@ -353,6 +358,12 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 				return mcpArgError(fmt.Errorf("criteria: %w", err)), nil
 			}
 			tail = append(tail, "--set", "criteria:="+string(arr))
+		}
+		// observed_rev recovers a 409 doc_changed_since_claim: it rides the same
+		// repeatable --set flag as criteria so the server switches to strict
+		// full-rev CAS and bypasses the work-digest fence (Tasks.close/3 :observed_rev).
+		if rev := strings.TrimSpace(in.ObservedRev); rev != "" {
+			tail = append(tail, "--set", "observed_rev="+rev)
 		}
 		return mcpRun(execManifestCommand(g, ctx, m, cc, tail)), nil
 	})

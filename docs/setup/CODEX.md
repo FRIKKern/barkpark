@@ -159,7 +159,7 @@ Conventions:
 - Closing marks criteria in the same atomic write; a met:true entry MUST carry the criterion's exact wording:
   `--set 'criteria:=[{"index":0,"met":true,"evidence":"...","criterion":"<wording>"}]'`
 - Nest large work with `parent_id` (a slug) for a Goal → sub-task tree; keep it flat otherwise.
-- If a close 409s with `doc_changed_since_claim`, the brief changed under you — re-read the task, then close again.
+- If a close 409s with `doc_changed_since_claim`, the brief changed under your claim — the 409 names the current rev + changed fields; re-read, reconcile, then close with `--set observed_rev=<current_rev>`. A plain re-read then close repeats the 409 (a same-worker re-read keeps the claim's work digest).
 
 MCP-native surface? The same verbs are first-class MCP tools via `bp mcp serve` — see `docs/setup/AGENT-ONRAMPS.md`.
 <!-- barkpark:onramp:end -->

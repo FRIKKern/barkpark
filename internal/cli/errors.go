@@ -354,7 +354,7 @@ func (e apiError) hint() string {
 		// (if the holder is YOU) re-claim under your own id to renew the lease.
 		return "the task isn't claimable — someone else holds it or it isn't ready; if YOU hold it, re-claim with your own worker id to renew the lease"
 	case "doc_changed_since_claim":
-		return "the task's brief changed since you claimed it — re-read with `bp task get <id>`, then close again (or pass --set observed_rev=<rev> for strict rev fencing)"
+		return "the task's brief changed since you claimed it — the 409 body names current_rev + changed_fields; re-read with `bp task get <id>`, reconcile, then close with `--set observed_rev=<current_rev>` (strict full-rev CAS, bypasses the digest fence). A plain re-read then close repeats the 409 — a same-worker re-read preserves the claim-time work digest"
 	case "rate_limited":
 		return "retry with backoff"
 	case "unauthorized":
