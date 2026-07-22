@@ -95,6 +95,16 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> unique_constraint([:name, :dataset],
       name: :schema_definitions_name_dataset_null_dataset_id_index
     )
+    # FK-abort containment (Felix W16). `workspace_id/project_id/dataset_id` are
+    # real Postgres FKs (schema_definitions_<col>_fkey, migration
+    # 20260527160000_cascade_content_on_scope_delete). `Content.upsert_schema/3`
+    # writes this changeset raw via Repo.insert()/update() — without these, an
+    # insert referencing a scope row deleted concurrently RAISES Ecto.ConstraintError
+    # (a 500) instead of returning {:error, changeset}. Bare calls → Ecto-default
+    # constraint names.
+    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:dataset_id)
   end
 
   # ─────────────────────────────────────────────────────────────────────────────
