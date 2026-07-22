@@ -1,0 +1,29 @@
+{
+  "grip_id": "a3-db-gate-reality-2026-07-22",
+  "verifier": "spill-janitor (A3-db-gate-reality)",
+  "wave": "felix-pristine-wave-14-2026-07-22",
+  "assignment": "PIVOTAL: can DataCase/ConnCase tests RUN locally against a live Postgres at all? Run one known-passing ConnCase test and one DataCase test, report pass/fail + wall-time + whether a DB connection was established.",
+  "verdict": "DB GATE IS OPEN. Both tests PASS against a real local Postgres (barkpark_test on /tmp/.s.PGSQL.5432): ConnCase scim_users_controller_test.exs 26/26 in 1.8s (wall 3.14s incl. boot/compile); DataCase asset_metadata_tenancy_test.exs 4/4 in 0.3s (wall 3.12s). DataCase.setup starts a real Ecto.Adapters.SQL.Sandbox owner against Barkpark.Repo (not a stub). C2/C3/C4 are locally mutation-testable this wave -- they do NOT collapse to proven-by-trace.",
+  "recipes": [
+    {
+      "claim": "ConnCase test scim_users_controller_test.exs passes 26/26 in 1.8s against a live DB (must be run from api/, not repo root, or Mix.Project is not found)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && time CC=/usr/bin/clang mix test test/barkpark_web/controllers/scim_users_controller_test.exs 2>&1 | tail -10"
+    },
+    {
+      "claim": "DataCase test asset_metadata_tenancy_test.exs passes 4/4 in 0.3s against a live DB",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && time CC=/usr/bin/clang mix test test/barkpark/media/asset_metadata_tenancy_test.exs 2>&1 | tail -10"
+    },
+    {
+      "claim": "asset_metadata_tenancy_test.exs uses `use Barkpark.DataCase, async: false` and scim_users_controller_test.exs uses `use BarkparkWeb.ConnCase, async: false` -- neither is skipped/tagged out",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && grep -n 'use Barkpark' test/barkpark/media/asset_metadata_tenancy_test.exs test/barkpark_web/controllers/scim_users_controller_test.exs"
+    },
+    {
+      "claim": "Barkpark.DataCase.setup checks out a REAL Ecto.Adapters.SQL.Sandbox owner against Barkpark.Repo (proves a genuine DB connection is established per-test, not a mock)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && grep -n 'Sandbox' test/support/data_case.ex"
+    },
+    {
+      "claim": "the barkpark_test database exists locally and answers a live query on the same socket the test config targets (config/test.exs hostname=localhost -> /tmp/.s.PGSQL.5432)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && psql -l | grep '^ barkpark_test ' && psql -d barkpark_test -c 'select 1;'"
+    }
+  ]
+}

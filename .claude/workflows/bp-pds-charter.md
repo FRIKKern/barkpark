@@ -3989,6 +3989,111 @@ stale wave-19 run dir per D269, same-breath 0b per D275, arm BY PATH `--prewarm-
 no polling); then, after the climb completes, the LEAD runs `pds-w20-crown-collect-and-seal` (D261 bundle
 cross-check, D278 self-confirm rung-3 delta ≤ 98.19, re-stamp 0–9 to one run_id, 10 on merge, 11 last-and-alone).
 
+### Wave 2026-07-21 (21) — READ THE ABORT, THEN FIRE — DECIDE (paper `pds-wave-21-2026-07-21`)
+
+Wave 20 finally FIRED at the derived 897 floor (fossil 2200 gone) and got **6 PASS · 4 ABORT · 1 FAIL**:
+rung 1 (the import) 500'd with a Postgres **25P02**. One crown attempt remains (**5/6**). This wave spends
+its whole budget on DIAGNOSIS (zero crown attempts) to sort two hypotheses BEFORE the last shot — then
+fires clean or refuses with a name. **VERDICT: (a) DIRTY-SCRATCH — PROCEED TO FIRE.** Proven, not guessed.
+
+- **PDS-D279 — THE RUNG-1 25P02 IS (a) DIRTY-SCRATCH, PROVEN FOUR WAYS — NOT (b) A HANDLER BUG.** The
+  visible 25P02 on `SET session_replication_role = DEFAULT` is the after-block CLEANUP mask; the true
+  first-failing statement (Postgres logs it by default, `log_min_error_statement=error`, request_id
+  `GMRmnzN-yl-UNAkAAABk`) is **ERROR 23505** duplicate key on `content_edges_from_to_kind_uniq`, tuple
+  `(from,to,kind)=(98650f3b…, b63e6a30…, parent_id)`, inside the merge `INSERT … ON CONFLICT ("id") DO
+  UPDATE`. MECHANISM (code-verified): `merge_upsert`'s ON CONFLICT arbiter is ALWAYS the PK
+  (`order_columns`), never the secondary unique `(from_id,to_id,kind)`. The scratch pre-held that tuple
+  under id `7bd32bce` (wave-18's 15:29:50 pull); the bundle carries the SAME tuple under a DIFFERENT id
+  `0003051d`, so the bundle row misses the PK arbiter, tries to INSERT, and hits the secondary unique the
+  pre-existing row occupies → unabsorbed → tx abort. PROOFS: (1) bundle has **0** intra-tuple dups across
+  5109 rows (cannot self-collide); (2) LEG A — bundle `content_edges.copy` into a FRESH EMPTY table w/ the
+  real unique index = `COPY 5109`, zero violations; (3) LEG B — plant the foreign-id row + replay the exact
+  captured INSERT = identical 23505 w/ identical DETAIL. **The only variable that flips pass↔fail is TARGET
+  EMPTINESS** — nothing in the bundle or the handler. `merge_import` is NOT broken; there is NO api bug that
+  blocks the crown. `pds-backlog-import-savepoint-honesty` stays open as honest error-surfacing polish (the
+  app should show the 23505, not the 25P02 mask) — it is NOT a crown blocker.
+
+- **PDS-D280 — MOVE 1 WAS FREE; MOVE 2 (APP-PATH ISOLATION) IS THE BELT-AND-SUSPENDERS BEFORE ATTEMPT 6.**
+  The root was already on disk (no re-run, no config, zero attempts). A1's LEG A/B is a DB-layer isolation
+  (real bundle bytes + real constraint + real captured SQL) but did NOT boot the full app path (worktree
+  COLD). RULING: because the wish FORBIDS guessing the last attempt away, the fire slice runs the EXACT
+  `export --profile dev --dataset production --with-blobs | import default --yes --merge --with-blobs`
+  against a GUARANTEED-FRESH scratch **in isolation (no crown, zero attempts)** as the final app-path gate.
+  Clean exit 0 = (a) confirmed end-to-end → arm. Same 25P02 = (b) after all → do NOT spend attempt 6, file
+  the api successor, record a NAMED REFUSAL (a win). The crown's own rung 1 is the same command into a fresh
+  empty target, so an isolation pass predicts the crown rung-1 pass exactly.
+
+- **PDS-D281 — HYPOTHESIS (c) SCHEMA-SKEW IS REFUTED; THE SORT COLLAPSED TO (a) vs (b), LANDS ON (a).**
+  Migration diff `8b32a1e67..f76367999` is EMPTY (34 intervening commits, zero migration files); guerrilla's
+  boot/fire shas (`e16869ac`, `34b9b25d`) are ancestors of origin/main. A fresh boot from origin/main applies
+  an identical, already-maximal migration set (the D32 lifecycle-check widening predates the boot sha).
+  Booting fresh fixes (a) even though (c) was never present.
+
+- **PDS-D282 — THE FRESH-SCRATCH FIX IS A *NEW* `PDS_RUN_ID`, NOT reused `pdsw18-crown`.** `run_tag =
+  cksum(PDS_RUN_ID)`; reusing `pdsw18-crown` → run_tag `c7528814` → the SAME dirty `BARKPARK_HOME`
+  (`/private/tmp/pds-w14.c7528814`) that carries wave-18's pull (5083 content_edges, 34 clobbered rows,
+  empty pull_provenance). The root fix for (a) is a NEW `PDS_RUN_ID` (never initdb'd) → fresh
+  `BARKPARK_HOME` → guaranteed-EMPTY target. New run_tag makes D269 archive automatic (fresh `STATE_DIR`)
+  and the launcher's `O_APPEND` transcript collision moot. Boot it explicitly (`pds-scratch-target.sh up
+  --verify`, D34/D54 traps: `CC=/usr/bin/clang`, `mix deps.get` first, `BARKPARK_HOME` <85 chars, redirect
+  not pipe, ~3.5 min cold, budget an OOM without chasing it) BEFORE arming — the launcher only LOADS a
+  scratch, never boots one. Isolation and crown need SEPARATE fresh scratches (the isolation populates its
+  target; the crown rung-1 must import into a still-empty one).
+
+- **PDS-D283 — THE "CHECKOUT LAUNCHER FROM BRANCH" STEP IS A NO-OP; NEVER DIRECTORY-CHECKOUT.** The
+  897-floor launcher merged to origin/main (PR #5522, `c305a1a6e`, ancestor of `f76367999`); `git diff
+  origin/main c4569f98e -- scripts/pds-crown-launch.sh` is EMPTY, and all three floor knobs read 897 on
+  origin/main (lines 136/137/207). A worktree cut fresh at origin/main ALREADY carries the armed launcher —
+  skip the checkout step. If it is ever performed for provenance, it MUST be a single explicit pathspec
+  (`checkout c4569f98e -- scripts/pds-crown-launch.sh`, identical bytes) and NEVER `checkout <branch> -- .`
+  (that branch tip is based on the older `58862f62`; ~40 stale files would regress the worktree).
+
+- **PDS-D284 — RE-FREEZE THE WINDOW `worktree-cut → arm`, HOLDING #2907 + #5525.** The lead LIFTED the
+  freeze after wave-20's climb died (to drain PRs). The protected window is fire-worktree-cut → arm; once
+  armed, the detached child's own rung 0b re-checks live at fire time (D275), so post-arm merges self-defend
+  — the risk is entirely PRE-arm. `deploy.yml` redeploys guerrilla on any push touching
+  `api/**|cloud/**|internal/**|deploy/**|templates/**|connectors/**`; the INSTANCE job (the one that moves
+  guerrilla's sha) narrows to `^(api|internal|deploy|connectors)/` (deploy.yml:72). Currently exactly TWO
+  open PRs touch that set: **#2907** and **#5525** (both `api/**`; both `CONFLICTING` now, but one rebase
+  from mergeable). Docs/tooling PRs #5514/#5458 are safe. The lead RE-FREEZES (holds #2907 + #5525)
+  immediately before `git worktree add` and holds through the arm returning — the exact wave-18 failure
+  (guerrilla redeployed mid-climb, voiding 0b's ancestry) this window prevents. Coordinate via the paper +
+  SendMessage(main); re-verify with `bash scripts/pds-climb-preflight.sh` CHECK 4 immediately before cutting.
+
+- **PDS-D285 — BUDGET = spent+2 = 7; RE-READ `attempts` AT FIRE TIME (D224).** `attempts`=5 now (5/6 spent,
+  one remains). The fire re-cats `/tmp/pds-full-export/attempts` in the SAME shell as the arm and exports
+  `PDS_FULL_EXPORT_BUDGET=$((spent+2))`=7 INLINE before the fork (never a survey literal — the store is
+  machine-global per D156, a sibling could move it). Do NOT set `PDS_FULL_EXPORT_DIR` (D274). The parked tar
+  is one deploy stale (`served_sha 34b9b25d` ≠ live `f76367999`) → the fire PULLS FRESH, never reuses the
+  cached tar (D275 same-breath).
+
+- **PDS-D286 — RUNG 1 PASSING UNBLOCKS NO CROWN CRITERION BY ITSELF; the crown stays 9/12 (6,10,11 open).**
+  Rung 1 is a precondition for rung 6 (which ABORTs naming step 1 if no pull ran) and one step of the ONE
+  serial climb criterion 11 demands — but a fire is only a SEAL if rungs 3&4 pass WITH controls firing off
+  the one full bundle AND rungs 1/2/5/6 pass against the real booted target, all under ONE run_id (D84/D122).
+  10 is merge-gated (LEAD), 11 is last-and-alone (LEAD). Wave-20's fire moved the stamped count by ZERO.
+
+**WAVE 21 PLAN.** Two slices. **Round 1 — `pds-w21-diagnose-and-fire` (opus, `scripts/pds-w21-fire-record.md`):**
+(A) MOVE-2 app-path isolation — boot a guaranteed-fresh scratch (NEW `PDS_RUN_ID`), run the exact
+export|import (reuse the 76 MB artifact for the import leg), record the exit. SORT: exit 0 → (a) confirmed
+→ go to (B); same 25P02 → (b) → file the api successor, record the NAMED REFUSAL, do NOT arm, STOP (a win).
+(B) FIRE — SendMessage(main) to RE-FREEZE (#2907/#5525) and confirm the freeze is declared; cut a FRESH
+persistent worktree at origin/main `f76367999` (launcher already armed there, D283); pay `deps.get` + both
+compiles off-clock; boot a fresh CROWN scratch (a SECOND new `PDS_RUN_ID`); re-cat `attempts` + export
+`PDS_FULL_EXPORT_BUDGET=7` inline; re-run the same-breath 0b (`merge-base --is-ancestor <guerrilla-HEAD>
+<fire-worktree-HEAD>`, abort honestly if non-0); arm the launcher BY PATH `--prewarm-now --max-draws 2160
+--interval 10` DETACHED; confirm the child ONCE (`ps -p`); record run_id/run_tag/pid/transcript/scratch-home/
+budget/floor; push; open the PR; END THE TURN — NO polling. Gates (from the fresh fire worktree):
+`bash scripts/pds-crown-launch.sh selftest` (N ok · 0 FAIL) and `bash scripts/pds-climb-preflight.sh` (no
+CHECK FAIL). **Round 2 (deferred, LEAD dispatches after the CLIMB completes) — `pds-w21-crown-collect-and-seal`
+(fable, LEAD-only):** collect via six named states (`ps -p`, never `pgrep`), D248 stranded-lock recovery,
+the D261 bundle cross-check BEFORE any stamp, criterion text fetched to a file. If RESULT: PASS with rungs
+3/4/6 green off the ONE full bundle, controls firing — re-stamp crown **0–9** to the ONE wave-21 run_id, **10
+on merge** with the merge SHA recorded, **11 LAST and ALONE**, sealing the crown 12/12. If any rung refused:
+stamp NOTHING, record the named refusal, sort each red HARNESS-BUG vs ENGINE-FAIL, file the successor. **ZERO
+NEW SCRIPTS; `scripts/pds-*` fence ONLY** (the (b) fix, if ever, is FILED for an api/felix wave). Frozen blob
+`e219e97c` UNTOUCHED. Crown 9/12; unmet 6,10,11.
+
 ### Wave 2026-07-21 (21) — READ THE ABORT, THEN FIRE — last attempt FIRED and PASSED 11/11, CROWN SEALED 12/12, grade A− (paper `pds-wave-21-2026-07-21`)
 
 **THE EPIC PAYOFF LANDED.** One round-1 slice, `pds-w21-diagnose-and-fire` (opus). **PART A — app-path

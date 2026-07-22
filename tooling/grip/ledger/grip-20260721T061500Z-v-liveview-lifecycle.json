@@ -1,0 +1,29 @@
+{
+  "grip_id": "v-liveview-lifecycle-2026-07-21",
+  "verifier": "v-liveview-lifecycle",
+  "wave": "felix-pristine-wave-13-2026-07-21",
+  "assignment": "Are dashboard_live/ops_live ungated-mount findings FRESH or wave-12-deferred? Which of the four d07 items are ripe under improvement-only?",
+  "verdict": "FRESH (not in wave-12 paper, not #2402-swept). 2 mount-gate items (dashboard_live, ops_live) are RIPE; 2 unbounded-Repo.all items are NOT ripe / weak.",
+  "recipes": [
+    {
+      "claim": "wave-12 paper does NOT record dashboard_live/ops_live/staleness_live nor any mount/load_/repo.all/ungated/n+1/preload term; its watch-items are only sweep-worker,pusher-timeout,auth-genserver,runtime-env-integer,suite-seed,onexit",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && bp doc get paper felix-pristine-wave-12-2026-07-16 -o json | python3 -c \"import json,sys;t=json.dumps(json.load(sys.stdin)).lower();print({k:t.count(k) for k in ['dashboard_live','ops_live','mount','load_','repo.all','ungated','n+1','preload','sweep-worker','pusher-timeout','auth-genserver','onexit']})\""
+    },
+    {
+      "claim": "#2402 (f27623fdf) swept the connected?-mount-gate scar across staleness_live, board_live(+test), tickets inbox_live, org_admin_live, settings_live — but NOT pulse dashboard_live nor github ops_live",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show --stat f27623fdf | grep -E '\\.ex'"
+    },
+    {
+      "claim": "staleness_live.mount + board_live.mount are ALREADY connected?-gated (2402); pulse dashboard_live.mount runs load_rows/load_vitals/safe_storage UNCONDITIONALLY; github ops_live.mount runs Health.snapshot() UNCONDITIONALLY (only PubSub/timers connected?-gated)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && sed -n '26,40p' api/lib/barkpark/plugins/pulse/web/dashboard_live.ex; sed -n '35,40p' api/lib/barkpark/plugins/github/web/ops_live.ex; sed -n '52,66p' api/lib/barkpark/plugins/onixedit/web/staleness_live.ex; sed -n '196,214p' api/lib/barkpark/plugins/tasks/web/board_live.ex"
+    },
+    {
+      "claim": "staleness_live.load_books + tasks/board.ex load_task_docs ARE unbounded Repo.all; staleness is a DELIBERATE documented FLAT-POSTURE admin cross-workspace console (bounding blanks it, barkpark-s6t1)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && sed -n '230,244p' api/lib/barkpark/plugins/onixedit/web/staleness_live.ex; grep -n 'load_task_docs\\|Repo.all' api/lib/barkpark/tasks/board.ex"
+    },
+    {
+      "claim": "board_live_test.exs (from #2402) is the MODEL protective test (dead-render ZERO queries + connected 2x->1x); dashboard_live_test.exs(6) + ops_live_test.exs(16) exist and pass (19/0) but carry NO connected/disconnected/elide assertion",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'test ' api/test/barkpark/plugins/tasks/web/board_live_test.exs | grep -iE 'disconnect|discard|elide|2x'; grep -lc 'connected\\|disconnected\\|discarded\\|elide' api/test/barkpark/plugins/pulse/dashboard_live_test.exs api/test/barkpark/plugins/github/web/ops_live_test.exs; cd api && CC=/usr/bin/clang mix test test/barkpark/plugins/github/web/ops_live_test.exs test/barkpark/plugins/pulse | tail -3"
+    }
+  ]
+}
