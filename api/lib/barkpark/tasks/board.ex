@@ -47,8 +47,15 @@ defmodule Barkpark.Tasks.Board do
   alias Barkpark.Repo
   alias Barkpark.Tasks
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.Validation
 
   @columns [:open, :ready, :in_progress, :blocked, :done]
+
+  # Derived at compile time from the ONE claimability source of truth
+  # (Validation.claimable_statuses/0 — ~w(open blocked)); never fork a local
+  # literal. Keeps the `ready?/1` overlay guard in lockstep with the ready-queue
+  # allowlist (Tasks.Queue) and the targeted-claim guard (Tasks.Claim).
+  @claimable_statuses Validation.claimable_statuses()
 
   # The done column is WINDOWED (charter D10) so the board never becomes a dead
   # wall of finished work (§0). `build/2` + `apply_change/3` render only the most
@@ -998,7 +1005,7 @@ defmodule Barkpark.Tasks.Board do
 
   # A card is ready when it is open|blocked AND all its `blocks` targets are
   # done. An empty blocker list is vacuously ready (open with no deps).
-  defp ready?(%{lifecycle_status: s, blocker_statuses: bs}) when s in ["open", "blocked"],
+  defp ready?(%{lifecycle_status: s, blocker_statuses: bs}) when s in @claimable_statuses,
     do: Enum.all?(bs, &(&1 == "done"))
 
   defp ready?(_), do: false
