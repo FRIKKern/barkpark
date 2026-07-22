@@ -20,6 +20,8 @@ import { BarkparkValidationError } from './errors'
 import { getDoc } from './doc'
 import { searchDocuments, getSearchSuggestions } from './search'
 import { getBacklinks } from './backlinks'
+import { getRelated } from './related'
+import { listTags, getTagDocs } from './tags'
 import { getGraph, getOrphans, getDangling } from './graph'
 import { getHistory, getRevision, restoreRevision } from './history'
 import {
@@ -355,6 +357,15 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     getBacklinks(id, opts) {
       return getBacklinks(frozen, id, opts)
+    },
+    getRelated(id, opts) {
+      return getRelated(frozen, id, opts)
+    },
+    listTags(opts) {
+      return listTags(frozen, opts)
+    },
+    getTagDocs(tag, opts) {
+      return getTagDocs(frozen, tag, opts)
     },
     getGraph(id, opts) {
       return getGraph(frozen, id, opts)

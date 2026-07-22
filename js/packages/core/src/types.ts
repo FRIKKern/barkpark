@@ -535,6 +535,110 @@ export interface GraphOptions {
   signal?: AbortSignal
 }
 
+/** A shared tag between the source and a related candidate (`RelatedEntry.shared_tags`). */
+export interface SharedTag {
+  tag: string
+  /** The tag's strength on the source document (0..100). */
+  src_strength: number
+  /** The tag's strength on the candidate document (0..100). */
+  cand_strength: number
+}
+
+/** One related document from `client.getRelated()` — a fused tag-overlap / backlink candidate. */
+export interface RelatedEntry {
+  doc_id: string
+  type: string
+  /** The `documents.title` column (may be null for an untitled doc). */
+  title: string | null
+  /** The fused relatedness score (higher = more related). */
+  score: number
+  /** Which legs contributed: `'tags'` (shared tag names) and/or `'references'` (backlinks). */
+  sources: Array<'tags' | 'references'>
+  /** The tag names shared with the source and their per-side strengths (empty for a backlink-only match). */
+  shared_tags: SharedTag[]
+  [key: string]: unknown
+}
+
+/** Result of `client.getRelated()` — the ranked related documents. */
+export interface RelatedResult {
+  related: RelatedEntry[]
+  count: number
+}
+
+/** Options for `client.getRelated()`. */
+export interface RelatedOptions {
+  /** Cap the fan-out (server default 10, clamped to 50). */
+  limit?: number
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
+/** One tag in the registry from `client.listTags()` — per-type published counts + a total. */
+export interface TagRegistryEntry {
+  tag: string
+  /** Published-document count per type (e.g. `{ paper: 12, task: 3 }`). */
+  counts: Record<string, number>
+  /** The sum across every type. */
+  total: number
+}
+
+/** Result of `client.listTags()` — the tag registry, biggest first. */
+export interface ListTagsResult {
+  tags: TagRegistryEntry[]
+  count: number
+}
+
+/** Options for `client.listTags()`. */
+export interface ListTagsOptions {
+  /** Scope the corpus to these types (server default `['paper', 'task']`). */
+  types?: string[]
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
+/** One document carrying a tag from `client.getTagDocs()`, projected with that tag's weighting. */
+export interface TagDoc {
+  doc_id: string
+  type: string
+  /** The `documents.title` column (may be null for an untitled doc). */
+  title: string | null
+  /** The matched (strongest) tag entry's strength — null for a legacy flat carrier. */
+  strength: number | null
+  /** The matched entry's rationale — null for a legacy flat carrier. */
+  rationale: string | null
+  /** True when this tag is the document's `main_tag`. */
+  main_tag_match: boolean
+  [key: string]: unknown
+}
+
+/** Result of `client.getTagDocs()` — the documents carrying a tag, ranked by its strength. */
+export interface TagDocsResult {
+  tag: string
+  documents: TagDoc[]
+  count: number
+}
+
+/** Options for `client.getTagDocs()`. */
+export interface TagDocsOptions {
+  /** Scope the corpus to these types (server default `['paper', 'task']`). */
+  types?: string[]
+  /** AbortSignal to cancel the request. */
+  signal?: AbortSignal
+}
+
+/**
+ * A weighted tag entry as it appears on a document's `tags` field — the wave-2
+ * object shape. A legacy carrier stores a bare string instead; `normalizeTags()`
+ * lifts either shape into this uniform form (a flat string → `{ tag }` only).
+ */
+export interface WeightedTag {
+  tag: string
+  /** Author-assigned strength 0..100 (absent on a legacy flat carrier). */
+  strength?: number
+  /** Why the tag applies (absent on a legacy flat carrier). */
+  rationale?: string
+}
+
 /** One entry in a document's revision history (`client.getHistory()` / `getRevision()`). */
 export interface DocumentRevision {
   id: string
@@ -1150,6 +1254,12 @@ export interface BarkparkClient {
   revokeCollectionShare(id: string, opts?: { signal?: AbortSignal }): Promise<void>
   /** Documents that reference `id` — inbound references / backlinks (`GET /v1/data/backlinks/:dataset/:id`). */
   getBacklinks(id: string, opts?: BacklinksOptions): Promise<BacklinksResult>
+  /** Documents related to `id` — tag-overlap fused with backlinks (`GET /v1/data/related/:dataset/:id`). */
+  getRelated(id: string, opts?: RelatedOptions): Promise<RelatedResult>
+  /** Browse the tag registry — per-tag per-type published counts (`GET /v1/data/tags/:dataset`). */
+  listTags(opts?: ListTagsOptions): Promise<ListTagsResult>
+  /** Documents carrying `tag`, ranked by that tag's strength (`GET /v1/data/tags/:dataset/:tag`). */
+  getTagDocs(tag: string, opts?: TagDocsOptions): Promise<TagDocsResult>
   /** Traverse the content graph from a root document (`GET /v1/graph/:id`). */
   getGraph(id: string, opts?: GraphOptions): Promise<GraphResult>
   /** Documents with zero edges — orphans (`GET /v1/graph/orphans`). */
