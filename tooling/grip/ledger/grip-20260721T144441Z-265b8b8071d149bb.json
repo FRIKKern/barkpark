@@ -1,0 +1,75 @@
+{
+  "run_id": "grip-20260721T144441Z",
+  "recipes": [
+    {
+      "subject": "cmd:git",
+      "quantity": "git:log",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git log --oneline origin/main | grep -c 8fd00b6af",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T14:44:41Z"
+    },
+    {
+      "subject": "cloud/priv/static/app.js",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:cloud/priv/static/app.js | grep -n 'silently ADDITIVE'",
+      "derived_level": "L2",
+      "deps": [
+        "cloud/priv/static/app.js"
+      ],
+      "observed_at": "2026-07-21T14:44:41Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:log",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git log --oneline origin/main | grep -c 16453cf65",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T14:44:41Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:log",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git log -1 --format=%B 8c9c116c5 | grep -A1 '^Task:'",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T14:44:41Z"
+    },
+    {
+      "subject": "cloud/docker-compose.yml",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:cloud/docker-compose.yml",
+      "derived_level": "L2",
+      "deps": [
+        "cloud/docker-compose.yml"
+      ],
+      "observed_at": "2026-07-21T14:44:41Z"
+    },
+    {
+      "subject": "cloud/priv/static/__preview__/shoot.sh",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:cloud/priv/static/__preview__/shoot.sh | grep -n 'pkill\\|PPID\\|elapsed\\|orphan'",
+      "derived_level": "L2",
+      "deps": [
+        "cloud/priv/static/__preview__/shoot.sh"
+      ],
+      "observed_at": "2026-07-21T14:44:41Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get gr-blk-oracle-modal-callsite-coverage -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T14:44:41Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get gr-backlog-cssom-parity-count-skew -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T14:44:41Z"
+    }
+  ]
+}
