@@ -1,0 +1,35 @@
+{
+  "id": "v3-vercel-network-policy-fact",
+  "created": "2026-07-22T08:04:36Z",
+  "wave": "connectors-wave-31-2026-07-22",
+  "assignment": "Re-prove the D243(a)-falsifying fact before Decide amends the ledger: pinned vercel CLI version, existence + surface of `vercel sandbox config network-policy`, vendored dist mechanism (sandbox.update on an existing sandbox), and whether the cloud-sandbox-runner.mjs reuse branch is still untouched since D243",
+  "verdict": "FACT RE-PROVEN, HOLDS — D243(a)'s 'no Vercel API to narrow a live sandbox's allowlist without a fresh create' is FALSE and should be struck/amended. `vercel sandbox config network-policy <name>` exists on the pinned 54.13.0 CLI, exposes exactly --allowed-domain/--allowed-cidr/--denied-cidr/--network-policy/--mode, resolves the sandbox BY NAME via sandboxClient.get(...) and calls sandbox.update({ networkPolicy }) on that EXISTING sandbox object (dist/app-BPs0T7SC.mjs:15738-15749) — no fresh create involved. D243(b) (enforcement is live-only) and D243(c) (self-heals credential-less) are untouched by this fact and still stand. The cloud-sandbox-runner.mjs reuse-skip-create branch is confirmed untouched since D243 (last touch was #4184, W29/D237-D242, before D243) — the one commit on the file since D243 (#5552, W30 sanitize belt) only rewrote error-message construction at 3 unrelated call sites, never the reuse branch.",
+  "recipes": [
+    {
+      "claim": "vercel CLI on PATH is exactly the pinned 54.13.0 (not drifted)",
+      "rerun": "which vercel && vercel --version",
+      "expect": "/Users/pelle/.nvm/versions/node/v22.22.0/bin/vercel ; Vercel CLI 54.13.0"
+    },
+    {
+      "claim": "`vercel sandbox config network-policy` exists and exposes --allowed-domain/--allowed-cidr/--denied-cidr/--network-policy/--mode against an existing sandbox resolved by <name>",
+      "rerun": "vercel sandbox config network-policy --help",
+      "expect": "ARGUMENTS: <name> - The name of the sandbox ; OPTIONS include --network-policy <MODE>, --allowed-domain <str>, --allowed-cidr <str>, --denied-cidr <str>, --mode <MODE>"
+    },
+    {
+      "claim": "the vendored network-policy handler resolves the sandbox BY NAME and calls sandbox.update({ networkPolicy }) on that EXISTING sandbox — no fresh create in the path",
+      "rerun": "sed -n '15718,15752p' \"$(npm root -g)/vercel/node_modules/sandbox/dist/app-BPs0T7SC.mjs\"",
+      "expect": "networkPolicyCommand handler: `const sandbox = typeof sandboxName$1 !== \"string\" ? sandboxName$1 : await sandboxClient.get({ name: sandboxName$1, projectId, teamId, token })` immediately followed by `await sandbox.update({ networkPolicy: networkPolicy$1 })`"
+    },
+    {
+      "claim": "the reuse-skip-create branch in cloud-sandbox-runner.mjs is untouched since D243 (W30, connectors-wave-30-2026-07-21) — only commit on the file since then is the unrelated W30 sanitize belt",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git log --oneline --since=2026-07-21 origin/main -- scripts/connectors/cloud-sandbox-runner.mjs",
+      "expect": "single hit: 1720a9965 fix(connectors): sanitize res.err folds in cloud-sandbox shim (W30, D213) (#5552) — touches only the error-message sites (~692/760/781 pre-shift), never the reuseSandboxId branch"
+    },
+    {
+      "claim": "the reuse-skip-create branch's own line range last changed at #4184 (W29, D237-D242) — strictly BEFORE D243 was decided",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git log --oneline -L 890,905:scripts/connectors/cloud-sandbox-runner.mjs origin/main | head -5",
+      "expect": "1628f92bf connectors W29 (design) — per-connector cloud-sandbox egress widening (D237-D242) (#4184) — the only hit touching this range; nothing since"
+    }
+  ],
+  "reasoning": "D243(a) as ledgered claims 'no Vercel API to narrow a live sandbox's allowlist without a fresh create.' That premise is refuted directly: `vercel sandbox config network-policy <name>` is a first-class subcommand on the exact pinned CLI (54.13.0, confirmed on PATH, not drifted), and its vendored handler in dist/app-BPs0T7SC.mjs resolves the target sandbox by name through sandboxClient.get(...) — the SAME lookup-by-name pattern the runner's own reuse branch would need — then mutates it in place via sandbox.update({ networkPolicy }). No create, no snapshot, no destruction of the /tmp+transcript state D243(a) worried a narrowing-fix would cost. This does NOT resurrect D243 as a whole: (b) enforcement is still live-only (no offline test can prove a stale allowlist causes real egress without a live sandbox) and (c) the credential-less self-heal still stands (cloud_policy.ex re-derives both the MCP entry and the egress host set from the CURRENT installed set every turn) — neither was examined or touched by this fact, only (a)'s API-existence claim. The correct Decide action is a targeted amendment striking/rewording (a)'s 'no API exists' language while leaving p4/open and the live-gate re-escalation intact, exactly as the digest specified — not a build this wave, since the reuse branch that would consume this API is confirmed byte-identical since before D243 and the live stop/resume + propagation semantics needed to actually wire it up are deliberately out of Arm B's offline scope."
+}
