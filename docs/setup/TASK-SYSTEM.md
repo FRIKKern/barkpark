@@ -115,7 +115,7 @@ bp task ready --all                    # aggregate pages; fail closed on a repea
 bp task ls --limit 20                  # all tasks, goals included
 ```
 
-Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `limit`, plus ready-only `offset` (default/floor 0). Ready order is priority/creation/UUID; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
+Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `limit`, plus `offset` on both `ready` and `ls` (default/floor 0). Ready order is priority/creation/UUID; `ls` order is total (updated_at DESC or, with `parent`, inserted_at ASC — id tiebreak either way), so pages are disjoint over a frozen ledger; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
 
 **7. Watch the stream.** **Push:** SSE `/v1/data/listen/:dataset` — `task.*`, no polling. **Pull:** `bp task events --since <id>` → `GET /v1/tasks/events?since=<id>` replays **id-ASC, one page** (≤500): `{ok, events:[{id,event,doc_id,rev,at}], cursor, has_more}`. `id` = the **stable cursor** (monotonic `mutation_events` PK, lossless under concurrency). Resume with the last `cursor` as `--since`; omit = from start; `has_more:true` → poll again. Scoped one `dataset` (default `production`) + `type=task`.
 

@@ -106,10 +106,15 @@ defmodule Barkpark.Tasks.Query do
 
   def maybe_filter_claim_worker(query, _), do: query
 
+  # `id` tiebreaks make the order TOTAL (queue.ex tiebreak precedent): without
+  # them, rows sharing a timestamp may swap across pages, so offset pagination
+  # could repeat/skip rows. Only true timestamp ties reorder — non-paging
+  # consumers see the same sequence as before.
   def apply_index_order(query, parent) when is_binary(parent),
-    do: from(d in query, order_by: [asc: d.inserted_at])
+    do: from(d in query, order_by: [asc: d.inserted_at, asc: d.id])
 
-  def apply_index_order(query, _), do: from(d in query, order_by: [desc: d.updated_at])
+  def apply_index_order(query, _),
+    do: from(d in query, order_by: [desc: d.updated_at, desc: d.id])
 
   # ── the live-plan fetcher ───────────────────────────────────────────────────
 
