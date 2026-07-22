@@ -911,8 +911,29 @@ defmodule Barkpark.Content.Query do
     end
   end
 
+  # The strongest weighted entry for ONE tag name on a row's `tags_meta`
+  # GENERATED column (ae-w10 tag-detail read). ORDER BY … DESC LIMIT 1 IS the
+  # MAX guarded-cast strength — expressed as a row (not a scalar MAX) so the
+  # matched entry's `rationale` rides along in the same lateral. Shape guards
+  # copied from `Search.DocumentsRetriever.tag_boost_key/1`
+  # (`jsonb_typeof(e) = 'object'` + the strength digits regex — a non-integer
+  # strength fails the guard instead of blowing up the `::int` cast) and the
+  # name match is `lower() = lower()` like `Content.Related`'s tag leg. A
+  # legacy flat-string element is `jsonb_typeof` "string" → no row → NULL
+  # strength, which the caller's `desc_nulls_last` ranks LAST (Postgres DESC
+  # defaults NULLS FIRST — legacy docs would otherwise rank on top).
+  @strength_match_sql """
+  (SELECT (e->>'strength')::int AS strength, e->>'rationale' AS rationale
+     FROM jsonb_array_elements(?.tags_meta) AS e
+    WHERE jsonb_typeof(e) = 'object'
+      AND e->>'strength' ~ '^[0-9]+$'
+      AND lower(e->>'tag') = lower(?)
+    ORDER BY (e->>'strength')::int DESC
+    LIMIT 1)
+  """
+
   @doc """
-  Every document of `type` carrying `tag` in its `content["tags"]` array, scoped
+  Every document of `type_or_types` carrying `tag` in its tags array, scoped
   to `dataset` + the caller's tenant — the tag-index read.
 
   DUAL-SHAPE (authoring-excellence D10/D19): `tags` elements are weighted
@@ -921,34 +942,99 @@ defmodule Barkpark.Content.Query do
   `jsonb_array_elements` matching `e->>'tag'` (weighted; NULL on a scalar
   element) OR `e #>> '{}'` (the flat element's own text — never matches a
   weighted object, whose `#>> '{}'` is its full JSON text). Exact match either
-  way (Obsidian-parity); the CASE guards a non-array/absent `tags` into
-  no-match instead of an error (the `has`-op idiom above). Results are
-  title-ordered (then `doc_id` for a stable tie-break). Scoping is identical
-  to `get_document/4` (the P0 leak guard).
+  way (Obsidian-parity). The unnest source is the `tags_meta` GENERATED
+  column — byte-identical to the old inline `CASE WHEN jsonb_typeof(…)` guard
+  (the generation expression materializes exactly that CASE, see
+  `documents_retriever.ex` #4178) — so membership never DETOASTs `content`.
+  Scoping is identical to `get_document/4` (the P0 leak guard); a LIST of
+  types applies owner-scoping to the WHOLE query when ANY member type is
+  owner-scoped (conservative fail-closed — never a leak, at worst a narrower
+  mixed-type read). `published_only: true` narrows to the published
+  perspective (the `maybe_published_only` gate; default off, so existing
+  callers are untouched).
+
+  Ordering (ae-w10 tag-browse reads):
+
+    * default — title asc, `doc_id` asc (the historical tag-index order);
+      returns `[Document.t()]`.
+    * `order: :strength` — the tag-detail ranking: strongest carriers of
+      `tag` first via a `desc_nulls_last` LEFT LATERAL over `tags_meta`
+      (NULLS LAST is MANDATORY — see `@strength_match_sql`), tie-broken
+      title asc then `doc_id` asc. Returns projection maps
+      `%{doc_id, type, title, strength, rationale, main_tag_match}` — the
+      title COLUMN, never `content->>'title'` (empty for 2117/2132 weighted
+      docs, the D69 proven trap); `strength`/`rationale` are the matched
+      (strongest) entry's, NULL for a legacy flat carrier; `main_tag_match`
+      compares `content->>'main_tag'` case-insensitively (the one accepted
+      `content` read, mirroring `Content.Related`'s main_tag bonus). The
+      generic `order=` grammar structurally cannot express this
+      parameterized per-tag order — it lives here as a dedicated option.
   """
-  @spec docs_with_tag(String.t(), String.t(), String.t(), keyword()) :: [Document.t()]
-  def docs_with_tag(tag, type, dataset, opts \\ []) when is_binary(tag) do
+  @spec docs_with_tag(String.t(), String.t() | [String.t()], String.t(), keyword()) ::
+          [Document.t()] | [map()]
+  def docs_with_tag(tag, type_or_types, dataset, opts \\ []) when is_binary(tag) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
+    types = List.wrap(type_or_types)
 
-    Document
-    |> where([d], d.type == ^type)
-    |> where(
-      [d],
-      fragment(
-        "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->'tags') = 'array' THEN ?->'tags' ELSE '[]'::jsonb END) AS e WHERE e->>'tag' = ? OR e #>> '{}' = ?)",
-        d.content,
-        d.content,
-        ^tag,
-        ^tag
+    base =
+      Document
+      |> where([d], d.type in ^types)
+      |> where(
+        [d],
+        fragment(
+          "EXISTS (SELECT 1 FROM jsonb_array_elements(?.tags_meta) AS e WHERE e->>'tag' = ? OR e #>> '{}' = ?)",
+          d,
+          ^tag,
+          ^tag
+        )
       )
-    )
-    |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    |> maybe_scope_to_owner(type, dataset, opts)
-    |> maybe_scope_to_grants(opts)
-    |> order_by([d], asc: d.title, asc: d.doc_id)
-    |> Repo.all()
+      |> scope_to_dataset(dataset, opts)
+      |> scope_to_workspace_or_global(workspace_id, project_id)
+      |> maybe_scope_to_owner_any(types, dataset, opts)
+      |> maybe_scope_to_grants(opts)
+      |> maybe_published_only(opts)
+
+    case Keyword.get(opts, :order) do
+      :strength ->
+        base
+        |> join(:left_lateral, [d], m in fragment(@strength_match_sql, d, ^tag),
+          on: true,
+          as: :tag_match
+        )
+        |> order_by([d, tag_match: m],
+          desc_nulls_last: m.strength,
+          asc: d.title,
+          asc: d.doc_id
+        )
+        |> select([d, tag_match: m], %{
+          doc_id: d.doc_id,
+          type: d.type,
+          title: d.title,
+          strength: m.strength,
+          rationale: m.rationale,
+          main_tag_match:
+            fragment("lower(COALESCE(?->>'main_tag', '')) = lower(?)", d.content, ^tag)
+        })
+        |> Repo.all()
+
+      _ ->
+        base
+        |> order_by([d], asc: d.title, asc: d.doc_id)
+        |> Repo.all()
+    end
+  end
+
+  # `maybe_scope_to_owner/4` for a type LIST: owner-scope the whole query when
+  # ANY member type is owner-scoped. For a single type this is byte-identical
+  # to the singular helper; for a mixed ask it is deliberately conservative
+  # (fail-closed — an owner-scoped member narrows everything, never leaks).
+  defp maybe_scope_to_owner_any(query, types, dataset, opts) do
+    if Enum.any?(types, &Barkpark.Content.owner_scoped?(&1, dataset, opts)) do
+      scope_to_owner(query, Keyword.get(opts, :caller_context))
+    else
+      query
+    end
   end
 
   @doc """

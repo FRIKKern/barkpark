@@ -9,7 +9,7 @@ Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
 A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Documents** (§3). Canonical paths start `/w/:workspace_slug/p/:project_slug/v1/data/...`.
 
-**Flat alias.** Unprefixed `/v1/*` content routes resolve to `Default`/`Default`; scoped paths canonical.
+**Flat alias.** Unprefixed `/v1/*` content routes resolve to `Default`/`Default`.
 
 ## 2. Base URL & Authentication
 
@@ -67,7 +67,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `order` | `_updatedAt:desc` | `<field>:asc\|desc`, comma-join secondaries |
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
-| `filter[<field>][<op>]` | — | Ops `op` ∈ `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, last-colon split: weighted entry `strength >= min`; flat elements never match), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
+| `filter[<field>][<op>]` | — | Ops `op` ∈ `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted entry `strength >= min`; flat elements never match), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs). Depth 1. |
 
 **Response:** `result` is `{perspective, documents:[envelopes], count, limit, offset}` (`count` = page rows); outer keys per §3.
@@ -86,13 +86,15 @@ Inbound refs (reverse of §5a) — docs referencing `:id`: `{result:{backlinks:[
 
 Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap (Σ `LEAST(src,cand)/100` + main_tag bonus) + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`. Anon 404.
 
+Tags — `GET /v1/data/tags/:dataset` (`?type=`, default `paper,task`): per-tag per-type published counts → `{result:{tags:[{tag,counts,total}],count}}`; `/tags/:dataset/:tag`: docs ranked by that tag's strength (legacy flat last) → `result.documents:[{doc_id,type,title,strength,rationale,main_tag_match}]`. Anon 404.
+
 ### 5c. History [token]
 
 Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{…content}}`; `POST revision/:dataset/:id/restore` restores as a draft.
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-Apply a batch of mutations atomically (one DB transaction — any failure rolls back the batch). Body: `{ "mutations": [ … ] }`.
+Apply a batch of mutations atomically (any failure rolls back the batch). Body: `{ "mutations": [ … ] }`.
 
 **Write gate.** Requires `write` permission (read-only token → `403`, even on its own workspace); tenancy checked first (§2).
 
@@ -100,9 +102,7 @@ Apply a batch of mutations atomically (one DB transaction — any failure rolls 
 
 **`create`** — new draft; `conflict` if a draft already exists at that id: `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
-**`createOrReplace`** — upsert: creates or overwrites the draft. Same shape as `create`.
-
-**`createIfNotExists`** — creates only if no draft exists; else returns it with `operation: "noop"`; shape as `create`.
+**`createOrReplace`** — upsert (creates or overwrites the draft); **`createIfNotExists`** — creates only if no draft exists, else returns it with `operation: "noop"`. Both shaped as `create`.
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
@@ -115,7 +115,7 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
 - **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist. Requires `type` (else `400 malformed`); honors `ifRevisionID`.
 
-**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add `warnings: [{code,severity,message}]` — non-blocking advisories (e.g. `label_norm`); bulldocs paper-ingest 200 carries the same key, omitted when empty.
+**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add `warnings: [{code,severity,message}]` — non-blocking advisories (e.g. `label_norm`); bulldocs paper-ingest 200 carries the same key.
 
 Failures use the §9 error envelope.
 
@@ -125,11 +125,11 @@ SSE stream of document mutations, scoped to the resolved workspace + project.
 
 **Resuming:** `Last-Event-ID: <int>` header (or `?lastEventId=<int>` for browsers); replays the scope's events with greater `id`, oldest first, then streams live.
 
-**Response headers:** `Content-Type: text/event-stream` · `Cache-Control: no-cache` · `Connection: keep-alive`. **First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
+Standard SSE response headers. **First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
 
-**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data` fields: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (string\|null — rev *before*, same live and replay, `null` on `create`), `result` (envelope), `syncTags` (outer format). **Keepalive:** `: keepalive` every 30 s idle.
+**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data` fields: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (rev *before*, `null` on `create`), `result` (envelope), `syncTags` (outer format). **Keepalive:** `: keepalive` every 30 s idle.
 
-**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a compact live workflow summary (unreplayable, NO `id:`) refreshing the TUI strip mid-turn.
+**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a compact live workflow summary (unreplayable, NO `id:`).
 
 ## 8. Schema endpoints [admin]
 
@@ -158,14 +158,13 @@ A **`bptk_` key IS an identity**: an operator mints one per outsider, who files/
 
 Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_TOKEN` shared secret also authorizes. Ops apply INDIVIDUALLY, not atomically — a refused op lands in the 200 response's `errors` as `{index,code,message}`. Full grammar: the `Barkpark.Plugins.Sheets.Session` moduledoc.
 
-**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col:<0-based absolute index inside the rect>, dir:"asc"|"desc"}]}` — a PURE row permutation of the rect: formulas move VERBATIM (refs never rewritten; Excel semantics), recompute refreshes values, undo is the exact inverse permutation. Refusals: `sort_merge_overlap` / `sort_frozen_overlap` (rect must sit below the frozen band) / `invalid_sort_keys`.
+**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col:<0-based absolute index inside the rect>, dir:"asc"|"desc"}]}` — a PURE row permutation of the rect: formulas move VERBATIM (refs never rewritten; Excel semantics), undo is the exact inverse permutation. Refusals: `sort_merge_overlap` / `sort_frozen_overlap` (rect must sit below the frozen band) / `invalid_sort_keys`.
 
-**Filtering** is per-viewer view-state in Studio + the `/sheets` reader (sorting is an edit mutation). Deliberately NO filter wire endpoint; adding one is a design regression, not a gap.
+**Filtering** is per-viewer view-state in Studio + the `/sheets` reader (sorting is an edit mutation). Deliberately NO filter wire endpoint; adding one is a design regression.
 
 ## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
 
-Immutable Epic/Legendary ledger; scoped routes are canonical and flat routes are
-projectless legacy aliases. Full contract: [`cycle-fleet.md`](contracts/cycle-fleet.md).
+Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless legacy aliases. Full contract: [`cycle-fleet.md`](contracts/cycle-fleet.md).
 
 ## 9. Error Codes
 
@@ -179,7 +178,7 @@ Endpoint-specific (OpenAPI `Error.code` enum): ingest `invalid_paper`/`invalid_t
 
 ## 10. Legacy `/api/*` Routes
 
-Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE /api/documents/:type[/:id]` (token), `GET /api/schemas` (public). Responses carry `Deprecation: true` / `Sunset: 2026-12-31` / `Link` successor headers.
+Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE /api/documents/:type[/:id]` (token), `GET /api/schemas` (public). Responses carry `Deprecation`/`Sunset`/`Link` successor headers.
 
 ## 11. Rate Limiting
 
