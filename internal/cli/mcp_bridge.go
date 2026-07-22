@@ -62,14 +62,29 @@ import (
 // design (Cursor hard-caps 40 MCP tools), so the default surface omitting the
 // access tools is intentional, not a gap. TestBridgeAccessParity pins both facts
 // so a future shadow-set edit or verb rename reds the guard.
+// Never-double-expose extends to chat (herd charter D75h): the curated chat
+// session tools (mcp_chat.go — hardcoded, NOT manifest-backed, because chat.*
+// is existence-hidden at write tier) cover three chat verbs under hand-tuned
+// names, so a manifest that DOES carry them (a future admin-tier projection, or
+// the D36 tier remap) must not generate bp_chat_* twins:
+//
+//   - chat.create_session → curated chat_spawn_session
+//   - chat.send_message   → curated chat_send
+//   - chat.get_session    → curated chat_read_tail
+//
+// chat_wait_for_state composes over the fleet SSE — no manifest twin exists, so
+// it has no shadow entry.
 var bridgeShadowedIDs = map[string]bool{
-	"task.ready": true,
-	"task.next":  true,
-	"task.get":   true,
-	"task.close": true,
-	"task.prime": true,
-	"task.stamp": true,
-	"task.pulse": true,
+	"task.ready":          true,
+	"task.next":           true,
+	"task.get":            true,
+	"task.close":          true,
+	"task.prime":          true,
+	"task.stamp":          true,
+	"task.pulse":          true,
+	"chat.create_session": true,
+	"chat.send_message":   true,
+	"chat.get_session":    true,
 }
 
 // registerBridgeTools walks m.Commands and registers one MCP tool per command

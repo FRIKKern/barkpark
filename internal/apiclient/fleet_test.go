@@ -166,6 +166,57 @@ func TestFleetEventsReconnectAdvancesCursor(t *testing.T) {
 	}
 }
 
+// FleetEventsWithCursor (herd charter D76h) exposes every cursor advance to the
+// caller AS IT HAPPENS: onCursor fires once per id-bearing frame with the fresh
+// "<epoch>:<seq>" value, and never for the id-less heartbeat — so the handed-out
+// cursor stays pinned across heartbeats, exactly the replay position the server
+// honours. The plain FleetEvents path (nil onCursor) is pinned unchanged by the
+// tests above; this one proves the observing variant.
+func TestFleetEventsWithCursorObservesAdvances(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		_, _ = io.WriteString(w, "id: 1700:0\nevent: snapshot\ndata: {\"sessions\":[]}\n\n")
+		_, _ = io.WriteString(w, "event: heartbeat\ndata: {\"session_id\":\"s1\",\"ts\":\"2026-07-22T00:00:30Z\"}\n\n")
+		_, _ = io.WriteString(w, "id: 1700:1\nevent: state\ndata: {\"session_id\":\"s1\",\"agent_state\":\"idle\",\"ts\":\"2026-07-22T00:01:00Z\",\"title\":null}\n\n")
+		if fl != nil {
+			fl.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var mu sync.Mutex
+	var cursors []string
+	var events int
+	err := newChatClient(srv.URL).FleetEventsWithCursor(ctx, "", func(event, data string) error {
+		mu.Lock()
+		events++
+		n := events
+		mu.Unlock()
+		if n == 3 { // snapshot + heartbeat + state all delivered
+			cancel()
+		}
+		return nil
+	}, nil, func(cursor string) {
+		mu.Lock()
+		cursors = append(cursors, cursor)
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("FleetEventsWithCursor: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(cursors) != 2 || cursors[0] != "1700:0" || cursors[1] != "1700:1" {
+		t.Fatalf("onCursor observed %v, want [1700:0 1700:1] — one firing per id-bearing frame, none for the heartbeat", cursors)
+	}
+}
+
 // A first-attempt non-200 fails fast (bad creds don't retry forever).
 func TestFleetEventsInitialErrorFailsFast(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

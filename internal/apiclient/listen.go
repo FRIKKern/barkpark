@@ -113,7 +113,7 @@ func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, d
 
 		connected = true
 		consecutive5xx = 0 // a healthy 200 stream clears the 5xx blip streak
-		cbErr := scanListenFrames(resp.Body, &lastEventID, &backoff, floorBackoff, onEvent)
+		cbErr := scanListenFrames(resp.Body, &lastEventID, &backoff, floorBackoff, onEvent, nil)
 		resp.Body.Close()
 
 		// onEvent asked to stop (e.g. a broken stdout pipe) — propagate it.
@@ -143,7 +143,15 @@ func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, d
 // next drop retries fast). It returns only a non-nil error from onEvent; any
 // other scan-loop end (EOF / read error / ctx cancel) simply returns nil and the
 // caller decides whether to reconnect.
-func scanListenFrames(r io.Reader, lastEventID *string, backoff *time.Duration, floor time.Duration, onEvent func(event, data string) error) error {
+//
+// onCursor (nil-safe, herd charter D76h) observes every cursor advance as it
+// happens: it fires with the new value each time an id: line moves *lastEventID,
+// and ONLY then — id-less frames (live deltas, heartbeats) never fire it, so a
+// caller exposing the cursor (chat_wait_for_state's resumable bound) hands out a
+// value pinned across id-less heartbeats, exactly the replay position the server
+// honours on Last-Event-ID. Listen and ChatEvents pass nil (no exposure, byte-
+// identical behaviour); FleetEventsWithCursor threads its caller's func through.
+func scanListenFrames(r io.Reader, lastEventID *string, backoff *time.Duration, floor time.Duration, onEvent func(event, data string) error, onCursor func(cursor string)) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20) // tolerate large event frames
 
@@ -169,6 +177,9 @@ func scanListenFrames(r io.Reader, lastEventID *string, backoff *time.Duration, 
 			// The server tags each frame with a keyset id; remember it so the
 			// reconnect's Last-Event-ID header resumes exactly after it.
 			*lastEventID = strings.TrimSpace(line[len("id:"):])
+			if onCursor != nil {
+				onCursor(*lastEventID)
+			}
 		}
 	}
 	return nil
