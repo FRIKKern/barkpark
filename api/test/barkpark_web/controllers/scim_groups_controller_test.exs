@@ -198,7 +198,10 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
 
     test "PATCH /scim/v2/Groups/:id with a non-UUID id → 404 (never a 500)" do
       %{token: token} = org_with_ws("grp-cast-patch")
-      assert scim(token) |> patch("/scim/v2/Groups/%2Fnope", member_op("add", "x")) |> json_response(404)
+
+      assert scim(token)
+             |> patch("/scim/v2/Groups/%2Fnope", member_op("add", "x"))
+             |> json_response(404)
     end
 
     test "positive control: a valid-shape but unknown UUID → 404 (not 500)" do
@@ -333,6 +336,63 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
         |> json_response(412)
 
       assert resp["status"] == "412"
+    end
+  end
+
+  # IdP-supplied MEMBER ids (POST `members[].value` / PATCH Operations value)
+  # bind into `set_member_role/3`'s `:binary_id` compare. Before the guard a
+  # non-UUID member value raised `Ecto.Query.CastError` (phoenix_ecto maps it to
+  # a generic 400 — a SCIM-conformance gap vs the guarded `replace_group_members`
+  # path, which folds the same input to a clean no-op); now every member write
+  # routes through `Repo.uuid_or_nil` and folds to a no-op. ConnCase re-raises
+  # dispatch exceptions (the 400 is unobservable here), so the mutation-proof is
+  # the RAISE→NO-RAISE transition: these requests complete with a clean 201/200.
+  describe "non-UUID member ids fold to a no-op, never raise (CastError member-write class)" do
+    test "POST /scim/v2/Groups with a non-UUID member value → 201, member ignored" do
+      %{token: token} = org_with_ws("gmember-cast")
+
+      body =
+        scim(token)
+        |> post(
+          "/scim/v2/Groups",
+          Jason.encode!(%{
+            "displayName" => "CastGuard",
+            "role" => "member",
+            "members" => [%{"value" => "not-a-uuid"}]
+          })
+        )
+        |> json_response(201)
+
+      assert body["displayName"] == "CastGuard"
+      # the garbage id granted nothing and audited nothing
+      refute Repo.exists?(from e in Event, where: e.subject == "not-a-uuid")
+    end
+
+    test "PATCH add/remove with a non-UUID member → 200 no-op; a valid member still resolves" do
+      %{ws: ws, token: token} = org_with_ws("gmember-castp")
+      custom_role(ws.id, "reviewer", ["read"])
+      provision(token, "ok@gmember-castp.com")
+      user = Accounts.get_user_by_email("ok@gmember-castp.com")
+      gid = create_group(token, "Reviewers", "reviewer") |> Map.fetch!("id")
+
+      # add with a garbage member id → clean 200, nothing granted
+      scim(token)
+      |> patch("/scim/v2/Groups/#{gid}", member_op("add", "not-a-uuid"))
+      |> json_response(200)
+
+      assert Auth.authorize(user, ws.id, :write) == :ok
+
+      # remove with a garbage member id → clean 200, still a no-op
+      scim(token)
+      |> patch("/scim/v2/Groups/#{gid}", member_op("remove", "also-not-a-uuid"))
+      |> json_response(200)
+
+      # positive control: a valid member UUID still resolves through the same path
+      scim(token)
+      |> patch("/scim/v2/Groups/#{gid}", member_op("add", user.id))
+      |> json_response(200)
+
+      assert Auth.authorize(user, ws.id, :write) == {:error, :forbidden}
     end
   end
 

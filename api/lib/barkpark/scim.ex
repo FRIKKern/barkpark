@@ -451,41 +451,66 @@ defmodule Barkpark.Scim do
   @doc """
   Add `user_id` to `group`: set that user's membership role (in the org's
   workspaces) to the group's mapped role. No-op if the user isn't provisioned
-  into the org. Audited.
+  into the org, or if `user_id` is not a UUID (an IdP-supplied member value
+  binds to a `:binary_id` column — mirroring `replace_group_members/3`, a
+  malformed id folds to `{:ok, 0}` instead of raising, and is not audited).
+  Audited.
   """
   @spec add_group_member(Organization.t(), Group.t(), binary()) :: {:ok, non_neg_integer()}
   def add_group_member(%Organization{} = org, %Group{} = group, user_id) do
-    n = set_member_role(org, user_id, group.role_name)
-    audit_group(org, user_id, group, "group_member_added", group.role_name)
-    {:ok, n}
+    case Repo.uuid_or_nil(user_id) do
+      nil ->
+        {:ok, 0}
+
+      user_id ->
+        n = set_member_role(org, user_id, group.role_name)
+        audit_group(org, user_id, group, "group_member_added", group.role_name)
+        {:ok, n}
+    end
   end
 
   @doc """
   Remove `user_id` from `group`: revert that user's membership role (in the
   org's workspaces) to the default `member`, revoking the mapped grant. Audited.
+  A non-UUID `user_id` folds to `{:ok, 0}` un-audited, as in `add_group_member/3`.
   """
   @spec remove_group_member(Organization.t(), Group.t(), binary()) :: {:ok, non_neg_integer()}
   def remove_group_member(%Organization{} = org, %Group{} = group, user_id) do
-    n = set_member_role(org, user_id, @provision_role)
-    audit_group(org, user_id, group, "group_member_removed", @provision_role)
-    {:ok, n}
+    case Repo.uuid_or_nil(user_id) do
+      nil ->
+        {:ok, 0}
+
+      user_id ->
+        n = set_member_role(org, user_id, @provision_role)
+        audit_group(org, user_id, group, "group_member_removed", @provision_role)
+        {:ok, n}
+    end
   end
 
   # Set the user's role on every membership it holds in the org's workspaces.
+  # `user_id` binds to the `:binary_id` principal_id — a non-UUID would raise
+  # Ecto.Query.CastError, so it folds to 0 (defense in depth; public callers
+  # already guard via Repo.uuid_or_nil).
   defp set_member_role(org, user_id, role_name) do
-    ws_ids = workspace_ids(org)
+    case Repo.uuid_or_nil(user_id) do
+      nil ->
+        0
 
-    {n, _} =
-      Repo.update_all(
-        from(m in Membership,
-          where:
-            m.principal_type == "user" and m.principal_id == ^user_id and
-              m.workspace_id in ^ws_ids
-        ),
-        set: [role: role_name, updated_at: DateTime.utc_now()]
-      )
+      user_id ->
+        ws_ids = workspace_ids(org)
 
-    n
+        {n, _} =
+          Repo.update_all(
+            from(m in Membership,
+              where:
+                m.principal_type == "user" and m.principal_id == ^user_id and
+                  m.workspace_id in ^ws_ids
+            ),
+            set: [role: role_name, updated_at: DateTime.utc_now()]
+          )
+
+        n
+    end
   end
 
   # A role name is known if it's a built-in or a Role row that's global or
