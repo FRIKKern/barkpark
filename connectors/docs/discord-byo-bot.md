@@ -141,6 +141,65 @@ the command name itself (`/status`) into the turn loop, so a bare command still 
 **Interaction tokens live 15 minutes.** The synchronous deferred ack buys the turn that long to
 produce its reply; a turn that runs past 15 minutes can no longer edit the interaction.
 
+## The dev-loop smoke — `npm run smoke:discord`
+
+`connectors/scripts/smoke-discord.ts` shortens the D230 sequence above into one command. It has **two
+legs**, and the split is the whole point:
+
+| Leg | Runs when | Proves | Network |
+|---|---|---|---|
+| **Offline Ed25519 proof** | ALWAYS (no credentials) | the bridge verifies a signed interaction, answers `type:5`, dispatches, and rejects a forgery | none — local bridge only |
+| **Live guild registration** | ONLY with the credential triple + guild id | a guild-scoped command reaches Discord's v10 REST API and is invokable | one PUT to `discord.com` |
+
+The offline leg cannot use your real bot's key — Discord holds the private half, so only Discord can
+produce a signature that verifies against your app's public key. The smoke generates its **own**
+throwaway Ed25519 keypair, builds the adapter with **that** public key, signs a `timestamp + rawBody`
+the way Discord does (the recipe banked in `test/discord-slash-commands.test.ts`), and POSTs it to a
+**local** bridge mounted at the real `/connectors/webhooks/discord/:installKey` route. No public
+tunnel, no credentials, no egress: the adapter's follow-up PATCH to `discord.com` is stubbed so
+nothing leaves the machine. It asserts, in order:
+
+1. a signed **PING** → `200 {type:1}` — this is exactly Discord's save-time validation (see step 1
+   above), so the smoke proves the PONG the portal demands **before** you touch the portal;
+2. a signed **APPLICATION_COMMAND** → `200 {type:5}` synchronous deferred ack, dispatch backgrounded;
+3. the registered handler ran and its reply **PATCHed** the interaction (captured, not escaped);
+4. a **forged** signature → `401` (Ed25519 fail-closed).
+
+### Opt-in live registration (never CI — charter D230)
+
+The second leg registers a **guild-scoped** command against Discord's live REST API. Guild scope
+propagates **instantly** (global is ~1h), so it is the right dev-loop tool. Because it needs live
+BYO-bot credentials it is a **documented ops step and is never wired into CI** — with no credentials
+the smoke prints the exact gate and exits non-zero, having already run the offline proof.
+
+**Prerequisites:** the app exists, the bot is **invited to your dev guild**, and Message Content
+Intent is on (see [What you create](#what-you-create-per-workspace)).
+
+```bash
+export DISCORD_APPLICATION_ID='111111111111111111'   # General Information -> Application ID
+export DISCORD_BOT_TOKEN='...'                        # Bot -> Reset Token (secret, shown once)
+export DISCORD_PUBLIC_KEY='<64 hex chars>'            # General Information -> Public Key
+export DISCORD_GUILD_ID='222222222222222222'          # right-click server -> Copy Server ID
+# optional: SMOKE_DISCORD_COMMAND (default 'smoke'), SMOKE_DISCORD_PORT (default 8477)
+
+cd connectors && npm run smoke:discord
+```
+
+On success the bridge registers `/<command>` in that guild. **Invocation:** type `/<command>` in the
+dev guild — with the interactions endpoint wired (step 1 above) and the bridge running, it reaches the
+agent. **Portal PING ordering still applies:** registration only *defines* the command; delivery of
+the interaction still requires the Interactions Endpoint URL saved (and PING-validated) against a live
+route. **Cleanup:** re-run the same PUT with an empty array to delete it —
+
+```bash
+curl -X PUT \
+  "https://discord.com/api/v10/applications/<applicationId>/guilds/<guildId>/commands" \
+  -H "Authorization: Bot <botToken>" -H "Content-Type: application/json" -d '[]'
+```
+
+The script never prints the bot token; the triple is validated through `parseDiscordCredential`
+(fail-closed on any missing field) without echoing secrets.
+
 ## Three vendor traps, handled once
 
 `connectors/src/connectors/gateway.ts` is the shared supervisor for the socket channels (Discord and
