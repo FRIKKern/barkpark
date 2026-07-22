@@ -102,5 +102,29 @@ defmodule Barkpark.Content.Document do
     |> unique_constraint([:doc_id, :type, :dataset_id],
       name: :documents_doc_id_type_dataset_id_index
     )
+    # FK-abort containment (Felix W17). `workspace_id`, `project_id`, and
+    # `dataset_id` are real Postgres foreign keys —
+    # `references(:workspaces/:projects/:datasets, on_delete: :nilify_all)` from
+    # migrations 20260527110100_add_tenancy_columns and
+    # 20260527131000_add_dataset_id_columns, with Ecto-default constraint names
+    # `documents_<col>_fkey`. `owner_id` is NOT this class — it is a plain
+    # `:binary_id` column with no `references()` (migration
+    # 20260629150300_add_owner_id_to_documents) — so it earns no constraint.
+    #
+    # WHO RAISES: both public write routes — POST /v1/data/mutate/:dataset
+    # (MutateController) and POST /api/documents/:type (LegacyController) — flow
+    # through `Content.Writer.upsert_document`/`create_document`, which build this
+    # changeset and call the NON-BANG `Repo.insert()`. On a concurrently-deleted
+    # scope (an admin deletes the workspace/project/dataset between write-token
+    # scope resolution and the insert — a TOCTOU race; per D87 a DB-resolved id
+    # gone stale counts like raw input) the insert raises a raw
+    # `Ecto.ConstraintError` (a 500) instead of returning `{:error, changeset}`.
+    #
+    # RED vs GREEN: without these calls a bad/stale scope ref RAISES out of the
+    # writer (500); with them Ecto translates the Postgres rejection into
+    # `{:error, %Ecto.Changeset{}}` carrying `{"does not exist", _}` on the col.
+    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:dataset_id)
   end
 end
