@@ -1310,6 +1310,39 @@ self_update budget fix, and REFUSES the rest with reasons (D97). 3 slices, all r
 
 ## Wave log
 
+- **Wave 17 — 2026-07-22 — REVIEWED (A, per `felix-pristine-wave-17-2026-07-22`). Arm: E (E2 —
+  dual-reviewer intersection).** COMPLETE the FK-abort scar-class CENSUS E1 seeded
+  (`task-felix-w16-fk-abort-class-census-remainder`, now CLOSED 2/2 done by reviewer-1 — the wave
+  ran the census in Digest/Decide but never stamped the deliverable task; reviewer sealed it). E2 =
+  E1's lean straight-to-build + one premise-smoke PLUS a dual-reviewer-intersection merge gate.
+  **Census-of-the-5-corners COMPLETE (all REFUTE, derived live off origin/main):** sync/ (insert_all
+  raw upserts — no changeset for a constraint to attach to — + dormant), Oban workers (0/10 own an
+  FK-casting changeset insert; ProjectorWorker→Content.Edge already constrained), plugin schemas
+  (only 4 Ecto schemas repo-wide under plugins/; none an unfixed real `references()` FK),
+  media-beyond-meta (MediaFile W14-fixed is the sole media schema), schema-v2 internals (no backing
+  schema; codelists boot/seed/admin-only). **2 contestable candidates REFUTE on reachability:**
+  Content.Revision (compactor `Repo.insert!` BANG on system Oban cron; online save_revision copies
+  scope from a live in-txn parent Document — now FK-guarded — that aborts first → buildable
+  intersection empty), webhooks/delivery.ex (real CASCADE FKs but insert runs in a DETACHED
+  `Dispatcher.fan_out` `Task.Supervisor.start_child` fire-and-forget → crash logged, never a
+  user-facing 500). **1 genuine reachable instance FOUND + BUILT:** `task-felix-w17-document-fk-constraint`
+  (PR #5732, `loop-epic/content-document-core-schema-fk-abort-v1-0`) — the FOURTH sibling of the
+  Event/SchemaDefinition/MediaFile scope-FK family. Three bare `foreign_key_constraint` appended to
+  `Document.changeset/2`; owner_id correctly excluded (plain binary_id, no references()). Reviewer-1
+  (this review) re-ran the mutation independently: strip → 3 `documents_<col>_fkey` ConstraintError
+  raises, restore → 4/0 green; **ZERO code fixes needed**. **Corrected filter recorded (D99):**
+  CASCADE/SET NULL/nilify_all are ALL still this class (both W16 fixes are themselves CASCADE FKs) —
+  only "no real references() FK" excludes. **E2 experiment reading:** reviewer-1 AGREES with all
+  three decide-phase verdicts (Document=build, Revision=refute, delivery.ex=refute); the
+  agreement/disagreement data + escape-rate test await the LEAD-dispatched, blind reviewer-2 —
+  that intersection is the E2 scoring input, reported post-wave, not by this reviewer. Backlog
+  seeded: `task-felix-w17-belongs-to-crosscheck-backlog` (P3 — ~85 belongs_to schemas outside the
+  5 corners) + a future insert_all-with-FK-no-changeset census (a distinct related scar-class).
+  Ledger honest (slice in_progress 3/4, merge-gated [3] open for lead; census task closed 2/2).
+  Next: LEAD merges PR #5732 (Elixir Test gate) + closes slice criterion [3] on the dual-reviewer
+  intersection; dispatches blind reviewer-2 to re-derive the Document reachability premise, re-run
+  the mutation, and re-check the Revision/delivery.ex refutes (the E2 disagreement seam).
+
 - **Wave 16 — 2026-07-22 — REVIEWED (A−, per `felix-pristine-wave-16-2026-07-22`). Arm: E (E1).**
   COMPLETE the FK-abort scar-class sweep W14 opened on MediaFile. E1 = arm-D straight-to-build cost
   profile PLUS one real ~5-minute premise-smoke scout (no survey fleet). **2 round-1 slices, opus,
