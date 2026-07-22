@@ -128,6 +128,7 @@
                   "invalid_paper",
                   "invalid_proposal",
                   "invalid_request_id",
+                  "invalid_state_report",
                   "invalid_text",
                   "label_spine",
                   "malformed",
