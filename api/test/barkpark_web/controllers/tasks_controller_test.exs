@@ -23,6 +23,7 @@ defmodule BarkparkWeb.TasksControllerTest do
   alias Barkpark.{Auth, Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Tasks.Internal
+  alias BarkparkWeb.TasksController.Params
 
   @token "barkpark-test-tasks-token"
   @dataset "production"
@@ -225,6 +226,33 @@ defmodule BarkparkWeb.TasksControllerTest do
       resp = conn |> authed() |> get("/v1/tasks/ready?order=closure-neerest")
       assert resp.status == 400
       assert Jason.decode!(resp.resp_body)["message"] =~ "order must be closure_nearest"
+    end
+  end
+
+  describe "Params.parse_offset/1 — shared pagination floor convention" do
+    # tlv-bl-ready-offset-clamp: ready/2 was the codebase's SOLE offset with a
+    # floor (max 0) but no ceiling (min 100_000). parse_offset is the one clamp
+    # ready/2 and index/2 now share. A small-dataset API test can't distinguish
+    # a clamped 100_000 offset from an unbounded one (both return []), so the
+    # ceiling is proven here at the value seam. MUTATION PROOF: delete `max(0)`
+    # from Params.parse_offset → the negative case reds; delete `min(100_000)`
+    # → the ceiling case reds; restore either → green.
+    test "floors a negative offset to 0" do
+      assert Params.parse_offset("-10") == 0
+      assert Params.parse_offset(-10) == 0
+    end
+
+    test "caps an absurd offset at 100_000 (the ceiling ready/2 previously lacked)" do
+      assert Params.parse_offset("10000000") == 100_000
+      assert Params.parse_offset(10_000_000) == 100_000
+    end
+
+    test "passes an in-range offset through unchanged and fails junk soft to 0" do
+      assert Params.parse_offset("42") == 42
+      assert Params.parse_offset(nil) == 0
+      assert Params.parse_offset("not-an-int") == 0
+      # Phoenix array/map params (`?offset[]=1`) must not 500.
+      assert Params.parse_offset(["1"]) == 0
     end
   end
 

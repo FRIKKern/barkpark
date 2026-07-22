@@ -562,6 +562,15 @@ defmodule BarkparkWeb.TasksController.Params do
     end
   end
 
+  # Clamp an offset param into [0, 100_000] — the ONE floor convention every
+  # /v1/tasks pagination path shares (ready/2 and index/2). Floor 0 so a raw
+  # `?offset=-10` can never reach `OFFSET` as a negative (Postgres 500); ceiling
+  # 100_000 so `?offset=99999999` can't drive an unbounded deep scan. Mirrors the
+  # 3-site precedent (query_controller / search_controller / content/query) and
+  # the tlv-bl-tasks-ls-offset-broken (D19) index clamp — previously ready/2 was
+  # the sole offset in the codebase with a floor but no ceiling.
+  def parse_offset(raw), do: raw |> parse_int(0) |> max(0) |> min(100_000)
+
   def reason_to_string(reason) when is_atom(reason), do: Atom.to_string(reason)
   def reason_to_string({:invalid_lifecycle, s}), do: "invalid_lifecycle:#{s}"
   # Stamp (and any future holder-gated verb) on a task with no live claim —
