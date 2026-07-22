@@ -789,12 +789,18 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 //     `Map.get(params, "ifRev")`, so a `?if-rev=1` query param never matched and
 //     the guard was a silent no-op (a stale patch overwrote a newer paper
 //     instead of 412). Routed through the body (as camelCase `ifRev`, see
-//     bodyFlagKey) the guard fires. `file` is excluded — it carries the payload
-//     itself and is consumed by the --file path, never emitted as a body field.
+//     bodyFlagKey) the guard fires. Client-consumed flags (`file` carries the
+//     payload via the --file path; `set`/`quiet`/`all` are consumed by the CLI
+//     itself) are excluded — this MUST mirror applyQuery's clientOnly set, or a
+//     batch write's own control flag (e.g. `doc mutate --quiet`) would both skip
+//     the query string AND leak into the wire body.
 //   - cycle.open predates the batch rule: it is a non-batch write whose *_json
 //     contract flags ride the body by id. Retained verbatim.
 func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
-	if name == "file" {
+	// clientConsumed mirrors applyQuery's clientOnly set: these flags never ride
+	// the wire (as query OR body) — the CLI consumes them locally.
+	switch name {
+	case "file", "set", "quiet", "all":
 		return false
 	}
 	if cmd.Writes && cmd.Batch {

@@ -451,3 +451,44 @@ func TestSplitArgsShortAliasRejectsFlagShapedValue(t *testing.T) {
 		})
 	}
 }
+
+// TestDocMutateClientFlagsStayOffTheWire guards the S1 review fix: the
+// `Writes && Batch` body-routing rule must NOT capture client-consumed flags.
+// `doc mutate --quiet` set the batch rule true for `quiet`, which both skipped
+// the query string (clientOnly) AND leaked into the wire body as
+// `{"mutations":[…],"quiet":"true"}`, re-serializing what should ship verbatim.
+// Mutation proof: dropping "quiet" from commandFlagBelongsInBody's clientConsumed
+// switch turns this RED.
+func TestDocMutateClientFlagsStayOffTheWire(t *testing.T) {
+	cmd := manifest.Command{
+		ID: "doc.mutate", Noun: "doc", Verb: "mutate",
+		Flags:  []manifest.Flag{{Name: "file", Type: "file"}, {Name: "quiet", Type: "bool"}},
+		Writes: true, Batch: true,
+	}
+	opsPath := filepath.Join(t.TempDir(), "ops.json")
+	if err := os.WriteFile(opsPath, []byte(`{"mutations":[{"publish":{"type":"task","id":"x"}}]}`), 0o600); err != nil {
+		t.Fatalf("write ops file: %v", err)
+	}
+	flags := map[string][]string{"file": {opsPath}, "quiet": {"true"}}
+
+	// Never in the query string.
+	rawURL := applyQuery("https://example.test/v1/data/mutate", globals{}, cmd, flags, map[string]string{})
+	if strings.Contains(rawURL, "quiet") {
+		t.Fatalf("quiet leaked into query string: %s", rawURL)
+	}
+	// Never in the body.
+	body, _, _, err := buildBodyWithStdinOwnership(cmd, flags, map[string]string{}, false)
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	if strings.Contains(string(body), "quiet") {
+		t.Fatalf("quiet leaked into doc.mutate body: %s", string(body))
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if _, ok := got["mutations"]; !ok {
+		t.Fatalf("mutations payload dropped: %s", string(body))
+	}
+}
