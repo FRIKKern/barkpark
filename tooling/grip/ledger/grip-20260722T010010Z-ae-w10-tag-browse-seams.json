@@ -1,0 +1,71 @@
+{
+  "run_id": "grip-20260722T010010Z",
+  "subject_epic": "authoring-excellence",
+  "slice": "tag-browse-seams",
+  "verifier": "ae-w10-tag-browse-seams",
+  "recipes": [
+    {
+      "subject": "TagDistribution.per_type/3's tenant opts are read via Keyword.get(opts,:workspace_id) / Keyword.get(opts,:project_id) then piped into scope_to_workspace_or_global/3 — nil,nil resolves to the GLOBAL (all-tenant) read the daily worker deliberately uses; a controller must instead pass BarkparkWeb.ScopeHelpers.scope_opts(conn) (or an equivalent [workspace_id:, project_id:] pair from conn.assigns) so a public tag-browse read is tenant-scoped, not global",
+      "quantity": "tag-distribution-opts-contract",
+      "rerun": "sed -n '66,120p' api/lib/barkpark/content/tag_distribution.ex",
+      "expect": "per_type/3 does `workspace_id = Keyword.get(opts, :workspace_id)`; `project_id = Keyword.get(opts, :project_id)` then `|> scope_to_workspace_or_global(workspace_id, project_id)`, with the marker comment directly above the call reading 'D45 tag-count distribution is deliberate instance-wide admin telemetry — the daily TagDistribution worker reads across all tenants (workspace_id nil -> global)'",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/content/tag_distribution.ex"],
+      "observed_at": "2026-07-22T01:00:10Z"
+    },
+    {
+      "subject": "docs_with_tag/4 (content/query.ex) already establishes the exact controller-facing pattern per_type/3 must copy: same Keyword.get(opts,:workspace_id)/:project_id) -> scope_to_workspace_or_global/3 idiom, called with a real request's opts",
+      "quantity": "docs-with-tag-precedent",
+      "rerun": "sed -n '929,952p' api/lib/barkpark/content/query.ex",
+      "expect": "docs_with_tag/4 reads workspace_id/project_id from opts identically to per_type/3 and pipes scope_to_workspace_or_global(workspace_id, project_id) — title-ordered (asc: d.title, asc: d.doc_id), no strength ORDER BY arm yet",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/content/query.ex"],
+      "observed_at": "2026-07-22T01:00:10Z"
+    },
+    {
+      "subject": "GET /v1/data/counts/:dataset (#4377, QueryController.counts/2, manifest id data.counts) groups ONLY by d.type — a flat {type=>N} map — and is a structurally different shape from TagDistribution.per_type's {type,tag}=>N; extending it to carry a tag dimension would break its documented FROZEN response shape ('the Go bare-noun slice consumes it verbatim')",
+      "quantity": "counts-shape-vs-tag-distribution-shape",
+      "rerun": "sed -n '118,172p' api/lib/barkpark_web/controllers/query_controller.ex",
+      "expect": "counts/2 docstring: 'FROZEN response shape, which the CLI slice consumes verbatim: {\"ok\":true,\"dataset\":..,\"perspective\":\"published\",\"counts\":{type=>N}}' — grouped by d.type only, no tag axis anywhere in the query",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark_web/controllers/query_controller.ex"],
+      "observed_at": "2026-07-22T01:00:10Z"
+    },
+    {
+      "subject": "the open task pds-bl-counts-perspective-honesty is an ORTHOGONAL axis (perspective published/drafts/raw honesty on the existing /v1/data/counts route) — it neither blocks nor is satisfied by adding a tag dimension; it's a separate fix on the same file",
+      "quantity": "counts-perspective-task-scope",
+      "rerun": "bp task get pds-bl-counts-perspective-honesty -o json | python3 -c \"import json,sys;d=json.load(sys.stdin);print(d['doc']['content']['description'][:300])\"",
+      "expect": "description starts '...GET /v1/data/counts/:dataset accepts a perspective query param and IGNORES it entirely...' — about perspective, not about a tag/type breakdown",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-22T01:00:10Z"
+    },
+    {
+      "subject": "ROOT CAUSE of `bp doc query document` 404ing: NOT a route-segment collision. doc.get/doc.ls/doc.query are manifest auth_tier:\"none\", so authHeaders() sends NO Authorization header at the default published perspective (run.go:369-375) — confirmed by proxying the real bp process: the /v1/capabilities preflight carried 'Authorization: Bearer ...' but the subsequent GET /v1/data/query/production/document?limit=1 carried NONE, and the server 404s an anonymous read of a type with no public schema (existence-hiding) exactly as it does for `post` (0 docs) while paper/tag/command/metric/task (all public schemas) succeed anonymously",
+      "quantity": "doc-query-auth-header-drop",
+      "rerun": "python3 tooling_scratch_proxy.py & BARKPARK_API_URL=http://127.0.0.1:8933 bp doc query document --limit 1 -o json  # proxy logs show the 2nd request has no Authorization header while /v1/capabilities did",
+      "expect": "bp doc query document 404s ('document not found') at default perspective; `bp doc query document --perspective drafts` (forces needsPerspectiveAuth=true, run.go:87-125) succeeds and returns the real doc — proving the token, not the route, was the missing ingredient",
+      "derived_level": "L1",
+      "deps": ["internal/cli/run.go"],
+      "observed_at": "2026-07-22T01:00:10Z"
+    },
+    {
+      "subject": "doc.backlinks and data.counts are correctly manifest auth_tier:\"read\" (always attach bearer) — the pattern a NEW tag-browse/tag-detail manifest command must copy so an authenticated bp caller never hits the same silent 404 the wish's MUST-RUN probe surfaced",
+      "quantity": "read-tier-precedent-for-new-routes",
+      "rerun": "TOKEN=$(python3 -c \"import json;print(json.load(open('$HOME/.config/barkpark/config.json'))['token'])\"); curl -s -H \"Authorization: Bearer $TOKEN\" https://guerrilla.barkpark.cloud/v1/capabilities | python3 -c \"import json,sys;d=json.load(sys.stdin);[print(c['id'],c['auth_tier']) for c in d['commands'] if c['id'] in ('doc.backlinks','data.counts','doc.query')]\"",
+      "expect": "doc.backlinks read, data.counts read, doc.query none",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-22T01:00:10Z"
+    },
+    {
+      "subject": "router.ex mounts confirm two distinct client patterns: backlinks/counts/query/doc (dataset-scoped: flat /v1/data/... + preview /v1/preview/... + scoped /w/:workspace_slug/p/:project_slug/... mirrors, pipe_through [:api,:api_grant_read] or :shared_docs_api) vs /v1/graph/* (global: ONE mount under scope \"/v1\" with pipe_through [:api,:require_token], no workspace/project prefix, dataset rides a ?dataset= query param). Tag-browse/tag-detail reads are per-tenant dataset-scoped counts/doc-lists (TagDistribution.per_type/docs_with_tag both take dataset as a REQUIRED positional arg, matching backlinks/counts) so they should follow the backlinks/counts (dataset-scoped) pattern, not the graph.ts (global) pattern — a shared-vocabulary tag route on the global pattern would leak cross-tenant tag existence/usage, the exact class data_counts_test.exs guards counts against",
+      "quantity": "dataset-scoped-vs-global-route-recommendation",
+      "rerun": "grep -n 'QueryController, :backlinks\\|QueryController, :counts\\|TasksController, :graph_show' api/lib/barkpark_web/router.ex",
+      "expect": "backlinks/counts appear 3-4x across /v1/data (flat), /v1/preview, and /w/:workspace_slug/p/:project_slug scopes; graph_show appears once under a bare scope \"/v1\" with no workspace/project prefix",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark_web/router.ex"],
+      "observed_at": "2026-07-22T01:00:10Z"
+    }
+  ]
+}
