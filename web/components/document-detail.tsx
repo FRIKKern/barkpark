@@ -12,6 +12,7 @@ import { PaperEditorDoc } from "@/components/paper-editor-doc";
 import { SheetGrid, type SheetTab } from "@/components/sheet-grid";
 import { MetaCard } from "@/components/meta-card";
 import { DetailChrome } from "@/components/detail-chrome";
+import { RelatedPapers } from "@/components/related-papers";
 
 /**
  * Render the body for a resolved document, dispatched on `_type`. Text types
@@ -38,14 +39,23 @@ function renderBody(
       // per top-level prose block and server-renders the rest.
       const paperReadMode = process.env.NEXT_PUBLIC_PAPER_EDITOR === "read";
       const blocks = paperBlocks(doc as PaperDocument);
+      // Related-papers read: link by the source's own slug (its `doc_id`),
+      // falling back to the uuid only if a slug is somehow absent. Rendered
+      // below the article as an async Server Component; empty related shows
+      // nothing (RelatedPapers returns null).
+      const relatedId =
+        typeof doc.slug === "string" && doc.slug ? doc.slug : doc._id;
       return (
-        <article className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-10">
-          {paperReadMode ? (
-            <PaperEditorDoc blocks={blocks} />
-          ) : (
-            <PortableDoc value={blocks} />
-          )}
-        </article>
+        <>
+          <article className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-10">
+            {paperReadMode ? (
+              <PaperEditorDoc blocks={blocks} />
+            ) : (
+              <PortableDoc value={blocks} />
+            )}
+          </article>
+          <RelatedPapers docId={relatedId} />
+        </>
       );
     }
     case "sheet":
