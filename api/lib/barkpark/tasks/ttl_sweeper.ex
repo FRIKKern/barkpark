@@ -469,6 +469,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
         # can never interleave with a close/claim/reap on the same task.
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{doc_id}"])
 
+        # global-read: in-lock by-PK re-read of a candidate row the sweeper's own cross-tenant scan selected — internal Oban worker, tenancy resolved by the candidate query, same posture as the reap re-read above.
         case Repo.get(Document, doc_id) do
           nil ->
             :skipped
