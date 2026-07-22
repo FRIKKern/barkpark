@@ -93,7 +93,13 @@ if os.path.exists(f):
             except Exception:
                 sys.stderr.write("fleet: FATAL non-numeric cost_usd on line %d in %s\n" % (i, f))
                 sys.exit(3)
-print(round(cap - tot, 6))
+# Budget FLOORS at 0 (the protocol's documented behavior): overspend past the cap
+# would otherwise emit a NEGATIVE budget, which the server's capacity contract
+# (budget >= 0, PDF-D34) refuses with 422 — and the `|| true` on the beat would
+# swallow that, flipping the listener OFFLINE silently at the exact moment the
+# cap trips. 0 and negative route identically (route.py refuses budget < cost),
+# so the floor loses nothing and keeps presence alive through a tripped cap.
+print(round(max(cap - tot, 0.0), 6))
 PY
 }
 
