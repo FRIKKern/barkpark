@@ -1799,3 +1799,42 @@ flagged to tlv). Decisions D206–D214. Wave: S1 slice-C merge, S2 reconciliatio
 (round 1) + S4 terminal bracketed run (round 2, after S1). Backlog filed:
 `tlv-bl-stage-verb-done-reopen-door`, `tlv-bl-true-blocking-primitive-decision`,
 `spd-bl-primary-checkout-diverged`. Review appends the grade + premise_failures/review_fixes counts here.
+
+### Wave 2026-07-22 — Wave 16 (THE VERDICT-AND-SEAL WAVE), Review. **Arm: B.** Grade A-.
+
+**Landed (round 1, all green):** S1 `spd-w13-prediction-registered` MERGED at `dc4d2db02` (#5684) — the
+frozen prediction + checker are on main; the reviewer executed the checker (the builder never ran it):
+all four exit paths proven and a mutation test (one flipped raw after-value → 3 SELF_INCONSISTENT + 1
+ROUND_TRIP miss) shows it genuinely recomputes; zero code fixes. S2 reconciliation: 15/15 worklist rows
+done with SHA-cited evidence (trailer-bleed catch on tier3-header-chrome verified real — `1b71730d8`
+#5015, not stacked #5016); superseded pointer cancelled. S3 verdict-closes: b24 (ruling, `aee876e4f`
+#5537), c967 (`2dcf32b7a` #5554), spd-b44 (run row) — all verified, task closed done 5/5 by Review.
+
+**Review_fixes (2, both ledger):** the epic root's 5 criteria were stamped met:true with LITERAL 'C' as
+evidence (vacuous — the one material defect, on the crown row of the seal; grade capped at A- for it);
+Review re-stamped all 5 with the full D208 evidence map. And spd-b39w-verdict-closes criterion 4 was
+stamped + the task closed on Review's independent three-row verification.
+
+**Premise_failures (3 = 2 external + 1 internal):** wish item 1 (38ch crush) dead at L1 (D206); wish
+item 3 superseded (D203); internal — our stage-door filing was a mis-premise, hereby folded as:
+
+- **D215 — Stage-door retraction (correction of D211's framing).** The `done→open` stage transition is
+  the RATIFIED D7 reopen edge (`transitions.ex` lists `{done, open}` under terminal→reopen; `stage.ex`
+  gates on that one table), NOT an undocumented door of the #5621 bug class. `tlv-bl-stage-verb-done-reopen-door`
+  is closed as a mis-premise duplicate; the real defect (stale capabilities-manifest description feeding
+  `bp task stage --help`) is owned by `task-13bc8127adedfee0` (tlv epic). D211's operational recipe is
+  UNCHANGED — stage-open for done rows is legal and sanctioned. Attribution fix: cite #5537/`aee876e4f`
+  by SHA, not as tlv-publishdoor-builder's work.
+
+**Round-2 intel (for S4):** the frozen prediction ALREADY reads MISMATCH against the D206 residue
+artifact — 24 misses, all viewport 1280, all faces, all basis `prior-observation` (predicted 596px/59.6ch
+from the 2026-07-20 table; the deployed build measures 640px/64ch default-state at 1280; before==after,
+so a real layout move, NOT a round-trip failure). Round-trip claims hold 27/27; covered-column ruling
+HELD in 18 rows. The prediction stays frozen: when S4 fires, expect exit 1 in exactly this shape and read
+the per-miss `basis` field — stale absolutes wrong, structural/ruling claims held. That IS the honest
+quotable ruling; re-freezing after seeing results is the corruption the design forbids.
+
+**Next:** dispatch S4 `inspector-shape-bracketed-deployed-run` (its sole dep is merged): fire twice on
+the same build from origin/main's instrument blob, checker against the frozen prediction, forced-container
+control as a SIBLING section, new artifact files only, Task trailer PR; lead closes criterion 11 on
+merge, then Review seals the epic root (in_progress 5/5). After S4: epic residue zero.
