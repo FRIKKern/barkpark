@@ -491,6 +491,23 @@ defmodule Barkpark.Tasks do
   defdelegate close(task_id, worker_id, opts \\ []), to: Close
 
   @doc """
+  Merge-event bridge — auto-stamp a task's explicit `"merge_gate" => true`
+  acceptance criterion when its PR merges, WITHOUT a manual lead close. Reuses
+  #3039's close-time autostamp marker semantics + the shared `merge_criteria`
+  rev-CAS write. STAMP-ONLY: never flips `lifecycle_status`, so every OTHER unmet
+  criterion stays visibly partial and the lead keeps close/3's claim/epoch
+  judgment. Idempotent, named outcomes:
+
+      Tasks.reconcile_merge_gate(task_uuid,
+        %{"prs" => [4621], "commit" => "abc1234"}, worker_id: "github-merge")
+
+  `{:ok, :stamped, [index]}` | `{:ok, :already_stamped}` | `{:ok, :no_marker}` |
+  `{:ok, :no_guardable_marker}` | `{:error, :unknown_task | :stale_rev}`.
+  See `Barkpark.Tasks.Close.reconcile_merge_gate/3`.
+  """
+  defdelegate reconcile_merge_gate(task_id, landed, opts \\ []), to: Close
+
+  @doc """
   Voluntarily RELEASE a claimed task — the on-demand unclaim (the TTL
   sweeper's reap is the timeout twin). Holder-only + epoch-fenced: flips
   `in_progress → open`, clears `claim.worker` and `assignee`, bumps the
