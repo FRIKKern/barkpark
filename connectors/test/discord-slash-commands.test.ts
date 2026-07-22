@@ -33,6 +33,11 @@ import {
   decodeDiscordModalCustomId,
   extendDiscordInteractionWebhook,
 } from "../src/connectors/discord.js";
+import {
+  DEFAULT_DISCORD_MODAL_WINDOW_MS,
+  InvalidConfigError,
+  loadConfig,
+} from "../src/config.js";
 
 const APP_ID = "111111111111111111";
 
@@ -114,7 +119,9 @@ interface Harness {
 
 let harness: Harness;
 
-function makeHarness(opts: { withInteractionHandlers?: boolean } = {}): Harness {
+function makeHarness(
+  opts: { withInteractionHandlers?: boolean; modalWindowMs?: number } = {},
+): Harness {
   const withInteractionHandlers = opts.withInteractionHandlers ?? true;
   const captured: { method: string; url: string; body?: string }[] = [];
   const entered: string[] = [];
@@ -209,10 +216,16 @@ function makeHarness(opts: { withInteractionHandlers?: boolean } = {}): Harness 
     });
   }
 
-  // THE REAL SRC SEAM under test (not a mirror): the type-5 MODAL_SUBMIT
-  // intercept + onOpenModal injection, wrapping chat.webhooks.discord in place
-  // exactly as mountInstall does.
-  extendDiscordInteractionWebhook(chat, adapter);
+  // THE REAL SRC SEAM under test (not a mirror): the D249 hold-and-substitute
+  // (modal OPEN becomes the interaction HTTP response) + the type-5 MODAL_SUBMIT
+  // intercept, wrapping chat.webhooks.discord in place exactly as mountInstall
+  // does. `modalWindowMs` threads the knob a real deploy reads from
+  // CONNECTORS_DISCORD_MODAL_WINDOW_MS; omitted = the src default (250ms).
+  extendDiscordInteractionWebhook(
+    chat,
+    adapter,
+    opts.modalWindowMs === undefined ? {} : { modalWindowMs: opts.modalWindowMs },
+  );
 
   return {
     chat,
@@ -555,8 +568,9 @@ describe("Discord component + modal interactions — W30 (stop acked-then-droppe
     expect(harness.actionDispatched).toEqual(["pick-env staging"]);
   });
 
-  it("(h) modal round-trip: openModal from a slash handler → type-9 callback POST; signed MODAL_SUBMIT → routed to onModalSubmit with its fields; reply PATCHes the SUBMIT's own token", async () => {
-    // STEP 1 — a slash handler opens a modal.
+  it("(h) D249 modal round-trip: openModal within the window → {type:9} IS the interaction HTTP response with ZERO prior egress; same-turn reply goes POST ?wait=true; signed MODAL_SUBMIT → routed with its fields; reply PATCHes the SUBMIT's own token", async () => {
+    // STEP 1 — a slash handler opens a modal INSIDE the hold window, then posts
+    // a same-turn follow-up through the ordinary channel reply closure.
     let openResult: { viewId: string } | undefined;
     harness.setSlashHook(async (event) => {
       const modal: ModalElement = {
@@ -588,28 +602,50 @@ describe("Discord component + modal interactions — W30 (stop acked-then-droppe
       ),
       { waitUntil: (p) => bg.push(p) },
     );
-    expect(commandRes.status).toBe(200);
-    await Promise.allSettled(bg);
-    await waitFor(() => harness.completed.length === 1);
 
-    // The openModal seam POSTed a REAL type-9 modal to the interaction
-    // callback endpoint (offline the stub answers 200; live, the vendor's
-    // auto-ack wins the race and Discord would answer 40060 — see the W30
-    // seam note in discord.ts).
-    const modalPost = harness.captured.find(
-      (c) =>
-        c.method === "POST" &&
-        c.url.includes(`/interactions/31/${commandToken}/callback`),
-    );
-    expect(modalPost, JSON.stringify(harness.captured)).toBeTruthy();
-    const posted = JSON.parse(modalPost?.body ?? "{}") as {
+    // THE SUBSTITUTION (D249): the modal IS the interaction's HTTP response —
+    // the vendor's held type-5 ack was discarded, never sent, so the 40060
+    // "already acknowledged" race is structurally impossible, not merely won.
+    expect(commandRes.status).toBe(200);
+    const posted = (await commandRes.clone().json()) as {
       type: number;
       data: { custom_id: string; title: string; components: unknown[] };
     };
     expect(posted.type).toBe(9);
     expect(posted.data.title).toBe("Feedback");
     expect(posted.data.components).toHaveLength(1);
+
+    // ZERO egress at the substitution instant: no /interactions callback POST
+    // (the W30 raced fetch is DELETED, not raced better) and no @original PATCH
+    // was captured before the type-9 returned.
+    const egressAtSubstitution = harness.captured.filter(
+      (c) =>
+        c.url.includes("/interactions/") || c.url.includes("/messages/@original"),
+    );
+    expect(egressAtSubstitution, JSON.stringify(harness.captured)).toHaveLength(0);
+
+    await Promise.allSettled(bg);
+    await waitFor(() => harness.completed.length === 1);
     expect(openResult).toEqual({ viewId: posted.data.custom_id });
+
+    // MIXED-REPLY FIX: after a modal win the type-9 WAS the initial response, so
+    // the same-turn channel.post must ride POST ?wait=true (a follow-up), never
+    // PATCH @original — live, that PATCH would 404 (no placeholder exists after
+    // a type-9). The no-flip control is pinned by (c)/(e)/(h2): without a modal
+    // win the same closure PATCHes @original.
+    const followUp = harness.captured.find(
+      (c) =>
+        c.method === "POST" &&
+        c.url.includes(`/webhooks/${APP_ID}/${commandToken}?wait=true`),
+    );
+    expect(followUp, JSON.stringify(harness.captured)).toBeTruthy();
+    expect(
+      harness.captured.filter((c) => c.url.includes("/messages/@original")),
+    ).toHaveLength(0);
+    // Still zero /interactions callback POSTs after the full drain.
+    expect(
+      harness.captured.filter((c) => c.url.includes("/interactions/")),
+    ).toHaveLength(0);
 
     // The custom_id round-trips callbackId + contextId (the stored modal
     // context that will restore relatedChannel on submit).
@@ -677,6 +713,173 @@ describe("Discord component + modal interactions — W30 (stop acked-then-droppe
     expect(patch, JSON.stringify(harness.captured)).toBeTruthy();
   });
 
+  function feedbackCommandBody(id: string, token: string): string {
+    return JSON.stringify({
+      type: 2,
+      id,
+      application_id: APP_ID,
+      token,
+      channel_id: "chan-1",
+      guild_id: "guild-1",
+      data: { id: "cmd-feedback", name: "feedback", type: 1 },
+      member: { user: { id: "user-6", username: "erik", global_name: "Erik" } },
+    });
+  }
+
+  const FEEDBACK_MODAL: ModalElement = {
+    type: "modal",
+    callbackId: "feedback-modal",
+    title: "Feedback",
+    children: [{ type: "text_input", id: "note", label: "Your note" }],
+  };
+
+  it("(h2) HONEST CEILING: openModal AFTER the window → warn + undefined (never silent success), the vendor type-5 ack was already released, and the reply PATCHes @original (no-flip control)", async () => {
+    const late = makeHarness({ modalWindowMs: 40 });
+    const warnSpy = vi.spyOn(console, "warn");
+    try {
+      let openResult: { viewId: string } | undefined | "unset" = "unset";
+      let releaseHook!: () => void;
+      const held = new Promise<void>((r) => (releaseHook = r));
+      late.setSlashHook(async (event) => {
+        await held; // resolved only AFTER the webhook response returned
+        openResult = await event.openModal(FEEDBACK_MODAL);
+      });
+
+      const token = "interaction-token-late";
+      const bg: Promise<unknown>[] = [];
+      const res = await late.webhook(
+        makeRequest(feedbackCommandBody("41", token), { signed: true }),
+        { waitUntil: (p) => bg.push(p) },
+      );
+
+      // The window expired with no modal — the HELD vendor ack is released.
+      expect(res.status).toBe(200);
+      expect(((await res.clone().json()) as { type: number }).type).toBe(5);
+
+      releaseHook();
+      await Promise.allSettled(bg);
+      await waitFor(() => late.completed.length === 1);
+
+      // warn + undefined — never a silent success, never a raced callback POST.
+      expect(openResult).toBeUndefined();
+      expect(
+        warnSpy.mock.calls.some((args) =>
+          String(args[0]).includes('modal "feedback-modal"'),
+        ),
+      ).toBe(true);
+      expect(
+        late.captured.filter((c) => c.url.includes("/interactions/")),
+      ).toHaveLength(0);
+
+      // NO-FLIP CONTROL: without a modal win, initialResponseSent stays false,
+      // so the same-turn reply PATCHes @original (not POST ?wait=true).
+      const patch = late.captured.find(
+        (c) =>
+          c.method === "PATCH" &&
+          c.url.includes(`/webhooks/${APP_ID}/${token}/messages/@original`),
+      );
+      expect(patch, JSON.stringify(late.captured)).toBeTruthy();
+    } finally {
+      warnSpy.mockRestore();
+      await late.chat.shutdown().catch(() => {});
+    }
+  });
+
+  it("(h3) knob: modalWindowMs 0 DISABLES the hold — immediate vendor type-5 ack, openModal → warn + undefined", async () => {
+    const disabled = makeHarness({ modalWindowMs: 0 });
+    const warnSpy = vi.spyOn(console, "warn");
+    try {
+      let openResult: { viewId: string } | undefined | "unset" = "unset";
+      disabled.setSlashHook(async (event) => {
+        openResult = await event.openModal(FEEDBACK_MODAL);
+      });
+
+      const bg: Promise<unknown>[] = [];
+      const started = Date.now();
+      const res = await disabled.webhook(
+        makeRequest(feedbackCommandBody("42", "interaction-token-off"), {
+          signed: true,
+        }),
+        { waitUntil: (p) => bg.push(p) },
+      );
+      const elapsed = Date.now() - started;
+
+      // Immediate ack: no hold, no deadline wait (generous bound — the point is
+      // it did not sit out a window; the handler itself is near-instant).
+      expect(res.status).toBe(200);
+      expect(((await res.clone().json()) as { type: number }).type).toBe(5);
+      expect(elapsed).toBeLessThan(1000);
+
+      await Promise.allSettled(bg);
+      await waitFor(() => disabled.completed.length === 1);
+
+      expect(openResult).toBeUndefined();
+      expect(
+        warnSpy.mock.calls.some((args) =>
+          String(args[0]).includes('modal "feedback-modal"'),
+        ),
+      ).toBe(true);
+      expect(
+        disabled.captured.filter((c) => c.url.includes("/interactions/")),
+      ).toHaveLength(0);
+    } finally {
+      warnSpy.mockRestore();
+      await disabled.chat.shutdown().catch(() => {});
+    }
+  });
+
+  it("(h4) non-modal short-circuit: dispatch settling releases the held ack WITHOUT waiting out the window", async () => {
+    // A 2500ms window with a near-instant handler: if the hold waited out the
+    // full window this would take >=2500ms; the dispatch-settled branch of the
+    // race must release the ack as soon as the turn completes.
+    const wide = makeHarness({ modalWindowMs: 2500 });
+    try {
+      const token = "interaction-token-fast";
+      const bg: Promise<unknown>[] = [];
+      const started = Date.now();
+      const res = await wide.webhook(
+        makeRequest(feedbackCommandBody("43", token), { signed: true }),
+        { waitUntil: (p) => bg.push(p) },
+      );
+      const elapsed = Date.now() - started;
+
+      expect(res.status).toBe(200);
+      expect(((await res.clone().json()) as { type: number }).type).toBe(5);
+      expect(elapsed).toBeLessThan(1500);
+
+      await Promise.allSettled(bg);
+      await waitFor(() => wide.completed.length === 1);
+
+      // The normal reply path is untouched: PATCH @original on the own token.
+      const patch = wide.captured.find(
+        (c) =>
+          c.method === "PATCH" &&
+          c.url.includes(`/webhooks/${APP_ID}/${token}/messages/@original`),
+      );
+      expect(patch, JSON.stringify(wide.captured)).toBeTruthy();
+    } finally {
+      await wide.chat.shutdown().catch(() => {});
+    }
+  });
+
+  it("(h5) a negative modalWindowMs is clamped to 0 (hold disabled), never a hang or a throw", async () => {
+    const negative = makeHarness({ modalWindowMs: -100 });
+    try {
+      const bg: Promise<unknown>[] = [];
+      const res = await negative.webhook(
+        makeRequest(feedbackCommandBody("44", "interaction-token-neg"), {
+          signed: true,
+        }),
+        { waitUntil: (p) => bg.push(p) },
+      );
+      expect(res.status).toBe(200);
+      expect(((await res.clone().json()) as { type: number }).type).toBe(5);
+      await Promise.allSettled(bg);
+    } finally {
+      await negative.chat.shutdown().catch(() => {});
+    }
+  });
+
   it("(i) forged/unsigned MODAL_SUBMIT → 401, the intercept NEVER dispatches (Ed25519 stays in front)", async () => {
     const body = JSON.stringify({
       type: 5,
@@ -741,5 +944,49 @@ describe("Discord component + modal interactions — W30 (stop acked-then-droppe
       values: { a: "b" },
       relatedChannelId: undefined, // no stored context — honest degradation
     });
+  });
+});
+
+describe("CONNECTORS_DISCORD_MODAL_WINDOW_MS — the D249 hold-window knob on BridgeConfig", () => {
+  // The minimum viable env for loadConfig — the knob rides the same intFromEnv
+  // idiom as every other bridge interval (out-of-range = ERROR, never a silent
+  // fallback; the runtime clamp in discord.ts is the defensive second belt).
+  function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+    return {
+      DATABASE_URL: "postgres://test",
+      BARKPARK_API_URL: "https://api.test",
+      CONNECTORS_CREDENTIAL_KEY: "a".repeat(44),
+      ...extra,
+    };
+  }
+
+  it("defaults to 250ms when unset", () => {
+    expect(DEFAULT_DISCORD_MODAL_WINDOW_MS).toBe(250);
+    expect(loadConfig(env()).discordModalWindowMs).toBe(
+      DEFAULT_DISCORD_MODAL_WINDOW_MS,
+    );
+  });
+
+  it("accepts the full [0..2500] range — 0 (hold disabled) and 2500 (the cap) included", () => {
+    expect(
+      loadConfig(env({ CONNECTORS_DISCORD_MODAL_WINDOW_MS: "0" }))
+        .discordModalWindowMs,
+    ).toBe(0);
+    expect(
+      loadConfig(env({ CONNECTORS_DISCORD_MODAL_WINDOW_MS: "400" }))
+        .discordModalWindowMs,
+    ).toBe(400);
+    expect(
+      loadConfig(env({ CONNECTORS_DISCORD_MODAL_WINDOW_MS: "2500" }))
+        .discordModalWindowMs,
+    ).toBe(2500);
+  });
+
+  it("rejects out-of-range and malformed values loudly (2501, -1, non-integer)", () => {
+    for (const bad of ["2501", "-1", "1.5", "abc"]) {
+      expect(() =>
+        loadConfig(env({ CONNECTORS_DISCORD_MODAL_WINDOW_MS: bad })),
+      ).toThrow(InvalidConfigError);
+    }
   });
 });
