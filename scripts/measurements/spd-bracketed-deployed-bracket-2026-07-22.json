@@ -1,0 +1,152 @@
+{
+  "bracket_id": "spd-bracketed-deployed-run-2026-07-22",
+  "title": "The bracketed deployed inspector-shape run — round-trip fidelity PAID, the derived destination confirmed, D127's exemption ruled per condition against served bdd7dac40",
+  "role": "This is the wave's DELIVERABLE, not its epilogue. It is the only artefact permitted to speak about the deployed render, and the thing that converts D127's pre-registered exemption from REGISTERED to a per-condition ruling. It is a BRACKET — per-condition rows — never one collapsed verdict.",
+  "generated_by": "spd-s4-runner2 (Opus re-run; prior Fable runner completed run 1 but pushed nothing, died on a model cap)",
+  "generated_at_utc": "2026-07-22T12:21Z",
+  "raw_runs": [
+    "scripts/measurements/spd-bracketed-deployed-run1-2026-07-22.json",
+    "scripts/measurements/spd-bracketed-deployed-run2-2026-07-22.json"
+  ],
+  "registered_prediction": "scripts/measurements/spd-round-trip-prediction-2026-07-21.json",
+  "checker": "scripts/measurements/check-prediction.mjs",
+  "forced_container_control": "scripts/studio-scrim-threshold-control.mjs",
+
+  "provenance": {
+    "deployed_served_sha": "bdd7dac40dfbc3e1c91e252e202163480031a730",
+    "slot_active": ["green"],
+    "read_method": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 'cd /opt/barkpark && git rev-parse HEAD' + systemctl list-units 'barkpark-slot@*'",
+    "bracket_pre_read_run1": "2026-07-22T12:17:49.796Z",
+    "bracket_post_read_run1": "2026-07-22T12:19:02.005Z",
+    "bracket_pre_read_run2": "2026-07-22T12:19:20.497Z",
+    "bracket_post_read_run2": "2026-07-22T12:20:32.441Z",
+    "provenance_bracket_matched_run1": true,
+    "provenance_bracket_matched_run2": true,
+    "provenance_bracket_mismatches": [],
+    "note": "The served SHA and live slot were read live over ssh BEFORE and AFTER each sweep. Both brackets matched with zero mismatches: no deploy and no slot rotation landed inside either measurement window, so every row of both runs describes the SAME build served by the SAME process.",
+    "after_merges_deployed": {
+      "tier3-keyboard-exit-and-focus-return": {"merge_sha": "b650154a1", "pr": 5086, "ancestor_of_deployed": true},
+      "spd-instrument-open-leg-stale-locator": {"merge_sha": "2d3164fc4", "pr": 5088, "ancestor_of_deployed": true},
+      "scrim-threshold-forced-container-control": {"merge_sha": "4045d0fa2", "pr": 5098, "ancestor_of_deployed": true},
+      "prediction+checker (frozen, split)": {"merge_sha": "dc4d2db02", "pr": 5684, "ancestor_of_deployed": true}
+    },
+    "all_named_merges_are_ancestors_of_served_sha": true
+  },
+
+  "prediction_registration": {
+    "registered_before_the_run": true,
+    "freeze_source": "committed at dc4d2db02 (#5684) on 2026-07-21, before this run fired 2026-07-22 — so it can fail",
+    "per_face_probe_px_per_ch_at_18px": {
+      "native (Iowan Old Style)": {"probe_px_per_ch": 10.0000, "method": "span[style=width:1ch] inserted as a CHILD of .bp-paper-surface", "55ch_px": 550.00},
+      "georgia": {"probe_px_per_ch": 11.0469, "method": "same probe span", "55ch_px": 607.58},
+      "source-serif-4": {"probe_px_per_ch": 9.1719, "method": "same probe span", "55ch_px": 504.45}
+    },
+    "cross_face_division": "BANNED and structurally unreachable — every ch figure divides this leg's own box by this leg's own probe span; the checker's recomputeDerivedCh stays WITHIN ONE FACE. Observed 0 self-inconsistencies across all 27 cells in both runs.",
+    "struck_cross_face_figure": "The disproven cross-face reading is struck and quoted nowhere as a desk fact. The corrected comparable is 340px = 34.00ch on the native face at 10.0000 px/ch."
+  },
+
+  "determinism": {
+    "basis": "run-1 vs run-2 of the SAME deployed build (served_sha bdd7dac40, slot green) — NOT a comparison against the committed 2026-07-20 baselines.",
+    "why_not_the_baselines": "scripts/measurements/spd-visible-table-2026-07-20.json and its -verify twin were taken at served_sha 65541e2d4, which is 256 commits behind deployed bdd7dac40 (recomputed with git rev-list --count) and predates BOTH the Tier-2 ladder (#4922) and the Tier-3 return grammar (#5014). A fresh run row-compared to them reports DIVERGENT by construction and that verdict means nothing. They are a historical record, never a comparand.",
+    "rows_measurement_field_diffs": 0,
+    "rows_compared": 54,
+    "rows_measurement_fields_compared": 2682,
+    "round_trip_cell_diffs": 0,
+    "round_trip_cells_compared": 27,
+    "round_trip_fields_compared": 324,
+    "settle_signature_diffs": 0,
+    "only_variation": "wall-clock only: per-row measured_at timestamps (54) and settle telemetry settle_ms jitter (e.g. 825 vs 823 ms). The structural settle.signature is byte-identical in every row. No desk-measurement field moved between the two runs.",
+    "checker_verdict_identical_across_runs": true
+  },
+
+  "checker_verdict": {
+    "recorded_verbatim": true,
+    "note": "This is the HONEST verdict and is recorded exactly as emitted. The checker was NOT altered and the frozen prediction was NOT edited to make it pass.",
+    "run1": {"verdict": "MISMATCH", "exit": 1, "cells_checked": 27, "cells_returned_unchanged": 27, "reached_widths": 9, "field_comparisons": 162, "misses": 24, "self_inconsistencies": 0, "ruling_covered_column_reports_null": "HELD (applied in 18 rows)"},
+    "run2": {"verdict": "MISMATCH", "exit": 1, "cells_checked": 27, "cells_returned_unchanged": 27, "reached_widths": 9, "field_comparisons": 162, "misses": 24, "self_inconsistencies": 0, "ruling_covered_column_reports_null": "HELD (applied in 18 rows)"},
+    "all_24_misses_are": "the SAME cell, viewport 1280px / default, across all three faces: content_px and visible_content_px predicted 596 (prior-observation basis) but observed 640; content_ch/visible_ch recomputed from each face's own probe — native predicted 59.6 observed 64.00, georgia predicted 53.95 observed 57.93, source-serif-4 predicted 64.98 observed 69.78.",
+    "interpretation": "The 1280px layout MOVED from the prediction's stale 2026-07-20 prior-observation (a 596px content box) to a 640px content box on the deployed build. This is NOT a round-trip failure: the checker reads 640px on BOTH the before AND the after leg of every 1280 cell, so the reading column returns byte-for-byte unchanged (27/27 cells returned unchanged, recomputed from raw before/after). What missed is the prediction's registered prior-observation absolute figure, which the freeze contract requires be recorded as WRONG rather than amended. The finding: the 1280px default-state box on the deployed build is 640px = 64.00ch (native), not the pre-ladder 596px."
+  },
+
+  "forced_container_control_sibling_section": {
+    "is_a_desk_row": false,
+    "note": "Quoted here as a SIBLING section, NEVER as a desk row, and NEVER via --positive-control on the measure script (D188 — that shipped flag is a proven false green that flips ::after on a fixture with the 860px generator deleted). This is the offline forced-container control from scripts/studio-scrim-threshold-control.mjs, run with --self-test.",
+    "with_generator": "standard/user_opened is the ONLY discriminating cell: 861px -> none, 860px -> \"\" (the 860px scrim generator is LIVE code). All other bucket x user_opened cells read none at both widths.",
+    "false_green_trap": "REJECTED — with data-width-bucket unset the probe reads none -> \"\" identical to the truthful standard cell; the control refuses to report an unstamped document.",
+    "generator_deleted_failure_case": "SELF-TEST deleted the fenced 860px generator (657 bytes, 5715 -> 5058) and re-ran: standard/user_opened at 860px went \"\" -> none. THE CONTROL CAN FAIL — it is not vacuous. Exit 0.",
+    "satisfies": "the amended D153 (charter D176): a run is not invalidated by zero real scrim rows when the forced-container control demonstrates the generator machinery is live and falsifiable offline."
+  },
+
+  "non_vacuity_guard": {
+    "applies_in_rows": 0,
+    "hit_tested_rows": 54,
+    "scrim_host_present_in_rows": 54,
+    "scrim_renders_in_rows": 0,
+    "vacuous": true,
+    "zero_cause": "DESK-FIXED (unproven)",
+    "reading": "Read through zero_cause, NOT celebrated. The host .editor-with-preview was present in 54 of 54 hit-tested rows and the scrim rendered in NONE of them — what a fixed desk looks like. It is 'unproven' only because no --positive-control ran inside the desk sweep (correctly, per D188); the SIBLING forced-container control above supplies the independent proof that the guard machinery can fire, so the two zeros ('desk fixed' vs 'guard could not fire') are told apart rather than conflated. This is NOT read as good news on its own.",
+    "distinguished_from": "GUARD-NEVER-RAN (instrument suspect) — which would have required scrim_host_present_in_rows < 54; it was 54, so the instrument ran."
+  },
+
+  "d161_exemption_bracket": {
+    "framing": "D127's three exemption conditions, answered explicitly as (i)/(ii)/(iii). The D127(a)/(b)/(c) lettering is BANNED by D161 and does not appear.",
+    "i_round_trip_fidelity": {
+      "ruling": "PAID",
+      "evidence": "round_trip.ran=true and returns_bit_identical=true in BOTH runs. 27/27 cells returned unchanged, recomputed by the checker from each cell's own before[] and after[] over 6 compared fields (content_px, content_ch, px_per_ch, visible_content_px, visible_ch, gutter_px). The non-identical list is EMPTY. Determinism run-1 vs run-2: 0 measurement-field diffs across 54 rows and 27 round-trip cells."
+    },
+    "ii_exit_is_cheap_plural_and_visible": {
+      "ruling": "PAID",
+      "evidence": "Per-width dismiss grammar (NOT the retired run-level dismiss_control scalar, which read widths[0] only and mis-stated a 1440px toggle re-click as the whole sweep's grammar, D183): the three wide/standard widths [1440, 1280, 1024] dismiss via [data-test-id=\"sidebar-toggle-panel\"] (toggle re-click, the fallback where no purpose-built dismiss renders); the six destination widths [900, 800, 764, 700, 640, 500] dismiss via the purpose-built [data-test-id=\"sidebar-dismiss\"]. The exit is plural (two grammars), cheap (a single control click), and visible (a purpose-built control at every destination width).",
+      "dismiss_grammar_by_width": [
+        {"viewport_px": 1440, "control": "[data-test-id=\"sidebar-toggle-panel\"]", "grammar": "toggle re-click"},
+        {"viewport_px": 1280, "control": "[data-test-id=\"sidebar-toggle-panel\"]", "grammar": "toggle re-click"},
+        {"viewport_px": 1024, "control": "[data-test-id=\"sidebar-toggle-panel\"]", "grammar": "toggle re-click"},
+        {"viewport_px": 900, "control": "[data-test-id=\"sidebar-dismiss\"]", "grammar": "purpose-built dismiss control"},
+        {"viewport_px": 800, "control": "[data-test-id=\"sidebar-dismiss\"]", "grammar": "purpose-built dismiss control"},
+        {"viewport_px": 764, "control": "[data-test-id=\"sidebar-dismiss\"]", "grammar": "purpose-built dismiss control"},
+        {"viewport_px": 700, "control": "[data-test-id=\"sidebar-dismiss\"]", "grammar": "purpose-built dismiss control"},
+        {"viewport_px": 640, "control": "[data-test-id=\"sidebar-dismiss\"]", "grammar": "purpose-built dismiss control"},
+        {"viewport_px": 500, "control": "[data-test-id=\"sidebar-dismiss\"]", "grammar": "purpose-built dismiss control"}
+      ]
+    },
+    "iii_the_mode_declares_itself": {
+      "ruling": "PAID",
+      "evidence": "No scrim renders in ANY of the 54 rows (scrim_renders_in_rows=0 of 54, host present in all 54). The user-opened inspector is a deliberate, self-declaring mode: it is entered by a real click on [data-test-id=\"sidebar-toggle-panel\"] through the live LiveView socket (server-stamped data-user-opened, proven in user_opened_proof), and it dims nothing — the reader is never covered by a 55%-black overlay on any reachable row."
+    },
+    "exemption_as_a_whole": {
+      "ruling": "PAID",
+      "note": "All three conditions PAID against the deployed build bdd7dac40. The only prediction MISS is the stale 1280px prior-observation absolute figure, which does not bear on any of the three exemption conditions — round-trip fidelity, the exit, and mode declaration all hold. D127's pre-registered exemption is now PAID BY EVIDENCE."
+    }
+  },
+
+  "confirming_rows": {
+    "note": "Carried as named CONFIRMING rows, not as drift.",
+    "1024_position_static_x3": {
+      "role": "the ladder's CONFIRMING rows (charter D186), NOT drift",
+      "rows": "viewport 1024px / user-opened / {native, georgia, source-serif-4}: scrim.host_present=true, scrim.renders=false, scrim.position=static, scrim_alpha=0, dimmed_content_px=0. The scrim host is in the DOM (position:static, painting nothing) exactly as the ladder intends — the panel is lifted clear at 980px so the generator never fires."
+    },
+    "browser_back_leaves_the_desk": {
+      "role": "CONFIRMING row only — ALREADY RULED by D179 and not re-litigated here."
+    }
+  },
+
+  "highest_information_bracket_1024_user_opened": {
+    "pre_ladder_record_at_65541e2d4": {"panel_px": 720, "scrim_renders": true, "scrim_alpha": 0.55, "dimmed_content_px": 378.958},
+    "post_ladder_deployed_at_bdd7dac40": {"panel_px": 980, "scrim_renders": false, "scrim_alpha": 0, "dimmed_content_px": 0, "guard_applies": false},
+    "finding": "The scrim NO LONGER renders at viewport 1024px / user-opened on the deployed build. Panel lifted from 720px to 980px, alpha from 0.55 to 0, dimmed box from 378.958px to 0. The wave's Move-4 reasoning HOLDS and the standard residue is gone — this is reported as the finding, not smoothed. visible_content_px=600px at this row; visible_meets_55ch is native=true, georgia=false, source-serif-4=true (each face judged against its own 55ch probe target)."
+  },
+
+  "out_of_matrix_declared_in_words": {
+    "d175_compound_secondary_pane_state": "DECLARED OUT-OF-MATRIX (charter D187). The instrument has no driver path to D175's compound secondary-pane state, so this run says nothing about it. Silence here is called out deliberately: without this declaration the artefact could be misread as 'no scrim renders ANYWHERE post-ladder', which the forced-container control shows is false (the 860px generator is live and would fire on a panel forced below 860 in a standard/user-opened container). The claim of this run is bounded: no scrim renders on any of the 54 REACHABLE, driver-visited rows."
+  },
+
+  "hygiene": {
+    "measures_visible_meets_55ch_never_content_meets_55ch": true,
+    "bare_viewport_640_or_content_640_present": false,
+    "struck_cross_face_figure_quoted_as_desk_fact": false,
+    "zero_byte_or_skipped_run_treated_as_instrument_failure": "N/A — both runs completed with ran=true, returns_bit_identical=true, 54 rows, provenance bracket matched. No leg skipped; the gate was round_trip.ran && returns_bit_identical (NOT the checker exit code, per D184).",
+    "bucket_precondition": "Every reading asserted data-width-bucket equals the expected bucket as a PRECONDITION (D171 +32px widen-only dead-band defeated): bucket_precondition checked 72, agreed 72, all_agreed true, failures [] in both runs. No row was silently measured against the wrong tier."
+  },
+
+  "instrument_failure_handling": "The instrument cleared all its own preconditions: selectors asserted > 0, provenance bracket matched, 54/54 rows settled, bucket precondition 72/72 agreed, user-opened overlay asserted, destination verdicts all NULL (18/18, never FALSE). Had it failed a precondition, that would have been reported as the wave's finding rather than a manufactured desk fact."
+}
