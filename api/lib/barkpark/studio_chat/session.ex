@@ -103,13 +103,10 @@ defmodule Barkpark.StudioChat.Session do
 
     field :last_active_at, :utc_datetime_usec
 
-    # When the admin LAST LOOKED at this session (wave 12, the needs-you strip).
-    # Stamped on open, on switch-away, and when a settle is watched on screen —
-    # never bumped by the agent (that is `last_active_at`'s job). The pair is the
-    # finished-while-away signal: `last_active_at > last_visited_at` on a settled
-    # session means something happened after you last looked. Nullable: a
-    # pre-migration row reads "never visited" and the strip stays quiet about it.
-    field :last_visited_at, :utc_datetime_usec
+    # NOTE: the DB still carries the wave-12 visited-stamp column (read
+    # tracking, retired by the herd layer — no read receipts). It is deliberately
+    # UNMAPPED here so the old slot keeps working under blue/green; the column
+    # drop is the follow-up migration (herd-bl-lastvisited-drop).
 
     # Archive shelf (wave 2): nil = active side of the sidebar, a timestamp =
     # archived. Orthogonal to `status` (liveness) BY DESIGN — see the migration.
@@ -202,7 +199,6 @@ defmodule Barkpark.StudioChat.Session do
     |> cast(attrs, @create_fields)
     |> put_legacy_identity_defaults()
     |> maybe_default_last_active()
-    |> maybe_default_last_visited()
     |> validate_required([:id])
     |> validate_uuid(:id)
     |> validate_uuid(:execution_host_id)
@@ -264,18 +260,6 @@ defmodule Barkpark.StudioChat.Session do
   defp maybe_default_last_active(changeset) do
     case get_field(changeset, :last_active_at) do
       nil -> put_change(changeset, :last_active_at, DateTime.utc_now())
-      _ -> changeset
-    end
-  end
-
-  # A session is created on the FIRST send — while the user is looking at it —
-  # so it starts VISITED (wave 12). Copy the (possibly just-defaulted)
-  # `last_active_at` value, never a second `utc_now()`: two separate clock reads
-  # would make a freshly-created row read `last_active_at > last_visited_at` by
-  # microseconds and fake a finished-while-away signal at birth.
-  defp maybe_default_last_visited(changeset) do
-    case get_field(changeset, :last_visited_at) do
-      nil -> put_change(changeset, :last_visited_at, get_field(changeset, :last_active_at))
       _ -> changeset
     end
   end

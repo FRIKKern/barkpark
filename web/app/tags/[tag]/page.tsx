@@ -7,7 +7,11 @@ import {
   paperExcerpt,
   type PaperDocument,
 } from "@/lib/papers";
-import { paperTags } from "@/lib/paper-tags";
+import {
+  paperTagEntries,
+  sortPapersByTagStrength,
+  tagStrength,
+} from "@/lib/paper-tags";
 import { PostsListSkeleton } from "@/components/posts-list";
 import { EmptyState } from "@/components/empty-state";
 
@@ -25,14 +29,15 @@ async function TagListing({ tag }: { tag: string }) {
   let error: string | null = null;
 
   try {
-    // The generic query endpoint does scalar equality, not JSONB array
-    // containment, so there's no server-side `tags includes ?` filter to lean
-    // on. We fetch the corpus and filter CLIENT/SERVER-side in this RSC —
-    // scale-bounded but fine at this app's size (~94 papers). A server-side
-    // JSONB-containment endpoint (`content->'tags' @> to_jsonb(?)`, which the
-    // Phoenix layer already has as `docs_with_tag`) is the future optimization.
+    // Server-side weighted-tag membership (charter D77): `hasStrong("tags", "<tag>:1")`
+    // matches every paper carrying this tag at strength ≥ 1 — i.e. every weighted
+    // tag. The generic `has` op is single-shape (legacy `{_ref}`/scalar elements
+    // only) and matches ZERO weighted docs on the live corpus, so the old
+    // fetch-all-then-filter path is replaced by this real server filter. The
+    // `_updatedAt:desc` order is the tiebreak the strength sort preserves.
     papers = await client
       .docs<PaperDocument>("paper")
+      .hasStrong("tags", `${tag}:1`)
       .order("_updatedAt:desc")
       .limit(200)
       .find();
@@ -40,7 +45,13 @@ async function TagListing({ tag }: { tag: string }) {
     error = err instanceof Error ? err.message : String(err);
   }
 
-  const matches = papers.filter((paper) => paperTags(paper.tags).includes(tag));
+  // Defensive: the server already filtered, but confirm the tag is really present
+  // (guards a name-encoding quirk and lets every strength/rationale lookup below
+  // resolve). Then rank by the authored weight — strongest topical match first.
+  const carrying = papers.filter((paper) =>
+    paperTagEntries(paper.tags).some((entry) => entry.tag === tag),
+  );
+  const matches = sortPapersByTagStrength(carrying, tag);
 
   return (
     <main className={shell}>
@@ -70,6 +81,10 @@ async function TagListing({ tag }: { tag: string }) {
         <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
           {matches.map((paper) => {
             const excerpt = paperExcerpt(paper);
+            const strength = tagStrength(paper.tags, tag);
+            const rationale = paperTagEntries(paper.tags).find(
+              (entry) => entry.tag === tag,
+            )?.rationale;
             return (
               <li key={paper._id}>
                 <Link
@@ -78,6 +93,19 @@ async function TagListing({ tag }: { tag: string }) {
                 >
                   <span className="flex items-center gap-2 text-lg font-medium tracking-tight">
                     {paperTitle(paper)}
+                    {strength !== undefined ? (
+                      <span
+                        title={`Tag strength ${strength}/100 for #${tag}`}
+                        className="inline-flex items-center gap-1 rounded-full bg-zinc-200/70 px-2 py-0.5 font-mono text-[0.7rem] font-normal text-zinc-600 dark:bg-zinc-800/70 dark:text-zinc-300"
+                      >
+                        <span
+                          aria-hidden
+                          className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"
+                          style={{ opacity: Math.max(0.25, strength / 100) }}
+                        />
+                        {strength}
+                      </span>
+                    ) : null}
                     <span
                       aria-hidden
                       className="translate-x-0 text-zinc-400 opacity-0 transition-all group-hover:translate-x-1 group-hover:opacity-100"
@@ -85,6 +113,11 @@ async function TagListing({ tag }: { tag: string }) {
                       →
                     </span>
                   </span>
+                  {rationale ? (
+                    <span className="text-sm italic text-zinc-500 dark:text-zinc-400">
+                      “{rationale}”
+                    </span>
+                  ) : null}
                   {excerpt ? (
                     <span className="line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
                       {excerpt}
