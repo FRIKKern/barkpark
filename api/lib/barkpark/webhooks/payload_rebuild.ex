@@ -61,6 +61,31 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
     end
   end
 
+  # An audit row (auth-event bridge, era-w7) targets a real `webhooks` row
+  # (`endpoint_id`) but has no `mutation_events` source (`event_id` NULL — the
+  # source lives in `audit_events`, a different table), so the body is
+  # re-encoded from the row's `payload_snapshot`. Unlike chat_blocked, the
+  # snapshot is the RAW decoded payload map `Dispatcher.deliver_audit/2` stored
+  # (`Jason.decode!(body)`), NOT a `%{"body" => body}` wrapper — so the whole
+  # map is re-encoded (semantically equivalent; the attempt loop re-signs
+  # whatever body it is handed, so exact byte order is irrelevant). MUST precede
+  # the catch-all clause: its `Repo.get(MutationEvent, nil)` RAISES on the NULL
+  # event_id, and `StuckDeliverySweeper.sweep/1`'s reduce is unguarded, so one
+  # audit row would abort recovery for the whole cron batch.
+  def rebuild(%Delivery{source_kind: "audit"} = delivery) do
+    with %Webhook{} = webhook <- Repo.get(Webhook, delivery.endpoint_id),
+         snapshot when is_map(snapshot) <- delivery.payload_snapshot do
+      {:ok, webhook, Jason.encode!(snapshot)}
+    else
+      _ ->
+        Logger.warning(
+          "Audit webhook delivery ##{delivery.id} is unrecoverable (webhook deleted or no usable payload_snapshot); skipping"
+        )
+
+        :gone
+    end
+  end
+
   # A "test" row (GR45) is a one-shot admin probe: the synchronous single attempt
   # in `Dispatcher.deliver_test/3` already wrote its verdict. A row stranded
   # "pending" by a crash mid-probe is never worth resuming (the admin has long
