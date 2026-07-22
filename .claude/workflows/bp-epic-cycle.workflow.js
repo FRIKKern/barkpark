@@ -84,6 +84,17 @@ const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system,
 - Work discovered but NOT taken this wave gets filed NOW as a published child task (honest description, sane priority) — the visible backlog is part of the system being alive.
 - Patches to tasks go through /v1/data/mutate semantics: fields FLAT, patch merges into content, re-publish after mutating (boards read the published ledger only).`
 
+const PREMISE_SMOKE_BLOCK = `PREMISE SMOKE (E1, graduated into this cycle 2026-07-23 — a cheap pre-build check that caught the phantom-citation class for ~2% of a full survey's cost; DISTINCT from your own facts[].rerun discipline). Your facts[].rerun attaches a re-derivation command to facts YOU emit; this governs the INHERITED premises you are about to RELY ON but did not author — a charter D-number the direction/charter CITES, a candidate a prior phase NAMED reachable, a code site the wish points a builder at. A rerun string passes by being non-empty; a premise passes only when you RUN the check. Three obligations, each a cheap L1/L2 git-show (34-54ms — cheaper than being wrong):
+- CITATION EXISTS AND COVERS: git-show every cited charter D-number / prior decision on origin/main (\`git show origin/main:<path>\`) and read that it actually AUTHORIZES what it is cited for. Existence is not enough — the arm-D phantom-D32 miss was a REAL entry cited as authority it does not cover. A citation you did not git-show is unverified; one whose text you did not read for coverage is a phantom wearing a number.
+- CANDIDATE IS REACHABLE: confirm every candidate capability is reachable through a REAL non-admin write path, and name the caller/route that proves it. A path only an admin can reach is not the reachability the slice claims (the codelists-refutation lesson).
+- CODE SITE STILL EXISTS: confirm every named file:symbol you build on still exists on ORIGIN/MAIN (\`git show origin/main:<path>\`), never a worktree that may be ahead/behind/dirty.
+A premise that fails smoke is a FINDING, not a foundation — drop it, or fix the citation, before it reaches a builder.`
+
+const FLIP_RISK_BLOCK = `FLIP-RISK DUAL-REVIEW (E2, graduated into this cycle 2026-07-23 — a 2nd independent reviewer's DISAGREEMENT localized a real escape the single-review census missed; scoped to earn its cost ONLY at high-flip-risk points, never every slice):
+- DECIDE names it: for each slice whose KEY judgment is flip-prone — reachability, security, tenancy (NOT routine slices) — say so both IN that slice's task brief and in the wave-plan prose, as a "HIGH-FLIP-RISK: <which judgment>" line. That line is the trigger the reviewer reads.
+- REVIEW acts on it: for any slice flagged high-flip-risk, the single wave-reviewer performs a DISTINCT independent re-derivation of that judgment (not a re-read of the builder's reasoning), AND explicitly flags — in the slice verdict and in next_wave — that a genuinely INDEPENDENT second reviewer is warranted before merge.
+HONEST LIMIT: this workflow spawns exactly ONE reviewer, so the actual dispatch of that second reviewer is a MANUAL LEAD STEP — the lead already reviews the full diff and merges by hand. Review's job here is to NAME when independence is owed, not to auto-spawn it.`
+
 const STRATEGY_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'survey'],
@@ -395,6 +406,7 @@ Your output:
 3. survey — 5-20 BROAD assignments for cheap Sonnet surveyors. Cast a wide net: suspected files, prior art (in the repo AND in bp papers/tasks), claims to check, seams to map, adjacent systems that might constrain the design, and every load-bearing assumption your stress-test surfaced. Width is cheap here — ask everything you'd want a scout report on. The Digest phase distills; you do not need to be precise yet.
 4. OPEN THE WAVE PAPER: create + publish the wave strategy Paper (slug like <epic>-wave-<YYYY-MM-DD>, style=article): the wish, your direction, the direction debate (candidates weighed, why the winner won), the survey plan (every question + why). This Paper is the wave's living story — every later phase appends to it; someone opening it mid-wave sees exactly where the wave stands. Read it back before setting paper_created=true.
 5. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}: flat wave_status ("wave: surveying — <one-line direction>") + flat wave_paper (the Paper's id), then re-publish.` : 'if a published epic parent task already exists for this epic, stamp its wave_status + wave_paper; if none exists yet, skip (Decide creates it).'}
+${PREMISE_SMOKE_BLOCK}
 ${PAPER_BLOCK}
 ${LEAD_NOTES}`,
   { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: STRAT_MODEL }
@@ -463,6 +475,7 @@ Your job:
    - Verify plan: every assignment (question, model, what will be RUN as proof) — so the Paper states what is in flight while the verifiers work.
    Set paper_updated=true only after you re-published and read it back.
 4. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}'s flat wave_status field ("wave: verifying — <one-line synthesis>") and re-publish.` : 'if a published epic parent task for this epic already exists, stamp its wave_status; if none exists yet, set heartbeat_stamped=true and move on (Decide creates it).'}
+${PREMISE_SMOKE_BLOCK}
 ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
@@ -571,6 +584,8 @@ Your job:
    Set paper_updated=true only after you re-published and read it back.
 8. HEARTBEAT: stamp the epic task's wave_status ("wave: building <n> slices — <one-line plan>") + wave_paper=${WAVE_PAPER} and re-publish. Set heartbeat_stamped=true only after you did.
 ${TASKS_BLOCK}
+${PREMISE_SMOKE_BLOCK}
+${FLIP_RISK_BLOCK}
 ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
@@ -677,7 +692,8 @@ Then, once, for the wave:
    The body MUST carry a single canonical \`Task: <task_id>\` line (not \`Tasks: a + b\`) or the PR↔task gate fails. Do NOT merge — the lead merges. Report per slice \`pushed: true\` and \`pr\`; if a push or PR genuinely fails, report \`pushed: false\` with the verbatim error, and say so in overall_verdict — never silently. A wave that grades A with unpushed branches has not earned it, and you must say that in the commentary.
 ${TASKS_BLOCK}
 ${PAPER_BLOCK}
-${LIVENESS_BLOCK}`,
+${LIVENESS_BLOCK}
+${FLIP_RISK_BLOCK}`,
     { label: 'review', phase: 'Review', schema: REVIEW_SCHEMA, model: REVIEW_MODEL, isolation: 'worktree' }
   )
 }
