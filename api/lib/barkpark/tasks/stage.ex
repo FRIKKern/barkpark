@@ -113,6 +113,7 @@ defmodule Barkpark.Tasks.Stage do
       Repo.transaction(fn ->
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> task_id])
 
+        # global-read: by-PK re-read inside the stage-family advisory lock — same posture as pulse.ex/stamp.ex; caller authorization is enforced at the API seam.
         case Repo.get(Document, task_id) do
           nil ->
             {:error, :not_found}
