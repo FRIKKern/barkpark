@@ -115,9 +115,9 @@ bp task ready --all                    # aggregate pages; fail closed on a repea
 bp task ls --limit 20                  # all tasks, goals included
 ```
 
-Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `limit`, plus `offset` on both `ready` and `ls` (default/floor 0). Ready order is priority/creation/UUID; `ls` order is total (updated_at DESC or, with `parent`, inserted_at ASC — id tiebreak either way), so pages are disjoint over a frozen ledger; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
+Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `limit`, plus `offset` on `ready` and `ls` (floor 0). Ready order: priority/creation/UUID. `ls` order is total (updated_at DESC; with `parent`, inserted_at ASC; id tiebreak) so pages are disjoint; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
 
-**7. Watch the stream.** **Push:** SSE `/v1/data/listen/:dataset` — `task.*`, no polling. **Pull:** `bp task events --since <id>` → `GET /v1/tasks/events?since=<id>` replays **id-ASC, one page** (≤500): `{ok, events:[{id,event,doc_id,rev,at}], cursor, has_more}`. `id` = the **stable cursor** (monotonic `mutation_events` PK, lossless under concurrency). Resume with the last `cursor` as `--since`; omit = from start; `has_more:true` → poll again. Scoped one `dataset` (default `production`) + `type=task`.
+**7. Watch the stream.** **Push:** SSE `/v1/data/listen/:dataset` — `task.*`, no polling. **Pull:** `bp task events --since <id>` → `GET /v1/tasks/events?since=<id>` replays id-ASC, one page (≤500): `{ok, events:[{id,event,doc_id,rev,at}], cursor, has_more}`. `id` = the stable cursor (monotonic `mutation_events` PK). Resume with the last `cursor` as `--since`; omit = from start; `has_more:true` → poll again. Scoped one `dataset` (default `production`) + `type=task`.
 
 ## Task ↔ code linkage
 
@@ -136,7 +136,7 @@ Leave a field absent when unknown, never fabricate a ref.
 
 ## The cmux bridge — a pane that owns its task
 
-A cmux pane can auto-own its Barkpark task. `bp cmux install --print` shows the four Claude Code hooks (SessionStart · PreToolUse · Stop · SessionEnd → `bp cmux hook <event>`) + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one fencing lease: with `BARKPARK_TASK=<doc_id>` set, **SessionStart** claims (re-claim = renewal), **PreToolUse** renews ≤1/60s, **Stop**/**SessionEnd** close IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Every hook exits 0 with empty stdout — a dead server can't harm the agent (`bp cmux status` shows the breadcrumb; auth in `~/.config/barkpark/`). No `uninstall` verb — remove hook groups by hand (`--merge` backup undoes).
+A cmux pane can auto-own its Barkpark task. `bp cmux install --print` shows the four Claude Code hooks (SessionStart · PreToolUse · Stop · SessionEnd → `bp cmux hook <event>`) + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one fencing lease: with `BARKPARK_TASK=<doc_id>` set, **SessionStart** claims (re-claim = renewal), **PreToolUse** renews ≤1/60s, **Stop**/**SessionEnd** close IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Every hook exits 0 with empty stdout — a dead server can't harm the agent (`bp cmux status`; auth in `~/.config/barkpark/`). No `uninstall` verb — remove hook groups by hand.
 
 ## Working with your AI in Studio
 
