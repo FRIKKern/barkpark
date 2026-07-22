@@ -49,9 +49,15 @@ for n, line in enumerate(open(sys.argv[1]), 1):
     except ValueError:
         sys.stderr.write(f"ABORT: MALFORMED_SPEND_LEDGER_ROW line {n}: not JSON: {line[:100]}\n")
         sys.exit(12)
-    usd = row.get("usd") if isinstance(row, dict) else None
+    # PDF-D37 ONE row format: {ts, order_id, agent, cost_usd|null, ...} — the SAME
+    # key record_spend writes. cost_usd:null is a CANONICAL row (an honest
+    # "couldn't price it"): skipped, matching the runner's measure_budget (fails
+    # slightly open, documented). A MISSING key or non-numeric value is malformed.
+    usd = row.get("cost_usd", "MISSING") if isinstance(row, dict) else "MISSING"
+    if usd is None:
+        continue
     if isinstance(usd, bool) or not isinstance(usd, (int, float)):
-        sys.stderr.write(f"ABORT: MALFORMED_SPEND_LEDGER_ROW line {n}: missing/non-numeric 'usd': {line[:100]}\n")
+        sys.stderr.write(f"ABORT: MALFORMED_SPEND_LEDGER_ROW line {n}: missing/non-numeric 'cost_usd': {line[:100]}\n")
         sys.exit(12)
     total += usd
 print(f"{total:.4f}")
