@@ -1308,7 +1308,217 @@ self_update budget fix, and REFUSES the rest with reasons (D97). 3 slices, all r
    `api/lib/barkpark/self_update/checker.ex`, `api/test/barkpark/self_update/checker_test.exs`.
    Gate: `cd api && CC=/usr/bin/clang mix test test/barkpark/self_update/checker_test.exs`.
 
+## Wave 17 Decisions (2026-07-22) — ARM E (E2): FK-ABORT SCAR-CLASS CENSUS COMPLETE + ONE REACHABLE SIBLING (Arm: E, config E2)
+
+Research-program **Arm E / config E2** (paper `/papers/epic-cycle-research-program-abcde`; wave story
+`felix-pristine-wave-17-2026-07-22`). E2 = E1's proven lean profile (straight-to-build + ONE premise-smoke)
+PLUS a **dual-reviewer-intersection** merge gate. HYPOTHESIS (test + report): *inter-reviewer AGREEMENT
+predicts escape-rate better than any pre-build signal — where two independent reviewers disagree on a slice
+is exactly where escapes hide.* KILL SIGNAL: if the two reviewers agree on every slice AND reviewer-2 finds
+nothing reviewer-1 missed, reviewer-2 is pure cost and E2 dies. The WORK finishes the FK-abort scar-class
+census E1 seeded (`task-felix-w16-fk-abort-class-census-remainder`). All verdicts derived LIVE off
+origin/main (`b0f1dcc19`) — the local checkout is 25 behind and shows already-fixed sites as un-constrained.
+
+- **D98 — CENSUS COMPLETE on the 5 declared corners: ALL REFUTE (0 slices FROM the assigned corners).**
+  (1) **sync/** — no changeset path at all (`Repo.insert_all` raw-map upserts, nothing to attach
+  `foreign_key_constraint` to) AND dormant (`BARKPARK_SYNC_ENABLED` unset on every deploy target, zero
+  routes, no Oban queue). (2) **Oban worker changesets** — all delegate to the generic content path, or
+  their own schema is already-constrained (ProjectorWorker→`Content.Edge` has both FK constraints), or do
+  no FK-bearing insert (sweep/export/retry). (3) **remaining plugin schemas** — exactly 4 `use Ecto.Schema`
+  under `plugins/`: `bulldocs/event` (W16-fixed), `github/conflict` (no real `references()` FK — `doc_id`
+  is plain `:text`), `settings_audit`/`settings_record` (plain string cols). (4) **media-beyond-meta** —
+  `MediaFile` (W14-fixed) is the sole media schema; `search_intel_*` tables have no FK columns. (5)
+  **schema-v2 field internals** — composite/arrayOf/localizedText have NO backing Ecto schema; codelists
+  `Value`/`Translation` MATCH the shape (real CASCADE FKs, no constraint) but FAIL reachability — sole
+  writer `Codelists.register/3` is boot/seed/admin-only, zero router `codelist` entries (cite the **W16
+  PAPER**, not "D95" — the charter has no Wave-16 D-block and D92–D97 collide with Wave 15; the phantom-
+  citation trap). Celebrated: the class is census-complete for these five corners.
+
+- **D99 — CORRECTED FILTER (overrides the handed brief; load-bearing).** "CASCADE/SET NULL is NOT this
+  class" is FACTUALLY WRONG — both W16 fixes (Event, SchemaDefinition) are CASCADE (`delete_all`) FKs and
+  were built anyway. A Postgres FK raises on INSERT against a missing/concurrently-deleted parent
+  regardless of `on_delete` (which only governs parent-deletion, not child-insert). The ONLY legitimate
+  exclusion is "no real `references()` FK at all" (e.g. `documents.owner_id` is plain `:binary_id`, no
+  `references` — correctly excluded; `nilify_all` scope FKs are still this class).
+
+- **D100 — Content.Revision = REFUTE (child-of-a-child; clean reachability refute, NOT refute-on-fixability).**
+  `revision.ex` casts `document_id/workspace_id/project_id/dataset_id` (real `nilify_all` FKs), ZERO
+  `foreign_key_constraint` — SHAPE matches. But every one of the 3 inserters fails
+  reachability-with-a-bad-scope: `broadcast.save_revision` (non-bang, non-admin) copies scope from a live
+  in-transaction Document whose own scope FKs guarantee + row-lock live parents → NOT stale-able;
+  `compactor.apply_compaction` is BANG + Oban-cron system (double-refute); `cycle_fleet.insert_candidate_revision`
+  loads its Document `FOR UPDATE` (scope pinned) + fleet/system path. Buildable intersection
+  {non-admin ∧ stale-able ∧ non-bang} = EMPTY. Even after D101's Document fix, the online path aborts at
+  Document's FK BEFORE reaching Revision — Revision stays refute.
+
+- **D101 — BUILD (the ONE reachable slice): Document.changeset FK-constraint** (`task-felix-w17-document-fk-constraint`,
+  opus, round 1). Verification surfaced the OUT-OF-CORNER sibling of the three merged fixes:
+  `content/document.ex` casts `workspace_id/project_id/dataset_id` (real `nilify_all` FKs, migrations
+  20260527110100 + 20260527131000, default-named `documents_<col>_fkey`) with ZERO `foreign_key_constraint`.
+  Reached NON-ADMIN via `POST /v1/data/mutate/:dataset` (MutateController, `:require_write`) and
+  `POST /api/documents/:type` (LegacyController, `:require_write`) → `Content.Writer.upsert_document`/`create_document`
+  → `Document.changeset` → **NON-BANG `Repo.insert()`** (writer.ex:205/611). On a concurrently-deleted scope
+  (TOCTOU; D87 reachability doctrine — a DB-resolved id gone stale, not raw input) it raises raw
+  `Ecto.ConstraintError` (500) instead of `{:error, cs}`. This is the FOURTH sibling of the exact
+  scope-FK family fixed for Event/SchemaDefinition/MediaFile — fixing it FINISHES the family and closes the
+  online-path vulnerability that makes Revision unreachable. **SCOPE RULING:** out of the 5 declared corners
+  but squarely the class and the census's own purpose ("FK-abort census-complete on origin/main"); leaving
+  it unfixed is a census-with-a-hole. It is NOT Rival-B (a genuine reachable 500, not shape-only
+  defense-in-depth). **FENCE:** touches ONLY `api/lib/barkpark/content/document.ex` (3 bare
+  `foreign_key_constraint` calls appended to `changeset/2`) + NEW `api/test/barkpark/content/document_fk_test.exs`
+  — `writer.ex`/lifecycle/related are read-only traced, UNTOUCHED; no open PR touches document.ex.
+
+- **D102 — webhooks/delivery.ex = REFUTE on reachability; NO slice, NO backlog.** Shape matches (casts
+  `endpoint_id/event_id`, real `delete_all` FKs, `unique_constraint` only, non-bang `claim_delivery`
+  insert) BUT the insert runs in a DETACHED fire-and-forget Task (`Dispatcher.fan_out` →
+  `Task.Supervisor.start_child` + `async_stream_nolink`): a stale-ref `ConstraintError` crashes a background
+  delivery task and is logged — NEVER a user-facing 500, and the doctrine green is ALSO unreachable
+  (`deliver/3`'s `{:error,cs}` is discarded by `Stream.run`). Pure internal-robustness with no reachable 500
+  → improvement-only doctrine REJECTS (the codelists lesson). Recorded as a census refute, not sliced.
+
+- **D103 — E2 is SCORABLE, not merely inconclusive.** The one build slice (Document.changeset) gives the
+  dual-reviewer INTERSECTION a real escape-rate test; the two borderline REFUTE verdicts (Revision D100,
+  delivery.ex D102) are the disagreement-prone reachability calls both reviewers ALSO evaluate — precisely
+  the W13(D79 refuse)→W16(D87 override, build) flip locus. Reviewer-1 = the wave's rank-and-fix
+  (mutation-re-prove: strip constraint → raw `ConstraintError` 500, restore → `{:error,cs}`). Reviewer-2 =
+  LEAD-dispatched, independent, BLIND to reviewer-1, re-derives the reachability premise + re-runs the
+  mutation from scratch. MERGE = intersection of both above-bar sets. Kill-check honored: if both agree
+  everywhere AND reviewer-2 finds nothing new, reviewer-2 is pure cost — report honestly.
+
+- **D104 — BACKLOG (out of felix's corners, a separate sweep): the ~85 remaining `belongs_to` schemas
+  repo-wide** (auth/tenancy/sso/cloud/mutation_event) were NOT migration-crosschecked for the FK-abort
+  class — a genuine coverage gap outside the 5 corners and the barkpark_web/core-auth fence. Filed as
+  `task-felix-w17-belongs-to-crosscheck-backlog` (P3). Note: `mutation_event` insert is BANG (`save_event`)
+  → refute-on-fixability if surveyed.
+
+## Wave 18 Decisions (2026-07-23) — ARM E (E4): FABLE-ARCHITECTED + FABLE-GRADED, FINISH THE REAL BACKLOG (Arm: E, config E4)
+
+Research-program **Arm E / config E4** (paper `/papers/epic-cycle-research-program-abcde`; wave story
+`felix-pristine-wave-18-2026-07-23`). E4 = Fable on the two judgment phases (architecting + grading),
+graduated LEAN base (survey floor 1, straight-to-build + E1 premise-smoke, single reviewer except at
+flip-risk), Fable REPLACING stages rather than adding them. HYPOTHESIS: same premise-failure +
+72h-escape rate as the Opus-architected felix arms (C/E1/E2) at LOWER total tokens. NOTE ON NUMBERING:
+W17's D98–D104 were stranded on an unpushed local-main commit (`46fb0d67e`) — their text is RECOVERED
+verbatim into this pushed charter above; W18 numbers from D105.
+
+- **D105 — GHOST W18 SUPERSEDED (wording corrected by verify).** The paper
+  `felix-pristine-wave-18-2026-07-22` EXISTS (published, 21 blocks, reached "14 Sonnet surveyors
+  dispatched") — the earlier "does not exist" claim was wrong. But it is an ABANDONED ATTEMPT with
+  ZERO task artifacts (no w18 children on the epic, no claims, no wave log) — nothing to unwind.
+  THIS wave (paper `felix-pristine-wave-18-2026-07-23`) is the real W18. Its stamped plan (full
+  belongs_to breadth sweep, 14 surveyors) is dead twice over: the ~85-site premise was ~3x stale, and
+  breadth-sweep surveying is exactly the reading-breadth spend E4 bets against.
+
+- **D106 — CENSUS METHOD CORRECTION (load-bearing; closes D104's backlog).** A literal grep for
+  `foreign_key_constraint` is NOT the shape test: `assoc_constraint/2` IS a `:foreign_key` constraint
+  (ecto `changeset.ex` → `add_constraint(changeset, :foreign_key, …)`) keyed by association name, so
+  the grep missed it everywhere. Bang-ness is ALSO a red herring: `constraints_to_errors/3` raises
+  `Ecto.ConstraintError` for any UNDECLARED constraint violation before the bang/non-bang split — what
+  decides crash-vs-`{:error, cs}` is solely whether the translator is declared. Corrected census of
+  the D104 surface (29 belongs_to-casting files: 11 api-side + 18 cloud — `cloud/` is a SEPARATE
+  Elixir app, `mutation_event` is ONE file): 7/8 api shape-matches and 16/18 cloud shape-matches are
+  ALREADY GUARDED via `assoc_constraint`; `mutation_event` refuted (bang insert via `change/2`);
+  `workspace.ex` + `usage/sample.ex` already safe. TWO genuine instances remain:
+  `auth/api_token.ex` (workspace_id + owner_user_id cast, zero translator, 8 non-bang HTTP-reachable
+  sites, softest route POST /v1/auth/tokens `require_user`; trigger = deleted-default-workspace race,
+  not injection — narrow but real 500) and cloud `device_auth/request.ex` (belongs_to :user, no
+  translator; LATENT — sole live write path `approve/2` is `Repo.update_all`, which bypasses
+  changesets, and always writes the caller's own authed id). Two verifiers derived the
+  assoc_constraint fact INDEPENDENTLY (api via vendored Ecto source; cloud via per-file grep) — the
+  dual-check at the census-refute flip-risk seam (W17 Revision lesson) happened at VERIFY, pre-build.
+  Fence ruling: ONE builder, not two — the "17 unguarded cloud files" evaporated under the corrected
+  method. Census task `task-felix-w17-belongs-to-crosscheck-backlog` CLOSED 3/3 with this evidence.
+
+- **D107 — BUILD slice A: FK-abort family close** (`task-felix-w18-fkabort-family-close`, opus,
+  round 1, small). Append `foreign_key_constraint(:workspace_id)` + `(:owner_user_id)` to
+  `ApiToken.changeset/2` (matching the merged Document/Event/SchemaDefinition/MediaFile family) and
+  `assoc_constraint(:user)` to cloud `DeviceAuth.Request.changeset/2` (cloud house style).
+  Mutation-proven red-then-green both sides; extend the EXISTING test files. Gates dry-run at Decide:
+  cloud `device_auth_test.exs` 33/0 (after `mix deps.get`), api harness proven by claim_fence 4/0.
+
+- **D108 — S2 SETTLED: insert_all-with-FK census complete; BUILD slice B = two studio_chat fixes**
+  (`task-b55360f458ff6a45` repurposed as the slice task — census half stamped by evidence, build half
+  + appended merge-gate criterion remain). Census: sync/ five REFUTED (W17: no changeset + dormant);
+  idempotency/preview_token/pulse OUT OF CLASS (no `references()` FK column); cycle_fleet ×2 +
+  runtime_usage correct-by-construction (the authority join FOR SHARE/FOR UPDATE locks the exact
+  referenced rows — a cascade delete takes the same row locks, so parent deletes serialize behind the
+  txn); their missing regression test filed as `task-felix-w18-authority-lock-mutation-proof` (P3).
+  The ONE open site: `runtime_telemetry.ex persist_once` — Receipt `insert_all` races
+  `delete_session`; delete-commits-first → FK raise out of `Repo.transaction` → Recorder crash
+  (`on_conflict: :nothing` does NOT suppress FK violations); fix = locked session pre-check +
+  `Repo.rollback(:session_not_found)`, mirroring `project_observation`'s existing guard.
+  SHARPER CO-FINDING promoted into the same slice: `StudioChat.delete_session/2` is a bare
+  `Repo.delete` — deleting any session with runtime-attempt/usage-receipt children raises an
+  unhandled RESTRICT `foreign_key_violation` and CRASHES the admin chat LiveView (user-facing, not
+  self-healing); fix = changeset-based delete with the RESTRICT constraints declared + a flash in
+  `chat_live.ex`. Prior-art note: the 2026-07-12 transactions audit (task-290094…) predates all four
+  tables (2026-07-15 migrations) — it never ruled on them. Baseline dry-run: 102/0.
+
+- **D109 — S3 SEAL RULING: gate inside `to_card/3`, count stays ungated, dual review mandated**
+  (`task-felix-w13-boardsnapshot-fieldvis-seal`, opus, round 1, medium; anchors re-derived on
+  origin/main — the task's ~L904/977/998 were stale). Single seal point = `Board.to_card/3`
+  (board.ex L195-222); `family_walk/4` (L833/835), `gantt_data/1` (board_live L3197) and `focus_of/1`
+  (L3373) inherit the redaction — render-site-only gating is FORBIDDEN (the two copies would
+  diverge). Gate the TEXT-BEARING fields: description_excerpt, design_doc, criteria_list AND
+  next_criterion (both read raw acceptance_criteria text — gating one leaves a leak) + peek-parity
+  fields per merged #5470 (`Envelope.field_readable?` with `CallerContext.anonymous()`, fail-closed,
+  schema resolved ONCE per snapshot). The derived criteria COUNT (`Criteria.progress/1`, %{met,total},
+  never text) stays UNGATED per the peek's own count-vs-text law (board_live.ex:765). `board_test.exs`
+  does NOT exist — new scaffolding required. Latent hardening, not a live leak (no schema declares a
+  private field today); sole consumer = board_live.ex at /admin/projects auth: :ops ("web embed"
+  consumer claim was stale). DUAL INDEPENDENT REVIEW at Review — the E2 graduate applied at the
+  security flip-risk seam. Baselines run-proven green: board_live 93/0, theme-parity 4/0.
+
+- **D110 — S4 EXECUTED AT DECIDE (Fable replaces a stage — the E4 move; zero builders spent).**
+  (a) `task-felix-w13-claimfence-uuid-guard` CLOSED done 4/4: its RECONCILED-2026-07-22 note was
+  itself the false-done risk — WRONG on both prongs (ee9b00464/#5473 IS an ancestor of origin/main;
+  the `Ecto.UUID.cast` guard IS live at claim_fence.ex:26-40); test ran 4/0. The note had compared
+  against the stranded local-main head, not origin/main. (b) `task-felix-sobelow-gate-blocking-eval`
+  CLOSED done: sibling STAY-ADVISORY verdict (PR #5474) + exact-137 recount with verbatim category
+  match + security.yml:55 agreement; criterion-0 honestly notes classification rests on the baseline
+  mechanism, not a fresh CI-log review. (c) D81(c)'s SEVEN won't-build retirements — never executed
+  on the ledger since W13 — EXECUTED via `bp task close … cancelled` (D5: ledger-honest cancel, never
+  delete; `Stage` excludes cancelled by design; unclaimed close needs no epoch), each citing its
+  D57/D63/D65/D75 verdict + the tenancy fence-lift re-confirmed (no open tenancy PR 2026-07-23).
+  STAY OPEN with premises re-verified live: openapi-drift-chronic (drift check still inside mix-test
+  job; two same-day repair commits 07-22), sync-deadletter-classification, migration-growth-watch.
+  D79's pair untouched (separate ruling, correctly-seeded backlog).
+
+- **D111 — E4 SCORING INPUTS SO FAR (Review completes the row).** Premise-failures caught PRE-BUILD,
+  zero builder cost: (1) the wish's five named children — all merged W6–W7 (caught at Strategize);
+  (2) rival R1's 14-surveyor ~85-site breadth sweep — premise ~3x stale; (3) the digest's own
+  "25 unguarded files" reading — overturned at Verify by the assoc_constraint method fix, sparing
+  ~2 census builders + up to 24 false-positive fix slices. Escaped-to-build premise failures: 0 so
+  far. Review must report tokens/slice (METER.md), wall-clock, review_fixes, the provisional
+  72h-escape note (pending on ALL scoreboard arms — comparison provisional by construction), rank
+  order, Fable grade with honest commentary, and the explicit E4 verdict vs felix C/E1/E2 rows.
+
+### Wave 18 roadmap (3 slices, round 1, parallel — disjoint files)
+
+| # | Slice | Task | Model | Size |
+|---|-------|------|-------|------|
+| A | FK-abort family close (api_token + cloud device_auth/request) | `task-felix-w18-fkabort-family-close` | opus | small |
+| B | studio_chat: telemetry-race guard + delete_session RESTRICT crash | `task-b55360f458ff6a45` | opus | medium |
+| C | Board.snapshot field-visibility seal at to_card/3 (dual review) | `task-felix-w13-boardsnapshot-fieldvis-seal` | opus | medium |
+
+Backlog filed: `task-felix-w18-authority-lock-mutation-proof` (P3),
+`task-felix-w18-registry-staleability-hardening` (P4), `task-felix-w18-cloud-github-route-tier-drift` (P4).
+
+
 ## Wave log
+
+- **Wave 18 — 2026-07-23 — DECIDED (building). Arm: E (E4 — Fable-architected + Fable-graded, lean
+  base).** Ratified D105–D111; recovered the stranded W17 D98–D104 text (unpushed local-main commit
+  46fb0d67e) into the pushed charter. Ghost 07-22 W18 paper ruled an abandoned attempt (published, 21
+  blocks, ZERO task artifacts) — superseded by `felix-pristine-wave-18-2026-07-23`. Census method
+  corrected (assoc_constraint IS the FK translator; bang-ness irrelevant) → D104's ~85-site backlog
+  collapses to TWO genuine instances; census task closed 3/3. 3 opus round-1 slices building:
+  FK-abort family close (api_token + cloud device_auth/request), studio_chat telemetry-race +
+  delete_session RESTRICT crash, Board.snapshot to_card seal (dual review). S4 executed AT Decide:
+  claimfence closed 4/4 (its RECONCILED note was wrong on both prongs), sobelow-gate-eval closed via
+  sibling verdict + exact-137 recount, D81(c)'s 7 retirements finally executed (close→cancelled).
+  Backlog: authority-lock mutation proof, registry staleability hardening, github route-tier drift.
+  E4 so far: 3 premise-failure classes caught pre-build, 0 escaped. Grade: pending build+review.
 
 - **Wave 17 — 2026-07-22 — REVIEWED (A, per `felix-pristine-wave-17-2026-07-22`). Arm: E (E2 —
   dual-reviewer intersection).** COMPLETE the FK-abort scar-class CENSUS E1 seeded
