@@ -17,13 +17,26 @@ var placeholderRe = regexp.MustCompile(`:([A-Za-z0-9_]+)`)
 // from ctx.Server.
 //
 // Scope prefix (contract rule #4): a command may carry a scoped_prefix HINT
-// (e.g. "/w/:ws/p/:project"). In v1 the scoped route mirror is deferred — it
-// does not exist on any server — so the hint is INERT: BuildURL uses the flat
-// path_template and does NOT prepend. Prepending against a flat-only server
-// turns "/v1/data/query/..." into "/w/default/p/default/v1/data/query/..." which
-// 404/403s. The prepend activates only when ctx.ScopedMirror is true (a future
-// server that advertises the mirror); the hint still ships in the manifest so
-// nothing needs a breaking change when that day comes.
+// (e.g. "/w/:ws/p/:project"). Whether BuildURL prepends it is keyed on the
+// command's auth_tier, because the tier is the code fact for WHERE the route is
+// actually mounted:
+//
+//   - scoped_admin / scoped_read — the route exists ONLY under the
+//     workspace/project prefix (e.g. POST /w/:ws/p/:project/v1/tokens; there is
+//     no flat /v1/tokens). BuildURL MUST compose the prefix now, or every call
+//     hits a non-existent flat path and 404s. This is the generic fix for the
+//     whole scoped tier — token.create is the first inhabitant, not a special
+//     case (vercel_cmd.go's vercelMintReadToken hand-rolls the same shape).
+//   - read / write / admin / none — the flat path_template IS the live route
+//     the server serves today; the scoped_prefix is a FUTURE mirror hint only
+//     (e.g. doc.get). Prepending now would turn "/v1/data/query/..." into
+//     "/w/default/p/default/v1/data/query/..." which 404/403s. These stay FLAT.
+//
+// The future full mirror (rule #4, all tiers scoped) still activates uniformly
+// when ctx.ScopedMirror is true — a server that advertises the mirror composes
+// every command's prefix, flat tiers included. A command with a nil/empty
+// scoped_prefix is never composed regardless of tier (e.g. workspace.project-
+// create is scoped_admin but self-scopes via :workspace_slug in its own path).
 //
 // Placeholder resolution per name:
 //   - :dataset                          -> ctx.Dataset
@@ -36,7 +49,8 @@ var placeholderRe = regexp.MustCompile(`:([A-Za-z0-9_]+)`)
 func (m *Manifest) BuildURL(cmd Command, ctx Context, args map[string]string) (string, error) {
 	path := cmd.HTTP.PathTemplate
 
-	if ctx.ScopedMirror && cmd.ScopedPrefix != nil && *cmd.ScopedPrefix != "" {
+	if cmd.ScopedPrefix != nil && *cmd.ScopedPrefix != "" &&
+		(isScopedTier(cmd.AuthTier) || ctx.ScopedMirror) {
 		path = *cmd.ScopedPrefix + path
 	}
 
@@ -47,6 +61,21 @@ func (m *Manifest) BuildURL(cmd Command, ctx Context, args map[string]string) (s
 
 	base := strings.TrimRight(ctx.Server, "/")
 	return base + filled, nil
+}
+
+// isScopedTier reports whether an auth_tier's route is mounted ONLY under the
+// workspace/project prefix (never flat), so BuildURL must compose scoped_prefix
+// for it now rather than deferring to the mirror. These are the two per-
+// workspace-role tiers: scoped_admin (RequireWorkspaceRole admin/owner — e.g.
+// token.create) and scoped_read (a workspace-scoped read). The global tiers
+// (none/read/write/admin) keep serving their flat path_template today.
+func isScopedTier(tier string) bool {
+	switch tier {
+	case "scoped_admin", "scoped_read":
+		return true
+	default:
+		return false
+	}
 }
 
 // fillTemplate replaces every :placeholder in tmpl, returning an error on the
