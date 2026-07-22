@@ -2207,7 +2207,11 @@ defmodule Barkpark.StudioChat.RecorderTest do
       %{sid: sid, host: reporter_host!()}
     end
 
-    test "PRECEDENCE →: while the fence lives the reporter is SOLE truth — derived flips touch NEITHER the store NOR the wire; ← on expiry the recorder hands back explicitly",
+    # Precedence BOTH directions: → while the fence lives the reporter is SOLE
+    # truth (derived flips touch NEITHER the store NOR the wire); ← on lease
+    # expiry the recorder hands authority back explicitly. (Name kept short:
+    # the OTP atom limit is 255 BYTES and closure atoms append '/1-fun-N-'.)
+    test "precedence both ways: fenced reporter is sole truth on store + wire; expiry hands back",
          %{sid: sid, recorder: recorder, host: host} do
       frame(recorder, init_frame())
       assert agent_state(sid) == "working"
