@@ -1,0 +1,8 @@
+{
+  "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+  "quantity": "line count on origin/main (graduation target for PREMISE_SMOKE_BLOCK/FLIP_RISK)",
+  "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | wc -l",
+  "derived_level": "L2",
+  "deps": [".claude/workflows/bp-epic-cycle.workflow.js"],
+  "observed_at": "2026-07-23T00:00:00Z"
+}
