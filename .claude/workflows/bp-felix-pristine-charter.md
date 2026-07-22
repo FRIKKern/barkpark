@@ -1204,7 +1204,127 @@ backlog), `task-felix-sweep-worker-unique-guard` + `task-felix-pusher-explicit-t
 `task-felix-auth-genserver-async-fetch` (Tier-3 vacuous-green watch-items). Closed this wave without a
 build: pulse keep-serial, N=2000 measurement, + 4 ledger restamps.
 
+## Wave 15 Decisions (2026-07-22) — ARM C: RECOVERY PATHS + UNBOUNDED AGGREGATES (Arm: C)
+
+Wave Paper: **`felix-pristine-wave-15-2026-07-22`** (guerrilla, style=article). **Research-program
+Arm C** (/papers/epic-cycle-research-program-abcde): NO survey fleet — the strategist read the code
+alone and named the slate in one pass; ONE Sonnet premise-smoke (3/3 CONFIRMED, zero collisions —
+exactly one open PR repo-wide, #2907, disjoint) + TWO opus RUN-verifiers (webhooks abort raise;
+telemetry SQL-capture harness) were the only pre-build research. Wave 15 hunts the two live,
+least-swept veins the wish named — webhooks recovery and search aggregates — plus one thin-but-honest
+self_update budget fix, and REFUSES the rest with reasons (D97). 3 slices, all round-1, file-disjoint.
+
+- **D92 — Arm C protocol held: the smoke + 2 run-verifiers sufficed; every slice is RUN-proven, the
+  honest skips stand on the strategist's solo read.** Why: the smoke confirmed all three candidate
+  sites verbatim on origin/main (catch-all last clause + unguarded reduce + unordered/unbounded
+  stuck_candidates; four group_by+Repo.all no-LIMIT helpers + Repo.all+length count on anonymous
+  routes; 4×10s HTTP budget vs 30s call timeout), and the verifiers supplied the two proofs Decide
+  could not cut without: the actual raise/starvation run and the actual telemetry SQL capture. The
+  "webhooks lane is HOT" attack COOLED (the #5556-era class fix was NOT in flight — its own moduledoc
+  documents the open class in three comments). Skips recorded as absences in the wave Paper, not
+  oversights — per the declared Arm-C risk posture.
+- **D93 — Slice A (P1, opus): close the webhooks recovery poison-row batch-abort CLASS
+  (`task-felix-w15-webhooks-recovery-poison-class`).** Why: third recurrence of a twice-bitten class —
+  chat_blocked clause, then the #5556 audit clause each closed ONE row-kind and left the class open
+  (the module's own moduledoc says so). RUN-PROVEN (V1): a NULL-event_id document-kind delivery makes
+  PayloadRebuild's catch-all raise `ArgumentError "cannot perform Ecto.Repo.get/2 because the given
+  value is nil"` (the `with/else nil` arm can NEVER catch it — Repo.get raises, not returns), and one
+  such poison row aborts StuckDeliverySweeper.sweep/1's unguarded reduce so a later recoverable row
+  starves FOREVER (probe: status+updated_at byte-identical, 0 HTTP calls) — every cron pass, forever.
+  Fix (three prongs, closes the class not the row): (1) guard the catch-all on
+  `is_integer(delivery.event_id)` + a terminal fallback clause returning `:gone` with a loud
+  Logger.warning naming delivery id + source_kind; (2) per-row try/rescue inside the sweep reduce
+  (count the row skipped, log, continue); (3) `stuck_candidates` ordered oldest-first
+  (`order_by: [asc: :updated_at]`) + batch-bounded (limit, default 500). LOAD-BEARING verifier facts:
+  message assertions use the `Ecto.Repo.get/2` wording (NOT the moduledoc's "Barkpark.Repo.get/2");
+  NO existing test expects the raise (all NULL-event_id tests assert the {:ok}/:gone path — the guard
+  flips nothing); retry_worker.ex was READ — one Oban job per delivery, no reduce, no cross-row
+  starvation → fence is payload_rebuild.ex + stuck_delivery_sweeper.ex ONLY, RetryWorker is fixed
+  transitively (today a poison retry job wastes 3 Oban attempts).
+- **D94 — Slice B (P2, fable): PROMOTE `task-felix-w14-search-suggestions-unbounded` — the D89
+  deferral is OVERTURNED because the fail-before harness it demanded is now RUN-PROVEN.** Why: V2
+  built and RAN the telemetry SQL-capture harness under the mix-test Ecto sandbox: Barkpark.Repo has
+  NO custom telemetry_prefix, so `[:barkpark, :repo, :query]` fires with verbatim SQL in
+  `metadata.query` — the probe captured all four popular/nohits GROUP-BY aggregates (none carries a
+  SQL LIMIT; truncation is caller-side `Enum.sort_by |> Enum.take` AFTER `Repo.all`) and the
+  correction count's `SELECT DISTINCT session_key` (Repo.all+length, no SQL COUNT), on queries
+  grouped by attacker-mintable `query_normalized` reachable via ANONYMOUS
+  GET /suggestions + POST /correction (router pipe `[:api, :api_grant_read]`). Fix: SQL-side
+  `order_by` (desc count/sum) + LIMIT on each of the four helpers with a GENEROUS per-source cap
+  (default 500, `Application.get_env`-overridable inline — NO config.exs edit, collision
+  minimization) so crystal+event merge semantics hold at normal cardinality (output limit is ≤8);
+  correction count via a SQL COUNT DISTINCT (`select: count(e.session_key, :distinct)`). Harness
+  rules: `async: false` (process-global :telemetry handler table); isolate the four aggregates by
+  filtering captured SQL on `GROUP BY` + table name (recent_queries' non-grouped SELECT is
+  legitimately LIMIT'd and must be excluded); assert output parity below the cap; state the
+  cap-straddle truncation edge in the PR. Verifier probe files are UNCOMMITTED throwaways — the
+  builder re-derives the harness from these facts.
+- **D95 — Slice C (P4, opus, thin-but-honest — BUILD, per the D73 precedent, not D63 churn): fix the
+  self_update :check_now budget arithmetic (`task-felix-w15-selfupdate-checknow-budget`).** Why: the
+  module's own comment names the failure ("a merely-slow upstream masquerades as :unknown while the
+  fresh result is thrown away") and the smoke proved it now REACHABLE in fork mode: checker.run_check
+  grew to FOUR sequential 10s-budget requests (latest_release(repo) + fork_advice→latest_release
+  (canonical) + digest + release_notes, all through the single `request/1` helper with
+  `@receive_timeout 10_000`) while `call_timeout(:check_now)` stayed 30_000 — worst case 40s > 30s,
+  and the stale comment still says "two 10s-budget requests". This is a NAMED reachable failure with
+  a mutation-provable fix, not idiom churn. Fix: derive — expose the worst-case sequential HTTP
+  budget from ONE source of truth (e.g. `Checker.worst_case_http_budget_ms/0` computed from the
+  client's receive_timeout × the request count), set `call_timeout(:check_now)` = budget + margin,
+  correct the comment. Protective test asserts the relationship (RED with the budget exposed while
+  call_timeout stays 30_000; GREEN after) — no 40s sleep-stub theater.
+- **D96 — Builder logistics: branch from ORIGIN/main, isolated worktrees, `CC=/usr/bin/clang`,
+  targeted `mix test` only; worktrees have NO deps/_build — `mix deps.get` + first full compile is a
+  required setup step (both verifiers paid it), NOT a defect.** `.ex` PRs wait the CI Elixir Test
+  gate; re-check open PRs at dispatch (webhooks was hot yesterday — #5556 merged; today one open PR,
+  disjoint). Slice A ordering note: the fail-before starvation assertion must not depend on unordered
+  SELECT ordering — assert the raise + at-least-one-row-untouched pre-fix, exact %{swept: 1,
+  skipped: 1} post-fix (the ordered candidates make it deterministic). Models: A/C opus
+  (well-specified), B fable (SQL-shape change under merge-semantics + harness subtlety).
+- **D97 — Honest skips, each with its reason (recorded, not oversights): sync/** (dormant infra, D89
+  holds — `task-felix-w14-sync-deadletter-classification` stays backlog); **bulldocs ingest core**
+  (fail-soft + capped at its reachable seams); **schema-v2 validation** (admin-gated Regex.compile,
+  no incident); **dispatcher retry math** (verified ALREADY-GOOD: usec fence precision end-to-end,
+  Retry-After clamped); **dispatch_async/5 legacy sleep path** (caller-less = tidiness);
+  **self_update/runner** (W7-bounded). The wave is honest at 2 slices if C falls at review. No new
+  backlog discovered — exploration surfaced nothing real beyond the slate and these refusals.
+
+### Wave 15 roadmap (3 slices, round 1, parallel — disjoint files)
+
+1. **[P1, medium] webhooks recovery poison-row class fix** —
+   `task-felix-w15-webhooks-recovery-poison-class` — opus. Files:
+   `api/lib/barkpark/webhooks/payload_rebuild.ex`, `api/lib/barkpark/webhooks/stuck_delivery_sweeper.ex`,
+   `api/test/barkpark/webhooks/stuck_delivery_sweeper_test.exs`,
+   `api/test/barkpark/webhooks/payload_rebuild_audit_test.exs`. Gate: `cd api && CC=/usr/bin/clang
+   mix test test/barkpark/webhooks/stuck_delivery_sweeper_test.exs
+   test/barkpark/webhooks/payload_rebuild_audit_test.exs test/barkpark/webhooks/chat_blocked_delivery_test.exs`.
+2. **[P2, medium] search suggestions/correction SQL bounds (promoted W14 backlog)** —
+   `task-felix-w14-search-suggestions-unbounded` — fable. Files:
+   `api/lib/barkpark/search/intelligence.ex`,
+   `api/test/barkpark/search/intelligence_suggestions_bounds_test.exs` (new). Gate: `cd api &&
+   CC=/usr/bin/clang mix test test/barkpark/search/intelligence_suggestions_bounds_test.exs
+   test/barkpark/search/intelligence_test.exs`.
+3. **[P4, small] self_update :check_now budget arithmetic** —
+   `task-felix-w15-selfupdate-checknow-budget` — opus. Files: `api/lib/barkpark/self_update.ex`,
+   `api/lib/barkpark/self_update/checker.ex`, `api/test/barkpark/self_update/checker_test.exs`.
+   Gate: `cd api && CC=/usr/bin/clang mix test test/barkpark/self_update/checker_test.exs`.
+
 ## Wave log
+
+- **Wave 15 — 2026-07-22 — DECIDED (building). Arm: C.** Ratified D92–D97. Minimal-research wave on a
+  well-chartered epic: strategist solo read → ONE premise smoke (3/3 CONFIRMED, collision-free) → 2
+  RUN-verifiers → 3 round-1 file-disjoint slices under `task-96a908af98698118`, all linked to
+  `felix-pristine-wave-15-2026-07-22`: (1) webhooks recovery poison-row batch-abort CLASS fix
+  (`task-felix-w15-webhooks-recovery-poison-class`, opus — run-proven ArgumentError + starvation;
+  guard + terminal fallback + per-row rescue + ordered/bounded candidates; retry_worker read, fixed
+  transitively, fence complete); (2) search suggestions/correction SQL bounds
+  (`task-felix-w14-search-suggestions-unbounded` PROMOTED — the D89 deferral overturned by a
+  run-proven `[:barkpark,:repo,:query]` telemetry SQL-capture harness; fable); (3) self_update
+  :check_now budget arithmetic (`task-felix-w15-selfupdate-checknow-budget`, opus — 4×10s > 30s,
+  derived budget + protective relationship test; thin-but-honest per D73). Honest skips recorded
+  (D97): sync/ dormant, bulldocs fail-soft, schema-v2 admin-gated, dispatcher retry math
+  already-good, dispatch_async sleep path caller-less, runner W7-bounded. Wave honest at 2 if C
+  falls. Reviewer-2 verdicts arrive post-wave (research-program scoring). Grade: pending
+  build+review.
 
 - **Wave 14 — 2026-07-22 — DECIDED (building).** Ratified D83–D91. LEAST-SWEPT INPUT-BOUNDARY HUNT,
   honest count. 15 surveys + a 7-assignment RUN-verify fleet (A1 xlsx-zipbomb offline `:zip` proof;
