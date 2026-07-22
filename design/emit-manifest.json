@@ -15,9 +15,9 @@
     "cloud/priv/static/app.js": "51bedecd9f9fe16523d18b510564d07d7ca605feedcdef0c12d8fdfc8ed4d09f",
     "cloud/priv/static/styleguide.html": "09c39abf2838df0d33ea6e8a50e2d9d801686b315d95832c4af48e2bb2f66094",
     "internal/pdrender/tokens_gen.go": "a43355a3619909d5c5a21f5a3d3e1b3f9969a3a405cabcbfad81af55d3f7f5a6",
-    "internal/semrole/chrome_gen.go": "14ace64cf0f750035ae5bdfc0e57257597ecd871a000554220e4bc6c5eecaa11",
-    "internal/semrole/tokens_gen.go": "02383b1905bd745255a9a56c1984761328a098f328bbebe7fbea3af11ffb6133",
-    "internal/taskboard/tokens_gen.go": "65f28d7e63f6de0fe7297065240f105bbe1ee515856e61d7f066fe19cbb6f7b6",
+    "internal/semrole/chrome_gen.go": "a55b48dbdff4c327e7a456bcc894f2a423d75c6509c91cd695355ae7ac90734d",
+    "internal/semrole/tokens_gen.go": "e15a4495b1f473b8465bffc84c9dca5621e03aba8a42bb0577f03f400629c5bf",
+    "internal/taskboard/tokens_gen.go": "9215c045732c56f88ced73d318b154a15e94724a369cdfe6a2d6417e7c9c9852",
     "web/app/globals.css": "035a1f9a178e8a511dcb0d113b84c1720157c75e44b2b6af102e6654457cf9ba",
     "web/lib/tokens.gen.ts": "66a0ed2b6c9a12ef4233fd7208c5ef7f9fad9d1a4597c30e42fa66eef3e466d8"
   }

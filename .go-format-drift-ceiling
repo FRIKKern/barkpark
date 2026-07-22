@@ -1,0 +1,7 @@
+# go-format drift ceiling roster — the grandfathered gofmt-dirty Go files.
+# One repo-relative path per line; blank lines and #comments ignored.
+# Enforced by scripts/go-format-drift-ceiling.sh (a BLOCKING CI job): any Go file
+# that is gofmt-dirty and NOT listed here reds the build. This ratchet is
+# SHRINK-ONLY — a rostered file that becomes clean must be pruned from this list,
+# never re-dirtied. The list is EMPTY: the tree is fully gofmt-clean, so the
+# ceiling is zero-tolerance. Do not add entries; run `gofmt -w <file>` instead.
