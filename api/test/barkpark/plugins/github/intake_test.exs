@@ -260,11 +260,15 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
       # Simulate a wave-4-style adoption / Studio edit AFTER birth: strip
       # `needs-human`, flip lifecycle, rename. The ownership matrix says the
       # outsider issue is read ONCE at birth — a webhook re-delivery must never
-      # regress these Barkpark-owned edits back to the birth attrs.
+      # regress these Barkpark-owned edits back to the birth attrs. The flip
+      # must be a LEGAL D7 transition (open → blocked): the Writer-seam
+      # transition gate (tlv) refuses a raw open → in_progress (a claim is
+      # minted only by `bp task claim`), and the concern here is re-delivery
+      # no-clobber, not the lifecycle value.
       adopted_content =
         doc.content
         |> Map.put("labels", ["src:github"])
-        |> Map.put("lifecycle_status", "in_progress")
+        |> Map.put("lifecycle_status", "blocked")
 
       {:ok, _} =
         Content.upsert_document(
@@ -280,7 +284,7 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
       # The adopted state survives — no rewrite back to the birth attrs.
       assert existing.title == "Adopted title"
       assert existing.content["labels"] == ["src:github"]
-      assert existing.content["lifecycle_status"] == "in_progress"
+      assert existing.content["lifecycle_status"] == "blocked"
       refute_receive {:comment, _, _, _}
 
       reloaded = fetch_task(31, scope)

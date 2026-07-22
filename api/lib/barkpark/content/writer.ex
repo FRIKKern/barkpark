@@ -32,6 +32,7 @@ defmodule Barkpark.Content.Writer do
 
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
   alias Barkpark.Preview
+  alias Barkpark.Tasks.Transitions
 
   # W7a step 1 — task documents carry a tight `content` field contract
   # (`Barkpark.Tasks.validate_kind_content/2`) on top of the generic
@@ -129,11 +130,13 @@ defmodule Barkpark.Content.Writer do
         _ -> nil
       end
 
-    # Find-or-create gate (task-obsession layer 1): a NEW kind:task birth is
-    # refused if it duplicates an existing task. Only fires when prev_doc is nil
-    # (a genuine create — updates/autosaves/publishes pass straight through) and
-    # fails open. See Barkpark.Tasks.Dedup.
-    with :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
+    # Transition gate first (side-effect-free refusal, before dedup and
+    # :before_save), then the find-or-create gate (task-obsession layer 1): a
+    # NEW kind:task birth is refused if it duplicates an existing task. Dedup
+    # only fires when prev_doc is nil (a genuine create — updates/autosaves/
+    # publishes pass straight through) and fails open. See Barkpark.Tasks.Dedup.
+    with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
+         :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
       create_after_dedup(type, attrs, dataset, ctx, prev_doc, opts)
     end
   end
@@ -556,6 +559,15 @@ defmodule Barkpark.Content.Writer do
         _ -> nil
       end
 
+    # Transition gate immediately after prev-doc resolution, BEFORE
+    # :before_save fires — a refusal is side-effect-free (the validate_task_kind
+    # position precedent).
+    with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts) do
+      upsert_after_gate(type, attrs, dataset, ctx, prev_doc, opts)
+    end
+  end
+
+  defp upsert_after_gate(type, attrs, dataset, ctx, prev_doc, opts) do
     payload = %{
       event: :before_save,
       doc: attrs,
@@ -613,6 +625,113 @@ defmodule Barkpark.Content.Writer do
         |> Sheets.tap_sheet_writethrough()
     end
   end
+
+  # ── The Writer-seam transition gate (task-lifecycle-visibility, D7b + D21) ─
+  #
+  # Every HTTP door that can change a `type:task` row's `lifecycle_status`
+  # funnels through do_create_document/do_upsert_document, so the ONE
+  # transition-legality table (`Barkpark.Tasks.Transitions`, charter D7) is
+  # enforced HERE — immediately after prev-doc resolution, BEFORE
+  # `:before_save` fires, so a refusal is side-effect-free.
+  #
+  # `was` is resolved PUBLISHED-FALLBACK (get_patch_base-style: the Writer's
+  # own drafts-exact prev_doc first, then the bare id), NOT drafts-exact.
+  # Proven open at L1 (run probe 2026-07-22): with the drafts-exact lookup, a
+  # createOrReplace on a PUBLISHED-ONLY open task births a `drafts.<id>` done
+  # twin that Queue.ready's done-CTE (which regexp-strips the `drafts.` prefix)
+  # counts — flipping a gated dependent to ready with zero attribution. A BIRTH
+  # is when NEITHER spelling exists. Both lookups ride the caller's scope opts
+  # (the B3 rule), so a same-id row in a foreign workspace never gates a birth.
+  #
+  # Exemptions — never consult `legal?/2` on a birth (`legal?(nil, x)` is false
+  # by design and would refuse every task birth):
+  #   * `was == nil` — a birth, or a legacy row with no lifecycle. The importer
+  #     shape (migration 20260528100000 seeds already-`done` rows) depends on
+  #     the birth being exempt.
+  #   * `source == :sync` — `Sync.Applier` mirrors upstream transitions
+  #     verbatim; `:source` is server-set (MutateController prepends
+  #     `source: :api`), so a request body can never reach the exemption.
+  #
+  # `bp migrate` arrives `source: :api` via /v1/data/mutate: a fresh target is
+  # birth-exempt, a steady re-migrate is same→same legal, and forcing a LIVE
+  # target's lifecycle to mirror a since-closed source is REFUSED BY DESIGN —
+  # divergence repair is Sync's job.
+  #
+  # This SUPERSEDES the mutations.ex revision escape for ILLEGAL transitions
+  # (D7a): `ensure_task_close_is_cas`'s `ifRevisionID` escape still proves the
+  # caller read the row, but a read no longer licenses an illegal transition —
+  # this downstream gate wins for e.g. `open → done`. mutations.ex is untouched
+  # (its rev-escape ordering is load-bearing for the claim fence), and LEGAL
+  # terminal transitions (`open → blocked`, `open → cancelled`) still pass with
+  # the rev escape exactly as before.
+  defp ensure_task_transition_legal("task", attrs, dataset, doc_id, prev_doc, opts) do
+    content = Map.get(attrs, "content") || %{}
+    now = Map.get(content, "lifecycle_status") || Map.get(content, :lifecycle_status)
+    was = resolve_lifecycle_was(prev_doc, doc_id, dataset, opts)
+
+    cond do
+      # Birth (neither id spelling exists) or a legacy no-lifecycle row.
+      is_nil(was) -> :ok
+      # Replication mirrors upstream transitions verbatim.
+      Keyword.get(opts, :source, :api) == :sync -> :ok
+      Transitions.legal?(was, now) -> :ok
+      true -> {:error, {:invalid_task_content, illegal_transition_error(was, now)}}
+    end
+  end
+
+  defp ensure_task_transition_legal(_type, _attrs, _dataset, _doc_id, _prev_doc, _opts), do: :ok
+
+  # The row's CURRENT lifecycle_status, resolved published-fallback: the
+  # drafts-exact prev_doc the writer already loaded first, then the bare
+  # (published) id — mirroring Mutations.get_patch_base/4, and scoped through
+  # the same opts as the prev-doc lookup.
+  defp resolve_lifecycle_was(%Document{content: content}, _doc_id, _dataset, _opts),
+    do: (content || %{})["lifecycle_status"]
+
+  defp resolve_lifecycle_was(_prev_doc, doc_id, dataset, opts) do
+    with id when is_binary(id) <- doc_id,
+         pid when pid != "" and pid != id <- DraftId.published_id(id),
+         {:ok, %Document{content: content}} <-
+           Content.get_document(pid, "task", dataset, opts) do
+      (content || %{})["lifecycle_status"]
+    else
+      _ -> nil
+    end
+  end
+
+  # Renders through the existing `invalid_task_content` family →
+  # `Content.Errors` 422 validation_failed envelope, keyed on the field. The
+  # message names from, to and the sanctioned verb — the refusal TEACHES
+  # (tasks_controller stage/close precedent). Never the `{:halted, _}` shape,
+  # which is reserved for plugin vetoes.
+  defp illegal_transition_error(from, to) do
+    %{
+      "lifecycle_status" => [
+        "illegal lifecycle transition #{inspect(from)} → #{inspect(to)}: no document " <>
+          "write may perform it — " <> sanctioned_verb(to)
+      ]
+    }
+  end
+
+  defp sanctioned_verb("done"),
+    do:
+      "`done` is reached only through the close primitive (`bp task close <id> <worker> " <>
+        "<epoch>`, POST /v1/tasks/:id/close), which records who closed it."
+
+  defp sanctioned_verb("in_progress"),
+    do:
+      "a live claim is minted only by the claim primitive (`bp task claim <id> <worker>`, " <>
+        "POST /v1/tasks/:id/claim), which fences on the claim epoch."
+
+  defp sanctioned_verb(to) when to in ~w(considering researching),
+    do:
+      "thought states move through the sanctioned stage verb (`bp task stage <id> #{to}`, " <>
+        "POST /v1/tasks/:id/stage), which enforces the same legality table."
+
+  defp sanctioned_verb(_to),
+    do:
+      "move through the sanctioned task lifecycle verbs instead (`bp task stage` for " <>
+        "considering|researching|open, `bp task claim`, `bp task close`)."
 
   # R2 chokepoint (id-less backfill). When a document write carries a
   # `content["blocks"]` LIST, route it through the canonical

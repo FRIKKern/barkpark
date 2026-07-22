@@ -91,7 +91,10 @@ defmodule Barkpark.Plugins.TasksQualityGateTest do
       log =
         capture_log(fn ->
           assert {:ok, doc} =
-                   create_task("qg-zero-1", %{"title" => "A real task", "content" => base_content()})
+                   create_task("qg-zero-1", %{
+                     "title" => "A real task",
+                     "content" => base_content()
+                   })
 
           assert doc.title == "A real task"
         end)
@@ -164,13 +167,17 @@ defmodule Barkpark.Plugins.TasksQualityGateTest do
             })
         })
 
-      # A patch that carries content but no title, and no criteria — must not halt.
+      # A patch that carries content but no title, and no criteria — must not
+      # halt. The lifecycle change must be a LEGAL D7 transition (open →
+      # blocked) — the Writer-seam transition gate (tlv) refuses a raw
+      # open → in_progress (a claim is minted only by `bp task claim`), which
+      # is not the concern under test here.
       assert {:ok, _} =
                Content.upsert_document(
                  "task",
                  %{
                    "doc_id" => "qg-upd-1",
-                   "content" => base_content(%{"lifecycle_status" => "in_progress"})
+                   "content" => base_content(%{"lifecycle_status" => "blocked"})
                  },
                  @dataset
                )
