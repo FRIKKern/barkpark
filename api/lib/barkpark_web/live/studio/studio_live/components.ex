@@ -373,7 +373,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         destination_title: destination_title,
         feedback: feedback,
         visually_open: visually_open?,
-        labels: PaperCanvas.paper_labels(paper),
+        labels: PaperCanvas.paper_label_entries(paper),
         relations:
           blocks
           |> PaperCanvas.paper_relations()
@@ -583,12 +583,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           title="Labels"
           open={PaperCanvas.sidebar_section_open?(@collapsed, "labels")}
         >
+          <%!-- ae-w10 / D76 — the Labels section renders the WEIGHT the publish
+                wall enforces, not bare names: entries arrive from
+                `paper_label_entries/1` sorted strength DESC (legacy nil-strength
+                last), each chip carries its rationale as a hover tooltip and a
+                small numeric strength badge, and the stamped main tag reads as
+                a flag icon + bold name. Reuses the existing `.bp-doc-*` classes
+                only (root.html.heex is spd territory — zero new CSS). --%>
           <%= if @labels == [] do %>
             <p class="bp-doc-empty" data-test-id="sidebar-labels-empty">No labels yet.</p>
           <% else %>
             <ul class="bp-doc-tags" data-test-id="sidebar-labels">
-              <li :for={label <- @labels} class="bp-doc-tag">
-                <.icon name="tag" size={11} /> {label}
+              <li
+                :for={label <- @labels}
+                class="bp-doc-tag"
+                title={label.rationale}
+                data-strength={label.strength}
+                data-main-tag={label.main? && ""}
+                data-test-id={if label.main?, do: "sidebar-label-main", else: "sidebar-label"}
+              >
+                <.icon name={if label.main?, do: "flag", else: "tag"} size={11} />
+                <%= if label.main? do %>
+                  <strong>{label.name}</strong>
+                <% else %>
+                  {label.name}
+                <% end %>
+                <small :if={label.strength} data-test-id="sidebar-label-strength">
+                  {label.strength}
+                </small>
               </li>
             </ul>
           <% end %>
