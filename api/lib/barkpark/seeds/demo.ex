@@ -556,6 +556,8 @@ defmodule Barkpark.Seeds.Demo do
 
       %Document{}
       |> Document.changeset(doc_attrs)
+      # AUDIT: OFFLINE-only dev/demo seed — raw-inserts status:"published" rows and
+      # deliberately bypasses AuthoringWall (never reachable from any web controller).
       |> Repo.insert!(on_conflict: :nothing)
     end
 
