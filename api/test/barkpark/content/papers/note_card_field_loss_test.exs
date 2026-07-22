@@ -100,7 +100,10 @@ defmodule Barkpark.Content.Papers.NoteCardFieldLossTest do
 
     test "an undeclared block type is never flagged (the wider census is separate)" do
       refute Slots.lossy_shape?(%{"id" => "x", "type" => "paragraph", "mystery" => "hi"})
-      refute Slots.lossy_shape?(%{"id" => "x", "type" => "callout", "text" => "stranded"})
+      # `quote` carries no field_vocab — an undeclared type stays untouched.
+      # (`callout` USED to sit here; the census gate now declares it — see
+      # BlockFieldCensusTest for its positive coverage.)
+      refute Slots.lossy_shape?(%{"id" => "x", "type" => "quote", "mystery" => "hi"})
     end
   end
 

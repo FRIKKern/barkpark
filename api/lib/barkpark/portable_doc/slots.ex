@@ -186,14 +186,25 @@ defmodule Barkpark.PortableDoc.Slots do
   @doc """
   The consumed-field vocabulary for a block type whose renderer reads a FIXED,
   known key set — the surface the silent-content-loss gate (`lossy_shape?/1`)
-  keys off. Only the two types this cycle gates declare one:
+  keys off. The types whose renderer returns an EMPTY string (not a visible
+  "no data" placeholder) when their content key is absent declare one, so
+  authored prose stranded under an unread key is caught at write time:
 
     * `note` consumes `label` / `lead` / `text` (the flat legacy fields) plus
-      `slots` (the materialized form); no chrome.
+      `slots` (the materialized form); no chrome. (gate: pd-note-block, #5731)
     * `card` is slots-native — it consumes `slots` alone (title/body/media/action
-      all live under it) plus the `tone` accent chrome.
+      all live under it) plus the `tone` accent chrome. (#5731)
+    * `callout` (census follow-up) consumes `content` (the legacy inline body
+      array `callout_body_inline/1` reads), `slots` (the materialized `body`
+      slot) and `title`; `tone` / `collapsible` / `collapsed` are chrome. Prose
+      authored under `text` (the note vocabulary) renders an EMPTY callout.
+    * `pipeline` (census follow-up) consumes `nodes` alone — the node list whose
+      per-node `kind`/`title`/`detail`/`files` `pipeline_html/1` reads. An empty
+      or mis-keyed node list (e.g. prose stranded under `steps`/`stages`)
+      renders "" with no signal at all.
 
-  Every other type returns `nil` (UNGATED — the wider per-type census is
+  Every other type returns `nil` (UNGATED — either not lossy, or a VISIBLE
+  placeholder makes its empty state honest — see the census on
   `pt-backlog-block-field-census`), so no existing block of an undeclared type
   can ever be flagged. Never raises.
   """
@@ -203,6 +214,12 @@ defmodule Barkpark.PortableDoc.Slots do
 
   def field_vocab(%{"type" => "card"}),
     do: %{consumed: ["slots"], chrome: ["tone"]}
+
+  def field_vocab(%{"type" => "callout"}),
+    do: %{consumed: ["content", "slots", "title"], chrome: ["tone", "collapsible", "collapsed"]}
+
+  def field_vocab(%{"type" => "pipeline"}),
+    do: %{consumed: ["nodes"], chrome: []}
 
   def field_vocab(_), do: nil
 
@@ -632,7 +649,38 @@ defmodule Barkpark.PortableDoc.Slots do
       is_nil(card_media(block)) and is_nil(card_action(block))
   end
 
+  # A callout renders no prose when BOTH its body inline (from the `content`
+  # legacy array or the materialized `body` slot, read through the renderer's own
+  # `callout_body_inline/1`) is blank AND its optional `title` is blank — the two
+  # surfaces `Compose.compose_block(callout)` paints. Prose stranded under `text`
+  # (or any other unread key) leaves both blank.
+  defp renders_no_prose?(%{"type" => "callout"} = block) do
+    blank?(flatten_inline_text(callout_body_inline(block))) and
+      blank?(to_text(Map.get(block, "title")))
+  end
+
+  # A pipeline renders no prose when its `nodes` list carries no readable text in
+  # ANY node (asked through the SAME per-node `kind`/`title`/`detail`/`files` keys
+  # `pipeline_html/1` reads) — an empty/absent node list, or one whose prose was
+  # stranded under a mis-keyed container (`steps`/`stages`/…). `Enum.all?` over []
+  # is true, so an empty pipeline reads as no-prose.
+  defp renders_no_prose?(%{"type" => "pipeline"} = block) do
+    block |> Map.get("nodes") |> pipeline_nodes_blank?()
+  end
+
   defp renders_no_prose?(_), do: false
+
+  defp pipeline_nodes_blank?(nodes) when is_list(nodes) do
+    Enum.all?(nodes, fn node ->
+      blank?(pnode_text(node, "kind")) and blank?(pnode_text(node, "title")) and
+        blank?(pnode_text(node, "detail")) and blank?(pnode_text(node, "files"))
+    end)
+  end
+
+  defp pipeline_nodes_blank?(_), do: true
+
+  defp pnode_text(node, key) when is_map(node), do: node |> Map.get(key) |> to_text()
+  defp pnode_text(_node, _key), do: ""
 
   defp blank?(s) when is_binary(s), do: String.trim(s) == ""
   defp blank?(_), do: true
