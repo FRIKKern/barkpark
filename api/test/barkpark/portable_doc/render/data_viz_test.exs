@@ -120,6 +120,92 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     assert html =~ ">0</text>"
   end
 
+  test "chart annotations: region wash behind the plot, tone class, centered label" do
+    html =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [%{"label" => "crime", "points" => [80, 30, 20, 35, 75]}],
+        "axes" => %{"min" => 0, "max" => 100},
+        "annotations" => %{
+          "regions" => [
+            %{"from" => 0, "to" => 1.5, "label" => "NORM COLLAPSE", "tone" => "warn"},
+            %{"from" => 3, "to" => 4, "tone" => "danger"}
+          ]
+        }
+      })
+
+    assert html =~ ~s(class="bp-chart__region bp-chart__region--warn")
+    assert html =~ ~s(class="bp-chart__region bp-chart__region--danger")
+    assert html =~ ">NORM COLLAPSE</text>"
+    # the wash renders BEFORE the series polyline (behind it in paint order)
+    assert :binary.match(html, "bp-chart__region") |> elem(0) <
+             :binary.match(html, "<polyline") |> elem(0)
+  end
+
+  test "chart annotations: refLine at the data y with right-aligned label above it" do
+    html =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [%{"label" => "count", "points" => [0, 10]}],
+        "axes" => %{"min" => 0, "max" => 10},
+        "annotations" => %{"refLines" => [%{"y" => 5, "label" => "target", "tone" => "ok"}]}
+      })
+
+    assert html =~ ~s(class="bp-chart__refline bp-chart__refline--ok")
+    assert html =~ ">target</text>"
+    # refLines paint ABOVE the series
+    assert :binary.match(html, "bp-chart__refline") |> elem(0) >
+             :binary.match(html, "<polyline") |> elem(0)
+  end
+
+  test "chart annotations: point callout anchors at the series datum" do
+    html =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [%{"label" => "s", "points" => [0, 100, 0]}],
+        "axes" => %{"min" => 0, "max" => 100},
+        "annotations" => %{"points" => [%{"index" => 1, "label" => "the peak"}]}
+      })
+
+    assert html =~ "bp-chart__pt"
+    assert html =~ ">the peak</text>"
+    # datum at max with min pinned 0 → the marker sits at the TOP pad (y=8)
+    assert html =~ ~s(cy="8")
+  end
+
+  test "chart annotations are fail-soft and escaped: junk coordinates drop, labels never inject" do
+    html =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [%{"label" => "s", "points" => [1, 2]}],
+        "annotations" => %{
+          "regions" => [%{"from" => "x", "to" => 1, "label" => "dropped"}, %{"from" => 1, "to" => 0}],
+          "refLines" => [%{"label" => "no y"}],
+          "points" => [
+            %{"index" => 99, "label" => "out of range"},
+            %{"index" => 0, "label" => "<img onerror=x>"}
+          ]
+        }
+      })
+
+    refute html =~ "dropped"
+    refute html =~ "bp-chart__region"
+    refute html =~ "bp-chart__refline"
+    refute html =~ "out of range"
+    refute html =~ "<img"
+    assert html =~ "&lt;img onerror=x&gt;"
+  end
+
+  test "chart without annotations is byte-identical to before (no annotation markup)" do
+    block = %{"type" => "chart", "series" => [%{"label" => "s", "points" => [1, 2, 3]}]}
+    html = DataViz.chart_html(block)
+
+    refute html =~ "bp-chart__region"
+    refute html =~ "bp-chart__refline"
+    refute html =~ "bp-chart__ann"
+    refute html =~ "bp-chart__pt"
+  end
+
   test "chart clamps out-of-span points to the pinned edge (pdrender semantics)" do
     # max pinned to 5: the point at 10 must land on the SAME y as a point at 5.
     html =
