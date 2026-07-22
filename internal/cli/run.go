@@ -531,12 +531,15 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 }
 
 // bindArgs maps positional values onto the command's declared args by position,
-// enforcing required args. Extra positionals beyond the declared args are an
-// error.
+// enforcing required args. An empty-string positional counts as absent: a
+// required arg then yields the friendly missing-arg error (with the usage block)
+// instead of a cryptic unresolved-placeholder failure downstream, and an
+// optional arg simply produces no map key. Extra positionals beyond the declared
+// args are an error.
 func bindArgs(cmd manifest.Command, pos []string) (map[string]string, error) {
 	m := map[string]string{}
 	for i, arg := range cmd.Args {
-		if i < len(pos) {
+		if i < len(pos) && pos[i] != "" {
 			m[arg.Name] = pos[i]
 		} else if arg.Required {
 			return nil, fmt.Errorf("missing required argument <%s> for %s %s", arg.Name, cmd.Noun, cmd.Verb)

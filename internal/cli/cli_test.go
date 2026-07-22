@@ -289,6 +289,33 @@ func TestBindArgs(t *testing.T) {
 	if _, err := bindArgs(*get, []string{"post", "p2", "extra"}); err == nil {
 		t.Errorf("too many args: expected error")
 	}
+
+	// (a) An empty-string value for a required positional counts as absent and
+	// yields the friendly missing-arg error, not a present-but-empty bind that
+	// blows up later as an unresolved URL placeholder.
+	_, err = bindArgs(*get, []string{"post", ""})
+	if err == nil {
+		t.Fatalf("empty required doc_id: expected missing-arg error")
+	}
+	if want := "missing required argument <doc_id> for doc get"; err.Error() != want {
+		t.Errorf("empty required error = %q, want %q", err.Error(), want)
+	}
+
+	// (b) An empty-string value for an OPTIONAL positional binds as absent — no
+	// map key — so downstream consumers (which all guard `ok && v != ""`) see
+	// exactly the same shape as if the arg were omitted. Zero wire change.
+	optCmd := manifest.Command{
+		Noun: "doc",
+		Verb: "ls",
+		Args: []manifest.Arg{{Name: "type", Required: false}},
+	}
+	m, err = bindArgs(optCmd, []string{""})
+	if err != nil {
+		t.Fatalf("empty optional positional: unexpected error %v", err)
+	}
+	if _, ok := m["type"]; ok {
+		t.Errorf("empty optional should be absent, got map %v", m)
+	}
 }
 
 func TestSplitArgs(t *testing.T) {
