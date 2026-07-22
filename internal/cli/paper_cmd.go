@@ -307,7 +307,132 @@ func runPaperView(out *writer, g globals, args []string) int {
 	// (chrome is dropped below MinWidth), so no post-processing that could break
 	// that guarantee. outf adds the single trailing newline.
 	out.outf("%s", rendered)
+
+	// Append the Related section (weighted-tag + backlink affinity, ae-w10). A
+	// SECONDARY read, FAIL-OPEN by contract: any transport error, non-2xx, or
+	// empty result yields "" and the section simply does not appear — the paper
+	// render above must never break on this new read. Skipped for the -o json /
+	// share / release-pinned paths above (they return before here).
+	if section := paperRenderRelated(client, ctx.Dataset, opt.slug, paperRelatedTopN); section != "" {
+		out.outf("%s", section)
+	}
 	return exitOK
+}
+
+// paperRelatedTopN caps both the fetch limit and the rendered entry count of the
+// Related section — the top matches are the only useful ones in a terminal.
+const paperRelatedTopN = 5
+
+// paperRelatedSharedTag is one shared-tag detail carried by a related entry: the
+// tag NAME and the source/candidate strengths that scored the affinity.
+type paperRelatedSharedTag struct {
+	Tag          string `json:"tag"`
+	SrcStrength  int    `json:"src_strength"`
+	CandStrength int    `json:"cand_strength"`
+}
+
+// paperRelatedEntry mirrors ONE element of the GET /v1/data/related response's
+// result.related array (query_controller.related → Content.Related.entry). Title
+// is the documents.title COLUMN — empty for most weighted docs (a proven prod
+// trap), so the renderer falls back to DocID.
+type paperRelatedEntry struct {
+	DocID      string                  `json:"doc_id"`
+	Type       string                  `json:"type"`
+	Title      string                  `json:"title"`
+	Score      float64                 `json:"score"`
+	Sources    []string                `json:"sources"`
+	SharedTags []paperRelatedSharedTag `json:"shared_tags"`
+}
+
+// backlinkOnly reports whether an entry's provenance is inbound references ONLY
+// (no shared-tag leg) — the "sources":["references"] degrade for a zero-tag or
+// tag-mismatched neighbour. The renderer marks these so a reader knows the link
+// is a backlink, not a tag affinity.
+func (e paperRelatedEntry) backlinkOnly() bool {
+	hasTags, hasRefs := false, false
+	for _, s := range e.Sources {
+		switch s {
+		case "tags":
+			hasTags = true
+		case "references":
+			hasRefs = true
+		}
+	}
+	return hasRefs && !hasTags
+}
+
+// paperRenderRelated fetches GET /v1/data/related/:dataset/:id and renders the
+// plain-text Related section (top paperRelatedTopN entries). It mirrors
+// paperLoadTitles' secondary-read pattern exactly — paperScopedURL + doRequest +
+// optional bearer, NO apiclient change. FAIL-OPEN: a nil client, empty id, any
+// transport error, a non-2xx status (incl. the anon 404 existence-hiding), a
+// decode failure, or an empty related list all yield "" so the caller prints
+// nothing and the paper render is never broken by this read.
+func paperRenderRelated(client *apiclient.Client, dataset, id string, limit int) string {
+	id = strings.TrimSpace(id)
+	if client == nil || dataset == "" || id == "" {
+		return ""
+	}
+	u := paperScopedURL(client, "/v1/data/related/"+url.PathEscape(dataset)+"/"+url.PathEscape(id))
+	if limit > 0 {
+		u += "?limit=" + strconv.Itoa(limit)
+	}
+	headers := map[string]string{}
+	if t := client.Token(); t != "" {
+		headers["Authorization"] = "Bearer " + t
+	}
+	status, body, err := doRequest("GET", u, headers, nil)
+	if err != nil || status < 200 || status >= 300 {
+		return ""
+	}
+	var env struct {
+		Result struct {
+			Related []paperRelatedEntry `json:"related"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(body, &env) != nil || len(env.Result.Related) == 0 {
+		return ""
+	}
+	return formatRelatedSection(env.Result.Related)
+}
+
+// formatRelatedSection renders up to paperRelatedTopN entries as a plain-text
+// block: a leading blank line separates it from the paper body, then a "Related"
+// heading, then one line per entry (score, title-or-id, type, backlink marker)
+// with an indented shared-tags detail line. No SGR — plain text keeps piped and
+// golden captures clean and honours a NoColor profile. Returns "" for no
+// entries; the returned string carries NO trailing newline (outf adds it).
+func formatRelatedSection(entries []paperRelatedEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	if len(entries) > paperRelatedTopN {
+		entries = entries[:paperRelatedTopN]
+	}
+	lines := []string{"", "Related"}
+	for _, e := range entries {
+		label := strings.TrimSpace(e.Title)
+		if label == "" {
+			label = e.DocID
+		}
+		typeSuffix := ""
+		if e.Type != "" {
+			typeSuffix = "  (" + e.Type + ")"
+		}
+		marker := ""
+		if e.backlinkOnly() {
+			marker = "  · backlink"
+		}
+		lines = append(lines, fmt.Sprintf("  %.2f  %s%s%s", e.Score, label, typeSuffix, marker))
+		if len(e.SharedTags) > 0 {
+			parts := make([]string, 0, len(e.SharedTags))
+			for _, t := range e.SharedTags {
+				parts = append(parts, fmt.Sprintf("%s (%d·%d)", t.Tag, t.SrcStrength, t.CandStrength))
+			}
+			lines = append(lines, "        tags: "+strings.Join(parts, ", "))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // normalizePaperRef accepts the three forms users naturally paste into a
