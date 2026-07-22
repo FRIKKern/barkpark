@@ -157,6 +157,28 @@ the new states are simply not in it.
   deps-met, rendered bright; same stored value `open`). desk_groups gains one thought chip
   `{"in": ["considering","researching"]}` mirroring the closed-chip `{"in":[...]}` pattern.
 
+> **Decisions D19–D24 were introduced in the wave-3/wave-4 logs below** (the numbers
+> D22/D23/D24 are cited inline against the finishing-wave slices) and were never lifted into
+> this section; the next free number is therefore D25.
+
+- **D25 — advisory blocking is FINAL; Barkpark grows NO hard-fence lifecycle primitive.**
+  A `blocked` task is claim-EQUIVALENT to `open` (both are in the claimable allowlist), and
+  readiness is a DERIVED, deps-met render (D18) that holds work back at query time — never a
+  stored hard fence that forbids a claim. Barkpark deliberately does not add a "truly blocked"
+  primitive that would refuse claims: the funnel doctrine keeps `open` == ready and lets a
+  human/agent claim a `blocked` row to unblock it. Single-sourced and test-locked:
+  `Validation.claimable_statuses/0 == ~w(open blocked)` (validation.ex:31,49-50,
+  `@canonical capability:task-claimable-statuses`); the derived copies in queue.ex (Ecto `in`
+  + raw-SQL CTE `= ANY(?)`), board.ex `ready?/1`, and claim.ex all reference it (consolidated
+  #5529/#5586). Proven real by `claimable_statuses_test.exs` (#5537): 8 tests / 0 failures
+  green, and forking the single source to `~w(open)` reds 4 tests (the pin, blocked-ready,
+  blocked-after-dep-flip, blocked-edge) — reviewer re-verified L1 on origin/main
+  2026-07-22. This decision SUPERSEDES the phantom "D32" citation that
+  `tlv-bl-true-blocking-primitive-decision` was authored against: the charter never carried a
+  D32 (it topped at D24), and the ruling substance previously lived only under the
+  **OPEN MEANS READY** section + D18 + the validation.ex:26-31 comment. D25 formalizes it so
+  the ledger row can close against a real authority. No production code, no new fence.
+
 ## Roadmap
 
 Wave 1 (this wave — 8 slices; rounds are law, round ≥2 dispatches only after its deps MERGE):
@@ -266,3 +288,47 @@ only PR-caused red) and merge it; re-run main's Elixir gate past the 429 StatusC
 `tlv-bl-writer-seam-transition-gate` (fable) — the crown closes D7/D7a and the proven draft-twin
 forgery door. (4) `tlv-bl-publish-door-lifecycle-guard` is the strongest new prio-1 candidate
 (publish-door resurrection is run-proven open). Then tlv-s5/tlv-s8 per the epic roadmap.
+
+### Wave 2026-07-22 — backlog finish wave (wave 5), Arm D (straight-to-build), grade A−
+
+**Arm: D** — research-program arm D (`/papers/epic-cycle-research-program-abcde`): the wish +
+charter went DIRECTLY to Decide with NO survey and NO verify fleet; builders verified their own
+premise at L1 first; the REVIEW was the wave's entire quality system. Four disjoint-ground
+backlog rows were cut; all four premises CONFIRMED at L1 (none refuted on the ground).
+
+**Landed (3 green slices, reviewer re-ran every gate on the final branch):**
+- `task-13bc8127adedfee0` (S1, #5705) — `task.stage` manifest description now enumerates the four
+  terminal/blocked reopen edges (`done→open`, `cancelled→open`, `blocked→open`, `in_progress→open`)
+  the enforced `Transitions.legal?/2` gate already sanctions for a stageable target. Doc-only `.ex`,
+  zero behavior change; welded with a keep-the-claim reopen test + a mutation-proof substring
+  assertion. Reviewer gate: `mix test stage_test.exs` 12/0.
+- `task-1471170216ac6b54` (S2, #5706 `-r`) — close-drift recovery leads with `observed_rev` (strict
+  full-rev CAS, bypasses the work-digest fence) instead of the dead-end "re-read then close again";
+  the 409 already names `current_rev` + `changed_fields`. Flipped every CLI/MCP/manifest/onramp
+  surface + wired a reachable MCP `observed_rev` property; 3-case regression (re-read repeats /
+  observed_rev succeeds / stale rev still 409s). Reviewer fix: trimmed the onramp line so
+  `docs/setup/CODEX.md` holds its 10100B budget (S2 had it at 10207B → now 10096B). Reviewer gates:
+  `mix test tasks_test.exs` 28/0, `go test -run Onramp` ok, `check-doc-budgets.sh` PASS.
+- `tlv-bl-js-vocab-drift-gate` (S4, #5707) — `status-manifest-check.sh` Part 5 byte-checks the two
+  hand-maintained TS vocab twins (react `STATUS_ROLES`, web `STATUS_LADDER`) against
+  `design/status-manifest.json` (role set + order + glyph + label); `unknown` is the ONE sanctioned
+  non-manifest role; fails closed. Reviewer re-ran the gate + mutation-re-proved (label desync +
+  extra role each red). Shell-only, merges on its own gate.
+
+**Ruled (S3, `tlv-bl-true-blocking-primitive-decision`):** premise CONFIRMED but the slice was
+authored against a **phantom charter D32** that never existed (the charter topped at D24). Per the
+LEAD ruling (2026-07-22 12:18), the REVIEW phase authored **D25** above (advisory blocking is FINAL;
+`blocked` claim-equivalent to `open`; readiness derived not fenced; single-sourced +
+`claimable_statuses_test.exs` #5537 test-locked, reviewer re-verified 8/0 at L1), reworded the two
+S3 criteria D32→D25, and stamped the invariant proof. The row closes on the D25 charter merge (this
+entry's PR) — the lead lands it.
+
+**Ledger truthful:** S1/S2/S4 all `in_progress` with their "PR merged" criteria left `met=false` for
+the lead; no fabricated `done`; every slice carries its `wave_paper` + epic parent. S3 honestly
+records the phantom-D32 refutation and the lead's D25 resolution.
+
+**Next wave — dispatch order:** (1) LEAD merges the green round-1 PRs #5705 (S1, waits CI Elixir
+Test), #5706 (S2, waits CI Elixir Test), #5707 (S4, own gate) — all pairwise file-disjoint. (2)
+Merge THIS charter PR (D25) and close `tlv-bl-true-blocking-primitive-decision` citing the merged
+D25 SHA + `claimable_statuses_test.exs`. (3) Then the crown `tlv-bl-writer-seam-transition-gate` and
+`tlv-bl-publish-door-lifecycle-guard` remain the top round-2 candidates, then tlv-s5/tlv-s8.
