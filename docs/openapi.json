@@ -901,6 +901,63 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/fleet/beat": {
+      "post": {
+        "operationId": "fleet.beat",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: worker.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Listener presence heartbeat: upsert this worker's listener row (first beat registers it; every later beat is one zero-row atomic write). last_seen is server-stamped — send ttl as data, never a timestamp.",
+        "tags": [
+          "fleet"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
     "/v1/media/{dataset}/{id}/checkout": {
       "post": {
         "operationId": "media.checkout",
@@ -6311,6 +6368,53 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/fleet/roster": {
+      "get": {
+        "operationId": "fleet.roster",
+        "parameters": [
+          {
+            "description": "Dataset to read the roster from (defaults to production).",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The fleet roster: every listener with online/offline computed server-side (offline iff now - last_seen > ttl_s; missing last_seen = offline, fail closed) plus each worker's current in_progress task.",
+        "tags": [
+          "fleet"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/revision/{dataset}/{rev_id}/restore": {
       "post": {
         "operationId": "doc.restore-revision.scoped",
@@ -11478,6 +11582,10 @@
     {
       "description": "Bulldocs — live, no-reload paper/document surface. Ingests block-structured papers from external producers and renders them at /papers/:slug with real-time per-block streaming. Formerly the built-in Papers feature; now a first-party plugin built on the core portable-doc utilities.",
       "name": "bulldocs"
+    },
+    {
+      "description": "Tasks — the W7 task-document substrate as a first-party plugin. Declares the `task` schema (goals/phases/events are all just tasks) and owns the TTL-sweep + compaction Oban cron jobs. Built on the core Barkpark.Tasks machinery, which stays in core as reusable utilities.",
+      "name": "fleet"
     },
     {
       "description": "GitHub bridge — Barkpark (the guerrilla ledger) stays the single source of truth; this plugin mirrors tasks OUTBOUND to GitHub Issues (debounced, idempotent, App-authenticated), intakes only outsider-opened issues INBOUND as find-or-create tasks awaiting adoption, and projects a READ-ONLY Projects v2 dashboard. No field is ever bidirectional; claims/epochs/fencing/rail_rev never leave Barkpark. Off by default.",
