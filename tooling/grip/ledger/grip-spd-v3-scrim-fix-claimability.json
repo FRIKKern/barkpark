@@ -1,0 +1,38 @@
+{
+  "id": "grip-spd-v3-scrim-fix-claimability",
+  "wave": "spd-inspector-shape-harden-wave-2026-07-21",
+  "question": "Can the standard-bucket scrim FIX (spd-standard-bucket-scrim-unruled, root.html.heex) be an in-fence slice this wave?",
+  "answer": "GO on all mechanical gates; the sole open question is a lead coordination call about an active seal-arming freeze.",
+  "recipes": [
+    {
+      "claim": "Zero open PRs touch root.html.heex",
+      "rerun": "gh pr list --state open --limit 200 --json number,files --jq '.[] | select(.files[].path | test(\"root\\\\.html\\\\.heex\")) | .number'",
+      "expect": "empty output"
+    },
+    {
+      "claim": "Only open-PR .heex toucher is #2907 studio.html.heex (different file)",
+      "rerun": "gh pr list --state open --limit 200 --json number,files --jq '.[] | select(.files[].path | endswith(\".heex\")) | {number, heex:[.files[].path|select(endswith(\".heex\"))]}'",
+      "expect": "{\"heex\":[\"api/lib/barkpark_web/layouts/studio.html.heex\"],\"number\":2907}"
+    },
+    {
+      "claim": "Dependency tier3-keyboard (b650154a1 = #5086) is ancestor of origin/main",
+      "rerun": "git merge-base --is-ancestor b650154a1 origin/main && echo yes",
+      "expect": "exit 0 / yes"
+    },
+    {
+      "claim": "b650154a1 identity",
+      "rerun": "git log -1 --format='%h %s' b650154a1",
+      "expect": "b650154a1 feat(studio): the keyboard exit and focus return — pay D127(b) and (a) (spd-w12) (#5086)"
+    },
+    {
+      "claim": "Breach still live on main: no standard + [data-user-opened] scrim suppressor",
+      "rerun": "git show origin/main:api/lib/barkpark_web/layouts/root.html.heex | grep -n 'data-user-opened'",
+      "expect": "only narrow/phone suppressors (:2120-2142) and :not([data-user-opened]) painted-closed guard; no standard-bucket suppressor"
+    },
+    {
+      "claim": "D16 single-owner-per-round is the governing rule",
+      "rerun": "grep -n 'D16 — root.html.heex is single-owner per round' .claude/workflows/bp-studio-space-priority-charter.md",
+      "expect": "line 37"
+    }
+  ]
+}

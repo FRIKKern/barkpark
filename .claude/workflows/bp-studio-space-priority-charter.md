@@ -1677,3 +1677,125 @@ Two file-disjoint slices, both round 1, dispatched in parallel. S2 is `root.html
 round (D16). Both fable — S1 carries the split-view regression trap (D199), S2 the cascade + merged
 positive-control repair (D200). Ledger reconcile (`spd-b39-seal-ledger-reconciliation`) and slice-C push
 (SEAL-BLOCKER 1) are LEAD/operator work, not builder slices.
+
+### Wave 16 amendments (2026-07-22, D206–D214) — THE VERDICT-AND-SEAL WAVE (Arm: B)
+
+Wave paper: `spd-b39-residue-wave-2026-07-22`. Research-program **Arm B** (survey 5, verify 3, digest
+light, review rank-and-fix; /papers/epic-cycle-research-program-abcde). The wish carried at least two
+stale premises (items 1 and 3); this wave NAMES them (D206, D203) instead of obeying them —
+premise_failures are reported explicitly at Review.
+
+- **D206 — The headline premise is DEAD at L1.** The fresh bracketed run (2026-07-22, artifact
+  `scripts/measurements/spd-b39-residue-run-2026-07-22.json`, fired with origin/main's FINAL instrument
+  blob `d5218a8f6`, served_sha `9d956b611` == origin/main at run time, slot blue, provenance bracket
+  matched, round_trip 27/27 bit-identical, bucket precondition 72/72): at viewport 1024 the USER-OPENED
+  reading column is **60.00ch native, panel 980px, is_destination=false, scrim renders in 0 of 54 rows,
+  dimmed_content_px=0**. The wish's "38ch crush at 1024" cites the pre-ladder wave-8/9 record (panel 720,
+  scrim alpha 0.55, dimmed ≈38ch) — that state no longer exists on the deployed build. **No fix slice
+  exists this wave.** Item 1 of the wish resolves by STAMPING, not building (D208).
+
+- **D207 — Forced-georgia shortfall: RECORDED AND EXEMPT, not a defect.** The only sub-55ch user-opened
+  desktop faces in the run are forced-georgia 1280 = 53.95ch (−1.05) and 1024 = 54.31ch (−0.69); native
+  clears at every non-destination desktop width (min 59.60ch@1280) and source-serif-4 clears everywhere
+  (64.98/65.42). RULING: forced-georgia is the deliberately-widest stress face (11.0469px/ch registered),
+  not the deployed default; successor criterion 2's own text accepts "records its shortfall per face,
+  named and owned". The shortfall is hereby named (this decision) and owned (the run artifact). No
+  compound-selector slice is spent on <1.1ch of a forced stress face. If a future wave ships a real
+  per-face floor, it starts from this record.
+
+- **D208 — Successor root criteria stamping map (per-criterion, never blanket).**
+  Criterion 0 ← the run (27 user-opened rows = 9 widths × 3 forced faces, hardened instrument with D185
+  bucket precondition). Criterion 1 ← rulings D148/D149/D154/D170 (shape chosen: Tier-2 in-flow dock +
+  Tier-3 summoned destination, wide scrim abolished) + D190/D198 (shape SOLVED, rebuild rejected).
+  Criterion 2 ← the run + D207 (native/ssf4 clear 55ch; georgia shortfall recorded per face). Criterion 3
+  ← D161 (exemption question pre-registered before any run) + D202 (abolition applies the settled D127
+  invariant — not a post-table exemption). Criterion 4 ← run row {1024, user-opened, native}:
+  dimmed_content_px=0, visible_ch=60.00 == content_ch=60.00, is_destination=false, scrim.renders=false.
+  The label sentence: **"dimmed and visible are identical because nothing is dimmed — dimmed_content_px=0
+  in every non-destination row, and in destination rows visible is NULL (covered), never quoted as
+  content."** `spd-b44-dimmed-vs-visible-label-identity` closes on the same row.
+
+- **D209 — Slice C's MERGE is the committed floor.** The PDS crown sealed 12/12 at 2026-07-21T21:52:28Z —
+  the freeze window is over, and scripts/** was never in its blast radius. Branch
+  `loop-epic/register-the-terminal-run-s-prediction-a-2-r` (tip `eb39567c0`, 2 purely-additive
+  `scripts/measurements/` files) merge-trees clean against origin/main with zero conflicts; no open PR
+  touches the lane. The repo has NO branch protection and NO rulesets (verified via gh api) — every gate
+  is review discipline, not a merge blocker; elixir.yml runs unconditionally (no paths filter) and passes
+  trivially; security.yml and doc-gates path-skip a scripts-only diff; merging does NOT deploy (deploy.yml
+  has no scripts/** path — correct, nothing to deploy). The builder RE-CLAIMS
+  `spd-w13-prediction-registered` first (claim lapsed 2026-07-21, epoch 7) so pr-task-gate reads green.
+
+- **D210 — Residue goes to ZERO this wave: the bracketed run fires ROUND 2, from this host.** V1 proved
+  the "operator" is us — `~/.ssh/barkpark_indx` authenticates, the guerrilla token resolves, playwright
+  1.59.1 + chromium are cached, and the instrument fired clean. `inspector-shape-bracketed-deployed-run`
+  dispatches AFTER `spd-w13-prediction-registered` MERGES (its criterion 2 requires the frozen prediction
+  + checker ON MAIN before the run). Recipe deltas vs the D206 run: fire TWICE on the same build
+  (criterion 5 determinism), run `scripts/measurements/check-prediction.mjs` against the frozen
+  prediction, quote the forced-container control (`scripts/studio-scrim-threshold-control.mjs`) as a
+  SIBLING section — NEVER the shipped `--positive-control` flag (D188, proven false-green) — which also
+  upgrades zero_cause from "DESK-FIXED (unproven)" to proven (criterion 6). served_sha may read
+  `9d956b611` or later (api/** merges auto-deploy; scripts/** merges don't) — both contain every wave-15
+  fix; the provenance bracket guards mid-run rotation as always.
+
+- **D211 — Ledger-pipeline ruling from the V3 pilot: read each row's lifecycle FIRST.** The digest's
+  blanket "all 15 claims lapsed, just re-claim" was wrong for the pilot row (spd-b29f was lifecycle=done,
+  not lapsed-in_progress). Recipe: (1) `bp task get` → read lifecycle_status; (2) in_progress w/ lapsed
+  claim → claim renews the lease; (3) already done → `bp task stage <id> open` FIRST (an UNDOCUMENTED
+  done→open door — same ledger-lie bug class as tlv's #5621 publish door; flagged to tlv and filed as
+  `tlv-bl-stage-verb-done-reopen-door`; builders use it ONLY for sanctioned reconciliation and watch for
+  tlv gating it); then claim → pulse → stamp (verbatim `--criterion-text`) → close → re-GET to verify
+  state, never just exit codes. Merge SHAs re-verified BY CONTENT (git log `Task:` trailer + diff
+  content), never `--is-ancestor` alone. Pilot succeeded: spd-b29f now done 6/6 with SHA-cited evidence
+  (`ce8943e58`, #4738).
+
+- **D212 — b24 + c967 are straight verdict-closes.** `spd-b24-blocked-lifecycle-is-not-a-fence`:
+  premise already ruled half-wrong 2026-07-21 (blocked IS claim-equivalent to open); the invariant is
+  locked on origin/main by `api/test/barkpark/tasks/claimable_statuses_test.exs` (#5537, `aee876e4f`,
+  which names spd-b24 in its moduledoc); no live tlv builder touches queue/claim/validation. CLOSE with
+  ruling; the deferred true-blocking-primitive decision survives as new tlv backlog row
+  `tlv-bl-true-blocking-primitive-decision` (SendMessage-ping tlv before the close, per the wish's
+  coordination clause). `task-c967eebb8a51715f`: folded into wave-15 S2, which MERGED as `2dcf32b7a`
+  (#5554) with the positive control repaired at BOTH assertions (860 ⇒ `""`, 861 ⇒ nil against the
+  in-memory unsuppressed source, non-vacuity refute guard present) — evidence-close citing that SHA.
+
+- **D213 — Charter lands on origin/main in the SAME wave that cites it.** D69 doctrine (builders read the
+  charter via `git show origin/main:...`) means an uncommitted or locally-stranded charter is invisible.
+  The Decide phase itself lands this amendment via branch `loop-epic/spd-b39-residue-decide-charter` + PR
+  + merge (docs+json only), carrying: this amendment, the run artifact
+  (`scripts/measurements/spd-b39-residue-run-2026-07-22.json`), and this run's grip ledger recipe rows.
+  The PRIMARY checkout stays untouched: it is DIVERGED (HEAD `4f84fd087`, unpushed charter commits, its
+  instrument copy 333 lines stale, missing the D185 bucket precondition) — stewarding it is backlog row
+  `spd-bl-primary-checkout-diverged` (preserve → reset --hard origin/main → never fire the stale local
+  instrument; V1 dodged this by running origin/main's blob). The D37 stub is NOT amended (its own text
+  forbids it).
+
+- **D214 — Wave 16 shape: three ledger slices round 1, slice-C merge round 1, terminal run round 2.**
+  Honest count: items 1 and 3 of the wish are named premise failures (stale headline; superseded
+  pointer), absorbed as D206/D203 rulings, not builds. The wave's end state: all 15 reconciliation rows
+  closed with SHA evidence, the superseded pointer closed, spd-b39's 5 root criteria stamped TRUE
+  per-criterion (D208), b24/c967/spd-b44 closed, slice C merged, and the terminal bracketed run PAID —
+  residue zero. If the round-2 run cannot complete, unstamped bracketed-run criteria stay met:false with
+  an honest note naming the missing run (pre-ruled fallback, wave paper block "Sharpest attack").
+
+**Wave 16 slice table.**
+
+| # | slice | task | round | builder | files |
+|---|---|---|---|---|---|
+| S1 | Push + merge slice C — the frozen prediction and its checker land on main | `spd-w13-prediction-registered` | 1 | opus | `scripts/measurements/check-prediction.mjs`, `scripts/measurements/spd-round-trip-prediction-2026-07-21.json` (both already authored on the local branch — push, PR, merge; no rebuild) |
+| S2 | The 15-row seal-ledger reconciliation + superseded-pointer close + spd-b39 root-criteria stamp (D208) | `spd-b39-seal-ledger-reconciliation` | 1 | opus | (ledger-only — no repo files) |
+| S3 | Verdict-closes: spd-b24 close-with-ruling, c967 evidence-close, spd-b44 label-identity close | `spd-b39w-verdict-closes` | 1 | opus | (ledger-only — no repo files) |
+| S4 | THE TERMINAL BRACKETED RUN — twice, predicted, controlled; D127's exemption PAID | `inspector-shape-bracketed-deployed-run` | 2, AFTER S1 MERGES | fable | `scripts/measurements/` (new run artifacts only) |
+
+S2 and S3 touch disjoint ledger rows (S2 owns the spd-b39 root row and the 15 worklist rows; S3 owns
+b24/c967/spd-b44). S4 is the ONLY round-2 slice — it never dispatches beside an unmerged S1.
+
+## Wave log — wave 16 (append at Review)
+
+### Wave 2026-07-22 — Wave 16 (THE VERDICT-AND-SEAL WAVE), Decide. **Arm: B.**
+Verify round: V1 FIRED the instrument (38ch crush refuted at L1 — 60.00ch@1024 user-opened native;
+only forced-georgia reads sub-55ch, ruled recorded-exempt D207); V2 proved slice C still clean + no
+branch protection exists; V3 piloted the close pipeline on spd-b29f (done→open stage door discovered,
+flagged to tlv). Decisions D206–D214. Wave: S1 slice-C merge, S2 reconciliation, S3 verdict-closes
+(round 1) + S4 terminal bracketed run (round 2, after S1). Backlog filed:
+`tlv-bl-stage-verb-done-reopen-door`, `tlv-bl-true-blocking-primitive-decision`,
+`spd-bl-primary-checkout-diverged`. Review appends the grade + premise_failures/review_fixes counts here.
