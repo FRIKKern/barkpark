@@ -139,13 +139,16 @@ defmodule Barkpark.Plugins.Bulldocs do
 
   @impl Barkpark.Plugin
   def register_schemas(_opts) do
-    raw =
-      @schemas_dir
-      |> Path.join("paper.json")
-      |> File.read!()
-      |> Jason.decode!()
+    # paper (public reader artifact) + form_response (PRIVATE — anonymous form
+    # submissions land here; visibility "private" keeps every response off the
+    # public read API while bp/Studio token reads see them normally).
+    for file <- ["paper.json", "form_response.json"] do
+      raw =
+        @schemas_dir
+        |> Path.join(file)
+        |> File.read!()
+        |> Jason.decode!()
 
-    [
       %SchemaDefinition{
         name: Map.fetch!(raw, "name"),
         title: Map.get(raw, "title"),
@@ -154,7 +157,7 @@ defmodule Barkpark.Plugins.Bulldocs do
         fields: Map.get(raw, "fields", []),
         dataset: "production"
       }
-    ]
+    end
   end
 
   @doc """
@@ -204,7 +207,17 @@ defmodule Barkpark.Plugins.Bulldocs do
        auth: :ingest},
       {:get, "/bulldocs/intents", BarkparkWeb.BulldocsIntentsController, :index, auth: :ingest},
       {:post, "/bulldocs/intents/:id/processed", BarkparkWeb.BulldocsIntentsController,
-       :mark_processed, auth: :ingest}
+       :mark_processed, auth: :ingest},
+      # Anonymous form submissions (study play #5): the reader's form/
+      # questionnaire blocks POST here. `:public_api` is the sanctioned
+      # browser-reachable anonymous bucket (JSON, PublicCors, no session) —
+      # abuse is held by the RateLimiter token bucket + honeypot inside the
+      # controller, and the stored `form_response` schema is PRIVATE. The
+      # `:options` sibling is the CORS-preflight contract for public_api POSTs.
+      {:post, "/bulldocs/papers/:slug/form-responses", BarkparkWeb.BulldocsFormController,
+       :submit, auth: :public_api},
+      {:options, "/bulldocs/papers/:slug/form-responses", BarkparkWeb.BulldocsFormController,
+       :submit, auth: :public_api}
     ]
   end
 
