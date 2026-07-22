@@ -5,11 +5,119 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
+
+// bulldocsPatchCommand mirrors the server manifest for `bulldocs patch`: a BATCH
+// write whose ops come from --file and whose optional --if-rev optimistic guard
+// must land in the JSON body as camelCase ifRev (bulldocs_ingest_controller reads
+// only Map.get(params,"ifRev")).
+func bulldocsPatchCommand() manifest.Command {
+	return manifest.Command{
+		ID:       "bulldocs.patch",
+		Noun:     "bulldocs",
+		Verb:     "patch",
+		HTTP:     manifest.HTTP{Method: "POST", PathTemplate: "/v1/plugins/bulldocs/papers/:slug/ops"},
+		AuthTier: "ingest",
+		Args:     []manifest.Arg{{Name: "slug", Required: true, Type: "slug"}},
+		Flags: []manifest.Flag{
+			{Name: "file", Type: "file"},
+			{Name: "if-rev", Type: "int"},
+		},
+		Writes: true,
+		Batch:  true,
+	}
+}
+
+// TestBulldocsPatchIfRevEntersBodyAsCamelCase pins the axi-b6 fix: `--if-rev`
+// must merge into the ops body as `ifRev` and never leak into the query string,
+// or the server's guard stays a silent no-op. Mutation proof: reverting
+// commandFlagBelongsInBody to `cmd.ID != "cycle.open"` turns this RED (ifRev
+// absent from the body, if-rev present in the URL).
+func TestBulldocsPatchIfRevEntersBodyAsCamelCase(t *testing.T) {
+	cmd := bulldocsPatchCommand()
+
+	opsPath := filepath.Join(t.TempDir(), "ops.json")
+	if err := os.WriteFile(opsPath, []byte(`{"ops":[{"insert-after":{"after":"b0","block":{"id":"b1"}}}]}`), 0o600); err != nil {
+		t.Fatalf("write ops file: %v", err)
+	}
+
+	pos, flags, err := splitArgs(cmd, []string{"my-paper", "--file", opsPath, "--if-rev", "2"})
+	if err != nil {
+		t.Fatalf("splitArgs: %v", err)
+	}
+	args, err := bindArgs(cmd, pos)
+	if err != nil {
+		t.Fatalf("bindArgs: %v", err)
+	}
+
+	rawURL := applyQuery("https://example.test/v1/plugins/bulldocs/papers/my-paper/ops", globals{}, cmd, flags, args)
+	if strings.Contains(rawURL, "if-rev") || strings.Contains(rawURL, "ifRev") {
+		t.Fatalf("if-rev guard leaked into the query string: %s", rawURL)
+	}
+
+	body, _, contentType, err := buildBodyWithStdinOwnership(cmd, flags, args, false)
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("content type = %q, want application/json", contentType)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got["ifRev"] != "2" {
+		t.Fatalf("body missing camelCase ifRev guard: %#v", got)
+	}
+	if _, ok := got["if-rev"]; ok {
+		t.Fatalf("hyphenated flag name leaked into body: %#v", got)
+	}
+	if _, ok := got["ops"]; !ok {
+		t.Fatalf("ops payload dropped when merging if-rev: %#v", got)
+	}
+}
+
+// TestBulldocsPatchWithoutIfRevShipsFileVerbatim guards the additive contract:
+// a plain patch (no --if-rev) still ships the --file ops object unchanged, with
+// no injected guard field.
+func TestBulldocsPatchWithoutIfRevShipsFileVerbatim(t *testing.T) {
+	cmd := bulldocsPatchCommand()
+
+	opsPath := filepath.Join(t.TempDir(), "ops.json")
+	if err := os.WriteFile(opsPath, []byte(`{"ops":[{"insert-after":{"after":"b0","block":{"id":"b1"}}}]}`), 0o600); err != nil {
+		t.Fatalf("write ops file: %v", err)
+	}
+
+	pos, flags, err := splitArgs(cmd, []string{"my-paper", "--file", opsPath})
+	if err != nil {
+		t.Fatalf("splitArgs: %v", err)
+	}
+	if _, err := bindArgs(cmd, pos); err != nil {
+		t.Fatalf("bindArgs: %v", err)
+	}
+
+	body, _, _, err := buildBodyWithStdinOwnership(cmd, flags, map[string]string{"slug": "my-paper"}, false)
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if _, ok := got["ifRev"]; ok {
+		t.Fatalf("unset guard injected into body: %#v", got)
+	}
+	if _, ok := got["ops"]; !ok {
+		t.Fatalf("ops payload missing: %#v", got)
+	}
+}
 
 func TestRunCommandWarnsWhenDefaultPageMayBeTruncated(t *testing.T) {
 	body := `{"docs":[{"id":"1"},{"id":"2"},{"id":"3"}]}`
@@ -341,5 +449,46 @@ func TestSplitArgsShortAliasRejectsFlagShapedValue(t *testing.T) {
 				t.Fatalf("splitArgs(%v) flags[file] = %v, want [%q]", tc.tail, got, tc.tail[1])
 			}
 		})
+	}
+}
+
+// TestDocMutateClientFlagsStayOffTheWire guards the S1 review fix: the
+// `Writes && Batch` body-routing rule must NOT capture client-consumed flags.
+// `doc mutate --quiet` set the batch rule true for `quiet`, which both skipped
+// the query string (clientOnly) AND leaked into the wire body as
+// `{"mutations":[…],"quiet":"true"}`, re-serializing what should ship verbatim.
+// Mutation proof: dropping "quiet" from commandFlagBelongsInBody's clientConsumed
+// switch turns this RED.
+func TestDocMutateClientFlagsStayOffTheWire(t *testing.T) {
+	cmd := manifest.Command{
+		ID: "doc.mutate", Noun: "doc", Verb: "mutate",
+		Flags:  []manifest.Flag{{Name: "file", Type: "file"}, {Name: "quiet", Type: "bool"}},
+		Writes: true, Batch: true,
+	}
+	opsPath := filepath.Join(t.TempDir(), "ops.json")
+	if err := os.WriteFile(opsPath, []byte(`{"mutations":[{"publish":{"type":"task","id":"x"}}]}`), 0o600); err != nil {
+		t.Fatalf("write ops file: %v", err)
+	}
+	flags := map[string][]string{"file": {opsPath}, "quiet": {"true"}}
+
+	// Never in the query string.
+	rawURL := applyQuery("https://example.test/v1/data/mutate", globals{}, cmd, flags, map[string]string{})
+	if strings.Contains(rawURL, "quiet") {
+		t.Fatalf("quiet leaked into query string: %s", rawURL)
+	}
+	// Never in the body.
+	body, _, _, err := buildBodyWithStdinOwnership(cmd, flags, map[string]string{}, false)
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	if strings.Contains(string(body), "quiet") {
+		t.Fatalf("quiet leaked into doc.mutate body: %s", string(body))
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if _, ok := got["mutations"]; !ok {
+		t.Fatalf("mutations payload dropped: %s", string(body))
 	}
 }

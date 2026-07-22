@@ -678,14 +678,22 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		if err != nil {
 			return nil, nil, "", fmt.Errorf("read --file %q: %w", path, err)
 		}
-		if cmd.MutationOp == "" {
+		// A plain (non-mutation) write with no body flags to merge ships the file
+		// verbatim. But when the command has body-membership flags set (e.g.
+		// bulldocs.patch --if-rev), the file is the base object those flags merge
+		// into — parse it so the guard joins the payload instead of being dropped.
+		if cmd.MutationOp == "" && !commandHasSetBodyFlags(cmd, flags) {
 			return raw, nil, "application/json", nil
 		}
+		bodyKind := "mutation body"
+		if cmd.MutationOp == "" {
+			bodyKind = "--file body"
+		}
 		if err := json.Unmarshal(raw, &obj); err != nil {
-			return nil, nil, "", fmt.Errorf("read --file %q: mutation body must be a JSON object: %w", path, err)
+			return nil, nil, "", fmt.Errorf("read --file %q: %s must be a JSON object: %w", path, bodyKind, err)
 		}
 		if obj == nil {
-			return nil, nil, "", fmt.Errorf("read --file %q: mutation body must be a JSON object", path)
+			return nil, nil, "", fmt.Errorf("read --file %q: %s must be a JSON object", path, bodyKind)
 		}
 	} else if stdinRedirected {
 		// Recommend --file - only where the manifest actually declares the
@@ -714,7 +722,7 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			continue
 		}
 		if values := flags[f.Name]; len(values) > 0 {
-			obj[f.Name] = values[len(values)-1]
+			obj[bodyFlagKey(f.Name)] = values[len(values)-1]
 		}
 	}
 	// --set fields target: nested under SetKey (e.g. patch's `set`) or, by
@@ -771,16 +779,74 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	return raw, nil, "application/json", nil
 }
 
+// commandFlagBelongsInBody reports whether a command-local flag rides in the
+// JSON request body instead of the query string. The rule is MANIFEST-DRIVEN,
+// not a table of command ids:
+//
+//   - A BATCH write command's payload IS a JSON body (the `ops` array), so its
+//     scalar control flags belong at the body head. bulldocs.patch's `--if-rev`
+//     optimistic-concurrency guard is the motivating case: the server reads
+//     `Map.get(params, "ifRev")`, so a `?if-rev=1` query param never matched and
+//     the guard was a silent no-op (a stale patch overwrote a newer paper
+//     instead of 412). Routed through the body (as camelCase `ifRev`, see
+//     bodyFlagKey) the guard fires. Client-consumed flags (`file` carries the
+//     payload via the --file path; `set`/`quiet`/`all` are consumed by the CLI
+//     itself) are excluded — this MUST mirror applyQuery's clientOnly set, or a
+//     batch write's own control flag (e.g. `doc mutate --quiet`) would both skip
+//     the query string AND leak into the wire body.
+//   - cycle.open predates the batch rule: it is a non-batch write whose *_json
+//     contract flags ride the body by id. Retained verbatim.
 func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
-	if cmd.ID != "cycle.open" {
-		return false
-	}
+	// clientConsumed mirrors applyQuery's clientOnly set: these flags never ride
+	// the wire (as query OR body) — the CLI consumes them locally.
 	switch name {
-	case "experiment_contract_json", "correction_of_json", "correction_of_digest", "release_gate_receipt_json":
-		return true
-	default:
+	case "file", "set", "quiet", "all":
 		return false
 	}
+	if cmd.Writes && cmd.Batch {
+		return true
+	}
+	if cmd.ID == "cycle.open" {
+		switch name {
+		case "experiment_contract_json", "correction_of_json", "correction_of_digest", "release_gate_receipt_json":
+			return true
+		}
+	}
+	return false
+}
+
+// commandHasSetBodyFlags reports whether the caller actually set any body-membership
+// flag on cmd. When true, a --file payload for a non-mutation write must be parsed
+// and merged (so e.g. bulldocs.patch's --if-rev joins the ops object at the body
+// head) rather than shipped verbatim.
+func commandHasSetBodyFlags(cmd manifest.Command, flags map[string][]string) bool {
+	for _, f := range cmd.Flags {
+		if commandFlagBelongsInBody(cmd, f.Name) && len(flags[f.Name]) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// bodyFlagKey maps a hyphenated CLI flag name to the camelCase JSON key the API
+// reads for it (`if-rev` → `ifRev`). Names without a hyphen — cycle.open's
+// snake_case *_json contract flags, single-word flags — pass through unchanged,
+// so the server-side spelling is preserved exactly.
+func bodyFlagKey(name string) string {
+	if !strings.Contains(name, "-") {
+		return name
+	}
+	parts := strings.Split(name, "-")
+	var b strings.Builder
+	b.WriteString(parts[0])
+	for _, p := range parts[1:] {
+		if p == "" {
+			continue
+		}
+		b.WriteString(strings.ToUpper(p[:1]))
+		b.WriteString(p[1:])
+	}
+	return b.String()
 }
 
 // commandHasFileFlag reports whether cmd's manifest declares the --file body
