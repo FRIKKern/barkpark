@@ -1,0 +1,68 @@
+{
+  "run_id": "grip-20260722T084500Z-spd-b39-residue-instrument-fire",
+  "recipes": [
+    {
+      "subject": "deployed guerrilla served_sha (L1)",
+      "quantity": "ssh:git-rev-parse",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 'cd /opt/barkpark && git rev-parse HEAD'",
+      "value": "9d956b611b6fe0f8a1218ec5911fb36b51ca3cb1",
+      "derived_level": "L1",
+      "deps": ["deployed guerrilla /opt/barkpark HEAD"],
+      "observed_at": "2026-07-22T08:41:56Z"
+    },
+    {
+      "subject": "local main checkout HEAD vs origin/main (DIVERGED)",
+      "quantity": "git:rev-parse",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git rev-parse HEAD origin/main && git merge-base --is-ancestor HEAD origin/main; echo $?",
+      "value": "HEAD=4f84fd087 origin/main=9d956b611 — NEITHER is an ancestor of the other (local carries unpushed charter commits; its studio-desk-measure.mjs is 333 lines behind origin/main)",
+      "derived_level": "L1",
+      "deps": [".git"],
+      "observed_at": "2026-07-22T08:40:00Z"
+    },
+    {
+      "subject": "FINAL instrument fired = origin/main blob, NOT the diverged worktree file",
+      "quantity": "git:show + node run",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:scripts/studio-desk-measure.mjs > /tmp/instr.mjs && BP_PLAYWRIGHT_FROM=/Volumes/SATECHI/github/barkpark/js/package.json node /tmp/instr.mjs --out scripts/measurements/spd-b39-residue-run-2026-07-22.json",
+      "value": "instrument blob d5218a8f6 (origin/main); playwright 1.59.1 from js/; chromium-1217 cached at ~/Library/Caches/ms-playwright",
+      "derived_level": "L1",
+      "deps": ["origin/main:scripts/studio-desk-measure.mjs", "js/node_modules playwright@1.59.1"],
+      "observed_at": "2026-07-22T08:43:13Z"
+    },
+    {
+      "subject": "user-opened reading column at 1024 (wish '38ch crush' refutation)",
+      "quantity": "node:json-extract",
+      "rerun": "node -e 'const j=require(\"/Volumes/SATECHI/github/barkpark/scripts/measurements/spd-b39-residue-run-2026-07-22.json\");const r=j.rows.find(x=>x.viewport_px===1024&&x.inspector_state===\"user-opened\"&&x.face===\"native\");console.log(r.panel_px,r.visible_ch,r.visible_meets_55ch,r.dimmed_content_px,r.scrim.renders,r.is_destination)'",
+      "value": "panel_px=980 visible_ch=60.00 visible_meets_55ch=true dimmed_content_px=0 scrim.renders=false is_destination=false — NOT 38ch, NO scrim",
+      "derived_level": "L1",
+      "deps": ["scripts/measurements/spd-b39-residue-run-2026-07-22.json"],
+      "observed_at": "2026-07-22T08:43:13Z"
+    },
+    {
+      "subject": "sub-55ch user-opened desktop faces (fix-slice trigger test)",
+      "quantity": "node:json-filter",
+      "rerun": "node -e 'const j=require(\"/Volumes/SATECHI/github/barkpark/scripts/measurements/spd-b39-residue-run-2026-07-22.json\");j.rows.filter(r=>r.inspector_state===\"user-opened\"&&r.visible_meets_55ch===false).forEach(r=>console.log(r.viewport_px,r.face,r.visible_ch))'",
+      "value": "ONLY forced-georgia: 1280 georgia 53.95ch (-1.05), 1024 georgia 54.31ch (-0.69). native+source-serif-4 clear 55ch at every non-destination desktop width; native min = 59.60ch@1280",
+      "derived_level": "L1",
+      "deps": ["scripts/measurements/spd-b39-residue-run-2026-07-22.json"],
+      "observed_at": "2026-07-22T08:43:13Z"
+    },
+    {
+      "subject": "round-trip fidelity + bucket precondition + provenance bracket",
+      "quantity": "node:json-extract",
+      "rerun": "node -e 'const j=require(\"/Volumes/SATECHI/github/barkpark/scripts/measurements/spd-b39-residue-run-2026-07-22.json\");console.log(JSON.stringify({rt:j.round_trip,bp:j.bucket_precondition,bracket:j.provenance_bracket&&j.provenance_bracket.matched}))'",
+      "value": "round_trip.ran=true returns_bit_identical=true 27/27; bucket_precondition checked=72 agreed=72 failures=0; provenance_bracket_matched=true; served pre==post 9d956b611 slot blue",
+      "derived_level": "L1",
+      "deps": ["scripts/measurements/spd-b39-residue-run-2026-07-22.json"],
+      "observed_at": "2026-07-22T08:43:13Z"
+    },
+    {
+      "subject": "bracketed-run 'after' deps merged+deployed",
+      "quantity": "git:log-grep",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && for t in tier3-keyboard-exit-and-focus-return spd-instrument-open-leg-stale-locator scrim-threshold-forced-container-control; do git log origin/main --grep=\"Task: $t\" --format=%h -1; done",
+      "value": "b650154a1, 2d3164fc4, 4045d0fa2 — all on origin/main = deployed 9d956b611",
+      "derived_level": "L1",
+      "deps": ["origin/main history"],
+      "observed_at": "2026-07-22T08:44:00Z"
+    }
+  ]
+}
