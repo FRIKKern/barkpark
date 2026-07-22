@@ -36,6 +36,29 @@ An **order** is a `type:task` document routed to your worker name via `assignee`
    --criterion-text "<the criterion, verbatim>" --yes` (get `<epoch>` from `bp task get`).
 6. **Close.** Re-read the epoch, then `bp task close <id> <you> <epoch> --yes`. Return to step 1.
 
+## Capacity in the beat (measured, never vibed)
+
+Every heartbeat carries a **measured** capacity envelope so the orchestrator routes heavy work to
+big boxes and light work to lean ones from real data, not static config:
+
+```
+bp fleet beat <you> --status idle --ttl 30 --agent <kind> \
+  --capacity '{"size_class":"heavy","slots_total":1,"slots_free":1,"budget":42.5}'
+```
+
+- **`size_class`** — from **real total RAM** (Darwin `sysctl -n hw.memsize`, Linux `MemTotal`),
+  inclusive thresholds light `<4` / standard `4–<16` / heavy `16–<64` / xl `≥64` GiB, then clamped
+  by `FLEET_MAX_CLASS` (a CEILING, `min(observed, declared)` at the edge — PDF-D6/D36).
+- **`slots_free`** — the loop's OWN control-flow state: `1` idle, `0` from claim to close. Never an
+  OS probe; a busy worker advertises zero and the router skips it (same effect as offline).
+- **`budget`** — `FLEET_SPEND_CAP` minus the running spend ledger (`${FLEET_HOME:-~/.barkpark-fleet}/
+  <worker>/spend.jsonl`, one append-only row per closed order), re-read every beat; omitted when
+  uncapped. Cap reached ⇒ budget floors ⇒ the orchestrator's ambition drops to zero and dispatch
+  halts — the fleet brake. A malformed ledger line is a loud abort, never coerced to a number.
+
+`tooling/fleet/fleet-run.sh` measures and threads all of this; `fleet-run.sh capacity` prints the
+envelope. The orchestrator reads declared capacity as a CEILING — under-report, never over-report.
+
 ## Rules (all agents)
 
 - **Never merge or push.** Code orders leave a merge-ready PR; the orchestrator is the arbiter.
