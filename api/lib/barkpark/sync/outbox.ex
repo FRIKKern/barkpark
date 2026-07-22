@@ -6,6 +6,11 @@ defmodule Barkpark.Sync.Outbox do
   EXCLUDED, so a mutation that arrived via pull is never pushed back — no
   ping-pong.
 
+  `type = "listener"` events are likewise EXCLUDED: Personal Dev Fleet listener
+  presence is per-machine truth (a heartbeat that only makes sense on the host
+  it describes), so it must never fan out to synced remotes. Mirroring the
+  echo-suppression idiom, the filter lives in the read-side where-clause.
+
   This module does READS ONLY (a plain `Repo` query — never a write through
   `content.ex`/`tasks.ex`), so invariant #1 holds. Events come back in
   `id ASC` order (causal replay) and `after_id` is the push cursor, so the loop
@@ -18,9 +23,9 @@ defmodule Barkpark.Sync.Outbox do
   alias Barkpark.Repo
 
   @doc """
-  Fetch up to `limit` un-pushed, non-sync-originated events for `dataset`,
-  with `id > after_id`, in `id ASC` order. `after_id` is the push cursor;
-  `limit` is `push_batch_size`.
+  Fetch up to `limit` un-pushed, non-sync-originated, non-`listener` events for
+  `dataset`, with `id > after_id`, in `id ASC` order. `after_id` is the push
+  cursor; `limit` is `push_batch_size`.
   """
   @spec fetch(String.t(), non_neg_integer(), pos_integer()) :: [MutationEvent.t()]
   def fetch(dataset, after_id, limit)
@@ -29,7 +34,8 @@ defmodule Barkpark.Sync.Outbox do
     from(e in MutationEvent,
       where:
         e.dataset == ^dataset and e.id > ^after_id and
-          (is_nil(e.source) or e.source != "sync"),
+          (is_nil(e.source) or e.source != "sync") and
+          e.type != "listener",
       order_by: [asc: e.id],
       limit: ^limit
     )
