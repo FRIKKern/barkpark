@@ -336,6 +336,26 @@ case System.get_env("BARKPARK_TASK_LEASE_TTL_SECONDS") do
     :ok
 end
 
+# Engagement honesty TTL override (tlv-s6). The default (config.exs) is 900 s
+# (15 min) — the lapse lease for the considering/researching thought states.
+# Same positive-int-or-warn shape as the work lease above.
+case System.get_env("BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS") do
+  raw when is_binary(raw) and raw != "" ->
+    case Integer.parse(raw) do
+      {ttl, ""} when ttl > 0 ->
+        config :barkpark, :task_engagement_ttl_seconds, ttl
+
+      _ ->
+        IO.warn(
+          "BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS=#{inspect(raw)} is not a positive integer — " <>
+            "keeping the compiled default"
+        )
+    end
+
+  _ ->
+    :ok
+end
+
 # Pulse (Shared Storm) public event channels. DEFAULT-OFF: unset/empty/invalid
 # env means %{} — every pulse route 404s and nothing on the instance is
 # anonymously writable. Value is a JSON object keyed by channel name; see
