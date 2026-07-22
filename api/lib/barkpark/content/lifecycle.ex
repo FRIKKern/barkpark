@@ -44,6 +44,8 @@ defmodule Barkpark.Content.Lifecycle do
     WriteScope
   }
 
+  alias Barkpark.Tasks.Transitions
+
   # TIMED: the publish/lifecycle hot path had ZERO telemetry, so "what is p95 of
   # a publish?" was unanswerable. `:telemetry.span` emits
   # `[:barkpark, :content, :lifecycle, :start | :stop | :exception]` with a
@@ -82,122 +84,258 @@ defmodule Barkpark.Content.Lifecycle do
 
     case Content.get_document(did, type, dataset, opts) do
       {:ok, draft} ->
-        ctx = WriteScope.build_ctx(opts)
-
-        payload = %{
-          event: :before_publish,
-          doc: draft,
-          dataset: dataset,
-          prev_doc: draft,
-          ctx: ctx
-        }
-
-        # The publish wall (authoring-excellence D1): fail-closed enforcement
-        # lives in CORE, immediately BEFORE the before_publish hook fire — the
-        # hook chain is plugin-droppable and coerces raising hooks to :ok, so
-        # it is the wrong home for a correctness gate (the hook stays for
-        # optional tenant policies). The whole chain — exemption read ONCE →
-        # label spine (E1/E2) → E3 tag registry → E4 dedup → clear-on-full-pass
-        # → main_tag stamp — lives in `Barkpark.Content.AuthoringWall` (charter
-        # D26: the ONE shared wall, also mounted by BlockOps.upsert_paper for
-        # the direct paper-birth path). The delegation is behaviour-identical:
-        # the three raw error tuples ({:label_spine, …} 422, {:unknown_tag, …}
-        # 422, {:duplicate_of, …} 409) fall straight out of the `with` —
-        # nothing below runs, each emitting its telemetry at AuthoringWall's own
-        # else seam — and `pub_content` is the draft's content with the D7
-        # main_tag stamp applied (put on derivation, DROPPED when stale).
-        with {:ok, pub_content} <- AuthoringWall.enforce(draft, type, pid, dataset, opts) do
-          # Hook stays BEFORE the transaction. The rev-fenced delete below
-          # closes the publish-during-edit TOCTOU: a concurrent write that
-          # bumps the draft between the read above and the delete now surfaces
-          # a {:error, {:rev_mismatch, …}} (412) instead of silently
-          # destroying the newer edit while this stale snapshot publishes.
-          case Barkpark.Plugins.Hooks.fire(:before_publish, payload) do
-            {:halt, reason} ->
-              {:error, {:halted, reason}}
-
-            :ok ->
-              # Upsert the published version with draft's content (main_tag
-              # denormalized — see AuthoringWall.stamp_main_tag/2, applied to
-              # `pub_content` above). Inherit the draft's tenancy scope so a
-              # publish never drops workspace_id/project_id on the published row.
-              pub_attrs =
-                %{
-                  "doc_id" => pid,
-                  "type" => type,
-                  "dataset" => dataset,
-                  "title" => draft.title,
-                  "status" => "published",
-                  "content" => pub_content,
-                  "rev" => Writer.generate_rev()
-                }
-                |> WriteScope.inherit_scope_attrs(draft)
-
-              txn =
-                Repo.transaction(fn ->
-                  {pub_result, prev_pub_rev} =
-                    case Content.get_document(pid, type, dataset, opts) do
-                      {:ok, existing} ->
-                        {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
-
-                      _ ->
-                        {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
-                    end
-
-                  case pub_result do
-                    {:error, cs} ->
-                      Repo.rollback(cs)
-
-                    {:ok, published} ->
-                      # Rev-fenced: if a concurrent write bumped the draft since
-                      # the read above, delete nothing and surface a rev_mismatch
-                      # (412) instead of destroying the newer edit. A vanished
-                      # draft resolves to {:error, :not_found} (prior semantics).
-                      case fenced_delete(draft) do
-                        :ok -> {published, prev_pub_rev}
-                        {:error, reason} -> Repo.rollback(reason)
-                      end
-                  end
-                end)
-
-              result =
-                case txn do
-                  {:ok, {published, prev_pub_rev}} ->
-                    Broadcast.tap_broadcast(
-                      {:ok, published},
-                      dataset,
-                      type,
-                      "publish",
-                      prev_pub_rev,
-                      Keyword.get(opts, :source, :api),
-                      Keyword.get(opts, :user_id)
-                    )
-
-                  {:error, reason} ->
-                    {:error, reason}
-                end
-
-              # Publishing a SHEET refreshes its PUBLISHED embedders with the
-              # now-published content (the draft-save path deliberately skips
-              # them — see Sheets.refresh_sheet_embeds). Publish writes the
-              # published row directly (not through Writer's upsert tap), so
-              # the write-through must be invoked here explicitly.
-              Sheets.tap_sheet_writethrough(result)
-
-              WriteScope.fire_after(result, :after_publish, payload)
-          end
-
-          # A wall rejection ({:label_spine,…}/{:unknown_tag,…}/{:duplicate_of,…})
-          # falls straight out of `AuthoringWall.enforce` above — the `with`
-          # returns it UNCHANGED (each shape emits its telemetry at
-          # AuthoringWall's own else seam), and the controllers map it to
-          # 422/422/409.
+        # The publish-door lifecycle gate — immediately after the draft read,
+        # BEFORE the wall and the :before_publish hook fire, so a refusal is
+        # side-effect-free (the Writer-seam gate-position precedent).
+        with :ok <- ensure_task_publish_transition_legal(type, draft, pid, dataset, opts) do
+          publish_after_gate(draft, pid, type, dataset, opts)
         end
 
       {:error, :not_found} ->
         {:error, :not_found}
     end
   end
+
+  defp publish_after_gate(%Document{} = draft, pid, type, dataset, opts) do
+    ctx = WriteScope.build_ctx(opts)
+
+    payload = %{
+      event: :before_publish,
+      doc: draft,
+      dataset: dataset,
+      prev_doc: draft,
+      ctx: ctx
+    }
+
+    # The publish wall (authoring-excellence D1): fail-closed enforcement
+    # lives in CORE, immediately BEFORE the before_publish hook fire — the
+    # hook chain is plugin-droppable and coerces raising hooks to :ok, so
+    # it is the wrong home for a correctness gate (the hook stays for
+    # optional tenant policies). The whole chain — exemption read ONCE →
+    # label spine (E1/E2) → E3 tag registry → E4 dedup → clear-on-full-pass
+    # → main_tag stamp — lives in `Barkpark.Content.AuthoringWall` (charter
+    # D26: the ONE shared wall, also mounted by BlockOps.upsert_paper for
+    # the direct paper-birth path). The delegation is behaviour-identical:
+    # the three raw error tuples ({:label_spine, …} 422, {:unknown_tag, …}
+    # 422, {:duplicate_of, …} 409) fall straight out of the `with` —
+    # nothing below runs, each emitting its telemetry at AuthoringWall's own
+    # else seam — and `pub_content` is the draft's content with the D7
+    # main_tag stamp applied (put on derivation, DROPPED when stale).
+    with {:ok, pub_content} <- AuthoringWall.enforce(draft, type, pid, dataset, opts) do
+      # Hook stays BEFORE the transaction. The rev-fenced delete below
+      # closes the publish-during-edit TOCTOU: a concurrent write that
+      # bumps the draft between the read above and the delete now surfaces
+      # a {:error, {:rev_mismatch, …}} (412) instead of silently
+      # destroying the newer edit while this stale snapshot publishes.
+      case Barkpark.Plugins.Hooks.fire(:before_publish, payload) do
+        {:halt, reason} ->
+          {:error, {:halted, reason}}
+
+        :ok ->
+          # Upsert the published version with draft's content (main_tag
+          # denormalized — see AuthoringWall.stamp_main_tag/2, applied to
+          # `pub_content` above). Inherit the draft's tenancy scope so a
+          # publish never drops workspace_id/project_id on the published row.
+          pub_attrs =
+            %{
+              "doc_id" => pid,
+              "type" => type,
+              "dataset" => dataset,
+              "title" => draft.title,
+              "status" => "published",
+              "content" => pub_content,
+              "rev" => Writer.generate_rev()
+            }
+            |> WriteScope.inherit_scope_attrs(draft)
+
+          txn =
+            Repo.transaction(fn ->
+              {pub_result, prev_pub_rev} =
+                case Content.get_document(pid, type, dataset, opts) do
+                  {:ok, existing} ->
+                    {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
+
+                  _ ->
+                    {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
+                end
+
+              case pub_result do
+                {:error, cs} ->
+                  Repo.rollback(cs)
+
+                {:ok, published} ->
+                  # Rev-fenced: if a concurrent write bumped the draft since
+                  # the read above, delete nothing and surface a rev_mismatch
+                  # (412) instead of destroying the newer edit. A vanished
+                  # draft resolves to {:error, :not_found} (prior semantics).
+                  case fenced_delete(draft) do
+                    :ok -> {published, prev_pub_rev}
+                    {:error, reason} -> Repo.rollback(reason)
+                  end
+              end
+            end)
+
+          result =
+            case txn do
+              {:ok, {published, prev_pub_rev}} ->
+                Broadcast.tap_broadcast(
+                  {:ok, published},
+                  dataset,
+                  type,
+                  "publish",
+                  prev_pub_rev,
+                  Keyword.get(opts, :source, :api),
+                  Keyword.get(opts, :user_id)
+                )
+
+              {:error, reason} ->
+                {:error, reason}
+            end
+
+          # Publishing a SHEET refreshes its PUBLISHED embedders with the
+          # now-published content (the draft-save path deliberately skips
+          # them — see Sheets.refresh_sheet_embeds). Publish writes the
+          # published row directly (not through Writer's upsert tap), so
+          # the write-through must be invoked here explicitly.
+          Sheets.tap_sheet_writethrough(result)
+
+          WriteScope.fire_after(result, :after_publish, payload)
+      end
+
+      # A wall rejection ({:label_spine,…}/{:unknown_tag,…}/{:duplicate_of,…})
+      # falls straight out of `AuthoringWall.enforce` above — the `with`
+      # returns it UNCHANGED (each shape emits its telemetry at
+      # AuthoringWall's own else seam), and the controllers map it to
+      # 422/422/409.
+    end
+  end
+
+  # ── The publish-door lifecycle gate (task-lifecycle-visibility, D7/D21) ────
+  #
+  # `publish_document` bypasses `Content.Writer` entirely and copies the ENTIRE
+  # draft content — `lifecycle_status`, `claim`, epoch and all — onto the
+  # published row. Proven at L1 (run probe 2026-07-22): claim+close a published
+  # task through the SANCTIONED verbs, then republish a coexisting stale open
+  # draft → the published row silently reverts done→open and content.claim
+  # becomes nil, obliterating the attribution record. The Writer-seam gate
+  # (D7b, `Writer.ensure_task_transition_legal/6`) cannot see this door.
+  #
+  # Contract — mirrors the Writer-seam gate, adapted to the publish seam (the
+  # collapse target IS the published row, so `was` is simply its current
+  # `lifecycle_status`; no draft-fallback resolution is needed):
+  #
+  #   * FIRST publish (no published row) is a birth — exempt, including the
+  #     importer's legitimately-born-`done` draft.
+  #   * `source: :sync` mirrors upstream state verbatim — exempt. `:source` is
+  #     server-set (MutateController prepends `source: :api`), so a request
+  #     body can never reach the exemption.
+  #   * a published row with no `lifecycle_status` (legacy / non-task-kind
+  #     content) exempts the transition check; the claim check still runs.
+  #   * an ILLEGAL implied transition (`Transitions.legal?/2`, the ONE D7
+  #     table) is refused naming from, to and the sanctioned verb — e.g.
+  #     `open → done` forged through the publish door (a done-carrying draft
+  #     can exist legally via `source: :sync`; publishing it may not flip the
+  #     published row).
+  #   * a TABLE-LEGAL transition can still be a stale-draft RESURRECTION
+  #     (`done → open` is legal — the false-done reopen recipe). The staleness
+  #     signal is the CLAIM: the published row's claim state is written ONLY by
+  #     the sanctioned primitives (claim/renew/pulse/release/close, all
+  #     rev-CAS'd), so a draft that does not carry it verbatim predates it —
+  #     refused. A draft derived from the CURRENT published content
+  #     (patch-then-publish: the met-flip republish flow, the reopen recipe,
+  #     the github bookkeeping collapse) carries the claim byte-identical and
+  #     passes untouched.
+  #
+  # Refusals use the `{:invalid_task_content, %{field => [msg]}}` family
+  # (→ 422 validation_failed via Content.Errors), NEVER `{:halted, _}` (that
+  # shape is reserved for plugin vetoes). EMITTER TWIN:
+  # `Writer.illegal_transition_error/2` + `Writer.sanctioned_verb/1` — a
+  # contract-shape change must update BOTH seams (the error-emitters-duplicated
+  # rule).
+  defp ensure_task_publish_transition_legal("task", %Document{} = draft, pid, dataset, opts) do
+    if Keyword.get(opts, :source, :api) == :sync do
+      :ok
+    else
+      case Content.get_document(pid, "task", dataset, opts) do
+        {:ok, %Document{content: pub_content}} ->
+          gate_task_publish(pub_content || %{}, draft.content || %{})
+
+        _ ->
+          # First publish — a birth. Never consult legal?/2 (legal?(nil, x)
+          # is false by design and would refuse every first publish).
+          :ok
+      end
+    end
+  end
+
+  defp ensure_task_publish_transition_legal(_type, _draft, _pid, _dataset, _opts), do: :ok
+
+  defp gate_task_publish(pub_content, draft_content) do
+    was = pub_content["lifecycle_status"]
+    now = draft_content["lifecycle_status"]
+
+    cond do
+      not (is_nil(was) or Transitions.legal?(was, now)) ->
+        {:error, {:invalid_task_content, publish_transition_error(was, now)}}
+
+      stale_claim?(pub_content, draft_content) ->
+        {:error, {:invalid_task_content, stale_claim_error(pub_content)}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp stale_claim?(pub_content, draft_content) do
+    pub_claim = pub_content["claim"]
+    is_map(pub_claim) and map_size(pub_claim) > 0 and draft_content["claim"] != pub_claim
+  end
+
+  defp publish_transition_error(was, now) do
+    %{
+      "lifecycle_status" => [
+        "illegal lifecycle transition #{inspect(was)} → #{inspect(now)}: publishing this " <>
+          "draft would rewrite the published row's lifecycle — " <> publish_sanctioned_verb(now)
+      ]
+    }
+  end
+
+  defp stale_claim_error(pub_content) do
+    worker = get_in(pub_content, ["claim", "worker"])
+    epoch = get_in(pub_content, ["claim", "epoch"])
+
+    %{
+      "claim" => [
+        "stale draft: the published row carries claim state (worker #{inspect(worker)}, " <>
+          "epoch #{inspect(epoch)}) this draft does not — publishing would obliterate it. " <>
+          "Re-derive the draft from the published row (patch, then publish), or move the " <>
+          "claim through the sanctioned verbs (`bp task claim` / `bp task release` / " <>
+          "`bp task close`)."
+      ]
+    }
+  end
+
+  # Names the sanctioned verb per refused target — the refusal TEACHES (the
+  # tasks_controller stage/close precedent). Twin of Writer.sanctioned_verb/1.
+  defp publish_sanctioned_verb("done"),
+    do:
+      "`done` is reached only through the close primitive (`bp task close <id> <worker> " <>
+        "<epoch>`, POST /v1/tasks/:id/close), which records who closed it."
+
+  defp publish_sanctioned_verb("in_progress"),
+    do:
+      "a live claim is minted only by the claim primitive (`bp task claim <id> <worker>`, " <>
+        "POST /v1/tasks/:id/claim), which fences on the claim epoch."
+
+  defp publish_sanctioned_verb(to) when to in ~w(considering researching),
+    do:
+      "thought states move through the sanctioned stage verb (`bp task stage <id> #{to}`, " <>
+        "POST /v1/tasks/:id/stage), which enforces the same legality table."
+
+  defp publish_sanctioned_verb(_to),
+    do:
+      "move through the sanctioned task lifecycle verbs instead (`bp task stage` for " <>
+        "considering|researching|open, `bp task claim`, `bp task close`)."
 
   @doc """
   Unpublish: move published doc back to draft, delete published version.
