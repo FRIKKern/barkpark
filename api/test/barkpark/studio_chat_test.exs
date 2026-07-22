@@ -2653,7 +2653,7 @@ defmodule Barkpark.StudioChatTest do
       seed_pending_ask(s, "approval", "r1")
       # the Recorder persists "blocked" when the ask flips needs_you (D38) —
       # the strip reads the COLUMN, not the pending counter
-      {1, _} = StudioChat.set_agent_state(s.id, "blocked")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
       s = StudioChat.get_session(s.id)
 
       assert StudioChat.strip_kind(s, ["plan", "question", "approval"], nil) ==
@@ -2682,7 +2682,7 @@ defmodule Barkpark.StudioChatTest do
       assert StudioChat.strip_kind(s, [], %{state: :working, line: "writing…"}) == :working
 
       # the persisted column alone (cold mount) is enough
-      {1, _} = StudioChat.set_agent_state(s.id, "working")
+      {1, _} = StudioChat.set_agent_state(s.id, "working", :derived)
       s = set_active(s.id, minutes_ago(1))
       assert StudioChat.strip_kind(s, [], nil) == :working
     end
@@ -2690,7 +2690,7 @@ defmodule Barkpark.StudioChatTest do
     test "a blocked row (pending ask) outranks a running-turn overlay" do
       s = new_session()
       seed_pending_ask(s, "approval", "r1")
-      {1, _} = StudioChat.set_agent_state(s.id, "blocked")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
       s = StudioChat.get_session(s.id)
 
       assert StudioChat.strip_kind(s, ["approval"], %{state: :working, line: "writing…"}) ==
@@ -2716,20 +2716,20 @@ defmodule Barkpark.StudioChatTest do
     test "COLD-MOUNT correct: kinds + priority order derive from persisted rows alone" do
       # working (persisted herd column — no overlay)
       working = new_session()
-      {1, _} = StudioChat.set_agent_state(working.id, "working")
+      {1, _} = StudioChat.set_agent_state(working.id, "working", :derived)
       working = StudioChat.get_session(working.id)
 
       # plan ready / awaiting input / pending approval: the pending ask rows
       # carry the KIND detail; the persisted "blocked" column carries the state
       plan = new_session()
       seed_pending_ask(plan, "plan", "rp")
-      {1, _} = StudioChat.set_agent_state(plan.id, "blocked")
+      {1, _} = StudioChat.set_agent_state(plan.id, "blocked", :ask)
       question = new_session()
       seed_pending_ask(question, "question", "rq")
-      {1, _} = StudioChat.set_agent_state(question.id, "blocked")
+      {1, _} = StudioChat.set_agent_state(question.id, "blocked", :ask)
       approval = new_session()
       seed_pending_ask(approval, "approval", "rap")
-      {1, _} = StudioChat.set_agent_state(approval.id, "blocked")
+      {1, _} = StudioChat.set_agent_state(approval.id, "blocked", :ask)
 
       # quiet: settled — no entry (unseen-finish tracking retired, herd)
       quiet = set_active(new_session().id, minutes_ago(2))
@@ -2758,7 +2758,7 @@ defmodule Barkpark.StudioChatTest do
     test "the on-screen session is never 'away' — excluded even mid-ask" do
       s = new_session()
       seed_pending_ask(s, "approval", "r1")
-      {1, _} = StudioChat.set_agent_state(s.id, "blocked")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
       s = StudioChat.get_session(s.id)
 
       assert StudioChat.needs_you_strip([s],
@@ -2773,11 +2773,11 @@ defmodule Barkpark.StudioChatTest do
 
     test "within a kind, most recently active first" do
       older = new_session()
-      {1, _} = StudioChat.set_agent_state(older.id, "working")
+      {1, _} = StudioChat.set_agent_state(older.id, "working", :derived)
       older = set_active(older.id, minutes_ago(30))
 
       newer = new_session()
-      {1, _} = StudioChat.set_agent_state(newer.id, "working")
+      {1, _} = StudioChat.set_agent_state(newer.id, "working", :derived)
       newer = set_active(newer.id, minutes_ago(5))
 
       assert [%{session: %{id: first}}, %{session: %{id: second}}] =
@@ -2805,7 +2805,7 @@ defmodule Barkpark.StudioChatTest do
 
       # the herd column rides the sidebar select (herd wave 1): a select that
       # omitted it would feed the schema default ("idle") to every pill/strip
-      {1, _} = StudioChat.set_agent_state(s.id, "working")
+      {1, _} = StudioChat.set_agent_state(s.id, "working", :derived)
       listed = Enum.find(StudioChat.list_sessions(), &(&1.id == s.id))
       assert listed.agent_state == "working"
       assert %DateTime{} = listed.agent_state_at
@@ -2824,7 +2824,7 @@ defmodule Barkpark.StudioChatTest do
       assert s.agent_state == "idle"
       assert s.agent_state_at == nil
 
-      assert {1, nil} = StudioChat.set_agent_state(s.id, "working")
+      assert {1, nil} = StudioChat.set_agent_state(s.id, "working", :derived)
 
       updated = StudioChat.get_session(s.id)
       assert updated.agent_state == "working"
@@ -2832,13 +2832,14 @@ defmodule Barkpark.StudioChatTest do
 
       # four states ONLY — "done" does not exist (herd doctrine)
       assert_raise FunctionClauseError, fn ->
-        StudioChat.set_agent_state(s.id, "done")
+        StudioChat.set_agent_state(s.id, "done", :derived)
       end
     end
 
     test "touch_agent_state_at bumps ONLY the liveness stamp — never the state" do
       s = new_session()
-      {1, _} = StudioChat.set_agent_state(s.id, "blocked")
+      seed_pending_ask(s, "approval", "touch-1")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
       %{agent_state_at: at0} = StudioChat.get_session(s.id)
 
       {1, _} = StudioChat.touch_agent_state_at(s.id)
@@ -2863,7 +2864,7 @@ defmodule Barkpark.StudioChatTest do
       s = new_session()
       seed_pending_ask(s, "approval", "ub-1")
       seed_pending_ask(s, "question", "ub-2")
-      {1, _} = StudioChat.set_agent_state(s.id, "blocked")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
 
       # one ask down, one still pending — the human is still needed
       {:ok, _} = StudioChat.update_approval_status(s.id, "ub-1", "allowed")
@@ -2878,10 +2879,110 @@ defmodule Barkpark.StudioChatTest do
       s = new_session()
       seed_pending_ask(s, "approval", "ub-3")
       # the Recorder already died mid-turn: the offline rule wrote "unknown"
-      {1, _} = StudioChat.set_agent_state(s.id, "unknown")
+      {1, _} = StudioChat.set_agent_state(s.id, "unknown", :derived)
 
       {:ok, _} = StudioChat.update_approval_status(s.id, "ub-3", "canceled")
       assert StudioChat.get_session(s.id).agent_state == "unknown"
+    end
+  end
+
+  # A live execution-lease fence for `session_id` (herd-s6 fixtures): a real
+  # registered host + a real chat_execution_leases row, because the :reported
+  # corroboration is an in-WHERE EXISTS over that table — never a stub.
+  defp lease_fence!(session_id, opts \\ []) do
+    suffix = System.unique_integer([:positive])
+    {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "s6-#{suffix}", name: "S6 #{suffix}"})
+    {:ok, %{host: host}} = Barkpark.ChatHosts.issue_enrollment(ws.id, %{name: "reporter"})
+
+    {:ok, lease} =
+      %Barkpark.ChatHosts.ExecutionLease{}
+      |> Barkpark.ChatHosts.ExecutionLease.changeset(%{
+        host_id: host.id,
+        workspace_id: ws.id,
+        session_id: session_id,
+        provider: "claude",
+        command_key: "ck-#{suffix}",
+        status: Keyword.get(opts, :status, "running"),
+        expires_at: Keyword.get(opts, :expires_at, DateTime.add(DateTime.utc_now(), 60, :second))
+      })
+      |> Repo.insert()
+
+    lease
+  end
+
+  describe "blocked-source guard at the choke point (herd-s6, charter D80h)" do
+    test "blocked with :ask is corroborated IN-WHERE: pending_approvals==0 writes {0, nil}" do
+      s = new_session()
+
+      # MUTATION-PROVEN guard: a declared :ask with no pending ask row writes
+      # NOTHING — remove the corroboration WHERE and this red-lines.
+      assert {0, nil} = StudioChat.set_agent_state(s.id, "blocked", :ask)
+      assert StudioChat.get_session(s.id).agent_state == "idle"
+
+      # …and the SAME call with real store evidence writes.
+      seed_pending_ask(s, "approval", "bsg-1")
+      assert {1, nil} = StudioChat.set_agent_state(s.id, "blocked", :ask)
+      assert StudioChat.get_session(s.id).agent_state == "blocked"
+    end
+
+    test "blocked with :reported demands a LIVE lease fence: a self-report without one writes {0, nil}" do
+      s = new_session()
+
+      # no lease at all → nothing written
+      assert {0, nil} = StudioChat.set_agent_state(s.id, "blocked", :reported)
+      assert StudioChat.get_session(s.id).agent_state == "idle"
+
+      # an EXPIRED lease is not a fence either (the dead-reporter clock)
+      _expired =
+        lease_fence!(s.id, expires_at: DateTime.add(DateTime.utc_now(), -5, :second))
+
+      assert {0, nil} = StudioChat.set_agent_state(s.id, "blocked", :reported)
+
+      # a live leased/running lease IS the corroboration
+      _live = lease_fence!(s.id)
+      assert {1, nil} = StudioChat.set_agent_state(s.id, "blocked", :reported)
+      assert StudioChat.get_session(s.id).agent_state == "blocked"
+    end
+
+    test "no heuristic blocked: :derived-blocked and any unlisted source raise" do
+      s = new_session()
+
+      # blocked is NEVER a derived/heuristic write — only :ask or :reported
+      assert_raise FunctionClauseError, fn ->
+        StudioChat.set_agent_state(s.id, "blocked", :derived)
+      end
+
+      # an unlisted source raises for EVERY state — the vocabulary of writers
+      # is closed, exactly like the four-state vocabulary itself
+      assert_raise FunctionClauseError, fn ->
+        StudioChat.set_agent_state(s.id, "working", :heuristic)
+      end
+
+      assert_raise FunctionClauseError, fn ->
+        StudioChat.set_agent_state(s.id, "blocked", :sweep)
+      end
+    end
+
+    test "census tripwire: every agent_state update_all lives in studio_chat.ex; the literal blocked write only in set_agent_state" do
+      lib = Path.expand("../../lib", __DIR__)
+      files = Path.wildcard(Path.join(lib, "**/*.ex"))
+      assert files != [], "census must scan a real lib tree"
+
+      set_writers =
+        for f <- files,
+            Regex.match?(~r/set:\s*\[[^\]]*\bagent_state:/, File.read!(f)),
+            do: Path.relative_to(f, lib)
+
+      assert set_writers == ["barkpark/studio_chat.ex"],
+             "agent_state update_all writes must funnel through studio_chat.ex, found: #{inspect(set_writers)}"
+
+      blocked_writers =
+        for f <- files,
+            String.contains?(File.read!(f), ~s(agent_state: "blocked")),
+            do: Path.relative_to(f, lib)
+
+      assert blocked_writers == ["barkpark/studio_chat.ex"],
+             ~s(the literal blocked write may exist only in set_agent_state, found: #{inspect(blocked_writers)})
     end
   end
 

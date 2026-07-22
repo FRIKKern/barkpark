@@ -89,6 +89,11 @@ defmodule Barkpark.Content.Errors do
   # are kept separate from @hints rather than diluting it.
   @public_inline_codes MapSet.new([
                          "invalid_enrollment",
+                         # Herd-s6 fenced state report (chat_host_controller.ex
+                         # report_state): an off-vocabulary state or a
+                         # missing/non-integer lease epoch — refused before the
+                         # store is touched.
+                         "invalid_state_report",
                          # Site-deploy status by build_id (search-template W6 D34) —
                          # site_deploy_controller.ex: a status probe naming a build
                          # this box is not running answers an honest 404, never a

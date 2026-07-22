@@ -2154,6 +2154,267 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  # ── herd-s6 fixtures: a REAL registered host + execution lease ──────────────
+  #
+  # The report fence is a literal chat_execution_leases reuse (D79h), so these
+  # tests enroll a real host and insert a real lease row — the corroborating
+  # EXISTS predicate and the FOR-UPDATE fence validation both hit the actual
+  # table, never a stub.
+  defp reporter_host! do
+    suffix = System.unique_integer([:positive])
+
+    {:ok, ws} =
+      Barkpark.Tenancy.create_workspace(%{slug: "s6-#{suffix}", name: "S6 #{suffix}"})
+
+    {:ok, %{enrollment_token: token}} =
+      Barkpark.ChatHosts.issue_enrollment(ws.id, %{name: "reporter"})
+
+    {:ok, %{credential: credential}} = Barkpark.ChatHosts.enroll(token)
+    {:ok, host} = Barkpark.ChatHosts.authenticate(credential)
+    host
+  end
+
+  defp lease!(host, sid, opts \\ []) do
+    {:ok, lease} =
+      %Barkpark.ChatHosts.ExecutionLease{}
+      |> Barkpark.ChatHosts.ExecutionLease.changeset(%{
+        host_id: host.id,
+        workspace_id: host.workspace_id,
+        session_id: sid,
+        provider: "claude",
+        command_key: "ck-#{System.unique_integer([:positive])}",
+        status: Keyword.get(opts, :status, "running"),
+        expires_at: Keyword.get(opts, :expires_at, DateTime.add(DateTime.utc_now(), 60, :second))
+      })
+      |> Repo.insert()
+
+    lease
+  end
+
+  defp expire_lease!(lease) do
+    {1, _} =
+      Repo.update_all(
+        from(l in Barkpark.ChatHosts.ExecutionLease, where: l.id == ^lease.id),
+        set: [expires_at: DateTime.add(DateTime.utc_now(), -5, :second)]
+      )
+
+    :ok
+  end
+
+  describe "external reporter fence — precedence + explicit hand-back (herd-s6, D79h)" do
+    setup %{sid: sid} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+      %{sid: sid, host: reporter_host!()}
+    end
+
+    # Precedence BOTH directions: → while the fence lives the reporter is SOLE
+    # truth (derived flips touch NEITHER the store NOR the wire); ← on lease
+    # expiry the recorder hands authority back explicitly. (Name kept short:
+    # the OTP atom limit is 255 BYTES and closure atoms append '/1-fun-N-'.)
+    test "precedence both ways: fenced reporter is sole truth on store + wire; expiry hands back",
+         %{sid: sid, recorder: recorder, host: host} do
+      frame(recorder, init_frame())
+      assert agent_state(sid) == "working"
+      assert_receive {:chat_activity, ^sid, %{state: :working}}
+
+      lease = lease!(host, sid)
+
+      assert {:ok, %{agent_state: "blocked", lease_id: lease_id}} =
+               Barkpark.ChatHosts.report_state(host, sid, "blocked", lease.epoch)
+
+      assert lease_id == lease.id
+      # reported truth lands in the store AND speaks on the fleet-feeding topic
+      assert agent_state(sid) == "blocked"
+      assert_receive {:chat_reported_state, ^sid, %{agent_state: "blocked"}}
+
+      # a derived idle transition (the result frame) arrives while fenced…
+      frame(recorder, result_frame())
+      # …and overwrites NEITHER barrel: not the column, not the wire
+      assert agent_state(sid) == "blocked"
+      refute_receive {:chat_activity, ^sid, %{state: :idle}}, 100
+
+      # PRECEDENCE ←: the reporter dies — its lease expires (the 60s TTL
+      # clock); the fence check finds no live lease and hands authority back:
+      # the recorder re-asserts its CURRENT derived truth on both barrels.
+      expire_lease!(lease)
+      send(recorder, :reported_fence_check)
+      :sys.get_state(recorder)
+
+      assert agent_state(sid) == "idle"
+      assert_receive {:chat_activity, ^sid, %{state: :idle}}
+    end
+
+    test "a still-live lease re-arms the fence check — no premature hand-back",
+         %{sid: sid, recorder: recorder, host: host} do
+      frame(recorder, init_frame())
+      lease = lease!(host, sid)
+      assert {:ok, _} = Barkpark.ChatHosts.report_state(host, sid, "blocked", lease.epoch)
+      assert agent_state(sid) == "blocked"
+
+      # the check fires while the host heartbeat still keeps the lease live
+      send(recorder, :reported_fence_check)
+      :sys.get_state(recorder)
+
+      # still suspended: a derived idle flip stays off both barrels
+      frame(recorder, result_frame())
+      assert agent_state(sid) == "blocked"
+      refute_receive {:chat_activity, ^sid, %{state: :idle}}, 100
+    end
+
+    test "the 60s heartbeat is fence-aware: NO freshness stamp while the fence holds (the composed freeze hazard)",
+         %{sid: sid, recorder: recorder, host: host} do
+      frame(recorder, init_frame())
+      assert agent_state(sid) == "working"
+
+      lease = lease!(host, sid)
+      assert {:ok, _} = Barkpark.ChatHosts.report_state(host, sid, "working", lease.epoch)
+      %{agent_state_at: at0} = StudioChat.get_session(sid)
+
+      # the recorder's cache says "working", so WITHOUT the fence gate this
+      # tick would touch agent_state_at and keep a dead reporter's row
+      # eternally fresh — sweep-proof. Fence-aware: no touch.
+      send(recorder, :agent_state_heartbeat)
+      :sys.get_state(recorder)
+      %{agent_state_at: at1} = StudioChat.get_session(sid)
+      assert DateTime.compare(at0, at1) == :eq
+
+      # non-vacuous: after hand-back the SAME tick touches again
+      expire_lease!(lease)
+      send(recorder, :reported_fence_check)
+      :sys.get_state(recorder)
+      %{agent_state_at: at2} = StudioChat.get_session(sid)
+
+      send(recorder, :agent_state_heartbeat)
+      :sys.get_state(recorder)
+      %{agent_state_at: at3} = StudioChat.get_session(sid)
+      assert DateTime.compare(at3, at2) == :gt
+    end
+  end
+
+  describe "codex derivation completeness — the SHARED path, never a second mapper (herd-s6, D78h)" do
+    defp codex_ev(sid, kind, overrides \\ []) do
+      struct!(%Event{kind: kind, provider: "codex", session_id: sid}, overrides)
+    end
+
+    defp fresh_codex_session! do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, mode: "plan"})
+      {:ok, rec} = Recorder.ensure(%{session_id: id, mode: "plan", resume: false})
+      {id, rec}
+    end
+
+    defp codex_ask_ev(sid, approval_id) do
+      codex_ev(sid, :approval_requested,
+        approval_id: approval_id,
+        native: %{"method" => "item/commandExecution/requestApproval", "params" => %{}}
+      )
+    end
+
+    test "turn/completed lands idle for terminal_state :completed AND :interrupted",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:studio_chat_runtime_event, codex_ev(sid, :turn_started)})
+      assert agent_state(sid) == "working"
+
+      frame(
+        recorder,
+        {:studio_chat_runtime_event, codex_ev(sid, :turn_completed, terminal_state: :completed)}
+      )
+
+      assert agent_state(sid) == "idle"
+
+      frame(recorder, {:studio_chat_runtime_event, codex_ev(sid, :turn_started)})
+      assert agent_state(sid) == "working"
+
+      frame(
+        recorder,
+        {:studio_chat_runtime_event, codex_ev(sid, :turn_completed, terminal_state: :interrupted)}
+      )
+
+      assert agent_state(sid) == "idle"
+    end
+
+    test "a FAILED codex turn lands idle — the failed→idle row is DELIBERATE (D78h), not an accident",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:studio_chat_runtime_event, codex_ev(sid, :turn_started)})
+      assert agent_state(sid) == "working"
+
+      # codex "turn/completed" with turn.status=failed normalizes to
+      # kind :turn_completed / terminal_state :failed (Protocol.normalize/2) —
+      # the turn SETTLED, nothing is running and nothing needs the human, so
+      # the honest herd state is idle, never unknown/blocked.
+      frame(
+        recorder,
+        {:studio_chat_runtime_event, codex_ev(sid, :turn_completed, terminal_state: :failed)}
+      )
+
+      assert agent_state(sid) == "idle"
+    end
+
+    test "unknown from :process_failed with a BLOCKED prior and from :protocol_error with a working prior",
+         %{sid: sid, recorder: recorder} do
+      # blocked prior: a mid-ask process death is possibly-wedged → unknown
+      frame(recorder, {:studio_chat_runtime_event, codex_ev(sid, :turn_started)})
+      frame(recorder, {:studio_chat_runtime_event, codex_ask_ev(sid, "cdx-pf")})
+      assert agent_state(sid) == "blocked"
+
+      frame(recorder, {:studio_chat_runtime_event, codex_ev(sid, :process_failed)})
+      assert agent_state(sid) == "unknown"
+
+      # working prior on a FRESH session: protocol death → unknown
+      {sid2, rec2} = fresh_codex_session!()
+      frame(rec2, {:studio_chat_runtime_event, codex_ev(sid2, :turn_started)})
+      assert StudioChat.get_session(sid2).agent_state == "working"
+
+      frame(rec2, {:studio_chat_runtime_event, codex_ev(sid2, :protocol_error)})
+      assert StudioChat.get_session(sid2).agent_state == "unknown"
+    end
+
+    test "never-blocked sweep: NO normalized kind except :approval_requested can produce blocked" do
+      # Every kind the codex Protocol + host normalizer can emit. Each runs
+      # against a FRESH session so no prior state can mask a stray blocked.
+      kinds = [
+        :session_started,
+        :turn_started,
+        :text_delta,
+        :thinking_delta,
+        :tool_delta,
+        :item_started,
+        :item_completed,
+        :usage,
+        :turn_completed,
+        :control_completed,
+        :error,
+        :process_failed,
+        :protocol_error,
+        :provider_event,
+        :runtime_acknowledged
+      ]
+
+      for kind <- kinds do
+        {sid, rec} = fresh_codex_session!()
+
+        frame(
+          rec,
+          {:studio_chat_runtime_event,
+           codex_ev(sid, kind, native: %{"params" => %{"item" => %{}}})}
+        )
+
+        assert StudioChat.get_session(sid).agent_state != "blocked",
+               "normalized kind #{inspect(kind)} must NEVER produce blocked"
+
+        # release the managed-runtime admission slot before the next kind —
+        # 15 concurrent recorders would trip the capacity cap, not the sweep
+        :ok = DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, rec)
+      end
+
+      # non-vacuous control: the ONE excepted kind DOES block — the sweep's
+      # harness is provably able to observe a blocked write.
+      {sid, rec} = fresh_codex_session!()
+      frame(rec, {:studio_chat_runtime_event, codex_ask_ev(sid, "nb-ctl")})
+      assert StudioChat.get_session(sid).agent_state == "blocked"
+    end
+  end
+
   describe "AgentStateSweeper (charter D42h)" do
     defp seed_agent_state(state, at) do
       id = Ecto.UUID.generate()
@@ -2212,6 +2473,42 @@ defmodule Barkpark.StudioChat.RecorderTest do
 
       # start_supervised! returns only after init/1 — the row is already swept
       assert StudioChat.get_session(stale).agent_state == "unknown"
+    end
+
+    test "fence-aware: a stale working/blocked row under a LIVE report fence is never swept (herd-s6, D79h)" do
+      stale_working = seed_agent_state("working", long_ago())
+      stale_blocked = seed_agent_state("blocked", nil)
+      host = reporter_host!()
+      _lease_w = lease!(host, stale_working)
+      _lease_b = lease!(host, stale_blocked, status: "leased")
+
+      assert AgentStateSweeper.sweep() == 0
+      assert StudioChat.get_session(stale_working).agent_state == "working"
+      assert StudioChat.get_session(stale_blocked).agent_state == "blocked"
+    end
+
+    test "a DEAD reporter's value is never sweep-proof: an expired/revoked lease stops shielding (herd-s6, D79h)" do
+      # the composed freeze hazard, closed: the reporter died, its lease
+      # expired within the 60s TTL — the row must age into the sweep window
+      # like any other working/blocked row.
+      expired = seed_agent_state("blocked", long_ago())
+      revoked = seed_agent_state("working", long_ago())
+      host = reporter_host!()
+
+      _expired_lease =
+        lease!(host, expired, expires_at: DateTime.add(DateTime.utc_now(), -5, :second))
+
+      revoked_lease = lease!(host, revoked)
+
+      {1, _} =
+        Repo.update_all(
+          from(l in Barkpark.ChatHosts.ExecutionLease, where: l.id == ^revoked_lease.id),
+          set: [revoked_at: DateTime.utc_now()]
+        )
+
+      assert AgentStateSweeper.sweep() == 2
+      assert StudioChat.get_session(expired).agent_state == "unknown"
+      assert StudioChat.get_session(revoked).agent_state == "unknown"
     end
   end
 end

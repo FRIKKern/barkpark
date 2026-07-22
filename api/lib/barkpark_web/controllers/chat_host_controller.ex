@@ -67,6 +67,44 @@ defmodule BarkparkWeb.ChatHostController do
     end
   end
 
+  # POST /v1/chat/sessions/:id/state (herd-s6, charter D78h–D80h): the fenced
+  # reporter's authoritative herd-state write. Vocabulary is the persisted
+  # four-state — anything else is 422 BEFORE the store is touched. `epoch` must
+  # be the integer the host received with its lease (`lease_and_enqueue` /
+  # `GET /v1/chat-host/commands`); it is compared by the fence but VESTIGIAL —
+  # nothing ever bumps it (today it is always the insert default 1). The fence
+  # deny grammar mirrors /v1/chat-host/events: stale_fence / lease_expired →
+  # 409, lease_not_found → 422, a vanished session → 404.
+  @agent_states ~w(working blocked idle unknown)
+
+  def report_state(conn, %{"id" => session_id, "state" => agent_state, "epoch" => epoch})
+      when agent_state in @agent_states and is_integer(epoch) do
+    case ChatHosts.report_state(conn.assigns.chat_host, session_id, agent_state, epoch) do
+      {:ok, result} -> json(conn, result)
+      {:error, reason} when reason in [:stale_fence, :lease_expired] -> conflict(conn, reason)
+      {:error, :session_not_found} -> session_not_found(conn)
+      {:error, reason} -> unprocessable(conn, reason)
+    end
+  end
+
+  def report_state(conn, _params) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{
+      error: %{
+        code: "invalid_state_report",
+        message:
+          "state must be one of working|blocked|idle|unknown and epoch must be the lease's integer epoch"
+      }
+    })
+  end
+
+  defp session_not_found(conn) do
+    conn
+    |> put_status(:not_found)
+    |> json(%{error: %{code: "not_found", message: "session not found"}})
+  end
+
   defp unauthorized_enrollment(conn) do
     conn
     |> put_status(:unauthorized)

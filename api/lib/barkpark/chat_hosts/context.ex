@@ -353,6 +353,149 @@ defmodule Barkpark.ChatHosts do
     end
   end
 
+  @doc """
+  Authoritative external state report for one session (herd-s6, charter
+  D78h–D80h): the registered host that holds the session's live execution-lease
+  fence writes the herd four-state directly — while that fence lives, the
+  reporter is the SOLE truth source (the Recorder's derivation is suspended for
+  both the DB column and the fleet wire; see `Recorder.note_reported_state/3`).
+
+  ## Fence = literal `chat_execution_leases` reuse (D79h)
+
+  No new table, no migration. Several leases can exist per session (one per
+  dispatched command), so the fence row follows the selection rule: the LATEST
+  non-revoked, unexpired lease with status `leased`/`running` for the session.
+  It is locked `FOR UPDATE` and validated exactly like `accept_event/2`
+  (`validate_fence/3`): wrong host or wrong/stale epoch → `:stale_fence`;
+  expired → `:lease_expired` (both 409 at the route); no lease at all →
+  `:lease_not_found`. The lease `epoch` is compared but VESTIGIAL — nothing in
+  chat_hosts ever bumps it (it is always the insert default `1` today); we
+  deliberately do NOT build a bump path, we only refuse a mismatch.
+
+  On success the write funnels through the D80h choke point
+  (`StudioChat.set_agent_state/4`, source `:reported` — for `"blocked"` the
+  live fence itself is the in-WHERE corroboration, satisfied by construction
+  inside this same transaction), then AFTER commit the reported truth is
+  broadcast on the activity topic as `{:chat_reported_state, session_id, frame}`
+  (the FleetHub projects it onto the fleet wire) and the session's live
+  Recorder — if any — is told to suspend its derivation until hand-back.
+  """
+  def report_state(%RegisteredHost{} = host, session_id, agent_state, epoch)
+      when is_binary(session_id) and agent_state in ["working", "blocked", "idle", "unknown"] do
+    now = DateTime.utc_now()
+
+    Repo.transaction(fn ->
+      lease = report_fence_lease(session_id, now)
+
+      with :ok <- validate_fence(lease, host, epoch) do
+        case Barkpark.StudioChat.set_agent_state(session_id, agent_state, :reported, now) do
+          {1, _} -> %{lease: lease, ts: now}
+          {0, _} -> Repo.rollback(:session_not_found)
+        end
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, %{lease: lease, ts: ts}} ->
+        broadcast_reported_state(session_id, agent_state, ts)
+        notify_recorder_of_report(session_id, agent_state, lease.expires_at)
+
+        {:ok,
+         %{
+           session_id: session_id,
+           agent_state: agent_state,
+           lease_id: lease.id,
+           epoch: lease.epoch,
+           expires_at: lease.expires_at
+         }}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  The correlated live-fence EXISTS predicate (herd-s6): execution leases that
+  currently fence the parent query's session — the parent binding MUST be named
+  `:session`. One owner for the predicate: `StudioChat.set_agent_state/4` uses
+  it as the `:reported`-blocked corroboration and the agent-state sweep uses
+  its negation, so "live fence" can never mean two different things.
+  """
+  def live_fence_subquery(now) do
+    from(l in ExecutionLease,
+      where: l.session_id == parent_as(:session).id,
+      where: l.status in ["leased", "running"],
+      where: is_nil(l.revoked_at) and l.expires_at > ^now
+    )
+  end
+
+  @doc """
+  The session's current live report fence, or nil (herd-s6). The Recorder's
+  hand-back check calls this when its fence timer fires: a still-live lease
+  (the host heartbeat extends `expires_at`) re-arms the suspension; nil means
+  the reporter is gone — authority hands back explicitly.
+  """
+  def live_report_fence(session_id, now \\ DateTime.utc_now()) when is_binary(session_id) do
+    ExecutionLease
+    |> where([l], l.session_id == ^session_id)
+    |> where([l], l.status in ["leased", "running"])
+    |> where([l], is_nil(l.revoked_at) and l.expires_at > ^now)
+    |> order_by([l], desc: l.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  # D79h selection rule, plus honest deny grammar: prefer the LATEST live lease
+  # (non-revoked, unexpired, leased/running); when none exists, fall back to the
+  # latest leased/running row regardless of expiry/revocation so
+  # `validate_fence/3` can distinguish `:lease_expired` from `:stale_fence`
+  # instead of collapsing every failure into `:lease_not_found`.
+  defp report_fence_lease(session_id, now) do
+    base =
+      ExecutionLease
+      |> where([l], l.session_id == ^session_id)
+      |> where([l], l.status in ["leased", "running"])
+      |> order_by([l], desc: l.inserted_at)
+      |> limit(1)
+      |> lock("FOR UPDATE")
+
+    live =
+      base
+      |> where([l], is_nil(l.revoked_at) and l.expires_at > ^now)
+      |> Repo.one()
+
+    live || Repo.one(base)
+  end
+
+  # Reported truth on the fleet wire (herd-s6): the Recorder is suspended while
+  # the fence lives, and FleetHub hears only the activity topic — so the
+  # reporter's write must speak there itself, as its OWN frame kind (the
+  # four-state rides literally; reverse-mapping through the wave-5 activity
+  # vocabulary would distort "unknown" through the :offline prior rule).
+  defp broadcast_reported_state(session_id, agent_state, ts) do
+    owner_ws =
+      case Barkpark.StudioChat.get_session(session_id) do
+        %{owner_workspace_id: ws} -> ws
+        _ -> nil
+      end
+
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      Barkpark.StudioChat.Recorder.activity_topic(),
+      {:chat_reported_state, session_id,
+       %{agent_state: agent_state, ts: ts, owner_workspace_id: owner_ws}}
+    )
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp notify_recorder_of_report(session_id, agent_state, expires_at) do
+    Barkpark.StudioChat.Recorder.note_reported_state(session_id, agent_state, expires_at)
+  catch
+    :exit, _ -> :ok
+  end
+
   defp validate_fence(nil, _host, _epoch), do: {:error, :lease_not_found}
 
   defp validate_fence(%ExecutionLease{} = lease, host, epoch) do

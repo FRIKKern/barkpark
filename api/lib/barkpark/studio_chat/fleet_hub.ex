@@ -115,32 +115,19 @@ defmodule Barkpark.StudioChat.FleetHub do
   @impl true
   def handle_info({:chat_activity, sid, activity}, state) do
     owner_ws = Map.get(activity, :owner_workspace_id)
-    prior = Map.get(state.states, sid)
-    mapped = map_state(Map.get(activity, :state), prior)
-    owners = Map.put(state.owners, sid, owner_ws)
+    mapped = map_state(Map.get(activity, :state), Map.get(state.states, sid))
+    {:noreply, record_flip(state, sid, mapped, owner_ws)}
+  end
 
-    if mapped == prior do
-      # A line-only change (working → working): NOT a four-state flip, so no wire
-      # frame and no seq consumed — "state-change frames only" (design §s2).
-      {:noreply, %{state | owners: owners}}
-    else
-      seq = state.seq + 1
-
-      entry = %{
-        seq: seq,
-        session_id: sid,
-        agent_state: mapped,
-        ts: DateTime.utc_now(),
-        owner_ws: owner_ws
-      }
-
-      ring = Enum.take([entry | state.ring], @ring_cap)
-
-      Phoenix.PubSub.broadcast(Barkpark.PubSub, @fleet_topic, {:fleet_flip, entry})
-
-      {:noreply,
-       %{state | seq: seq, ring: ring, states: Map.put(state.states, sid, mapped), owners: owners}}
-    end
+  # An external reporter's authoritative write (herd-s6, charter D79h): while
+  # its lease fence lives, the Recorder's derivation is suspended on this very
+  # topic — so the fleet wire hears the reporter through its own frame kind.
+  # The four-state rides LITERALLY (never reverse-mapped through the wave-5
+  # activity vocabulary, which would distort "unknown" via the :offline prior
+  # rule). Same flips-only ring discipline as a derived transition.
+  def handle_info({:chat_reported_state, sid, %{agent_state: mapped} = frame}, state)
+      when mapped in ["working", "blocked", "idle", "unknown"] do
+    {:noreply, record_flip(state, sid, mapped, Map.get(frame, :owner_workspace_id))}
   end
 
   def handle_info({:chat_heartbeat, sid, ts}, state) do
@@ -171,6 +158,35 @@ defmodule Barkpark.StudioChat.FleetHub do
   @impl true
   def handle_call({:handshake, cursor, scope}, _from, state) do
     {:reply, resolve_handshake(cursor, scope, state), state}
+  end
+
+  # The shared flips-only ring discipline for BOTH truth sources (derived
+  # activity and herd-s6 reported state): dedup against the last-emitted
+  # four-state, mint a seq, ring it, broadcast the flip.
+  defp record_flip(state, sid, mapped, owner_ws) do
+    owners = Map.put(state.owners, sid, owner_ws)
+
+    if mapped == Map.get(state.states, sid) do
+      # A line-only change (working → working): NOT a four-state flip, so no wire
+      # frame and no seq consumed — "state-change frames only" (design §s2).
+      %{state | owners: owners}
+    else
+      seq = state.seq + 1
+
+      entry = %{
+        seq: seq,
+        session_id: sid,
+        agent_state: mapped,
+        ts: DateTime.utc_now(),
+        owner_ws: owner_ws
+      }
+
+      ring = Enum.take([entry | state.ring], @ring_cap)
+
+      Phoenix.PubSub.broadcast(Barkpark.PubSub, @fleet_topic, {:fleet_flip, entry})
+
+      %{state | seq: seq, ring: ring, states: Map.put(state.states, sid, mapped), owners: owners}
+    end
   end
 
   # ─────────────────────────────────────────────────────────────────────────

@@ -19,7 +19,9 @@ defmodule Barkpark.StudioChat.RollupTest do
   @zero %{working: 0, blocked: 0, idle: 0, unknown: 0}
 
   # Insert through the real create funnel (defaults agent_state to "idle"), then
-  # flip through the real write funnel `set_agent_state/2` — never a raw UPDATE.
+  # flip through the real write funnel `set_agent_state/4` — never a raw UPDATE.
+  # A blocked flip carries the D80h corroboration honestly: a real pending ask
+  # row first (the same store truth the `:ask` in-WHERE guard reads).
   defp session!(owner_workspace_id, agent_state) do
     id = Ecto.UUID.generate()
 
@@ -28,8 +30,24 @@ defmodule Barkpark.StudioChat.RollupTest do
       |> Session.create_changeset(%{id: id, owner_workspace_id: owner_workspace_id})
       |> Repo.insert()
 
-    if agent_state != "idle" do
-      {1, nil} = StudioChat.set_agent_state(id, agent_state)
+    case agent_state do
+      "idle" ->
+        :ok
+
+      "blocked" ->
+        {:ok, _} =
+          StudioChat.append_message(id, %{
+            role: "approval",
+            metadata: %{
+              "request_id" => "ru-#{System.unique_integer([:positive])}",
+              "approval_status" => "pending"
+            }
+          })
+
+        {1, nil} = StudioChat.set_agent_state(id, "blocked", :ask)
+
+      other ->
+        {1, nil} = StudioChat.set_agent_state(id, other, :derived)
     end
 
     s

@@ -299,8 +299,30 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
     StudioChat.rename(id, title)
     if status = opts[:status], do: StudioChat.update_status(id, status)
-    # the herd column (charter D38/D40) — what the sidebar pill actually reads
-    if agent_state = opts[:agent_state], do: StudioChat.set_agent_state(id, agent_state)
+
+    # the herd column (charter D38/D40) — what the sidebar pill actually reads.
+    # D80h: a blocked flip carries its :ask corroboration (a real pending ask
+    # row); every other state is a :derived write through the same funnel.
+    case opts[:agent_state] do
+      nil ->
+        :ok
+
+      "blocked" ->
+        {:ok, _} =
+          StudioChat.append_message(id, %{
+            role: "approval",
+            metadata: %{
+              "request_id" => "cl-#{System.unique_integer([:positive])}",
+              "approval_status" => "pending"
+            }
+          })
+
+        {1, _} = StudioChat.set_agent_state(id, "blocked", :ask)
+
+      agent_state ->
+        {1, _} = StudioChat.set_agent_state(id, agent_state, :derived)
+    end
+
     id
   end
 

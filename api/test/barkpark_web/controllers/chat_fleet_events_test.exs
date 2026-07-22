@@ -35,9 +35,28 @@ defmodule BarkparkWeb.ChatFleetEventsTest do
 
   defp session_in!(scope, agent_state) do
     {:ok, s} =
-      StudioChat.create_session(%{id: Ecto.UUID.generate(), cwd: ClaudeChat.cwd(), mode: "plan"}, scope)
+      StudioChat.create_session(
+        %{id: Ecto.UUID.generate(), cwd: ClaudeChat.cwd(), mode: "plan"},
+        scope
+      )
 
-    StudioChat.set_agent_state(s.id, agent_state)
+    # D80h: a blocked flip needs its :ask corroboration (a real pending ask
+    # row); every other state is a :derived write through the same funnel.
+    if agent_state == "blocked" do
+      {:ok, _} =
+        StudioChat.append_message(s.id, %{
+          role: "approval",
+          metadata: %{
+            "request_id" => "fe-#{System.unique_integer([:positive])}",
+            "approval_status" => "pending"
+          }
+        })
+
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
+    else
+      {1, _} = StudioChat.set_agent_state(s.id, agent_state, :derived)
+    end
+
     s.id
   end
 
@@ -85,7 +104,13 @@ defmodule BarkparkWeb.ChatFleetEventsTest do
       refute frame =~ "owner_workspace_id"
 
       payload = data_payload(frame)
-      assert payload == %{"session_id" => "s2", "agent_state" => "idle", "ts" => "2026-07-18T00:01:00Z", "title" => nil}
+
+      assert payload == %{
+               "session_id" => "s2",
+               "agent_state" => "idle",
+               "ts" => "2026-07-18T00:01:00Z",
+               "title" => nil
+             }
     end
 
     test "heartbeat frame is id-less + seq-less (UNREPLAYABLE) — only {session_id, ts}" do
@@ -155,7 +180,9 @@ defmodule BarkparkWeb.ChatFleetEventsTest do
 
   describe "FleetHub boot epoch is µs wall-clock, never :erlang.unique_integer" do
     test "the live hub mints a microsecond epoch at init" do
-      pid = start_supervised!({FleetHub, name: :"fleet_epoch_#{System.unique_integer([:positive])}"})
+      pid =
+        start_supervised!({FleetHub, name: :"fleet_epoch_#{System.unique_integer([:positive])}"})
+
       {:snapshot, epoch, 0, []} = FleetHub.handshake(pid, nil, :global)
 
       # A µs wall-clock stamp is ~1.7e15; :erlang.unique_integer is a small
@@ -235,22 +262,67 @@ defmodule BarkparkWeb.ChatFleetEventsTest do
 
   describe "FleetHub live projection over the activity topic" do
     setup do
-      pid = start_supervised!({FleetHub, name: :"fleet_live_#{System.unique_integer([:positive])}"})
+      pid =
+        start_supervised!({FleetHub, name: :"fleet_live_#{System.unique_integer([:positive])}"})
+
       Phoenix.PubSub.subscribe(Barkpark.PubSub, FleetHub.fleet_topic())
       %{pid: pid, sid: "sid-#{System.unique_integer([:positive])}"}
     end
 
     test "a four-state flip broadcasts a ring entry carrying the owner; a line-only change does NOT",
          %{pid: pid, sid: sid} do
-      send(pid, {:chat_activity, sid, %{state: :working, line: "thinking…", owner_workspace_id: "ws-a"}})
-      assert_receive {:fleet_flip, %{session_id: ^sid, agent_state: "working", owner_ws: "ws-a", seq: 1}}
+      send(
+        pid,
+        {:chat_activity, sid, %{state: :working, line: "thinking…", owner_workspace_id: "ws-a"}}
+      )
+
+      assert_receive {:fleet_flip,
+                      %{session_id: ^sid, agent_state: "working", owner_ws: "ws-a", seq: 1}}
 
       # Same mapped four-state, different line → NOT a flip (state-change only).
-      send(pid, {:chat_activity, sid, %{state: :working, line: "writing…", owner_workspace_id: "ws-a"}})
+      send(
+        pid,
+        {:chat_activity, sid, %{state: :working, line: "writing…", owner_workspace_id: "ws-a"}}
+      )
+
       refute_receive {:fleet_flip, %{session_id: ^sid}}, 100
 
-      send(pid, {:chat_activity, sid, %{state: :needs_you, line: "approve?", owner_workspace_id: "ws-a"}})
+      send(
+        pid,
+        {:chat_activity, sid, %{state: :needs_you, line: "approve?", owner_workspace_id: "ws-a"}}
+      )
+
       assert_receive {:fleet_flip, %{session_id: ^sid, agent_state: "blocked", seq: 2}}
+    end
+
+    test "a {:chat_reported_state} frame rides the ring with the LITERAL four-state (herd-s6, D79h)",
+         %{pid: pid, sid: sid} do
+      # "unknown" is the distortion-proof probe: the wave-5 activity vocabulary
+      # can only reach it through the :offline prior rule, so a reverse-mapped
+      # reported frame would emit the WRONG state here.
+      send(
+        pid,
+        {:chat_reported_state, sid,
+         %{agent_state: "unknown", ts: DateTime.utc_now(), owner_workspace_id: "ws-a"}}
+      )
+
+      assert_receive {:fleet_flip,
+                      %{session_id: ^sid, agent_state: "unknown", owner_ws: "ws-a", seq: 1}}
+
+      # flips-only holds across truth sources: the same reported state again is
+      # NOT a flip…
+      send(
+        pid,
+        {:chat_reported_state, sid,
+         %{agent_state: "unknown", ts: DateTime.utc_now(), owner_workspace_id: "ws-a"}}
+      )
+
+      refute_receive {:fleet_flip, %{session_id: ^sid}}, 100
+
+      # …and a later derived transition dedups against the SAME lineage
+      # (hand-back convergence on one wire).
+      send(pid, {:chat_activity, sid, %{state: :working, line: "x", owner_workspace_id: "ws-a"}})
+      assert_receive {:fleet_flip, %{session_id: ^sid, agent_state: "working", seq: 2}}
     end
 
     test "{:chat_workflow} is IGNORED — never a fleet frame (D44h)", %{pid: pid, sid: sid} do
@@ -294,7 +366,9 @@ defmodule BarkparkWeb.ChatFleetEventsTest do
       assert json_response(conn, 403)["error"]["code"] == "forbidden"
     end
 
-    test "a text/event-stream Accept negotiates (D6) — reaches the gate, not a 406", %{reader: reader} do
+    test "a text/event-stream Accept negotiates (D6) — reaches the gate, not a 406", %{
+      reader: reader
+    } do
       conn =
         build_conn()
         |> as(reader)

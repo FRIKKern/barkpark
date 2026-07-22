@@ -514,7 +514,7 @@ defmodule BarkparkWeb.ChatControllerTest do
 
       # a persisted flip rides the same projection, timestamp included
       now = DateTime.utc_now()
-      StudioChat.set_agent_state(sid, "working", now)
+      StudioChat.set_agent_state(sid, "working", :derived, now)
       entry = sidebar_entry(a1, sid)
       assert entry["agent_state"] == "working"
 
@@ -697,7 +697,7 @@ defmodule BarkparkWeb.ChatControllerTest do
 
       # MUTATION-PROVEN: a persisted flip changes the SHOW read, timestamp too
       now = DateTime.utc_now()
-      StudioChat.set_agent_state(sid, "working", now)
+      StudioChat.set_agent_state(sid, "working", :derived, now)
       body = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
       assert body["agent_state"] == "working"
       assert {:ok, at, 0} = DateTime.from_iso8601(body["agent_state_at"])
@@ -1332,8 +1332,17 @@ defmodule BarkparkWeb.ChatControllerTest do
       {:ok, b_sess} =
         StudioChat.create_session(%{id: Ecto.UUID.generate()}, {:workspace, ws_b.id})
 
-      StudioChat.set_agent_state(a_sess.id, "working")
-      StudioChat.set_agent_state(b_sess.id, "blocked")
+      StudioChat.set_agent_state(a_sess.id, "working", :derived)
+
+      # D80h: the blocked flip carries its :ask corroboration — a real pending
+      # ask row for ws-B's session first, then the guarded write.
+      {:ok, _} =
+        StudioChat.append_message(b_sess.id, %{
+          role: "approval",
+          metadata: %{"request_id" => "ru-b-1", "approval_status" => "pending"}
+        })
+
+      {1, _} = StudioChat.set_agent_state(b_sess.id, "blocked", :ask)
 
       body = json_conn(conn_a_raw) |> get("/v1/chat/rollup") |> json_response(200)
 

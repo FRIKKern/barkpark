@@ -26,12 +26,9 @@ defmodule Barkpark.StudioChat.AgentStateSweeper do
 
   use GenServer
 
-  import Ecto.Query
-
   require Logger
 
-  alias Barkpark.Repo
-  alias Barkpark.StudioChat.Session
+  alias Barkpark.StudioChat
 
   @sweep_every_ms 300_000
   @stale_after_s 150
@@ -60,18 +57,18 @@ defmodule Barkpark.StudioChat.AgentStateSweeper do
   One staleness-scoped sweep (public so tests drive it directly): flips every
   `working`/`blocked` row whose `agent_state_at` is NULL or older than 150s to
   `unknown`. Rows in any other state — and FRESH working/blocked rows — are
-  never touched. Returns the number of rows swept.
+  never touched. Fence-aware since herd-s6 (charter D79h): a row covered by a
+  LIVE report fence (a live execution lease) is skipped — the lease's own 60s
+  TTL is the reporter's liveness clock, so a dead reporter's row becomes
+  sweepable within a minute, never sweep-proof. The `update_all` itself lives
+  in `StudioChat.sweep_stale_agent_states/2` (the D80h census: every
+  `agent_state` write funnels through `studio_chat.ex`). Returns the number of
+  rows swept.
   """
   @spec sweep(DateTime.t()) :: non_neg_integer()
   def sweep(now \\ DateTime.utc_now()) do
     cutoff = DateTime.add(now, -@stale_after_s, :second)
-
-    {count, _} =
-      Session
-      |> where([s], s.agent_state in ["working", "blocked"])
-      |> where([s], is_nil(s.agent_state_at) or s.agent_state_at < ^cutoff)
-      |> Repo.update_all(set: [agent_state: "unknown", updated_at: now])
-
+    {count, _} = StudioChat.sweep_stale_agent_states(cutoff, now)
     count
   end
 
