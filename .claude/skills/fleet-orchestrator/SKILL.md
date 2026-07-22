@@ -17,8 +17,14 @@ execute order content yourself, and you never claim a task.**
   intrinsic, not something you pass. To conduct a different project, switch with `bp use` first.
 - See your listeners (the roster): the live workers in this scope, each with a status pill
   (idle / working / blocked), its current task, capacity, and last-seen. Read it with
-  `bp fleet roster` (see §6). Online/offline is computed server-side — a listener whose heartbeat
-  is stale past its TTL reads OFFLINE; never dispatch to it.
+  `bp fleet roster` (see §6). Capacity is a **structured MEASURED object** per row —
+  `{size_class, slots_total, slots_free, budget}`, measured never vibes — and the declared class
+  is a CEILING: the effective class is **min(declared, observed)** (PDF-D6); a box that claims
+  `xl` but measures lean routes as lean. Online/offline is computed server-side — a listener
+  whose heartbeat is stale past its TTL reads OFFLINE; the auto-router never picks it.
+  **Carve-out (PDF-D41):** that rule binds the AUTO-router choosing among candidates — an order
+  whose assignee you DIRECTLY NAME is filed via `helpers/file-order.sh` with **no presence
+  check** and simply waits on the ledger until that listener returns.
 - Route orders by `assignee` = a listener's worker name (e.g. `support-1`).
 - The order-filing helper is bundled: `helpers/file-order.sh` (in this skill's directory). It
   handles every task-authoring trap (priority 0-4, brief-as-blocks, the dedup wall with retry,
@@ -52,6 +58,17 @@ into step 2's brief. That dependency is what makes it a pipeline, not two isolat
 export lands on a big-class listener, a light lint never wastes it, same-fence orders never
 co-locate, over-budget or over-cap work is refused (not dropped). Reserve big boxes for the work
 that needs them; fill lean boxes with the rest. `python3 helpers/route.py` runs its 9-check proof.
+
+**The live path is `helpers/dispatch.sh <orders.json>`** — one batch end-to-end, every decision
+printed with its reason. It re-reads the spend ledger on EVERY invocation (the cap gate runs
+before every batch, never cached; a malformed ledger row is a named ABORT), fetches the live
+roster, prints every excluded-offline row by name BEFORE routing, pipes
+roster → `helpers/transform.py` → `helpers/route.py --route`, prints
+`order → worker (klass): reason` per assignment and files it via file-order.sh, and prints
+`order UNPLACEABLE: reason` for the rest. `transform.py` owns the messy edges (three capacity
+encodings, `size_class`→`max_class`, ISO8601→epoch, server `status` passed through untouched) —
+`python3 helpers/transform.py --selftest` proves them. route.py stays a pure untouched function;
+if you ever add a selftest check to it you MUST bump the "9-check proof" count in the same commit.
 
 **Let the ledger do the collision math.** Barkpark ships the fence allocator: `bp task frontier`
 returns the maximal set of ready tasks that can run in parallel WITHOUT their blast radii
@@ -96,6 +113,12 @@ honest summary. **Be ruthless — never dress up a miss.** A worker that produce
 FAIL; a plausible-but-wrong answer is a FAIL; only real, verified work is a PASS. Record what
 failed and why, so the next round is better.
 
+**A cap-frozen batch is reported EXPLICITLY, never as a silent empty round.** When the spend cap
+trips, dispatch.sh prints exactly one loud line —
+`SPEND CAP REACHED ($spent >= $cap) — dispatch halted, 0/N orders placed` — and lists every
+order `spend_cap`. Your report must carry that line and the frozen order list; "nothing landed
+this round" without the freeze line is a lie of omission.
+
 ## 6. The roster (listener presence)
 
 The fleet is only conductable if you can SEE your listeners. Each `fleet-listener` beats a native
@@ -111,7 +134,11 @@ in-progress task (a read-time join, never stored on the row), `scope`, `agent`, 
 `last_seen`, and `ttl_s`. **Online/offline is computed server-side** — a row reads `offline` iff
 `now - last_seen > ttl_s` (missing `last_seen` = offline, fail-closed); you never do the staleness
 math yourself. Read the roster to decide who is free before you dispatch, and to notice a listener
-that went dark mid-order (reassign or re-file). Never dispatch to an OFFLINE row.
+that went dark mid-order (reassign or re-file). Never dispatch to an OFFLINE row —
+**with the PDF-D41 carve-out: that prohibition binds the AUTO-router choosing among candidates.**
+An order you DIRECTLY NAME to a specific assignee is filed via file-order.sh with no presence
+check; it sits on the ledger until the named listener comes back and claims it. Routing around
+absence is the router's job; waiting on a name is the ledger's.
 
 ## Hard-won rules (from the live PoC — do not relearn these)
 
@@ -128,7 +155,10 @@ that went dark mid-order (reassign or re-file). Never dispatch to an OFFLINE row
   timing), and rate-limit so the shared gate never jams.
 - **Idle capacity is permission.** If workers sit idle with budget headroom, raise ambition
   (bigger slices, deeper verification); if declines/failures rise, reduce. A hard spend cap =
-  ambition forced to zero.
+  ambition forced to zero — and there are TWO real brakes at different altitudes: the glue's
+  **batch cap gate** (dispatch.sh re-reads the spend ledger before EVERY batch; cap reached =
+  the whole batch freezes, loudly) and route.py's **per-listener budget** (one box out of budget
+  refuses its share while the rest keep working). Neither substitutes for the other.
 
 ## What "done" looks like
 
