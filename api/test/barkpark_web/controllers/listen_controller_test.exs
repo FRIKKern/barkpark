@@ -396,6 +396,35 @@ defmodule BarkparkWeb.ListenControllerTest do
     assert replay_json["previousRev"] == live_json["previousRev"]
   end
 
+  # ---------------------------------------------------------------------------
+  # Listener egress guard (PDF-D18): a `type:"listener"` presence broadcast NEVER
+  # rides the SSE fan-out — not even to an unscoped (nil-workspace) subscriber,
+  # which is the exact live leak (eventId 70357). Mirrors the Sync.Outbox
+  # exclusion (#5626). MUTATION-PROOF: remove the `%{type: "listener"}` clause in
+  # forward_event?/2 and the first two assertions below flip to `true` and fail.
+  # ---------------------------------------------------------------------------
+  describe "forward_event?/2 — listener presence never fans out" do
+    test "dropped for an UNSCOPED (nil-workspace) subscriber — the live leak" do
+      refute ListenController.forward_event?(%{type: "listener", workspace_id: nil}, nil)
+    end
+
+    test "dropped for a same-workspace subscriber that would otherwise match" do
+      refute ListenController.forward_event?(
+               %{type: "listener", workspace_id: "ws-1"},
+               "ws-1"
+             )
+    end
+
+    test "a non-listener event is still forwarded (guard is type-narrow)" do
+      assert ListenController.forward_event?(%{type: "post", workspace_id: nil}, nil)
+
+      assert ListenController.forward_event?(
+               %{type: "post", workspace_id: "ws-1"},
+               "ws-1"
+             )
+    end
+  end
+
   # Parse the JSON payload out of an SSE frame ("id: ..\nevent: ..\ndata: {json}\n\n").
   defp frame_data(frame) do
     frame

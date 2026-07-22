@@ -440,6 +440,14 @@ defmodule BarkparkWeb.ListenController do
   # Public (`@doc false`) so the cross-tenant isolation contract can assert the
   # drop directly — same testing seam as `replay_since/3` and `format_event/2`.
   @doc false
+  # Personal Dev Fleet listener presence NEVER rides the SSE fan-out — not even
+  # to an unscoped (nil-workspace) subscriber, which the clause below would
+  # otherwise forward. A listener heartbeat is per-machine truth, so it must not
+  # reach a generic workspace SSE consumer (the live leak, eventId 70357).
+  # Mirrors `Sync.Outbox`'s `type != "listener"` exclusion (#5626, PDF-D18).
+  # Ordered FIRST so it beats the nil-workspace forward-everything clause.
+  def forward_event?(%{type: "listener"}, _workspace_id), do: false
+
   def forward_event?(_msg, nil), do: true
 
   def forward_event?(%{workspace_id: event_ws}, workspace_id)
