@@ -116,6 +116,36 @@ defmodule BarkparkWeb.QueryController do
   end
 
   @doc """
+  Related documents — shared weighted tags fused with inbound references
+  (authoring-excellence D68–D71). Wraps `Content.Related.related_documents/3`:
+  the tag leg is strength-aware SQL over the `tags_meta` GENERATED column
+  (LEAST min-strength credit per shared name + main_tag bonus), the reference
+  leg reuses `Content.Graph.reverse_referencers/2`'s FAIL-CLOSED hydration
+  (an unreadable referencing source is dropped, never stubbed), and fusion is
+  by doc identity in Elixir. A source with zero weighted tags degrades to
+  backlink-only related. Scoping threads `scope_opts/1` exactly like
+  `backlinks/2`; auth mirrors a doc read: preview or a token, otherwise 404
+  (existence-hiding, like `backlinks`).
+  """
+  def related(conn, %{"dataset" => dataset, "id" => id} = params) do
+    if preview?(conn) or authed?(conn) do
+      related =
+        Content.Related.related_documents(
+          id,
+          dataset,
+          [limit: parse_int(params["limit"], 10)] ++ scope_opts(conn)
+        )
+
+      json(conn, %{
+        result: %{related: related, count: length(related)},
+        syncTags: ["bp:ds:#{dataset}:related:#{id}"]
+      })
+    else
+      {:error, :not_found}
+    end
+  end
+
+  @doc """
   Bundled per-type published-document counts for a dataset (AXI charter
   decision 19 / `data.counts`). ONE `GROUP BY d.type` aggregate — never a
   per-type loop — over the tenancy-scoped, published set, so a bare `bp <noun>`

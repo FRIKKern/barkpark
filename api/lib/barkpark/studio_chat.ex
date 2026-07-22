@@ -45,13 +45,12 @@ defmodule Barkpark.StudioChat do
       plan awaits approval).
     * `:working` — a turn is running (live overlay `:working`, or persisted
       status `"working"` on a cold mount).
-    * `:finished_while_away` — the session settled (persisted status `"active"`
-      or `"exited"`) and `last_active_at > last_visited_at`: something happened
-      after you last looked. Visiting (`mark_visited/1`) clears it.
 
   The three needs-you kinds map 1:1 onto the `@needs_you_roles` ask roles
-  (charter D31); `:finished_while_away` is the new away axis carried by the
-  `last_visited_at` column. A session in none of these states has no strip entry.
+  (charter D31). A session in none of these states has no strip entry — a
+  settled session is simply quiet (the wave-12 unseen-finish read tracking
+  was retired by the herd layer: no read receipts; the idle `agent_state`
+  pill is the successor signal).
   """
   import Ecto.Query, warn: false
 
@@ -280,7 +279,6 @@ defmodule Barkpark.StudioChat do
       output_tokens: s.output_tokens,
       total_cost_usd: s.total_cost_usd,
       last_active_at: s.last_active_at,
-      last_visited_at: s.last_visited_at,
       archived_at: s.archived_at,
       inserted_at: s.inserted_at,
       updated_at: s.updated_at,
@@ -2071,8 +2069,8 @@ defmodule Barkpark.StudioChat do
 
   # Strip kinds in STRICT priority order (the moduledoc vocabulary). The order
   # IS the sort: an approval outranks a question outranks a plan outranks a
-  # running turn outranks an unseen finish.
-  @strip_kinds [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+  # running turn.
+  @strip_kinds [:pending_approval, :awaiting_input, :plan_ready, :working]
 
   # Ask role → strip kind (charter D31 roles). Precedence inside one session
   # with SEVERAL pending asks follows @strip_kinds: approval > question > plan.
@@ -2082,36 +2080,12 @@ defmodule Barkpark.StudioChat do
     {"plan", :plan_ready}
   ]
 
-  # The persisted statuses that mean "nothing is running": `active` (turn
-  # settled — the Recorder flips it on every result frame) and `exited` (the
-  # process died). `working` deliberately is NOT here — a mid-turn session is
-  # `:working`, never `:finished_while_away`.
-  @settled_statuses ~w(active exited)
-
   @doc """
   The strip-kind vocabulary in strict priority order (wave 12; see the
   moduledoc). S7's notification seam consumes these EXACT atoms.
   """
   @spec strip_kinds() :: [atom()]
   def strip_kinds, do: @strip_kinds
-
-  @doc """
-  Stamp `last_visited_at = now` — the admin just looked at this session (opened
-  it, switched away from it, or watched it settle on screen). Clears the session
-  from the needs-you strip's `:finished_while_away` state. Deliberately does NOT
-  bump `last_active_at` (visiting must not reorder the sidebar — the `set_draft/2`
-  precedent). Returns `{:ok, session}` or `{:error, :not_found}`.
-  """
-  @spec mark_visited(String.t() | nil) :: {:ok, Session.t()} | {:error, :not_found}
-  def mark_visited(session_id) do
-    with %Session{} = session <- get_session(session_id) do
-      session
-      |> Ecto.Changeset.change(last_visited_at: DateTime.utc_now())
-      |> Repo.update()
-    else
-      nil -> {:error, :not_found}
-    end
-  end
 
   @doc """
   The PENDING ask roles per session, for a list of session ids — the store-truth
@@ -2176,8 +2150,7 @@ defmodule Barkpark.StudioChat do
   @doc """
   One session's strip kind (wave 12) — or nil (no entry). PURE; the per-session
   half of `needs_you_strip/2`, public so the derivation is unit-testable kind by
-  kind. Precedence: a pending ask (any needs-you role) beats a running turn
-  beats an unseen finish.
+  kind. Precedence: a pending ask (any needs-you role) beats a running turn.
 
   `pending_roles` is this session's pending ask roles (`pending_ask_roles/1`);
   `activity` is its live overlay entry or nil. The overlay only ADDS liveness
@@ -2195,32 +2168,10 @@ defmodule Barkpark.StudioChat do
       session.agent_state == "working" or activity_state(activity) == :working ->
         :working
 
-      finished_while_away?(session) ->
-        :finished_while_away
-
       true ->
         nil
     end
   end
-
-  @doc """
-  True when a session settled AFTER the admin last looked (wave 12): persisted
-  status is a settled one (`active` — the Recorder flips it on every result
-  frame — or `exited`) AND `last_active_at > last_visited_at`. STRICT
-  comparison + a nil `last_visited_at` reads false: a freshly-created row
-  (stamped visited at birth) and a pre-migration row (never stamped) both stay
-  honestly quiet — the strip never fakes an unseen finish.
-  """
-  @spec finished_while_away?(Session.t()) :: boolean()
-  def finished_while_away?(%Session{
-        status: status,
-        last_active_at: %DateTime{} = active,
-        last_visited_at: %DateTime{} = visited
-      })
-      when status in @settled_statuses,
-      do: DateTime.compare(active, visited) == :gt
-
-  def finished_while_away?(_), do: false
 
   # Highest-priority kind among this session's pending ask roles. A needs-you
   # signal with NO known pending row (an overlay :needs_you racing the store

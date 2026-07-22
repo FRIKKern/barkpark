@@ -333,10 +333,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       true ->
         # Switch-away moment (charter D36c): persist the draft of the session we
         # are LEAVING before anything else, so its unsent words survive the swap
-        # and reload when it is reopened. Leaving also stamps last_visited_at
-        # (wave 12) — everything up to the departure was SEEN, so only what
-        # happens after counts as "while away".
-        socket = socket |> capture_draft() |> stamp_visited_on_leave()
+        # and reload when it is reopened.
+        socket = capture_draft(socket)
 
         case StudioChat.get_session(sid, :global) do
           nil ->
@@ -355,14 +353,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_params(params, _uri, socket) do
-    # Leaving to the new-chat state stamps the departed session's visit (wave
-    # 12) and re-reads the list, so the strip never claims "finished while away"
-    # for the session you just walked out of watching.
+    # Leaving to the new-chat state persists the departed session's draft and
+    # re-reads the list.
     {:noreply,
      socket
      |> put_return_to(params)
      |> capture_draft()
-     |> stamp_visited_on_leave()
      |> reset_to_new_chat()
      |> refresh_sessions()}
   end
@@ -397,18 +393,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp capture_draft(socket) do
     if sid = socket.assigns[:store_session_id] do
       StudioChat.set_draft(sid, socket.assigns[:composer_draft])
-    end
-
-    socket
-  end
-
-  # Leaving a session stamps its `last_visited_at` (wave 12, the needs-you
-  # strip): everything up to the departure was on screen — SEEN — so only what
-  # happens after you leave can count as "finished while away". Rides the same
-  # switch-away seam as capture_draft; no-op on the new-chat state.
-  defp stamp_visited_on_leave(socket) do
-    if sid = socket.assigns[:store_session_id] do
-      StudioChat.mark_visited(sid)
     end
 
     socket
@@ -1908,14 +1892,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
       if activity.state in [:idle, :offline],
         do: Map.delete(socket.assigns.activity, sid),
         else: Map.put(socket.assigns.activity, sid, activity)
-
-    # Watching a session settle counts as SEEING it (wave 12): a terminal
-    # activity for the ON-SCREEN session re-stamps last_visited_at, so the
-    # needs-you strip never claims "finished while away" for a finish that
-    # happened right in front of you.
-    if sid == socket.assigns.store_session_id and activity.state in [:idle, :offline] do
-      StudioChat.mark_visited(sid)
-    end
 
     # Always re-read the list: a session that just became active may not be in
     # the sidebar yet (created by another tab), and a terminal transition needs
@@ -4260,11 +4236,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # D28): its Recorder owns the runtime; we only stop listening to it.
     socket = socket |> unsubscribe_session() |> subscribe_session(session.id)
 
-    # Arriving stamps last_visited_at (wave 12): opening a session clears it
-    # from the needs-you strip's finished-while-away state — you are looking at
-    # it now. The refresh_sessions at the tail re-reads the stamped row.
-    StudioChat.mark_visited(session.id)
-
     {session_pid, status, live?} =
       case live_runtime(session) do
         nil ->
@@ -6503,19 +6474,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # Strip kind → badge class (existing tokenized chat badges — warn for every
-  # needs-you kind, working tone for a running turn, the ok/idle tone for an
-  # unseen finish) and → imperative label. Copy is deliberately DISTINCT from
-  # the session-row pill texts ("needs you"/"working"/…) so the two surfaces
-  # never read as duplicates.
+  # needs-you kind, working tone for a running turn) and → imperative label.
+  # Copy is deliberately DISTINCT from the session-row pill texts ("needs
+  # you"/"working"/…) so the two surfaces never read as duplicates.
   defp strip_badge(:working), do: "badge-chat-working"
-  defp strip_badge(:finished_while_away), do: "badge-chat-idle"
   defp strip_badge(_needs_you_kind), do: "badge-chat-approval"
 
   defp strip_label(:pending_approval), do: "approve"
   defp strip_label(:awaiting_input), do: "answer"
   defp strip_label(:plan_ready), do: "plan ready"
   defp strip_label(:working), do: "running"
-  defp strip_label(:finished_while_away), do: "done"
 
   # Session → tokenized pill. The live overlay wins over the stored row (wave
   # 5): a Recorder that says "working" right now beats a row the sidebar has
