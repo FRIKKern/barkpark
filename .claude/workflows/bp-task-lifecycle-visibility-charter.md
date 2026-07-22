@@ -223,3 +223,46 @@ claim. Both honest; the lead closes the merge criteria on merge.)
 slices as their deps land: `tlv-bl-outcome-resolution-unenforced` + `tlv-bl-board-ready-allowlist-4th-copy`
 (after #5529 merges — both extend validation.ex), and `tlv-bl-tasks-ls-offset-broken` (after #5530
 merges — S7 restructures tasks_controller.ex). Then the felix Writer-seam slice closes D7/D7a.
+
+### Wave 2026-07-22 — finishing wave (wave 4), grade A−
+
+Reviewed and pushed 4 round-1 slices (all gates re-run green by the reviewer; octopus-merge of all
+four final branches against origin/main proven conflict-free). PRs #5585–#5588, held for the lead
+(.ex PRs wait for the CI Elixir Test gate).
+
+**Landed:**
+- `tlv-bl-outcome-resolution-unenforced` (#5585) — `check_outcome/2` micro-validator: a present
+  off-enum `outcome.resolution` (incl. `""`) 422s naming the 7 advertised values (mirrors schema.ex's
+  select byte-for-byte); absent/nil ok; non-map keeps the byte-identical shape error. Strict always-on
+  per D23 (guerrilla census clean). Mutation-proven.
+- `tlv-bl-board-ready-allowlist-4th-copy` (#5586) — board.ex `ready?/1` derives
+  `@claimable_statuses` from `Validation.claimable_statuses/0`; the 4th and LAST lifecycle-string
+  allowlist copy is dead. Gate narrowed per D22 (board_live_test.exs:319 + theme parity; the 6-failure
+  connected?-mount regression is `tlv-bl-board-live-connected-mount-regression`).
+- `tlv-bl-cli-empty-arg-guard` (#5587) — bindArgs treats empty positionals as absent (D24): required →
+  friendly missing-arg error + usage; optional → no map key. Zero wire change re-verified at all four
+  consumers (run.go:584/:708/:845, internal/manifest/url.go:120).
+- `tlv-bl-tasks-ls-offset-broken` (#5588, `-r`) — `/v1/tasks` honors `?offset=` (clamped [0,100k]) +
+  id tiebreaks in both `apply_index_order/2` arms (total order — pages disjoint over a frozen ledger);
+  task.ls manifest flag + openapi regen + TASK-SYSTEM.md honesty. Reviewer fixed the flag's help copy
+  ("Ready-queue row offset." → "Task-index row offset.") and re-regenerated openapi.json. Honest
+  residual: desc:updated_at shears under concurrent writes mid `--all` sweep; keyset = eventual cure.
+
+**Evidence-closed at Decide (landed in wave 3, premises verified L1 before cutting):**
+`tlv-bl-ready-allowlist-consolidation` (#5537/#5529), `tlv-bl-release-epoch-and-restore`
+(#5535/#5531), `tlv-bl-axis2-cancelled-strand` (#5536/#5533), tlv-s6 (#5538; dup #5532
+closed-not-merged). Backlog filed: `tlv-bl-publish-door-lifecycle-guard` (prio 1 — publish
+resurrection door PROVEN open), `tlv-bl-board-live-connected-mount-regression`,
+`tlv-bl-ready-offset-clamp`.
+
+**Deferred by design (round 2):** `tlv-bl-writer-seam-transition-gate` — THE CROWN (D7b contract:
+published-fallback was-resolution, exemption = birth OR :sync, only mutate_controller_test.exs:126
+flips). Dispatches ONLY after #5530 (tlv-s7 stage verb) merges.
+
+**Next wave — dispatch order:** (1) LEAD: green #5530 (regen docs/openapi.json via CI artifact — its
+only PR-caused red) and merge it; re-run main's Elixir gate past the 429 StatusController flake.
+(2) Merge round-1 #5585–#5588 (any order; all pairwise conflict-free; #5588 is line-disjoint from
+#5530 but merge #5530 first to keep the courtesy ordering). (3) THEN dispatch
+`tlv-bl-writer-seam-transition-gate` (fable) — the crown closes D7/D7a and the proven draft-twin
+forgery door. (4) `tlv-bl-publish-door-lifecycle-guard` is the strongest new prio-1 candidate
+(publish-door resurrection is run-proven open). Then tlv-s5/tlv-s8 per the epic roadmap.
