@@ -386,13 +386,110 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   commit (`git show <sha>:<path> > <path>`), never cherry-pick — local main is diverged and
   content-copy is conflict-proof.
 
+## Wave B round-2 decisions (Decide, 2026-07-23 — the CLOSING round; 11 survey lanes + 6 verify lanes, every load-bearing claim executed, not read)
+
+- **PDF-D46 — CLOSING-ROUND SHAPE (direction A with C folded in, confirmed).** One centerpiece
+  build (`pdf-wb-efficiency-proof`, round 1) + two round-2 stamp slices dispatched only after
+  the proof MERGES (`pdf-wb-epic-crit2-stamp`, `pdf-bl-presence-honesty-sparse` AC1). All other
+  round-2 duties were EXECUTED AT DECIDE with verify-fleet evidence in hand: the guerrilla live
+  egress verify (passed, 5 legs), the fresh-binary `--capacity` beat smoke (passed, roster
+  round-trips a typed map, probe cleaned), and the round-1 ledger closes (all five slice tasks
+  now genuinely done with real merge/live evidence — the same-day false-done pattern repaired,
+  not papered over). Zero new verbs, zero server changes, zero code edits to
+  dispatch.sh/route.py/transform.py — the proof rides the merged FLEET_ROSTER_JSON /
+  FLEET_FILE_ORDER_BIN seams (D42's "add the seam" contingency is MOOT).
+- **PDF-D47 — REOPEN/STAMP RECIPE IS THE THIRD PATH (proven end-to-end on
+  `pdf-wb-charter-landing`).** `bp task stage <id> open` flips lifecycle done→open but KEEPS the
+  closed claim occupying the slot: a fresh claim under a NEW worker id → `not_ready` (exit 6),
+  and a direct stamp at the old epoch → `not_in_progress:open` (exit 2) — BOTH predicted paths
+  refuted by live probe. The ONLY working path: re-claim under the task's OWN `claim.worker`
+  (the original closer, read per task — never a shared lead id), which renews the closed claim,
+  bumps the epoch, and enters in_progress; then stamp at the NEW epoch, then close. Batch recipe:
+  stage open → `HOLDER=$(bp task get <id> -o json | jq -r .doc.claim.worker)` → claim as HOLDER
+  → stamp each unmet criterion (verbatim `--criterion-text`) → close done → re-get and assert
+  met==total. Applied 2026-07-23 to capacity-contract, edge-measurement, dispatch-glue, and
+  egress-guard: all four now done with full criteria. The false-done memory recipe's
+  "stamp directly on the standing worker+epoch" is WRONG post-stage — re-claim is mandatory.
+- **PDF-D48 — EGRESS GUARD LIVE-VERIFIED ON GUERRILLA (criterion closed on 5-leg proof).**
+  Fresh first-ever `type:listener` beat = ZERO frames on a subscribed
+  `/v1/data/listen/production` SSE stream while non-listener anchors forwarded (eventIds
+  80679/80681 with the suppressed listener at the 80680 gap); `Last-Event-ID` replay excluded
+  listener rows but replayed non-listener docs (type-scoped, non-vacuous); listener DELETE
+  silent while a same-window non-listener control fired; roster row present before, gone after.
+  HONEST RESIDUAL: the webhook leg rests on merged unit tests (`broadcast_test.exs`), not a live
+  webhook endpoint — recorded, not hidden. PREMISE CORRECTION: `/v1/fleet/beat|roster` HTTP
+  routes DO exist (Tasks-plugin route table); but the egress guard operates on the underlying
+  listener DOC mutations — the doc path (`/v1/data/mutate` createOrReplace/delete) is what the
+  5-leg proof exercised.
+- **PDF-D49 — SQUASH-MERGE ANCESTRY LESSON (budget-clamp ruling: FIXED, nothing to file).**
+  `git merge-base --is-ancestor <branch-commit> origin/main` is the WRONG test after a squash
+  merge: commit-hash ancestry ≠ content presence. The review's budget-floor fix (4d2db4885)
+  IS on origin/main inside squash commit 89afdd479 (#5686) — file byte-identical between the two
+  commits; origin/main's `measure_budget` emits `budget: 0.0` on an overspent ledger while the
+  pre-fix parent emits `-0.35` (both executed). The defect class (negative budget → server 422 →
+  `|| true` swallows → listener silently vanishes at cap-trip) was real and is CLOSED. Rule
+  forward: prove landed-ness by CONTENT (`git show <sha>:<file> | diff`), never by hash ancestry.
+- **PDF-D50 — FLEET CLI IS 100% MANIFEST-DRIVEN (beat smoke closed at provenance rigor).**
+  `internal/cli/cli.go` has no `fleet` case — beat/roster ride the generic capabilities-manifest
+  dispatch, so a pre-round-1 and post-round-1 binary behave identically for `fleet beat
+  --capacity`. A fresh origin/main build (6a7ead0a7, provably containing #5685 via merge-base)
+  ran the structured-capacity beat against deployed guerrilla: roster round-trips a typed JSON
+  map (never a string), the beat write is draft-only (delete result shows ONLY `drafts.<id>` —
+  PDF-D17 corroborated live), probe cleaned, roster left clean. The "fresh binary" duty closes
+  the PROVENANCE caveat, not server behavior.
+- **PDF-D51 — DEPLOYED SCHEMA DRIFT: `listener.status` REJECTS ITS OWN VOCABULARY on guerrilla.**
+  Live probe: status=idle/working/blocked/provisioning ALL 422 `{"status":["is invalid"]}` via
+  the doc-mutation path, while other select schemas validate fine and the schema CODE on
+  origin/main is correct — root-cause hypothesis: a stale registered schema row predating the
+  options (Bootstrap is idempotent-on-(name,dataset) and never updates). Symptom CONFIRMED,
+  root-cause PLAUSIBLE. Filed `pdf-bl-listener-status-schema-drift` (backlog). Interim law:
+  beats against guerrilla OMIT `status` via the doc path (the `/v1/fleet/beat` endpoint path
+  sets status server-side and is unaffected — the smoke's beat stored `status:idle` fine).
+- **PDF-D52 — BACKLOG DISPOSITIONS (the four Decide-seeded + two net-new).**
+  (a) `pdf-bl-worker-protocol-paper-sync` = EXECUTE NOW (round-1 slice; 2-block Paper patch,
+  stale `max_size:"M"` + global-120s-TTL confirmed live).
+  (b) `pdf-bl-file-order-env-override` = EXECUTE NOW SHRUNK (round-1 slice; ~15-line
+  env-fallback diff to file-order.sh only — the dispatch.sh half already merged in #5687; task
+  description's "reconcile" note is stale and is corrected on the task).
+  (c) `pdf-bl-adapter-rate-card` = STAYS OPEN, annotated: the local half is ANSWERED (one
+  `codex exec` invocation emits exactly ONE `turn.completed` with usage summed across tool
+  calls; D37 + route.py's CLASS_COST already ARE the rate ruling) — only the remote
+  claude-flag-on-a-real-listener-host leg remains.
+  (d) `pdf-bl-scratch-orphan-postgres-janitor` = STAYS OPEN (census re-confirmed, 5 foreign
+  PPID-1 orphans; multi-hour build, not a closing-round errand).
+  (e) NET-NEW filed: `pdf-bl-listener-status-schema-drift` (D51) and
+  `pdf-bl-doctor-bp-staleness-regex` (doctor.sh:82's sed pattern can't match a
+  `-dirty`-suffixed commit, so the bp-staleness check silently self-skips on every dirty build).
+- **PDF-D53 — PRESENCE-HONESTY AC1 CLOSES FROM THE PROOF TRANSCRIPT (round 2, never conflated).**
+  AC0 (the D40/D41 ruling implemented as docs) is byte-anchored: the SKILL.md hunks are genuinely
+  new in #5686/#5687 and no server code changed (no `quiet` status exists — the optional render
+  was correctly never built). AC1's "live roster read" half stays HONESTLY OPEN until the
+  efficiency proof runs: the proof MUST capture at least one raw roster GET showing live rows
+  (including one `status:offline` row so the dispatch exclusion line prints — dry-run gap), and
+  THAT transcript quote closes AC1. transform.py capacity-decode robustness is a DIFFERENT fact
+  (already selftest-covered) and never substitutes for the live read.
+- **PDF-D54 — PROOF CONTRACT PINS (byte-exact, from the executed dry-run; the builder transcribes,
+  never explores).** (1) The dispatch cap-gate ledger is `$FLEET_HOME/orchestrator/spend.jsonl`,
+  dialect `cost_usd` — `record_spend` writes a DIFFERENT per-worker file; R0 must ABORT-verify
+  path+dialect or every cap rung can fake green. (2) The beat receipt NEVER echoes `capacity` —
+  assert round-trip via the roster, never the beat response. (3) The stub filer MUST `exit 0`
+  (dispatch.sh's `set -e` while-loop aborts the batch otherwise). (4) Cap comparison is
+  `spent >= cap` — a ledger summing exactly the cap trips the freeze. (5) R4 must assert the
+  freeze LINE + stub-log 0 bytes (dispatch layer), not merely all-orders-`spend_cap` (the route
+  layer alone also produces that). (6) The malformed-ledger ABORT (exit 12) fires even with NO
+  cap set — the ledger read is unconditional when the file exists. (7) Roster fixtures include
+  one `status:offline` row to capture the PDF-D38 exclusion print (the one dry-run gap).
+  (8) Budget the charter's COLD figure — 311.7s boot (D29), never the in-checkout ~25s number.
+
 ## Roadmap (waves; interleaved with MVP stages per the build plan)
 
 - **Wave A — Presence & roster** (FIRST): `listener` presence record (worker · status · scope ·
   capacity · last_seen · ttl) + heartbeat in listener skill/runner + `bp fleet roster` (+
   console-readable). Proof: kill a listener → OFFLINE exactly at TTL.
-- **Wave B — Efficiency loop** (IN FLIGHT 2026-07-22): measured capacity heartbeats feed
-  route.py live; cap halts dispatch. Decisions PDF-D34..D45; proof `pdf-efficiency-proof.sh`.
+- **Wave B — Efficiency loop** (round 1 MERGED #5685-#5690; round 2 CLOSING 2026-07-23):
+  measured capacity heartbeats feed route.py live; cap halts dispatch. Decisions PDF-D34..D54;
+  proof `pdf-efficiency-proof.sh` (R0-R7 + negctl) is the wave's seal — its merged transcript
+  stamps epic criterion 2. Next after seal: MVP-0, then Wave C.
 - **MVP-0 — Visual setup + first offload** (console journey; Screens 0-2 of the GUI plan).
 - **Wave C — Cloud add-support, one action** (provision + bind + scrubbed pull + listener).
 - **Wave D — Durability**: fence-lifecycle fix; lease-lapse recovery; runner robustness.
@@ -474,3 +571,20 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   mid-claim with evidence, left lifecycle honest, merge-gated criteria open; the round-2 proof
   task sits open/unclaimed as designed. Wave Paper closed as the debrief:
   `personal-dev-fleet-wave-b-2026-07-22`.
+- **2026-07-23 · Wave B round-2 DECIDE (close the wave).** 11 survey lanes + 6 verify lanes, all
+  executed live: the full dispatch pipeline dry-run passed every fixture variation (R2-R7
+  mechanics proven pre-build), the guerrilla egress verify PASSED 5 legs, the reopen/stamp
+  recipe was proven end-to-end (the third path — stage → re-claim SAME worker → stamp → close;
+  both briefed paths refuted), the budget-clamp defect ruled ALREADY FIXED via squash 89afdd479,
+  and the fresh-binary beat smoke closed the provenance caveat. Decisions PDF-D46..D54.
+  EXECUTED AT DECIDE: round-1 ledger repaired — `pdf-wb-capacity-contract`,
+  `pdf-wb-edge-measurement`, `pdf-wb-dispatch-glue`, `pdf-bl-listener-egress-guard` (live-verify
+  + merge evidence), `pdf-wb-charter-landing` (verify probe) all now genuinely done. Wave =
+  5 slices: `pdf-wb-efficiency-proof` (r1, fable, the R0-R7 + negctl proof, transcript
+  committed) · `pdf-bl-worker-protocol-paper-sync` (r1, opus, 2-block Paper fix) ·
+  `pdf-bl-file-order-env-override` (r1, opus, shrunk env-fallback diff) ·
+  `pdf-wb-epic-crit2-stamp` (r2 AFTER proof merges, opus, PDF-D33 recipe on epic criterion 2) ·
+  `pdf-bl-presence-honesty-sparse` (r2 AFTER proof merges, opus, AC1 from the transcript's live
+  roster read per PDF-D53). Net-new backlog: `pdf-bl-listener-status-schema-drift`,
+  `pdf-bl-doctor-bp-staleness-regex`. Honestly open: adapter-rate-card (remote leg only),
+  scratch-orphan-janitor. Wave Paper: `personal-dev-fleet-wave-b-2026-07-22-r2`.
