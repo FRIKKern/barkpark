@@ -42,9 +42,16 @@ defmodule Barkpark.SelfUpdate.CheckerTest do
     # co-located in checker.ex for exactly that reason.
     assert Checker.worst_case_http_budget_ms() == 4 * 10_000
 
-    assert SelfUpdate.check_now_timeout_ms() >= Checker.worst_case_http_budget_ms(),
-           "check_now call timeout #{SelfUpdate.check_now_timeout_ms()}ms must cover the " <>
+    # Assert on the value the production `GenServer.call/3` dispatch ACTUALLY
+    # uses (`call_timeout(:check_now)`), not merely the `check_now_timeout_ms/0`
+    # derivation helper — otherwise reverting the `:check_now` dispatch clause to
+    # a hand-tuned 30_000 would leave this green (the wiring line was untested).
+    assert SelfUpdate.call_timeout(:check_now) >= Checker.worst_case_http_budget_ms(),
+           "check_now call timeout #{SelfUpdate.call_timeout(:check_now)}ms must cover the " <>
              "worst-case HTTP budget #{Checker.worst_case_http_budget_ms()}ms"
+
+    # And that dispatch value IS the derivation (the two must stay wired).
+    assert SelfUpdate.call_timeout(:check_now) == SelfUpdate.check_now_timeout_ms()
   end
 
   test "status/0 without a running Checker returns the :disabled map, never raises" do

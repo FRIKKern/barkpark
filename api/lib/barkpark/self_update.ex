@@ -87,8 +87,14 @@ defmodule Barkpark.SelfUpdate do
   def check_now_timeout_ms,
     do: Checker.worst_case_http_budget_ms() + @check_now_timeout_margin_ms
 
-  defp call_timeout(:check_now), do: check_now_timeout_ms()
-  defp call_timeout(_msg), do: 5_000
+  # Public (`@doc false`) so the check-timeout test asserts on the value the
+  # `GenServer.call/3` above ACTUALLY dispatches with — not just the derivation
+  # helper. Without that, reverting this `:check_now` clause to a hand-tuned
+  # literal stays green (the test only saw `check_now_timeout_ms/0`).
+  @doc false
+  @spec call_timeout(atom()) :: pos_integer()
+  def call_timeout(:check_now), do: check_now_timeout_ms()
+  def call_timeout(_msg), do: 5_000
 
   # Baseline status map — the shape every status/0 / check_now/0 result has.
   # Shared with the Checker so the disabled/unknown fallbacks and the real
