@@ -876,10 +876,12 @@ function taskboardGo(themes = loadThemes()) {
     return [
       `\t${JSON.stringify(name)}: {`,
       "\t\tLifecycle: map[string]GenLifecycleToken{",
-      ...litRows,
+      ...alignMap(litRows),
       "\t\t},",
-      `\t\tBrailleFrames: [10]string{${litFrames}},`,
-      `\t\tBrailleStill: "${glyphOf(pl.in_progress.framesStill)}",`,
+      ...alignMap([
+        `\t\tBrailleFrames: [10]string{${litFrames}},`,
+        `\t\tBrailleStill: "${glyphOf(pl.in_progress.framesStill)}",`,
+      ]),
       "\t},",
     ];
   };
@@ -1153,13 +1155,13 @@ function semroleGo(themes = loadThemes()) {
     return [
       `\t${JSON.stringify(name)}: {`,
       "\t\tStatusTone: map[string]lipgloss.AdaptiveColor{",
-      ...SEMROLE_TONES.map(([, role]) => `\t\t\t"${role}": ${goAdaptive(hslToHex(pst[role].light), hslToHex(pst[role].dark))},`),
+      ...alignMap(SEMROLE_TONES.map(([, role]) => `\t\t\t"${role}": ${goAdaptive(hslToHex(pst[role].light), hslToHex(pst[role].dark))},`)),
       "\t\t},",
       "\t\tLifecycleHue: map[string]lipgloss.AdaptiveColor{",
-      ...LIFE_ORDER.map((s) => `\t\t\t"${s}": ${goAdaptive(plife[s].color.light, plife[s].color.dark)},`),
+      ...alignMap(LIFE_ORDER.map((s) => `\t\t\t"${s}": ${goAdaptive(plife[s].color.light, plife[s].color.dark)},`)),
       "\t\t},",
       "\t\tANSI16: map[string]int{",
-      ...SEMROLE_TONES.map(([, role]) => `\t\t\t"${role}": ${SEMROLE_ANSI16[role]},`),
+      ...alignMap(SEMROLE_TONES.map(([, role]) => `\t\t\t"${role}": ${SEMROLE_ANSI16[role]},`)),
       "\t\t},",
       "\t},",
     ];
@@ -1285,7 +1287,7 @@ function cliChromeGo(themes = loadThemes()) {
     const p = themePalette(spec);
     return [
       `\t${JSON.stringify(name)}: {Chrome: map[string]lipgloss.AdaptiveColor{`,
-      ...all.map(([, role]) => { const h = cliChromeHex(role, p); return `\t\t\t"${role}": ${goAdaptive(h.light, h.dark)},`; }),
+      ...alignMap(all.map(([, role]) => { const h = cliChromeHex(role, p); return `\t\t"${role}": ${goAdaptive(h.light, h.dark)},`; })),
       "\t}},",
     ];
   };
