@@ -46,6 +46,7 @@ do_order(){ # $1 = task id
   echo "$R" | grep -q '"error"' && { say "claim error $ID: $(echo "$R"|head -c 100)"; return 0; }
   say "✅ CLAIMED $ID (fence $FENCE) — running $FLEET_AGENT on the brief"
   bp task pulse "$ID" "$WORKER" --now "executing $ID via $FLEET_AGENT" --yes >/dev/null 2>&1
+  bp fleet beat "$WORKER" --status working --ttl 30 --agent "$FLEET_AGENT" -o json >/dev/null 2>&1 || true
   local D="/tmp/fleet-run/$ID-$WORKER"; rm -rf "$D"; mkdir -p "$D"; ( cd "$D" || exit
     export FLEET_PROMPT
     FLEET_PROMPT="You are fleet worker '$WORKER' (agent: $FLEET_AGENT). Execute this ORDER exactly and completely IN THIS TURN. Create any file it names at the EXACT absolute path given. Do NOT background the work or spawn anything that outlives this turn. Be correct and rigorous. ORDER: $BRIEF"
@@ -54,6 +55,7 @@ do_order(){ # $1 = task id
   bp task stamp "$ID" "$WORKER" "$E" --criterion 0 --met --evidence "worker $WORKER executed the order via $FLEET_AGENT (headless); artifact at the path named in the brief" --criterion-text "$CTEXT" --yes >/dev/null 2>&1
   E=$(field "$ID" epoch)
   bp task close "$ID" "$WORKER" "$E" --yes >/dev/null 2>&1
+  bp fleet beat "$WORKER" --status idle --ttl 30 --agent "$FLEET_AGENT" -o json >/dev/null 2>&1 || true
   say "🏁 CLOSED $ID (fence released) — done"
 }
 
@@ -62,11 +64,17 @@ case "$MODE" in
   listen)
     WORKER="${1:?worker}"
     say "listener online in $(bp use 2>/dev/null | python3 -c "import sys,json;a=json.load(sys.stdin)['active'];print(a['workspace']+'/'+a['project']+'/'+a['dataset'])" 2>/dev/null) — waiting for orders"
+    # Native presence: register + declare idle (ttl_s 30 — the bash runner beats every ~6s tick,
+    # so a stale row means the loop itself died, PDF-D22). NEVER '--worker' (exits 2, swallowed by
+    # || true = a beat into the void). The beat shares fate with this foreground loop — no sidecar.
+    bp fleet beat "$WORKER" --status idle --ttl 30 --agent "$FLEET_AGENT" -o json >/dev/null 2>&1 || true
     declare -A seen
     while true; do
       for ID in $(bp task ready -o json 2>/dev/null | python3 -c "import sys,json;[print(d['doc_id']) for d in json.load(sys.stdin).get('docs',[]) if d.get('assignee')=='$WORKER']" 2>/dev/null); do
         [ -n "${seen[$ID]:-}" ] && continue; seen[$ID]=1; do_order "$ID"
       done
+      # idle beat every poll cycle — keeps the row ONLINE while parked, dies with the loop.
+      bp fleet beat "$WORKER" --status idle --ttl 30 --agent "$FLEET_AGENT" -o json >/dev/null 2>&1 || true
       sleep 6
     done ;;
   *) echo "usage: fleet-run.sh listen <worker> | once <task-id> <worker>" >&2; exit 2 ;;

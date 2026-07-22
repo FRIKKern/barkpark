@@ -26,7 +26,15 @@ CLASS_COST = {"light": 1, "standard": 4, "heavy": 12, "xl": 30}
 
 
 def _online(listener: dict, now: float) -> bool:
-    """A listener is live only if its heartbeat is fresh within its ttl (stale = offline)."""
+    """A listener is live iff it is not offline.
+
+    Prefer the SERVER-COMPUTED `status` field (the roster's one staleness formula, PDF-D20): when
+    present, `status == "offline"` is authoritative and the client never re-derives liveness from
+    raw timestamps. Only for rows lacking a computed status (e.g. a hand-built roster) fall back to
+    the local heartbeat-freshness math (stale = offline)."""
+    status = listener.get("status")
+    if status is not None:
+        return status != "offline"
     return (now - listener.get("last_seen", now)) <= listener.get("ttl_s", 120)
 
 
@@ -140,7 +148,16 @@ def _selftest():
     r = route(poor, [{"id": "exp", "klass": "heavy"}])  # heavy costs 12 > budget 5
     check("over-budget heavy refused", r["assignments"] == [] and r["unplaceable"][0]["reason"] == "all_capable_busy_or_over_budget")
 
-    print(f"\nROUTER PROOF: {ok}/8 checks passed — best-fit, capacity-, fence-, budget- and cap-aware.")
+    # 9) Server field wins: a row the server marked OFFLINE stays excluded even with a FRESH
+    #    last_seen (the arithmetic fallback alone would call it online — the computed status must
+    #    override). Proves the PDF-D20 preference: one server-side staleness formula, not the client.
+    ghost = [{"worker": "ghost", "max_class": "xl", "slots_total": 1, "slots_free": 1,
+              "status": "offline", "last_seen": 0, "ttl_s": 900}]
+    r = route(ghost, [{"id": "huge", "klass": "xl"}], now=0)  # elapsed 0 << ttl 900, yet server says offline
+    check("server status=offline excludes a fresh-last_seen row",
+          r["assignments"] == [] and r["unplaceable"] == [{"order": "huge", "reason": "no_capacity_for_class"}])
+
+    print(f"\nROUTER PROOF: {ok}/9 checks passed — best-fit, capacity-, fence-, budget- and cap-aware; server status wins.")
 
 
 if __name__ == "__main__":
