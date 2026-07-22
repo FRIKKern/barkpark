@@ -243,12 +243,156 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   field wins) — without it the new branch is untested. The local skill dirs are untracked-but-
   byte-identical to origin/main: edit ONLY in the worktree; the untracked local copies are inert.
 
+## Wave B decisions (Decide, 2026-07-22 — 14 survey lanes + 8 verify lanes with run proofs; every load-bearing claim below was fired live, not inferred)
+
+- **PDF-D34 — STRUCTURED CAPACITY ON THE EXISTING BEAT (the ONE server change).** `beat_fields/1`
+  silently drops any non-string capacity (proven live: map body → 200 `ok:true`, roster stores
+  null; JSON-string round-trips byte-identical). Fix: a `put_capacity/2` accepting THREE shapes —
+  (a) native map (Phoenix-decoded JSON body, for glue/curl), (b) a JSON string that decodes to a
+  map (LOAD-BEARING for the CLI: flags always ride the query string, `commandFlagBelongsInBody`
+  hardcodes `cycle.open` only, so `--capacity` stays `type:string` carrying JSON text — zero Go),
+  (c) legacy non-empty plain string stored as-is (back-compat, existing rows untouched).
+  Validation STRICT: `size_class` ∈ `light|standard|heavy|xl` (a live off-vocab row — `"big"` —
+  would silently degrade via route.py's `CLASS.get(...,2)` default; refuse it at the gate);
+  `slots_total`/`slots_free` integers ≥ 0, `slots_free ≤ slots_total`; `budget` optional number
+  ≥ 0. Invalid map/JSON-map → `{:error, :invalid_capacity}` → 422 arm mirroring
+  `:invalid_status`/`:invalid_ttl`. The protective test sends a map and MUST FAIL on pre-fix main
+  (the silent-drop is untested today — `fleet_test.exs` only ever sends `"1 task"`). Roster needs
+  zero change (`to_row` passes the stored value through — verified).
+- **PDF-D35 — NAMING SEAM RULED: the server speaks `size_class`; the glue transforms.** The
+  stored field is `size_class` (PDF-D7 charter vocabulary). route.py keeps `max_class` and stays
+  PURE and UNTOUCHED — its 9-check selftest is the iteration surface. `helpers/transform.py`
+  renames `size_class`→`max_class`, decodes all three capacity shapes, converts ISO8601
+  `last_seen`→epoch float (route.py does float math — fed a string it breaks), and passes the
+  server `status` field through (PDF-D20: server wins). The transform is a PROVEN code shape:
+  dress-rehearsed against synthetic server-shaped rows (mixed batch → heavy-on-big +
+  light-on-lean; capacity swap → assignment FLIPS with names constant; cap → all-spend_cap) and
+  against the real live roster row (no crash, offline row correctly excluded). The
+  worker-protocol paper's `max_size:"M"` vocabulary is DEAD — paper gets a correction line
+  (backlog), never the code.
+- **PDF-D36 — MEASUREMENT LAW.** `size_class` derives from TOTAL RAM (stable; never fluctuating
+  available-RAM). Platform-branched probes, both proven live: Darwin `sysctl -n hw.memsize` /
+  `hw.ncpu` (mac: 16.0 GiB, 10 cores); Linux `awk /proc/meminfo MemTotal` / `nproc` (guerrilla:
+  3.73 GiB, 2 cores — and macOS has NO `nproc`, a single shared one-liner is impossible).
+  Threshold table with EXPLICIT inclusivity — a real, common machine sits exactly on the 16-GiB
+  seam: light `RAM < 4`; standard `4 ≤ RAM < 16`; heavy `16 ≤ RAM < 64`; xl `RAM ≥ 64` (GiB).
+  `FLEET_MAX_CLASS` env var (house convention; net-new, zero collisions) is the declared CEILING;
+  effective = min(observed, declared) computed AT THE EDGE before the beat — route.py never
+  learns about ceilings. `slots_free` is the LOOP'S OWN CONTROL-FLOW STATE (1 parked idle, 0 from
+  claim to close) — never an OS probe. PINNED INVARIANT: sourcing slots_free from anything but
+  live loop state breaks the offline≡busy equivalence (PDF-D40).
+- **PDF-D37 — SPEND LEDGER + CAP LAW.** ONE row format, append-only JSONL, one line per CLOSED
+  order: `{ts, order_id, agent, cost_usd|null, tokens|null, source, klass}`. Deterministic path
+  OUTSIDE per-order scratch churn (`${FLEET_HOME:-$HOME/.barkpark-fleet}/<worker>/spend.jsonl`;
+  orchestrator keeps its own under `.../orchestrator/`). NEVER auto-reset — an auto-reset
+  silently un-trips the cap; rotation is an explicit operator action. Denomination by provenance:
+  **claude** = real dollars (`claude -p --output-format json` top-level `total_cost_usd` —
+  live-proven; its native `--max-budget-usd` fires `subtype:error_max_budget_usd` — a third brake
+  for free; floor cost measured ~$0.20/invocation in a fat-context harness — re-measure in a lean
+  listener before using as a constant); **codex** = tokens ONLY, read from `codex exec --json`
+  stdout's `turn.completed.usage` (VERIFIED CORRECTION: the `token_count` event exists only in
+  the on-disk `~/.codex/sessions` rollout file, NEVER on exec stdout) — dollars via `CLASS_COST`
+  fallback, raw tokens recorded for honesty; **custom** = `CLASS_COST` fallback. Every row
+  carries `source` (`claude-cli-json | codex-turn-usage | class-cost-fallback`).
+  `FLEET_SPEND_CAP` env var; the glue computes `spend_cap_reached = sum(ledger) ≥ cap` by
+  RE-READING the file before EVERY batch (liveness is proven by the R6 zero-the-ledger control).
+  Malformed ledger row = loud ABORT — never coerce to 0 (brake disabled) or ∞ (brake stuck). TWO
+  independent brakes that cannot double-count (route.py's cap short-circuit runs BEFORE
+  per-listener budget bookkeeping — verified code order): fleet cap at dispatch + per-listener
+  `budget` fed by the beat. Cap scope is ORCHESTRATOR-LOCAL by honest design (one orchestrator
+  per scope — PDF-D8/D9); the ledger file prints in every proof transcript.
+- **PDF-D38 — GLUE SHAPE.** NEW `.claude/skills/fleet-orchestrator/helpers/dispatch.sh` +
+  `helpers/transform.py`; NEVER a `route.py --live` mode (purity law — "Pure function. No I/O"
+  stays literally true). Pipeline: `bp fleet roster -o json` → transform.py → cap gate (ledger
+  re-read) → `route.py --route` → `file-order.sh` per assignment (assignee = winner) → one
+  printed line PER DECISION with its reason. The glue logs excluded-offline rows BEFORE calling
+  route.py: route.py drops offline rows before computing `capable_exists`, so its
+  `no_capacity_for_class` honestly cannot distinguish "no such box" from "the sole capable box is
+  offline/busy-stale" — the glue print restores honesty, zero route.py change. Cap tripped: one
+  loud freeze line, every order printed `spend_cap`, file-order.sh NEVER invoked.
+- **PDF-D39 — EGRESS LEAK: SLICE-NOW, OWN PR (PDF-D31 superseded on evidence).** The leak FIRED
+  empirically on guerrilla: a generic workspace SSE subscriber received the full listener
+  registration doc (worker, capacity, status — eventId 70357) and both delete events; only
+  zero-row update beats are silent (PDF-D17 held). A live external Go-http-client reconnects to
+  that exact endpoint at the same workspace scope (~15-20 min cadence). Severity framing:
+  INTRA-workspace presence disclosure to non-fleet consumers — not cross-tenant (topic is
+  workspace-scoped). This wave opens api/** anyway, so D31's only deferral argument dissolves.
+  Fix = `type:"listener"` excluded at all three sites — `maybe_dispatch_webhook` head-guard,
+  `forward_event?` type clause, `replay_since` both where-clauses — mirroring the shipped Outbox
+  idiom, protective tests mutation-proven (guard removed → test fails), its OWN PR (guard+fix
+  decoupling law). Replay caveat: the already-logged registration events (eventId 70357 + two
+  deletes) stay in mutation_events history; the replay filter is what retroactively muzzles them.
+- **PDF-D40 — OFFLINE ≡ BUSY (proven dispatch-equivalence; ZERO Wave B code).** A busy worker
+  has `slots_free=0` by construction, so route.py refuses it via two redundant guards
+  (online-but-slots-0 filter, offline drop); fresh-busy vs stale-busy changes only the REASON
+  STRING, never the dispatch decision — proven by truth-table runs (sole capable box: refused
+  both ways; another capable box present: identical placement both ways). Mid-order staleness
+  (the bash runner reads offline from claim+30s for any order >30s — the COMMON case, not an
+  edge) is fail-closed CORRECT; no mid-turn heartbeat exists or is needed (PDF-D22 ban holds).
+  One honest doc line lands in the listener skill + a runner comment. Do NOT conflate with
+  PDF-D41 — opposite cases (busy wants refusal; parked-idle wants reachability).
+- **PDF-D41 — PRESENCE-HONESTY RULED: docs, not code (closes `pdf-bl-presence-honesty-sparse`).**
+  route.py's offline-exclusion STAYS for auto-routing (load-bearing for this wave's proof). A
+  DIRECTLY-NAMED assignee bypasses the router entirely: `file-order.sh` has and needs NO presence
+  check (verified — zero status/roster reads); the order sits on the ledger until the parked
+  listener's persistent SSE Monitor wakes it. Amendments: orchestrator SKILL.md §0/§6 gain the
+  named-assignee carve-out ("never dispatch to OFFLINE" applies to the AUTO-router picking among
+  candidates, not to naming a known parked listener); listener SKILL.md honesty note gains
+  "offline does not remove you from the ledger or block orders addressed to you by name."
+  Quiet-vs-dead roster render (ttl_s≥900 heuristic, client-side) = OPTIONAL polish, never a
+  requirement. No fifth verb, no stored state (PDF-D23 holds).
+- **PDF-D42 — PROOF LAW (`scripts/pdf-efficiency-proof.sh`).** Inherits the kill-listener
+  substrate verbatim (fresh origin/main worktree, short `BARKPARK_HOME`, pinned
+  `PDS_SCRATCH_POINTER`, PGID kill under `set -m`, `--plan`/`--negctl`, PASS/ABORT/FAIL ladder —
+  PDF-D28/D29). Rungs: **R0** precondition — roster 200 + a structured capacity beat round-trips
+  on scratch (post-fix assert; the fail-on-main anchor lives in the server slice's protective
+  test); **R1** two stub curl-loop listeners beat genuinely different measured profiles; **R2**
+  mixed batch → heavy-on-big + light-on-lean asserted from the LIVE roster through
+  dispatch.sh/transform/route.py; **R3** SWAP control — capacities exchanged, worker names
+  constant → assignment must FLIP (proves content-keyed routing, not identity); **R4** cap
+  tripped → freeze fires: one loud line, every order `spend_cap`, ZERO orders filed; **R5**
+  untripped control — fresh ledger under cap → dispatch must PROCEED; **R6** ledger-ZEROED
+  live-read control — zero the file in place, NO process restart → freeze must NOT fire (catches
+  a cached `spend_cap_reached`); **R7** malformed ledger row → named ABORT, never PASS/FAIL.
+  Filing legs use INLINE curls with DRAFT-ONLY filing (createOrReplace → query
+  `perspective=raw` → delete): `file-order.sh` hardcodes prod via `bp whoami` and must NEVER be
+  pointed at scratch unmodified, and a fresh scratch has ZERO registered tags so the publish wall
+  422s (`label_spine` then `unknown_tag` — proven live). "Zero tasks filed" = raw row-count
+  delta 0.
+- **PDF-D43 — LOCAL ELIXIR GATE IS REAL (OOM lore scoped away).** Definitively proven:
+  `cd api && CC=clang mix test test/barkpark/tasks/fleet_test.exs` passes 17/17 in a fresh
+  origin/main worktree — 5m46s cold (one-time first-compile; deps.get + 805-file app), ~7s warm,
+  peak RSS ~455 MB on a 16 GB host. The historical OOM is `mix phx.server`/release boot — a
+  DIFFERENT code path; targeted `mix test <file>` never hits it. `CC=clang` is LOAD-BEARING
+  (`cc` is shell-aliased to a Claude wrapper; argon2's NIF build shells out to `cc`). Build
+  rhythm: ONE worktree per slice, iterate warm — never fresh-worktree-per-commit. Version note:
+  local Elixir 1.19.5 vs CI 1.18.1 (format-sensitive surfaces only).
+- **PDF-D44 — WAVE A RESIDUE RULINGS.** (a) `pdf-wa-tenant-scope-global-read`: CLOSED superseded
+  — its purpose (guard green on main) landed via merged #5630; AC2's "#5647 MERGED" was literally
+  unsatisfiable (#5647 CLOSED-not-merged, correctly — its content was redundant);
+  `tenant-scope-check.sh` PASSES on fresh origin/main (48 baselined, exit 0). Do NOT re-fix. (b)
+  `pdf-r2-wave-log` branch (c14c85252, 18-line r2 REVIEW log, no PR ever opened): content FOLDED
+  into this charter's wave log verbatim; the charter-landing slice deletes the branch after its
+  PR merges. (c) `pdf-bl-checkout-steward` stays open with REAL remaining work: the
+  `worktree-fleet-provider-neutral` DIRECTORY still exists on disk (clean; `git worktree remove`
+  + branch prune remain). (d) Stray guerrilla probe listener rows: already deleted (roster
+  `documents:[]` verified); delete recipe = dataset-in-path `/v1/data/mutate/production` — the
+  workspace-path query-param form 404s.
+- **PDF-D45 — BUILDER SUBSTRATE (this wave).** The primary checkout is POISON: ~167 behind, 88
+  dirty foreign files, 4 of 6 local fleet-tooling files are stale pre-r2 copies, `fleet.ex`
+  absent from local HEAD entirely. Every builder worktrees from freshly-fetched `origin/main`,
+  edits skills ONLY in the worktree (r2 law re-affirmed), anchors line numbers to origin/main.
+  The charter reaches origin/main via the charter-landing slice: COPY THE FILE from the Decide
+  commit (`git show <sha>:<path> > <path>`), never cherry-pick — local main is diverged and
+  content-copy is conflict-proof.
+
 ## Roadmap (waves; interleaved with MVP stages per the build plan)
 
 - **Wave A — Presence & roster** (FIRST): `listener` presence record (worker · status · scope ·
   capacity · last_seen · ttl) + heartbeat in listener skill/runner + `bp fleet roster` (+
   console-readable). Proof: kill a listener → OFFLINE exactly at TTL.
-- **Wave B — Efficiency loop**: measured capacity heartbeats feed route.py live; cap halts dispatch.
+- **Wave B — Efficiency loop** (IN FLIGHT 2026-07-22): measured capacity heartbeats feed
+  route.py live; cap halts dispatch. Decisions PDF-D34..D45; proof `pdf-efficiency-proof.sh`.
 - **MVP-0 — Visual setup + first offload** (console journey; Screens 0-2 of the GUI plan).
 - **Wave C — Cloud add-support, one action** (provision + bind + scrubbed pull + listener).
 - **Wave D — Durability**: fence-lifecycle fix; lease-lapse recovery; runner robustness.
@@ -276,3 +420,33 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   `pdf-wa-charter-recovery-pr` (opus, steward safe half). Backlog filed:
   `pdf-bl-listener-egress-guard`, `pdf-bl-presence-honesty-sparse`. Wave Paper:
   `personal-dev-fleet-wave-2026-07-22-r2`.
+- **2026-07-22 · Wave A round-2 REVIEW (grade A−).** All 3 slices landed green and were
+  adversarially re-verified. `pdf-wa-runner-skills-native-presence`: final branch
+  `loop-epic/runner-and-both-fleet-skills-speak-nativ-0-r` (one review fix — the listener skill
+  now says `working` at claim / `idle` at close, matching the runner and the orchestrator's
+  pill); route.py 9th check re-proven load-bearing by mutation. `pdf-wa-kill-listener-proof`:
+  branch `loop-epic/kill-a-listener-executable-proof-corpse--1` UNCHANGED — the full gate was
+  independently re-run in the review worktree (7/7 PASS, first offline at 11.30s against
+  boundary 11; negctl 7/7, exit 0); its transcript is the epic's criterion-0 evidence (LEAD
+  stamps per PDF-D33 after merge). `pdf-wa-charter-recovery-pr`: PR #5638 open, docs-only,
+  gate green; its CI reds are MAIN-INHERITED, proven — `tenant-scope-check.sh` exits 1 on
+  origin/main itself because round 1's `Tasks.Fleet` in-lock by-PK re-read lacked a
+  `# global-read:` justification. Review FIXED that at the root: PR #5647
+  (`pdf-r2-tenant-scope-global-read`, task `pdf-wa-tenant-scope-global-read`) — one comment,
+  zero behavior change, guard PASS locally; merge it after the Elixir Test gate. [Post-hoc note,
+  Wave B Decide: #5638/#5649/#5650 all MERGED; #5647 went CLOSED-redundant — #5630 landed the
+  identical fix first; see PDF-D44.] Next: Wave B efficiency loop + the seeded backlog.
+- **2026-07-22 · Wave B DECIDE (the efficiency loop).** 14 survey lanes + 8 verify lanes (all
+  claims fired live: silent-drop reproduced on scratch, JSON-string capacity byte-identical
+  round-trip, transform+router dress rehearsal incl. swap-flip and cap-freeze, SSE egress leak
+  FIRED and cleaned up, offline≡busy truth-tabled, local Elixir gate 17/17, codex stdout shape
+  corrected). Decisions PDF-D34..D45. Wave = 6 slices: `pdf-wb-capacity-contract` (r1, opus,
+  api/** server seam) · `pdf-wb-edge-measurement` (r1, opus, runner+listener skill) ·
+  `pdf-wb-dispatch-glue` (r1, fable, dispatch.sh+transform.py+orchestrator skill) ·
+  `pdf-bl-listener-egress-guard` (r1, opus, PROMOTED slice-now per PDF-D39, own PR) ·
+  `pdf-wb-charter-landing` (r1, opus, this file → origin/main + r2 branch cleanup) ·
+  `pdf-wb-efficiency-proof` (r2 AFTER capacity-contract + dispatch-glue merge, fable, the
+  proof-that-must-fire R0-R7). Residue executed at Decide: `pdf-wa-tenant-scope-global-read`
+  closed superseded-by-#5630; `pdf-bl-presence-honesty-sparse` ruled by PDF-D41 (charter
+  criterion stamped; implementation rides the glue slice). Wave Paper:
+  `personal-dev-fleet-wave-b-2026-07-22`.
