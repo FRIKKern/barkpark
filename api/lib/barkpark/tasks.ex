@@ -148,6 +148,14 @@ defmodule Barkpark.Tasks do
   @spec task_schema(String.t()) :: SchemaDefinition.t()
   def task_schema(dataset \\ "production"), do: Schema.task_schema(dataset)
 
+  @doc """
+  Just the `listener` schema struct (Personal Dev Fleet presence).
+  `dataset` defaults to `"production"`.
+  See `Barkpark.Tasks.Schema.listener_schema/1`.
+  """
+  @spec listener_schema(String.t()) :: SchemaDefinition.t()
+  def listener_schema(dataset \\ "production"), do: Schema.listener_schema(dataset)
+
   # ─── Validation (extracted → Barkpark.Tasks.Validation) ─────────────────────
 
   @doc """

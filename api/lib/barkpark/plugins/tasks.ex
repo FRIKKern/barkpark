@@ -63,8 +63,12 @@ defmodule Barkpark.Plugins.Tasks do
   require Logger
 
   @doc """
-  Declares the `task` document type by delegating to
-  `Barkpark.Tasks.schema_definitions/1`.
+  Declares the `task` and `listener` document types by delegating to
+  `Barkpark.Tasks.schema_definitions/1` (`listener` is Personal Dev Fleet
+  presence — see `Barkpark.Tasks.Fleet`; its type name is exactly
+  `"listener"`, never `"task"`, so the literal `type == "task"` filters in
+  the GitHub outbox, `/v1/tasks/events` and `/v1/tasks/prime` structurally
+  exclude presence rows).
 
   `dataset` comes from `opts[:dataset]` when supplied (Bootstrap calls this with
   `[]`), defaulting to `"production"` — matching every other seed schema and the
@@ -424,6 +428,12 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
       {:post, "/tasks/:doc_id/move", BarkparkWeb.TasksController, :move, auth: :token_root},
       {:post, "/tasks/:doc_id/stage", BarkparkWeb.TasksController, :stage, auth: :token_root},
+      # Personal Dev Fleet presence (Wave A) — literal paths mount at
+      # /v1/fleet/* on the same :token_root bucket (the flat /v1/tasks family;
+      # AssignDefaultScope resolves scope — PDF-D19). Presence VOCABULARY, not
+      # an order protocol: beat writes the listener row, roster reads it.
+      {:post, "/fleet/beat", BarkparkWeb.TasksController, :fleet_beat, auth: :token_root},
+      {:get, "/fleet/roster", BarkparkWeb.TasksController, :fleet_roster, auth: :token_root},
       # Barkpark Projects — the native task BOARD (read-only :ops LiveView),
       # mounted at /admin/projects (the :ops bucket). /admin (not /studio) so
       # the desk-link scoper leaves the path intact — see desk_items/1 and the
@@ -476,6 +486,13 @@ defmodule Barkpark.Plugins.Tasks do
       transition: considering | researching | open — enforces the Transitions
       legality table, writes/clears content.engagement, no epoch fence). WRITES,
       minimal receipt.
+
+  Plus the `fleet` noun (Personal Dev Fleet presence, Wave A):
+
+    * `roster` — `GET /v1/fleet/roster`. READ, table (the `documents` envelope
+      key — PDF-D21).
+    * `beat` — `POST /v1/fleet/beat`. WRITES, minimal receipt (zero-row atomic
+      heartbeat — PDF-D17).
   """
   @impl Barkpark.Plugin
   def cli_commands do
@@ -999,6 +1016,89 @@ defmodule Barkpark.Plugins.Tasks do
             type: "int",
             summary:
               "Optional acceptance_criteria index this pulse is working on (boards spin that lock)."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      # ── The fleet noun (Personal Dev Fleet, Wave A) ──────────────────────
+      # Presence vocabulary over /v1/fleet/* — beat (heartbeat write) and
+      # roster (fail-closed presence read). Dispatch and table rendering are
+      # manifest-driven: ZERO Go changes (the roster envelope's `documents`
+      # key is what every installed bp binary renders as a real table).
+      %{
+        id: "fleet.roster",
+        noun: "fleet",
+        verb: "roster",
+        summary:
+          "The fleet roster: every listener with online/offline computed server-side (offline iff now - last_seen > ttl_s; missing last_seen = offline, fail closed) plus each worker's current in_progress task.",
+        http: %{method: "GET", path_template: "/v1/fleet/roster"},
+        auth_tier: "read",
+        args: [],
+        flags: [
+          %{
+            name: "dataset",
+            type: "string",
+            summary: "Dataset to read the roster from (defaults to production)."
+          }
+        ],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "table",
+        scoped_prefix: nil
+      },
+      %{
+        id: "fleet.beat",
+        noun: "fleet",
+        verb: "beat",
+        summary:
+          "Listener presence heartbeat: upsert this worker's listener row (first beat registers it; every later beat is one zero-row atomic write). last_seen is server-stamped — send ttl as data, never a timestamp.",
+        http: %{method: "POST", path_template: "/v1/fleet/beat"},
+        auth_tier: "write",
+        args: [
+          %{
+            name: "worker",
+            required: true,
+            type: "string",
+            summary: "Worker identity beating (the unique presence key)."
+          }
+        ],
+        flags: [
+          %{
+            name: "status",
+            type: "string",
+            summary: "Self-declared state: idle | working | blocked | provisioning."
+          },
+          %{
+            name: "ttl",
+            type: "int",
+            summary: "Self-declared staleness budget in seconds (default 120)."
+          },
+          %{
+            name: "agent",
+            type: "string",
+            summary: "What runs the session: claude-code | codex | custom."
+          },
+          %{
+            name: "scope",
+            type: "string",
+            summary: "What the listener works on (repo, area, project)."
+          },
+          %{
+            name: "capacity",
+            type: "string",
+            summary: "Free-form capacity hint, e.g. \"1 task\"."
+          },
+          %{
+            name: "dataset",
+            type: "string",
+            summary: "Dataset to write the listener row into (defaults to production)."
           }
         ],
         writes: true,

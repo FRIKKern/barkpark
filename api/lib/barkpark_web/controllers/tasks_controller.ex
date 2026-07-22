@@ -45,6 +45,7 @@ defmodule BarkparkWeb.TasksController do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.{Content, Repo, Tasks}
+  alias Barkpark.Tasks.Fleet
   alias Barkpark.Content.Document
   alias Barkpark.Content.Graph
   alias Barkpark.Tasks.Edge
@@ -1352,6 +1353,58 @@ defmodule BarkparkWeb.TasksController do
       %{id: id} -> id
       _ -> nil
     end
+  end
+
+  # ─── POST /v1/fleet/beat ────────────────────────────────────────────────
+  # Personal Dev Fleet presence heartbeat (Barkpark.Tasks.Fleet). Registration
+  # rides the plain Content path; every later beat is the zero-row atomic
+  # write (PDF-D17). `dataset` query param defaults "production", the same
+  # request_dataset/1 the graph reads use; scope opts feed ONLY the
+  # registration create.
+
+  def fleet_beat(conn, params) do
+    dataset = request_dataset(conn)
+
+    case Fleet.beat(params, dataset, scope_opts(conn)) do
+      {:ok, receipt} ->
+        json(conn, %{
+          ok: true,
+          registered: receipt.registered,
+          doc: receipt.doc
+        })
+
+      {:error, :missing_worker} ->
+        bad_request(conn, "worker is required")
+
+      {:error, :invalid_status} ->
+        unprocessable(conn, "invalid_status", "status must be one of: " <> Enum.join(Fleet.statuses(), " | "))
+
+      {:error, :invalid_ttl} ->
+        unprocessable(conn, "invalid_ttl", "ttl must be a positive integer (seconds)")
+
+      {:error, :stale_beat} ->
+        conflict(conn, :stale_beat, nil)
+
+      {:error, other} ->
+        unprocessable(conn, "beat_failed", "beat failed: #{inspect(other)}")
+    end
+  end
+
+  # ─── GET /v1/fleet/roster ───────────────────────────────────────────────
+  # The fleet roster — global-per-dataset (PDF-D19, no workspace clause) with
+  # online/offline computed at read time, fail closed. The envelope key is
+  # `documents` (PDF-D21): the one key every installed bp binary renders as a
+  # real table; a bespoke key would degrade to one crammed KV cell.
+
+  def fleet_roster(conn, _params) do
+    dataset = request_dataset(conn)
+    json(conn, %{ok: true, documents: Fleet.roster(dataset)})
+  end
+
+  defp unprocessable(conn, reason, message) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{ok: false, reason: reason, message: message})
   end
 
   defp maybe_put_notices(map, []), do: map
