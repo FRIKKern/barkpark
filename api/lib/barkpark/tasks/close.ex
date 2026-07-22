@@ -125,7 +125,7 @@ defmodule Barkpark.Tasks.Close do
       end)
 
     case result do
-      {:ok, {:ok, :stamped, indices, updated, broadcasts}} ->
+      {:ok, {:ok, :stamped, indices, _updated, broadcasts}} ->
         :ok = emit_broadcasts(broadcasts)
         {:ok, :stamped, indices}
 
