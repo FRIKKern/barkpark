@@ -196,5 +196,42 @@ defmodule Barkpark.Search.IntelligenceSuggestionsBoundsTest do
       assert Enum.map(capped, & &1.query) == ["gamma"],
              "cap=1 must keep only the top-count row via SQL ORDER BY/LIMIT"
     end
+
+    test "the cap governs the CRYSTAL aggregates too — ORDER BY direction + LIMIT are SQL-side" do
+      # The events-only cap-lever above leaves the two crystal aggregates' ORDER BY
+      # DESC direction behaviorally unproven: a reversed direction (keep the LEAST
+      # popular / least zero-hit) or a dropped crystal LIMIT still passes the
+      # SQL-text harness (LIMIT present) and the events-only lever (no crystals).
+      # Seed two crystals with OPPOSITE success/zero-hit rankings and cap to 1 so
+      # exactly the TOP crystal survives EACH aggregate — reds if either crystal
+      # ORDER BY is reversed, or either crystal LIMIT is dropped.
+      day = Date.add(Date.utc_today(), -3)
+
+      for {q, success, zero_hits} <- [{"quartz", 9, 2}, {"flint", 2, 9}] do
+        Repo.insert!(%Crystal{
+          surface: @surface,
+          scope: @scope,
+          period: "day",
+          period_start: day,
+          query_normalized: q,
+          success_count: success,
+          zero_hit_count: zero_hits,
+          avg_result_count: 1.0
+        })
+      end
+
+      Application.put_env(:barkpark, :search_suggestions_source_cap, 1)
+      on_exit(fn -> Application.delete_env(:barkpark, :search_suggestions_source_cap) end)
+
+      result = Intelligence.suggestions(@surface, @scope, "actor-crystal", nil, min_search_count: 1)
+
+      # popular_from_crystals: ORDER BY sum(success_count) DESC LIMIT 1 -> quartz.
+      assert Enum.map(result.popular, & &1.query) == ["quartz"],
+             "cap=1 must keep the highest-SUCCESS crystal via SQL ORDER BY DESC/LIMIT"
+
+      # nohits_from_crystals: ORDER BY sum(zero_hit_count) DESC LIMIT 1 -> flint.
+      assert Enum.map(result.nohits, & &1.query) == ["flint"],
+             "cap=1 must keep the highest-ZERO-HIT crystal via SQL ORDER BY DESC/LIMIT"
+    end
   end
 end
