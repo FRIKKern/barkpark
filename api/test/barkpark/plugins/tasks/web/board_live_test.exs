@@ -14,6 +14,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
@@ -29,6 +30,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
   @repo_query_event [:barkpark, :repo, :query]
 
   setup do
+    # HERMETIC GUARD (tlv-bl-board-live-connected-mount-regression): the board
+    # mount projects the WHOLE `type:task` corpus of the production dataset, so
+    # every exact-corpus assertion below (momentum pct, done counts, empty
+    # banner, filter facets) is poisoned by any task document that survives in
+    # the shared test database. Such rows are real: `cycle_fleet_test`'s
+    # `Sandbox.unboxed_run` COMMITS its fixtures, and a killed run strands them
+    # forever (`mix test` migrates, never resets). Deleting strays here runs
+    # inside this test's sandbox transaction — it rolls back, the database
+    # keeps its rows, and THIS test sees a clean corpus.
+    Repo.delete_all(from(d in Document, where: d.type == "task"))
+
     {:ok, _} =
       Auth.create_token(@admin_token, "projects board admin", "production", [
         "read",
