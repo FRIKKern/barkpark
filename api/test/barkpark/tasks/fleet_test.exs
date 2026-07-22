@@ -221,6 +221,21 @@ defmodule Barkpark.Tasks.FleetTest do
     assert roster_row(@dataset, patient, now: now)["status"] == "blocked"
   end
 
+  test "a provisioner-written provisioning row renders verbatim while fresh (PDF-D23)",
+       %{scope: scope} do
+    # Wave C writes `provisioning` directly (never via the beat) — the roster
+    # must pass it through as stored vocab, and still fail-close on staleness.
+    now = DateTime.utc_now()
+    worker = uniq("prov")
+
+    mk_listener!(worker, %{"last_seen" => iso_ago(now, 5), "status" => "provisioning"}, scope)
+
+    assert roster_row(@dataset, worker, now: now)["status"] == "provisioning"
+
+    late = DateTime.add(now, 121, :second)
+    assert roster_row(@dataset, worker, now: late)["status"] == "offline"
+  end
+
   test "kill-a-listener: a live beat reads online, then reads OFFLINE once its ttl elapses",
        %{scope: scope} do
     worker = uniq("kill")
@@ -245,7 +260,10 @@ defmodule Barkpark.Tasks.FleetTest do
         %{
           "doc_id" => "listener-" <> worker,
           "title" => worker,
-          "content" => %{"worker" => worker, "last_seen" => DateTime.to_iso8601(DateTime.utc_now())}
+          "content" => %{
+            "worker" => worker,
+            "last_seen" => DateTime.to_iso8601(DateTime.utc_now())
+          }
         },
         "staging",
         scope
@@ -302,6 +320,14 @@ defmodule Barkpark.Tasks.FleetTest do
     assert {:error, :invalid_status} =
              Fleet.beat(%{"worker" => uniq("w"), "status" => "sleeping"}, @dataset, scope)
 
+    # PDF-D23: provisioning is provisioner-written (Wave C) — never
+    # beat-declarable. offline is derived-only — never storable.
+    assert {:error, :invalid_status} =
+             Fleet.beat(%{"worker" => uniq("w"), "status" => "provisioning"}, @dataset, scope)
+
+    assert {:error, :invalid_status} =
+             Fleet.beat(%{"worker" => uniq("w"), "status" => "offline"}, @dataset, scope)
+
     assert {:error, :invalid_ttl} =
              Fleet.beat(%{"worker" => uniq("w"), "ttl" => "soon"}, @dataset, scope)
 
@@ -316,8 +342,7 @@ defmodule Barkpark.Tasks.FleetTest do
 
     assert {:post, "/fleet/beat", BarkparkWeb.TasksController, :fleet_beat, auth: :token_root} in routes
 
-    assert {:get, "/fleet/roster", BarkparkWeb.TasksController, :fleet_roster,
-            auth: :token_root} in routes
+    assert {:get, "/fleet/roster", BarkparkWeb.TasksController, :fleet_roster, auth: :token_root} in routes
 
     commands = Barkpark.Plugins.Tasks.cli_commands()
 

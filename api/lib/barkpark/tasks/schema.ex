@@ -720,9 +720,11 @@ defmodule Barkpark.Tasks.Schema do
     * `worker` — the unique presence key (`_id` = `listener-<worker>`).
     * `agent` — what runs the session (`claude-code` | `codex` | `custom`).
     * `scope` — what the listener works on (free-form, e.g. a repo path).
-    * `status` — self-declared: `idle | working | blocked | provisioning`.
-      The roster OVERRIDES this to `"offline"` at read time when the beat is
-      stale (fail-closed) — derived status is never stored.
+    * `status` — self-declared via the beat: `idle | working | blocked`
+      (PDF-D23; `provisioning` is stored vocab too, but written only by the
+      cloud provisioner — Wave C — never beat-declarable). The roster
+      OVERRIDES this to `"offline"` at read time when the beat is stale
+      (fail-closed) — derived status is never stored.
     * `capacity` — free-form capacity hint (e.g. `"1 task"`).
     * `last_seen` — ISO8601, SERVER-stamped by the beat write only; clients
       never send a timestamp.
@@ -770,7 +772,7 @@ defmodule Barkpark.Tasks.Schema do
           "type" => "select",
           "options" => ["idle", "working", "blocked", "provisioning"],
           "description" =>
-            "Self-declared state. The roster computes offline from last_seen vs ttl_s at read time — offline is never stored."
+            "Self-declared via the beat: idle | working | blocked (provisioning is provisioner-written, Wave C). The roster computes offline from last_seen vs ttl_s at read time — offline is never stored."
         },
         %{
           "name" => "capacity",

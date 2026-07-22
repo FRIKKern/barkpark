@@ -1073,7 +1073,7 @@ defmodule Barkpark.Plugins.Tasks do
           %{
             name: "status",
             type: "string",
-            summary: "Self-declared state: idle | working | blocked | provisioning."
+            summary: "Self-declared state: idle | working | blocked."
           },
           %{
             name: "ttl",

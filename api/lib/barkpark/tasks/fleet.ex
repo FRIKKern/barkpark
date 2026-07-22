@@ -61,13 +61,21 @@ defmodule Barkpark.Tasks.Fleet do
 
   @type_name "listener"
   @default_ttl_s 120
-  @statuses ~w(idle working blocked provisioning)
+  # PDF-D23: a beat may self-declare ONLY these. `provisioning` is written by
+  # the cloud provisioner (Wave C), never by a beat; `offline` is derived at
+  # read time, never stored.
+  @self_declared_statuses ~w(idle working blocked)
+  @stored_statuses @self_declared_statuses ++ ["provisioning"]
 
   @doc "The default self-declared staleness budget, in seconds."
   def default_ttl_s, do: @default_ttl_s
 
-  @doc "The self-declarable listener statuses (offline is derived, never stored)."
-  def statuses, do: @statuses
+  @doc """
+  The BEAT-declarable listener statuses (PDF-D23). `provisioning` is stored
+  vocab too, but provisioner-written (Wave C) — a beat cannot declare it;
+  `offline` is derived at read time, never stored.
+  """
+  def statuses, do: @self_declared_statuses
 
   @doc """
   Heartbeat: upsert the caller's listener row, keyed on `params["worker"]`.
@@ -217,7 +225,7 @@ defmodule Barkpark.Tasks.Fleet do
 
   defp stored_status(content) do
     case Map.get(content, "status") do
-      s when s in @statuses -> s
+      s when s in @stored_statuses -> s
       _ -> "idle"
     end
   end
@@ -255,11 +263,16 @@ defmodule Barkpark.Tasks.Fleet do
   end
 
   defp put_status(fields, nil), do: {:ok, fields}
-  defp put_status(fields, s) when s in @statuses, do: {:ok, Map.put(fields, "status", s)}
+
+  defp put_status(fields, s) when s in @self_declared_statuses,
+    do: {:ok, Map.put(fields, "status", s)}
+
   defp put_status(_fields, _), do: {:error, :invalid_status}
 
   defp put_ttl(fields, nil), do: {:ok, fields}
-  defp put_ttl(fields, ttl) when is_integer(ttl) and ttl > 0, do: {:ok, Map.put(fields, "ttl_s", ttl)}
+
+  defp put_ttl(fields, ttl) when is_integer(ttl) and ttl > 0,
+    do: {:ok, Map.put(fields, "ttl_s", ttl)}
 
   defp put_ttl(fields, ttl) when is_binary(ttl) do
     case Integer.parse(ttl) do
