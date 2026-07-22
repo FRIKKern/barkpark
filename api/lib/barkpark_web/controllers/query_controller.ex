@@ -34,6 +34,14 @@ defmodule BarkparkWeb.QueryController do
       caller_context = CallerContext.from_conn(conn)
 
       cond do
+        # An unparseable flat --filter string normalizes to an {:error, …}
+        # sentinel, never %{} — an empty map here used to slip past both
+        # guards below and SILENTLY return the UNFILTERED set (D75: `--filter
+        # 'tags hasStrong x:50'` exited 0 with every row). A refusal naming
+        # the accepted grammar beats a silent passthrough.
+        match?({:error, _}, filter_map) ->
+          filter_map
+
         # Fail CLOSED on an unknown filter operator. Otherwise it falls through
         # the query builder's catch-all (apply_field_op/4) and SILENTLY returns
         # every row — a typo'd op (?filter[status][bogus]=x) looked like it
@@ -744,16 +752,35 @@ defmodule BarkparkWeb.QueryController do
   # families, tried in order:
   #   1. operator forms — `=`/`==`/`!=`/`>`/`>=`/`<`/`<=` plus the CSS-selector
   #      shorthands `^=`/`$=`/`*=` (starts/ends/contains).
-  #   2. keyword forms — `is null` / `is not null`, and `in` / `not in`.
+  #   2. keyword forms — `is null` / `is not null`, `hasStrong <tag>:<min>`,
+  #      and `in` / `not in`.
   # Operators are tried FIRST so a value that itself contains ` is `/` in ` after
   # an operator is preserved (`notes=a in b` → eq value `a in b`, NOT an `in`
   # filter). Keyword forms only apply to an operator-less string.
-  defp normalize_filter_map(s) when is_binary(s) and byte_size(s) > 0 do
-    trimmed = String.trim(s)
-    parse_scalar_op(trimmed) || parse_scalar_keyword(trimmed) || %{}
+  #
+  # A non-empty string NEITHER family parses is an {:error, {:invalid_flat_filter,
+  # raw}} sentinel, never %{} — the empty-map fall-through was a SILENT
+  # passthrough (D75): the string was discarded as noise, the fail-closed
+  # invalid_filter_op guard had nothing to inspect, and the caller got the
+  # UNFILTERED set with exit 0. index/2 turns the sentinel into a 400 naming
+  # the accepted grammar. Whitespace-only stays a no-filter no-op, like absent.
+  defp normalize_filter_map(s) when is_binary(s) do
+    case String.trim(s) do
+      "" ->
+        %{}
+
+      trimmed ->
+        parse_scalar_op(trimmed) || parse_scalar_keyword(trimmed) ||
+          {:error, {:invalid_flat_filter, trimmed}}
+    end
   end
 
   defp normalize_filter_map(_), do: %{}
+
+  @doc false
+  # Thin public wrapper exposing the pure flat-grammar parser for unit tests
+  # (no ConnCase/DB) — same pattern as invalid_filter_op_for_test/1.
+  def normalize_filter_map_for_test(s), do: normalize_filter_map(s)
 
   # Split on the LEFTMOST operator (2-char ops `^=`/`$=`/`*=`/`>=`/`<=`/`!=`/`==`
   # take precedence at a given index). The non-greedy field capture keeps the split
@@ -778,12 +805,32 @@ defmodule BarkparkWeb.QueryController do
   end
 
   # Keyword forms (only reached for operator-less strings): `<field> is null` /
-  # `is not null` (the scalar form of the SDK's eq/neq null), then `in` / `not in`.
+  # `is not null` (the scalar form of the SDK's eq/neq null), then
+  # `hasStrong`, then `in` / `not in`.
   defp parse_scalar_keyword(trimmed) do
     case Regex.run(~r/^(.+?)\s+is\s+(not\s+)?null$/i, trimmed) do
       [_, field | rest] ->
         not? = String.trim(List.first(rest) || "") != ""
         %{String.trim(field) => %{"is" => if(not?, do: "notnull", else: "null")}}
+
+      nil ->
+        parse_scalar_has_strong(trimmed)
+    end
+  end
+
+  # `<field> hasStrong <tag>:<min>` — the flat form of the weighted-tag
+  # strength-floor op (D75: it had no flat spelling, only the nested
+  # filter[field][hasStrong]=tag:min wire form). Keyword matched
+  # case-insensitively, emitted as the canonical "hasStrong" nested op so ONE
+  # value parser and ONE SQL arm serve both wire forms: the value is checked
+  # up front by invalid_filter_op/1 via Content.Query.parse_has_strong/1, so a
+  # malformed `<tag>:<min>` is a 400 here too, never a silent no-op. Tried
+  # BEFORE `in`/`not in` so a hasStrong value containing ` in ` reads as a
+  # (rejected) hasStrong value rather than a bogus membership filter.
+  defp parse_scalar_has_strong(trimmed) do
+    case Regex.run(~r/^(.+?)\s+hasStrong\s+(.+)$/i, trimmed) do
+      [_, field, value] ->
+        %{String.trim(field) => %{"hasStrong" => unquote_filter_value(value)}}
 
       nil ->
         parse_scalar_in(trimmed)

@@ -32,7 +32,7 @@ defmodule Barkpark.Content.Errors do
     "schema_has_documents" =>
       "Delete the documents of this type first, or repeat the request with ?force=true to remove the schema and orphan them.",
     "invalid_filter" =>
-      "Use one of the documented filter operators (eq, neq, in, nin, has, contains, startsWith, endsWith, gt, gte, lt, lte, is) — check for a typo or wrong case.",
+      "Use one of the documented filter operators (eq, neq, in, nin, has, hasStrong, contains, startsWith, endsWith, gt, gte, lt, lte, is) — check for a typo or wrong case.",
     "forbidden_field" =>
       "Filter/order only on fields your token can read; use an admin/owner token, or query a field that isn't private in this schema.",
     "halted" =>
@@ -286,10 +286,27 @@ defmodule Barkpark.Content.Errors do
       code: "invalid_filter",
       message:
         "unknown filter operator #{inspect(op)} on field #{inspect(field)}; " <>
-          "valid operators: eq, neq, in, nin, has, contains, startsWith, endsWith, " <>
-          "gt, gte, lt, lte, is",
+          "valid operators: eq, neq, in, nin, has, hasStrong, contains, startsWith, " <>
+          "endsWith, gt, gte, lt, lte, is",
       status: 400,
       details: %{field: field, op: op}
+    }
+
+  # The modern /v1/data/query flat `--filter` string (QueryController.
+  # normalize_filter_map/1). A non-empty string neither grammar family parses
+  # used to fall through to an EMPTY filter map — fail-OPEN, the filter
+  # silently discarded and every row returned (D75). Fail CLOSED with the same
+  # "invalid_filter" code, naming the accepted flat grammar so the caller can
+  # fix the string instead of trusting a result that was never filtered.
+  defp build({:error, {:invalid_flat_filter, raw}}),
+    do: %{
+      code: "invalid_filter",
+      message:
+        "malformed filter #{inspect(raw)}; expected field<op>value " <>
+          "(op: = == != > >= < <= ^= $= *=), '<field> is [not] null', " <>
+          "'<field> [not] in a,b,c', or '<field> hasStrong <tag>:<min>'",
+      status: 400,
+      details: %{filter: raw}
     }
 
   # The legacy `/api/documents/:type?filter=...` surface's flat "field=value"
