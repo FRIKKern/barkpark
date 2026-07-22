@@ -643,13 +643,70 @@ defmodule Barkpark.StudioChat do
   piggyback on (offline ×3, working-on-init, idle-on-result). A flip is always
   a fresh heartbeat, so `agent_state_at` stamps alongside (D41h). Returns the
   `Repo.update_all` result (`{count, nil}`).
+
+  ## Blocked-source guard (herd-s6, charter D80h)
+
+  `source` is REQUIRED and names WHO is writing: `:derived` (the Recorder's
+  activity mapping and its hand-back re-assert), `:ask` (the two ask-driven
+  `:needs_you` publish sites — both persist the ask row FIRST), or `:reported`
+  (a fenced external reporter via `ChatHosts.report_state/4`). Writing
+  `"blocked"` is the guarded transition — a false blocked trains humans to
+  ignore the signal — so it demands a listed source AND in-WHERE corroboration
+  the caller cannot fake by declaration:
+
+    * `:ask` → the row's denormalised `pending_approvals` counter must be > 0
+      (the same store truth `unblock_if_resolved/1` keys on);
+    * `:reported` → a LIVE execution-lease fence must exist for the session
+      (`ChatHosts.live_fence_subquery/1` — the fence IS the corroboration).
+
+  Observed-not-declared: a blocked write whose corroboration fails returns
+  `{0, nil}` — nothing written. Any OTHER source (or blocked with `:derived`)
+  raises `FunctionClauseError`: no heuristic path can ever set blocked.
   """
-  @spec set_agent_state(String.t(), String.t(), DateTime.t()) :: {non_neg_integer(), nil}
-  def set_agent_state(session_id, agent_state, now \\ DateTime.utc_now())
-      when agent_state in ["working", "blocked", "idle", "unknown"] do
+  @spec set_agent_state(String.t(), String.t(), :derived | :ask | :reported, DateTime.t()) ::
+          {non_neg_integer(), nil}
+  def set_agent_state(session_id, agent_state, source, now \\ DateTime.utc_now())
+
+  def set_agent_state(session_id, "blocked", source, now) when source in [:ask, :reported] do
+    from(s in Session, as: :session)
+    |> where([s], s.id == ^session_id)
+    |> corroborate_blocked(source, now)
+    |> Repo.update_all(set: [agent_state: "blocked", agent_state_at: now, updated_at: now])
+  end
+
+  def set_agent_state(session_id, agent_state, source, now)
+      when agent_state in ["working", "idle", "unknown"] and
+             source in [:derived, :ask, :reported] do
     Session
     |> where([s], s.id == ^session_id)
     |> Repo.update_all(set: [agent_state: agent_state, agent_state_at: now, updated_at: now])
+  end
+
+  # In-WHERE corroboration for the blocked write (D80h): the predicate rides the
+  # SAME UPDATE, so there is no check-then-write race — a caller whose evidence
+  # vanished between read and write simply writes nothing.
+  defp corroborate_blocked(query, :ask, _now),
+    do: where(query, [s], s.pending_approvals > 0)
+
+  defp corroborate_blocked(query, :reported, now),
+    do: where(query, [s], exists(Barkpark.ChatHosts.live_fence_subquery(now)))
+
+  @doc """
+  The staleness-scoped agent-state convergence sweep (charter D42h, fence-aware
+  since herd-s6/D79h): flip `working`/`blocked` rows whose `agent_state_at` is
+  NULL or older than `cutoff` to `"unknown"` — EXCEPT rows currently covered by
+  a live report fence (a live execution lease means the reporter/host is still
+  heartbeating; its lease expiring within the 60s TTL is exactly what makes a
+  DEAD reporter's value sweepable again — never sweep-proof). Owned here so the
+  census invariant holds: every `agent_state` `update_all` lives in this module.
+  """
+  @spec sweep_stale_agent_states(DateTime.t(), DateTime.t()) :: {non_neg_integer(), nil}
+  def sweep_stale_agent_states(cutoff, now) do
+    from(s in Session, as: :session)
+    |> where([s], s.agent_state in ["working", "blocked"])
+    |> where([s], is_nil(s.agent_state_at) or s.agent_state_at < ^cutoff)
+    |> where([s], not exists(Barkpark.ChatHosts.live_fence_subquery(now)))
+    |> Repo.update_all(set: [agent_state: "unknown", updated_at: now])
   end
 
   @doc """

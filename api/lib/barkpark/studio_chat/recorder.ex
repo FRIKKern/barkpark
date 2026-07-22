@@ -83,6 +83,24 @@ defmodule Barkpark.StudioChat.Recorder do
 
   def advertised_commands(_), do: []
 
+  @doc """
+  Tell the session's live Recorder an external reporter just wrote authoritative
+  state under a live execution-lease fence (herd-s6, charter D79h). While that
+  fence holds, the reporter is the SOLE truth source: the Recorder suspends its
+  derivation for BOTH the DB column and the activity broadcast, and arms a
+  fence-expiry check (`expires_at` — the lease's 60s-TTL heartbeat clock) that
+  either re-arms while the lease stays live or hands authority back explicitly.
+  A no-op when no Recorder is running (a foreign agent's session usually has
+  none — nothing is deriving, so nothing needs suspending).
+  """
+  @spec note_reported_state(String.t(), String.t(), DateTime.t()) :: :ok
+  def note_reported_state(session_id, agent_state, %DateTime{} = expires_at) do
+    case whereis(session_id) do
+      pid when is_pid(pid) -> GenServer.cast(pid, {:reported_state, agent_state, expires_at})
+      nil -> :ok
+    end
+  end
+
   @doc "PubSub topic a viewer subscribes to for this session's frames."
   @spec topic(String.t()) :: String.t()
   def topic(session_id), do: "studio_chat:#{session_id}"
@@ -272,6 +290,17 @@ defmodule Barkpark.StudioChat.Recorder do
       owner_workspace_id: owner_workspace_id,
       agent_state: nil,
       agent_state_timer: nil,
+      # The external-reporter fence (herd-s6, charter D79h). While
+      # `reported_fence_until` is non-nil, a registered host holds the
+      # session's live execution-lease fence and its reported state is the
+      # SOLE truth: `publish_activity` still TRACKS derived activity (so
+      # hand-back has truth to re-assert) but suspends both the store write
+      # and the activity broadcast, and the 60s heartbeat never stamps
+      # freshness for a value the reporter owns. Cleared ONLY by the explicit
+      # hand-back (`:reported_fence_check` finds no live lease) — never by a
+      # wall-clock compare in the hot path.
+      reported_fence_until: nil,
+      reported_fence_timer: nil,
       # The blocked-truth guard (charter D56h). request_ids of asks THIS
       # Recorder surfaced that are still pending: set on the honest-ask paths
       # ({:claude_chat_permission, ask} + the codex :approval_requested
@@ -370,6 +399,22 @@ defmodule Barkpark.StudioChat.Recorder do
   # name-only init fallback, then []).
   def handle_call(:advertised_commands, _from, state),
     do: {:reply, advertised(state), state}
+
+  # An external reporter wrote authoritative state under a live lease fence
+  # (herd-s6, D79h): suspend derivation until the explicit hand-back. The
+  # reporter's OWN write already stamped the row and spoke on the wire — this
+  # cast only flips the suspension and (re-)arms the expiry check against the
+  # lease's current `expires_at` (the host heartbeat may extend it; the check
+  # re-reads the store before handing back). `state.agent_state` (the
+  # last-PERSISTED derived cache) is deliberately NOT touched: hand-back nils
+  # it anyway so the flips-only gate can never swallow the re-assert.
+  @impl true
+  def handle_cast({:reported_state, _agent_state, %DateTime{} = expires_at}, state) do
+    if state.reported_fence_timer, do: Process.cancel_timer(state.reported_fence_timer)
+
+    timer = Process.send_after(self(), :reported_fence_check, fence_check_delay_ms(expires_at))
+    {:noreply, %{state | reported_fence_until: expires_at, reported_fence_timer: timer}}
+  end
 
   # Only the private capability echoed by the managed Session may feed
   # assignment usage. The public/generic event shape remains projection-only.
@@ -681,22 +726,50 @@ defmodule Barkpark.StudioChat.Recorder do
   # every long call look stalled). Deliberately NO touch/1 here — a
   # self-generated tick must never defeat the frame-silence idle reaper.
   def handle_info(:agent_state_heartbeat, state) do
-    if state.agent_state in ["working", "blocked"] do
-      ts = DateTime.utc_now()
-      StudioChat.touch_agent_state_at(state.session_id, ts)
+    cond do
+      # Fence-aware (herd-s6, the D79h composed freeze hazard): while a
+      # reporter holds the fence, this tick must NOT stamp `agent_state_at` —
+      # the cache-keyed touch would keep a DEAD reporter's row eternally fresh
+      # (sweep-proof) once the flips-only gate stopped writing. The reporter's
+      # own reports stamp freshness; the live lease shields it from the
+      # sweeper; a dead reporter's row must AGE. Keep the timer alive so the
+      # heartbeat resumes seamlessly after hand-back.
+      reported_fence_held?(state) ->
+        timer = Process.send_after(self(), :agent_state_heartbeat, agent_heartbeat_ms())
+        {:noreply, %{state | agent_state_timer: timer}}
 
-      Phoenix.PubSub.broadcast(
-        Barkpark.PubSub,
-        activity_topic(),
-        {:chat_heartbeat, state.session_id, ts}
-      )
+      state.agent_state in ["working", "blocked"] ->
+        ts = DateTime.utc_now()
+        StudioChat.touch_agent_state_at(state.session_id, ts)
 
-      timer = Process.send_after(self(), :agent_state_heartbeat, agent_heartbeat_ms())
-      {:noreply, %{state | agent_state_timer: timer}}
-    else
-      # A stale tick that raced a flip out of working/blocked: the flip already
-      # canceled/re-based the timer — do not re-arm off this message.
-      {:noreply, state}
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          activity_topic(),
+          {:chat_heartbeat, state.session_id, ts}
+        )
+
+        timer = Process.send_after(self(), :agent_state_heartbeat, agent_heartbeat_ms())
+        {:noreply, %{state | agent_state_timer: timer}}
+
+      true ->
+        # A stale tick that raced a flip out of working/blocked: the flip
+        # already canceled/re-based the timer — do not re-arm off this message.
+        {:noreply, state}
+    end
+  end
+
+  # The fence-expiry check (herd-s6, D79h): fired at the lease's `expires_at`.
+  # The host heartbeat may have extended the lease since the report, so re-read
+  # the store: still live → re-arm against the CURRENT expiry (the reporter
+  # stays sole truth); gone → the hand-back is EXPLICIT, never implicit decay.
+  def handle_info(:reported_fence_check, state) do
+    case Barkpark.ChatHosts.live_report_fence(state.session_id) do
+      %{expires_at: until} ->
+        timer = Process.send_after(self(), :reported_fence_check, fence_check_delay_ms(until))
+        {:noreply, %{state | reported_fence_until: until, reported_fence_timer: timer}}
+
+      nil ->
+        {:noreply, hand_back_reported_fence(state)}
     end
   end
 
@@ -1454,18 +1527,67 @@ defmodule Barkpark.StudioChat.Recorder do
   defp publish_activity(state, activity) do
     {state, activity} = enforce_blocked_truth(state, activity)
 
-    if activity != state.activity and activity != nil do
-      state = persist_agent_state(state, activity)
+    cond do
+      activity == state.activity or activity == nil ->
+        state
+
+      # Reporter fence held (herd-s6, D79h): the reporter is SOLE truth, so a
+      # derived transition overwrites NEITHER the DB column NOR the fleet wire
+      # — the suspension is double-barrelled, because FleetHub hears only this
+      # topic and gating just the write would leave the wire contradicting
+      # reported truth. The derived activity is still TRACKED so the explicit
+      # hand-back has current truth to re-assert.
+      reported_fence_held?(state) ->
+        %{state | activity: activity}
+
+      true ->
+        state = persist_agent_state(state, activity)
+
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          activity_topic(),
+          {:chat_activity, state.session_id,
+           Map.put(activity, :owner_workspace_id, state.owner_workspace_id)}
+        )
+
+        %{state | activity: activity}
+    end
+  end
+
+  # ── external-reporter fence (herd-s6, charter D79h) ─────────────────────────
+
+  defp reported_fence_held?(state), do: state.reported_fence_until != nil
+
+  defp fence_check_delay_ms(%DateTime{} = expires_at) do
+    # Fire just past the lease's expiry (250ms slack absorbs clock skew between
+    # the stamp and this BEAM); an already-expired lease checks immediately.
+    max(DateTime.diff(expires_at, DateTime.utc_now(), :millisecond) + 250, 0)
+  end
+
+  # Explicit hand-back (D79h): the reporter's lease is gone, so derived truth
+  # resumes NOW — the cache is nilled first so the flips-only gate cannot
+  # swallow the re-assert (the reporter may have left the very value we would
+  # re-derive: the row still needs a fresh stamp so it ages honestly), and the
+  # activity re-broadcasts so the fleet wire converges off reported truth even
+  # though the derived map never changed while suspended.
+  defp hand_back_reported_fence(state) do
+    if state.reported_fence_timer, do: Process.cancel_timer(state.reported_fence_timer)
+    state = %{state | reported_fence_until: nil, reported_fence_timer: nil}
+
+    if state.activity do
+      state = persist_agent_state(%{state | agent_state: nil}, state.activity)
 
       Phoenix.PubSub.broadcast(
         Barkpark.PubSub,
         activity_topic(),
         {:chat_activity, state.session_id,
-         Map.put(activity, :owner_workspace_id, state.owner_workspace_id)}
+         Map.put(state.activity, :owner_workspace_id, state.owner_workspace_id)}
       )
 
-      %{state | activity: activity}
+      state
     else
+      # Nothing was ever derived (a fence on a recorder that saw no frames):
+      # nothing to re-assert — the fence-aware sweeper owns convergence.
       state
     end
   end
@@ -1552,7 +1674,13 @@ defmodule Barkpark.StudioChat.Recorder do
     if mapped == state.agent_state do
       state
     else
-      StudioChat.set_agent_state(state.session_id, mapped)
+      # D80h source honesty: "blocked" maps ONLY from :needs_you, and
+      # :needs_you publishes ONLY from the two ask sites (both persist the ask
+      # row first, so the `:ask` corroboration — pending_approvals > 0 — is
+      # already store truth). Every other derived flip declares `:derived`,
+      # which the choke point refuses for "blocked" by clause.
+      source = if mapped == "blocked", do: :ask, else: :derived
+      StudioChat.set_agent_state(state.session_id, mapped, source)
       rearm_agent_heartbeat(%{state | agent_state: mapped})
     end
   end

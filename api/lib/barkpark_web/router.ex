@@ -1736,6 +1736,17 @@ defmodule BarkparkWeb.Router do
     post("/events", ChatHostController, :event)
   end
 
+  # Authoritative external state report (herd-s6, charter D78h/D79h): the
+  # registered host holding a session's live execution-lease fence writes the
+  # herd four-state directly. Host-credential auth (NOT a bearer token) — a
+  # plain API token has no host identity for the fence's host_id leg, so the
+  # route rides the :registered_chat_host pipeline like the /v1/chat-host
+  # dispatch surface above, even though the path lives under /v1/chat.
+  scope "/v1/chat", BarkparkWeb do
+    pipe_through(:registered_chat_host)
+    post("/sessions/:id/state", ChatHostController, :report_state)
+  end
+
   # ── Revision restore — a WRITE (Revisions.restore_revision →
   # Content.upsert_document), so it carries the same :require_write gate as
   # /mutate. Split out of the token-only read scope above so a read/public-read
