@@ -87,7 +87,10 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     assert html =~ "bp-g--done"
     assert html =~ "bp-g--ready"
 
-    # Move the work: close the open task.
+    # Move the work: close the open task. A mirror write (source: :sync) —
+    # the Writer-seam transition gate (tlv) refuses a raw api-door open → done
+    # (`done` is reached only via `bp task close`), and this test's concern is
+    # the reader re-resolving on a task mutation broadcast, not the door.
     {:ok, _} =
       Content.upsert_document(
         "task",
@@ -96,7 +99,7 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
           "content" => %{"kind" => "task", "lifecycle_status" => "done", "parent_id" => epic}
         },
         @dataset,
-        scope
+        scope ++ [source: :sync]
       )
 
     # The reader heard the task mutation on its tenant stream and re-resolved —

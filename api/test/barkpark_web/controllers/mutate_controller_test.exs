@@ -123,7 +123,15 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert content["priority"] == 1
     end
 
-    test "a revision precondition is the escape: the same close with ifRevisionID succeeds",
+    # D7a SUPERSEDE (tlv writer-seam gate): this test used to assert the
+    # rev-carrying open→done patch SUCCEEDS — the revision escape was the
+    # sanctioned path out of the close guard. The Writer-seam transition gate
+    # now enforces the charter-D7 legality table downstream of that escape:
+    # a revision precondition still proves the caller read the row, but a read
+    # no longer licenses an ILLEGAL transition (`any → done` is reached only
+    # through the close primitive). The escape remains live for LEGAL terminal
+    # transitions — see the `blocked` rev-escape test below, which stays 200.
+    test "D7a supersede: a revision precondition no longer licenses an illegal open → done patch",
          %{conn: conn} do
       create_task(conn, "guard-cas")
       {:ok, doc} = Content.get_document("drafts.guard-cas", "task", "test")
@@ -133,8 +141,19 @@ defmodule BarkparkWeb.MutateControllerTest do
         |> task_patch(%{"lifecycle_status" => "done"})
         |> Map.put("ifRevisionID", doc.rev)
 
-      assert mutate(conn, [%{"patch" => patch}]).status == 200
-      assert task_content("guard-cas")["lifecycle_status"] == "done"
+      resp = mutate(conn, [%{"patch" => patch}])
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "validation_failed"
+      # The refusal names from, to and the sanctioned verb.
+      assert [message] = body["error"]["details"]["lifecycle_status"]
+      assert message =~ "\"open\""
+      assert message =~ "\"done\""
+      assert message =~ "bp task close"
+
+      # The row never moved.
+      assert task_content("guard-cas")["lifecycle_status"] == "open"
     end
 
     test "the guard fires only on a CHANGE into a terminal state: patching an unrelated field " <>
@@ -652,7 +671,12 @@ defmodule BarkparkWeb.MutateControllerTest do
 
       assert task_content("cchw2-blocked")["lifecycle_status"] == "open"
 
-      # …and the revision precondition is the escape, exactly as for `done`.
+      # …and the revision precondition is the escape. PROTECTIVE under the
+      # writer-seam transition gate (D7a): `open → blocked` is LEGAL in the
+      # charter-D7 table, so unlike the illegal `open → done` (whose rev escape
+      # the gate superseded — see the D7a test above) this MUST STAY 200. The
+      # survey claim that "both escapes flip" was verified WRONG; this
+      # assertion is what keeps the gate from over-refusing legal transitions.
       attrs =
         "cchw2-blocked"
         |> task_doc(%{"lifecycle_status" => "blocked"})
