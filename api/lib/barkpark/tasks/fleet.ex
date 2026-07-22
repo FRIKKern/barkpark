@@ -344,6 +344,10 @@ defmodule Barkpark.Tasks.Fleet do
         # In-lock re-read: beats serialize on the advisory lock, so the CAS
         # below only loses to a NON-beat writer (e.g. a Studio edit) racing
         # between this read and the write — that surfaces as :stale_beat.
+        # This by-PK re-read targets the SAME document the caller already resolved
+        # through the fleet's flat global-per-dataset posture (PDF-D19); doc.id
+        # comes from that scoped lookup, so no cross-tenant reach is added.
+        # global-read: in-lock re-read of an already-tenant-resolved doc.id (fleet flat posture, PDF-D19)
         case Repo.get(Document, doc.id) do
           nil -> {:error, :stale_beat}
           %Document{} = fresh -> apply_beat(fresh, fields)
