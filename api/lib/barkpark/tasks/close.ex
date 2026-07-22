@@ -115,6 +115,7 @@ defmodule Barkpark.Tasks.Close do
       Repo.transaction(fn ->
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
 
+        # global-read: task-close by-PK — task_id IS the Document PK; tenancy is resolved by the caller's CAS claim (worker+epoch) inside this per-task advisory-locked txn, not a workspace_id thread (internal-worker posture).
         case Repo.get(Document, task_id) do
           nil ->
             {:error, :unknown_task}
@@ -231,6 +232,7 @@ defmodule Barkpark.Tasks.Close do
         #    bigint and auto-releases at COMMIT/ROLLBACK.
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
 
+        # global-read: task-close by-PK — task_id IS the Document PK; tenancy is resolved by the caller's CAS claim (worker+epoch) inside this per-task advisory-locked txn, not a workspace_id thread (internal-worker posture).
         case Repo.get(Document, task_id) do
           nil ->
             {:error, :not_found}
