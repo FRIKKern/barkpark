@@ -9,9 +9,12 @@
 set -euo pipefail
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 ID="${1:?id}"; TITLE="${2:?title}"; WHO="${3:?assignee}"; BRIEF="${4:?brief}"; CRIT="${5:?criterion}"
-SERVER=$(bp whoami -o json 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('server','https://guerrilla.barkpark.cloud'))")
-DS=$(bp whoami -o json 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('dataset','production'))")
-TOK=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.config/barkpark/config.json')))['token'])")
+# Target resolution: a BP_FLEET_* env var wins when set (points file-order.sh at a
+# scratch or secondary instance without touching bp whoami), else fall back to the
+# byte-unchanged bp-whoami / config.json path below.
+SERVER="${BP_FLEET_SERVER:-$(bp whoami -o json 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('server','https://guerrilla.barkpark.cloud'))")}"
+DS="${BP_FLEET_DATASET:-$(bp whoami -o json 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('dataset','production'))")}"
+TOK="${BP_FLEET_TOKEN:-$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.config/barkpark/config.json')))['token'])")}"
 IDX="${FLEET_ORDER_INDEX:-/tmp/fleet-orders.index}"
 
 build() { # $1 = optional extra distinct id to fence off
@@ -37,7 +40,7 @@ doc = {"_id": i, "_type": "task", "title": f"{t} [{i}]", "kind": "task",
 print(json.dumps({"mutations": [{"createOrReplace": doc}]}))
 PY
 }
-submit(){ curl -s -X POST "$SERVER/v1/data/mutate/$DS" -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" -d @-; }
+submit(){ curl -sS -X POST "$SERVER/v1/data/mutate/$DS" -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" -d @-; }
 
 R=$(build "" | submit)
 if echo "$R" | grep -q duplicate_task; then
