@@ -214,6 +214,103 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
+  @doc """
+  Tag-registry browse — per-tag per-type published-document counts
+  (authoring-excellence ae-w10 / manifest `tag.browse`). Wraps
+  `Content.TagDistribution.per_type/3` with the CALLER'S tenant scope
+  (`scope_opts/1`) — NEVER the daily worker's `opts: []` global call shape,
+  which here would be a cross-tenant existence-count leak (the exact class
+  `data_counts_test.exs` guards). The SQL rows `{type, tag, count}` are
+  regrouped in Elixir to per-tag rows `{tag, counts: {type => n}, total}`
+  sorted total DESC (tag asc tie-break).
+
+  Perspective is published-only BY DESIGN: draft and published copies are
+  SEPARATE rows, so counting drafts would double-count every doc with an open
+  draft twin — the registry counts the published vocabulary, the corpus the
+  publish wall governs. NOT an extension of the FROZEN `/v1/data/counts`
+  shape (per-TYPE census) — this is the per-TAG registry, a different read.
+  Auth mirrors a doc read: preview or a token, otherwise 404
+  (existence-hiding, like `backlinks`).
+  """
+  def tag_browse(conn, %{"dataset" => dataset} = params) do
+    if preview?(conn) or authed?(conn) do
+      rows =
+        Content.TagDistribution.per_type(parse_types(params["type"]), dataset, scope_opts(conn))
+
+      tags = regroup_tag_rows(rows)
+
+      json(conn, %{
+        result: %{tags: tags, count: length(tags)},
+        syncTags: ["bp:ds:#{dataset}:tags"]
+      })
+    else
+      {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Tag detail — the documents carrying `:tag`, RANKED BY THAT TAG'S STRENGTH
+  (authoring-excellence ae-w10 / manifest `tag.docs`). Wraps
+  `Content.docs_with_tag/4` with `order: :strength`: a `desc_nulls_last`
+  lateral over the `tags_meta` GENERATED column (NULLS LAST is mandatory —
+  legacy unweighted carriers rank last, not first), tie-broken title asc,
+  doc_id asc. Each entry projects `{doc_id, type, title, strength, rationale,
+  main_tag_match}` — the title COLUMN, and the matched (strongest) entry's
+  strength/rationale (NULL for a legacy flat carrier). The generic `order=`
+  grammar cannot express a parameterized per-tag order — dedicated read only.
+
+  Published-only (`published_only: true` — same by-design posture as
+  `tag_browse`); tenancy threads `scope_opts/1` exactly like `backlinks/2`;
+  auth mirrors a doc read: preview or a token, otherwise 404
+  (existence-hiding).
+  """
+  def tag_docs(conn, %{"dataset" => dataset, "tag" => tag} = params) do
+    if preview?(conn) or authed?(conn) do
+      docs =
+        Content.docs_with_tag(
+          tag,
+          parse_types(params["type"]),
+          dataset,
+          [order: :strength, published_only: true] ++ scope_opts(conn)
+        )
+
+      json(conn, %{
+        result: %{tag: tag, documents: docs, count: length(docs)},
+        syncTags: ["bp:ds:#{dataset}:tags:#{tag}"]
+      })
+    else
+      {:error, :not_found}
+    end
+  end
+
+  # The tag reads' `?type=` grammar: a comma list, default paper,task (the two
+  # weighted-tag corpora). Blank/absent falls back to the default.
+  @default_tag_types ~w(paper task)
+  defp parse_types(nil), do: @default_tag_types
+
+  defp parse_types(param) when is_binary(param) do
+    case param |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+      [] -> @default_tag_types
+      types -> types
+    end
+  end
+
+  defp parse_types(_), do: @default_tag_types
+
+  # `{type, tag, count}` SQL rows → per-tag registry rows, biggest first.
+  defp regroup_tag_rows(rows) do
+    rows
+    |> Enum.group_by(& &1.tag)
+    |> Enum.map(fn {tag, tag_rows} ->
+      %{
+        tag: tag,
+        counts: Map.new(tag_rows, &{&1.type, &1.count}),
+        total: tag_rows |> Enum.map(& &1.count) |> Enum.sum()
+      }
+    end)
+    |> Enum.sort_by(&{-&1.total, &1.tag})
+  end
+
   def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
     cond do
       # NO anonymous caller may fetch a draft by id — neither a read-only

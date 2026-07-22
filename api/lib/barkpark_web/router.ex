@@ -1635,6 +1635,13 @@ defmodule BarkparkWeb.Router do
     # only (existence-hiding, like backlinks); tenancy fail-closed via
     # scope_opts in the controller.
     get("/related/:dataset/:id", QueryController, :related)
+    # Tag-registry reads (authoring-excellence ae-w10 / manifest `tag.browse` +
+    # `tag.docs`): per-tag per-type published counts, and a tag's documents
+    # ranked by that tag's strength (tags_meta lateral, DESC NULLS LAST).
+    # Token/preview only (existence-hiding, like backlinks); tenancy
+    # fail-closed via scope_opts in the controller.
+    get("/tags/:dataset", QueryController, :tag_browse)
+    get("/tags/:dataset/:tag", QueryController, :tag_docs)
     # Bundled per-type published-document counts — ONE GROUP BY d.type aggregate
     # (AXI charter decision 19 / manifest `data.counts`). Token/preview only
     # (existence-hiding, like backlinks); tenancy fail-closed in the controller.
@@ -1662,6 +1669,8 @@ defmodule BarkparkWeb.Router do
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/backlinks/:dataset/:id", QueryController, :backlinks)
     get("/related/:dataset/:id", QueryController, :related)
+    get("/tags/:dataset", QueryController, :tag_browse)
+    get("/tags/:dataset/:tag", QueryController, :tag_docs)
   end
 
   # ── Private API — full CRUD, requires token ─────────────────────────────
@@ -2129,6 +2138,8 @@ defmodule BarkparkWeb.Router do
     get("/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/v1/preview/backlinks/:dataset/:id", QueryController, :backlinks)
     get("/v1/preview/related/:dataset/:id", QueryController, :related)
+    get("/v1/preview/tags/:dataset", QueryController, :tag_browse)
+    get("/v1/preview/tags/:dataset/:tag", QueryController, :tag_docs)
   end
 
   scope "/w/:workspace_slug/p/:project_slug/v1", BarkparkWeb do
@@ -2197,6 +2208,8 @@ defmodule BarkparkWeb.Router do
     get("/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/v1/data/backlinks/:dataset/:id", QueryController, :backlinks)
     get("/v1/data/related/:dataset/:id", QueryController, :related)
+    get("/v1/data/tags/:dataset", QueryController, :tag_browse)
+    get("/v1/data/tags/:dataset/:tag", QueryController, :tag_docs)
     # Scoped mirror of the flat bundled-counts read (AXI decision 19) — a scoped
     # caller resolves its real workspace/project, so counts stay tenant-true.
     get("/v1/data/counts/:dataset", QueryController, :counts)

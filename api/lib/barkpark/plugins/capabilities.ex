@@ -674,6 +674,37 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # Tag-registry reads (ae-w10). auth_tier "read", NEVER "none" — same D71
+      # rationale as doc.related (both endpoints 404 anon, existence-hiding).
+      core_cmd(
+        "tag.browse",
+        "tag",
+        "browse",
+        "Browse the tag registry: per-tag per-type published-document counts, biggest first.",
+        "GET",
+        "/v1/data/tags/:dataset",
+        "read",
+        flags: [
+          flag("type", "string", "Comma list of document types to count (default paper,task).")
+        ],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "tag.docs",
+        "tag",
+        "docs",
+        "List the documents carrying a tag, ranked by that tag's strength — strongest first, legacy unweighted docs last.",
+        "GET",
+        "/v1/data/tags/:dataset/:tag",
+        "read",
+        args: [arg("tag", true, "string", "Tag name (exact match).")],
+        flags: [
+          flag("type", "string", "Comma list of document types to include (default paper,task).")
+        ],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "doc.history",
         "doc",
