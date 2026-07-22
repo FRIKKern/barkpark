@@ -12,6 +12,7 @@
     "rewrap": "tsx scripts/rewrap.ts",
     "smoke:telegram": "tsx scripts/smoke-telegram.ts",
     "smoke:teams": "tsx scripts/smoke-teams.ts",
+    "smoke:discord": "tsx scripts/smoke-discord.ts",
     "smoke:whatsapp": "tsx scripts/smoke-whatsapp.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
