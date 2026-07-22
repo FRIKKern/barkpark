@@ -16,9 +16,9 @@ execute order content yourself, and you never claim a task.**
   **Everything you dispatch and every listener you see is within that one scope** — it is
   intrinsic, not something you pass. To conduct a different project, switch with `bp use` first.
 - See your listeners (the roster): the live workers in this scope, each with a status pill
-  (idle / working / blocked), its current task, capacity, and last-seen. Use the native roster
-  if present (`bp fleet roster`); until it ships, read the shared presence records (see §6).
-  A listener whose heartbeat is stale past its TTL is OFFLINE — never dispatch to it.
+  (idle / working / blocked), its current task, capacity, and last-seen. Read it with
+  `bp fleet roster` (see §6). Online/offline is computed server-side — a listener whose heartbeat
+  is stale past its TTL reads OFFLINE; never dispatch to it.
 - Route orders by `assignee` = a listener's worker name (e.g. `support-1`).
 - The order-filing helper is bundled: `helpers/file-order.sh` (in this skill's directory). It
   handles every task-authoring trap (priority 0-4, brief-as-blocks, the dedup wall with retry,
@@ -51,7 +51,7 @@ into step 2's brief. That dependency is what makes it a pipeline, not two isolat
 `{roster, orders}` to `helpers/route.py --route`. It does best-fit-decreasing packing — a heavy
 export lands on a big-class listener, a light lint never wastes it, same-fence orders never
 co-locate, over-budget or over-cap work is refused (not dropped). Reserve big boxes for the work
-that needs them; fill lean boxes with the rest. `python3 helpers/route.py` runs its 8-check proof.
+that needs them; fill lean boxes with the rest. `python3 helpers/route.py` runs its 9-check proof.
 
 **Let the ledger do the collision math.** Barkpark ships the fence allocator: `bp task frontier`
 returns the maximal set of ready tasks that can run in parallel WITHOUT their blast radii
@@ -98,21 +98,20 @@ failed and why, so the next round is better.
 
 ## 6. The roster (listener presence)
 
-The fleet is only conductable if you can SEE your listeners. Each `fleet-listener` publishes a
-presence record — keyed by its worker name, scoped to the active workspace/project/dataset —
-that it heartbeats on start / claim / close:
+The fleet is only conductable if you can SEE your listeners. Each `fleet-listener` beats a native
+`listener` presence row — keyed by its worker name, scoped to the active workspace/project/dataset
+— on start / claim / close. Read the whole roster in one call:
 
 ```
-{ worker, status: idle|working|blocked, current_task, scope:{workspace,project,dataset},
-  host, slots_free, last_seen, ttl_s }
+bp fleet roster
 ```
 
-The roster is every presence record in your scope; `last_seen` older than `ttl_s` = OFFLINE.
-Read it to decide who is free before you dispatch, and to notice a listener that went dark
-mid-order (reassign or re-file). **Native home:** this is the Herd `report_state` substrate; when
-`bp fleet listen` / `bp fleet roster` ship, they replace the hand-rolled record with the same
-shape and the terminal twin of the herd view. Until then, listeners and orchestrator share the
-presence doc convention above.
+Each row carries `worker`, `status` (`idle | working | blocked`, self-declared), the current
+in-progress task (a read-time join, never stored on the row), `scope`, `agent`, capacity,
+`last_seen`, and `ttl_s`. **Online/offline is computed server-side** — a row reads `offline` iff
+`now - last_seen > ttl_s` (missing `last_seen` = offline, fail-closed); you never do the staleness
+math yourself. Read the roster to decide who is free before you dispatch, and to notice a listener
+that went dark mid-order (reassign or re-file). Never dispatch to an OFFLINE row.
 
 ## Hard-won rules (from the live PoC — do not relearn these)
 

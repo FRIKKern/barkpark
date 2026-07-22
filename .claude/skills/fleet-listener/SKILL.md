@@ -28,10 +28,20 @@ and every order you claim lives in it. STATE it: `listening as <WORKER> in <ws>/
 same scope. (To serve a different project, the operator switches context with `bp use` before
 starting you.)
 
-Publish your presence so the orchestrator's roster can see you (status `idle`, your scope, and
-capacity). Heartbeat it on start, on claiming, and on closing. Use the native roster mechanism
-if present (`bp fleet …`); until that ships, upsert a small presence record keyed by `<WORKER>`
-(see the fleet-orchestrator skill's roster note for the shared shape).
+Publish your presence so the orchestrator's roster can see you. Beat the native `listener` record
+at every turn boundary — on start, on claiming an order, and on closing one:
+
+```
+bp fleet beat <WORKER> --status idle --ttl 900 --agent claude-code
+```
+
+`<WORKER>` is a REQUIRED POSITIONAL — never `--worker` (that exits 2 "unknown flag"). Declare
+`--status idle | working | blocked` (never `online` — it 422s; online/offline are server-derived).
+The `--ttl 900` is honest, not generous: a resident skill can only beat while a turn is running,
+and an SSE-parked idle session runs no code between turns, so 900s is the mechanical ceiling.
+**Honesty note (PDF-D32):** `offline` means only "no beat within the TTL" — for a quietly-parked
+listener in sparse personal use it means *quiet, not dead*. An alive-but-idle session that reads
+`offline` on the roster is this design's steady state, not an error.
 
 ## 2. Arm the doorbell (SSE), then go idle
 
