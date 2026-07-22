@@ -59,7 +59,14 @@ defmodule Barkpark.Content.EventLog do
   def replay_since(dataset, since, nil, opts) when is_integer(since) do
     batch = Keyword.get(opts, :batch, @replay_batch)
 
-    from(e in MutationEvent, where: e.dataset == ^dataset, order_by: e.id, limit: ^batch)
+    # `type != "listener"` mirrors the `Sync.Outbox` egress exclusion (#5626,
+    # PDF-D18): Personal Dev Fleet listener presence is per-machine truth and
+    # must never resurface through the Last-Event-ID replay to an SSE consumer.
+    from(e in MutationEvent,
+      where: e.dataset == ^dataset and e.type != "listener",
+      order_by: e.id,
+      limit: ^batch
+    )
     |> keyset_stream(since, batch)
   end
 
@@ -67,8 +74,11 @@ defmodule Barkpark.Content.EventLog do
       when is_integer(since) and is_binary(workspace_id) do
     batch = Keyword.get(opts, :batch, @replay_batch)
 
+    # `type != "listener"` — same egress exclusion as the nil-workspace leg
+    # above (#5626, PDF-D18): listener presence never resurfaces through replay.
     from(e in MutationEvent,
-      where: e.dataset == ^dataset and e.workspace_id == ^workspace_id,
+      where:
+        e.dataset == ^dataset and e.workspace_id == ^workspace_id and e.type != "listener",
       order_by: e.id,
       limit: ^batch
     )

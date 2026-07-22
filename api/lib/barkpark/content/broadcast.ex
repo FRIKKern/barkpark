@@ -223,6 +223,16 @@ defmodule Barkpark.Content.Broadcast do
     end
   end
 
+  # Personal Dev Fleet listener presence NEVER fans out to remote webhooks
+  # (PDF-D18, mirroring the `Sync.Outbox` `type != "listener"` exclusion shipped
+  # in #5626): a listener registration is per-machine heartbeat truth, not a
+  # content mutation to echo out to arbitrary third-party HTTP endpoints.
+  # Head-guarding BEFORE the `in_transaction?` branch below muzzles BOTH the
+  # immediate dispatch AND the deferred/flush path — a listener event is never
+  # queued, so `flush_deferred_broadcasts/0` has nothing to dispatch.
+  defp maybe_dispatch_webhook(_dataset, _action, "listener", _doc_id, _document, _event_id, _opts),
+    do: :ok
+
   # Defer webhook dispatch when inside a transaction, fire immediately otherwise.
   # `opts` carries `:workspace_id` / `:project_id` so the delivered payload
   # emits workspace/project-scoped sync-tags.
