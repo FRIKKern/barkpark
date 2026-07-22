@@ -47,7 +47,10 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id/stamp",
                  "/v1/tasks/:doc_id/pulse",
                  "/v1/tasks/:doc_id/move",
-                 "/v1/tasks/:doc_id/stage"
+                 "/v1/tasks/:doc_id/stage",
+                 # #5627 listener presence — the fleet pair rides the Tasks plugin.
+                 "/v1/fleet/roster",
+                 "/v1/fleet/beat"
                ])
 
   defp atomize_for_manifest(cmds) do
@@ -125,13 +128,25 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
-      assert length(cmds) == 13
+      # #5627 (listener presence) added the two fleet verbs to this plugin —
+      # 13 task.* + fleet.roster/fleet.beat = 15.
+      assert "fleet.roster" in ids
+      assert "fleet.beat" in ids
+      assert length(cmds) == 15
+
+      {fleet_cmds, task_cmds} = Enum.split_with(cmds, &(&1.noun == "fleet"))
 
       # task is no longer a core noun — the verbs moved verbatim onto the Tasks
       # plugin; auth_tier stays "read" (the /v1/tasks scope is bearer-gated, not
       # admin).
-      assert Enum.all?(cmds, &(&1.noun == "task"))
-      assert Enum.all?(cmds, &(&1.auth_tier == "read"))
+      assert Enum.all?(task_cmds, &(&1.noun == "task"))
+      assert Enum.all?(task_cmds, &(&1.auth_tier == "read"))
+
+      # The fleet pair: roster is a read; beat is the one write-tier verb
+      # (listener presence heartbeat) — pinned so a tier drift is caught here.
+      assert Enum.map(fleet_cmds, & &1.id) |> Enum.sort() == ["fleet.beat", "fleet.roster"]
+      assert Enum.find(fleet_cmds, &(&1.id == "fleet.roster")).auth_tier == "read"
+      assert Enum.find(fleet_cmds, &(&1.id == "fleet.beat")).auth_tier == "write"
 
       # Every path_template is a route the plugin actually mounts.
       assert Enum.all?(cmds, fn c -> MapSet.member?(@tasks_paths, c.http.path_template) end)
