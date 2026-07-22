@@ -7349,7 +7349,7 @@
             }
           },
           {
-            "description": "Ready-queue row offset.",
+            "description": "Task-index row offset.",
             "in": "query",
             "name": "offset",
             "required": false,

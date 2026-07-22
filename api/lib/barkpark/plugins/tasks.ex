@@ -485,7 +485,7 @@ defmodule Barkpark.Plugins.Tasks do
         args: [],
         flags: [
           %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50},
-          %{name: "offset", type: "int", summary: "Ready-queue row offset.", default: 0}
+          %{name: "offset", type: "int", summary: "Task-index row offset.", default: 0}
         ],
         writes: false,
         batch: false,
