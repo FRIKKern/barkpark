@@ -115,6 +115,59 @@ defmodule Barkpark.StudioChat do
   def scope_match?(owner_ws, ws) when is_binary(ws), do: owner_ws == ws
   def scope_match?(_owner_ws, _fail_closed), do: false
 
+  # Attention order for `rollup/1` (herd charter D64h): `blocked > working >
+  # idle > unknown` — unknown ranks LAST, byte-matching the shipped Go TUI
+  # `herdRank` (internal/chat/herd.go, `TestHerdAttentionSort`) so the rollup
+  # can never disagree with `bp chat` for a workspace mixing idle + unknown.
+  @rollup_precedence [:blocked, :working, :idle, :unknown]
+
+  @doc """
+  The workspace fleet rollup (herd layer, charter D64h): ONE grouped count over
+  `chat_sessions.agent_state` — the single herd column every surface reads —
+  plus the ONE state that summarises the herd. Serves `GET /v1/chat/rollup`.
+
+  Returns `%{counts: %{working: n, blocked: n, idle: n, unknown: n},
+  precedence: state}` where `precedence` is the highest-attention state with a
+  nonzero count in the order `blocked > working > idle > unknown`. All four
+  keys are always present (zero-filled — `agent_state` is CHECK-constrained to
+  exactly these four values). An EMPTY in-scope fleet rolls up to `:unknown`
+  with all-zero counts: no sessions is no information, never a synthetic idle.
+
+  `scope` is the controller's `chat_scope` (`:global | {:workspace, ws}`) or
+  the store funnel's bare form (`:global | workspace_id`); `{:workspace, ws}`
+  unwraps onto the SAME fail-closed `scope_sessions/2` gate every other read
+  funnel uses — `:global` unfiltered, a workspace binary confined to its own
+  `owner_workspace_id` rows (NULL-owner sessions invisible), anything else
+  `where: false` (zero rows).
+  """
+  @spec rollup(:global | {:workspace, binary()} | binary() | term()) :: %{
+          counts: %{
+            working: non_neg_integer(),
+            blocked: non_neg_integer(),
+            idle: non_neg_integer(),
+            unknown: non_neg_integer()
+          },
+          precedence: :blocked | :working | :idle | :unknown
+        }
+  def rollup({:workspace, ws}), do: rollup(ws)
+
+  def rollup(scope) do
+    counts =
+      Session
+      |> scope_sessions(scope)
+      |> group_by([s], s.agent_state)
+      |> select([s], {s.agent_state, count(s.id)})
+      |> Repo.all()
+      |> Enum.reduce(Map.new(@rollup_precedence, &{&1, 0}), fn {state, n}, acc ->
+        # CHECK-constrained to the four states, so the atom always exists.
+        Map.replace(acc, String.to_existing_atom(state), n)
+      end)
+
+    precedence = Enum.find(@rollup_precedence, :unknown, &(counts[&1] > 0))
+
+    %{counts: counts, precedence: precedence}
+  end
+
   # The owner_workspace_id to STAMP on a new session from the create scope. The
   # controller threads the resolved `chat_scope` (`:global | {:workspace, ws}`,
   # charter D18); a bare workspace binary is also accepted defensively. Anything

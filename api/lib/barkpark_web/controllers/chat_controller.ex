@@ -160,6 +160,19 @@ defmodule BarkparkWeb.ChatController do
     end
   end
 
+  # ── GET /v1/chat/rollup ────────────────────────────────────────────────────
+
+  @doc """
+  The workspace fleet rollup (herd charter D64h): counts per `agent_state` plus
+  ONE precedence state (`blocked > working > idle > unknown`), scoped at the DB
+  by the caller's `chat_scope` — `:global` sees the whole herd, a workspace
+  connector only its own `owner_workspace_id` rows (fail-closed). Data-only:
+  the aggregate twin of the fleet stream, no per-session detail.
+  """
+  def rollup(conn, _params) do
+    json(conn, StudioChat.rollup(scope(conn)))
+  end
+
   # ── GET /v1/chat/sessions/:id ──────────────────────────────────────────────
 
   @doc """
