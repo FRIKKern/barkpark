@@ -1093,7 +1093,8 @@ defmodule Barkpark.Plugins.Tasks do
           %{
             name: "capacity",
             type: "string",
-            summary: "Free-form capacity hint, e.g. \"1 task\"."
+            summary:
+              "Capacity for routing. A JSON object string is validated + stored structured, e.g. '{\"size_class\":\"heavy\",\"slots_total\":2,\"slots_free\":1,\"budget\":5.0}' (size_class: light | standard | heavy | xl); a plain string is a legacy free-form hint, e.g. \"1 task\"."
           },
           %{
             name: "dataset",

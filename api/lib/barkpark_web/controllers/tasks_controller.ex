@@ -1382,6 +1382,13 @@ defmodule BarkparkWeb.TasksController do
       {:error, :invalid_ttl} ->
         unprocessable(conn, "invalid_ttl", "ttl must be a positive integer (seconds)")
 
+      {:error, :invalid_capacity} ->
+        unprocessable(
+          conn,
+          "invalid_capacity",
+          "capacity must be a free-form string or an object with size_class (light | standard | heavy | xl), non-negative slots_total/slots_free (slots_free <= slots_total), and an optional non-negative budget"
+        )
+
       {:error, :stale_beat} ->
         conflict(conn, :stale_beat, nil)
 
