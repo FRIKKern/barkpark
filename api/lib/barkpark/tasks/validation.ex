@@ -31,6 +31,13 @@ defmodule Barkpark.Tasks.Validation do
   @claimable_statuses ~w(open blocked)
   @kinds ~w(task)
 
+  # The advertised `outcome.resolution` enum — mirrors the schema select
+  # options (schema.ex, task field "outcome" → "resolution"). Strict and
+  # always-on (charter D23): a present off-enum value — including "" — is
+  # rejected; absent/nil stays fine. No grandfathering: the guerrilla census
+  # found every live value already on-enum.
+  @outcome_resolutions ~w(shipped fixed partial wont_do duplicate superseded discarded)
+
   alias Barkpark.Tasks.{ExecutionPolicy, QueueGate}
 
   @doc "The seven lifecycle-status string values a task document may carry."
@@ -64,7 +71,8 @@ defmodule Barkpark.Tasks.Validation do
   plus the dossier fields: `description` / `design` /
   `design_doc` / `due_at` / `blocked_reason` / `close_reason` / `retro`
   (strings), `papers` / `attachments` (lists of strings), `labels` /
-  `history` (lists), `estimate` / `outcome` / `history_summary` (maps),
+  `history` (lists), `estimate` / `history_summary` (maps), `outcome`
+  (map; its `resolution`, when present, must be on the advertised enum),
   `worklog` / `acceptance_criteria` (lists of maps). `execution_policy` and
   `queue_gate` are the two strict nested versioned contracts; other dossier
   composites retain top-level-only shape checks.
@@ -154,7 +162,7 @@ defmodule Barkpark.Tasks.Validation do
     |> check_optional_list(content, "labels")
     |> check_optional_list(content, "history")
     |> check_optional_map(content, "estimate")
-    |> check_optional_map(content, "outcome")
+    |> check_outcome(content)
     # Land digest (task-obsession layer 3): what the task changed —
     # %{"prs","files","capability_slugs"}. Written at close; read by the CI
     # re-land check. Top-level shape only (map), per the claim precedent.
@@ -266,6 +274,43 @@ defmodule Barkpark.Tasks.Validation do
 
       other ->
         Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
+    end
+  end
+
+  # `outcome` map with a validated `resolution` enum (charter D23). Top-level
+  # shape mirrors check_optional_map (kept separate — that helper has seven
+  # unrelated call sites); when the map carries a "resolution" (string key —
+  # HTTP content is string-keyed) the value must be on the advertised enum.
+  # Absent/nil resolution is fine; any present off-enum value — including
+  # `""` — rejects. Other keys (summary, commits, actual_size, …) stay
+  # shape-unchecked here, per the claim-map precedent.
+  defp check_outcome(errors, content) do
+    case fetch(content, "outcome") do
+      nil ->
+        errors
+
+      outcome when is_map(outcome) ->
+        case Map.get(outcome, "resolution") do
+          nil ->
+            errors
+
+          v when is_binary(v) ->
+            if v in @outcome_resolutions do
+              errors
+            else
+              Map.put(errors, "outcome", [
+                "resolution must be one of #{inspect(@outcome_resolutions)}, got #{inspect(v)}"
+              ])
+            end
+
+          other ->
+            Map.put(errors, "outcome", [
+              "resolution must be one of #{inspect(@outcome_resolutions)}, got #{inspect(other)}"
+            ])
+        end
+
+      other ->
+        Map.put(errors, "outcome", ["must be a map when set, got #{inspect(other)}"])
     end
   end
 
