@@ -13,7 +13,9 @@ defmodule Barkpark.Tasks.Schema do
   alias Barkpark.Tasks.Validation
 
   @doc """
-  Returns the `%SchemaDefinition{}` struct the W7 substrate needs: `task`.
+  Returns the `%SchemaDefinition{}` structs the task substrate needs:
+  `task` (the dossier) and `listener` (fleet presence — see
+  `listener_schema/1`).
 
   The schema is the **task dossier** — the complete working memory an AI
   agent needs for one unit of work, in four editor groups: a *Brief* it
@@ -36,7 +38,7 @@ defmodule Barkpark.Tasks.Schema do
   """
   @spec schema_definitions(String.t()) :: [SchemaDefinition.t()]
   def schema_definitions(dataset \\ "production") do
-    [task_schema(dataset)]
+    [task_schema(dataset), listener_schema(dataset)]
   end
 
   @doc "Just the `task` schema struct (callers that only need one)."
@@ -697,6 +699,100 @@ defmodule Barkpark.Tasks.Schema do
           "visibleWhen" => %{"field" => "history_summary", "operator" => "non_empty"},
           "description" =>
             "Compaction rollup: event_count, first/last ts, status_transitions, workers."
+        }
+      ]
+    }
+  end
+
+  @doc """
+  The `listener` schema struct — Personal Dev Fleet presence (Wave A).
+
+  A listener is a dev-server/agent session that heartbeats its presence into
+  the ledger via `POST /v1/fleet/beat` and is read back by
+  `GET /v1/fleet/roster` (`Barkpark.Tasks.Fleet`). The type name is EXACTLY
+  `"listener"` — NEVER `"task"`: the literal `type == "task"` filters in the
+  GitHub outbox, `/v1/tasks/events` and `/v1/tasks/prime` are what
+  structurally exclude listener rows from those feeds (a task-typed listener
+  would leak as a fake GitHub issue).
+
+  Content fields are FLAT, mirroring the task dossier idiom:
+
+    * `worker` — the unique presence key (`_id` = `listener-<worker>`).
+    * `agent` — what runs the session (`claude-code` | `codex` | `custom`).
+    * `scope` — what the listener works on (free-form, e.g. a repo path).
+    * `status` — self-declared via the beat: `idle | working | blocked`
+      (PDF-D23; `provisioning` is stored vocab too, but written only by the
+      cloud provisioner — Wave C — never beat-declarable). The roster
+      OVERRIDES this to `"offline"` at read time when the beat is stale
+      (fail-closed) — derived status is never stored.
+    * `capacity` — free-form capacity hint (e.g. `"1 task"`).
+    * `last_seen` — ISO8601, SERVER-stamped by the beat write only; clients
+      never send a timestamp.
+    * `ttl_s` — self-declared staleness budget in seconds, default 120.
+  """
+  @spec listener_schema(String.t()) :: SchemaDefinition.t()
+  def listener_schema(dataset \\ "production") do
+    %SchemaDefinition{
+      name: "listener",
+      title: "Listener",
+      icon: "📡",
+      # Presence rows are operational metadata, not public content — private
+      # keeps them off the anonymous read API (the roster endpoint is
+      # token-gated and reads the Repo directly).
+      visibility: "private",
+      dataset: dataset,
+      list_preview: %{
+        "badge" => "status",
+        "meta" => %{"field" => "agent", "prefix" => ""}
+      },
+      fields: [
+        %{
+          "name" => "worker",
+          "title" => "Worker",
+          "type" => "string",
+          "validation" => %{"required" => true},
+          "description" =>
+            "Unique presence key. The beat upserts on this — doc _id is listener-<worker>."
+        },
+        %{
+          "name" => "agent",
+          "title" => "Agent",
+          "type" => "string",
+          "description" => "What runs the session: claude-code | codex | custom."
+        },
+        %{
+          "name" => "scope",
+          "title" => "Scope",
+          "type" => "string",
+          "description" => "What the listener works on (repo, area, project)."
+        },
+        %{
+          "name" => "status",
+          "title" => "Status",
+          "type" => "select",
+          "options" => ["idle", "working", "blocked", "provisioning"],
+          "description" =>
+            "Self-declared via the beat: idle | working | blocked (provisioning is provisioner-written, Wave C). The roster computes offline from last_seen vs ttl_s at read time — offline is never stored."
+        },
+        %{
+          "name" => "capacity",
+          "title" => "Capacity",
+          "type" => "string",
+          "description" => "Free-form capacity hint, e.g. \"1 task\"."
+        },
+        %{
+          "name" => "last_seen",
+          "title" => "Last seen",
+          "type" => "string",
+          "description" =>
+            "ISO8601, server-stamped by POST /v1/fleet/beat. Clients never send a timestamp."
+        },
+        %{
+          "name" => "ttl_s",
+          "title" => "TTL (s)",
+          "type" => "number",
+          "description" =>
+            "Self-declared staleness budget in seconds (default 120). Older than this = offline on the roster."
         }
       ]
     }
