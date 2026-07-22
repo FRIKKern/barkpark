@@ -176,6 +176,13 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
       {:error, :request_entity_too_large, "sheet_too_large",
        "import carries at least #{count} non-empty cells; the cap is #{Sheets.cell_cap()}"}
 
+  # An xlsx whose declared decompressed size exceeds the pre-extract ceiling is a
+  # decompression bomb — same 413 class as the cell cap, refused before inflate.
+  defp wrap_convert({:error, :xlsx_decompressed_size_exceeded}, _code),
+    do:
+      {:error, :request_entity_too_large, "sheet_too_large",
+       "xlsx decompressed size exceeds the import ceiling"}
+
   defp wrap_convert({:error, message}, code),
     do: {:error, :unprocessable_entity, code, message}
 
