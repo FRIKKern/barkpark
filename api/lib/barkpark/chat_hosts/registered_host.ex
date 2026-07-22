@@ -115,15 +115,42 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
 
   defp safe_capabilities?(_), do: false
 
+  # Non-secret provider readiness the host declares over the wire. `operations`
+  # and `task_hands` are protocol-readiness facts the dispatch gate
+  # (`Runtime.registered_provider_ready/2`) actually reads: without persisting
+  # them here, a real host could store `installed`/`auth_ready`/`version` only,
+  # so the gate — which ALSO demands the full `operations` set and
+  # `task_hands == true` — could never pass on the public wire (only an in-memory
+  # test fake, built past this changeset, ever satisfied it). They carry no
+  # secret: `operations` is a bounded list of short command-name strings and
+  # `task_hands` is a boolean, so admitting them keeps the "only non-secret
+  # readiness metadata" invariant while making a genuine host reachable.
+  @provider_metadata_keys ~w(installed auth_ready version operations task_hands)
+
   defp safe_provider_metadata?(%{"installed" => installed, "auth_ready" => auth_ready} = map)
-       when is_boolean(installed) and is_boolean(auth_ready) and map_size(map) in 2..3 do
-    Enum.all?(Map.keys(map), &(&1 in ["installed", "auth_ready", "version"])) and
-      case Map.get(map, "version") do
-        nil -> true
-        version when is_binary(version) -> byte_size(version) <= 200
-        _ -> false
-      end
+       when is_boolean(installed) and is_boolean(auth_ready) do
+    Enum.all?(Map.keys(map), &(&1 in @provider_metadata_keys)) and
+      safe_version?(Map.get(map, "version")) and
+      safe_operations?(Map.get(map, "operations")) and
+      safe_task_hands?(Map.get(map, "task_hands"))
   end
 
   defp safe_provider_metadata?(_), do: false
+
+  defp safe_version?(nil), do: true
+  defp safe_version?(version) when is_binary(version), do: byte_size(version) <= 200
+  defp safe_version?(_), do: false
+
+  # Absent is fine (the gate reads it as "no operations declared" and refuses);
+  # when present it must be a list of short, non-secret command-name strings.
+  defp safe_operations?(nil), do: true
+
+  defp safe_operations?(operations) when is_list(operations),
+    do: Enum.all?(operations, &(is_binary(&1) and byte_size(&1) <= 64))
+
+  defp safe_operations?(_), do: false
+
+  defp safe_task_hands?(nil), do: true
+  defp safe_task_hands?(value) when is_boolean(value), do: true
+  defp safe_task_hands?(_), do: false
 end
