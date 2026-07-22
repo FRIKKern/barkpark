@@ -231,6 +231,74 @@ func TestRunPaginatedAll_AllowsDistinctFullPagesWithSharedGenericFields(t *testi
 	}
 }
 
+// TestRunPaginatedAll_WalksLargeCorpusPastOffset100InOrder is the #5588
+// regression lock ("/v1/tasks honors offset + total index order — page 2 is
+// actually page 2", be7c80e7c). #5588 was a server-side fix; this test pins the
+// CLI half of the contract: given a server that correctly honors offset over a
+// >100-row corpus, runPaginatedAll must walk EVERY full page past offset 100
+// (offsets 0,100,200,300 for 350 rows), never raise a false pagination_stalled,
+// and concatenate the pages in GLOBAL ORDER — the exact invariant #5588 restored.
+//
+// The pre-#5588 failure (server ignoring offset so page 2 == page 1) surfaces at
+// the CLI as either the stall guard tripping or rows arriving out of / duplicated
+// order; both are asserted against here. This walks deeper than the existing
+// two-full-page tests (EnvelopeKeys tops out at offset 100), covering the
+// many-consecutive-full-pages path a real `task ls --all` takes.
+func TestRunPaginatedAll_WalksLargeCorpusPastOffset100InOrder(t *testing.T) {
+	const total = 350 // 3 full pages (0,100,200) + a 50-row tail at offset 300
+	var gotOffsets []int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		gotOffsets = append(gotOffsets, offset)
+		// A server that HONORS offset: serve the real slice [offset, offset+limit).
+		rows := []json.RawMessage{}
+		for i := offset; i < offset+limit && i < total; i++ {
+			rows = append(rows, json.RawMessage(fmt.Sprintf(`{"id":"row-%03d","seq":%d}`, i, i)))
+		}
+		body, _ := json.Marshal(map[string]any{"docs": rows})
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	out := newWriter(&stdout, &stderr)
+	out.output = "json"
+	cmd := manifest.Command{Noun: "task", Verb: "ls", HTTP: manifest.HTTP{Method: "GET"}}
+
+	if code := runPaginatedAll(out, cmd, srv.URL, map[string]string{}); code != exitOK {
+		t.Fatalf("exit = %d, want %d (false pagination_stalled on a correctly-paged server?); stdout=%q stderr=%q",
+			code, exitOK, stdout.String(), stderr.String())
+	}
+
+	// The loop must have requested every full page past offset 100, then the tail.
+	wantOffsets := []int{0, 100, 200, 300}
+	if fmt.Sprint(gotOffsets) != fmt.Sprint(wantOffsets) {
+		t.Fatalf("requested offsets = %v, want %v (loop did not walk past offset 100 in order)", gotOffsets, wantOffsets)
+	}
+
+	var got struct {
+		Docs []struct {
+			ID  string `json:"id"`
+			Seq int    `json:"seq"`
+		} `json:"docs"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("output not JSON: %v\n%s", err, stdout.String())
+	}
+	if len(got.Docs) != total {
+		t.Fatalf("row count = %d, want %d (dropped or duplicated a page)", len(got.Docs), total)
+	}
+	// Global order: doc i must be exactly seq i. This is what #5588 restored — a
+	// stalling/repeating or offset-shuffling server would break this even if the
+	// count happened to match.
+	for i, d := range got.Docs {
+		if d.Seq != i {
+			t.Fatalf("row %d has seq %d (out of global order); id=%q — pages not concatenated as 0,100,200,300", i, d.Seq, d.ID)
+		}
+	}
+}
+
 func keysOf(m map[string][]json.RawMessage) []string {
 	ks := make([]string, 0, len(m))
 	for k := range m {
