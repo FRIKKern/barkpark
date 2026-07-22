@@ -20,10 +20,13 @@ defmodule Barkpark.AuthSessionTokenTest do
   alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Repo
+  alias BarkparkWeb.Plugs.RequireChatAccess
   alias BarkparkWeb.Studio.ClaudeChat
 
   import Barkpark.TenancyFixtures
   import Ecto.Query
+  import Plug.Test
+  import Plug.Conn
 
   @session_ttl_cap 24 * 3600
   @session_ttl_default 4 * 3600
@@ -63,14 +66,35 @@ defmodule Barkpark.AuthSessionTokenTest do
       assert token.label == "claude-session #{sid}"
       assert token.workspace_id == ws.id
       # curated REAL permissions — the loopback's task/doc/search verbs ride
-      # the ordinary tiers; NEVER admin, NEVER opaque share perms.
-      assert Enum.sort(token.permissions) == ["read", "write"]
+      # the ordinary tiers, and `chat` reaches /v1/chat (herd-s4); NEVER admin,
+      # NEVER opaque share perms.
+      assert Enum.sort(token.permissions) == ["chat", "read", "write"]
       refute Auth.has_permission?(token, "admin")
       refute Enum.any?(token.permissions, &String.starts_with?(&1, "share-edit-"))
       # kind stays "api", so the single verify_token chokepoint accepts it
       # (the Access.mint grant-token path is PROVEN rejected there — D63).
       assert {:ok, verified} = Auth.verify_token(raw)
       assert verified.id == token.id
+    end
+
+    test "the REAL mint carries chat and RequireChatAccess resolves {:workspace, ws}, not 403",
+         %{ws: ws, minter: minter} do
+      # herd-s4: the loopback credential must reach /v1/chat. The mint carries
+      # `chat` and is workspace-bound, so RequireChatAccess inherits a tenant
+      # scope by construction — never instance-global, never a 403.
+      assert {:ok, {_raw, %ApiToken{} = token}} =
+               Auth.create_claude_session_token(minter, Ecto.UUID.generate())
+
+      assert Auth.has_permission?(token, "chat")
+      assert token.workspace_id == ws.id
+
+      conn =
+        conn(:get, "/v1/chat/sessions")
+        |> assign(:api_token, token)
+        |> RequireChatAccess.call(RequireChatAccess.init([]))
+
+      refute conn.halted
+      assert conn.assigns.chat_scope == {:workspace, ws.id}
     end
 
     test "default TTL is session-grade (hours), NOT clamp_ttl's 7-day share floor",
@@ -104,7 +128,7 @@ defmodule Barkpark.AuthSessionTokenTest do
                  permissions: ["admin"]
                )
 
-      assert Enum.sort(token.permissions) == ["read", "write"]
+      assert Enum.sort(token.permissions) == ["chat", "read", "write"]
       refute Auth.has_permission?(token, "admin")
     end
 
