@@ -95,6 +95,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.QueueGate
   alias Barkpark.Tasks.Rail
   alias Barkpark.Tasks.Schema
+  alias Barkpark.Tasks.Stage
   alias Barkpark.Tasks.Stamp
   alias Barkpark.Tasks.Validation
 
@@ -532,6 +533,29 @@ defmodule Barkpark.Tasks do
   @spec pulse_by_id(binary(), String.t(), keyword()) ::
           {:ok, Document.t()} | {:error, :not_found | :not_holder | :stale_claim}
   def pulse_by_id(task_uuid, worker_id, opts \\ []), do: Pulse.pulse(task_uuid, worker_id, opts)
+
+  @doc """
+  Stage a task between the thought/backlog states — the sanctioned
+  `bp task stage <id> <state>` transition verb (`POST /v1/tasks/:doc_id/stage`).
+  Enforces the shared `Barkpark.Tasks.Transitions` legality table, writes the
+  `content.engagement` companion map on `→ considering`/`→ researching` and
+  clears it on `→ open`, emits an additive `task.staged` mutation_event, and
+  broadcasts post-commit. NO epoch machinery — thought is not contended work
+  (charter D3). Kills stay on `close` (`→ cancelled`), claims on `claim`.
+
+      Tasks.stage(task_uuid, "researching", object: "research", holder: "cycle-42")
+
+  Errors: `:not_found`, `{:illegal_transition, from, to}`,
+  `{:invalid_object, object}`, `:stale_claim`. See `Barkpark.Tasks.Stage`.
+  """
+  @spec stage(binary(), String.t(), keyword()) ::
+          {:ok, Document.t()}
+          | {:error,
+             :not_found
+             | :stale_claim
+             | {:illegal_transition, String.t(), String.t()}
+             | {:invalid_object, term()}}
+  defdelegate stage(task_id, to, opts \\ []), to: Stage
 
   @doc """
   tt5: add/remove `content.labels` entries on a single task, advisory-lock +

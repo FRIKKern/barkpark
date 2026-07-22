@@ -8519,6 +8519,75 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/tasks/{doc_id}/stage": {
+      "post": {
+        "operationId": "task.stage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: state.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open. Enforces the transition-legality table (considering⇄researching; considering|researching→open; open→considering; same→same). Writes content.engagement {object,holder,ts,note} on →considering/researching and clears it on →open; emits a task.staged event. Kills go through `bp task close` (→ cancelled), claims through `bp task claim` (→ in_progress); an illegal transition (e.g. → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/schemas/{dataset}": {
       "get": {
         "operationId": "schema.ls",
