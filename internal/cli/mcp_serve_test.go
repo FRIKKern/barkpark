@@ -592,16 +592,22 @@ func TestMCPTaskCreateSurfacesWarnings(t *testing.T) {
 	}
 
 	var receipt struct {
-		ID       string           `json:"id"`
-		Draft    string           `json:"draft"`
-		Status   string           `json:"status"`
-		Warnings []map[string]any `json:"warnings"`
+		ID              string           `json:"id"`
+		Draft           string           `json:"draft"`
+		Status          string           `json:"status"`
+		LifecycleStatus string           `json:"lifecycle_status"`
+		Warnings        []map[string]any `json:"warnings"`
 	}
 	if err := json.Unmarshal([]byte(mcpContentText(res)), &receipt); err != nil {
 		t.Fatalf("receipt did not parse: %v (%q)", err, mcpContentText(res))
 	}
 	if receipt.ID != "task-1" || receipt.Status != "published" {
 		t.Fatalf("receipt id/status wrong: %+v", receipt)
+	}
+	// tlv-s6: the receipt echoes the born lifecycle_status — the MCP create
+	// path injects "open", and the receipt must say so instead of assuming it.
+	if receipt.LifecycleStatus != "open" {
+		t.Fatalf("receipt.lifecycle_status = %q, want the born \"open\" echoed", receipt.LifecycleStatus)
 	}
 	if len(receipt.Warnings) != 1 {
 		t.Fatalf("receipt.warnings = %v, want the publish-step advisory folded in", receipt.Warnings)

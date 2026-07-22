@@ -238,6 +238,7 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_unless(:status, doc.status, "published")
     |> put_unless(:lifecycle_status, Map.get(content, "lifecycle_status"), "open")
     |> put_brief_criteria(content)
+    |> put_brief_engagement(content)
     |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
     |> prune_nils()
   end
@@ -283,6 +284,20 @@ defmodule BarkparkWeb.TasksController.Params do
 
       _ ->
         map
+    end
+  end
+
+  # tlv-s6 (TLV charter D15): the engagement companion — the thought-state
+  # object map {object, holder, ts, note} that considering/researching rows
+  # carry — rides the brief card as an ADDITIVE 14th key, present only when
+  # the doc carries a non-empty map (same omission law as criteria_progress:
+  # omit the segment, never an empty object). The 13 frozen brief fields are
+  # untouched; lifecycle_status (already on the card) carries the thought
+  # states for free via put_unless/4 above.
+  defp put_brief_engagement(map, content) do
+    case Map.get(content, "engagement") do
+      %{} = engagement when map_size(engagement) > 0 -> Map.put(map, :engagement, engagement)
+      _ -> map
     end
   end
 

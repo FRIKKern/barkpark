@@ -759,8 +759,8 @@ func mcpBoolPtr(b bool) *bool { return &b }
 // manifest verb), riding sendTaskMutations — the same raw send half `bp task
 // create` uses (tasks_create_cmd.go) — but returning an MCP result instead of
 // writing a receipt to stdout. It creates the draft, optionally publishes it, and
-// returns a compact JSON receipt {id, draft, status} as tool content — plus a
-// `warnings` key when the create/publish success envelope carries the authoring
+// returns a compact JSON receipt {id, draft, status, lifecycle_status} as tool
+// content — plus a `warnings` key when the create/publish success envelope carries the authoring
 // wall's advisories (publish response preferred, else create), so an agent sees the
 // same {code,severity,message} advice the CLI surfaces. Any failure sets IsError
 // with a message that still names the created id (so a created-but-publish-failed
@@ -796,7 +796,14 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 		docStatus = "published"
 		warnBody = pBody
 	}
-	receipt := map[string]any{"id": bareID, "draft": draftID, "status": docStatus}
+	// tlv-s6 (TLV charter D14): echo the born lifecycle_status — the body value
+	// the server accepted — so a birth-as-considering is visible in the receipt.
+	receipt := map[string]any{
+		"id":               bareID,
+		"draft":            draftID,
+		"status":           docStatus,
+		"lifecycle_status": body["lifecycle_status"],
+	}
 	if warnings := warningsFrom(warnBody); len(warnings) > 0 {
 		receipt["warnings"] = warnings
 	}

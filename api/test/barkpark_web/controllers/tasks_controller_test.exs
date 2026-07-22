@@ -2185,6 +2185,48 @@ defmodule BarkparkWeb.TasksControllerTest do
       refute claim["now"]["ts"] =~ ~r/\.\d/
     end
 
+    # tlv-s6 (TLV charter D15): the engagement companion is an ADDITIVE key on
+    # the brief card — present only when the doc carries it, omitted otherwise.
+    # The 13 frozen brief fields are untouched (the exact-key-set test above
+    # stays byte-identical).
+    test "engagement rides the brief card when present and is omitted when absent",
+         %{conn: conn, scope: scope} do
+      engagement = %{
+        "object" => "research",
+        "holder" => "cycle-w1",
+        "ts" => "2026-07-21T10:00:00Z",
+        "note" => "surveying"
+      }
+
+      thinking_id = uniq("brief-eng")
+
+      mk_task!(thinking_id, scope, %{
+        "lifecycle_status" => "researching",
+        "engagement" => engagement
+      })
+
+      resting_id = uniq("brief-eng-none")
+      mk_task!(resting_id, scope, %{"lifecycle_status" => "considering"})
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks?view=brief")
+        |> json_response(200)
+
+      thinking = Enum.find(payload["docs"], &String.contains?(&1["doc_id"], thinking_id))
+      assert thinking, "researching task missing from brief index"
+      assert thinking["engagement"] == engagement
+      # lifecycle_status (frozen field #5) carries the thought state for free —
+      # only "open" is omitted (cut g), never the new values.
+      assert thinking["lifecycle_status"] == "researching"
+
+      resting = Enum.find(payload["docs"], &String.contains?(&1["doc_id"], resting_id))
+      assert resting, "considering task missing from brief index"
+      refute Map.has_key?(resting, "engagement")
+      assert resting["lifecycle_status"] == "considering"
+    end
+
     test "full view keeps ONE claim copy: top-level intact, content echo drops it, storage untouched",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-dedup")

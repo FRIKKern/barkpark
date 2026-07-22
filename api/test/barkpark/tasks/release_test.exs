@@ -12,6 +12,10 @@ defmodule Barkpark.Tasks.ReleaseTest do
     4. Only in-flight releases: an open task → {:not_in_progress, "open"}.
     5. Not-found id → :not_found.
     6. Release-then-reclaim keeps the epoch monotonic.
+    7. Regression: a MISSING observed_epoch raises loudly (KeyError) and a
+       blank (nil) one is fenced off — never a silent exit-0 no-op.
+    8. Ruling-pin: release ALWAYS lands "open", even for a blocked-born
+       task (deterministic landing, NOT a pre-claim restore).
   """
 
   use Barkpark.DataCase, async: false
@@ -125,6 +129,64 @@ defmodule Barkpark.Tasks.ReleaseTest do
     test "an unknown id is :not_found" do
       assert {:error, :not_found} =
                Release.release("00000000-0000-0000-0000-000000000099", "w", observed_epoch: 1)
+    end
+
+    # REGRESSION GUARD: the epoch fence must fail LOUDLY when the caller
+    # forgets (or blanks) observed_epoch. `Keyword.fetch!/2` raising here is
+    # the contract — a silent exit-0 no-op would let a walk-away skip the
+    # fence entirely. If this test starts failing, someone softened the
+    # fetch; do not "fix" it by defaulting the epoch.
+    test "a missing observed_epoch raises loudly and leaves the claim intact", %{scope: scope} do
+      doc = claimed_task!(scope, "w-hold")
+
+      assert_raise KeyError, fn -> Release.release(doc.id, "w-hold") end
+      assert_raise KeyError, fn -> Release.release(doc.id, "w-hold", []) end
+
+      content = Repo.get!(Document, doc.id).content
+      assert content["lifecycle_status"] == "in_progress"
+      assert get_in(content, ["claim", "worker"]) == "w-hold"
+    end
+
+    test "a blank (nil) observed_epoch is fenced off, never a silent no-op", %{scope: scope} do
+      doc = claimed_task!(scope, "w-hold")
+
+      assert {:error, :fenced_off} = Release.release(doc.id, "w-hold", observed_epoch: nil)
+
+      content = Repo.get!(Document, doc.id).content
+      assert content["lifecycle_status"] == "in_progress"
+      assert get_in(content, ["claim", "worker"]) == "w-hold"
+    end
+
+    # RULING PIN (task-lifecycle-visibility wave, 2026-07-21): release lands
+    # "open" DETERMINISTICALLY — it is not a restore of the pre-claim status.
+    # This is the RED probe inverted: a blocked-born task that is claimed and
+    # then released must land "open", because no pre-claim snapshot exists
+    # anywhere (claim.ex keeps none) and the TtlSweeper reap twin makes the
+    # same landing. See the doctrine comment in release.ex.
+    test "a blocked-born task claims then releases to open — the always-open ruling",
+         %{scope: scope} do
+      doc_id = uniq("rel-blocked")
+
+      {:ok, doc} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => doc_id,
+            "title" => doc_id,
+            "content" => %{"kind" => "task", "lifecycle_status" => "blocked"}
+          },
+          @dataset,
+          scope
+        )
+
+      {:ok, _claimed} = Tasks.claim_by_id(doc.doc_id, "w-hold", scope)
+      epoch = epoch_of(doc)
+
+      assert {:ok, _} = Release.release(doc.id, "w-hold", observed_epoch: epoch)
+
+      content = Repo.get!(Document, doc.id).content
+      assert content["lifecycle_status"] == "open"
+      assert get_in(content, ["claim", "worker"]) == nil
     end
 
     test "release-then-reclaim keeps the epoch monotonic", %{scope: scope} do
