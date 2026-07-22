@@ -58,6 +58,36 @@ func TestParseTaskCreateArgs_FlagsAndTypedSet(t *testing.T) {
 	}
 }
 
+// Regression (task-bp-create-drops-long-description): the builtin `bp task
+// create` --set parser (applyTaskSet) and its --description flag must also carry
+// a multi-KB, multi-line description VERBATIM — no newline truncation, no drop —
+// past the 5,783 bytes that reproduced the report.
+func TestParseTaskCreateArgs_LongMultilineDescription(t *testing.T) {
+	line := "rationale: a task reason with a colon a:b and a := marker, padding padding padding\n"
+	desc := "Hit twice during round nine.\n\n" + strings.Repeat(line, 84)
+	if len(desc) <= 5783 {
+		t.Fatalf("description must exceed the reproduced 5783 bytes, got %d", len(desc))
+	}
+
+	// via --set description=<big>
+	viaSet, _, err := parseTaskCreateArgs([]string{"t", "--set", "description=" + desc})
+	if err != nil {
+		t.Fatalf("--set path: %v", err)
+	}
+	if got, _ := viaSet["description"].(string); got != desc {
+		t.Fatalf("--set description not verbatim: got %d bytes, want %d", len(got), len(desc))
+	}
+
+	// via --description <big>
+	viaFlag, _, err := parseTaskCreateArgs([]string{"t", "--description", desc})
+	if err != nil {
+		t.Fatalf("--description path: %v", err)
+	}
+	if got, _ := viaFlag["description"].(string); got != desc {
+		t.Fatalf("--description not verbatim: got %d bytes, want %d", len(got), len(desc))
+	}
+}
+
 func TestParseTaskCreateArgs_SetOverridesDefault(t *testing.T) {
 	body, _, err := parseTaskCreateArgs([]string{"t", "--set", "lifecycle_status=blocked"})
 	if err != nil {

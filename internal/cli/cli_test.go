@@ -1197,6 +1197,89 @@ func TestBuildBodyMutationOp(t *testing.T) {
 	}
 }
 
+// Regression (task-bp-create-drops-long-description): a multi-KB, multi-line
+// --set description must be threaded VERBATIM into the create mutation — never
+// truncated at the first newline, never capped, never dropped. The reported
+// failure was a SILENT drop: `bp doc create task` returned success while the
+// stored draft had no description, which the publish wall later misdiagnosed as
+// a weak label. This pins the whole CLI create pipeline (splitArgs → bindArgs →
+// buildBody) so a large description survives BOTH arg tokenisation and body
+// assembly, alongside the typed sibling sets (tags, acceptance_criteria) that
+// DID land in the report — a byte-for-byte guard, larger than the 5,783 bytes
+// that reproduced it.
+func TestBuildBodyDocCreateLongMultilineDescription(t *testing.T) {
+	createCmd := manifest.Command{
+		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
+		HTTP:  manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args:  []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+		Flags: []manifest.Flag{{Name: "set", Type: "string", Repeatable: true}},
+	}
+
+	// Embedded newlines, colons, and a ':=' token — the marker that must NOT
+	// flip a plain key=value into a typed set. Sized past the reproduced 5,783 B.
+	line := "rationale: a task reason with a colon a:b and a := marker, padding padding padding\n"
+	desc := "Hit twice during round nine.\n\n" + strings.Repeat(line, 84)
+	if len(desc) <= 5783 {
+		t.Fatalf("description must exceed the reproduced 5783 bytes, got %d", len(desc))
+	}
+
+	tail := []string{
+		"task",
+		"--set", "_id=task-x",
+		"--set", "title=ReproTitle",
+		"--set", "description=" + desc,
+		"--set", `tags:=[{"tag":"cli"}]`,
+		"--set", `acceptance_criteria:=[{"criterion":"c1","met":false}]`,
+	}
+	pos, flags, err := splitArgs(createCmd, tail)
+	if err != nil {
+		t.Fatalf("splitArgs: %v", err)
+	}
+	args, err := bindArgs(createCmd, pos)
+	if err != nil {
+		t.Fatalf("bindArgs: %v", err)
+	}
+	body, _, _, err := buildBody(createCmd, flags, args)
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+
+	var payload struct {
+		Mutations []struct {
+			Create map[string]any `json:"create"`
+		} `json:"mutations"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if len(payload.Mutations) != 1 {
+		t.Fatalf("mutations = %d, want 1", len(payload.Mutations))
+	}
+	create := payload.Mutations[0].Create
+
+	got, ok := create["description"].(string)
+	if !ok {
+		keys := make([]string, 0, len(create))
+		for k := range create {
+			keys = append(keys, k)
+		}
+		t.Fatalf("description absent from create body (silent drop) — keys present: %v", keys)
+	}
+	if got != desc {
+		t.Fatalf("description not verbatim: got %d bytes, want %d bytes", len(got), len(desc))
+	}
+	// The siblings that landed in the report must still land.
+	if _, ok := create["tags"].([]any); !ok {
+		t.Errorf("tags dropped or mistyped: %#v", create["tags"])
+	}
+	if _, ok := create["acceptance_criteria"].([]any); !ok {
+		t.Errorf("acceptance_criteria dropped or mistyped: %#v", create["acceptance_criteria"])
+	}
+	if create["type"] != "task" {
+		t.Errorf("type = %v, want task", create["type"])
+	}
+}
+
 func TestBuildBodyDocCreateFileMergeAndDryRun(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "doc.json")

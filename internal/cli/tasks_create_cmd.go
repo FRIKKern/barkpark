@@ -488,5 +488,11 @@ flags:
   --publish        Publish the new task immediately (draft → published).
 
 write globals: --dry-run (print the request, don't send) · --yes (skip the
-prod confirmation) · -o json (structured receipt)`)
+prod confirmation) · -o json (structured receipt)
+
+reading it back: a new task (and any --set/patch) writes the DRAFT. Read it
+with the drafts. prefix — bp doc get task drafts.<id> --perspective raw. A bare
+bp doc get task <id> reads the PUBLISHED perspective and 404s (or shows the
+pre-write row) for an unpublished draft: that draft-vs-published asymmetry is
+why a successful write can look like it "read back unchanged" until you publish.`)
 }
