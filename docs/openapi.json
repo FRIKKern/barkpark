@@ -7347,6 +7347,15 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "description": "Task-index row offset.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {

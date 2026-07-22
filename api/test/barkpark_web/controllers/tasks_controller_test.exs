@@ -1352,6 +1352,40 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert parents == [phase_id]
       assert length(payload["docs"]) == 2
     end
+
+    # tlv-bl-tasks-ls-offset-broken (D19): the server used to IGNORE `offset`
+    # on the index — every page repeated page 0 and `bp task ls --all`
+    # self-aborted with pagination_stalled. Mirrors the ready-offset test
+    # above: seed under a unique bare parent= (the deterministic inserted_at
+    # ASC arm) and assert page 2 is actually page 2.
+    test "offset pages are disjoint: page 2 is actually page 2",
+         %{conn: conn, scope: scope} do
+      parent = uniq("idx-offset-parent")
+
+      for i <- 1..5 do
+        mk_task!(uniq("idx-offset-#{i}"), scope, %{"parent_id" => parent})
+      end
+
+      fetch_ids = fn offset ->
+        resp =
+          conn |> authed() |> get("/v1/tasks?parent=#{parent}&limit=2&offset=#{offset}")
+
+        assert resp.status == 200
+        resp.resp_body |> Jason.decode!() |> Map.fetch!("docs") |> Enum.map(& &1["doc_id"])
+      end
+
+      first = fetch_ids.("0")
+      second = fetch_ids.("2")
+
+      assert length(first) == 2
+      assert length(second) == 2
+      assert MapSet.disjoint?(MapSet.new(first), MapSet.new(second))
+
+      # Fails soft, matching the ready path: negative and junk clamp to 0.
+      assert fetch_ids.("-10") == first
+      assert fetch_ids.("not-an-int") == first
+      assert fetch_ids.("99") == []
+    end
   end
 
   # ─── C1 (task as universal node): GET /v1/tasks?parent= ────────────────

@@ -234,6 +234,14 @@ defmodule BarkparkWeb.TasksController do
     # and `?limit=100000000` would fan the whole task corpus out in one Repo.all.
     limit = Params.parse_limit(params["limit"], 1000, 1000)
 
+    # tlv-bl-tasks-ls-offset-broken (D19): offset used to be silently ignored —
+    # every page repeated page 0 and `bp task ls --all` self-aborted with
+    # pagination_stalled. Clamp mirrors the 3-site precedent
+    # (query_controller/search_controller/content/query): floor 0, cap 100k so a
+    # raw value can never reach `OFFSET` as a negative (Postgres 500) or as an
+    # unbounded deep scan.
+    offset = params["offset"] |> Params.parse_int(0) |> max(0) |> min(100_000)
+
     # C1 (task as universal node): when `parent` is given, the result reads as
     # that task's timeline/rail — its chronological child tasks (a "rail is the
     # chronological child tasks of a task"). Order by inserted_at ASC (oldest
@@ -244,7 +252,8 @@ defmodule BarkparkWeb.TasksController do
     base =
       from(d in Document,
         where: d.type == "task",
-        limit: ^limit
+        limit: ^limit,
+        offset: ^offset
       )
 
     query =

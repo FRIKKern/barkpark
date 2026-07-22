@@ -489,7 +489,8 @@ defmodule Barkpark.Plugins.Tasks do
         auth_tier: "read",
         args: [],
         flags: [
-          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50}
+          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50},
+          %{name: "offset", type: "int", summary: "Task-index row offset.", default: 0}
         ],
         writes: false,
         batch: false,
