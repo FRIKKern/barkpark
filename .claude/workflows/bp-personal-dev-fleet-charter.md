@@ -450,3 +450,27 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   closed superseded-by-#5630; `pdf-bl-presence-honesty-sparse` ruled by PDF-D41 (charter
   criterion stamped; implementation rides the glue slice). Wave Paper:
   `personal-dev-fleet-wave-b-2026-07-22`.
+- **2026-07-22 · Wave B round-1 REVIEW (grade A−).** All 5 round-1 slices built green and were
+  adversarially re-verified; TWO cross-slice defects — both in the cap-brake path, both invisible
+  to each slice's own gate — were found and FIXED in review. (1) `measure_budget` emitted a
+  NEGATIVE budget once spend passed the cap; the server's own PDF-D34 contract 422s a negative
+  budget and the beat's `|| true` swallowed it — the listener flipped OFFLINE silently at the
+  exact moment the cap tripped. Budget now FLOORS at 0 (the protocol's already-documented word;
+  0 and negative route identically). Fix on `loop-epic/the-runner-measures-size-class-from-real-1-r`.
+  (2) dispatch.sh's cap gate summed a `usd` ledger key that NOTHING writes — PDF-D37's one-row
+  format and `record_spend` both spell it `cost_usd` — so every canonical row would have tripped
+  the malformed-row ABORT: a permanently stalled brake. Now reads `cost_usd`, skips honest
+  `null` rows (matching `measure_budget`), still aborts 12 on a missing key / non-numeric value;
+  proven by drill (freeze at $12.25≥$10 with a null row skipped, in-place ledger-zero lifts the
+  freeze, garbage AND legacy-`usd` rows abort named). Fix on
+  `loop-epic/live-dispatch-glue-roster-transform-rout-2-r`. Re-verified UNCHANGED:
+  `pdf-wb-capacity-contract` (24/0; neutering put_capacity's map clause reds exactly 4),
+  `pdf-bl-listener-egress-guard` (31/0; stripping forward_event?'s listener clause reds 2),
+  `pdf-wb-charter-landing` (byte-identical to 8e6519dd3 at c1d966c08; this REVIEW entry is a
+  follow-up commit on its `-r` branch). NOTHING pushed — the LEAD merges the final branches
+  (`-r` where fixes exist, originals otherwise), closes the merge-gated criteria, deletes
+  `pdf-r2-wave-log` (PDF-D44b), then dispatches round-2 `pdf-wb-efficiency-proof` (its merged
+  transcript stamps epic criterion 2 per PDF-D33). Ledger audit: clean — every builder stamped
+  mid-claim with evidence, left lifecycle honest, merge-gated criteria open; the round-2 proof
+  task sits open/unclaimed as designed. Wave Paper closed as the debrief:
+  `personal-dev-fleet-wave-b-2026-07-22`.
