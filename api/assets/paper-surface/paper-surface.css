@@ -952,13 +952,13 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-chart__s { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 .bp-paper-surface .bp-chart__b { stroke: none; opacity: 0.85; }
 .bp-paper-surface .bp-chart__s0 { stroke: var(--paper-accent); }
-.bp-paper-surface .bp-chart__s1 { stroke: var(--bp-tone-info-fg, #3b82f6); }
-.bp-paper-surface .bp-chart__s2 { stroke: var(--bp-tone-warning-fg, #b45309); }
-.bp-paper-surface .bp-chart__s3 { stroke: var(--bp-tone-danger-fg, #b91c1c); }
+.bp-paper-surface .bp-chart__s1 { stroke: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chart__s2 { stroke: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chart__s3 { stroke: var(--bp-tone-danger-fg); }
 .bp-paper-surface rect.bp-chart__s0 { fill: var(--paper-accent); }
-.bp-paper-surface rect.bp-chart__s1 { fill: var(--bp-tone-info-fg, #3b82f6); }
-.bp-paper-surface rect.bp-chart__s2 { fill: var(--bp-tone-warning-fg, #b45309); }
-.bp-paper-surface rect.bp-chart__s3 { fill: var(--bp-tone-danger-fg, #b91c1c); }
+.bp-paper-surface rect.bp-chart__s1 { fill: var(--bp-tone-info-fg); }
+.bp-paper-surface rect.bp-chart__s2 { fill: var(--bp-tone-warning-fg); }
+.bp-paper-surface rect.bp-chart__s3 { fill: var(--bp-tone-danger-fg); }
 .bp-paper-surface .bp-chart__legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
 .bp-paper-surface .bp-chart__key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-chart__swatch { width: 14px; height: 3px; border-radius: 2px; background: currentColor; }
@@ -966,6 +966,21 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-chart__key .bp-chart__s1 { background: var(--bp-tone-info-fg, #3b82f6); }
 .bp-paper-surface .bp-chart__key .bp-chart__s2 { background: var(--bp-tone-warning-fg, #b45309); }
 .bp-paper-surface .bp-chart__key .bp-chart__s3 { background: var(--bp-tone-danger-fg, #b91c1c); }
+/* chart ANNOTATION layer (regions / refLines / points — data_viz.ex
+   `annotations` attr): washes behind the series, guides above them, labels in
+   the tick voice. Tones ride the same --bp-tone-* family as the series. */
+.bp-paper-surface .bp-chart__region { fill: var(--paper-ink-soft); opacity: 0.08; }
+.bp-paper-surface .bp-chart__region--info { fill: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chart__region--ok { fill: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-chart__region--warn { fill: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chart__region--danger { fill: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chart__refline { stroke: var(--paper-ink-soft); stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; opacity: 0.65; }
+.bp-paper-surface .bp-chart__refline--info { stroke: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chart__refline--ok { stroke: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-chart__refline--warn { stroke: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chart__refline--danger { stroke: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chart__ann { fill: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 10px; }
+.bp-paper-surface .bp-chart__pt { fill: var(--paper-accent); stroke: var(--paper-bg); stroke-width: 1.5; }
 
 /* ── data-viz slate 2: calendar heatmap, quantile dual-encode, matrix Σ,
    stat denominators (gui-premium w5) ──

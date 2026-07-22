@@ -455,17 +455,142 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
             do: "",
             else: ~s|<div class="bp-chart__t">#{escape_html(caption)}</div>|
 
+        ann = annotations_of(block)
+
         ~s|<div class="bp-chart">| <>
           cap_html <>
           ~s|<svg viewBox="0 0 #{@vw} #{@vh}" preserveAspectRatio="none" role="img">| <>
           grid_svg(min_v, max_v) <>
+          regions_svg(ann, n) <>
           plot_svg(series, kind, min_v, max_v, n) <>
+          overlays_svg(ann, series, min_v, max_v, n) <>
           x_labels_svg(x_labels) <>
           "</svg>" <> legend_html(series) <> "</div>"
     end
   end
 
   def chart_html(_), do: empty("chart")
+
+  # ── chart annotations (the Distill layer) ────────────────────────────────────
+  #
+  # An OPTIONAL `annotations` map lets the author narrate the plot ON-CANVAS —
+  # the layer whose absence forced this week's sanction-curve essay to move its
+  # region labels into the caption:
+  #
+  #   annotations: %{
+  #     "regions"  => [%{"from", "to", "label"?, "tone"?}],   # x-INDEX span wash
+  #     "refLines" => [%{"y", "label"?, "tone"?}],            # dashed y guide
+  #     "points"   => [%{"series"?, "index", "label"}]        # one datum called out
+  #   }
+  #
+  # `from`/`to`/`index` are data-point indexes (the same 0-based x domain the
+  # series points occupy; fractional is fine), `y` is a data value, `tone` one of
+  # info|ok|warn|danger (anything else → the neutral ink wash). Every entry is
+  # fail-soft in the house style: non-numeric coordinates drop the entry, labels
+  # go through escape_html, coordinates clamp to the plot area — a hostile block
+  # can never draw outside the svg or inject markup. Regions paint BEHIND the
+  # series (washes), refLines/points paint ABOVE (guides), so the data always
+  # stays legible. Email keeps its text-badge degrade untouched; the TUI twin
+  # ignores unknown attrs by construction (charter D4 lets surfaces diverge).
+  defp annotations_of(block) do
+    case get(block, "annotations") do
+      %{} = a -> %{regions: as_list(get(a, "regions")), ref_lines: as_list(get(a, "refLines")), points: as_list(get(a, "points"))}
+      _ -> %{regions: [], ref_lines: [], points: []}
+    end
+  end
+
+  defp tone_class(base, tone) do
+    case display_string(tone) do
+      t when t in ~w(info ok warn danger) -> "#{base} #{base}--#{t}"
+      _ -> base
+    end
+  end
+
+  defp regions_svg(%{regions: regions}, n) do
+    Enum.map_join(regions, "", fn r ->
+      from = numeric(get(r, "from"))
+      to = numeric(get(r, "to"))
+
+      if is_number(from) and is_number(to) and to > from do
+        x1 = x_at(clamp(from, 0.0, max(n - 1, 0) * 1.0), n)
+        x2 = x_at(clamp(to, 0.0, max(n - 1, 0) * 1.0), n)
+        label = r |> get("label") |> display_string()
+        cls = tone_class("bp-chart__region", get(r, "tone"))
+
+        rect =
+          ~s|<rect class="#{cls}" x="#{fmt(x1)}" y="#{@pad_t}" width="#{fmt(x2 - x1)}" height="#{fmt(@vh - @pad_t - @pad_b)}"/>|
+
+        label_svg =
+          if label == "",
+            do: "",
+            else:
+              ~s|<text class="bp-chart__ann" x="#{fmt((x1 + x2) / 2)}" y="#{@pad_t + 11}" text-anchor="middle">#{escape_html(label)}</text>|
+
+        rect <> label_svg
+      else
+        ""
+      end
+    end)
+  end
+
+  defp overlays_svg(%{ref_lines: ref_lines, points: points}, series, min_v, max_v, n) do
+    lines =
+      Enum.map_join(ref_lines, "", fn l ->
+        y = numeric(get(l, "y"))
+
+        if is_number(y) do
+          gy = y_at(y, min_v, max_v)
+          label = l |> get("label") |> display_string()
+          cls = tone_class("bp-chart__refline", get(l, "tone"))
+
+          line =
+            ~s|<line class="#{cls}" x1="#{@pad_l}" y1="#{fmt(gy)}" x2="#{@vw - @pad_r}" y2="#{fmt(gy)}"/>|
+
+          label_svg =
+            if label == "",
+              do: "",
+              else:
+                ~s|<text class="bp-chart__ann" x="#{@vw - @pad_r - 2}" y="#{fmt(gy - 4)}" text-anchor="end">#{escape_html(label)}</text>|
+
+          line <> label_svg
+        else
+          ""
+        end
+      end)
+
+    marks =
+      Enum.map_join(points, "", fn p ->
+        idx = numeric(get(p, "index"))
+        si = trunc(numeric(get(p, "series")) || 0.0)
+        label = p |> get("label") |> display_string()
+        value = point_value(series, si, idx)
+
+        if is_number(idx) and is_number(value) and label != "" do
+          i = idx |> clamp(0.0, max(n - 1, 0) * 1.0) |> trunc()
+          x = x_at(i, n)
+          y = y_at(value, min_v, max_v)
+          ly = if y < @pad_t + 20, do: y + 16, else: y - 8
+
+          ~s|<circle class="bp-chart__pt" cx="#{fmt(x)}" cy="#{fmt(y)}" r="3.5"/>| <>
+            ~s|<text class="bp-chart__ann" x="#{fmt(x)}" y="#{fmt(ly)}" text-anchor="middle">#{escape_html(label)}</text>|
+        else
+          ""
+        end
+      end)
+
+    lines <> marks
+  end
+
+  # The called-out datum: series si (author order, clamped in-range), point at
+  # trunc(index). Out-of-range series/index → nil → the entry is dropped.
+  defp point_value(series, si, idx) when is_number(idx) and idx >= 0 do
+    with %{points: pts} <- Enum.at(series, si),
+         v when is_number(v) <- Enum.at(pts, trunc(idx)),
+         do: v,
+         else: (_ -> nil)
+  end
+
+  defp point_value(_series, _si, _idx), do: nil
 
   # ── gauge-list ───────────────────────────────────────────────────────────────
   #
