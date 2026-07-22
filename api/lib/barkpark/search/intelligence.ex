@@ -17,6 +17,17 @@ defmodule Barkpark.Search.Intelligence do
   @retention_days 90
   @default_limit 8
   @min_search_count 3
+  @default_source_cap 500
+
+  # Generous per-source SQL LIMIT for the popular/nohits suggestion aggregates.
+  # `query_normalized` is attacker-mintable on the anonymous suggestion/correction
+  # routes, so every GROUP BY aggregate must carry an explicit SQL-side bound:
+  # without it an attacker forces a full-table GROUP BY sorted in BEAM memory.
+  # The cap (default #{@default_source_cap}/source) sits far above the caller's
+  # output limit (<= #{@default_limit}), so normal-cardinality output is unchanged;
+  # runtime-overridable via `config :barkpark, :search_suggestions_source_cap`.
+  defp source_cap,
+    do: Application.get_env(:barkpark, :search_suggestions_source_cap, @default_source_cap)
 
   @doc "Default retention for raw search events (days)."
   @spec retention_days() :: pos_integer()
@@ -444,15 +455,15 @@ defmodule Barkpark.Search.Intelligence do
   end
 
   defp count_distinct_correction_sessions(surface, scope, from_norm, to_norm) do
+    # SQL COUNT(DISTINCT session_key) — never fetch every distinct session row into
+    # Elixir just to take length/1 (these are anonymous, attacker-driven writes).
     from(e in Event,
       where:
         e.surface == ^surface and e.scope == ^scope and e.event_type == "correction" and
           e.query_normalized == ^from_norm and e.object_id == ^to_norm,
-      select: e.session_key,
-      distinct: true
+      select: count(e.session_key, :distinct)
     )
-    |> Repo.all()
-    |> length()
+    |> Repo.one()
   end
 
   defp synonym_exists?(surface, scope, from_norm, to_norm, workspace_id) do
@@ -691,6 +702,8 @@ defmodule Barkpark.Search.Intelligence do
   end
 
   defp popular_from_crystals(surface, scope, prefix, period_start, period_end, workspace_id) do
+    cap = source_cap()
+
     base =
       from(c in Crystal,
         where:
@@ -699,6 +712,8 @@ defmodule Barkpark.Search.Intelligence do
             c.query_normalized != "" and c.query_normalized != "__quality__" and
             c.success_count > 0,
         group_by: c.query_normalized,
+        order_by: [desc: sum(c.success_count)],
+        limit: ^cap,
         select: %{
           query_normalized: c.query_normalized,
           count: sum(c.success_count),
@@ -720,11 +735,15 @@ defmodule Barkpark.Search.Intelligence do
   end
 
   defp popular_from_events(surface, scope, prefix, since, workspace_id) do
+    cap = source_cap()
+
     from(e in Event,
       where:
         e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^since and
           e.zero_hits == false and e.query_normalized != "",
       group_by: e.query_normalized,
+      order_by: [desc: count(e.id)],
+      limit: ^cap,
       select: %{
         query_normalized: e.query_normalized,
         display_query: max(e.query),
@@ -770,6 +789,8 @@ defmodule Barkpark.Search.Intelligence do
   end
 
   defp nohits_from_crystals(surface, scope, prefix, period_start, period_end, workspace_id) do
+    cap = source_cap()
+
     base =
       from(c in Crystal,
         where:
@@ -778,6 +799,8 @@ defmodule Barkpark.Search.Intelligence do
             c.query_normalized != "" and c.query_normalized != "__quality__" and
             c.zero_hit_count > 0,
         group_by: c.query_normalized,
+        order_by: [desc: sum(c.zero_hit_count)],
+        limit: ^cap,
         select: %{
           query_normalized: c.query_normalized,
           count: sum(c.zero_hit_count)
@@ -792,11 +815,15 @@ defmodule Barkpark.Search.Intelligence do
   end
 
   defp nohits_from_events(surface, scope, prefix, since, workspace_id) do
+    cap = source_cap()
+
     from(e in Event,
       where:
         e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^since and
           e.zero_hits == true and e.query_normalized != "",
       group_by: e.query_normalized,
+      order_by: [desc: count(e.id)],
+      limit: ^cap,
       select: %{query: max(e.query), count: count(e.id)}
     )
     |> accepted_events()
