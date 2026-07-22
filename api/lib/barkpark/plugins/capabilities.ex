@@ -657,6 +657,23 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # auth_tier "read", NEVER "none" (D71): a none-tier read drops the bearer
+      # and silently 404s private-schema reads to authenticated callers — the
+      # proven doc.query bug class. The endpoint 404s anon (existence-hiding),
+      # so it is read-tier like doc.backlinks.
+      core_cmd(
+        "doc.related",
+        "doc",
+        "related",
+        "List documents related to this one: shared weighted tags fused with inbound references, best first.",
+        "GET",
+        "/v1/data/related/:dataset/:id",
+        "read",
+        args: [arg("id", true, "string", "Document id to find related documents for.")],
+        flags: [flag("limit", "int", "Max related entries to return (default 10, max 50).")],
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "doc.history",
         "doc",

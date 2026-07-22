@@ -21,9 +21,9 @@ Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-
 
 **Tenancy.** Path workspace/project are authoritative and must match the token: unknown workspace → `404`, non-member → `403`. Binding/write gates: `docs/auth.md`.
 
-Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any valid token · **[admin]** = admin.
+Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any token · **[admin]** = admin.
 
-**Discovery.** An **OpenAPI 3.1** descriptor of `/v1` is at `GET /openapi.json` (public, manifest-generated).
+**Discovery.** OpenAPI 3.1 descriptor of `/v1`: `GET /openapi.json` (public, manifest-generated).
 
 ## 3. Document Envelope
 
@@ -32,7 +32,7 @@ Every response wraps its payload under `result`, plus four outer metadata keys:
 | Outer key | Type | Description |
 |-----------|------|-------------|
 | `schemaHash` | string | Hex digest of the dataset's schema; changes when any schema changes. |
-| `etag` | string | Content fingerprint; use with `If-None-Match` for conditional GET (→ 304). |
+| `etag` | string | Content fingerprint for `If-None-Match` conditional GET (→ 304). |
 | `ms` | integer | Server processing time (ms). |
 | `syncTags` | string[] | Cache-tag hints for ISR revalidation (e.g. `bp:ds:production:type:post`). |
 
@@ -42,19 +42,19 @@ Every response wraps its payload under `result`, plus four outer metadata keys:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `_id` | string | Full document id, including `drafts.` prefix when the document is a draft |
-| `_type` | string | Document type (matches schema name) |
+| `_id` | string | Full id; `drafts.` prefix when draft |
+| `_type` | string | Type (schema name) |
 | `_rev` | string | 32-char hex, changes on every write |
 | `_draft` | boolean | `true` if `_id` starts with `drafts.` |
 | `_publishedId` | string | Id with `drafts.` prefix stripped |
 | `_createdAt` | string | ISO 8601 UTC, `Z` suffix |
 | `_updatedAt` | string | ISO 8601 UTC, `Z` suffix |
 
-All other keys come from stored document content plus `title`. User fields cannot shadow reserved keys (dropped on write).
+Other keys = stored content plus `title`; user fields can't shadow reserved keys (dropped on write).
 
 ## 4. `GET /w/:workspace_slug/p/:project_slug/v1/data/query/:dataset/:type` [public]
 
-List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2 on unknown workspace / non-member token.
+List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 **Query parameters:**
 
@@ -74,7 +74,7 @@ List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-Fetch a single document by id. 404 if not found or if the schema's `visibility` is `"private"`. Also takes `?fields=`/`?expand=` (§5a).
+Fetch one document by id. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a).
 
 ### 5a. Reference Expansion
 
@@ -83,6 +83,8 @@ Fetch a single document by id. 404 if not found or if the schema's `visibility` 
 ### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [public]
 
 Inbound refs (reverse of §5a) — docs referencing `:id`: `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered (out-of-tenant/hidden omitted).
+
+Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap (Σ `LEAST(src,cand)/100` + main_tag bonus) + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`. Anon 404.
 
 ### 5c. History [token]
 
@@ -106,7 +108,7 @@ Apply a batch of mutations atomically (one DB transaction — any failure rolls 
 
 **`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the existing doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`). Result operation `"update"`. Also composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend` with `set`; `ifMatch` aliases `ifRevisionID`; a 1-mutation batch inherits `If-Match`. Server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
 
-The next four all take the same shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
+The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
 
 - **`publish`** — copies `drafts.<id>` to `<id>`, deletes the draft.
 - **`unpublish`** — moves `<id>` back to `drafts.<id>`.
@@ -121,7 +123,7 @@ Failures use the §9 error envelope.
 
 SSE stream of document mutations, scoped to the resolved workspace + project.
 
-**Resuming:** send `Last-Event-ID: <int>` header (or `?lastEventId=<int>` for browser clients). The server replays all events with `id > last-event-id` for that scope, oldest first, then streams live.
+**Resuming:** `Last-Event-ID: <int>` header (or `?lastEventId=<int>` for browsers); replays the scope's events with greater `id`, oldest first, then streams live.
 
 **Response headers:** `Content-Type: text/event-stream` · `Cache-Control: no-cache` · `Connection: keep-alive`. **First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
 

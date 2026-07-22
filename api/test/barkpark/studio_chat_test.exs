@@ -2325,7 +2325,8 @@ defmodule Barkpark.StudioChatTest do
   # read. Unit-proven against the real fixtures, then mirrored byte-identical to an
   # api + a Go mirror (Mechanism A), regenerated with REGEN_WORKFLOW_AGENT_DETAIL=1.
 
-  defp detail_of(fixture), do: fixture |> load_ndjson() |> fold_rail() |> StudioChat.workflow_agent_detail()
+  defp detail_of(fixture),
+    do: fixture |> load_ndjson() |> fold_rail() |> StudioChat.workflow_agent_detail()
 
   describe "workflow_agent_node_detail/1 (wsc-ad D27/D28)" do
     test "a node with NO detail-signal field yields %{} (the no-affordance gate)" do
@@ -2431,7 +2432,12 @@ defmodule Barkpark.StudioChatTest do
         "a" => %{
           "seq" => 2,
           "workflow" => [
-            %{"type" => "workflow_agent", "agentId" => "old", "state" => "done", "resultPreview" => "old"}
+            %{
+              "type" => "workflow_agent",
+              "agentId" => "old",
+              "state" => "done",
+              "resultPreview" => "old"
+            }
           ]
         },
         "b" => %{
@@ -2439,7 +2445,12 @@ defmodule Barkpark.StudioChatTest do
           "workflow" => [
             # a detail-less agent — dropped from the list
             %{"type" => "workflow_agent", "agentId" => "thin", "state" => "start"},
-            %{"type" => "workflow_agent", "agentId" => "rich", "state" => "start", "lastToolName" => "Read"},
+            %{
+              "type" => "workflow_agent",
+              "agentId" => "rich",
+              "state" => "start",
+              "lastToolName" => "Read"
+            },
             # a non-agent node is ignored
             %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"}
           ]
@@ -2520,11 +2531,15 @@ defmodule Barkpark.StudioChatTest do
   # Recursively collect every `attempt` value under a "workflow_agent"-typed node,
   # at any nesting depth (task_progress frames nest them under "workflow_progress";
   # rail snapshots nest them under an entry's "workflow" list).
-  defp collect_agent_attempts(%{"type" => "workflow_agent"} = node), do: [Map.get(node, "attempt")]
+  defp collect_agent_attempts(%{"type" => "workflow_agent"} = node),
+    do: [Map.get(node, "attempt")]
+
   defp collect_agent_attempts(map) when is_map(map),
     do: Enum.flat_map(Map.values(map), &collect_agent_attempts/1)
+
   defp collect_agent_attempts(list) when is_list(list),
     do: Enum.flat_map(list, &collect_agent_attempts/1)
+
   defp collect_agent_attempts(_), do: []
 
   describe "workflow_agent attempt==1 across every committed fixture (D21/D25 documented proof)" do
@@ -2585,13 +2600,13 @@ defmodule Barkpark.StudioChatTest do
 
   # ── the needs-you strip (wave 12 — sidebar inbox) ──────────────────────────
 
-  # Pin the away-axis pair directly (bypassing the mutation helpers, whose
+  # Pin the activity stamp directly (bypassing the mutation helpers, whose
   # `utc_now()` stamps would make ordering-sensitive tests racy by microseconds).
-  defp set_times(session_id, active, visited) do
+  defp set_active(session_id, active) do
     {1, _} =
       Repo.update_all(
         from(s in Session, where: s.id == ^session_id),
-        set: [last_active_at: active, last_visited_at: visited]
+        set: [last_active_at: active]
       )
 
     StudioChat.get_session(session_id)
@@ -2608,29 +2623,6 @@ defmodule Barkpark.StudioChatTest do
         role: role,
         metadata: %{"request_id" => request_id, "approval_status" => "pending"}
       })
-  end
-
-  describe "mark_visited/1 + creation stamp (wave 12)" do
-    test "creation stamps last_visited_at EQUAL to last_active_at — never unseen at birth" do
-      s = new_session()
-      assert %DateTime{} = s.last_visited_at
-      assert DateTime.compare(s.last_visited_at, s.last_active_at) == :eq
-      refute StudioChat.finished_while_away?(s)
-    end
-
-    test "mark_visited stamps the visit WITHOUT bumping last_active_at" do
-      s = set_times(new_session().id, minutes_ago(10), minutes_ago(30))
-
-      assert {:ok, updated} = StudioChat.mark_visited(s.id)
-      assert DateTime.compare(updated.last_visited_at, s.last_visited_at) == :gt
-      # visiting must not reorder the sidebar (the set_draft precedent)
-      assert DateTime.compare(updated.last_active_at, s.last_active_at) == :eq
-    end
-
-    test "a missing or non-UUID id is a clean :not_found" do
-      assert StudioChat.mark_visited(Ecto.UUID.generate()) == {:error, :not_found}
-      assert StudioChat.mark_visited("not-a-uuid") == {:error, :not_found}
-    end
   end
 
   describe "pending_ask_roles/1 (wave 12)" do
@@ -2685,14 +2677,13 @@ defmodule Barkpark.StudioChatTest do
                :awaiting_input
     end
 
-    test "working: live overlay OR persisted agent_state — and it beats finished-while-away" do
+    test "working: live overlay OR persisted agent_state alone (cold mount)" do
       s = new_session()
       assert StudioChat.strip_kind(s, [], %{state: :working, line: "writing…"}) == :working
 
-      # the persisted column alone (cold mount) is enough — even with an unseen
-      # last_active_at, a running turn is :working, never :finished_while_away
+      # the persisted column alone (cold mount) is enough
       {1, _} = StudioChat.set_agent_state(s.id, "working")
-      s = set_times(s.id, minutes_ago(1), minutes_ago(10))
+      s = set_active(s.id, minutes_ago(1))
       assert StudioChat.strip_kind(s, [], nil) == :working
     end
 
@@ -2706,32 +2697,23 @@ defmodule Barkpark.StudioChatTest do
                :pending_approval
     end
 
-    test "finished-while-away: settled after the last visit; quiet otherwise" do
-      # settled (active) with activity AFTER the visit → surfaces
-      s = set_times(new_session().id, minutes_ago(1), minutes_ago(10))
-      assert StudioChat.strip_kind(s, [], nil) == :finished_while_away
+    test "a settled session is QUIET — the wave-12 unseen-finish kind is retired (herd, no read receipts)" do
+      # settled (active) with recent activity → no strip entry
+      s = set_active(new_session().id, minutes_ago(1))
+      assert StudioChat.strip_kind(s, [], nil) == nil
 
-      # exited counts as settled too
+      # exited is just as quiet — settling never surfaces a session
       {:ok, _} = StudioChat.update_status(s.id, "exited")
-      s = set_times(s.id, minutes_ago(1), minutes_ago(10))
-      assert StudioChat.strip_kind(s, [], nil) == :finished_while_away
+      s = set_active(s.id, minutes_ago(1))
+      assert StudioChat.strip_kind(s, [], nil) == nil
 
-      # visited AFTER it settled → seen, quiet
-      quiet = set_times(new_session().id, minutes_ago(10), minutes_ago(1))
-      assert StudioChat.strip_kind(quiet, [], nil) == nil
-
-      # a nil last_visited_at (pre-migration row) is honestly QUIET, never a
-      # fake unseen-finish
-      unknown = set_times(new_session().id, minutes_ago(1), nil)
-      assert StudioChat.strip_kind(unknown, [], nil) == nil
+      # ...and the retired kind is gone from the vocabulary entirely
+      refute :finished_while_away in StudioChat.strip_kinds()
     end
   end
 
   describe "needs_you_strip/2 — cross-session aggregation (wave 12)" do
     test "COLD-MOUNT correct: kinds + priority order derive from persisted rows alone" do
-      # done (settled after last visit)
-      done = set_times(new_session().id, minutes_ago(2), minutes_ago(20))
-
       # working (persisted herd column — no overlay)
       working = new_session()
       {1, _} = StudioChat.set_agent_state(working.id, "working")
@@ -2749,12 +2731,12 @@ defmodule Barkpark.StudioChatTest do
       seed_pending_ask(approval, "approval", "rap")
       {1, _} = StudioChat.set_agent_state(approval.id, "blocked")
 
-      # quiet: visited after settling — no entry
-      quiet = set_times(new_session().id, minutes_ago(20), minutes_ago(2))
+      # quiet: settled — no entry (unseen-finish tracking retired, herd)
+      quiet = set_active(new_session().id, minutes_ago(2))
 
       sessions =
         Enum.map(
-          [done.id, working.id, plan.id, question.id, approval.id, quiet.id],
+          [working.id, plan.id, question.id, approval.id, quiet.id],
           &StudioChat.get_session/1
         )
 
@@ -2765,10 +2747,10 @@ defmodule Barkpark.StudioChatTest do
         )
 
       assert Enum.map(strip, & &1.kind) ==
-               [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+               [:pending_approval, :awaiting_input, :plan_ready, :working]
 
       assert Enum.map(strip, & &1.session.id) ==
-               [approval.id, question.id, plan.id, working.id, done.id]
+               [approval.id, question.id, plan.id, working.id]
 
       refute Enum.any?(strip, &(&1.session.id == quiet.id))
     end
@@ -2790,8 +2772,13 @@ defmodule Barkpark.StudioChatTest do
     end
 
     test "within a kind, most recently active first" do
-      older = set_times(new_session().id, minutes_ago(30), minutes_ago(60))
-      newer = set_times(new_session().id, minutes_ago(5), minutes_ago(60))
+      older = new_session()
+      {1, _} = StudioChat.set_agent_state(older.id, "working")
+      older = set_active(older.id, minutes_ago(30))
+
+      newer = new_session()
+      {1, _} = StudioChat.set_agent_state(newer.id, "working")
+      newer = set_active(newer.id, minutes_ago(5))
 
       assert [%{session: %{id: first}}, %{session: %{id: second}}] =
                StudioChat.needs_you_strip([older, newer])
@@ -2808,26 +2795,13 @@ defmodule Barkpark.StudioChatTest do
                  activity: %{s.id => %{state: :working, line: "Bash — mix test"}}
                )
 
-      # leave: overlay gone (idle deletes the entry) + row still settled-as-seen
-      # → no entry; the strip yields to the store
+      # leave: overlay gone (idle deletes the entry) + settled row → no entry;
+      # the strip yields to the store
       assert StudioChat.needs_you_strip([s], activity: %{}) == []
     end
 
-    test "visiting clears a finished-while-away entry (mark_visited round-trip)" do
-      s = set_times(new_session().id, minutes_ago(2), minutes_ago(20))
-      assert [%{kind: :finished_while_away}] = StudioChat.needs_you_strip([s])
-
-      {:ok, _} = StudioChat.mark_visited(s.id)
-      s = StudioChat.get_session(s.id)
-      assert StudioChat.needs_you_strip([s]) == []
-    end
-
     test "list_sessions carries the strip fields (select must not orphan the derivation)" do
-      s = set_times(new_session().id, minutes_ago(2), minutes_ago(20))
-
-      listed = Enum.find(StudioChat.list_sessions(), &(&1.id == s.id))
-      assert %DateTime{} = listed.last_visited_at
-      assert [%{kind: :finished_while_away}] = StudioChat.needs_you_strip([listed])
+      s = set_active(new_session().id, minutes_ago(2))
 
       # the herd column rides the sidebar select (herd wave 1): a select that
       # omitted it would feed the schema default ("idle") to every pill/strip
@@ -2840,7 +2814,7 @@ defmodule Barkpark.StudioChatTest do
 
     test "strip_kinds/0 IS the priority order (S7's notification vocabulary)" do
       assert StudioChat.strip_kinds() ==
-               [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+               [:pending_approval, :awaiting_input, :plan_ready, :working]
     end
   end
 

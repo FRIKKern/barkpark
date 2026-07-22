@@ -4,8 +4,7 @@ defmodule Barkpark.StudioChat.Supervisor do
 
   Owns the single-writer `SessionRegistry`, the `RecorderRegistry`, the
   `RuntimeSupervisor` (`DynamicSupervisor` the server-owned Recorders start
-  under), the `Notifier` (per-session debounce ledger for needs-you mails), the
-  `AgentStateSweeper` (herd-layer staleness sweep, charter D42h — its
+  under), the `AgentStateSweeper` (herd-layer staleness sweep, charter D42h — its
   synchronous init sweep runs here, BEFORE the Endpoint starts, so it beats the
   first request), the `BlockedSweeper` (herd-layer walk-away safety, charter
   D57h–D59h — fires one debounced webhook per session blocked past its
@@ -32,7 +31,6 @@ defmodule Barkpark.StudioChat.Supervisor do
       {Registry, keys: :unique, name: Barkpark.StudioChat.SessionRegistry},
       {Registry, keys: :unique, name: Barkpark.StudioChat.RecorderRegistry},
       {DynamicSupervisor, name: Barkpark.StudioChat.RuntimeSupervisor, strategy: :one_for_one},
-      Barkpark.StudioChat.Notifier,
       Barkpark.StudioChat.AgentStateSweeper,
       Barkpark.StudioChat.BlockedSweeper,
       Barkpark.StudioChat.FleetHub
