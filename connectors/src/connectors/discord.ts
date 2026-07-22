@@ -1,6 +1,10 @@
 import { createDiscordAdapter, type DiscordAdapter } from "@chat-adapter/discord";
 import type { Adapter, Author, ModalElement, WebhookOptions } from "chat";
 
+import {
+  DEFAULT_DISCORD_MODAL_WINDOW_MS,
+  MAX_DISCORD_MODAL_WINDOW_MS,
+} from "../config.js";
 import type {
   ConnectValidation,
   Connector,
@@ -430,29 +434,59 @@ export function createDiscordConnector(
  *      parseable type-5 body means the signature ALREADY VERIFIED (a bad
  *      signature returns 401 before the dispatch switch runs), so the intercept
  *      never handles an unverified payload and adds ZERO crypto of its own;
- *   2. an `onOpenModal` seam (the `WebhookOptions` hook Teams uses) so
- *      `event.openModal(...)` from a slash/action handler produces the real
- *      Discord type-9 modal callback POST instead of the vendor's silent
- *      "does not support modals" warning.
+ *   2. the D249 HOLD-AND-SUBSTITUTE (W31): for an APPLICATION_COMMAND the
+ *      wrapper passes its OWN `waitUntil` into the vendor call (the vendor
+ *      registers the dispatch task synchronously BEFORE constructing its type-5
+ *      ack — V2-proven against @chat-adapter/discord@4.34.0), HOLDS that ack,
+ *      and races {openModal-called, dispatch-settled, deadline}. A modal opened
+ *      inside the window becomes THE interaction HTTP response (`{type: 9}`)
+ *      and the held ack is discarded — it only ever reaches Discord as our
+ *      return value, so the 40060 "already acknowledged" race the W30 seam
+ *      documented as its ceiling is structurally abolished, not merely won.
+ *      The `onOpenModal` seam (the `WebhookOptions` hook Teams uses) is
+ *      SIGNAL-ONLY: it never POSTs the callback endpoint itself.
  *
- * HONEST CEILING, named: Discord accepts a modal ONLY as an interaction's FIRST
- * response, and the vendor auto-acks every interaction (type-5/type-6)
- * synchronously before dispatch runs. So live, the type-9 callback POST loses
- * the race to the ack and Discord answers 40060 "already acknowledged" — the
- * seam surfaces that as a warn + `undefined` (the SDK's "modals unavailable"
- * contract), never a silent success. Making the modal BE the HTTP response
- * requires holding the vendor ack, an ack-timing redesign filed as
- * `connectors-discord-modal-open-response` — NOT fake-proven here. The
- * submit-side routing below is transport-real either way: a user-submitted
- * modal arrives as its OWN signed interaction and round-trips fully.
+ * HONEST CEILING, still named: after the window closes (or with the hold
+ * disabled, `modalWindowMs: 0`) the vendor ack has already been released, so a
+ * late `openModal` answers warn + `undefined` (the SDK's "modals unavailable"
+ * contract), never a silent success. Every NON-modal command pays
+ * min(dispatch-settled, window) of added ack latency — the knob
+ * (`CONNECTORS_DISCORD_MODAL_WINDOW_MS`) caps it at 2500ms, well under
+ * Discord's 3s interaction deadline. The GATEWAY transport is out of scope:
+ * the vendor's gateway path has no options plumbing to hold
+ * (`connectors-discord-gateway-modal-hold`, backlogged). The submit-side
+ * routing below is transport-real either way: a user-submitted modal arrives
+ * as its OWN signed interaction and round-trips fully.
  * ──────────────────────────────────────────────────────────────────────────── */
 
+/** Discord interaction type 2 — APPLICATION_COMMAND (a slash command). */
+const INTERACTION_APPLICATION_COMMAND = 2;
 /** Discord interaction type 5 — MODAL_SUBMIT. */
 const INTERACTION_MODAL_SUBMIT = 5;
 /** Discord interaction CALLBACK type 5 — DeferredChannelMessageWithSource. */
 const INTERACTION_CALLBACK_DEFERRED_MESSAGE = 5;
 /** Discord interaction CALLBACK type 9 — respond with a MODAL. */
 const INTERACTION_CALLBACK_MODAL = 9;
+
+/**
+ * The vendor's `protected` AsyncLocalStorage — runtime-real, tsc-hidden, so the
+ * ONE cast to reach it lives in this module (see {@link dispatchDiscordModalSubmit}
+ * and the D249 modal-win flip); pinned to @chat-adapter/discord@4.34.0.
+ */
+interface DiscordRequestContext {
+  getStore(): unknown;
+  run<T>(store: unknown, fn: () => T): T;
+}
+
+/** The slice of the vendor's ALS store the D249 modal-win flip mutates. */
+interface DiscordSlashCommandStore {
+  slashCommand?: { initialResponseSent: boolean };
+}
+
+function vendorRequestContext(adapter: DiscordAdapter): DiscordRequestContext {
+  return (adapter as unknown as { requestContext: DiscordRequestContext })
+    .requestContext;
+}
 
 /** The slice of a Discord interaction payload the modal seam reads. */
 interface DiscordInboundInteraction {
@@ -691,11 +725,7 @@ function dispatchDiscordModalSubmit(
   };
 
   const channelId = namespacedChannelId(adapter, interaction);
-  const requestContext = (
-    adapter as unknown as {
-      requestContext: { run<T>(store: unknown, fn: () => T): T };
-    }
-  ).requestContext;
+  const requestContext = vendorRequestContext(adapter);
   const interactionToken = interaction.token;
 
   const task = channelId
@@ -719,53 +749,37 @@ function dispatchDiscordModalSubmit(
   return Response.json({ type: INTERACTION_CALLBACK_DEFERRED_MESSAGE });
 }
 
-/**
- * Inject the `onOpenModal` seam so `event.openModal(...)` works on Discord.
- * A caller-supplied hook wins; without an interaction id + token there is no
- * callback endpoint to POST to, so the options pass through untouched.
- */
-function withDiscordOpenModal(
-  options: WebhookOptions | undefined,
-  interaction: DiscordInboundInteraction | undefined,
-): WebhookOptions | undefined {
-  if (
-    options?.onOpenModal ||
-    typeof interaction?.id !== "string" ||
-    typeof interaction.token !== "string"
-  ) {
-    return options;
-  }
-  const { id, token } = interaction;
-  return {
-    ...options,
-    onOpenModal: async (modal, contextId) => {
-      const customId = encodeDiscordModalCustomId(modal.callbackId, contextId);
-      // Bare GLOBAL fetch + hardcoded DISCORD_API_BASE — deliberately the
-      // vendor's own idiom (D229 law d), so offline tests stub ONE seam.
-      const res = await fetch(
-        `${DISCORD_API_BASE}/interactions/${id}/${token}/callback`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            type: INTERACTION_CALLBACK_MODAL,
-            data: discordModalPayload(modal, customId),
-          }),
-        },
-      );
-      if (!res.ok) {
-        console.warn(
-          `[discord] modal "${modal.callbackId}" open refused (HTTP ${res.status}) — ` +
-            "Discord accepts a modal only as an interaction's FIRST response and " +
-            "the vendor adapter auto-acks before dispatch (see the W30 seam note); " +
-            "the modal was NOT shown",
-        );
-        return undefined;
-      }
-      return { viewId: customId };
-    },
-  };
+/** The D249 knob as threaded by the caller (mountInstall ← BridgeConfig). */
+export interface DiscordWebhookExtensionOptions {
+  /**
+   * The modal-OPEN hold window in ms. Defaults to
+   * {@link DEFAULT_DISCORD_MODAL_WINDOW_MS} (250); clamped to
+   * [0, {@link MAX_DISCORD_MODAL_WINDOW_MS}]. `0` disables the hold: the
+   * vendor ack returns immediately and `openModal` answers warn + undefined.
+   */
+  modalWindowMs?: number;
 }
+
+/**
+ * The defensive runtime clamp behind the config gate: `loadConfig` already
+ * REJECTS an out-of-range env value (intFromEnv), so this belt only matters for
+ * a hand-built caller — which must degrade sanely (negative → disabled, huge →
+ * the cap, NaN → the default), never hang a webhook on a bad number.
+ */
+function clampModalWindowMs(raw: number | undefined): number {
+  if (raw === undefined || Number.isNaN(raw)) {
+    return DEFAULT_DISCORD_MODAL_WINDOW_MS;
+  }
+  return Math.min(MAX_DISCORD_MODAL_WINDOW_MS, Math.max(0, Math.trunc(raw)));
+}
+
+/**
+ * The mutable state of one held interaction. `open` accepts a modal win;
+ * `modal` means the substitution happened; `released` means the vendor ack
+ * already left (window expired, dispatch settled, or the hold is disabled) —
+ * from there a late `openModal` can only warn + undefined.
+ */
+type ModalHoldState = "open" | "modal" | "released";
 
 /**
  * Wrap `chat.webhooks.discord` in place with the component/modal seam.
@@ -776,7 +790,15 @@ function withDiscordOpenModal(
  *
  *   - forwards the vendor a byte-identical request (Ed25519 signs the RAW body,
  *     so the bytes are read once and re-sent verbatim);
- *   - injects the `onOpenModal` seam ({@link withDiscordOpenModal});
+ *   - injects a SIGNAL-ONLY `onOpenModal` seam and, for APPLICATION_COMMAND
+ *     interactions, runs the D249 hold-and-substitute (see the seam note
+ *     above): modal inside the window → `{type: 9}` IS the HTTP response and
+ *     the held vendor ack is discarded unsent;
+ *   - on a modal win flips the vendor ALS `slashCommand.initialResponseSent`
+ *     to `true` INSIDE `onOpenModal` (the hook runs in the vendor's
+ *     requestContext continuation — outside it `getStore()` is undefined), so
+ *     a same-turn `event.channel.post` rides POST `?wait=true` as a follow-up
+ *     instead of PATCHing an `@original` placeholder that never existed;
  *   - intercepts the vendor's 400 for a VERIFIED type-5 MODAL_SUBMIT and routes
  *     it ({@link dispatchDiscordModalSubmit}); every other response — 200 acks,
  *     401 bad signature, 400 bad JSON — passes through untouched.
@@ -784,10 +806,12 @@ function withDiscordOpenModal(
 export function extendDiscordInteractionWebhook(
   chat: DiscordInteractionChat,
   adapter: Adapter,
+  extension: DiscordWebhookExtensionOptions = {},
 ): void {
   const vendor = chat.webhooks[DISCORD_PROVIDER];
   if (!vendor) return;
   const discord = adapter as DiscordAdapter;
+  const modalWindowMs = clampModalWindowMs(extension.modalWindowMs);
 
   chat.webhooks[DISCORD_PROVIDER] = async (request, options) => {
     // No body to sign or parse — hand straight through (the route is POST-only,
@@ -813,17 +837,143 @@ export function extendDiscordInteractionWebhook(
       // Unparseable body: the vendor answers 400 "Invalid JSON" — pass through.
     }
 
-    const extended = withDiscordOpenModal(options, interaction);
-    const response = await vendor(forwarded, extended);
-
-    if (response.status !== 400 || interaction?.type !== INTERACTION_MODAL_SUBMIT) {
-      return response;
+    // A caller-supplied onOpenModal wins: their seam, their semantics — no
+    // hold, no injection; the type-5 intercept still applies.
+    if (options?.onOpenModal) {
+      const response = await vendor(forwarded, options);
+      return interceptModalSubmit(chat, discord, interaction, options, response);
     }
-    // A 400 for a parseable type-5 body is the vendor's "Unknown interaction
-    // type" fall-through — REACHED ONLY AFTER Ed25519 verify passed (a bad
-    // signature short-circuits to 401 before the dispatch switch).
-    return (
-      dispatchDiscordModalSubmit(chat, discord, interaction, extended) ?? response
-    );
+
+    // The hold applies ONLY to an APPLICATION_COMMAND on this webhook
+    // transport: that is the interaction whose FIRST response may be a modal
+    // and whose ack the vendor constructs AFTER synchronously registering the
+    // dispatch task (V2-proven, @chat-adapter/discord@4.34.0). Everything else
+    // (PING, components, modal submits) keeps its immediate vendor answer.
+    const holdable =
+      modalWindowMs > 0 &&
+      interaction?.type === INTERACTION_APPLICATION_COMMAND &&
+      typeof interaction.id === "string" &&
+      typeof interaction.token === "string";
+
+    let holdState: ModalHoldState = holdable ? "open" : "released";
+    let substituted: Response | undefined;
+    let signalModalOpened!: () => void;
+    const modalOpened = new Promise<void>((r) => (signalModalOpened = r));
+
+    // SIGNAL-ONLY (D249): the seam never POSTs the interaction callback
+    // endpoint. Inside the window it substitutes the held ack; outside it, it
+    // warns honestly — never a silent success, never a raced 40060.
+    const extended: WebhookOptions = {
+      ...options,
+      onOpenModal: async (modal, contextId) => {
+        const customId = encodeDiscordModalCustomId(modal.callbackId, contextId);
+        if (holdState !== "open") {
+          console.warn(
+            `[discord] modal "${modal.callbackId}" opened after the ` +
+              `${modalWindowMs}ms hold window (or with the hold disabled) — ` +
+              "Discord accepts a modal only as an interaction's FIRST response " +
+              "and the deferred ack has already been released (see the D249 " +
+              "seam note); the modal was NOT shown",
+          );
+          return undefined;
+        }
+        holdState = "modal";
+        // The mixed-reply flip. This hook runs inside the vendor's
+        // requestContext ALS continuation (dispatch → handler → openModal), so
+        // getStore() is the live slashCommand store. The type-9 below IS the
+        // initial response; without this flip a same-turn channel.post would
+        // PATCH an @original placeholder that never existed and 404 live.
+        const store = vendorRequestContext(discord).getStore() as
+          DiscordSlashCommandStore | undefined;
+        if (store?.slashCommand) {
+          store.slashCommand.initialResponseSent = true;
+        }
+        substituted = Response.json({
+          type: INTERACTION_CALLBACK_MODAL,
+          data: discordModalPayload(modal, customId),
+        });
+        signalModalOpened();
+        return { viewId: customId };
+      },
+    };
+
+    if (!holdable) {
+      const response = await vendor(forwarded, extended);
+      return interceptModalSubmit(chat, discord, interaction, extended, response);
+    }
+
+    // HOLD-AND-SUBSTITUTE. The vendor call gets our OWN waitUntil so the
+    // dispatch task is in hand before the ack Response is even constructed;
+    // every captured task is forwarded to the caller's real waitUntil at
+    // capture time (webhook-server supplies one), so runtime task tracking is
+    // untouched by the hold.
+    const captured: Promise<unknown>[] = [];
+    const holding: WebhookOptions = {
+      ...extended,
+      waitUntil: (task: Promise<unknown>) => {
+        captured.push(task);
+        options?.waitUntil?.(task);
+      },
+    };
+    const ack = await vendor(forwarded, holding);
+
+    // Only a healthy sync ack is worth holding — a 401/400 error passes
+    // straight through (nothing was dispatched, nothing can open a modal).
+    if (ack.status !== 200) {
+      holdState = "released";
+      return ack;
+    }
+
+    // Dispatch-settled: all captured tasks done, INCLUDING any registered
+    // while earlier ones ran — a settled turn that never opened a modal
+    // short-circuits the window, so a non-modal command pays
+    // min(dispatch-settled, window), never the full window.
+    const dispatchSettled = (async () => {
+      let settled = 0;
+      while (settled < captured.length) {
+        const batch = captured.slice(settled);
+        settled += batch.length;
+        await Promise.allSettled(batch);
+      }
+    })();
+
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<void>((r) => {
+      deadlineTimer = setTimeout(r, modalWindowMs);
+    });
+    await Promise.race([modalOpened, dispatchSettled, deadline]);
+    if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+
+    // The cast re-widens what TS narrowed away: onOpenModal mutates holdState
+    // inside a closure the control-flow analysis cannot see across the race.
+    if ((holdState as ModalHoldState) === "modal" && substituted) {
+      // THE SUBSTITUTION: the modal is the interaction's HTTP response. The
+      // held ack is discarded here, unsent — it only ever existed as a local
+      // Response object, so no 40060 race is possible (V2: zero egress).
+      return substituted;
+    }
+    holdState = "released";
+    return ack;
   };
+}
+
+/**
+ * The vendor-400 → MODAL_SUBMIT re-route (W30), shared by every wrapper path.
+ * A 400 for a parseable type-5 body is the vendor's "Unknown interaction type"
+ * fall-through — REACHED ONLY AFTER Ed25519 verify passed (a bad signature
+ * short-circuits to 401 before the dispatch switch).
+ */
+function interceptModalSubmit(
+  chat: DiscordInteractionChat,
+  adapter: DiscordAdapter,
+  interaction: DiscordInboundInteraction | undefined,
+  options: WebhookOptions | undefined,
+  response: Response,
+): Response {
+  if (response.status !== 400 || interaction?.type !== INTERACTION_MODAL_SUBMIT) {
+    return response;
+  }
+  return (
+    dispatchDiscordModalSubmit(chat, adapter, interaction, options) ?? response
+  );
 }

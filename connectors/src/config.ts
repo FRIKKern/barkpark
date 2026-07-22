@@ -93,6 +93,24 @@ export interface BridgeConfig {
    * interval` by defaulting the TTL to 3× the interval.
    */
   installLeaseTtlMs?: number;
+  /**
+   * The Discord modal-OPEN hold window in ms
+   * (`CONNECTORS_DISCORD_MODAL_WINDOW_MS`, charter D249). The webhook wrapper
+   * HOLDS the vendor's synchronous type-5 ack for an APPLICATION_COMMAND
+   * interaction and races {openModal-called, dispatch-settled, deadline}: a
+   * modal opened inside the window becomes the interaction's HTTP response
+   * (type 9) and the held ack is discarded — the only way Discord accepts a
+   * modal (it must be the FIRST response, and an ack that already left would
+   * make it 40060 "already acknowledged").
+   *
+   * The cost is honest: every NON-modal slash command's ack is delayed by
+   * min(dispatch-settled, window), so the cap is tight — max 2500ms, well under
+   * Discord's 3-second interaction deadline. `0` DISABLES the hold entirely
+   * (immediate vendor ack; `openModal` answers warn + undefined, the pre-D249
+   * contract). Optional in the TYPE so a hand-built test config can omit it;
+   * `loadConfig` always sets it and the wrapper defaults to 250.
+   */
+  discordModalWindowMs?: number;
 }
 
 /**
@@ -153,6 +171,15 @@ export const DEFAULT_MOUNT_RECONCILE_INTERVAL_MS = 30_000;
 export const DEFAULT_INSTALL_LEASE_INTERVAL_MS = 15_000;
 /** 3× the renew interval — a holder must miss three renews before a lapse is stealable. */
 export const DEFAULT_INSTALL_LEASE_TTL_MS = DEFAULT_INSTALL_LEASE_INTERVAL_MS * 3;
+/**
+ * 250ms: long enough for a handler that opens a modal to reach `openModal`
+ * (that call is typically the handler's FIRST await), short enough that a
+ * non-modal command's deferred ack still lands with ~10× headroom inside
+ * Discord's 3-second interaction deadline. See `discordModalWindowMs`.
+ */
+export const DEFAULT_DISCORD_MODAL_WINDOW_MS = 250;
+/** The knob's hard cap — the hold must stay well under Discord's 3s deadline. */
+export const MAX_DISCORD_MODAL_WINDOW_MS = 2500;
 
 export class MissingConfigError extends Error {
   constructor(key: string) {
@@ -254,6 +281,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
       ),
       1,
       Number.MAX_SAFE_INTEGER,
+    ),
+    discordModalWindowMs: intFromEnv(
+      env,
+      "CONNECTORS_DISCORD_MODAL_WINDOW_MS",
+      DEFAULT_DISCORD_MODAL_WINDOW_MS,
+      0,
+      MAX_DISCORD_MODAL_WINDOW_MS,
     ),
   };
 }

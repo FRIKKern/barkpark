@@ -481,12 +481,18 @@ export function mountInstall(
     );
   });
 
-  // Discord's missing MODAL_SUBMIT branch (W30): wrap chat.webhooks.discord in
-  // place — a verified type-5 would otherwise fall through the vendor dispatch
-  // switch to 400 AFTER registration, so registering onModalSubmit above is
-  // necessary but NOT sufficient. No-op for every other provider (guarded on
-  // the discord webhook key).
-  extendDiscordInteractionWebhook(chat, adapter);
+  // Discord's missing MODAL_SUBMIT branch (W30) + the D249 modal-OPEN
+  // hold-and-substitute (W31): wrap chat.webhooks.discord in place — a
+  // verified type-5 would otherwise fall through the vendor dispatch switch to
+  // 400 AFTER registration (so registering onModalSubmit above is necessary
+  // but NOT sufficient), and a modal opened inside the hold window becomes the
+  // interaction's own HTTP response instead of losing the vendor's ack race.
+  // The window knob rides BridgeConfig (CONNECTORS_DISCORD_MODAL_WINDOW_MS);
+  // undefined defaults inside the seam. No-op for every other provider
+  // (guarded on the discord webhook key).
+  extendDiscordInteractionWebhook(chat, adapter, {
+    modalWindowMs: deps.config.discordModalWindowMs,
+  });
 
   return { connector, install, chat, adapter };
 }
