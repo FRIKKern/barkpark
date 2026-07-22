@@ -778,7 +778,8 @@ defmodule Barkpark.Tasks.Schema do
           "name" => "capacity",
           "title" => "Capacity",
           "type" => "string",
-          "description" => "Free-form capacity hint, e.g. \"1 task\"."
+          "description" =>
+            "Capacity for best-fit routing. A validated structured object — {size_class: light | standard | heavy | xl, slots_total, slots_free (<= slots_total), budget} — declared as a native map or a JSON-object string; or a legacy free-form hint, e.g. \"1 task\". Off-vocab size_class or negative/inverted slots are refused (never silently stored)."
         },
         %{
           "name" => "last_seen",

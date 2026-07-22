@@ -66,6 +66,10 @@ defmodule Barkpark.Tasks.Fleet do
   # read time, never stored.
   @self_declared_statuses ~w(idle working blocked)
   @stored_statuses @self_declared_statuses ++ ["provisioning"]
+  # PDF-D6/D7: capacity size classes drive best-fit routing (light -> lean,
+  # heavy -> big). A beat that declares a size_class MUST use this vocab —
+  # the observed off-vocab `"big"` is refused, not silently stored.
+  @size_classes ~w(light standard heavy xl)
 
   @doc "The default self-declared staleness budget, in seconds."
   def default_ttl_s, do: @default_ttl_s
@@ -92,8 +96,10 @@ defmodule Barkpark.Tasks.Fleet do
   `opts` are `Content` write opts (workspace/project scope) used ONLY on the
   registration create. Returns `{:ok, receipt}` with
   `%{registered: boolean, doc: %{...}}`, or `{:error, :missing_worker |
-  :invalid_status | :invalid_ttl | :stale_beat}` (`:stale_beat` = a non-beat
-  writer raced the CAS; safe to retry — the next beat lands).
+  :invalid_status | :invalid_ttl | :invalid_capacity | :stale_beat}`
+  (`:invalid_capacity` = a structured capacity that violates the contract, see
+  `put_capacity/2`; `:stale_beat` = a non-beat writer raced the CAS; safe to
+  retry — the next beat lands).
   """
   def beat(params, dataset, opts \\ []) when is_map(params) and is_binary(dataset) do
     with {:ok, worker} <- fetch_worker(params),
@@ -249,9 +255,10 @@ defmodule Barkpark.Tasks.Fleet do
   # merged (an omitted key preserves the stored value). `ttl` aliases `ttl_s`.
   defp beat_fields(params) do
     with {:ok, fields} <- put_status(%{}, Map.get(params, "status")),
-         {:ok, fields} <- put_ttl(fields, Map.get(params, "ttl_s") || Map.get(params, "ttl")) do
+         {:ok, fields} <- put_ttl(fields, Map.get(params, "ttl_s") || Map.get(params, "ttl")),
+         {:ok, fields} <- put_capacity(fields, Map.get(params, "capacity")) do
       fields =
-        Enum.reduce(["agent", "scope", "capacity"], fields, fn key, acc ->
+        Enum.reduce(["agent", "scope"], fields, fn key, acc ->
           case Map.get(params, key) do
             v when is_binary(v) and v != "" -> Map.put(acc, key, v)
             _ -> acc
@@ -282,6 +289,70 @@ defmodule Barkpark.Tasks.Fleet do
   end
 
   defp put_ttl(_fields, _), do: {:error, :invalid_ttl}
+
+  # Capacity: the routing-relevant self-declaration (size_class + slots +
+  # budget) that lets the orchestrator route heavy->big / light->lean off real
+  # heartbeats (PDF-D6/D7). Three accepted shapes, mirroring put_status/put_ttl:
+  #
+  #   (a) a native map (an in-process/JSON-body object) — VALIDATED, stored.
+  #   (b) a Jason-decodable JSON OBJECT string — decoded, VALIDATED, stored as
+  #       the map. Load-bearing for the CLI whose `--capacity` rides the query
+  #       string as `type:"string"` (zero Go): the JSON travels as a string.
+  #   (c) any other plain string — a LEGACY free-form hint ("1 task"), stored
+  #       verbatim, unvalidated (backward compatibility).
+  #
+  # A validated map that violates the contract (off-vocab size_class, negative
+  # or inverted slots, negative budget) is REFUSED with {:error,
+  # :invalid_capacity} — the silent-drop trap sealed: bad structured capacity
+  # never lands as a stored-but-ignored blob.
+  defp put_capacity(fields, nil), do: {:ok, fields}
+  defp put_capacity(fields, ""), do: {:ok, fields}
+  defp put_capacity(fields, cap) when is_map(cap), do: validate_capacity(fields, cap)
+
+  defp put_capacity(fields, cap) when is_binary(cap) do
+    case Jason.decode(cap) do
+      # (b) a JSON object string -> validate the decoded map.
+      {:ok, decoded} when is_map(decoded) -> validate_capacity(fields, decoded)
+      # (c) a JSON scalar or non-JSON string -> legacy free-form hint, as-is.
+      _ -> {:ok, Map.put(fields, "capacity", cap)}
+    end
+  end
+
+  defp put_capacity(_fields, _), do: {:error, :invalid_capacity}
+
+  # Strict structured-capacity validation. size_class is REQUIRED and on-vocab;
+  # slots (when present) are non-negative ints with slots_free <= slots_total;
+  # budget (when present) is a non-negative number. Passing → store the
+  # validated MAP; any violation → {:error, :invalid_capacity}.
+  defp validate_capacity(fields, cap) do
+    with :ok <- check_size_class(Map.get(cap, "size_class")),
+         :ok <- check_slots(Map.get(cap, "slots_total"), Map.get(cap, "slots_free")),
+         :ok <- check_budget(Map.get(cap, "budget")) do
+      {:ok, Map.put(fields, "capacity", cap)}
+    else
+      :invalid -> {:error, :invalid_capacity}
+    end
+  end
+
+  defp check_size_class(sc) when sc in @size_classes, do: :ok
+  defp check_size_class(_), do: :invalid
+
+  defp check_slots(total, free) do
+    cond do
+      not valid_slot?(total) -> :invalid
+      not valid_slot?(free) -> :invalid
+      is_integer(total) and is_integer(free) and free > total -> :invalid
+      true -> :ok
+    end
+  end
+
+  defp valid_slot?(nil), do: true
+  defp valid_slot?(n) when is_integer(n) and n >= 0, do: true
+  defp valid_slot?(_), do: false
+
+  defp check_budget(nil), do: :ok
+  defp check_budget(n) when is_number(n) and n >= 0, do: :ok
+  defp check_budget(_), do: :invalid
 
   # `_id` slug: worker strings are agent-supplied — normalize to the doc-id
   # alphabet so `listener-<worker>` is always a valid, stable doc_id.

@@ -166,6 +166,114 @@ defmodule Barkpark.Tasks.FleetTest do
     assert content["ttl_s"] == 60
   end
 
+  # ── 2b. structured capacity contract (pdf-wb-capacity-contract) ──────────
+  # The silent-drop trap sealed: capacity is validated on the write path, so
+  # routing (heavy->big / light->lean, PDF-D6/D7) reads structured truth off
+  # the beat instead of a free-form hint the router cannot parse.
+
+  test "beat accepts a native capacity map, validates it, and stores the map", %{scope: scope} do
+    worker = uniq("capmap")
+
+    cap = %{
+      "size_class" => "heavy",
+      "slots_total" => 2,
+      "slots_free" => 1,
+      "budget" => 5.0
+    }
+
+    assert {:ok, %{registered: true}} =
+             Fleet.beat(%{"worker" => worker, "capacity" => cap}, @dataset, scope)
+
+    assert [%Document{content: content}] = listener_rows(worker)
+    # PROTECTIVE: pre-fix main dropped a non-binary capacity silently (the
+    # is_binary-only clause never matched a map) — the row would carry no
+    # capacity. This asserts the validated MAP round-trips intact.
+    assert content["capacity"] == cap
+  end
+
+  test "beat decodes a JSON-object capacity string into the validated map", %{scope: scope} do
+    worker = uniq("capjson")
+    json = ~s({"size_class":"light","slots_total":4,"slots_free":4})
+
+    assert {:ok, %{registered: true}} =
+             Fleet.beat(%{"worker" => worker, "capacity" => json}, @dataset, scope)
+
+    assert [%Document{content: content}] = listener_rows(worker)
+    # The CLI ships --capacity as a query-string string (type:"string", zero
+    # Go); a JSON object string must decode + store as a map — pre-fix it
+    # landed as the raw string, which the router cannot route on.
+    assert content["capacity"] == %{
+             "size_class" => "light",
+             "slots_total" => 4,
+             "slots_free" => 4
+           }
+  end
+
+  test "beat refuses an off-vocab size_class (the observed 'big') and stores nothing", %{
+    scope: scope
+  } do
+    worker = uniq("capbad")
+
+    assert {:error, :invalid_capacity} =
+             Fleet.beat(
+               %{"worker" => worker, "capacity" => %{"size_class" => "big"}},
+               @dataset,
+               scope
+             )
+
+    # Refused, never stored: no listener row was minted.
+    assert listener_rows(worker) == []
+  end
+
+  test "beat refuses negative slots and inverted slots_free > slots_total", %{scope: scope} do
+    assert {:error, :invalid_capacity} =
+             Fleet.beat(
+               %{
+                 "worker" => uniq("neg"),
+                 "capacity" => %{"size_class" => "standard", "slots_free" => -1}
+               },
+               @dataset,
+               scope
+             )
+
+    assert {:error, :invalid_capacity} =
+             Fleet.beat(
+               %{
+                 "worker" => uniq("inv"),
+                 "capacity" => %{
+                   "size_class" => "standard",
+                   "slots_total" => 1,
+                   "slots_free" => 3
+                 }
+               },
+               @dataset,
+               scope
+             )
+  end
+
+  test "beat refuses a JSON-object capacity string that fails validation", %{scope: scope} do
+    worker = uniq("capjsonbad")
+
+    assert {:error, :invalid_capacity} =
+             Fleet.beat(
+               %{"worker" => worker, "capacity" => ~s({"size_class":"xxl"})},
+               @dataset,
+               scope
+             )
+
+    assert listener_rows(worker) == []
+  end
+
+  test "beat still stores a legacy free-form capacity string verbatim", %{scope: scope} do
+    worker = uniq("caplegacy")
+
+    assert {:ok, %{registered: true}} =
+             Fleet.beat(%{"worker" => worker, "capacity" => "1 task"}, @dataset, scope)
+
+    assert [%Document{content: content}] = listener_rows(worker)
+    assert content["capacity"] == "1 task"
+  end
+
   # ── 3. the zero-row beat (PDF-D17) ───────────────────────────────────────
 
   test "second beat advances last_seen with ZERO new revisions/mutation_events/audit_events rows",
@@ -508,6 +616,19 @@ defmodule BarkparkWeb.FleetControllerTest do
       |> json_response(400)
 
     assert %{"ok" => false, "reason" => "bad_request"} = body
+  end
+
+  test "POST /v1/fleet/beat with off-vocab structured capacity is a 422", %{conn: conn} do
+    body =
+      conn
+      |> authed()
+      |> post("/v1/fleet/beat", %{
+        "worker" => uniq("http-cap"),
+        "capacity" => %{"size_class" => "big"}
+      })
+      |> json_response(422)
+
+    assert %{"ok" => false, "reason" => "invalid_capacity"} = body
   end
 
   test "fleet endpoints refuse an anonymous caller", %{conn: conn} do
