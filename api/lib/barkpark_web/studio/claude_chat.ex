@@ -590,12 +590,16 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   # WRITE, and the `bp_auth_*` verbs mutate credentials even where the
   # manifest marks them non-writing) surfaces the D31 approval card instead.
   # Curated task reads + the bridged task/doc/search reads (`bp_<noun>_<verb>`
-  # per mcp_bridge.go's naming).
+  # per mcp_bridge.go's naming). `chat_read_tail`/`chat_wait_for_state` are the
+  # herd read tools (charter D65) — pure observation of the fleet wire, so they
+  # auto-approve; `chat_spawn_session`/`chat_send` MUTATE and stay
+  # approval-gated.
   @mcp_auto_approve_tools ~w(
     task_ready task_show task_prime
     bp_task_get bp_task_ready bp_task_prime
     bp_doc_get bp_doc_ls bp_doc_query bp_doc_backlinks bp_doc_history bp_doc_revision
     bp_search_query
+    chat_read_tail chat_wait_for_state
   )
 
   @doc "True when `name` is one of OUR loopback server's tools (charter D64)."

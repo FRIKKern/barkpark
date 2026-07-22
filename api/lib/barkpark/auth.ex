@@ -673,9 +673,12 @@ defmodule Barkpark.Auth do
   @claude_session_default_ttl 4 * 3600
   @claude_session_max_ttl 24 * 3600
   # Curated REAL permissions — the task/doc/search verbs the loopback needs
-  # ride the ordinary `read`/`write` tiers. NEVER `share-edit-*` (opaque share
-  # perms), NEVER `admin`, NEVER caller-supplied.
-  @claude_session_permissions ~w(read write)
+  # ride the ordinary `read`/`write` tiers; `chat` lets the loopback reach
+  # `/v1/chat` (herd-s4). The mint is workspace-bound (below), so
+  # `RequireChatAccess` resolves it to `{:workspace, ws}` — fail-closed tenant
+  # inheritance by construction, never instance-global. NEVER `share-edit-*`
+  # (opaque share perms), NEVER `admin`, NEVER caller-supplied.
+  @claude_session_permissions ~w(read write chat)
   @claude_session_token_prefix "bpcs_"
 
   @doc """

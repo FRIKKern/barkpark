@@ -469,6 +469,20 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       end
     end
 
+    test "herd read tools auto-approve; herd write tools stay approval-gated (herd-s4)" do
+      # herd-s4: fleet OBSERVATION (read the wire) auto-approves; anything that
+      # spawns or sends a message MUTATES and lands the D31 approval card.
+      for tool <- ~w(chat_read_tail chat_wait_for_state) do
+        assert ClaudeChat.mcp_auto_approved?("mcp__barkpark__#{tool}"),
+               "#{tool} (herd read) should auto-approve"
+      end
+
+      for tool <- ~w(chat_spawn_session chat_send) do
+        refute ClaudeChat.mcp_auto_approved?("mcp__barkpark__#{tool}"),
+               "#{tool} (herd write) must NOT auto-approve"
+      end
+    end
+
     test "mutating (and merely unlisted) tools NEVER auto-approve — fail closed" do
       # task_next CLAIMS a task; create/close/publish write; auth_* mutate
       # credentials; anything unknown fails closed onto the approval card.
