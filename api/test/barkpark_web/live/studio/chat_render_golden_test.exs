@@ -73,7 +73,11 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
 
   setup %{conn: conn} do
     {:ok, _} =
-      Auth.create_token(@admin_token, "chat golden admin", "production", ["read", "write", "admin"])
+      Auth.create_token(@admin_token, "chat golden admin", "production", [
+        "read",
+        "write",
+        "admin"
+      ])
 
     Application.put_env(:barkpark, :studio_chat_title_http_adapter, NullTitleAdapter)
     Application.put_env(:barkpark, :studio_chat_title_cli, NullTitleCli)
@@ -104,6 +108,7 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
     on_exit(fn ->
       Application.delete_env(:barkpark, :studio_chat_title_http_adapter)
       Application.delete_env(:barkpark, :studio_chat_title_cli)
+
       if prev_chat,
         do: Application.put_env(:barkpark, :claude_chat, prev_chat),
         else: Application.delete_env(:barkpark, :claude_chat)
@@ -380,7 +385,7 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
 
   defp pin_last_active!(sid, at) do
     StudioChat.get_session(sid)
-    |> Ecto.Changeset.change(last_active_at: at, last_visited_at: at)
+    |> Ecto.Changeset.change(last_active_at: at)
     |> Barkpark.Repo.update!()
   end
 
