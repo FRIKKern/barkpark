@@ -344,6 +344,7 @@ defmodule Barkpark.Tasks.Fleet do
         # In-lock re-read: beats serialize on the advisory lock, so the CAS
         # below only loses to a NON-beat writer (e.g. a Studio edit) racing
         # between this read and the write — that surfaces as :stale_beat.
+        # global-read: by-PK re-read inside the listener-beat advisory lock — same posture as pulse.ex/stamp.ex/ttl_sweeper; the caller already resolved the row under its own scope.
         case Repo.get(Document, doc.id) do
           nil -> {:error, :stale_beat}
           %Document{} = fresh -> apply_beat(fresh, fields)
