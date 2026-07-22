@@ -575,6 +575,16 @@ func Execute(args []string) int {
 		}, "unknown command %q", noun)
 	}
 
+	// `bp task stamp` — client-side ergonomic wrapper: echo the 0-based
+	// --criterion index TRANSLATED to the 1-based position boards show, and
+	// refuse a --met on a MERGE-GATED row without an explicit --merge-gated
+	// override (the one mis-index that corrupts a lead's merge decision). The
+	// actual POST still runs through runCommand — the wrapper only adds the two
+	// CLI-only guards, then strips the CLI-only flag before delegating.
+	if noun == "task" && verb == "stamp" {
+		return runTaskStamp(out, g, ctx, m, *cmd, tail)
+	}
+
 	return runCommand(out, g, ctx, m, *cmd, tail)
 }
 
