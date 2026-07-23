@@ -2649,14 +2649,22 @@ func captureExecute(t *testing.T, args []string) string {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
+	// Drain the read end concurrently: os.Pipe has a bounded kernel buffer
+	// (~64KB), so a command that writes more than that would block on the write
+	// forever if we only started reading after Execute returned.
+	done := make(chan string, 1)
+	go func() {
+		body, _ := io.ReadAll(r)
+		done <- string(body)
+	}()
 	origOut, origErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = w, w
 	Execute(args)
 	_ = w.Close()
 	os.Stdout, os.Stderr = origOut, origErr
-	body, _ := io.ReadAll(r)
+	body := <-done
 	_ = r.Close()
-	return string(body)
+	return body
 }
 
 // TestExecuteCommandHelpShowsCommandSignature pins the fix for `bp <noun> <verb>
@@ -2717,14 +2725,21 @@ func captureExecuteCode(t *testing.T, args []string) (string, int) {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
+	// Drain the read end concurrently (see captureExecute): avoids a deadlock
+	// when a command's output exceeds the pipe's bounded kernel buffer.
+	done := make(chan string, 1)
+	go func() {
+		body, _ := io.ReadAll(r)
+		done <- string(body)
+	}()
 	origOut, origErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = w, w
 	code := Execute(args)
 	_ = w.Close()
 	os.Stdout, os.Stderr = origOut, origErr
-	body, _ := io.ReadAll(r)
+	body := <-done
 	_ = r.Close()
-	return string(body), code
+	return body, code
 }
 
 // TestExecuteBuiltinHelpHonoursGlobalHelp pins the fix for `--help`/`-h` being
