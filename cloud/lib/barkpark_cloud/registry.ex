@@ -295,6 +295,50 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  Register a SUPPORT machine as a fleet group row bound to a main (Personal Dev
+  Fleet Wave C, PDF-D61). The support is an ordinary `barkparks` row carrying the
+  three fleet columns — `fleet_role: "support"`, `fleet_parent_id` = the main's
+  id, and the opaque `fleet_token_id` (the minted ledger token id for later
+  revocation, NEVER the secret).
+
+  Rides `register_barkpark/2` FIRST so the single-create-path posture holds — the
+  per-plan instance quota and the slug/url unique constraints all apply — then
+  stamps the fleet fields via `fleet_changeset/2` in the SAME transaction, so a
+  support row can never exist half-bound (registered but role-less). Any error
+  (a changeset OR the `:limit_reached` quota atom) rolls the whole thing back and
+  is surfaced unchanged for the router to map.
+
+  `attrs` is `%{name, slug, host, parent_id, token_id}`. The CALLER (router) has
+  already verified `parent_id` belongs to `team` — this is the write, not the
+  authorization.
+  """
+  @spec register_support_barkpark(Team.t() | binary(), map()) ::
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t() | :limit_reached}
+  def register_support_barkpark(team, attrs) do
+    base =
+      %{
+        name: Map.get(attrs, :name),
+        slug: Map.get(attrs, :slug)
+      }
+      |> maybe_put_launch_opt(:host, Map.get(attrs, :host))
+
+    fleet = %{
+      fleet_role: "support",
+      fleet_parent_id: Map.get(attrs, :parent_id),
+      fleet_token_id: Map.get(attrs, :token_id)
+    }
+
+    Repo.transaction(fn ->
+      with {:ok, bp} <- register_barkpark(team, base),
+           {:ok, support} <- bp |> Barkpark.fleet_changeset(fleet) |> Repo.update() do
+        support
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
   defp url_conflict?(%Ecto.Changeset{errors: errors}) do
     Enum.any?(errors, fn
       {:url, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
