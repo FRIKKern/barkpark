@@ -2105,7 +2105,10 @@ defmodule BarkparkCloud.ProvisioningTest do
       {owner, team} = user_with_team()
 
       {:ok, pat_token, _} =
-        Accounts.create_personal_access_token(owner, team, %{name: "read-only", abilities: ["read"]})
+        Accounts.create_personal_access_token(owner, team, %{
+          name: "read-only",
+          abilities: ["read"]
+        })
 
       bp = barkpark_fixture(team)
       {:ok, job} = Registry.enqueue_provision_job(bp)
