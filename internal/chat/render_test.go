@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/FRIKKern/barkpark/internal/pdrender"
@@ -1355,5 +1356,151 @@ func TestChatHeaderDropsBadgesWhenNarrow(t *testing.T) {
 	}
 	if w := lipgloss.Width(lines[0]); w > m.width {
 		t.Fatalf("title band must never overflow width: %d > %d", w, m.width)
+	}
+}
+
+// TestPickerWindowsPastScreenful is the S14 flagship-gap guard: past a
+// screenful of sessions the picker must CLAMP its paint to the terminal height
+// (alt-screen = fixed buffer) and slide a cursor-follow viewport so the
+// highlighted row is always inside the window, with honest ↑/↓ more-indicators
+// for the hidden overflow. It drives the REAL key grammar (down-past-edge,
+// home, end, pgup, pgdn) through handlePickerKey and re-renders after every
+// stroke; m.height<=0 (a bare test Model, no WindowSizeMsg yet) must fall back
+// to show-all — never an empty paint.
+func TestPickerWindowsPastScreenful(t *testing.T) {
+	sessions := make([]SessionSummary, 50)
+	for i := range sessions {
+		sessions[i] = SessionSummary{ID: fmt.Sprintf("s%02d", i),
+			Title: fmt.Sprintf("session %02d", i), MessageCount: i + 1}
+	}
+	m := Model{width: 80, height: 24, sessions: sessions}
+
+	renderLines := func(out string) int { return strings.Count(out, "\n") + 1 }
+	cursorLine := func(out string) string {
+		for _, l := range strings.Split(out, "\n") {
+			if strings.Contains(l, "▸") {
+				return l
+			}
+		}
+		return ""
+	}
+	assertCursorVisible := func(step string) string {
+		t.Helper()
+		out := m.renderPicker()
+		if n := renderLines(out); n > m.height {
+			t.Fatalf("%s: picker paints %d lines past height %d:\n%s", step, n, m.height, out)
+		}
+		want := "+ new session"
+		if m.pickCursor > 0 {
+			want = m.orderedSessions()[m.pickCursor-1].Title
+		}
+		if cl := cursorLine(out); !strings.Contains(cl, want) {
+			t.Fatalf("%s: cursor row %q (pickCursor=%d) fell out of the window; cursor line=%q\n%s",
+				step, want, m.pickCursor, cl, out)
+		}
+		return out
+	}
+	press := func(k tea.KeyType) {
+		t.Helper()
+		nm, _ := m.handlePickerKey(tea.KeyMsg{Type: k})
+		m = nm.(Model)
+	}
+
+	// Initial: top of the roster, overflow only below.
+	out := assertCursorVisible("initial")
+	if strings.Contains(out, "more above") || !strings.Contains(out, "more below") {
+		t.Fatalf("initial window must hide rows below only, got:\n%s", out)
+	}
+
+	// Down past the window edge and all the way past the roster end: the
+	// viewport follows the cursor on every stroke and the cursor clamps.
+	for i := 0; i < 60; i++ {
+		press(tea.KeyDown)
+		assertCursorVisible(fmt.Sprintf("down #%d", i+1))
+	}
+	if m.pickCursor != len(sessions) {
+		t.Fatalf("down must clamp at the last session, got %d", m.pickCursor)
+	}
+	out = assertCursorVisible("down-past-edge settled")
+	if !strings.Contains(out, "more above") || strings.Contains(out, "more below") {
+		t.Fatalf("bottom window must hide rows above only, got:\n%s", out)
+	}
+
+	// Home jumps to the top; End back to the bottom — both keep the cursor in view.
+	press(tea.KeyHome)
+	if m.pickCursor != 0 {
+		t.Fatalf("home must land on the new-session row, got %d", m.pickCursor)
+	}
+	out = assertCursorVisible("home")
+	if strings.Contains(out, "more above") {
+		t.Fatalf("home window must start at the top, got:\n%s", out)
+	}
+	press(tea.KeyEnd)
+	if m.pickCursor != len(sessions) {
+		t.Fatalf("end must land on the last session, got %d", m.pickCursor)
+	}
+	assertCursorVisible("end")
+
+	// pgup/pgdn page by one window: a real multi-row stride, cursor always visible.
+	press(tea.KeyHome)
+	press(tea.KeyPgDown)
+	if m.pickCursor < 2 {
+		t.Fatalf("pgdn must stride a full window, got cursor %d", m.pickCursor)
+	}
+	assertCursorVisible("pgdn")
+	firstPage := m.pickCursor
+	press(tea.KeyPgDown)
+	if m.pickCursor <= firstPage {
+		t.Fatalf("second pgdn must keep paging, got %d after %d", m.pickCursor, firstPage)
+	}
+	assertCursorVisible("pgdn #2")
+	press(tea.KeyPgUp)
+	assertCursorVisible("pgup")
+	if m.pickCursor >= len(sessions) {
+		t.Fatalf("pgup must move back up, got %d", m.pickCursor)
+	}
+
+	// m.height<=0 (no WindowSizeMsg yet) shows ALL rows — never an empty paint.
+	m.height = 0
+	all := m.renderPicker()
+	for i := range sessions {
+		if !strings.Contains(all, fmt.Sprintf("session %02d", i)) {
+			t.Fatalf("height<=0 must show every row, missing session %02d", i)
+		}
+	}
+	if strings.Contains(all, "more above") || strings.Contains(all, "more below") {
+		t.Fatalf("height<=0 show-all must carry no more-indicators:\n%s", all)
+	}
+}
+
+// TestPickerWindowCountsPhysicalLines proves the window budget is charged in
+// PHYSICAL lines, not row indices: a workflow session is ONE navigable row
+// spanning THREE lines (herd row + two wsc card lines), so a viewport full of
+// workflow rows admits fewer rows and still never overflows the height.
+func TestPickerWindowCountsPhysicalLines(t *testing.T) {
+	wf := loadWorkflowFixture(t, "workflow_building.json")
+	sessions := make([]SessionSummary, 20)
+	for i := range sessions {
+		sessions[i] = SessionSummary{ID: fmt.Sprintf("w%02d", i),
+			Title: fmt.Sprintf("wave %02d", i), MessageCount: 1, Workflow: &wf,
+			Epic: &EpicGoal{Title: "epic", SlicesDone: 1, SlicesTotal: 3}}
+	}
+	m := Model{width: 100, height: 18, sessions: sessions}
+	out := m.renderPicker()
+	if n := strings.Count(out, "\n") + 1; n > m.height {
+		t.Fatalf("workflow-heavy picker paints %d lines past height %d:\n%s", n, m.height, out)
+	}
+	if !strings.Contains(out, "more below") {
+		t.Fatalf("hidden workflow rows must surface the below indicator:\n%s", out)
+	}
+	// The fleet notice is chrome OUTSIDE the row block: it must still paint and
+	// the total must still respect the height.
+	m.fleetNotice = "herd stream lost — boom"
+	out = m.renderPicker()
+	if !strings.Contains(out, "herd stream lost") {
+		t.Fatalf("the fleet notice must always render under a windowed list:\n%s", out)
+	}
+	if n := strings.Count(out, "\n") + 1; n > m.height {
+		t.Fatalf("noticed picker paints %d lines past height %d:\n%s", n, m.height, out)
 	}
 }
