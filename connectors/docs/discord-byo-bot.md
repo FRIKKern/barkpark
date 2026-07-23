@@ -100,8 +100,12 @@ Paste it into **General Information → Interactions Endpoint URL** in the Devel
 **The route must already be live and reachable.** Discord PING-validates at save time: it sends a
 signed `type: 1` PING and refuses the save unless it gets a `type: 1` PONG back. If the bridge is
 not deployed, or the endpoint is behind auth, or the install's `publicKey` is wrong, the portal
-rejects the URL and will not save it. There is **no** "copy this URL from Studio" — Studio surfaces
-no webhook URL for any provider; you construct it from your public host + the Application ID above.
+rejects the URL and will not save it. Studio's Connectors panel surfaces this exact URL once the
+install exists — the Discord card's **Interactions Endpoint URL** row is copyable and built from the
+instance's public base + the Application ID — but this runbook stays canonical: the URL must be
+**live and PING-validated before you Save**, which only you can time. If the instance has no public
+base configured, Studio shows *"endpoint unavailable"* and you construct it from your public host +
+the Application ID above.
 
 ### 2. Named failure mode — a failing endpoint is SILENTLY removed
 

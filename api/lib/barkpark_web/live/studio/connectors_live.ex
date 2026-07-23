@@ -813,6 +813,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           Install <code>{install.install_key}</code>
         </div>
         <div>Connected {connected_at(install)}</div>
+        <.webhook_endpoint_row provider_id={@provider.id} install_key={install.install_key} />
       </div>
 
       <p
@@ -893,6 +894,76 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           How to get a token
         </a>
       </div>
+    </div>
+    """
+  end
+
+  # THE WEBHOOK / INTERACTIONS URL (D260). A copyable, DISPLAY-ONLY mirror of the
+  # ops runbooks: Phoenix mounts no route — the Node bridge serves this URL behind
+  # Caddy (D34/D39). Rendered per install because a PATH-keyed provider's URL
+  # carries the install_key. A provider with no inbound webhook (telegram polling,
+  # imessage, the github/linear tools) has no spec and renders nothing.
+  #
+  # When the public base is not configured (`Catalog.webhook_endpoint` returns a
+  # nil `:url`) the row is HONEST — "endpoint unavailable" — never a localhost or
+  # loopback guess an operator would paste into a vendor portal and watch fail.
+  #
+  # The copy button reuses `CSP.copy_data_url_onclick/0` with `data-url={url}`: that
+  # exact handler hash is CSP-allowlisted (browser_csp_test.exs). A hand-rolled
+  # inline onclick with the URL interpolated into the JS would be silently blocked.
+  attr :provider_id, :string, required: true
+  attr :install_key, :string, required: true
+
+  defp webhook_endpoint_row(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :endpoint,
+        Catalog.webhook_endpoint(assigns.provider_id, assigns.install_key)
+      )
+
+    ~H"""
+    <div
+      :if={@endpoint}
+      data-test-id={"connector-webhook-#{@provider_id}"}
+      style="margin-top: 8px;"
+    >
+      <div class="text-sm" style="color: var(--fg-muted); font-weight: 600;">
+        {@endpoint.label}
+      </div>
+
+      <div
+        :if={@endpoint.url}
+        style="display: flex; gap: 8px; align-items: center; margin-top: 2px;"
+      >
+        <code
+          data-test-id={"connector-webhook-url-#{@provider_id}"}
+          style="flex: 1; min-width: 0; overflow-wrap: anywhere; word-break: break-all; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg);"
+        >{@endpoint.url}</code>
+        <button
+          type="button"
+          class="btn btn-sm"
+          data-url={@endpoint.url}
+          onclick={BarkparkWeb.CSP.copy_data_url_onclick()}
+          data-test-id={"connector-webhook-copy-#{@provider_id}"}
+          title="Copy webhook URL"
+        >
+          Copy
+        </button>
+      </div>
+
+      <div
+        :if={is_nil(@endpoint.url)}
+        data-test-id={"connector-webhook-unavailable-#{@provider_id}"}
+        class="text-sm"
+        style="margin-top: 2px; color: var(--fg-muted);"
+      >
+        Endpoint unavailable — public base not configured.
+      </div>
+
+      <p :if={@endpoint.help} class="text-sm" style="margin: 4px 0 0; color: var(--fg-muted);">
+        {@endpoint.help}
+      </p>
     </div>
     """
   end

@@ -140,6 +140,12 @@ config :barkpark, :claude_chat, enabled: true
 config :barkpark, Barkpark.Connectors,
   bridge_url: "http://127.0.0.1:4020/connectors",
   connect_secret: nil,
+  # The connectors HTTP path prefix — the Caddy route + `webhook-server.ts`'s
+  # `{prefix}/webhooks/:provider[/:installKey]` grammar both hang off it. Studio
+  # mirrors it to DISPLAY the per-install webhook/interactions URL an operator
+  # pastes into a vendor portal (connectors D260). Distinct from `bridge_url`
+  # (loopback, for the connect wire) — this joins the PUBLIC base, never loopback.
+  path_prefix: "/connectors",
   bridge: Barkpark.Connectors.BridgeClient
 
 config :barkpark, :media_cdn,

@@ -938,6 +938,134 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
     end
   end
 
+  # ── THE WEBHOOK / INTERACTIONS URL DISPLAY (D260) ──────────────────────────
+  #
+  # Studio mirrors the ops runbooks: it DISPLAYS the copyable per-install
+  # webhook/interactions URL an operator pastes into a vendor portal. Phoenix
+  # mounts no route (the Node bridge serves it behind Caddy) — this is a display
+  # string, built from the PUBLIC base + path prefix, keyed by the bridge's own
+  # `keySource` grammar. The public base has NO default: unconfigured ⇒ an honest
+  # "endpoint unavailable" state, never a localhost paste error.
+
+  defp seed_install(ws, provider, key) do
+    Repo.query!(
+      """
+      INSERT INTO chat_bridge.connector_installs
+        (provider, install_key, workspace_id, credential_ref, chat_token_ref, created_at)
+      VALUES ($1, $2, $3, 'SEALED-CREDENTIAL-BLOB', 'SEALED-CHAT-TOKEN-BLOB', now())
+      """,
+      [provider, key, ws.id]
+    )
+  end
+
+  # The base is set here, per-test (never in config/test.exs), so the nil branch
+  # stays the zero-setup default and this env never leaks into another test.
+  defp put_public_base(base) do
+    Application.put_env(:barkpark, :capabilities_base_url, base)
+    on_exit(fn -> Application.delete_env(:barkpark, :capabilities_base_url) end)
+  end
+
+  describe "the webhook / interactions URL display (D260)" do
+    test "a PATH-keyed provider (discord) shows a per-install URL carrying the install_key, copyable, labelled 'Interactions Endpoint URL' + the deploy-before-save runbook",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      put_public_base("https://studio.test")
+      app_id = "111111111111111111"
+      seed_install(ws, "discord", app_id)
+
+      {:ok, _view, html} = live(as(conn, raw), path)
+
+      # The URL is per-install: the install_key IS a path segment (keySource "path").
+      assert html =~ ~s(data-test-id="connector-webhook-discord")
+      assert html =~ ~s(data-test-id="connector-webhook-url-discord")
+      assert html =~ "https://studio.test/connectors/webhooks/discord/#{app_id}"
+
+      # Discord's portal field is literally "Interactions Endpoint URL".
+      assert html =~ "Interactions Endpoint URL"
+
+      # The deploy-before-save PING runbook is linked (silent-removal failure mode).
+      assert html =~ "connectors/docs/discord-byo-bot.md"
+      assert html =~ "PING-validate"
+
+      # A copy action wired to the CSP-allowlisted handler + data-url.
+      assert html =~ ~s(data-test-id="connector-webhook-copy-discord")
+      assert html =~ ~s(data-url="https://studio.test/connectors/webhooks/discord/#{app_id}")
+      # The CSP-allowlisted copy handler is wired (its `'`-bearing body is
+      # HTML-escaped in the attribute, so assert an unescaped, load-bearing
+      # fragment — `data-url` above is the URL half of the same handler).
+      assert html =~ "navigator.clipboard.writeText"
+    end
+
+    test "a PAYLOAD-keyed provider (slack) shows the APP-WIDE URL with NO install_key segment, linked to the Event Subscriptions step",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      put_public_base("https://studio.test")
+      # A payload-keyed provider's URL is app-wide; the team is dug from the body.
+      seed_install(ws, "slack", "T_TEAM")
+
+      {:ok, _view, html} = live(as(conn, raw), path)
+
+      assert html =~ ~s(data-test-id="connector-webhook-slack")
+      assert html =~ "https://studio.test/connectors/webhooks/slack"
+
+      # The install_key is NEVER a path segment for a payload-keyed provider.
+      refute html =~ "webhooks/slack/T_TEAM"
+
+      # Links the Event Subscriptions step (NOT the OAuth redirect step).
+      assert html =~ "Event Subscriptions"
+      assert html =~ "docs/ops/slack-app.md"
+    end
+
+    test "the base URL is trimmed of a trailing slash — the join never doubles it", %{
+      conn: conn,
+      path: path,
+      admin_raw: raw,
+      ws: ws
+    } do
+      put_public_base("https://studio.test/")
+      seed_install(ws, "whatsapp", "1555000111")
+
+      {:ok, _view, html} = live(as(conn, raw), path)
+
+      assert html =~ "https://studio.test/connectors/webhooks/whatsapp/1555000111"
+      refute html =~ "studio.test//connectors"
+    end
+
+    test "with NO public base configured the row is honest — 'endpoint unavailable', no URL, no copy button",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      # Deliberately do NOT set :capabilities_base_url — the nil default.
+      Application.delete_env(:barkpark, :capabilities_base_url)
+      seed_install(ws, "discord", "111111111111111111")
+
+      {:ok, _view, html} = live(as(conn, raw), path)
+
+      # The webhook block still renders (the provider HAS an endpoint)…
+      assert html =~ ~s(data-test-id="connector-webhook-discord")
+      # …but honestly, with no URL and no copy action — never a localhost guess.
+      assert html =~ ~s(data-test-id="connector-webhook-unavailable-discord")
+      assert html =~ "Endpoint unavailable"
+      refute html =~ ~s(data-test-id="connector-webhook-url-discord")
+      refute html =~ ~s(data-test-id="connector-webhook-copy-discord")
+      refute html =~ "localhost"
+      refute html =~ "127.0.0.1"
+    end
+
+    test "a LISTEN-ONLY connector (telegram polling) renders NO webhook endpoint at all", %{
+      conn: conn,
+      path: path,
+      admin_raw: raw,
+      ws: ws
+    } do
+      put_public_base("https://studio.test")
+      seed_install(ws, "telegram", @telegram_key)
+
+      {:ok, _view, html} = live(as(conn, raw), path)
+
+      # The install renders, but telegram has no inbound HTTP webhook — no row.
+      assert html =~ ~s(data-test-id="connector-install-telegram")
+      refute html =~ ~s(data-test-id="connector-webhook-telegram")
+      refute html =~ "webhooks/telegram"
+    end
+  end
+
   # ── The ticket the LiveView actually signs ─────────────────────────────────
 
   test "the LiveView signs the SAME ticket shape the golden vector pins", %{
