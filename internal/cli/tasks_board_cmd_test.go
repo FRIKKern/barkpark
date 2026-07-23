@@ -57,6 +57,39 @@ func TestTasksBoardHelp(t *testing.T) {
 			t.Fatalf("help missing the %q act-verb key: %q", want, out)
 		}
 	}
+
+	// Wave-16 shipped full mouse support; the help must teach the SAME concise
+	// grammar as the live footer. Each phrase below is one advertised gesture —
+	// deleting any one of them from printTasksBoardHelp fails here, so the help
+	// cannot silently drift back to keys-only or drop a gesture (mutation-proof).
+	for _, gesture := range []string{
+		"mouse",                             // the block exists at all
+		"wheel",                             // wheel scrolls the pane under the pointer
+		"free-scroll",                       // reading-frame wheel semantics
+		"preview scrolls",                   // depth-0 preview wheel semantics
+		"click",                             // click selects
+		"click again",                       // click-on-selected activates
+		"same as enter",                     // Enter equivalence
+		"double-click",                      // double-click == two presses, no separate path
+		"M ",                                // M toggles mouse capture
+		"toggle mouse",                      // …capture on/off
+		"opt/shift-click",                   // native-terminal text-selection bypass
+		"text selection",                    // …what opt/shift-click reaches
+		`opt/shift-click selects · M mouse`, // exact live-footer vocabulary
+	} {
+		if !strings.Contains(out, gesture) {
+			t.Fatalf("help missing the shipped mouse gesture %q: %q", gesture, out)
+		}
+	}
+
+	// The wide split is X-threshold PANE routing — there are no draggable
+	// dividers, no resizable or column-local scroll gestures (grep-proven never
+	// shipped). Help must never advertise those false premises.
+	for _, phantom := range []string{"divider", "resize", "drag the"} {
+		if strings.Contains(out, phantom) {
+			t.Fatalf("help advertises a never-shipped gesture %q: %q", phantom, out)
+		}
+	}
 }
 
 // A stray positional (a `bp task` verb typo) is rejected with a helpful
