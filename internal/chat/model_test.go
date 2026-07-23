@@ -247,6 +247,45 @@ func TestFetchTailEffectGetsSince(t *testing.T) {
 	}
 }
 
+// TestFetchTailEffectThreadsGen proves the settle-race token (charter D77) rides
+// the shell: execEffect stamps the FetchTailEffect's issuing generation onto the
+// tailFetchedMsg it returns, so the reducer can prove the landing GET still owns
+// the live tail.
+func TestFetchTailEffectThreadsGen(t *testing.T) {
+	f := &fakeTransport{full: Session{ID: "s1"}}
+	m := newTestModel(f)
+	m.st.SessionID = "s1"
+	msg := runCmd(m.execEffect(FetchTailEffect{SinceSeq: 3, Gen: 7}))
+	tf, ok := msg.(tailFetchedMsg)
+	if !ok {
+		t.Fatalf("FetchTailEffect must produce tailFetchedMsg, got %T", msg)
+	}
+	if tf.gen != 7 {
+		t.Fatalf("execEffect must thread the issuing generation, got gen=%d want 7", tf.gen)
+	}
+}
+
+// TestTailFetchedMsgGenGuardsTailClear proves the full shell path (charter D77):
+// Update maps tailFetchedMsg.gen → TailFetchedEvent.Gen, so a stale-generation
+// GET landing over a live tail leaves it intact while a matching one clears it.
+func TestTailFetchedMsgGenGuardsTailClear(t *testing.T) {
+	m := newTestModel(&fakeTransport{})
+	m.screen = screenChat
+	m.st = State{SessionID: "s1", Tail: "live", TailGen: 5}
+
+	// A stale GET (older generation) must NOT clear the live tail.
+	nm, _ := m.Update(tailFetchedMsg{session: Session{ID: "s1"}, gen: 4})
+	if got := nm.(Model).st.Tail; got != "live" {
+		t.Fatalf("a stale-gen tailFetchedMsg must not clear the tail, got %q", got)
+	}
+
+	// A matching GET clears it.
+	nm, _ = nm.(Model).Update(tailFetchedMsg{session: Session{ID: "s1"}, gen: 5})
+	if got := nm.(Model).st.Tail; got != "" {
+		t.Fatalf("a matching-gen tailFetchedMsg must clear the tail, got %q", got)
+	}
+}
+
 // TestPickerNewSessionRow proves the "+ new session" row (index 0) creates a
 // session rather than resuming one.
 func TestPickerNewSessionRow(t *testing.T) {

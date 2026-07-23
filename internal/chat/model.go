@@ -198,7 +198,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tailFetchedMsg:
-		return m.apply(TailFetchedEvent{Session: msg.session, Err: msg.err})
+		return m.apply(TailFetchedEvent{Session: msg.session, Err: msg.err, Gen: msg.gen})
 	case sendDoneMsg:
 		if msg.err != nil {
 			m.st.Notice = "send failed — " + msg.err.Error()
@@ -263,9 +263,10 @@ func (m Model) execEffect(e Effect) tea.Cmd {
 	switch e := e.(type) {
 	case FetchTailEffect:
 		since := e.SinceSeq
+		gen := e.Gen // the issuing generation (charter D77 settle-race token)
 		return func() tea.Msg {
 			s, err := tr.GetSession(id, since)
-			return tailFetchedMsg{session: s, err: err}
+			return tailFetchedMsg{session: s, err: err, gen: gen}
 		}
 	case SendEffect:
 		content := e.Content
@@ -542,10 +543,14 @@ type sessionOpenedMsg struct {
 	err     error
 }
 
-// tailFetchedMsg carries the turn-boundary GET (?since=) result.
+// tailFetchedMsg carries the turn-boundary GET (?since=) result. gen is the
+// generation of the FetchTailEffect that issued it (charter D77) — threaded
+// verbatim into TailFetchedEvent.Gen so the settle guard can prove the fetch
+// still owns the live tail.
 type tailFetchedMsg struct {
 	session Session
 	err     error
+	gen     int
 }
 
 // streamFrameMsg is one SSE frame pushed from the stream goroutine.
