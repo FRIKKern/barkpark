@@ -694,7 +694,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           labels: if(readable?.("labels"), do: (card && card.labels) || [], else: []),
           github: card && card.github,
           claim: if(readable?.("claim"), do: peek_claim(content)),
-          description: if(readable?.("description"), do: presence(Map.get(content, "description"))),
+          description:
+            if(readable?.("description"), do: presence(Map.get(content, "description"))),
           design_doc: if(readable?.("design_doc"), do: presence(Map.get(content, "design_doc"))),
           criteria: if(readable?.("acceptance_criteria"), do: peek_criteria(content), else: []),
           ancestors: ancestors,
