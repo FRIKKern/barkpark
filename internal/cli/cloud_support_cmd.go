@@ -23,15 +23,23 @@ package cli
 //   - the roster row's self-declared status rides in content.status, NEVER as a
 //     top-level status (the top-level key is the server-owned draft/published
 //     column and 422s exact-vocab by design — PDF-D56).
-//   - the bind endpoints (/v1/fleet/support-tokens, /v1/fleet/supports) are
-//     RUNTIME HTTP calls on the main — no compile-time dependency on the
-//     sibling Elixir slices that ship them.
+//   - the bind is TWO calls on TWO hosts (PDF-D69): the support token is minted
+//     on the MAIN (POST /v1/fleet/support-tokens, admin-gated — it authorizes
+//     ledger writes there), while the fleet group record is registered on the
+//     CONTROL PLANE (POST /v1/fleet/supports, via the bp-login
+//     CloudURL/CloudToken seam — the CP owns the fleet registry). Both are
+//     RUNTIME HTTP calls — no compile-time dependency on the slices that ship
+//     the routes.
 //   - agent PROVIDER KEYS ARE NEVER COPIED (PDF-D62): the command finishes by
 //     printing the exact SSH one-liner the developer runs themselves.
 //   - barkpark.service is baked into the warm image — never authored here.
 //
-// `remove` is DELIBERATELY absent — a round-2 slice (pdf-wc-one-action-remove)
-// extends this file after merge; the dispatcher names that honestly.
+// `remove` is the mirror verb (PDF-D68): tear a support down across all FOUR
+// surfaces — token (main), box (provider), roster row (main), control-plane row
+// (CP, deleted LAST because it is the sole durable holder of the token id) —
+// then RE-READ every surface (delete responses prove nothing, D33) and exit
+// non-zero naming every survivor. Idempotent: a double remove reports
+// already-gone; partial state converges.
 
 import (
 	"bytes"
@@ -147,9 +155,7 @@ func runCloudSupport(out *writer, g globals, args []string) int {
 	case "add":
 		return runCloudSupportAdd(out, g, rest)
 	case "remove", "rm", "delete":
-		return useError(out, "usage",
-			"`bp cloud support remove` is not built yet (a planned round-2 verb) — until it lands, tear a support down with `bp cloud instance delete <server> --provider hetzner --yes` (find the server via its barkpark-fleet-support label) and delete its listener row on the main",
-			exitUsage)
+		return runCloudSupportRemove(out, g, rest)
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown support command %q (run `bp cloud support -h` for usage)", verb), exitUsage)
 	}
@@ -172,12 +178,19 @@ type supportAddRun struct {
 	base  string // the MAIN's content-API base URL
 	token string // the operator's bearer against the main
 
+	// The CONTROL PLANE the register leg targets (PDF-D69) — resolved from the
+	// bp-login credentials (Config.CloudURL/CloudToken) BEFORE the box create,
+	// so a known-missing credential never bills a box.
+	cpBase  string
+	cpToken string
+
 	host    cloud.Server
 	runner  cloud.SupportRunner
 	secrets cloud.Secrets
 
 	ledgerToken string // minted for the box, delivered 0600 — never printed
 	tokenID     string
+	cpRowID     string // the CP support row id the register leg returned
 	maxClass    string // measured on the box; "" when the measure degraded
 }
 
@@ -257,14 +270,94 @@ func runCloudSupportAdd(out *writer, g globals, args []string) int {
 		out.progressf("  2. wait-ready    poll sshd on the new box (budget %s)", supportReadyTimeout)
 		out.progressf("  3. roster-row    publish listener-%s {status:provisioning, ttl_s:%d} on %s (dataset %s)", r.name, supportProvisioningTTL, r.base, r.dataset)
 		out.progressf("  4. configure     freshen → secrets → migrate → admin-token → LOCAL health probe")
-		out.progressf("  5. bind          POST /v1/fleet/support-tokens + POST /v1/fleet/supports on the main")
+		out.progressf("  5. bind          mint POST /v1/fleet/support-tokens on the MAIN + register POST /v1/fleet/supports on the CONTROL PLANE (PDF-D69)")
 		out.progressf("  6. dataset       dev-profile export of %s/%s → tar over SSH → merge-import into the box", r.ws, r.dataset)
 		out.progressf("  7. runtime       fleet-run.sh + protocol (origin/main content), %s CLI fail-open, unit + env 0600", r.agent)
 		out.progressf("  8. online        enable barkpark-fleet-listener, poll the roster to online-with-capacity (budget %s)", supportRosterPollBudget)
 		return exitOK
 	}
 
+	// PDF-D69: the register leg targets the CONTROL PLANE, so the Cloud login is
+	// checked UP FRONT — BEFORE the box create. A known-missing credential must
+	// never bill a box (the D58 writes-nothing ethos). requireCloud emits the
+	// exact "not logged in — run `bp login` first" wording.
+	cfg, okc := requireCloud(out)
+	if !okc {
+		return exitAuth
+	}
+	cl := cfg.CloudClient()
+	r.cpBase = strings.TrimRight(strings.TrimSpace(cl.BaseURL), "/")
+	r.cpToken = cl.Token
+
+	// PDF-D70: without --parent, resolve the main's control-plane row id BEFORE
+	// the box create, so a zero/many refusal costs nothing.
+	if r.parent == "" {
+		if code, stop := r.resolveParent(); stop {
+			return code
+		}
+	}
+
 	return r.run()
+}
+
+// resolveParent (PDF-D70) resolves --parent's default: the control-plane row
+// whose URL host matches the active main. The match key is hostname-of(row.url)
+// — NEVER the host column, which is a raw IP on every real row (guerrilla:
+// host=157.180.90.121 vs url=https://guerrilla.barkpark.cloud — a host-column
+// match returns zero by construction, live-proven). Support rows can never be
+// parents (the CP 422s them; we exclude them from candidacy). Exactly one match
+// resolves; zero or many REFUSES, naming the candidates; explicit --parent
+// skips this entirely.
+func (r *supportAddRun) resolveParent() (int, bool) {
+	rows, status, err := supportCPBarkparks(r.cpBase, r.cpToken)
+	if err != nil {
+		return useError(r.out, "failed",
+			"resolve --parent: cannot reach the control plane ("+r.cpBase+"): "+err.Error()+" — nothing was created; pass --parent <cp-row-id> or retry",
+			exitGeneric), true
+	}
+	if status == http.StatusUnauthorized {
+		return useError(r.out, "auth",
+			"resolve --parent: the control plane rejected the Cloud session (401) — not logged in; run `bp login` first",
+			exitAuth), true
+	}
+	if status < 200 || status >= 300 {
+		return useError(r.out, "failed",
+			fmt.Sprintf("resolve --parent: the control plane answered %d listing your fleet — nothing was created; pass --parent <cp-row-id> or retry", status),
+			exitGeneric), true
+	}
+
+	wantHost := hostOf(r.base)
+	var matches []supportCPRow
+	var candidates []string
+	for _, row := range rows {
+		if row.FleetRole == "support" {
+			continue // two-tier: a support can never be a parent
+		}
+		candidates = append(candidates, supportCPRowLabel(row))
+		if row.URL != "" && hostOf(row.URL) == wantHost {
+			matches = append(matches, row)
+		}
+	}
+	switch len(matches) {
+	case 1:
+		r.parent = matches[0].ID
+		r.out.progressf("→ parent: resolved %s — its url host matches the active main (%s)", supportCPRowLabel(matches[0]), wantHost)
+		return exitOK, false
+	case 0:
+		return useError(r.out, "failed",
+			fmt.Sprintf("resolve --parent: no control-plane row's url matches the active main's host %q — nothing was created. Candidates: %s. Re-run with `bp cloud support add %s --parent <cp-row-id>`",
+				wantHost, supportOr(strings.Join(candidates, ", "), "(none — is this main registered on the control plane?)"), r.name),
+			exitGeneric), true
+	default:
+		var names []string
+		for _, m := range matches {
+			names = append(names, supportCPRowLabel(m))
+		}
+		return useError(r.out, "failed",
+			fmt.Sprintf("resolve --parent: %d control-plane rows match the active main's host %q — refusing to pick one. Candidates: %s. Re-run with `bp cloud support add %s --parent <cp-row-id>`",
+				len(matches), wantHost, strings.Join(names, ", "), r.name),
+			exitGeneric), true
+	}
 }
 
 // run executes the eight named states in order. Each step returns (exitCode,
@@ -446,10 +539,12 @@ func (r *supportAddRun) stepBind() (int, bool) {
 	}
 	r.ledgerToken, r.tokenID = tok, tokID
 
-	r.state("bind", "registering the control-plane support row (fleet group record)")
-	// Contract keys per the CP endpoint (PDF-D61): name + parent_id (REQUIRED
-	// server-side) + host + token_id. worker/provider/server_name/agent ride
-	// along as provenance the endpoint is free to ignore.
+	r.state("bind", "registering the fleet group record on the CONTROL PLANE ("+r.cpBase+")")
+	// PDF-D69: POST /v1/fleet/supports exists ONLY on the control plane (the CP
+	// owns the fleet registry) — it rides the CloudURL/CloudToken seam, never
+	// the main. Contract keys (PDF-D61): name + parent_id (REQUIRED server-side)
+	// + host + token_id. worker/provider/server_name/agent ride along as
+	// provenance the endpoint is free to ignore.
 	reg := map[string]any{
 		"worker":      r.name,
 		"name":        r.name,
@@ -461,26 +556,50 @@ func (r *supportAddRun) stepBind() (int, bool) {
 	if r.tokenID != "" {
 		reg["token_id"] = r.tokenID
 	}
-	// parent_id is the MAIN's control-plane row id — the CP endpoint REQUIRES
-	// it (422 without). --parent supplies it explicitly; when absent we still
-	// send the registration so the refusal is the server's honest one.
 	if r.parent != "" {
 		reg["parent_id"] = r.parent
 	}
-	status, resp, err = supportMainJSON(http.MethodPost, r.base+"/v1/fleet/supports", r.token, reg)
-	if err != nil || status < 200 || status >= 300 {
-		reason := ""
-		if err != nil {
-			reason = err.Error()
-		} else {
-			reason = fmt.Sprintf("main answered %d: %s", status, supportTrim(resp))
-		}
-		return r.fail("bind", "control-plane support registration failed: "+reason,
+	status, resp, err = supportMainJSON(http.MethodPost, r.cpBase+"/v1/fleet/supports", r.cpToken, reg)
+	if err != nil {
+		return r.fail("bind", "control-plane support registration failed: "+err.Error(),
 			fmt.Sprintf("box %s configured at %s; token minted (id %s) but NOT registered — mint again on retry rather than reusing", r.host.Name, r.host.IP, r.tokenID),
-			"the target must serve POST /v1/fleet/supports and the group record needs the main's row id — re-run with `bp cloud support add "+r.name+" --parent <the main's control-plane row id>`",
+			"check the control plane ("+r.cpBase+") is reachable, then re-run `bp cloud support add "+r.name+"`",
 			exitGeneric)
 	}
-	r.done("bind", fmt.Sprintf("token minted (id %s) + support row registered for %s", supportOr(r.tokenID, "unreported"), r.name))
+	if status < 200 || status >= 300 {
+		written := fmt.Sprintf("box %s configured at %s; token minted (id %s) on the main but NOT registered — mint again on retry rather than reusing", r.host.Name, r.host.IP, r.tokenID)
+		reason := fmt.Sprintf("control plane answered %d: %s", status, supportTrim(resp))
+		// Named narrations per the CP's credential-aware contract (PDF-D69).
+		switch {
+		case status == http.StatusUnauthorized:
+			return r.fail("bind", "control-plane support registration refused: "+reason,
+				written,
+				"the Cloud session is missing or dead — not logged in; run `bp login` first, then re-run `bp cloud support add "+r.name+"`",
+				exitAuth)
+		case status == http.StatusUnprocessableEntity && supportCPErrorCode(resp) == "no_team":
+			return r.fail("bind", "control-plane support registration refused: "+reason,
+				written,
+				"your Cloud login has no active team — run `bp team use <team>`, then re-run `bp cloud support add "+r.name+"`",
+				exitGeneric)
+		case status == http.StatusForbidden:
+			return r.fail("bind", "control-plane support registration refused: "+reason,
+				written,
+				"a session needs team-admin, a PAT needs the deploy ability — fix the credential, then re-run `bp cloud support add "+r.name+"`",
+				exitAuth)
+		case status == http.StatusNotFound:
+			return r.fail("bind", "control-plane support registration refused: "+reason,
+				written,
+				"the parent row was not found in your team — re-run with `bp cloud support add "+r.name+" --parent <the main's control-plane row id>`",
+				exitGeneric)
+		default:
+			return r.fail("bind", "control-plane support registration failed: "+reason,
+				written,
+				"the control plane must serve POST /v1/fleet/supports — re-run `bp cloud support add "+r.name+"` once it does",
+				exitGeneric)
+		}
+	}
+	r.cpRowID = supportParseCPRowID(resp)
+	r.done("bind", fmt.Sprintf("token minted (id %s) on the main + support row %s registered on the control plane", supportOr(r.tokenID, "unreported"), supportOr(r.cpRowID, "(id unreported)")))
 	return exitOK, false
 }
 
@@ -639,6 +758,7 @@ func (r *supportAddRun) success() int {
 			"ip":        r.host.IP,
 			"provider":  "hetzner",
 			"token_id":  r.tokenID,
+			"cp_row_id": r.cpRowID,
 			"max_class": r.maxClass,
 			"unit":      "barkpark-fleet-listener",
 		},
@@ -655,6 +775,535 @@ func (r *supportAddRun) success() int {
 	r.out.outf("  agent:  %s (hand it %s via the ssh one-liner above)", r.agent, spec.keyVar)
 	r.out.outf("  next:   `bp fleet roster` shows it; route an order by naming assignee=%s", r.name)
 	return exitOK
+}
+
+// ── the mirror verb: remove ──────────────────────────────────────────────────
+
+// supportProbeSecretScript best-effort reads the support's own ledger token off
+// the box (0600 env written by add) so the census can run the REAL 403→401
+// token probe instead of trusting the revoke receipt. Read-only; the secret
+// stays in-process and is never printed.
+const supportProbeSecretScript = `grep '^BARKPARK_API_TOKEN=' /etc/barkpark/fleet-listener.env | head -n1 | cut -d= -f2-`
+
+// supportRemoveRun carries one `support remove` invocation's resolved inputs +
+// accumulated truth. Teardown ORDER is law (PDF-D68): read the CP record FIRST
+// (sole durable token-id holder), then token revoke on the main, then the
+// identity-fenced box delete, then the roster row, then the CP row LAST — so a
+// crash at any point never strands the token id. Then the four-surface census.
+type supportRemoveRun struct {
+	out *writer
+	g   globals
+
+	name    string
+	dataset string
+
+	base  string // the MAIN
+	token string
+
+	cpBase  string // the CONTROL PLANE (CloudURL/CloudToken seam)
+	cpToken string
+
+	provider cloud.CloudProvider
+	lister   cloud.LabelLister
+
+	rows  []supportCPRow // the CP support rows matching name (fleet_role=support)
+	boxes []cloud.Server // label-matched boxes at locate time
+
+	probeSecret string // the support's own token, ssh-read best-effort — never printed
+	probeBefore int    // pre-revoke probe status (0 = never probed)
+
+	revoked map[string]string // token_id → "revoked" | "already gone (404)"
+}
+
+func runCloudSupportRemove(out *writer, g globals, args []string) int {
+	const usage = "bp cloud support remove <name> [--dataset <slug>]"
+	a, err := parseHzArgs(args, []string{"dataset"}, nil, usage)
+	if err != nil {
+		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	if len(a.pos) != 1 {
+		return useError(out, "usage", "want exactly one <name> (usage: "+usage+")", exitUsage)
+	}
+	r := &supportRemoveRun{out: out, g: g, name: a.pos[0], revoked: map[string]string{}}
+	if !supportNameRe.MatchString(r.name) {
+		return useError(out, "usage",
+			fmt.Sprintf("invalid support name %q — want a DNS-label shape (the name is the identity the teardown resolves by)", r.name),
+			exitUsage)
+	}
+
+	ctx := resolveContext(g)
+	r.base = strings.TrimRight(strings.TrimSpace(ctx.Server), "/")
+	r.token = strings.TrimSpace(ctx.Token)
+	if r.base == "" {
+		return useError(out, "failed", "no main Barkpark resolved — run `bp use <name>` (or set BARKPARK_API_URL) so remove knows which main the support served", exitGeneric)
+	}
+
+	r.dataset = strings.TrimSpace(a.val("dataset"))
+	if r.dataset == "" && g.datasetSet {
+		r.dataset = strings.TrimSpace(g.dataset)
+	}
+	if r.dataset == "" {
+		r.dataset = strings.TrimSpace(ctx.Dataset)
+	}
+	if r.dataset == "" {
+		r.dataset = "production"
+	}
+	if !supportSlugRe.MatchString(r.dataset) {
+		return useError(out, "usage", fmt.Sprintf("invalid dataset slug %q", r.dataset), exitUsage)
+	}
+
+	if g.dryRun {
+		out.progressf("DRY RUN — bp cloud support remove %s would run, in order (PDF-D68):", r.name)
+		out.progressf("  1. cp-read   GET /v1/barkparks on the control plane — capture the support row id + token id FIRST")
+		out.progressf("  2. locate    list boxes labeled %s=%s (identity-fenced; foreign identity refused)", cloud.FleetSupportLabelKey, r.name)
+		out.progressf("  3. token     revoke the support token on the main (idempotent — 404 is already-gone)")
+		out.progressf("  4. server    delete the box (only an exact identity match; >1 match refused)")
+		out.progressf("  5. roster    delete listener-%s on %s (dataset %s)", r.name, r.base, r.dataset)
+		out.progressf("  6. cp-row    DELETE /v1/fleet/supports/:id on the control plane — LAST (sole durable token-id holder)")
+		out.progressf("  7. census    RE-READ all four surfaces; any survivor is named and exits non-zero")
+		return exitOK
+	}
+
+	// The CP legs ride the same bp-login seam the add's register leg uses.
+	cfg, okc := requireCloud(out)
+	if !okc {
+		return exitAuth
+	}
+	cl := cfg.CloudClient()
+	r.cpBase = strings.TrimRight(strings.TrimSpace(cl.BaseURL), "/")
+	r.cpToken = cl.Token
+
+	return r.run()
+}
+
+func (r *supportRemoveRun) run() int {
+	steps := []func() (int, bool){
+		r.stepCPRead,
+		r.stepLocate,
+		r.stepToken,
+		r.stepServer,
+		r.stepRoster,
+		r.stepCPRow,
+	}
+	for _, step := range steps {
+		if code, stop := step(); stop {
+			return code
+		}
+	}
+	return r.census()
+}
+
+func (r *supportRemoveRun) state(step, msg string) { r.out.progressf("→ %s: %s", step, msg) }
+func (r *supportRemoveRun) done(step, msg string)  { r.out.progressf("✓ %s — %s", step, msg) }
+
+// fail is the remove-side honest terminal state: reason, what is ACTUALLY still
+// standing, and the exact next command. Partial state is safe by construction —
+// the CP row (the token id's holder) is deleted last, so a re-run converges.
+func (r *supportRemoveRun) fail(step, reason, standing string, code int) (int, bool) {
+	if r.out.emitStructured(map[string]any{
+		"ok":      false,
+		"support": r.name,
+		"step":    step,
+		"error":   map[string]any{"code": "failed", "message": reason},
+		"state":   standing,
+		"next":    "re-run `bp cloud support remove " + r.name + "` — the teardown is idempotent and converges",
+	}) {
+		return code, true
+	}
+	r.out.userErr("✗ %s failed — %s", step, reason)
+	r.out.errf("  state: %s", standing)
+	r.out.errf("  next:  re-run `bp cloud support remove %s` — the teardown is idempotent and converges", r.name)
+	return code, true
+}
+
+// stepCPRead — FIRST (PDF-D68): the CP support row is the SOLE durable holder
+// of the token id (no GET route exists on fleet/supports or support-tokens), so
+// it is read before anything is torn down and deleted after everything else.
+func (r *supportRemoveRun) stepCPRead() (int, bool) {
+	r.state("cp-read", "reading the support's control-plane record (GET /v1/barkparks on "+r.cpBase+")")
+	rows, status, err := supportCPBarkparks(r.cpBase, r.cpToken)
+	if err != nil {
+		return r.fail("cp-read", "cannot reach the control plane: "+err.Error(),
+			"nothing torn down yet", exitGeneric)
+	}
+	if status == http.StatusUnauthorized {
+		return r.fail("cp-read", "the control plane rejected the Cloud session (401) — not logged in; run `bp login` first",
+			"nothing torn down yet", exitAuth)
+	}
+	if status < 200 || status >= 300 {
+		return r.fail("cp-read", fmt.Sprintf("the control plane answered %d listing your fleet", status),
+			"nothing torn down yet", exitGeneric)
+	}
+	for _, row := range rows {
+		if row.FleetRole == "support" && row.Name == r.name {
+			r.rows = append(r.rows, row)
+		}
+	}
+	if len(r.rows) == 0 {
+		r.done("cp-read", fmt.Sprintf("no control-plane support row named %q (already unbound)", r.name))
+		return exitOK, false
+	}
+	var ids []string
+	for _, row := range r.rows {
+		ids = append(ids, fmt.Sprintf("%s (token id %s)", row.ID, supportOr(row.FleetTokenID, "none")))
+	}
+	r.done("cp-read", strings.Join(ids, ", "))
+	return exitOK, false
+}
+
+// stepLocate lists the label-matched boxes and re-checks each one's identity —
+// the DeprovisionByIP fence, ported: NEVER delete a box whose
+// barkpark-fleet-support label names a different identity, and NEVER pick one
+// of several matches. Also best-effort captures the support's own token off the
+// box (0600 env) so the census can run the real 403→401 probe, and takes the
+// pre-revoke 403 baseline (a probe that cannot fail proves nothing).
+func (r *supportRemoveRun) stepLocate() (int, bool) {
+	provider, perr := supportProviderFor()
+	if perr != nil {
+		return r.fail("locate", perr.Error(),
+			"nothing torn down yet — fix the provider credential (hetzner: set HCLOUD_TOKEN or an `hcloud context`)", exitAuth)
+	}
+	r.provider = provider
+	lister, ok := provider.(cloud.LabelLister)
+	if !ok {
+		return r.fail("locate", "provider cannot list by label — cannot safely locate the support box",
+			"nothing torn down yet", exitGeneric)
+	}
+	r.lister = lister
+
+	r.state("locate", fmt.Sprintf("listing boxes labeled %s=%s", cloud.FleetSupportLabelKey, r.name))
+	boxes, err := lister.ListByLabel(supportCtx(), cloud.FleetSupportLabelKey, r.name)
+	if err != nil {
+		return r.fail("locate", "list by label failed: "+err.Error(), "nothing torn down yet", exitGeneric)
+	}
+	// Identity fence: refuse LOUDLY on any foreign identity in the result —
+	// deleting on a mismatched label is exactly the wrong-box deletion the
+	// DeprovisionByIP lineage exists to prevent.
+	for _, box := range boxes {
+		if got := box.Labels[cloud.FleetSupportLabelKey]; got != r.name {
+			return r.fail("locate",
+				fmt.Sprintf("box %s (ip %s) is labeled %s=%q, not %q — REFUSING to touch a foreign identity; investigate manually",
+					box.Name, box.IP, cloud.FleetSupportLabelKey, got, r.name),
+				"nothing torn down yet", exitGeneric)
+		}
+	}
+	if len(boxes) > 1 {
+		var names []string
+		for _, box := range boxes {
+			names = append(names, fmt.Sprintf("%s (ip %s)", box.Name, box.IP))
+		}
+		return r.fail("locate",
+			fmt.Sprintf("%d boxes carry %s=%s — an anomaly this command never picks-one from: %s; investigate manually",
+				len(boxes), cloud.FleetSupportLabelKey, r.name, strings.Join(names, ", ")),
+			"nothing torn down yet", exitGeneric)
+	}
+	r.boxes = boxes
+	if len(boxes) == 0 {
+		r.done("locate", fmt.Sprintf("no box carries %s=%s (already gone)", cloud.FleetSupportLabelKey, r.name))
+		return exitOK, false
+	}
+	box := boxes[0]
+	r.done("locate", fmt.Sprintf("%s at %s (identity verified: %s=%s)", box.Name, box.IP, cloud.FleetSupportLabelKey, r.name))
+
+	// Best-effort probe-secret capture + 403 baseline. Failures here degrade the
+	// census token leg to the revoke receipt — never the teardown.
+	if secret, serr := supportRunnerFor(box.IP).RunOutput(supportCtx(), supportProbeSecretScript); serr == nil {
+		secret = supportLastLine(secret)
+		if secret != "" && supportTokenSafeRe.MatchString(secret) {
+			r.probeSecret = secret
+			if st, perr := supportTokenProbe(r.base, r.probeSecret); perr == nil {
+				r.probeBefore = st
+				r.state("locate", fmt.Sprintf("probe secret captured off the box (never printed); pre-revoke probe read %d", st))
+			}
+		}
+	}
+	if r.probeSecret == "" {
+		r.state("locate", "probe secret unavailable (box env unreadable) — the census token leg falls back to the revoke receipt")
+	}
+	return exitOK, false
+}
+
+// stepToken revokes each recorded token id on the MAIN — idempotent (404 =
+// already gone). A hard failure STOPS: the CP row still holds the token id, so
+// a re-run converges instead of stranding a live credential.
+func (r *supportRemoveRun) stepToken() (int, bool) {
+	ids := supportTokenIDs(r.rows)
+	if len(ids) == 0 {
+		r.done("token", "no token id on record — nothing to revoke")
+		return exitOK, false
+	}
+	for _, id := range ids {
+		r.state("token", fmt.Sprintf("revoking support token %s on the main (%s)", id, r.base))
+		status, resp, err := supportMainJSON(http.MethodDelete, r.base+"/v1/fleet/support-tokens/"+url.PathEscape(id), r.token, nil)
+		if err != nil {
+			return r.fail("token", "cannot reach the main: "+err.Error(),
+				fmt.Sprintf("token %s NOT revoked; the control-plane row still holds its id", id), exitGeneric)
+		}
+		switch {
+		case status >= 200 && status < 300:
+			r.revoked[id] = "revoked"
+			r.done("token", fmt.Sprintf("%s revoked (receipt %s)", id, supportTrim(resp)))
+		case status == http.StatusNotFound:
+			r.revoked[id] = "already gone (404)"
+			r.done("token", id+" already gone (404)")
+		case status == http.StatusUnauthorized || status == http.StatusForbidden:
+			return r.fail("token", fmt.Sprintf("the main answered %d — the revoke route is admin-gated; use an admin token against the main", status),
+				fmt.Sprintf("token %s NOT revoked; the control-plane row still holds its id", id), exitAuth)
+		default:
+			return r.fail("token", fmt.Sprintf("the main answered %d: %s", status, supportTrim(resp)),
+				fmt.Sprintf("token %s NOT revoked; the control-plane row still holds its id", id), exitGeneric)
+		}
+	}
+	return exitOK, false
+}
+
+// stepServer deletes the (single, identity-verified) box.
+func (r *supportRemoveRun) stepServer() (int, bool) {
+	for _, box := range r.boxes {
+		r.state("server", fmt.Sprintf("deleting box %s at %s", box.Name, box.IP))
+		if err := r.provider.Delete(supportCtx(), box.Name); err != nil {
+			return r.fail("server", "delete failed: "+err.Error(),
+				fmt.Sprintf("box %s still exists (it is billing); token already revoked", box.Name), exitGeneric)
+		}
+		r.done("server", box.Name+" deleted")
+	}
+	return exitOK, false
+}
+
+// stepRoster deletes the listener row via the PDF-D44d dataset-in-path mutate
+// (the query-param form 404s). A non-2xx is a WARNING, not a stop — delete
+// responses prove nothing either way (D33); the census re-read is the truth.
+func (r *supportRemoveRun) stepRoster() (int, bool) {
+	r.state("roster", fmt.Sprintf("deleting roster row listener-%s on %s (dataset %s)", r.name, r.base, r.dataset))
+	body := map[string]any{"mutations": []any{
+		map[string]any{"delete": map[string]any{"id": "listener-" + r.name, "type": "listener"}},
+	}}
+	status, resp, err := supportMainJSON(http.MethodPost, r.base+"/v1/data/mutate/"+url.PathEscape(r.dataset), r.token, body)
+	if err != nil {
+		return r.fail("roster", "cannot reach the main: "+err.Error(),
+			fmt.Sprintf("roster row listener-%s may still be present", r.name), exitGeneric)
+	}
+	if status < 200 || status >= 300 {
+		r.out.errf("⚠ roster: the main answered %d: %s — continuing; the census below is the truth", status, supportTrim(resp))
+		return exitOK, false
+	}
+	r.done("roster", fmt.Sprintf("listener-%s delete submitted (the census re-reads it)", r.name))
+	return exitOK, false
+}
+
+// stepCPRow deletes the control-plane row(s) LAST (PDF-D68): only after the
+// token, box, and roster row are gone may the sole durable token-id holder go —
+// a crash before this point leaves a re-run everything it needs to converge.
+func (r *supportRemoveRun) stepCPRow() (int, bool) {
+	for _, row := range r.rows {
+		r.state("cp-row", fmt.Sprintf("deleting control-plane row %s — LAST (sole durable holder of the token id)", row.ID))
+		status, resp, err := supportMainJSON(http.MethodDelete, r.cpBase+"/v1/fleet/supports/"+url.PathEscape(row.ID), r.cpToken, nil)
+		if err != nil {
+			return r.fail("cp-row", "cannot reach the control plane: "+err.Error(),
+				fmt.Sprintf("control-plane row %s still registered (token already revoked, box gone)", row.ID), exitGeneric)
+		}
+		switch {
+		case status >= 200 && status < 300:
+			r.done("cp-row", row.ID+" removed")
+		case status == http.StatusNotFound:
+			r.done("cp-row", row.ID+" already gone (404)")
+		default:
+			r.out.errf("⚠ cp-row: the control plane answered %d: %s — continuing; the census below is the truth", status, supportTrim(resp))
+		}
+	}
+	return exitOK, false
+}
+
+// census — the deliverable (PDF-D68): RE-READ all four surfaces; delete-call
+// 200s prove nothing (D33: bp doc delete can exit 4 on success — verify by
+// re-read, never by exit code). Any survivor is named and the exit is non-zero.
+func (r *supportRemoveRun) census() int {
+	r.state("census", "re-reading all four surfaces (delete responses prove nothing)")
+	var residue []string
+
+	// 1. SERVER — the label listing must come back empty.
+	if boxes, err := r.lister.ListByLabel(supportCtx(), cloud.FleetSupportLabelKey, r.name); err != nil {
+		residue = append(residue, "could not verify servers: "+err.Error())
+	} else {
+		for _, box := range boxes {
+			residue = append(residue, fmt.Sprintf("server %s (ip %s) still carries %s=%s", box.Name, box.IP, cloud.FleetSupportLabelKey, r.name))
+		}
+	}
+
+	// 2. ROSTER — the same read stepOnline polls must now return no row.
+	if row, err := supportRosterRow(r.base, r.token, r.dataset, r.name); err != nil {
+		residue = append(residue, "could not verify the roster: "+err.Error())
+	} else if row != nil {
+		residue = append(residue, fmt.Sprintf("roster row listener-%s still present on the main (dataset %s)", r.name, r.dataset))
+	}
+
+	// 3. CONTROL PLANE — re-list; the support row must be gone.
+	if rows, status, err := supportCPBarkparks(r.cpBase, r.cpToken); err != nil {
+		residue = append(residue, "could not verify the control plane: "+err.Error())
+	} else if status < 200 || status >= 300 {
+		residue = append(residue, fmt.Sprintf("could not verify the control plane: it answered %d", status))
+	} else {
+		for _, row := range rows {
+			if row.FleetRole == "support" && row.Name == r.name {
+				residue = append(residue, fmt.Sprintf("control-plane row %s still registered", row.ID))
+			}
+		}
+	}
+
+	// 4. TOKEN — the REAL leg when the raw secret is at hand: the admin-gated
+	// mint endpoint read 403 to the support's own bearer while valid and MUST
+	// read 401 after revoke. Without the secret (box already gone), the leg is
+	// the revoke receipt, said plainly.
+	tokenIDs := supportTokenIDs(r.rows)
+	switch {
+	case r.probeSecret != "":
+		st, err := supportTokenProbe(r.base, r.probeSecret)
+		switch {
+		case err != nil:
+			residue = append(residue, "could not verify the token: "+err.Error())
+		case st == http.StatusUnauthorized:
+			before := ""
+			if r.probeBefore != 0 {
+				before = fmt.Sprintf("%d before, ", r.probeBefore)
+			}
+			r.out.progressf("  · token: DEAD — the admin-gated mint endpoint read %s401 after revoke", before)
+		case st == http.StatusForbidden:
+			residue = append(residue, "support token STILL VALID — the admin-gated mint endpoint answered 403 (authenticated), not 401, to the support's own bearer")
+		default:
+			residue = append(residue, fmt.Sprintf("token probe answered an unexpected %d — cannot confirm the token is dead", st))
+		}
+	case len(tokenIDs) > 0:
+		for _, id := range tokenIDs {
+			if receipt, ok := r.revoked[id]; ok {
+				r.out.progressf("  · token %s: %s — indirect leg (raw secret not at hand for the 403→401 probe; it is never stored)", id, receipt)
+			} else {
+				residue = append(residue, fmt.Sprintf("token %s has no revoke receipt", id))
+			}
+		}
+	default:
+		r.out.progressf("  · token: no token id was on record")
+	}
+
+	report := map[string]any{
+		"ok":      len(residue) == 0,
+		"support": r.name,
+		"dataset": r.dataset,
+		"residue": residue,
+	}
+	if r.out.emitStructured(report) {
+		if len(residue) > 0 {
+			return exitGeneric
+		}
+		return exitOK
+	}
+	if len(residue) > 0 {
+		r.out.userErr("✗ remove %s left residue:", r.name)
+		for _, line := range residue {
+			r.out.errf("  - %s", line)
+		}
+		r.out.errf("  next: re-run `bp cloud support remove %s` — the teardown is idempotent and converges", r.name)
+		return exitGeneric
+	}
+	r.out.outf("")
+	r.out.outf("✓ remove %s — census delta zero (server, roster, control plane, token all clean)", r.name)
+	return exitOK
+}
+
+// ── control-plane helpers ────────────────────────────────────────────────────
+
+// supportCPRow is the slice of a control-plane /v1/barkparks row this file
+// needs: identity + the three fleet columns the Wave C group record carries.
+type supportCPRow struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	URL           string `json:"url"`
+	Host          string `json:"host"`
+	FleetRole     string `json:"fleet_role"`
+	FleetParentID string `json:"fleet_parent_id"`
+	FleetTokenID  string `json:"fleet_token_id"`
+}
+
+// supportCPBarkparks lists the caller's fleet from the control plane. Non-2xx
+// is returned as a status, not an error — callers own the honest narration.
+func supportCPBarkparks(cpBase, cpToken string) ([]supportCPRow, int, error) {
+	status, body, err := supportMainJSON(http.MethodGet, cpBase+"/v1/barkparks", cpToken, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, status, nil
+	}
+	var env struct {
+		Barkparks []supportCPRow `json:"barkparks"`
+	}
+	if jerr := json.Unmarshal(body, &env); jerr != nil {
+		return nil, status, fmt.Errorf("barkparks payload not parseable: %w", jerr)
+	}
+	return env.Barkparks, status, nil
+}
+
+// supportCPRowLabel renders one row for candidate listings: name (id, url).
+func supportCPRowLabel(row supportCPRow) string {
+	return fmt.Sprintf("%s (id %s, url %s)", supportOr(row.Name, "?"), row.ID, supportOr(row.URL, "none"))
+}
+
+// supportCPErrorCode reads the flat {"error": "<code>"} shape the CP speaks.
+func supportCPErrorCode(body []byte) string {
+	var m struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return ""
+	}
+	return m.Error
+}
+
+// supportParseCPRowID reads the created row id out of the CP's 201 {barkpark}.
+func supportParseCPRowID(body []byte) string {
+	var m struct {
+		Barkpark struct {
+			ID string `json:"id"`
+		} `json:"barkpark"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return ""
+	}
+	return m.Barkpark.ID
+}
+
+// supportTokenIDs collects the distinct token ids the CP rows carry.
+func supportTokenIDs(rows []supportCPRow) []string {
+	var ids []string
+	seen := map[string]bool{}
+	for _, row := range rows {
+		id := strings.TrimSpace(row.FleetTokenID)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// supportTokenProbe asks the MAIN's admin-gated mint endpoint who the bearer
+// is: 403 = authenticated-but-not-admin (the support token is ALIVE), 401 =
+// rejected (revoked/unknown — DEAD). The body is a deliberately-invalid mint
+// ({"name":""} 422s) so the probe can NEVER create anything even against an
+// admin bearer.
+func supportTokenProbe(base, secret string) (int, error) {
+	status, _, err := supportMainJSON(http.MethodPost, base+"/v1/fleet/support-tokens", secret, map[string]any{"name": ""})
+	return status, err
+}
+
+// supportLastLine returns the last non-empty trimmed line of s.
+func supportLastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 // ── on-box step builders (pure — tests assert their scripts) ─────────────────
@@ -960,9 +1609,10 @@ func printCloudSupportHelp(out *writer) {
 	const help = `bp cloud support — grow your Personal Dev Fleet with one action.
 
 USAGE
-  bp cloud support add <name> [--agent claude|codex] [--workspace <slug>]
-                              [--dataset <slug>] [--parent <cp-row-id>]
-                              [--dry-run] [-o json|yaml]
+  bp cloud support add <name>    [--agent claude|codex] [--workspace <slug>]
+                                 [--dataset <slug>] [--parent <cp-row-id>]
+                                 [--dry-run] [-o json|yaml]
+  bp cloud support remove <name> [--dataset <slug>] [--dry-run] [-o json|yaml]
 
 WHAT IT DOES (eight named states, in order)
   create      provision an x86 warm-image box on hetzner, labeled
@@ -973,8 +1623,11 @@ WHAT IT DOES (eight named states, in order)
   configure   the reduced go-live chain on the box: freshen → per-instance
               secrets → migrate → admin token → LOCAL health probe. No DNS, no
               TLS, no public identity — a support serves the main, not the web.
-  bind        mint a support token on the main (/v1/fleet/support-tokens) and
-              register the control-plane support row (/v1/fleet/supports).
+  bind        mint a support token on the MAIN (/v1/fleet/support-tokens) and
+              register the fleet group record on the CONTROL PLANE
+              (/v1/fleet/supports, via your bp-login Cloud session — PDF-D69).
+              Without --parent, the main's control-plane row is auto-resolved
+              by matching its URL host (never the raw-IP host column).
   dataset     dev-profile (SCRUBBED) export of the main's dataset, streamed
               over SSH, merge-imported into the box's own Barkpark.
   runtime     fleet-run.sh + fleet-protocol.md (origin/main content), the agent
@@ -993,12 +1646,22 @@ FLAGS
   --dataset <slug>       the dataset to pull + register the listener under
                          (default: the active context, else production)
   --parent <cp-row-id>   the main's control-plane row id for the fleet group
-                         record (default: the main resolves itself server-side)
-  --dry-run              print the eight states and do nothing
+                         record (default: auto-resolved by url-host match;
+                         zero or many matches refuse with candidates)
+  --dry-run              print the named states and do nothing
   -o json|yaml           one machine-readable receipt on stdout
 
+REMOVE (the mirror verb — PDF-D68)
+  Tears one support down across all FOUR surfaces, in a crash-safe order:
+  read the control-plane record first (it alone holds the token id), revoke
+  the token on the main, delete the box (identity-fenced by its
+  barkpark-fleet-support label — a foreign identity is refused loudly),
+  delete the roster row, and delete the control-plane row LAST. Then a
+  census RE-READS every surface — delete responses prove nothing — and any
+  survivor is named with a non-zero exit. Idempotent: run it again and it
+  reports already-gone; partial state converges.
+
 RELATED
-  bp fleet roster        the fleet's presence table (who is online, with what)
-  bp cloud support remove   not built yet — a planned round-2 verb`
+  bp fleet roster        the fleet's presence table (who is online, with what)`
 	out.outf("%s", help)
 }
