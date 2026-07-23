@@ -6,7 +6,6 @@ Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/t
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/sync/pusher.ex:210,104F576
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/sheets.ex:113,1FB65CC
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:1293,1AC2BCE
-CI.System: Command Injection via `System` function,lib/barkpark/sites/deploy_runner.ex:526,42BDF81
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:537,20E2DB2
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:1512,4524A98
 Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/media/renditions.ex:107,3D69773
@@ -49,7 +48,6 @@ Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/o
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/discovery.ex:135,3D8504C
 XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark_web/controllers/media_controller.ex:149,2355861
 XSS.Raw: XSS,lib/barkpark_web/layouts.ex:48,39C16B7
-CI.System: Command Injection via `System` function,lib/barkpark/sites/deploy_runner.ex:1368,23F3F1D
 XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/sheets/web/export_controller.ex:42,4EDDFF5
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/discovery.ex:149,A91E89
 SQL.Query: SQL injection,lib/barkpark/media/delivery/search.ex:406,17455DA
@@ -105,7 +103,6 @@ Traversal.FileModule: Directory Traversal in `File.write!`,lib/barkpark/plugins/
 Traversal.FileModule: Directory Traversal in `File.chmod`,lib/barkpark_web/studio/claude_chat.ex:1698,453C272
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/search/golden_eval.ex:23,4D27E0F
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:142,F7AE3D
-CI.System: Command Injection via `System` function,lib/barkpark/sites/deploy_runner.ex:1351,722C624
 SQL.Stream: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:328,7A7C329
 Config.HTTPS: HTTPS Not Enabled,config/prod.exs:0,2B5C077
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:158,B1A314

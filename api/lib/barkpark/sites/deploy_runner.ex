@@ -122,6 +122,16 @@ defmodule Barkpark.Sites.DeployRunner do
   # until the next BEAM restart.
   @default_run_deadline_ms 1_800_000
 
+  # Hard deadline for a SYNCHRONOUS control-plane `System.cmd` (systemd-run,
+  # `systemctl is-active`, `systemctl stop`). These run INSIDE the singleton
+  # GenServer — a hung systemd/systemctl (a wedged unit, a stuck D-Bus) would
+  # freeze {:trigger}/{:status} for every slug, and the {:unit_deadline}
+  # watchdog's own stop cannot be rescued by safe_call. 15s is generous for a
+  # local systemctl round-trip; a call that outlives it is force-killed and its
+  # caller degrades (never crashes). Distinct from @default_run_deadline_ms,
+  # which bounds the BUILD, not the ctl call that launches/reaps it.
+  @default_ctl_cmd_timeout_ms 15_000
+
   # After a launch, systemd may report the unit `inactive` for a beat before it
   # transitions to `active`. Do NOT serve `:done` off an empty fold inside this
   # grace — an observer that flickers to done between spawn and start would race
@@ -522,13 +532,15 @@ defmodule Barkpark.Sites.DeployRunner do
               engine_path
             ] ++ engine_args
 
-        try do
-          case System.cmd(launcher, args, cd: run_cd(), stderr_to_stdout: true) do
-            {_out, 0} -> :ok
-            {out, code} -> {:error, {:systemd_run_exit, code, String.slice(out, 0, 500)}}
-          end
-        rescue
-          error -> {:error, error}
+        # Bounded: `systemd-run` REGISTERS-and-returns fast, but a wedged D-Bus /
+        # a hung systemd would otherwise freeze this synchronous {:trigger} call.
+        # A timeout or crash degrades to a start failure — the with-chain in
+        # launch_unit maps every {:error, _} to {:error, :start_failed}.
+        case bounded_cmd(launcher, args, cd: run_cd(), stderr_to_stdout: true) do
+          {:ok, {_out, 0}} -> :ok
+          {:ok, {out, code}} -> {:error, {:systemd_run_exit, code, String.slice(out, 0, 500)}}
+          :timeout -> {:error, {:systemd_run_timeout, ctl_cmd_timeout_ms()}}
+          {:crashed, reason} -> {:error, {:systemd_run_crashed, reason}}
         end
     end
   end
@@ -1336,6 +1348,41 @@ defmodule Barkpark.Sites.DeployRunner do
   defp memory_max, do: Keyword.get(config(), :memory_max, @default_memory_max)
   defp cpu_quota, do: Keyword.get(config(), :cpu_quota, @default_cpu_quota)
 
+  defp ctl_cmd_timeout_ms,
+    do: Keyword.get(config(), :ctl_cmd_timeout_ms, @default_ctl_cmd_timeout_ms)
+
+  # Run a control-plane `System.cmd` under a hard deadline on a SUPERVISED,
+  # UNLINKED task so a hung external process cannot wedge the singleton Runner.
+  # async_nolink (never linked Task.async) so a crash inside the child degrades
+  # to a tuple instead of taking the GenServer down; Task.yield ||
+  # Task.shutdown(:brutal_kill) is the same per-site pattern as
+  # `studio_chat/probe.ex` + `onixedit/export/validator.ex`. Returns:
+  #   {:ok, {out, code}} — the command completed inside the deadline;
+  #   :timeout           — the deadline fired (task brutal-killed);
+  #   {:crashed, reason} — `System.cmd` raised inside the task.
+  # Each caller degrades these three per the never-crash contract.
+  #
+  # Sobelow CI.System is a false-positive here: every caller resolves `path` via
+  # `System.find_executable/1` (a fixed binary name or a test-only config
+  # override, never request data) and passes a fixed token list + the
+  # server-generated unit name — no shell string, no client input. This inline
+  # skip replaces the line-anchored `.sobelow-skips` fingerprints
+  # (`deploy_runner.ex:526/:1351/:1368`) that the deadline wrapper moved
+  # System.cmd off of.
+  # sobelow_skip ["CI.System"]
+  defp bounded_cmd(path, args, opts) do
+    task =
+      Task.Supervisor.async_nolink(Barkpark.TaskSupervisor, fn ->
+        System.cmd(path, args, opts)
+      end)
+
+    case Task.yield(task, ctl_cmd_timeout_ms()) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {out, code}} -> {:ok, {out, code}}
+      {:exit, reason} -> {:crashed, reason}
+      nil -> :timeout
+    end
+  end
+
   # `systemctl is-active <unit>` → the trimmed state word ("active", "inactive",
   # "failed", …). A missing systemctl / a swept unit is terminal ("unknown").
   # Injectable so a systemd-less test can drive re-attach + finalize.
@@ -1347,11 +1394,16 @@ defmodule Barkpark.Sites.DeployRunner do
         "unknown"
 
       path ->
-        try do
-          {out, _code} = System.cmd(path, prefix ++ [unit_name], stderr_to_stdout: true)
-          out |> String.trim() |> String.split("\n") |> List.first() |> to_string()
-        rescue
-          _ -> "unknown"
+        # Bounded: a hung `systemctl is-active` would freeze the {:status} call
+        # (and prune_run_state_dir). A timeout or crash degrades to "unknown" —
+        # a terminal state (not in @active_states) that finalizes the run rather
+        # than pinning it :running forever.
+        case bounded_cmd(path, prefix ++ [unit_name], stderr_to_stdout: true) do
+          {:ok, {out, _code}} ->
+            out |> String.trim() |> String.split("\n") |> List.first() |> to_string()
+
+          _timeout_or_crash ->
+            "unknown"
         end
     end
   end
@@ -1364,11 +1416,22 @@ defmodule Barkpark.Sites.DeployRunner do
         :ok
 
       path ->
-        try do
-          _ = System.cmd(path, prefix ++ [unit_name], stderr_to_stdout: true)
-          :ok
-        rescue
-          _ -> :ok
+        # Bounded: this is the {:unit_deadline} watchdog's OWN kill, running in a
+        # handle_info that safe_call cannot rescue — a hung `systemctl stop` here
+        # would wedge the Runner exactly where it must stay live to force-close a
+        # wedged unit. On timeout/crash we WARN and still return :ok so the
+        # watchdog finalizes the run (:done / exit -2) regardless.
+        case bounded_cmd(path, prefix ++ [unit_name], stderr_to_stdout: true) do
+          {:ok, _} ->
+            :ok
+
+          other ->
+            Logger.warning(
+              "[site-deploy] systemctl stop did not complete in #{ctl_cmd_timeout_ms()}ms " <>
+                "for #{inspect(unit_name)} (#{inspect(other)}) — finalizing the run anyway"
+            )
+
+            :ok
         end
     end
   end
