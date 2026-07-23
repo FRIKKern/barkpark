@@ -415,8 +415,10 @@ func (r *supportAddRun) stepConfigure() (int, bool) {
 // stepRuntime — 0600, never printed.
 func (r *supportAddRun) stepBind() (int, bool) {
 	r.state("bind", "minting a support token on the main's ledger")
-	status, resp, err := supportMainJSON(http.MethodPost, r.base+"/v1/fleet/support-tokens", r.token,
-		map[string]any{"worker": r.name})
+	// The mint contract key is "name" (the endpoint labels the token
+	// fleet-support-<name>); "worker" rides along as provenance only.
+	status, resp, err := supportMainJSON(http.MethodPost, r.base+"/v1/fleet/support-tokens",
+		r.token, map[string]any{"name": r.name, "worker": r.name})
 	if err != nil || status < 200 || status >= 300 {
 		reason := ""
 		if err != nil {
@@ -445,10 +447,13 @@ func (r *supportAddRun) stepBind() (int, bool) {
 	r.ledgerToken, r.tokenID = tok, tokID
 
 	r.state("bind", "registering the control-plane support row (fleet group record)")
+	// Contract keys per the CP endpoint (PDF-D61): name + parent_id (REQUIRED
+	// server-side) + host + token_id. worker/provider/server_name/agent ride
+	// along as provenance the endpoint is free to ignore.
 	reg := map[string]any{
 		"worker":      r.name,
 		"name":        r.name,
-		"ip":          r.host.IP,
+		"host":        r.host.IP,
 		"provider":    "hetzner",
 		"server_name": r.host.Name,
 		"agent":       r.agent,
@@ -456,10 +461,11 @@ func (r *supportAddRun) stepBind() (int, bool) {
 	if r.tokenID != "" {
 		reg["token_id"] = r.tokenID
 	}
-	// fleet_parent_id is the MAIN's control-plane row id. An explicit --parent
-	// wins; absent, the main resolves its own row server-side (it knows itself).
+	// parent_id is the MAIN's control-plane row id — the CP endpoint REQUIRES
+	// it (422 without). --parent supplies it explicitly; when absent we still
+	// send the registration so the refusal is the server's honest one.
 	if r.parent != "" {
-		reg["fleet_parent_id"] = r.parent
+		reg["parent_id"] = r.parent
 	}
 	status, resp, err = supportMainJSON(http.MethodPost, r.base+"/v1/fleet/supports", r.token, reg)
 	if err != nil || status < 200 || status >= 300 {
@@ -471,7 +477,7 @@ func (r *supportAddRun) stepBind() (int, bool) {
 		}
 		return r.fail("bind", "control-plane support registration failed: "+reason,
 			fmt.Sprintf("box %s configured at %s; token minted (id %s) but NOT registered — mint again on retry rather than reusing", r.host.Name, r.host.IP, r.tokenID),
-			"the main must serve POST /v1/fleet/supports, then re-run `bp cloud support add "+r.name+"`",
+			"the target must serve POST /v1/fleet/supports and the group record needs the main's row id — re-run with `bp cloud support add "+r.name+" --parent <the main's control-plane row id>`",
 			exitGeneric)
 	}
 	r.done("bind", fmt.Sprintf("token minted (id %s) + support row registered for %s", supportOr(r.tokenID, "unreported"), r.name))

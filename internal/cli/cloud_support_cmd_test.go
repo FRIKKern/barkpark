@@ -324,11 +324,21 @@ func TestCloudSupportAddHappyPath(t *testing.T) {
 	if main.count("POST /v1/fleet/support-tokens") != 1 || main.count("POST /v1/fleet/supports") != 1 {
 		t.Fatalf("bind calls wrong: %v", main.requests)
 	}
+	// The mint contract key is "name" (the endpoint 422s without it).
+	var mint map[string]any
+	if err := json.Unmarshal(main.bodies["/v1/fleet/support-tokens"], &mint); err != nil {
+		t.Fatalf("mint body not JSON: %v", err)
+	}
+	if mint["name"] != "hex" {
+		t.Fatalf("mint body must carry name=hex (the endpoint's required key): %v", mint)
+	}
 	var reg map[string]any
 	if err := json.Unmarshal(main.bodies["/v1/fleet/supports"], &reg); err != nil {
 		t.Fatalf("supports body not JSON: %v", err)
 	}
-	if reg["token_id"] != "tid-42" || reg["fleet_parent_id"] != "cp-row-7" || reg["worker"] != "hex" {
+	// parent_id + host are the CP endpoint's contract keys (PDF-D61).
+	if reg["token_id"] != "tid-42" || reg["parent_id"] != "cp-row-7" || reg["worker"] != "hex" ||
+		reg["name"] != "hex" || reg["host"] != "203.0.113.9" {
 		t.Fatalf("support registration wrong: %v", reg)
 	}
 
