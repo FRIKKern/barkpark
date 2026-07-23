@@ -80,4 +80,13 @@ ASLONG FILE DONT CONTAIN "# scaffy:add-oban-worker {{.WorkerName}} MARK:oban-cro
 ASSERT FILE "api/lib/barkpark/workers/{{.worker_name}}.ex" CONTAINS "defmodule Barkpark.Workers.{{.WorkerName}} do"
 ASSERT FILE "api/test/barkpark/workers/{{.worker_name}}_test.exs" CONTAINS "assert :ok = {{.WorkerName}}.perform"
 ASSERT FILE "api/config/config.exs" CONTAINS "MARK:oban-cron-{{.worker-name}}"
+# Loud-fail guard-gap: REPLACE/MARK guard only on WorkerName, so a same-worker
+# run with a CHANGED CronExpr silently no-ops (exit 0, cron dropped). This
+# postcondition asserts the requested tuple's exact bytes landed — trailing tuple
+# brace dropped (E-012 }}} ban) — turning that silent drop into a loud exit-5
+# text-not-found. Fresh-write + same-cron-idempotent + multi-worker accretion are
+# unaffected (each writes the asserted tuple). Caveat: a FooBar worker request
+# would substring-match an already-present Foo tuple's prefix only if the cron and
+# module prefix coincide — the full "cron", Barkpark.Workers.Name span guards that.
+ASSERT FILE "api/config/config.exs" CONTAINS "{\"{{.CronExpr}}\", Barkpark.Workers.{{.WorkerName}}"
 ASSERT CMD "cd api && mix test test/barkpark/workers/{{.worker_name}}_test.exs" TIER ci
