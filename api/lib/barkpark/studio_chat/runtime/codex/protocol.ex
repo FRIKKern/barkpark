@@ -127,6 +127,24 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Protocol do
     }
   end
 
+  def buffer_overflow(context, byte_size) do
+    %Event{
+      provider: "codex",
+      session_id: context.session_id,
+      provider_session_id: context.thread_id,
+      turn_id: context.turn_id,
+      sequence: context.sequence,
+      idempotency_key: "codex:buffer_overflow:#{context.sequence}",
+      durability: :durable,
+      kind: :protocol_error,
+      error: %{
+        "code" => "buffer_overflow",
+        "detail" => "reassembly buffer exceeded #{byte_size} bytes"
+      },
+      native: %{}
+    }
+  end
+
   def malformed(context, line) do
     %Event{
       provider: "codex",

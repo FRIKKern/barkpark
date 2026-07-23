@@ -7,6 +7,14 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
 
   @default_timeout 15_000
 
+  # Ceiling on the JSONL line-reassembly buffer. A codex app-server that streams
+  # newline-free (or runaway) output would otherwise grow `state.buffer` without
+  # bound — `split_lines/1` returns `{[], whole_buffer}` on a newline-free chunk,
+  # so no line is ever consumed and the per-request `%{failure:}` guards never
+  # fire. Config-overridable via the sibling `:max_buffer_bytes` key in the
+  # `:codex_app_server` app-env keyword (tests shrink it to force the breach).
+  @default_max_buffer_bytes 8 * 1024 * 1024
+
   def start(opts) do
     timeout = Map.get(opts, :timeout_ms, @default_timeout)
 
@@ -176,9 +184,15 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
 
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) do
-    {lines, buffer} = split_lines(state.buffer <> data)
-    state = Enum.reduce(lines, %{state | buffer: buffer}, &consume_line/2)
-    {:noreply, state}
+    combined = state.buffer <> data
+
+    if byte_size(combined) > max_buffer_bytes() do
+      {:noreply, overflow(state, byte_size(combined))}
+    else
+      {lines, buffer} = split_lines(combined)
+      state = Enum.reduce(lines, %{state | buffer: buffer}, &consume_line/2)
+      {:noreply, state}
+    end
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
@@ -427,6 +441,21 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   defp reply_all_pending(pending, result),
     do: Enum.each(pending, fn {_id, value} -> reply_pending(value, result) end)
 
+  # Reassembly-buffer breach: a newline-free / runaway stream can never be stopped
+  # by `fail_pending` alone (it lives on the handle_call clauses, and split_lines
+  # keeps a newline-free chunk whole), so the cap MUST act here. Close the port so
+  # the runaway external process can no longer wedge the BEAM, drop the buffer, and
+  # fail every pending caller closed — mirroring the malformed-JSONL path (a Protocol
+  # failure event + fail_pending).
+  defp overflow(state, byte_size) do
+    if Port.info(state.port), do: Port.close(state.port)
+
+    state
+    |> emit(Protocol.buffer_overflow(context(state), byte_size))
+    |> fail_pending(:buffer_overflow)
+    |> Map.put(:buffer, "")
+  end
+
   defp fail_pending(%{pending: pending} = state, reason) do
     Enum.each(pending, fn {_id, %{timer: timer}} -> Process.cancel_timer(timer) end)
     reply_all_pending(pending, {:error, reason})
@@ -478,6 +507,12 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
     :barkpark
     |> Application.get_env(:codex_app_server, [])
     |> Keyword.get(:binary, "codex")
+  end
+
+  defp max_buffer_bytes do
+    :barkpark
+    |> Application.get_env(:codex_app_server, [])
+    |> Keyword.get(:max_buffer_bytes, @default_max_buffer_bytes)
   end
 
   defp executable_path(path) when is_binary(path) do
