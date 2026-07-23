@@ -602,8 +602,9 @@ ASSERT CMD "go test ./internal/pdrender/ -run Test{{.BlockName}}Renderer -count=
 # the new golden, because toPlainText.typekeyed.test.ts pins `cases.length`
 # against the LIVE pd-golden corpus and would red here on the old size.
 # The build is scoped to react + its transitive deps (the `...` suffix), which
-# resolves to exactly {@barkpark/core, @barkpark/react} — far cheaper than
-# turbo-building all ~12 workspace packages. The `...` is MANDATORY: a bare
+# resolves to exactly {@barkpark/core, @barkpark/react} (pnpm reports
+# `Scope: 2 of 14`) — far cheaper than turbo-building the whole workspace. The
+# `...` is MANDATORY: a bare
 # `--filter @barkpark/react` omits @barkpark/core, whose dist react tsc needs,
 # reintroducing the D29 TS2307 "Cannot find module @barkpark/core" false-red.
 # `pnpm install` stays UNSCOPED (it must precede and hydrate the whole workspace).
