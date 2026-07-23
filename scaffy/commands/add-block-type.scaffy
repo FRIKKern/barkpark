@@ -601,7 +601,14 @@ ASSERT CMD "go test ./internal/pdrender/ -run Test{{.BlockName}}Renderer -count=
 # run is RELOCATED into Surface 5 (below): it must run AFTER gen_pd_parity mints
 # the new golden, because toPlainText.typekeyed.test.ts pins `cases.length`
 # against the LIVE pd-golden corpus and would red here on the old size.
-ASSERT CMD "cd js && pnpm install && pnpm build"
+# The build is scoped to react + its transitive deps (the `...` suffix), which
+# resolves to exactly {@barkpark/core, @barkpark/react} (pnpm reports
+# `Scope: 2 of 14`) — far cheaper than turbo-building the whole workspace. The
+# `...` is MANDATORY: a bare
+# `--filter @barkpark/react` omits @barkpark/core, whose dist react tsc needs,
+# reintroducing the D29 TS2307 "Cannot find module @barkpark/core" false-red.
+# `pnpm install` stays UNSCOPED (it must precede and hydrate the whole workspace).
+ASSERT CMD "cd js && pnpm install && pnpm --filter @barkpark/react... build"
 ASSERT CMD "cd js/packages/react && npx tsc --noEmit"
 ASSERT CMD "cd api && mix test test/barkpark/portable_doc/render_test.exs" TIER ci
 # Golden-parity leg (Surface 4). ONE gen run writes BOTH mirrors (proven —
