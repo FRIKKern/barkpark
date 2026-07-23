@@ -69,6 +69,9 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
+      POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
+      POST    /v1/fleet/supports   user      register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
+      DELETE  /v1/fleet/supports/:id user    unbind + delete a SUPPORT fleet row (PDF-D61; mains refused 409)
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
       GET     /v1/barkparks/:id/bootstrap admin  reveal the dwb-4 content-bootstrap outputs (team-admin only)
       PATCH   /v1/barkparks/:id/autoupdate admin  set fleet-autoupdate policy (isu-w4 opt-out/pause/pin)
