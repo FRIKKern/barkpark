@@ -1038,12 +1038,22 @@ defmodule Barkpark.Tenancy do
     Repo.get_by(Dataset, project_id: project_id, slug: slug)
   end
 
-  @doc "List all Datasets under a Project (accepts a struct or a project id), ordered by slug."
+  @doc "List all Datasets under a Project (accepts a struct or a project id), the canonical `production` dataset first, then the rest alphabetically."
   @spec list_datasets(Project.t() | binary()) :: [Dataset.t()]
   def list_datasets(%Project{id: project_id}), do: list_datasets(project_id)
 
   def list_datasets(project_id) when is_binary(project_id) do
-    Repo.all(from d in Dataset, where: d.project_id == ^project_id, order_by: d.slug)
+    # Order the canonical `production`-slug dataset FIRST, then the rest
+    # alphabetically — the same idiom as `list_projects/1`'s `default` ordering.
+    # Every consumer that takes the first dataset (the mobile cascade's
+    # single-option auto-select, the switcher) resolves the same canonical
+    # default. The boolean `slug = 'production'` sorts DESC (true before false),
+    # then `slug` ASC.
+    Repo.all(
+      from d in Dataset,
+        where: d.project_id == ^project_id,
+        order_by: [desc: fragment("? = ?", d.slug, ^@production_dataset_slug), asc: d.slug]
+    )
   end
 
   @doc """
