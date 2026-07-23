@@ -2221,3 +2221,86 @@ offline, do not fake it. (3) ttw17-bl-d43-elixir-walkex — walk.ex task_glyph �
 delegate + drift coverage for both in-body chip forks, closing D43 cross-surface. (4) Narrow-mode
 reading-frame hover (the named residue of D99) once a narrow right-pane resolver exists.
 (5) Candidate: widen the chip delegate to ready/closed alongside the Elixir twin.
+
+### Wave 18 2026-07-23 (DECIDED: the finish pass — mouse-finish + one-status-language; Arm E config E6+E7)
+
+**Premise-smoke verdict:** the wish's nav-shell/subtraction/reading-renderer premise was REFUTED
+at Strategize (all sites git-shown built on origin/main; nav stack = program.go, subtraction +
+reading renderers shipped wave 5, mouse waves 9–17). Pivoted per the wish's own instruction to
+the charter's REAL open residue — W17's next-wave dispatch items 4–5. Verify round ran 4
+assignments, all green, and caught three stale premises in the direction itself (D107).
+
+**D104 — Wave 18 is two package-disjoint Go slices, wide-footer rider OUT.**
+Slice 1 `ttw18-narrow-rail-hover` (internal/taskboard, medium): narrow-mode reading-frame
+rail-stop hover — the named D99 residue. Slice 2 `ttw18-chip-full-manifest` (internal/pdrender,
+small): widen the in-body chip delegate from 5 statuses to the full 9-status manifest. Both
+offline-golden-provable, both merge on the Go gate (D21: never couple a Go wave to an Elixir
+deploy). The wide-mode footer-verb click rider is HONEST-OUT: survey proved it is a second
+feature (new footer-row geometry, restructuring handleWideMouse's unconditional pendingClose
+clear vs narrow's verb-first ordering, a third hover branch, tests), its absence is test-locked
+(TestFooterVerbAtDegradesHonestly) and was a deliberate wave-16 decision — filed as backlog
+`ttw18-bl-wide-footer-verb-clicks`, never a rider on slice 1 (compose.go collision).
+
+**D105 — Slice 1 mechanics + the one-producer hardening.** No hit-map extension exists or is
+needed: ComposeHitMap/frameHitTargets already tag narrow reading-frame rail stops as
+LineSpineRow with CursorIndex in exactly windowFrame's hoverStop index space (click-proven by
+TestHitMapClickReadingRail; motion-parity run-proven under non-zero scroll — 9/9 stops,
+hitmapY−2 == the one repainted row). The fix: (a) mouseMotion (program.go:670, Board-only today
+by explicit comment) gains a reading-frame branch resolving hits[y] → setHoverStop (reused
+as-is, D95 change-only debounce), mirroring wideMouseMotion's unconditional dual-set pattern;
+(b) compose.go:148 swaps the hardcoded −1 for m.ui.HoverStop (mirrors wide's line 191;
+run-proven golden-byte-neutral at rest — neutral-NOW because no narrow fixture sets HoverStop,
+not neutral-by-construction). (c) HARDENING (ruled in): frameHitTargets must CALL
+readingWindowTop instead of its inlined top-math copy — verify proved the two copies agree only
+algebraically today (the one way this slice silently paints the wrong row under scroll), so make
+D42 one-producer structural, plus a scrolled parity test that fails on drift. (d) Hover-paint
+tests force color via `lipgloss.SetColorProfile(termenv.TrueColor)` — NOT withChrome, which only
+swaps the branding fixture (a literal reading of the old phrasing writes a vacuous-green paint
+test). (e) cursor==hoverStop gets its own assertion: the ▎ bar survives (stripped text
+byte-identical), only the color collapses to the hover accent.
+
+**D106 — Slice 2 stays an explicit allowlist; no script edit.** taskStatusGlyph (inline.go:239)
+widens its switch from {open,in_progress,blocked,done,cancelled} to all 9 manifest statuses
+(+ready ○, closed ✓, considering ◌, researching ◎), still delegating to
+glyphForRole(roleForStatus(...)); it must NEVER become a passthrough — roleForStatus's default
+folds unknowns to open/○ and would swallow the ▸ unknown-sentinel. The D100 tripwire
+(TestTaskChipGlyphDelegatesToGatedVocabulary) widens in lockstep — mutation-proven vacuous today
+for the 4 joiners and proven able to fail when widened (red: `taskStatusGlyph("ready") = "▸",
+must delegate to glyphForRole(roleForStatus) = "○"`). scripts/status-manifest-check.sh needs NO
+edit: it gates gridblocks.go's roleForStatus/roleGlyph, which the delegate rides. Cross-surface
+parity note for the PR: Go's in_progress chip stays the static ⠋ (roleGlyph["progress"], a
+documented manifest exception) vs Elixir walk.ex's ⠿ still-frame — deliberate per-surface
+divergence (felix D114); parity is asserted on the 8 STATIC glyphs only.
+
+**D107 — three stale premises in the strategic direction, corrected by verify:** (1) the Elixir
+twin PR #5915 (walk.ex → StatusVocab delegate) ALREADY MERGED (ca5fac3a2, 06:03Z) — slice 2 is
+present-tense parity, Go is the last diverging surface NOW; (2) "force color via withChrome" was
+a misnomer (see D105d); (3) the "800k/573k/487k" tokens-per-slice curve is part-phantom: 573k
+appears nowhere in the corpus, E4/E6 were meter-corrected to 62.32M/38.87M all-axis, E7's 1.95M
+is not yet re-based — Review appends W18's scoreboard-t4 row with a METER.md tier-3 read or the
+honest "not metered" placeholder, never the phantom triple.
+
+**D108 — ledger hygiene executed at Decide:** PR #5840 (W17 wave log) merged FIRST (same charter
+tail as this append — conflict vector removed); the 4 merge-criterion-only tasks
+(ttw17-rail-stop-hover #5837, ttw17-d43-chip-delegate #5838, ttm-followup-help-copy #5839,
+ttw17-bl-d43-elixir-walkex #5915) re-claimed and closed on git-proven merges. Backlog filed:
+ttw18-bl-wide-footer-verb-clicks (priority 3) and ttw18-bl-go-toolchain-skew (go.mod 1.25.0 vs
+local go1.26.2 — real, latent, gofmt clean today; priority 4). ttw17-bl-live-tmux-drive stays
+first-in-line named backlog (cannot be proven offline; do not fake).
+
+**Wave plan (both round 1, disjoint packages, builders=opus, gates dry-run green at Decide):**
+1. **ttw18-narrow-rail-hover** (medium) — D99 close-out + D105. internal/taskboard: program.go
+   (mouseMotion) + compose.go (line 148 + readingWindowTop unification in hitmap.go) +
+   hitmap.go + new tests in compose_test.go/hitmap_test.go/motion tests.
+   Gate: `CC=/usr/bin/clang go build ./... && go vet ./internal/taskboard/... && go test
+   ./internal/taskboard/... && gofmt -l internal/taskboard` (empty).
+2. **ttw18-chip-full-manifest** (small) — D43/D100 close-out + D106. internal/pdrender:
+   inline.go + taskchip_test.go, strict two-file lockstep.
+   Gate: `CC=/usr/bin/clang go build ./... && go vet ./internal/pdrender/... && go test
+   ./internal/pdrender/... && gofmt -l internal/pdrender` (empty) + `bash
+   scripts/status-manifest-check.sh` still exit 0.
+
+Wave paper: task-tui-wave-2026-07-23b. Scoreboard row (Review's step) under
+task-09f4775e7ccc2cca per D107(3).
+
+Next D-number: D109.
