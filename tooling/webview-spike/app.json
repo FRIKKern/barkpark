@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "webview-spike",
+    "slug": "barkpark-webview-spike",
+    "version": "0.0.1",
+    "scheme": "bpspike",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "platforms": ["android", "ios"],
+    "android": {
+      "package": "cloud.barkpark.webviewspike"
+    },
+    "ios": {
+      "bundleIdentifier": "cloud.barkpark.webviewspike"
+    }
+  }
+}
