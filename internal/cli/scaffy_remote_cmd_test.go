@@ -10,12 +10,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -78,6 +80,57 @@ func scaffyMockCommandServer(t *testing.T, docs []map[string]any) *httptest.Serv
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// scaffyMockPagingCommandServer serves the same {"documents": …} shape but
+// HONORS ?limit=&offset= — the stock scaffyMockCommandServer ignores them and
+// returns the whole slice every request, so it cannot expose ls --remote's
+// single-page truncation. This one slices [offset:offset+limit], the exact
+// contract the offset loop pages against.
+func scaffyMockPagingCommandServer(t *testing.T, docs []map[string]any) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/v1/data/query/") || !strings.HasSuffix(r.URL.Path, "/command") {
+			http.NotFound(w, r)
+			return
+		}
+		q := r.URL.Query()
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		if limit <= 0 {
+			limit = len(docs)
+		}
+		offset, _ := strconv.Atoi(q.Get("offset"))
+		page := []map[string]any{}
+		if offset < len(docs) {
+			end := offset + limit
+			if end > len(docs) {
+				end = len(docs)
+			}
+			page = docs[offset:end]
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"documents": page})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// scaffyGeneratedCatalog builds n served command docs with distinct
+// concept/description per row — enough to overflow one page and to prove the
+// description column survives across page boundaries.
+func scaffyGeneratedCatalog(n int) []map[string]any {
+	docs := make([]map[string]any, 0, n)
+	for i := 0; i < n; i++ {
+		docs = append(docs, map[string]any{
+			"_id":         fmt.Sprintf("docs--cmd%04d--default", i),
+			"title":       fmt.Sprintf("Cmd %04d", i),
+			"concept":     fmt.Sprintf("cmd%04d", i),
+			"variant":     "default",
+			"domain":      "docs",
+			"description": fmt.Sprintf("desc %04d", i),
+		})
+	}
+	return docs
 }
 
 // scaffyRemoteDoc builds one served command document (flat content fields,
@@ -163,6 +216,58 @@ func TestScaffyLsRemoteServerErrorMapsExit(t *testing.T) {
 	code, _, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "ls", "--remote")
 	if code != exitNotFound {
 		t.Fatalf("exit = %d, want %d\nstderr:\n%s", code, exitNotFound, stderr)
+	}
+}
+
+// TestScaffyLsRemotePagesFullCatalog: a 1001-doc catalog served by a mock that
+// honors limit+offset must ALL surface. Pre-fix (one doRequest, no loop) this
+// returns 1000; post-fix the offset loop drains the second page too. This is
+// the protective test the wave calls out (1000/1001 → 1001/1001).
+func TestScaffyLsRemotePagesFullCatalog(t *testing.T) {
+	withTempConfigHome(t)
+	docs := scaffyGeneratedCatalog(1001)
+	srv := scaffyMockPagingCommandServer(t, docs)
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "json", "ls", "--remote")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\nstderr:\n%s", code, exitOK, stderr)
+	}
+	var env struct {
+		Documents []map[string]any `json:"documents"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not the documents payload: %v", err)
+	}
+	if len(env.Documents) != 1001 {
+		t.Fatalf("ls --remote returned %d docs, want 1001 (single-page fix truncates to %d)", len(env.Documents), scaffyRemotePageLimit)
+	}
+	// The 1001st doc lives at offset 1000 — page two. Its presence proves the
+	// loop advanced past the first page.
+	last := env.Documents[len(env.Documents)-1]
+	if last["concept"] != "cmd1000" {
+		t.Errorf("last doc concept = %v, want cmd1000 (page-two doc dropped?)", last["concept"])
+	}
+}
+
+// TestScaffyLsRemoteTableColumnsAcrossPages: the human table must keep the
+// description column AND render a page-two row — accumulating RAW documents (not
+// the typed scaffyCommandDoc, which has no Description field) is what preserves
+// the column once the catalog spans more than one page.
+func TestScaffyLsRemoteTableColumnsAcrossPages(t *testing.T) {
+	withTempConfigHome(t)
+	docs := scaffyGeneratedCatalog(1001)
+	srv := scaffyMockPagingCommandServer(t, docs)
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "ls", "--remote")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\nstderr:\n%s", code, exitOK, stderr)
+	}
+	// "description" header + first-page and second-page description values must
+	// all be present — the column is retained across the page boundary.
+	for _, want := range []string{"description", "concept", "cmd1000", "desc 1000", "desc 0000"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("catalog table missing %q — column dropped or catalog truncated across pages", want)
+		}
 	}
 }
 
