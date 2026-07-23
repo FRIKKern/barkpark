@@ -122,9 +122,11 @@ defmodule BarkparkCloud.Push.PushDeliveryWorkerTest do
   end
 
   test "ChatNotificationWorker's contract: queue :default, 4 attempts, [1s, 5s, 30s] backoff" do
-    job = PushDeliveryWorker.new(%{})
-    assert job.changes[:queue] == "default"
-    assert job.changes[:max_attempts] == 4
+    # apply_changes fills schema defaults in: "default" is Oban.Job's own queue
+    # default, so it never lands in `changes` — read the applied struct instead.
+    job = PushDeliveryWorker.new(%{}) |> Ecto.Changeset.apply_changes()
+    assert job.queue == "default"
+    assert job.max_attempts == 4
 
     assert PushDeliveryWorker.backoff(%Oban.Job{attempt: 1}) == 1
     assert PushDeliveryWorker.backoff(%Oban.Job{attempt: 2}) == 5
