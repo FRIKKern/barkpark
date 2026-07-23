@@ -1,0 +1,75 @@
+{
+  "run_id": "grip-20260723T063832Z",
+  "recipes": [
+    {
+      "subject": "api/lib/barkpark_web/csp.ex",
+      "quantity": "grep:-n:def copy_data_url_onclick",
+      "rerun": "grep -n 'def copy_data_url_onclick' api/lib/barkpark_web/csp.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/csp.ex"
+      ],
+      "observed_at": "2026-07-23T06:38:32Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/components/studio_components/modals.ex",
+      "quantity": "grep:-c:copy_data_url_onclick",
+      "rerun": "grep -c 'copy_data_url_onclick' api/lib/barkpark_web/components/studio_components/modals.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/components/studio_components/modals.ex"
+      ],
+      "observed_at": "2026-07-23T06:38:32Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/live/studio/connectors_live.ex",
+      "quantity": "grep:-c:webhook_url\\|capabilities_base_url\\|shar",
+      "rerun": "grep -c 'webhook_url\\|capabilities_base_url\\|share_link_base' api/lib/barkpark_web/live/studio/connectors_live.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/live/studio/connectors_live.ex"
+      ],
+      "observed_at": "2026-07-23T06:38:32Z"
+    },
+    {
+      "subject": "connectors/src/config.ts",
+      "quantity": "grep:-n:CONNECTORS_PATH_PREFIX",
+      "rerun": "grep -n 'CONNECTORS_PATH_PREFIX' connectors/src/config.ts",
+      "derived_level": "L3",
+      "deps": [
+        "connectors/src/config.ts"
+      ],
+      "observed_at": "2026-07-23T06:38:32Z"
+    },
+    {
+      "subject": "connectors/src/index.ts",
+      "quantity": "grep:-n:const publicBaseUrl = config.webhook.pub",
+      "rerun": "grep -n 'const publicBaseUrl = config.webhook.publicBaseUrl' connectors/src/index.ts",
+      "derived_level": "L3",
+      "deps": [
+        "connectors/src/index.ts"
+      ],
+      "observed_at": "2026-07-23T06:38:32Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/layouts/root.html.heex",
+      "quantity": "grep:-n:let Hooks = {}",
+      "rerun": "grep -n 'let Hooks = {}' api/lib/barkpark_web/layouts/root.html.heex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/layouts/root.html.heex"
+      ],
+      "observed_at": "2026-07-23T06:38:32Z"
+    },
+    {
+      "subject": "api/test/barkpark_web/plugs/browser_csp_test.exs",
+      "quantity": "grep:-n:copy_data_url_onclick",
+      "rerun": "grep -n 'copy_data_url_onclick' api/test/barkpark_web/plugs/browser_csp_test.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/test/barkpark_web/plugs/browser_csp_test.exs"
+      ],
+      "observed_at": "2026-07-23T06:38:32Z"
+    }
+  ]
+}
