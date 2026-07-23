@@ -4,7 +4,7 @@ drafts.the-paper · rev-7
 PAPER FRAME CHARTER                                                   
 ───────────────────                                                   
                                                                       
-Driven by [◐ in_progress · P1 · 2/3] Wire the driven-tasks rail — read
+Driven by [⠋ in_progress · P1 · 2/3] Wire the driven-tasks rail — read
 it inline.                                                            
                                                                       
 ▌ BASH                                                                

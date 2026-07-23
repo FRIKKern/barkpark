@@ -223,21 +223,21 @@ func (ir InlineRenderer) renderTaskChip(chip *TaskChip, n map[string]any, ctx Re
 	return ir.theme.Dim.Render(chipText) + " " + ir.theme.Link.Render(title)
 }
 
-// taskStatusGlyph maps a task lifecycle status to its chip glyph — kept in
-// LOCKSTEP with the Elixir walker's task_glyph/1 (the HTML chip). Unknown or
-// missing status gets the neutral pointer.
+// taskStatusGlyph maps a task lifecycle status to its chip glyph. For the known
+// lifecycle statuses it DELEGATES to the status-manifest-gated vocabulary in
+// gridblocks.go (glyphForRole ∘ roleForStatus — the UNSTYLED accessor, because
+// the chip is already Dim-wrapped at renderTaskChip; glyphForStatus pre-applies
+// color and would double-style). This kills the last hardcoded glyph fork so the
+// in-body chip and the adjacent task board speak ONE status language (D100).
+//
+// The known-status guard is MANDATORY: roleForStatus maps any UNRECOGNIZED
+// status onto role "open" (glyph ○) in its default clause, so an unconditional
+// delegate would silently collapse the unknown-status sentinel. Everything
+// outside the known set keeps the neutral ▸ pointer.
 func taskStatusGlyph(status string) string {
 	switch status {
-	case "open":
-		return "○"
-	case "in_progress":
-		return "◐"
-	case "blocked":
-		return "⊘"
-	case "done":
-		return "●"
-	case "cancelled":
-		return "✕"
+	case "open", "in_progress", "blocked", "done", "cancelled":
+		return glyphForRole(roleForStatus(status))
 	default:
 		return "▸"
 	}
