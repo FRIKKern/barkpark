@@ -103,6 +103,17 @@ defmodule Barkpark.StudioChat.RuntimeTelemetry do
     payload_hash = digest(payload)
 
     Repo.transaction(fn ->
+      # A locked existence pre-check BEFORE the receipt insert. The Receipt row
+      # carries a real `session_id` FK (RESTRICT), and `on_conflict: :nothing`
+      # does NOT suppress a foreign-key violation — so a `StudioChat.delete_session`
+      # that COMMITS between this observe and the insert would surface the FK abort
+      # as a raw `Postgrex.Error` escaping `Repo.transaction`, crashing the Recorder
+      # GenServer. `FOR SHARE` takes a shared lock the concurrent delete's exclusive
+      # lock must wait behind, and a missing row rolls back to an explicit
+      # `:session_not_found` — mirroring `project_observation/3`'s guard below.
+      Repo.one(from(s in Session, where: s.id == ^session_id, lock: "FOR SHARE")) ||
+        Repo.rollback(:session_not_found)
+
       {inserted, _} =
         Repo.insert_all(
           Receipt,

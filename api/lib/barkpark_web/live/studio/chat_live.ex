@@ -947,8 +947,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_event("session-delete", %{"id" => id}, socket) do
-    StudioChat.delete_session(id, :global)
-    {:noreply, after_lifecycle_mutation(socket, id)}
+    # A managed-codex session that recorded a runtime attempt / usage receipt is
+    # protected by RESTRICT FKs (StudioChat.delete_session maps them to a
+    # changeset error). Surface that as a flash — never let the FK abort crash
+    # the admin LiveView. Its ledgers are permanent; archive is the way out.
+    case StudioChat.delete_session(id, :global) do
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "That chat has a recorded runtime ledger and can't be deleted — archive it instead."
+         )}
+
+      _ok_or_noop ->
+        {:noreply, after_lifecycle_mutation(socket, id)}
+    end
   end
 
   # Flip the active ⇄ archived shelf. refresh_sessions reads the new flag.
