@@ -2651,10 +2651,18 @@ func captureExecute(t *testing.T, args []string) string {
 	}
 	origOut, origErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = w, w
+	// Drain concurrently — see captureExecuteCode: reading only after Execute
+	// returns deadlocks once output exceeds the OS pipe buffer (~512 bytes on
+	// some hosts). The goroutine reads while Execute writes.
+	done := make(chan string, 1)
+	go func() {
+		body, _ := io.ReadAll(r)
+		done <- string(body)
+	}()
 	Execute(args)
-	_ = w.Close()
 	os.Stdout, os.Stderr = origOut, origErr
-	body, _ := io.ReadAll(r)
+	_ = w.Close()
+	body := <-done
 	_ = r.Close()
 	return string(body)
 }
@@ -2719,10 +2727,20 @@ func captureExecuteCode(t *testing.T, args []string) (string, int) {
 	}
 	origOut, origErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = w, w
+	// Drain the pipe CONCURRENTLY with Execute. A single write larger than the OS
+	// pipe buffer (as small as ~512 bytes on some hosts; 64 KiB on Linux CI) blocks
+	// the writer until a reader drains it — so reading only after Execute returns
+	// deadlocks the moment any help text exceeds the buffer (printLoginHelp is
+	// ~1952 bytes). The goroutine reads while Execute writes; closing w signals EOF.
+	done := make(chan string, 1)
+	go func() {
+		body, _ := io.ReadAll(r)
+		done <- string(body)
+	}()
 	code := Execute(args)
-	_ = w.Close()
 	os.Stdout, os.Stderr = origOut, origErr
-	body, _ := io.ReadAll(r)
+	_ = w.Close()
+	body := <-done
 	_ = r.Close()
 	return string(body), code
 }
