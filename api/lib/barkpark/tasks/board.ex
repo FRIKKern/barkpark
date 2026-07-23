@@ -167,18 +167,27 @@ defmodule Barkpark.Tasks.Board do
     |> build(now: now)
   end
 
-  # Field-visibility seal (felix W18) — resolve the `task` schema ONCE per
-  # snapshot (dataset-scoped, NOT per card) and return a fail-closed
-  # visibility predicate `(field :: String.t()) -> boolean()`. This mirrors
-  # board_live's peek seal (load_peek/peek_schema/peek_field_readable?, merged
-  # #5470) and `tasks/query.ex` measure_field_readable?/2: an ANONYMOUS caller,
-  # so any content field the schema declares private / owner_only / readable_by
-  # is redacted from the card projection — and therefore from every derived
-  # copy (`family_walk/4` rows, `gantt_data/1`, `focus_of/1`) which read the
-  # gated card fields, never the raw doc. A nil schema (miss) leaves every field
-  # undeclared ⇒ public (legacy parity), never a crash. One indexed
-  # `Content.get_schema/3` per snapshot bounds the cost.
-  defp field_visibility_gate(dataset) do
+  @doc """
+  Field-visibility seal (felix W18/W19) — resolve the `task` schema ONCE for a
+  dataset (NOT per card) and return a fail-closed visibility predicate
+  `(field :: String.t()) -> boolean()`.
+
+  This mirrors board_live's peek seal (load_peek/peek_schema/peek_field_readable?,
+  merged #5470) and `tasks/query.ex` measure_field_readable?/2: an ANONYMOUS
+  caller, so any content field the schema declares private / owner_only /
+  readable_by is redacted from the card projection — and therefore from every
+  derived copy (`family_walk/4` rows, `gantt_data/1`, `focus_of/1`) which read
+  the gated card fields, never the raw doc. A nil schema (miss) leaves every
+  field undeclared ⇒ public (legacy parity), never a crash. One indexed
+  `Content.get_schema/3` bounds the cost.
+
+  PUBLIC (felix W19): the realtime path (`board_live` mount + `:refresh`)
+  computes the predicate ONCE per mount/reconcile and threads it into
+  `card_from_broadcast/3`, so a broadcast card is gated by the same decisions as
+  a fetched `to_card/4` one — WITHOUT resolving the schema per broadcast.
+  """
+  @spec field_visibility_gate(String.t()) :: (String.t() -> boolean())
+  def field_visibility_gate(dataset) do
     schema =
       case Content.get_schema("task", dataset, []) do
         {:ok, schema} -> schema
@@ -439,21 +448,35 @@ defmodule Barkpark.Tasks.Board do
   # ── wave 2: realtime re-bucket (charter D9/D10) ────────────────────────────
 
   @doc """
-  Project a broadcast `doc` map into a normalized card. PURE.
+  Project a broadcast `doc` map into a normalized card, applying the same
+  fail-closed field-visibility gate as `to_card/4`. PURE, DB-free.
 
   The broadcast (`Content.Broadcast`) carries only `%{doc_id, title, status,
   content, updated_at}` for the ONE changed doc — never the dependency graph. So
-  this is byte-parallel to `snapshot`'s private `to_card/3` with one difference:
-  it **carries `prev_card.blocker_statuses` forward** (the event has none) so an
-  already-known card keeps its readiness inputs. An unseen card gets `[]` and is
-  placed by raw lifecycle (open/blocked/in_progress/done) — its `ready`
-  correctness waits for the next `:refresh` reconcile (D9).
+  this is byte-parallel to `snapshot`'s private `to_card/4` with two differences:
+  it **carries `prev_card.blocker_statuses`/`:sub`/`:created_at` forward** (the
+  event has none) so an already-known card keeps its readiness inputs, and it
+  takes the visibility predicate `readable?` INJECTED by the caller instead of
+  resolving the schema itself.
+
+  FIELD-VISIBILITY SEAL (felix W19). `readable?` is `field_visibility_gate/1`'s
+  fail-closed predicate, computed ONCE per mount/`:refresh` by `board_live` and
+  threaded in — NEVER resolved per broadcast (no DB on the hot event path). It
+  gates EXACTLY the 7 text/PII fields `to_card/4` gates — priority, parent_id,
+  labels (else `[]`), worker (via `gated_worker/2`, the assignee⊕claim union),
+  next_criterion + criteria_list (both under `"acceptance_criteria"`),
+  description_excerpt (under `"description"`), design_doc. `lifecycle_status`,
+  `github`, `github_synced` and the carried-forward `blocker_statuses` STAY
+  UNGATED — parity with BOTH sealed paths (#5470 peek + #5779 snapshot); the
+  derived criteria COUNT stays ungated per the peek's count-vs-text law. On the
+  disconnected mount `board_live` injects `fn _ -> false end` (fail-closed), but
+  no broadcast can arrive pre-connect, so behavior is identical.
 
   `Content.published_id/1` collapses the draft/published twin to the same logical
   id `snapshot` keys on, so a draft-shadow event updates the one canonical card.
   """
-  @spec card_from_broadcast(map(), card() | nil) :: map()
-  def card_from_broadcast(msg_doc, prev_card) do
+  @spec card_from_broadcast(map(), card() | nil, (String.t() -> boolean())) :: map()
+  def card_from_broadcast(msg_doc, prev_card, readable?) when is_function(readable?, 1) do
     content = msg_doc.content || %{}
     doc_id = Content.published_id(msg_doc.doc_id)
 
@@ -469,10 +492,11 @@ defmodule Barkpark.Tasks.Board do
     %{
       doc_id: doc_id,
       title: msg_doc.title,
-      priority: Map.get(content, "priority"),
-      parent_id: Map.get(content, "parent_id"),
-      labels: normalize_labels(Map.get(content, "labels")),
-      worker: Map.get(content, "assignee") || get_in(content, ["claim", "worker"]),
+      priority: if(readable?.("priority"), do: Map.get(content, "priority")),
+      parent_id: if(readable?.("parent_id"), do: Map.get(content, "parent_id")),
+      labels:
+        if(readable?.("labels"), do: normalize_labels(Map.get(content, "labels")), else: []),
+      worker: gated_worker(content, readable?),
       lifecycle_status: Map.get(content, "lifecycle_status") || "open",
       criteria: Tasks.criteria_progress(content),
       github: Link.get(synthetic),
@@ -482,10 +506,12 @@ defmodule Barkpark.Tasks.Board do
       # summary forward (like blocker_statuses) — the slow :refresh reconcile
       # re-derives it from the full corpus.
       sub: (prev_card && prev_card[:sub]) || nil,
-      next_criterion: next_criterion(content),
-      description_excerpt: excerpt(Map.get(content, "description")),
-      design_doc: string_presence(Map.get(content, "design_doc")),
-      criteria_list: criteria_list(content),
+      next_criterion: if(readable?.("acceptance_criteria"), do: next_criterion(content)),
+      description_excerpt:
+        if(readable?.("description"), do: excerpt(Map.get(content, "description"))),
+      design_doc:
+        if(readable?.("design_doc"), do: string_presence(Map.get(content, "design_doc"))),
+      criteria_list: if(readable?.("acceptance_criteria"), do: criteria_list(content)),
       # The broadcast carries no inserted_at — keep the previous projection's
       # creation stamp (the :refresh reconcile re-reads it).
       created_at: prev_card && prev_card[:created_at],
@@ -496,7 +522,7 @@ defmodule Barkpark.Tasks.Board do
   @doc """
   Re-bucket ONE card into an existing board and report the delta. PURE.
 
-  `card` is a normalized card (typically from `card_from_broadcast/2`). Returns
+  `card` is a normalized card (typically from `card_from_broadcast/3`). Returns
   `{board, change}` where `change` (see `t:change/0`) tells the LiveView which
   card moved and how, so it can flash/slide it.
 
