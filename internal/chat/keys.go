@@ -408,6 +408,23 @@ func (m Model) scrollBy(delta int) Model {
 // wave — clicks are a later slice). A terminal without mouse reporting simply
 // never reaches here.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// The `?` overlay owns the wheel exactly as it owns the keyboard (charter
+	// D66): while open, the wheel scrolls the OVERLAY — never the transcript
+	// hidden behind it (a stealth scroll the user would only discover on close).
+	// Checked before the screen gate so it also works over the picker.
+	if m.helpOpen {
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			if m.helpScroll > 0 {
+				m.helpScroll--
+			}
+		case tea.MouseButtonWheelDown:
+			if m.helpScroll < helpMaxScroll(m.height) {
+				m.helpScroll++
+			}
+		}
+		return m, nil
+	}
 	if m.screen != screenChat {
 		return m, nil
 	}

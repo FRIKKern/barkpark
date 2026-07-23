@@ -296,3 +296,60 @@ func TestPickerFooterAdvertisesHelp(t *testing.T) {
 		}
 	}
 }
+
+// TestHelpOverlayFitsFrame is the chrome-budget guard (review fix): the rendered
+// overlay must never be taller than the frame View hands it — bubbletea drops
+// overflow lines from the TOP, so a one-row budget miss clips the modal's border
+// and "Keys" header off-screen on every windowed terminal. helpChrome=8 (the
+// prior-art constant, spent there against a paneHeight with toolbar/helpbar
+// slack chat does not have) fails this at every height below; 10 is the honest
+// full-frame budget. Worst case is a mid-scroll window (overflow indicator
+// present), so the scan covers every scroll position.
+func TestHelpOverlayFitsFrame(t *testing.T) {
+	for _, height := range []int{16, 18, 24, 40} {
+		for scroll := 0; scroll <= helpMaxScroll(height); scroll++ {
+			m := Model{helpOpen: true, helpScroll: scroll, height: height}
+			out := m.renderHelpOverlay(100, height)
+			if got := strings.Count(out, "\n") + 1; got > height {
+				t.Fatalf("height %d scroll %d: overlay renders %d lines — taller than the frame", height, scroll, got)
+			}
+		}
+	}
+}
+
+// TestHelpMouseWheelScrollsOverlay (review fix): while the overlay is open the
+// wheel scrolls the OVERLAY, clamped to the same bounds as j/k — never the
+// transcript hidden behind it (a stealth scroll the user would only discover on
+// close). Works over the picker too (the guard sits before the screen gate).
+func TestHelpMouseWheelScrollsOverlay(t *testing.T) {
+	m := Model{helpOpen: true, screen: screenChat, height: 24, scroll: -1}
+	if helpMaxScroll(24) == 0 {
+		t.Fatal("test setup: overlay must overflow at height 24")
+	}
+
+	next, _ := m.handleMouse(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	nm := next.(Model)
+	if nm.helpScroll != 1 {
+		t.Errorf("wheel down must scroll the overlay, got helpScroll=%d", nm.helpScroll)
+	}
+	if nm.scroll != -1 {
+		t.Errorf("wheel while help is open must NOT touch the transcript scroll, got %d", nm.scroll)
+	}
+
+	up, _ := nm.handleMouse(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	um := up.(Model)
+	if um.helpScroll != 0 {
+		t.Errorf("wheel up must scroll the overlay back, got %d", um.helpScroll)
+	}
+	moreUp, _ := um.handleMouse(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	if moreUp.(Model).helpScroll != 0 {
+		t.Errorf("wheel up at the top must clamp at 0, got %d", moreUp.(Model).helpScroll)
+	}
+
+	// Over the picker the wheel drives the overlay too (no screen gate).
+	pm := Model{helpOpen: true, screen: screenPicker, height: 24}
+	pnext, _ := pm.handleMouse(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	if pnext.(Model).helpScroll != 1 {
+		t.Errorf("wheel over the picker overlay must scroll it, got %d", pnext.(Model).helpScroll)
+	}
+}

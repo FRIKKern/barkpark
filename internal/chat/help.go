@@ -24,12 +24,19 @@ import (
 // prior screen/focus/scroll/panel state is restored. The overlay REPLACES the
 // frame for its paint (View branch), the same body-replace cmd/barkpark uses.
 
-// helpChrome is the fixed overlay chrome the windowed body must budget around:
-// header + divider + blank above, blank + close-hint below, plus the modal
-// border and padding. helpMaxScroll and renderHelpOverlay re-derive their row
-// window from it in lockstep, so the scroll handler's clamp and the render
-// window can never disagree (the over-clamp bug the never-overclamp test guards).
-const helpChrome = 8
+// helpChrome is the fixed overlay chrome the windowed body must budget around,
+// counted against the FULL frame height View hands renderHelpOverlay (chat's
+// overlay replaces the whole frame — unlike cmd/barkpark, whose -8 is spent
+// against a paneHeight that already excludes the surrounding toolbar/helpbar):
+// header + divider + blank above (3), the overflow indicator's worst case (1),
+// blank + close-hint below (2), modal border (2) + vertical padding (2) = 10.
+// One row under budgets the frame and bubbletea clips the modal's top border
+// off-screen (the renderer drops overflow lines from the TOP) — the fits-frame
+// test guards this. helpMaxScroll and renderHelpOverlay derive their row window
+// from the same constant in lockstep, so the scroll handler's clamp and the
+// render window can never disagree (the over-clamp bug the never-overclamp test
+// guards).
+const helpChrome = 10
 
 // helpSection is one titled group of key rows in the overlay. Curated ON PURPOSE:
 // each row documents INTENT ("esc  interrupt (mid-turn) · detach to herd (idle)"),
