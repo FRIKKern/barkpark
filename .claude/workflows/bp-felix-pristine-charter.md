@@ -1739,7 +1739,113 @@ Backlog filed: `task-felix-w20-bl-devauth-approve-bypass-guard` (P3),
 `task-felix-w20-bl-cloud-testdb-drift` (P4).
 
 
+## Wave 21 Decisions (2026-07-23) — INTEROP RESOURCE-BOUND: REFUTE THE SEALED LIST, BOUND THE NEW GENERATION (Arm: E, E6+E7 recipe)
+
+- **D125 — PREMISE REFUTED AT THE SEALED-TASK GRAIN; W21 FILES NEW TASKS, NEVER A REOPEN.**
+  The wish's target `task-felix-interop-resource-bound-sweep` is SEALED done 6/6 via PR #2954
+  (W7, merge 841fc2845): probe (= `studio_chat/probe.ex` — NOT `media/probe.ex` or
+  `plugins/content_probe.ex`, both zero-interop decoys; full paths mandatory everywhere),
+  self_update/runner.ex, onixedit validator.ex all ADOPTED; titles.ex already-good;
+  build_info.ex/claude_chat.ex out-of-scope. All six W7 sites re-verified drift-free on
+  origin/main. Per W20/D123 no-reopen precedent, W21's work lands on NEW child tasks. Census =
+  13 rows: 7 BOUNDED (magick, studio_chat/probe, titles, validator, self_update, codex
+  readiness, release_capture bounded_cmd), 2 OUT-OF-SCOPE (build_info compile-time; mix task
+  gen_types.ex dev-only npx — newly ruled, same class), 1 SURVEYED-AND-EXCLUDED (ExPTY forkpty
+  NIF tmux console — admin-gated interactive terminal, operator-triggered kill, different
+  threat class than request/job spawn), 3 CANDIDATE UNBOUNDED (codex/session.ex buffer,
+  deploy_runner ctl cmds, janitor ps). No `:os.cmd`/`System.shell`/bare `:erlang.open_port`
+  anywhere in api/lib; no Porcelain/Rambo/MuonTrap/Exile deps.
+
+- **D126 — S1 = CODEX SESSION BUFFER CAP (`task-felix-w21-codex-buffer-cap`), FIX SHAPE PINNED
+  BY RUN-PROOF.** `studio_chat/runtime/codex/session.ex` handle_info({port,{:data,data}})
+  does uncapped `state.buffer <> data`; fail-before REPRODUCED offline (8 MiB newline-free sh
+  stub → state.buffer = 8,388,608 bytes, one unbounded binary). Crucial constraint: the
+  `%{failure: reason}` guards live ONLY on the two handle_call clauses — on a newline-free
+  stream `split_lines` yields no complete line, so `fail_pending` alone can NEVER stop the
+  flood. The cap MUST act in the :data handler itself: byte_size check → close the port, stop
+  accumulating, `fail_pending(:buffer_overflow)` (named atom). Config: sibling
+  `:max_buffer_bytes` key in the EXISTING `:codex_app_server` app-env keyword (session.ex
+  already reads `:binary` there — never a new `__MODULE__` key), module-attr default 8 MiB,
+  validator.ex's `@default`/`config/0`/`Keyword.get` TECHNIQUE as template. Mutation test rides
+  the proven `binary:`/`args:` seam (hermetic, no real codex binary); assert threshold-crossing
+  + named failure + port closed — never exact byte counts (streaming-chunk flake). SEVERITY
+  FRAMING RESOLVED BY HOST CHECK: codex is DARK on guerrilla today (no `codex` binary anywhere
+  on the filesystem, zero codex env vars, 0/38 chat_sessions rows ever provider='codex') but
+  genuinely wired (provider CHECK constraint allows it; admin-gated ChatLive routes live).
+  Framing = "admin session, if a codex binary is later provisioned, wedges the shared BEAM for
+  every tenant" — defense-in-depth on the W7 admin-gated precedent (self_update ADOPT), not
+  live-exploitable-today. No new sobelow surface (no System.cmd moves in S1).
+
+- **D127 — S2 = DEPLOYRUNNER CONTROL-PLANE CMD DEADLINES
+  (`task-felix-w21-deployrunner-cmd-deadlines`), WEDGE RUN-PROVEN.** Three unbounded
+  System.cmd in the singleton `Sites.DeployRunner`: systemd_run:526 (inside
+  handle_call :trigger), is_active:1351 (handle_call :status), systemctl_stop:1368 (inside
+  handle_info :unit_deadline — the watchdog's OWN kill can wedge the watchdog; safe_call
+  cannot rescue a handle_info). Wedge proven: sleep-30 systemd_run stub → concurrent raw
+  GenServer.call exits `{:timeout,...}` at 5001ms while safe_call's 5s fallback MASKS the
+  symptom (returns plausible idle) — tests must target the raw call or wall-clock, never the
+  public status/1. Fix = the proven `Task.Supervisor.async_nolink` + `Task.yield(t) ||
+  Task.shutdown(:brutal_kill)` family (nolink, NOT linked Task.async), degrading per the
+  module's documented never-crash contract; ONE config key `:ctl_cmd_timeout_ms` in the
+  existing `Application.get_env(:barkpark, __MODULE__)` keyword, default 15_000. All three
+  seams (`:systemd_run_command`/`:is_active_cmd`/`:systemctl_stop_cmd`) are live-read and
+  test-proven — `:systemctl_stop_cmd` accepted a first-ever stub (unit_deadline → :done/-2 +
+  argv dump). Sobelow: the three CI.System entries are LINE-ANCHORED in api/.sobelow-skips
+  (lines for 526/1351/1368) — migrate to inline `# sobelow_skip ["CI.System"]` comments
+  (magick precedent) and drop the stale fingerprints. FENCE INSIDE THE FILE: the Port-fallback
+  ingest loop is ALREADY bounded ({:line,4096} + 500-line push_log cap) — do NOT widen S2 to
+  it; do not regress reattach (#3857) or teardown (#4106) semantics; 46-test baseline green is
+  proven and must stay. HIGH-FLIP-RISK: happy-path preservation — reviewer independently
+  re-derives that trigger/status/deadline behavior is unchanged when commands return promptly.
+
+- **D128 — JANITOR VERDICT: UNBOUNDED-BUT-CONTAINED, BACKLOG NOT BUILD.** janitor.ex's `ps`
+  System.cmd is genuinely unbounded and the `rescue` does NOT cover hangs (a blocked port read
+  never raises) — the direction's "already-good-with-rescue" phrasing would be dishonest. But
+  it is a boot-only one-shot `Task.start_link` (restart: :temporary, non-blocking to boot);
+  worst case = one leaked process + one boot's sweep silently skipped. The D127 fold-in
+  condition (real consequence) is UNMET → honest census row + backlog task, no build slice.
+
+- **D129 — WAVE SHAPE + BACKLOG.** 2 slices, both round 1, both opus, file-disjoint
+  (studio_chat/runtime/codex/** vs sites/**). Gates dry-run green at Decide: codex_test.exs
+  4/0, deploy_runner_test.exs 46/0 (warm _build, CC=clang). Backlog filed as published epic
+  children: `task-felix-w21-bl-claudechat-buffer-parity` (P3 — same uncapped `buffer <> chunk`
+  scar in barkpark_web claude_chat.ex:1160/1481, zero coverage, spawn_env carries no
+  resource-bound env; out of W21 fence), `task-felix-w21-bl-boundedcmd-extraction-eval` (P4 —
+  doctrine-clause-4 EVAL, not migration: drift dossier = 3 kill families, 5 config schemes, 5
+  error vocabularies, 2/7 volume-bound, uniform grandchild-kill gap; D34 per-site precedent
+  stands until argued), `task-felix-w21-bl-releasecapture-bound-tests` (P4 — bounded_cmd's
+  124/125 branches exist but have zero test proof), `task-felix-w21-bl-readiness-sobelow-inline`
+  (P4 — readiness.ex:42 is the ONE holdout still on a line-anchored .sobelow-skips fingerprint),
+  `task-felix-w21-bl-janitor-ps-bound` (P4 — per D128).
+
+### Wave 21 roadmap (2 slices, round 1, parallel — disjoint files)
+
+| # | Slice | Task | Model | Size |
+|---|-------|------|-------|------|
+| S1 | Codex session buffer cap — config-overridable ceiling, port closed on breach, mutation-proven | `task-felix-w21-codex-buffer-cap` | opus | medium |
+| S2 | DeployRunner ctl cmd deadlines — 3 System.cmd sites bounded, never-crash preserved, sobelow inlined | `task-felix-w21-deployrunner-cmd-deadlines` | opus | medium |
+
+Backlog filed: `task-felix-w21-bl-claudechat-buffer-parity` (P3),
+`task-felix-w21-bl-boundedcmd-extraction-eval` (P4),
+`task-felix-w21-bl-releasecapture-bound-tests` (P4),
+`task-felix-w21-bl-readiness-sobelow-inline` (P4),
+`task-felix-w21-bl-janitor-ps-bound` (P4).
+
+
 ## Wave log
+
+- **Wave 21 — 2026-07-23 — DECIDED (building). Arm: E (E6+E7 winning recipe — interop
+  resource-bound sweep).** Ratified D125–D129. Headline: the wish's named target
+  (`task-felix-interop-resource-bound-sweep`) is SEALED done 6/6 (#2954, W7) and all six W7
+  sites verified drift-free — the stale-premise guard fired again; W21 bounds the POST-W7
+  generation instead: 2 opus round-1 slices, both fail-before run-proven at Verify (codex
+  buffer grew to a literal 8 MiB offline; a sleep-stub systemd_run wedged the DeployRunner
+  singleton at 5001ms while safe_call masked it). Census completed to 13 rows (ExPTY
+  SURVEYED-AND-EXCLUDED, gen_types.ex OUT-OF-SCOPE). Codex proven DARK on guerrilla (no
+  binary, 0/38 sessions) → severity framed as defense-in-depth on the W7 admin-gated
+  precedent. Janitor ruled UNBOUNDED-BUT-CONTAINED (rescue does not cover hangs — the
+  "already-good-with-rescue" phrasing rejected as dishonest), backlog not build. 5 backlog
+  children filed. Grade: pending build+review.
 
 - **Wave 20 — 2026-07-23 — DECIDED (building). Arm: E (E6+E7 winning recipe, 3rd surface —
   cloud/ FK-abort sweep).** Ratified D119–D124. Headline: the wish's "~17 unguarded cloud FK
