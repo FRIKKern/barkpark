@@ -121,3 +121,35 @@ queue. Improvement-only; honest 2-slice wave.
    scripts/*.test.sh into shell-harnesses.yml once slice 1 lands.
 
 ## Wave log
+
+### Wave 2026-07-23 — round 1 built + reviewed, grade A-
+
+- **Landed (2/2 slices green, both pushed + PR'd, lead merges):**
+  - Slice 1 `scaffy-backlog-doctor-bp-freshness` — PR #6023, branch
+    `loop-epic/doctor-sh-guarded-merge-base-staleness-f-0` (no reviewer fixes).
+    doctor.sh section 2 now reds iff Go inputs changed over
+    merge-base(BP_COMMIT, origin/main)..origin/main (D1-D3 exact); guarded
+    fail-loud ladder; 8-cell doctor.test.sh harness on real fixtures wired via
+    NEW shell-harnesses.yml. Reviewer independently re-derived the
+    HIGH-FLIP-RISK verdict matrix (8/8 green; origin/main's buggy doctor reds
+    6 cells incl. the diverged + offline FALSE-GREENS; never-cancel guard
+    mutation-proven). E2: an independent second review of the matrix is
+    warranted before merge.
+  - Slice 2 `scaffy-backlog-seedcheck-ci-advisory` — PR #6025, branch
+    `loop-epic/scaffy-catalog-drift-yml-advisory-tokenl-1-r` (REVIEWER FIX
+    cb88ac8c4): the builder's `out="$(cmd)"; code=$?` capture was
+    errexit-unsafe — Actions' default run shell is `bash -e {0}`, so the
+    self-test aborted before capturing the code exactly when the tripwire
+    correctly redded, and the audit step died before writing its DRIFT
+    summary; fixed to `code=0; out="$(cmd)" || code=$?`, proven end-to-end
+    under `bash -e` both directions; also added `permissions: contents: read`.
+    Advisory tokenless scaffy-catalog-drift.yml + `make seed-check` otherwise
+    as decided (D6-D7).
+- **Stalled:** nothing — honest 2-slice wave, both premises re-confirmed live
+  before building (D11's corrections held).
+- **Next wave:** lead merges #6023 + #6025 (slice 1 after the E2 second look),
+  then discharges D10 post-merge obligations (one workflow_dispatch of
+  scaffy-catalog-drift.yml proving Actions egress; one live `make doctor` RED
+  on a deliberately-behind worktree). Then the backlog children in order:
+  `clirel-bl-wire-orphan-shell-tests` (cheapest, unblocked once slice 1
+  merges), `clirel-bl-go-tests-scaffy-paths`, `clirel-bl-local-update-early-exit`.
