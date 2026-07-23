@@ -64,18 +64,50 @@ defmodule Barkpark.Sso do
   @doc """
   Find-or-create the SSO-authenticated User by `email`. New accounts get an
   unusable local password (they sign in via the IdP) and are confirmed (the IdP
-  vouched for the identity). Shared by the OIDC / SAML flows.
+  vouched for the identity). Shared by the OIDC / SAML flows and the app-token
+  exchange (mobile charter D5).
+
+  Race-safe (charter D5): the get-then-insert window means two concurrent
+  same-email JIT calls can BOTH see "no user" — the loser's insert then hits
+  the `users_email_index` unique constraint. `jit_create_user/1` absorbs that
+  leg conflict-safely and re-fetches the winner's row, so both callers get the
+  same User instead of the loser crashing with a MatchError.
   """
   @spec find_or_create_user(String.t()) :: User.t()
   def find_or_create_user(email) when is_binary(email) do
     case Accounts.get_user_by_email(email) do
-      %User{} = user ->
-        user
+      %User{} = user -> user
+      _ -> jit_create_user(email)
+    end
+  end
 
-      _ ->
-        random = Base.encode16(:crypto.strong_rand_bytes(32))
-        {:ok, user} = Accounts.register_user(%{email: email, password: random})
+  # Public @doc false seam so the D5 race test can drive the "checked nil, then
+  # somebody else inserted" leg DETERMINISTICALLY (the controller-seam testing
+  # convention). Not part of the SSO API — callers go through
+  # `find_or_create_user/1`.
+  @doc false
+  @spec jit_create_user(String.t()) :: User.t()
+  def jit_create_user(email) when is_binary(email) do
+    random = Base.encode16(:crypto.strong_rand_bytes(32))
+
+    case Accounts.register_user(%{email: email, password: random}) do
+      {:ok, user} ->
         Repo.update!(User.confirm_changeset(user))
+
+      {:error, %Ecto.Changeset{}} ->
+        # Conflict-safe insert leg: the registration changeset declares
+        # `unique_constraint(:email)`, so a concurrent same-email insert lands
+        # here as a changeset error (never an Ecto.ConstraintError raise). The
+        # row exists NOW — re-fetch and return the winner's user. Anything else
+        # (a genuinely invalid email) still fails loudly below.
+        case Accounts.get_user_by_email(email) do
+          %User{} = user ->
+            user
+
+          _ ->
+            raise "SSO JIT provisioning failed for #{email}: " <>
+                    "insert rejected and no existing user found"
+        end
     end
   end
 

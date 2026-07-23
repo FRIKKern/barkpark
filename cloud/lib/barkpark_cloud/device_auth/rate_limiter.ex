@@ -14,6 +14,10 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
     * `"approve:"<user_id>` — 10 / 60s. Caps approve/deny/inspect attempts per
       authenticated user, so an authed attacker can't brute the ~39-bit user_code
       within its 600s TTL.
+    * `"app_token:"<peer_ip>` — 10 / 60s. Caps app-token exchange mints per IP
+      (`POST /v1/barkparks/:id/app-token`) — each hit costs the instance a
+      server-side admin-authed mint call, so a runaway client must be braked
+      here, before the proxy fans out.
 
   The key is `{key_string, window}` where `window = div(now_ms, @window_ms)`, so
   elapsed windows are lazily swept on the next `check/1` for that key and the
@@ -25,7 +29,7 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
   @table __MODULE__
   @window_ms 60_000
   @default_limit 10
-  @limits %{"poll" => 20, "start" => 10, "approve" => 10}
+  @limits %{"poll" => 20, "start" => 10, "approve" => 10, "app_token" => 10}
 
   @doc false
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)

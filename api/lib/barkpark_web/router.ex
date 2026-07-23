@@ -803,6 +803,15 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     post("/login-tickets", LoginTicketController, :create)
+
+    # ── Mobile app-token exchange, instance half (mobile charter D4) ──────
+    # POST /v1/auth/app-tokens — admin-bearer-gated in the controller (the
+    # mint_login_ticket idiom): the Cloud control plane proves possession of
+    # the stored per-instance admin token server-side and gets back a
+    # member-shaped, workspace-bound [read,write,chat] token for the calling
+    # cloud user (JIT-provisioned member, charter D5). The admin credential
+    # never reaches the member; the plaintext minted token is the payload.
+    post("/app-tokens", AppTokenController, :create)
   end
 
   # ── Bulldocs paper reader (LiveView) ────────────────────────────────────
