@@ -822,6 +822,31 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       refute File.exists?(path)
     end
 
+    # ── stdout buffer ceiling (charter D126, codex-twin parity) ───────────────
+    #
+    # The CLI streams newline-delimited JSON, so parse_chunk normally holds only
+    # the trailing partial line. A malformed/stalled stream that never emits a
+    # newline would otherwise grow `state.buffer` without bound in the long-lived
+    # per-session GenServer. This stub floods stdout with a NEWLINE-FREE blob well
+    # past a shrunk cap: no complete line ever reaches the event path, so the cap
+    # must fire at the accumulation seam. UNCAPPED code never emits the overflow
+    # error (the buffer just grows until the stub exits) — this reds without the
+    # cap and greens with it. Asserts threshold-crossing behavior, never bytes.
+    test "caps the stdout line-reassembly buffer and stops with a named overflow" do
+      put_chat_config(
+        command: {"sh", ["-c", "head -c 200000 /dev/zero | tr '\\0' 'x'"]},
+        max_buffer_bytes: 64 * 1024
+      )
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      ref = Process.monitor(session)
+
+      # Named error reaches the sink…
+      assert_receive {:claude_chat_error, :buffer_overflow, _tail}, 2_000
+      # …and the session stops cleanly (terminate/2 cleanup runs), never crashes.
+      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, 2_000
+    end
+
     test "session dies with its sink (no leaked subprocess owner)" do
       put_chat_config(command: {"cat", []})
 
