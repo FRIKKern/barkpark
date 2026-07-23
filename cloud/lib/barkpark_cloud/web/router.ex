@@ -2252,6 +2252,81 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/barkparks/:id/app-token → 200 {token, workspace_id, permissions,
+  # expires_at} — the member-reachable app-token exchange (mobile charter D4).
+  # The control plane uses the STORED per-instance admin token server-side to
+  # mint a workspace-bound [read,write,chat] instance token AS the calling
+  # cloud user (JIT member on the instance) via POST /v1/auth/app-tokens.
+  # The admin token never travels; unlike studio-link the PLAINTEXT minted app
+  # token IS the payload (returned ONCE, never audited, never logged).
+  #
+  # USER-authed + TEAM-SCOPED, fail-closed: any member of the owning team may
+  # mint their own app token; a wrong-team / nonexistent / malformed id is the
+  # SAME 404 (no existence leak). Rate-limited per IP (`app_token:<ip>` bucket,
+  # 10/min — each hit costs a server-side admin-authed instance call; peer-ip
+  # physics fixed by cch-w1-peer-ip-pin, PR #5305). 409 not_live while
+  # provisioning; 409 app_token_unsupported when the instance predates the
+  # mint route (charter D8 — the client maps it to manual token paste);
+  # 404 no_admin_token for pre-feature instances; 502 when the instance call
+  # fails; 500 on tampered ciphertext.
+  post "/v1/barkparks/:id/app-token" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      match?(
+        {:error, :rate_limited},
+        DeviceAuthRateLimiter.check("app_token:" <> (peer_ip(conn) || "unknown"))
+      ) ->
+        json(conn, 429, %{error: "rate_limited"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Registry.mint_app_token(bp, conn.assigns.current_user.email) do
+              {:ok, payload} ->
+                # OC24: audit THAT an app token was minted — NEVER the token
+                # value (it is a live credential) and never the admin token.
+                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.app_token_minted", %{
+                  name: bp.name
+                })
+
+                json(conn, 200, payload)
+
+              {:error, :not_live} ->
+                json(conn, 409, %{error: "not_live"})
+
+              {:error, :app_token_unsupported} ->
+                json(conn, 409, %{error: "app_token_unsupported"})
+
+              {:error, :no_admin_token} ->
+                json(conn, 404, %{
+                  error: "no_admin_token",
+                  detail:
+                    "No admin token is stored for this instance yet. It is captured at " <>
+                      "provision time — a pre-existing instance may need a re-provision."
+                })
+
+              {:error, :decrypt_failed} ->
+                json(conn, 500, %{error: "decrypt_failed"})
+
+              {:error, :instance_error} ->
+                json(conn, 502, %{error: "instance_unreachable"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   # POST /v1/barkparks/:id/site-url {url} → 200 {site_url, webhook_url} — the
   # dwb-6 deferred-URL step. After the user deploys the template repo (Vercel),
   # they paste the live site URL here; the control plane points the instance's

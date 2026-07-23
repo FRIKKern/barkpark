@@ -2588,6 +2588,109 @@ defmodule BarkparkCloud.Registry do
     )
   end
 
+  # The one permission set the app-token exchange mints (mobile charter D6,
+  # ratified R2). Deliberately admin-free: the instance derives the membership
+  # role FROM the permissions, so this list is what keeps the minted credential
+  # member-shaped.
+  @app_token_permissions ["read", "write", "chat"]
+
+  @doc """
+  Mint a member-reachable, workspace-bound instance app token (mobile charter
+  D4) — `mint_studio_link/2`'s sibling for the Barkpark Tasks mobile app.
+
+  Uses the stored per-instance admin token SERVER-SIDE to call the instance's
+  `POST /v1/auth/app-tokens`, which JIT-provisions `user_email`'s account and
+  mints a `#{inspect(@app_token_permissions)}` api token bound to the
+  instance's bootstrap workspace (or its Default workspace when none). The
+  admin token itself NEVER leaves this function (not in the payload, not
+  logged) — but unlike studio-link the PLAINTEXT minted app token IS the
+  payload: `{:ok, %{token, workspace_id, permissions, expires_at}}`. The
+  caller must never log or audit the token value.
+
+  Errors: `:not_live` (no `url` yet — still provisioning/failed),
+  `:no_admin_token` (row never got one; mirrors `/credentials`),
+  `:decrypt_failed` (tampered ciphertext, fail-closed),
+  `:app_token_unsupported` (the instance 404s the mint route — a pre-exchange
+  server, charter D8; the client falls back to manual token paste),
+  `:instance_error` (the instance call failed or returned a non-token).
+
+  Transport is the same swappable `:studio_link_http_client` seam
+  `mint_studio_link/2` uses (tests wire `StudioLinkFakeHttpClient`).
+  """
+  @spec mint_app_token(Barkpark.t(), String.t()) ::
+          {:ok,
+           %{
+             token: String.t(),
+             workspace_id: String.t() | nil,
+             permissions: [String.t()],
+             expires_at: String.t() | nil
+           }}
+          | {:error,
+             :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :app_token_unsupported
+             | :instance_error}
+  def mint_app_token(%Barkpark{url: url} = bp, user_email)
+      when is_binary(url) and url != "" and is_binary(user_email) and user_email != "" do
+    case reveal_admin_token(bp) do
+      {:ok, nil} ->
+        {:error, :no_admin_token}
+
+      :error ->
+        {:error, :decrypt_failed}
+
+      {:ok, admin_token} ->
+        base = String.trim_trailing(url, "/")
+
+        body =
+          Jason.encode!(%{
+            email: user_email,
+            workspace: bp.bootstrap_workspace,
+            permissions: @app_token_permissions,
+            label: "app:" <> user_email
+          })
+
+        request = %{
+          method: :post,
+          url: base <> "/v1/auth/app-tokens",
+          headers: [
+            {"Authorization", "Bearer " <> admin_token},
+            {"Accept", "application/json"},
+            {"Content-Type", "application/json"}
+          ],
+          body: body
+        }
+
+        case studio_link_http_client().request(request) do
+          {:ok, %{status: 201, body: body}} ->
+            case Jason.decode(body) do
+              {:ok, %{"token" => token} = decoded} when is_binary(token) and token != "" ->
+                {:ok,
+                 %{
+                   token: token,
+                   workspace_id: decoded["workspace_id"],
+                   permissions: decoded["permissions"] || @app_token_permissions,
+                   expires_at: decoded["expires_at"]
+                 }}
+
+              _ ->
+                {:error, :instance_error}
+            end
+
+          # A pre-exchange instance has no /v1/auth/app-tokens route: Phoenix
+          # 404s. That is capability absence, not an outage (charter D8).
+          {:ok, %{status: 404}} ->
+            {:error, :app_token_unsupported}
+
+          _ ->
+            {:error, :instance_error}
+        end
+    end
+  end
+
+  def mint_app_token(_, _), do: {:error, :not_live}
+
   @doc """
   Decrypt a Barkpark's stored content-bootstrap outputs (dwb-4) back to the map
   the dashboard/deploy step consumes:
