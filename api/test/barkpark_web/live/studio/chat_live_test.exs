@@ -1008,7 +1008,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # shrink the cap far below the flood; merge into the live :claude_chat env
       # so `enabled`/`command` survive, and restore on exit.
       prev = Application.get_env(:barkpark, :claude_chat, [])
-      Application.put_env(:barkpark, :claude_chat, Keyword.put(prev, :max_streaming_display_bytes, 4096))
+
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(prev, :max_streaming_display_bytes, 4096)
+      )
+
       on_exit(fn -> Application.put_env(:barkpark, :claude_chat, prev) end)
 
       # Well-formed prose with balanced-fence block boundaries — the buffer stays
@@ -1041,7 +1047,10 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(
         view.pid,
         {:claude_chat_event,
-         %{"type" => "assistant", "message" => %{"content" => [%{"type" => "text", "text" => full}]}}}
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => full}]}
+         }}
       )
 
       done = render(view)
@@ -1054,7 +1063,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # accumulator nor the per-delta full-prefix re-render can keep growing.
     test "once capped, further deltas do not grow the frozen display", %{view: view} do
       prev = Application.get_env(:barkpark, :claude_chat, [])
-      Application.put_env(:barkpark, :claude_chat, Keyword.put(prev, :max_streaming_display_bytes, 2048))
+
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(prev, :max_streaming_display_bytes, 2048)
+      )
+
       on_exit(fn -> Application.put_env(:barkpark, :claude_chat, prev) end)
 
       chunk = "The quick brown fox jumps over the lazy dog.\n\n"
