@@ -92,6 +92,8 @@ func runCloud(out *writer, g globals, args []string) int {
 		return runCloudAzure(out, g, args[1:])
 	case "instance", "instances":
 		return runCloudInstance(out, g, args[1:])
+	case "support", "supports":
+		return runCloudSupport(out, g, args[1:])
 	case "workspace", "workspaces":
 		return runCloudWorkspace(out, g, args[1:])
 	case "providers":

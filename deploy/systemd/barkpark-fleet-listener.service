@@ -1,0 +1,39 @@
+# barkpark-fleet-listener — the Personal Dev Fleet SUPPORT listener (Wave C,
+# PDF-D62). systemd supervises the ONE foreground loop (tooling/fleet's
+# fleet-run.sh `listen` mode): claim → execute in-turn → stamp → close, with the
+# presence beat INSIDE the loop so it shares fate with the worker (PDF-D22 — a
+# detached beat sidecar is banned; this unit is a supervisor, not a sidecar).
+#
+# Installed + enabled by `bp cloud support add`, which also writes:
+#   /etc/barkpark/fleet-listener.env  (0600, root-only — it carries the minted
+#                                      ledger bearer) with:
+#     BARKPARK_API_URL     the MAIN Barkpark this support serves (exact var name
+#                          — bp's env context reads BARKPARK_API_URL/_API_TOKEN;
+#                          BARKPARK_TOKEN without _API_ is a shadow hazard)
+#     BARKPARK_API_TOKEN   the support token minted on the main's ledger
+#     FLEET_WORKER         this support's worker name (the roster row identity)
+#     FLEET_AGENT          claude | codex — the one-line exec adapter seam
+#     FLEET_MAX_CLASS      declared capacity CEILING from the box's MEASURED
+#                          class (fleet-run.sh `capacity` is the measurer)
+#
+# Agent PROVIDER KEYS ARE NEVER written by the provisioner (PDF-D62): the
+# developer appends ANTHROPIC_API_KEY / OPENAI_API_KEY to fleet-listener.env
+# over SSH themselves — `bp cloud support add` prints the exact one-liner.
+# Keep the env file off this checkout; only the unit is source-controlled.
+[Unit]
+Description=Barkpark fleet support listener (claims + runs orders from the main's ledger)
+Documentation=file:///opt/barkpark-fleet/fleet-protocol.md
+After=network-online.target barkpark.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+# Fail cleanly (not restart-looping) if the provisioner has not written this yet.
+EnvironmentFile=/etc/barkpark/fleet-listener.env
+ExecStart=/usr/bin/env bash /opt/barkpark-fleet/fleet-run.sh listen ${FLEET_WORKER}
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

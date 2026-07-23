@@ -1524,6 +1524,7 @@ function studioTokensGen() {
   const p = tokens.color.presence.palette;
   const cf = tokens.color.sheetCf;
   const sh = tokens.color.statusHealth;
+  const fs = tokens.color.fleetStatus;
   const list = (arr) => arr.map((h) => `"${h}"`).join(", ");
   const life = tokens.lifecycle;
   const lifeRows = LIFE_ORDER.map((s) => {
@@ -1586,6 +1587,20 @@ function studioTokensGen() {
     "",
     "  # Neutral gray fallback for an unrecognised / missing status.",
     `  def status_health_unknown, do: "${sh.unknown}"`,
+    "",
+    "  # Personal Dev Fleet listener-status DATA tones (fleet_live.ex @pills dot +",
+    "  # track tint at /admin/fleet) — the PDF-D23 vocabulary as inline-style hex,",
+    "  # categorical listener-liveness DATA, not a CSS role. STRING keys: the",
+    "  # consumer keys by the runtime status string; an unrecognised status falls",
+    "  # back to \"idle\" in FleetLive.pill/1.",
+    "  def fleet_status,",
+    "    do: %{",
+    `      "working" => "${fs.working}",`,
+    `      "idle" => "${fs.idle}",`,
+    `      "blocked" => "${fs.blocked}",`,
+    `      "provisioning" => "${fs.provisioning}",`,
+    `      "offline" => "${fs.offline}"`,
+    "    }",
     "",
     "  # Lifecycle mirror — one row per state, canonical emission order. glyph +",
     "  # ascii are text CONTENT; light/dark are the adaptive hue LABELS (the applied",

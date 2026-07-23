@@ -49,23 +49,24 @@ defmodule Barkpark.PluginTopMenuTest do
       [tabs: Barkpark.Plugins.Tasks.top_menu_entries()]
     end
 
-    test "returns exactly one Projects tab pointing at the board", %{tabs: tabs} do
+    test "returns the Projects board tab and the Fleet roster tab", %{tabs: tabs} do
       assert is_list(tabs)
-      assert length(tabs) == 1
-      [tab] = tabs
-      assert tab.label == "Projects"
-      assert tab.path == "/admin/projects"
+      assert [%{label: "Projects"}, %{label: "Fleet"}] = tabs
+      assert Enum.map(tabs, & &1.path) == ["/admin/projects", "/admin/fleet"]
     end
 
-    test "orders after the built-in tabs (35, ahead of the default 100)", %{tabs: tabs} do
-      [tab] = tabs
-      assert tab.order == 35
-      assert tab.icon == "columns"
+    test "orders after the built-in tabs (35/36, ahead of the default 100)", %{tabs: tabs} do
+      [projects, fleet] = tabs
+      assert projects.order == 35
+      assert projects.icon == "columns"
+      assert fleet.order == 36
+      assert fleet.icon == "activity"
     end
 
-    test "active_when covers any /admin/projects path", %{tabs: tabs} do
-      [tab] = tabs
-      assert tab.active_when == "/admin/projects"
+    test "active_when covers each tab's own /admin subtree", %{tabs: tabs} do
+      [projects, fleet] = tabs
+      assert projects.active_when == "/admin/projects"
+      assert fleet.active_when == "/admin/fleet"
     end
   end
 end

@@ -1,0 +1,41 @@
+{
+  "run_id": "grip-20260723T093000Z",
+  "recipes": [
+    {
+      "subject": "main Elixir Test gate — completed-run status at origin/main tip",
+      "quantity": "no-completed-run-at-tip:most-recent-completed-run-is-1-commit-behind-and-red-4-failures",
+      "rerun": "git fetch origin main -q && git rev-parse origin/main && gh run list --workflow elixir --branch main --limit 6 --json status,conclusion,headSha,createdAt",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-23T09:30:00Z",
+      "note": "origin/main tip is 0f2497d55ee5f3c2e5430c2208e9dcf77c2b2f94 (#5935, doctor.ex dirty-suffix parse fix — unrelated to nav/Fleet). Its OWN elixir-workflow run (headSha match, createdAt 08:34:47Z) has status=completed but conclusion=CANCELLED — the gate has never produced a completed (pass/fail) verdict for the exact current tip. The nearest completed run is for the immediate parent commit d4cf409ba75ee10988e2df148fa3474c2b0780e4 (#5932, bp cloud support add), createdAt 08:46:54Z, conclusion=FAILURE, run id 29992318293. Its failing-test log: '27 doctests, 12549 tests, 4 failures, 48 excluded' with exactly the 4 named failures the digest cites: 3x Barkpark.PluginTopMenuTest (top_menu_entries/0 — 'returns exactly one Projects tab', 'orders after the built-in tabs', 'active_when covers any /admin/projects path') + 1x BarkparkWeb.Studio.NavParitySweepTest ('reflection completeness guard every studio-layout live route is curated in @routes'). Since 0f2497d55 only touches api/lib/mix/tasks (doctor staleness parsing) and not nav.ex/plugin_top_menu.ex/studio_layout, the same 4 failures almost certainly persist at tip, but this is inference, not a completed run AT the tip SHA — flag for Decide as a still-open operational gap (gate has a hole: cancelled runs never re-triggered). Independent corroboration: PR #5949's own Test (Elixir) job (run 29992803300, off a different, newer commit) shows the IDENTICAL 4 failures verbatim ('27 doctests, 12550 tests, 4 failures, 48 excluded') confirming these are pre-existing/inherited, not introduced by #5949's changes."
+    },
+    {
+      "subject": "nav-contract drift (PluginTopMenuTest x3 + NavParitySweepTest x1) — open PR or filed task already fixing it",
+      "quantity": "zero-open-PR-zero-filed-task:untracked",
+      "rerun": "gh pr list --state open --json number,title,headRefName; bp search query 'PluginTopMenuTest NavParitySweepTest failing red gate' -o json; bp search query 'plugin_top_menu nav_parity fleet tab' -o json",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-23T09:30:00Z",
+      "note": "12 open PRs enumerated (#5951,#5950,#5949,#5937,#5936,#5922,#5918,#5901,#5840,#5754,#2907 + in-flight); none touch plugin_top_menu.ex, nav.ex, or the studio NavParitySweepTest/PluginTopMenuTest files per title/branch review. bp search for the failing-test names surfaces only a DIFFERENT, already-closed gate-fix task (task-0d231ad07f8ad639, StudioAnonLockdownTest, status=done, unrelated file) and a DIFFERENT still-open gate task about the FORMAT gate (format-gate-red-on-main-teaches-dismissal, status=open, scoped to mix format --check-formatted, not Test). No task tracks the PluginTopMenuTest/NavParitySweepTest failures specifically — Decide should file the side-task the digest anticipates; it is not a duplicate of either existing task."
+    },
+    {
+      "subject": "claude_chat.ex / chat_live.ex — open-PR collision + task-felix-w21-bl-claudechat-buffer-parity claim state",
+      "quantity": "zero-collision-PRs:task-open-unclaimed",
+      "rerun": "for n in $(gh pr list --state open --json number -q '.[].number'); do gh pr diff $n --name-only | grep -iE 'claude_chat|chat_live' && echo COLLISION $n; done; bp task get task-felix-w21-bl-claudechat-buffer-parity -o json",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-23T09:30:00Z",
+      "note": "Looped all 12 open PR numbers through `gh pr diff --name-only | grep -iE 'claude_chat|chat_live'`: zero matches, zero collisions. task-felix-w21-bl-claudechat-buffer-parity: lifecycle_status=open, claim=None, assignee=None — still available for S1's builder, no concurrent-session dup risk detected at verify time."
+    },
+    {
+      "subject": "#5949 (Codex session buffer cap) current merge/gate state",
+      "quantity": "open-unmerged-red:mergeStateStatus-UNSTABLE",
+      "rerun": "gh pr view 5949 --json state,mergeStateStatus; gh pr checks 5949",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-23T09:30:00Z",
+      "note": "state=OPEN, mergeStateStatus=UNSTABLE (has not merged since the survey). Checks: Doc budgets+anchors FAIL, Format(advisory) FAIL, Sobelow FAIL, Test(Elixir) FAIL, Vercel(barkpark) FAIL, Vercel(demo) FAIL; a handful pass (Boundary/CVE/Re-land/Filebase/PR-task-gate/Validation-perf/Vercel-Preview-Comments). Its own Test(Elixir) failure log is the SAME 4 pre-existing nav failures (12550 tests, 4 failures) plus whatever its own changes add on top — needs a closer diff to separate #5949-caused reds from inherited ones, but the 4 named tests are verbatim identical to main's baseline red. Conclusion: #5949 is still reference-only, NOT a mergeable codex-twin template yet; S1's brief should keep citing validator.ex, not #5949, exactly as the direction already states."
+    }
+  ]
+}

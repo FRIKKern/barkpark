@@ -1,0 +1,53 @@
+{
+  "run_id": "grip-20260723T091148Z",
+  "subject_epic": "connectors",
+  "slice": "connectors-w34-guerrilla-path-proof",
+  "verifier": "guerrilla-path-proof",
+  "recipes": [
+    {
+      "subject": "cloud-sandbox-runner is NOT resolvable on the live barkpark.service BEAM's actual PATH today (candidate 1 genuinely unbuilt/reachable, re-confirmed on-host)",
+      "quantity": "which-exit-code",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx -o ConnectTimeout=10 -o BatchMode=yes root@157.180.90.121 'PID=$(pgrep -f \"beam.*barkpark\" | head -1); P=$(tr \"\\0\" \"\\n\" < /proc/$PID/environ | grep ^PATH= | cut -d= -f2-); cd /opt/barkpark/api && env PATH=\"$P\" which cloud-sandbox-runner; echo exit:$?'",
+      "expect": "exit:1 (which prints nothing, no match) — matches the D263 backlog claim that nothing in deploy/ installs the runner onto PATH",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-23T09:11:48Z"
+    },
+    {
+      "subject": "CRITICAL FLIP-AXIS RESOLUTION: node itself is NOT resolvable on the live BEAM's actual PATH either — a bare '#!/usr/bin/env node' shebang invocation of the copied cloud-sandbox-runner.mjs would fail to spawn when the BEAM execs it, even after the file lands in /usr/local/bin. This REFUTES the digest's 'asdf shim walk-up is plausible' framing: there is no asdf shims directory anywhere on this PATH, and the systemd unit (barkpark.service) carries no Environment= PATH override, so it inherits systemd's bare default PATH with zero asdf awareness",
+      "quantity": "which-exit-code + literal PATH value",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx -o ConnectTimeout=10 -o BatchMode=yes root@157.180.90.121 'PID=$(pgrep -f \"beam.*barkpark\" | head -1); tr \"\\0\" \"\\n\" < /proc/$PID/environ | grep ^PATH=; P=$(tr \"\\0\" \"\\n\" < /proc/$PID/environ | grep ^PATH= | cut -d= -f2-); env PATH=\"$P\" which node; echo exit:$?; env PATH=\"$P\" node -v'",
+      "expect": "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin (no asdf shims dir present); which node exit:1; 'node -v' -> 'sh: node: not found'",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-23T09:11:48Z"
+    },
+    {
+      "subject": "the wrapper fallback (exec /usr/local/bin/barkpark-node) is CONFIRMED VIABLE and de-risked: barkpark-node is a real, dependency-free node v26.5.0 ELF binary already present on the box, and it correctly runs an ESM .mjs file with argv passthrough — so a wrapper script (or a rewritten absolute shebang) pointed at it is a PATH-assumption-free install shape",
+      "quantity": "direct-invocation + argv/stdout roundtrip",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx -o ConnectTimeout=10 -o BatchMode=yes root@157.180.90.121 '/usr/local/bin/barkpark-node -v; echo \"console.log(JSON.stringify({ok:true, argv:process.argv.slice(2)}))\" > /tmp/t.mjs; /usr/local/bin/barkpark-node /tmp/t.mjs foo bar; echo exit:$?; rm -f /tmp/t.mjs'",
+      "expect": "v26.5.0; then {\"ok\":true,\"argv\":[\"foo\",\"bar\"]}; exit:0",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-23T09:11:48Z"
+    },
+    {
+      "subject": "a second viable fix shape exists per the D34 charter precedent: asdf has nodejs 26.5.0 installed under an absolute path, so ExecStart-style absolute-path invocation (bypassing PATH/env resolution entirely) also works — but /opt/barkpark/api carries no .tool-versions pin, and the running barkpark.service has no asdf awareness, so this path is available only if a builder hardcodes it (more fragile across host asdf re-installs than the already-deployed barkpark-node binary)",
+      "quantity": "asdf-where-nodejs-absolute-path",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx -o ConnectTimeout=10 -o BatchMode=yes root@157.180.90.121 'export PATH=\"$PATH:/root/.asdf/bin:/root/.asdf/shims\"; asdf where nodejs; asdf list nodejs; cat /opt/barkpark/api/.tool-versions 2>&1; systemctl cat barkpark.service | grep -iE \"Environment|ExecStart\"'",
+      "expect": "/root/.asdf/installs/nodejs/26.5.0; ' *26.5.0'; .tool-versions: No such file or directory; barkpark.service unit has ExecStart=/opt/barkpark/api/start.sh and NO Environment= line",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-23T09:11:48Z"
+    },
+    {
+      "subject": "the /usr/local/bin precedent for on-PATH installed binaries (bp CLI) re-confirmed under the exact same real BEAM PATH used for the node/runner checks above — the install SHAPE (copy to /usr/local/bin) is proven to work for PATH-resolvable binaries in general; the failure above is specific to the env-node shebang mechanism, not to /usr/local/bin as a destination",
+      "quantity": "which-bp + directory-listing",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx -o ConnectTimeout=10 -o BatchMode=yes root@157.180.90.121 'PID=$(pgrep -f \"beam.*barkpark\" | head -1); P=$(tr \"\\0\" \"\\n\" < /proc/$PID/environ | grep ^PATH= | cut -d= -f2-); env PATH=\"$P\" which bp; ls -la /usr/local/bin/ | grep -iE \"barkpark|^.*bp$|node\"'",
+      "expect": "/usr/local/bin/bp; ls shows barkpark-agent, barkpark-mcp, barkpark-node, bp present — cloud-sandbox-runner ABSENT",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-23T09:11:48Z"
+    }
+  ]
+}
