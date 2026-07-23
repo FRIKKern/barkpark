@@ -2160,16 +2160,23 @@ NOT wave-introduced); invisible on Linux CI (64KiB pipes). Fix = drain concurren
 (goroutine + io.Copy started before Execute). Mutation proof is built in: the isolated run fails
 in ~15s before the fix, passes after.
 
-**The wave (4 slices, all round 1, disjoint files; builders OPUS per E6; gates per slice in the
+**The wave (3 slices, all round 1, disjoint files; builders OPUS per E6; gates per slice in the
 task briefs — all dry-run green at Decide):**
 
-1. **w17-rail-stop-hover** (medium) — D99. internal/taskboard: types.go + compose.go +
+1. **ttw17-rail-stop-hover** (medium) — D99. internal/taskboard: types.go + compose.go +
    program.go + compose_test.go (+ detail_render.go only if the paint seam demands it).
-2. **w17-d43-chip-delegate** (small) — D100. internal/pdrender: inline.go + taskchip_test.go
+2. **ttw17-d43-chip-delegate** (small) — D100. internal/pdrender: inline.go + taskchip_test.go
    (+ a delegate-parity tripwire test so the chip vocabulary can't silently re-fork).
 3. **ttm-followup-help-copy** (small, pre-existing task, ACs corrected per D101) —
    internal/cli: tasks_board_cmd.go + tasks_board_cmd_test.go.
-4. **w17-cli-pipe-capture-fix** (small) — D103. internal/cli/cli_test.go only.
+
+**D103 slice WITHDRAWN at Decide (concurrent-epic dedup, not a scope cut):** filing the pipe-
+capture fix tripped the ledger's duplicate tripwire — **pdf-bl-go-test-pipe-deadlock**
+(personal-dev-fleet Wave C, rider PDF-D65b) already carries the SAME fix on the SAME file
+(internal/cli/cli_test.go), with criteria 0–1 already stamped met (fix built, awaiting merge).
+W17 does NOT duplicate it: the D103 root-cause record above stands, the W17 slice was deleted,
+and until that PR merges no W17 gate runs a bare `go test ./internal/cli` without `-run` filters
+on small-pipe hosts.
 
 **Named backlog (filed as published tasks, not faked):** the LIVE tmux mouse "feels native" drive
 (cannot be proven offline); the D43 Elixir half (walk.ex → status_vocab delegate + gate coverage
