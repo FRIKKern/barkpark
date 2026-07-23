@@ -141,11 +141,13 @@ func composeAt(m Model, width, height int) string {
 			avail = 1
 		}
 		body, stops := m.frameContent(top, width, now)
-		// Narrow-mode reading frames have no pointer-stop resolver this wave (the
-		// hover router is wide-only, charter D99) — so no hover paint here. The
-		// windowFrame paint seam already serves them; wiring a narrow resolver is
-		// named residue in the PR.
-		win := windowFrame(body, stops, top.Cursor, top.Scroll, -1, avail, width)
+		// The narrow reading frame paints the hovered rail stop (charter D99 /
+		// D105, the wide right pane's twin at line 191): mouseMotion resolves the
+		// pointer through ComposeHitMap into m.ui.HoverStop, and windowFrame tints
+		// that stop's body line in the accent foreground. HoverStop defaults to -1
+		// (newModel; keyboard input clears it), so a pointer-free frame paints
+		// nothing and the goldens stay byte-frozen.
+		win := windowFrame(body, stops, top.Cursor, top.Scroll, m.ui.HoverStop, avail, width)
 		for len(win) < avail {
 			win = append(win, "")
 		}

@@ -131,9 +131,10 @@ func windowTargets(targets []LineTarget, top, avail int) []LineTarget {
 // twin of windowFrame (compose.go). It maps each VISIBLE body line to a target —
 // a rail stop's line (Stop.Line) becomes LineSpineRow carrying that stop's index,
 // prose becomes LineNone — and stamps the ↑/↓ affordances on the same first/last
-// rows windowFrame overwrites. It reuses windowFrame's exact top math (absolute
-// Scroll>=0, else followTop for cursor-follow) so a click resolves against the
-// lines actually painted. `avail` is the reading viewport height Compose reserves.
+// rows windowFrame overwrites. It shares windowFrame's window-top producer
+// (readingWindowTop, charter D42/D105) — one function, not a re-inlined copy — so
+// the hit map and the paint can never drift about which body line a screen row
+// shows. `avail` is the reading viewport height Compose reserves.
 func frameHitTargets(body []string, stops []Stop, cursor, scroll, avail int) []LineTarget {
 	if avail <= 0 {
 		return nil
@@ -158,18 +159,7 @@ func frameHitTargets(body []string, stops []Stop, cursor, scroll, avail int) []L
 		}
 		return out
 	}
-	var top int
-	if scroll >= 0 {
-		top = scroll
-	} else {
-		top = followTop(len(body), stops, cursor, avail)
-	}
-	if top < 0 {
-		top = 0
-	}
-	if top > len(body)-avail {
-		top = len(body) - avail
-	}
+	top := readingWindowTop(len(body), stops, cursor, scroll, avail)
 	out := make([]LineTarget, avail)
 	for i := 0; i < avail; i++ {
 		out[i] = mk(top + i)
