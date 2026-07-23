@@ -52,6 +52,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   import Barkpark.PortableDoc.Render.Util,
     only: [escape_html: 1, escape_attr: 1, safe_url: 1, tone_palette: 1]
 
+  alias Barkpark.PortableDoc.Render.StatusVocab
+
   # Mono font is theme-INVARIANT (charter D28) — stays a compile-time constant.
   @font_mono Barkpark.PortableDoc.Render.Palettes.font_mono()
 
@@ -668,14 +670,25 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp task_status_attr(nil), do: ""
   defp task_status_attr(s), do: ~s( data-task-status="#{escape_html(s)}")
 
-  # Status glyphs — kept in LOCKSTEP with Go pdrender's taskStatusGlyph (the
-  # terminal chip). Unknown/missing status gets the neutral pointer.
-  defp task_glyph("open"), do: "○"
-  defp task_glyph("in_progress"), do: "◐"
-  defp task_glyph("blocked"), do: "⊘"
-  defp task_glyph("done"), do: "●"
-  defp task_glyph("cancelled"), do: "✕"
-  defp task_glyph(_), do: "▸"
+  # Status glyph — DELEGATES to the StatusVocab manifest (the white ladder,
+  # design/status-manifest.json) so this View + email shared chip cannot drift
+  # from the one source of truth. A known status resolves status → role → glyph;
+  # the `progress` spinner role degrades to the ⠿ still-frame per charter D5 —
+  # the SAME still-frame the sibling Elixir emitter fleet_email.ex chip uses
+  # (fleet_email.ex:580), and DELIBERATELY not Go pdrender's terminal ⠋ frame:
+  # the cross-language delta is per-surface consistency, not drift (the coverage
+  # test in walk_test.exs pins this). An unknown / missing status (not a manifest
+  # key) keeps the neutral ▸ pointer sentinel — neither a ladder glyph nor the
+  # spinner.
+  defp task_glyph(status) do
+    case StatusVocab.statuses() do
+      %{^status => role} ->
+        if StatusVocab.spinner?(role), do: "⠿", else: StatusVocab.glyph_for_role(role)
+
+      _ ->
+        "▸"
+    end
+  end
 
   # Inline live value (lvw-t1/lvw-t2, wire §3/§6/§8). A RESOLVED (target,
   # field) pair — present in the palette's `:values` map (`%{{target, field}
