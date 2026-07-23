@@ -89,6 +89,49 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     """
   end
 
+  # A moduledoc row WITH its tier column captured: `POST /path admin ...`. The
+  # @row_re above deliberately stops at method+path, so it is structurally blind
+  # to the `user|admin` tier prose — a row could claim the wrong tier and the
+  # method/path tripwire would stay green. This re-derives the tier explicitly.
+  @tier_row_re ~r/^\s{4,}(GET|POST|PUT|PATCH|DELETE)\s+(\S+)\s+(user|admin)\b/
+
+  defp documented_tier(method, path) do
+    moduledoc_block()
+    |> String.split("\n")
+    |> Enum.find_value(fn line ->
+      case Regex.run(@tier_row_re, line) do
+        [_, ^method, ^path, tier] -> tier
+        _ -> nil
+      end
+    end)
+  end
+
+  # The Auth.require_* guard the route body invokes, read from source.
+  defp route_guard(method, path) do
+    verb = String.downcase(method)
+    pattern = ~r/#{verb}\s+"#{Regex.escape(path)}"\s+do\s*\n\s*conn\s*=\s*Auth\.(require_\w+)/
+
+    case Regex.run(pattern, source()) do
+      [_, guard] -> guard
+      _ -> nil
+    end
+  end
+
+  test "POST /v1/github/installations documents the team-admin tier (matches require_team_admin)" do
+    # The route is guarded by Auth.require_team_admin (router.ex ~:3252); its
+    # moduledoc row must say `admin`, not `user`. Assert BOTH the documented tier
+    # and the live source guard so reverting the row to `user` — or dropping the
+    # guard — fails this test. The method+path tripwire cannot catch this drift.
+    assert route_guard("POST", "/v1/github/installations") == "require_team_admin",
+           "expected the POST /v1/github/installations route body to call Auth.require_team_admin"
+
+    assert documented_tier("POST", "/v1/github/installations") == "admin", """
+    The moduledoc route-table row for POST /v1/github/installations must state the
+    `admin` tier — the route is guarded by Auth.require_team_admin. Fix the tier
+    column in the "## Route table" block.
+    """
+  end
+
   test "every moduledoc route-table row still maps to a declared route" do
     stale = MapSet.difference(documented_routes(), declared_routes())
 

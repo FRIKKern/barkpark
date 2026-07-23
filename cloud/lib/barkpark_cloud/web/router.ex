@@ -106,7 +106,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/hetzner/catalog  user      the allowlisted Hetzner action catalog (resource/verb/tier/params)
       GET     /v1/hetzner/overview admin     server-side Hetzner estate snapshot (token never reaches the browser)
       GET     /v1/github/installation      user  the team's GitHub connection state (no secrets)
-      POST    /v1/github/installations     user  record a GitHub App install (503 if unconfigured)
+      POST    /v1/github/installations     admin record a GitHub App install (require_team_admin; 503 if unconfigured)
       DELETE  /v1/github/installation      user  disconnect GitHub (404 if none)
       GET     /v1/github/repos             user  the installation's repos (the "Import Git Repository" picker)
       POST    /v1/github/repos             admin create a repo from a template + push app files (deploy button)
