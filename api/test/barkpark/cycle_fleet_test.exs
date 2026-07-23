@@ -2887,6 +2887,108 @@ defmodule Barkpark.CycleFleetTest do
     end
   end
 
+  describe "authority-lock concurrency (mutation-proof)" do
+    # Charter D115 / felix-w18 — bind_assignment_task/2 acquires FOR SHARE on the task's
+    # authority join (assignment -> wave -> task document -> dataset) BEFORE inserting the
+    # AssignmentTask row. The dataset row is the ONLY mutation-sensitive lock target:
+    # the assignment row is FK-masked (bind's insert_all FOR-KEY-SHAREs it, so 55P03 fires
+    # even with the SELECT lock removed) and the wave row is reached by RI machinery too —
+    # both are false-green. Locking the dataset row proves the SELECT's own FOR SHARE:
+    # with the lock present a concurrent FOR UPDATE holder forces 55P03; delete the
+    # `lock: "FOR SHARE"` clause from cycle_fleet.ex and this same test returns {:ok}.
+    #
+    # Runs unboxed (two real Postgres connections that actually block each other); the
+    # sandbox's single shared transaction cannot observe cross-connection lock ordering.
+    # Manual teardown via Tenancy.delete_workspace/1 since unboxed writes are not rolled back.
+    test "bind_assignment_task FOR SHARE serializes against a concurrent dataset-row lock (55P03)" do
+      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+        workspace = Barkpark.TenancyFixtures.create_workspace!("cycle-lock-mutation")
+        project = Barkpark.TenancyFixtures.create_project!(workspace, "cycle-lock-mutation")
+
+        scope = %{
+          workspace_id: workspace.id,
+          project_id: project.id,
+          epic_id: "cycle-lock-mutation",
+          wave_id: "wave-1"
+        }
+
+        try do
+          assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 1))
+          complete_experiments(scope)
+          assert {:ok, _plan} = CycleFleet.seal_build_plan(scope, build_plan_attrs(1))
+          chain = create_retry_chain(scope, "legendary-builder")
+          assignment = hd(chain)
+
+          {:ok, dataset} = Tenancy.get_or_create_dataset(project, "production")
+
+          task =
+            %Document{}
+            |> Document.changeset(%{
+              doc_id: "drafts.cycle-lock-mutation-task",
+              type: "task",
+              dataset: "production",
+              title: "Cycle lock mutation task",
+              status: "draft",
+              content: %{"kind" => "task", "lifecycle_status" => "open"},
+              rev: Ecto.UUID.generate(),
+              workspace_id: workspace.id,
+              project_id: project.id,
+              dataset_id: dataset.id
+            })
+            |> Repo.insert!()
+
+          parent = self()
+
+          # Connection A: a real second connection holds FOR UPDATE on the task's dataset
+          # row and rendezvous-signals the parent BEFORE releasing (holder-first).
+          holder =
+            Task.async(fn ->
+              Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+                Repo.transaction(fn ->
+                  Repo.query!("SELECT id FROM datasets WHERE id = $1 FOR UPDATE", [
+                    Ecto.UUID.dump!(dataset.id)
+                  ])
+
+                  send(parent, :dataset_row_locked)
+
+                  receive do
+                    :release -> :ok
+                  after
+                    10_000 -> :timeout
+                  end
+                end)
+              end)
+            end)
+
+          assert_receive :dataset_row_locked, 5_000
+
+          # Connection B: the test process (inside unboxed_run) drives the REAL
+          # bind_assignment_task/2 under a SESSION-level lock_timeout. SET (not SET LOCAL,
+          # which is a no-op outside bind's own txn) so the guard survives into bind's
+          # transaction; RESET to 0 in the after-block — the GUC persists on the pooled
+          # connection and would poison later tests.
+          try do
+            Repo.query!("SET lock_timeout = '750ms'")
+
+            error =
+              assert_raise Postgrex.Error, fn ->
+                CycleFleet.bind_assignment_task(assignment, task.id)
+              end
+
+            assert error.postgres.code == :lock_not_available
+            assert error.postgres.pg_code == "55P03"
+          after
+            Repo.query!("SET lock_timeout = 0")
+            send(holder.pid, :release)
+            Task.await(holder, 10_000)
+          end
+        after
+          assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+        end
+      end)
+    end
+  end
+
   defp legendary_wave_attrs(scope, count) do
     count = max(count, 15)
 
