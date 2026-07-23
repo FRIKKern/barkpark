@@ -1517,7 +1517,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         )
 
         if port in Port.list(), do: Port.close(port)
-        send(state.sink, {:claude_chat_error, :buffer_overflow, read_stderr_tail(state[:stderr_path])})
+
+        send(
+          state.sink,
+          {:claude_chat_error, :buffer_overflow, read_stderr_tail(state[:stderr_path])}
+        )
+
         {:stop, :normal, %{state | port: nil}}
       else
         {events, rest} = ClaudeChat.parse_chunk(state.buffer, chunk)
