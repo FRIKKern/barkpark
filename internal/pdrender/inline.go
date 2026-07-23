@@ -236,7 +236,7 @@ func (ir InlineRenderer) renderTaskChip(chip *TaskChip, n map[string]any, ctx Re
 // outside the known set keeps the neutral ▸ pointer.
 func taskStatusGlyph(status string) string {
 	switch status {
-	case "open", "in_progress", "blocked", "done", "cancelled":
+	case "open", "ready", "in_progress", "blocked", "done", "closed", "cancelled", "considering", "researching":
 		return glyphForRole(roleForStatus(status))
 	default:
 		return "▸"
