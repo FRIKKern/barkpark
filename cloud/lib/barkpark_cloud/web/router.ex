@@ -1895,10 +1895,22 @@ defmodule BarkparkCloud.Web.Router do
   # a wrong-team / unknown / malformed id is the same 404 (no existence leak).
   # ONLY a support row is removable here — a main (or an ungrouped legacy row) is
   # refused 409, so this endpoint can never tear down the developer's home base.
-  # ADMIN-gated, like DELETE /v1/barkparks/:id (require_primary_team_admin halts
-  # 401 / 422 no_team / 403 for a plain member).
+  # Credential-aware, the SAME family as POST /v1/fleet/supports and go-live: a
+  # credential that can BIND can UNBIND — a PAT must carry the `deploy` ability;
+  # a session must be team-admin (owner/admin). Anon 401. The no-team case falls
+  # through to the downstream 404 (POST's is 422 — the asymmetry is left for
+  # backlog pdf-bl-cp-no-team-status-mismatch, deliberately not normalized here).
   delete "/v1/fleet/supports/:id" do
-    conn = Auth.require_primary_team_admin(conn)
+    conn = Auth.require_user_or_pat(conn, [])
+
+    conn =
+      cond do
+        conn.halted -> conn
+        conn.assigns[:current_token] -> Auth.require_ability(conn, "deploy")
+        is_nil(conn.assigns[:current_team]) -> conn
+        Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
+        true -> conn |> json(403, %{error: "forbidden"}) |> halt()
+      end
 
     cond do
       conn.halted ->

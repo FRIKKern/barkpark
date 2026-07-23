@@ -72,6 +72,25 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
     main
   end
 
+  # A support row already bound under a fresh in-team main, plus the team's user
+  # holding `role`. Returns {user, team, support} — the credential-gating tests
+  # mint their own PAT / session off the returned user + team.
+  defp support_in_team(role) do
+    {user, team, _session} = user_with_role(role)
+    main = main_fixture(team)
+    n = System.unique_integer([:positive])
+
+    {:ok, support} =
+      Registry.register_support_barkpark(team, %{
+        name: "Bound #{n}",
+        slug: "bound-#{n}",
+        parent_id: main.id,
+        token_id: "t"
+      })
+
+    {user, team, support}
+  end
+
   ## Request helper
 
   defp call(method, path, body \\ nil, token \\ nil) do
@@ -320,6 +339,68 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       {_u, _team, token} = user_with_role("owner")
       assert call(:delete, "/v1/fleet/supports/#{Ecto.UUID.generate()}", nil, token).status == 404
       assert call(:delete, "/v1/fleet/supports/not-a-uuid", nil, token).status == 404
+    end
+  end
+
+  ## DELETE /v1/fleet/supports/:id — credential-aware gating (PAT symmetry)
+  #
+  # A credential that can BIND (POST) can UNBIND (DELETE): the endpoint now runs
+  # require_user_or_pat + the deploy-ability cond, exactly like POST. Mirrors
+  # RouterPatTest's B2 (a deploy PAT can go-live, a read PAT is 403'd) —
+  # PATs minted via Accounts.create_personal_access_token/3.
+
+  describe "DELETE /v1/fleet/supports/:id credential gating" do
+    test "a deploy PAT removes the support → 200, the row is gone" do
+      {user, team, support} = support_in_team("owner")
+
+      {:ok, deploy_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "deploy-key",
+          abilities: ["deploy"]
+        })
+
+      conn = call(:delete, "/v1/fleet/supports/#{support.id}", nil, deploy_token)
+
+      assert conn.status == 200
+      assert decode(conn)["status"] == "removed"
+      assert Registry.get_barkpark(support.id) == nil
+    end
+
+    test "a read PAT is 403'd → the support survives" do
+      {user, team, support} = support_in_team("owner")
+
+      {:ok, read_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "read-key",
+          abilities: ["read"]
+        })
+
+      conn = call(:delete, "/v1/fleet/supports/#{support.id}", nil, read_token)
+
+      assert conn.status == 403
+      assert decode(conn)["error"] == "forbidden"
+      # The credential could not bind, so it could not unbind — row untouched.
+      assert Registry.get_barkpark(support.id) != nil
+    end
+
+    test "a plain member session is 403'd → the support survives" do
+      {member, _team, support} = support_in_team("member")
+      {:ok, member_session} = Accounts.create_user_session_token(member)
+
+      conn = call(:delete, "/v1/fleet/supports/#{support.id}", nil, member_session)
+
+      assert conn.status == 403
+      assert decode(conn)["error"] == "forbidden"
+      assert Registry.get_barkpark(support.id) != nil
+    end
+
+    test "an anonymous request is 401'd → the support survives" do
+      {_user, _team, support} = support_in_team("owner")
+
+      conn = call(:delete, "/v1/fleet/supports/#{support.id}", nil)
+
+      assert conn.status == 401
+      assert Registry.get_barkpark(support.id) != nil
     end
   end
 
