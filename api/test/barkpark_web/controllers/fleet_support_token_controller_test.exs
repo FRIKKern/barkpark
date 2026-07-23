@@ -96,8 +96,10 @@ defmodule BarkparkWeb.FleetSupportTokenControllerTest do
     end
 
     test "422 when name is missing or blank", %{conn: conn} do
-      assert conn |> admin_conn() |> post("/v1/fleet/support-tokens", Jason.encode!(%{})) |>
-               Map.get(:status) == 422
+      assert conn
+             |> admin_conn()
+             |> post("/v1/fleet/support-tokens", Jason.encode!(%{}))
+             |> Map.get(:status) == 422
 
       assert conn
              |> admin_conn()
