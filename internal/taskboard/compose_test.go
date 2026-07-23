@@ -1136,3 +1136,112 @@ func TestWideRailHoverDepth0HasNoStop(t *testing.T) {
 		t.Fatal("depth-0 preview painted a hover stop (it has none — #4240 owns depth-0 hover)")
 	}
 }
+
+// ── Narrow-mode reading-frame rail-stop hover paint (charter D99 close-out / D105) ──
+
+// TestNarrowRailHoverPaintsStop: a Motion over a NARROW reading-frame rail stop
+// PAINTS that stop's body line in the accent foreground (hoverStyle) via the
+// compose.go:148 HoverStop wiring — the mirror of TestWideRailHoverPaintsStop.
+// The truecolor profile is mandatory (D105d): the default profile emits no SGR,
+// so the paint would be the identity and prove nothing (vacuous green). withChrome
+// alone only swaps the branding fixture. Compose lines index 1:1 with
+// ComposeHitMap, so the painted line must land on the stop's hit-map row.
+func TestNarrowRailHoverPaintsStop(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+	withChrome(t)
+
+	m := narrowReadingFixture(3)
+	m.width, m.height = 44, 40 // tall enough that the whole body fits ⇒ stops on-screen
+	width, height := m.composeInner()
+	body, stops := m.frameContent(m.topFrame(), width, m.now())
+	if len(body) > height-2 {
+		t.Fatalf("fixture body (%d) must fit the pane (%d) so stops are on-screen", len(body), height-2)
+	}
+	if len(stops) < 2 {
+		t.Fatalf("need >=2 rail stops to prove the paint tracks the pointer, got %d", len(stops))
+	}
+
+	const stop = 1
+	y := firstStopY(m.ComposeHitMap(), stop)
+	if y < 0 {
+		t.Fatalf("no hit-map line for rail stop %d", stop)
+	}
+	before := strings.Split(Compose(m), "\n")
+
+	tm, _ := m.mouseMotion(5, y)
+	m2 := tm.(Model)
+	if m2.ui.HoverStop != stop {
+		t.Fatalf("motion over stop %d set HoverStop %d, want %d", stop, m2.ui.HoverStop, stop)
+	}
+	after := strings.Split(Compose(m2), "\n")
+
+	if len(after) != len(before) {
+		t.Fatalf("hover changed the line count: %d vs %d", len(before), len(after))
+	}
+	hoverOpen := probeHoverOpen(t)
+	changed, changedIdx := 0, -1
+	for i := range after {
+		if ansi.Strip(after[i]) != ansi.Strip(before[i]) {
+			t.Errorf("line %d: hover changed the VISIBLE text (styling only expected)\n got: %q\nwant: %q",
+				i, ansi.Strip(after[i]), ansi.Strip(before[i]))
+		}
+		if after[i] == before[i] {
+			continue
+		}
+		changed, changedIdx = changed+1, i
+		if !strings.Contains(after[i], hoverOpen) {
+			t.Errorf("line %d changed without the accent hover restyle:\n%q", i, after[i])
+		}
+	}
+	if changed != 1 {
+		t.Fatalf("hover restyled %d lines, want exactly 1 (only the hovered stop)", changed)
+	}
+	if changedIdx != y {
+		t.Fatalf("hover painted Compose row %d, want %d (the stop's hit-map row)", changedIdx, y)
+	}
+}
+
+// TestNarrowRailHoverAtCursorCollapsesColorOnly (charter D105e): when the pointer
+// hovers the SAME stop the cursor sits on, the ▎ (U+258E) selection bar SURVIVES
+// — the stripped text is byte-identical — and only the color collapses to the
+// hover accent. Proves the hover restyle composes over the cursor bar rather than
+// erasing the row's structure.
+func TestNarrowRailHoverAtCursorCollapsesColorOnly(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+	withChrome(t)
+
+	m := narrowReadingFixture(3)
+	m.width, m.height = 44, 40
+	const cur = 1
+	m.stack[len(m.stack)-1].Cursor = cur // the cursor bar sits on stop `cur`
+
+	y := firstStopY(m.ComposeHitMap(), cur)
+	if y < 0 {
+		t.Fatalf("no hit-map line for cursor stop %d", cur)
+	}
+	before := strings.Split(Compose(m), "\n")
+	if !strings.Contains(ansi.Strip(before[y]), "▎") {
+		t.Fatalf("cursor row %d carries no ▎ bar before hover: %q", y, ansi.Strip(before[y]))
+	}
+
+	m.ui.HoverStop = cur // hover the cursor's own stop
+	after := strings.Split(Compose(m), "\n")
+
+	if after[y] == before[y] {
+		t.Fatal("hovering the cursor stop produced no styling change (color should collapse to hover accent)")
+	}
+	if ansi.Strip(after[y]) != ansi.Strip(before[y]) {
+		t.Fatalf("hover changed the visible text on the cursor row (▎ must survive)\n got: %q\nwant: %q",
+			ansi.Strip(after[y]), ansi.Strip(before[y]))
+	}
+	if !strings.Contains(ansi.Strip(after[y]), "▎") {
+		t.Fatalf("the ▎ bar did not survive the hover restyle: %q", ansi.Strip(after[y]))
+	}
+	if !strings.Contains(after[y], probeHoverOpen(t)) {
+		t.Fatalf("cursor-row hover did not apply the accent hover restyle:\n%q", after[y])
+	}
+}

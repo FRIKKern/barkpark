@@ -1,6 +1,7 @@
 package taskboard
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -111,5 +112,119 @@ func TestFlashStyleLadder(t *testing.T) {
 	// The two active levels are distinct (bright vs remnant).
 	if one.GetBold() || !two.GetBold() {
 		t.Errorf("flash levels 1 and 2 are not distinguishable by weight")
+	}
+}
+
+// ── Narrow-mode reading-frame rail-stop hover (charter D99 close-out / D105) ──
+//
+// mouseMotion gained a reading-frame branch resolving the compose-level hit map
+// into UIState.HoverStop, so a pushed FrameTask/FramePaper tints the rail stop
+// under the pointer exactly as the wide right pane already did. These drive real
+// tea.MouseMsg motion through the FULL reducer (Update → handleMouse →
+// mouseMotion) and pin: set on a stop, clear off a stop, clear on a keypress, and
+// the board path staying hover-tint-only (never touching HoverStop).
+
+// narrowReadingFixture is a narrow model pushed one level into a FrameTask whose
+// subject "p" has nChildren parent-linked children — so the reading frame renders
+// a CHILDREN rail of nChildren selectable stops. Callers set width/height; the
+// clock is fixed. Shared by the motion, paint, and parity tests.
+func narrowReadingFixture(nChildren int) Model {
+	m := testModel(sampleBoard())
+	m.now = func() time.Time { return time.Unix(2, 0) }
+	p := t("p")
+	tasks := []Task{p}
+	for i := 0; i < nChildren; i++ {
+		id := fmt.Sprintf("ch%02d", i)
+		tasks = append(tasks, Task{DocID: id, Title: id, ParentID: "p"})
+	}
+	m.tasks = tasks
+	m.details = DetailIndex{"p": {Task: p}}
+	m.stack = append(m.stack, Frame{Kind: FrameTask, Ref: "p", Title: "p"})
+	return m
+}
+
+// firstStopY returns the first ComposeHitMap screen row that carries the given
+// rail-stop index (a LineSpineRow), or -1 — the reading-frame twin of
+// firstLineFor's board use.
+func firstStopY(hits []LineTarget, stopIdx int) int {
+	for i, h := range hits {
+		if h.Kind == LineSpineRow && h.CursorIndex == stopIdx {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestNarrowMotionHoversRailStop drives a Motion through the reducer over a
+// pushed FrameTask and asserts the D105 wiring: the pointer over a rail stop
+// stores that stop's index in HoverStop; the pointer over the breadcrumb chrome
+// clears it to -1; and a subsequent keypress also clears it (handleKey yields the
+// tint back to the keyboard). Tall enough (height 40) that every stop is
+// on-screen, so the resolution is unambiguous.
+func TestNarrowMotionHoversRailStop(t2 *testing.T) {
+	m := narrowReadingFixture(3)
+	m.width, m.height = 44, 40
+	if m.topFrame().Kind != FrameTask {
+		t2.Fatalf("fixture top frame is %v, want FrameTask", m.topFrame().Kind)
+	}
+	if m.frameStopCount() < 2 {
+		t2.Fatalf("reading frame has %d stops, want >=2 (the CHILDREN rail)", m.frameStopCount())
+	}
+
+	const stop = 1
+	y := firstStopY(m.ComposeHitMap(), stop)
+	if y < 0 {
+		t2.Fatalf("no hit-map line for rail stop %d", stop)
+	}
+
+	// Motion over the stop → HoverStop set, navigation untouched.
+	m2, _ := step(t2, m, motionAt(5, y))
+	if m2.ui.HoverStop != stop {
+		t2.Fatalf("motion over stop %d set HoverStop %d, want %d", stop, m2.ui.HoverStop, stop)
+	}
+	if m2.topFrame().Cursor != 0 || len(m2.stack) != 2 {
+		t2.Fatalf("motion mutated navigation: cursor=%d depth=%d", m2.topFrame().Cursor, len(m2.stack))
+	}
+
+	// Motion onto the breadcrumb (screen row 1, chrome) → cleared to -1.
+	m3, _ := step(t2, m2, motionAt(5, 1))
+	if m3.ui.HoverStop != -1 {
+		t2.Fatalf("motion onto chrome kept HoverStop %d, want -1", m3.ui.HoverStop)
+	}
+
+	// Re-hover the stop, then a keypress hands the tint back to the keyboard.
+	m4, _ := step(t2, m3, motionAt(5, y))
+	if m4.ui.HoverStop != stop {
+		t2.Fatalf("re-hover set HoverStop %d, want %d", m4.ui.HoverStop, stop)
+	}
+	m5, _ := step(t2, m4, runes("j"))
+	if m5.ui.HoverStop != -1 {
+		t2.Fatalf("keypress did not clear HoverStop: %d, want -1", m5.ui.HoverStop)
+	}
+}
+
+// TestNarrowMotionBoardPathUnchanged proves the reading-frame branch did NOT
+// bleed into the board path: at depth 0 a Motion still tints the board row's Ref
+// (HoverTarget) and never touches HoverStop, which stays its -1 default.
+func TestNarrowMotionBoardPathUnchanged(t2 *testing.T) {
+	m := testModel(sampleBoard())
+	m.now = func() time.Time { return time.Unix(2, 0) }
+	m.width, m.height = 80, 40
+	m.ui.Cursor = 0
+	syncScroll(&m)
+
+	const target = 4 // a task row
+	y := firstLineFor(m.ComposeHitMap(), target)
+	if y < 0 {
+		t2.Fatal("no hit-map line for target row 4")
+	}
+	wantRef := m.visibleRows()[target].docID
+
+	m2, _ := step(t2, m, motionAt(5, y))
+	if m2.ui.HoverTarget != wantRef {
+		t2.Fatalf("board motion set HoverTarget %q, want %q", m2.ui.HoverTarget, wantRef)
+	}
+	if m2.ui.HoverStop != -1 {
+		t2.Fatalf("board motion touched HoverStop: %d, want -1 (board path unchanged)", m2.ui.HoverStop)
 	}
 }

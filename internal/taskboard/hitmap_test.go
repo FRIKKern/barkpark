@@ -7,7 +7,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 // firstLineFor returns the first hit-map line index tagged as the given spine-row
@@ -380,4 +382,72 @@ func manyOrphans(n int) Board {
 		ids[i] = id
 	}
 	return Board{Orphans: ts, OrphansActive: true, OrphansFocusSet: focusOf(ids...)}
+}
+
+// TestNarrowRailHoverParityUnderScroll is the D42/D105 one-producer tripwire for
+// the NARROW reading frame: on a WINDOWED, SCROLLED fixture (a subject with 15
+// children at 44×14 forces the body past the viewport; Scroll>0 pushes the window
+// down), EVERY rail stop the hit map tags as LineSpineRow must paint on EXACTLY
+// its own hit-map screen row when hovered. Because frameHitTargets (the hit map)
+// and windowFrame (the paint) now share ONE window-top producer (readingWindowTop)
+// this holds structurally — but the test cross-checks it by independent paint, so
+// a re-inlined top-math copy that drifts would move the painted row off its hit Y
+// and RED this test. Truecolor is mandatory: without SGR hoverPaint is the
+// identity and no line would change (vacuous green).
+func TestNarrowRailHoverParityUnderScroll(t2 *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t2.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+	withChrome(t2)
+
+	m := narrowReadingFixture(15)
+	m.width, m.height = 44, 14
+	m.stack[len(m.stack)-1].Scroll = 8 // absolute free-scroll offset > 0 (windowed, scrolled)
+
+	width, height := m.composeInner()
+	body, _ := m.frameContent(m.topFrame(), width, m.now())
+	if len(body) <= height-2 {
+		t2.Fatalf("fixture must WINDOW to prove scroll parity: body %d, avail %d", len(body), height-2)
+	}
+
+	hits := m.ComposeHitMap()
+	base := m
+	base.ui.HoverStop = -1
+	baseLines := strings.Split(Compose(base), "\n")
+	if len(baseLines) != len(hits) {
+		t2.Fatalf("ComposeHitMap (%d) and Compose (%d) lengths diverge", len(hits), len(baseLines))
+	}
+
+	seen := 0
+	for i, h := range hits {
+		if h.Kind != LineSpineRow {
+			continue
+		}
+		seen++
+		hm := m
+		hm.ui.HoverStop = h.CursorIndex
+		afterLines := strings.Split(Compose(hm), "\n")
+		if len(afterLines) != len(baseLines) {
+			t2.Fatalf("stop %d hover changed the line count: %d vs %d", h.CursorIndex, len(afterLines), len(baseLines))
+		}
+		nChanged, changedIdx := 0, -1
+		for j := range afterLines {
+			if afterLines[j] != baseLines[j] {
+				nChanged, changedIdx = nChanged+1, j
+			}
+		}
+		if nChanged != 1 {
+			t2.Fatalf("stop %d hover restyled %d lines, want exactly 1", h.CursorIndex, nChanged)
+		}
+		if changedIdx != i {
+			t2.Fatalf("stop %d: hit-map row %d ≠ painted row %d — hit-map⇄paint top-math drift",
+				h.CursorIndex, i, changedIdx)
+		}
+		if ansi.Strip(afterLines[changedIdx]) != ansi.Strip(baseLines[changedIdx]) {
+			t2.Fatalf("stop %d hover changed the visible text at row %d (styling only expected)", h.CursorIndex, changedIdx)
+		}
+	}
+	if seen < 2 {
+		t2.Fatalf("expected >=2 visible rail stops in the scrolled window, got %d", seen)
+	}
 }

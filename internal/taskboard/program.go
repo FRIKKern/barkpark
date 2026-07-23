@@ -658,17 +658,22 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 // mouseMotion is pointer hover: resolve the pointer against the footer-verb
-// X-spans (ttm-s4) and the compose-level hit map's selectable row (ttm-s3, the
-// row's Ref into UIState.HoverTarget). Board frame only this wave (reading
-// rails have no hover tint yet — an honest gap, not a bug). Change-only
-// mutation IS the debounce (charter D95): the all-motion firehose emits one
-// event per cell crossed, but a Motion that resolves to the same row AND the
-// same verb returns the model unchanged, so the renderer diff repaints
-// nothing. Anything that is not a selectable board row or a footer verb —
-// chrome, separators, scroll affordances, a reading frame — resolves to
-// ""/0 and clears the tint.
+// X-spans (ttm-s4) and the compose-level hit map's selectable row (ttm-s3). Two
+// mutually-exclusive tints, one per frame kind (narrow shows exactly one frame),
+// mirroring wideMouseMotion's unconditional dual-set (compose.go): the BOARD
+// frame tints the spine row's Ref into UIState.HoverTarget; a pushed READING
+// frame (FrameTask/FramePaper) tints the rail stop's index into UIState.HoverStop
+// (charter D99 / D105 — the narrow residue). Both are always written, so crossing
+// from the board into a reading frame (or the reverse) hands the tint over cleanly
+// and never leaves the other pane's stale. Change-only mutation IS the debounce
+// (charter D95): the all-motion firehose emits one event per cell crossed, but a
+// Motion that resolves to the same row/stop AND the same verb returns the model
+// unchanged, so the renderer diff repaints nothing. Anything that is not a
+// selectable row or a footer verb — chrome, separators, scroll affordances,
+// prose — resolves to ""/-1/0 and clears the tint.
 func (m Model) mouseMotion(x, y int) (tea.Model, tea.Cmd) {
 	target := ""
+	stop := -1
 	if m.topFrame().Kind == FrameBoard {
 		hits := m.ComposeHitMap()
 		if y >= 0 && y < len(hits) && hits[y].Kind == LineSpineRow {
@@ -677,12 +682,23 @@ func (m Model) mouseMotion(x, y int) (tea.Model, tea.Cmd) {
 				target = rows[idx].docID
 			}
 		}
+	} else {
+		// Reading frame: ComposeHitMap tags each rail stop's body line as
+		// LineSpineRow carrying the stop index straight in HoverStop's index space
+		// (D105) — msg.Y indexes it directly, chrome rows are chromeTarget-padded.
+		// setHoverStop is reused unmodified (the D95 change-only debounce).
+		hits := m.ComposeHitMap()
+		if y >= 0 && y < len(hits) && hits[y].Kind == LineSpineRow {
+			stop = hits[y].CursorIndex
+		}
 	}
 	verb := rune(0)
 	if v, ok := m.footerVerbAt(x, y); ok {
 		verb = v
 	}
-	ui, changed := setHoverTarget(m.ui, target)
+	ui, tChanged := setHoverTarget(m.ui, target)
+	ui, sChanged := setHoverStop(ui, stop)
+	changed := tChanged || sChanged
 	if verb != ui.HoverFooterVerb {
 		ui.HoverFooterVerb = verb
 		changed = true
