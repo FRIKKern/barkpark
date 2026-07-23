@@ -1505,7 +1505,165 @@ Backlog filed: `task-felix-w18-authority-lock-mutation-proof` (P3),
 `task-felix-w18-registry-staleability-hardening` (P4), `task-felix-w18-cloud-github-route-tier-drift` (P4).
 
 
+## Wave 19 Decisions (2026-07-23) — ARM E (E7): FINISH THE RESIDUAL BACKLOG WITH VERIFY-DEPTH TRIAGE (Arm: E, config E7)
+
+Research-program **Arm E / config E7** (paper `/papers/epic-cycle-research-program-abcde`; wave story
+`felix-pristine-wave-19-2026-07-23`). E7 = E6 (Fable-arch × Fable-grade × freshness-gated lean
+survey) PLUS freshness-gated VERIFY: a verify agent is assigned ONLY where the key judgment is
+flip-prone/uncertain; premise-smoke-cleared fresh slices go straight to build with the builder's own
+mutation proof + independent reviewer re-derivation. Kill signal: escapes rise OR tokens ≥ E6's
+claimed 1.72M. This wave ran 3 verifiers vs E6's 6 — the verify chunk shrinks by design.
+
+- **D112 — HOUSEKEEPING EXECUTED AT DECIDE (Fable replaces a stage; zero builders).** The three
+  merged-W18 tasks CLOSED done 4/4 via claim→close (fresh epochs 8/8/7 — stale claim epochs 6/7/6
+  are unusable), each merge-gate criterion stamped with the file-diff-verified pairing:
+  `task-felix-w18-fkabort-family-close` ↔ PR #5777 (dd4d4cef, 4/4 exact file match),
+  `task-b55360f458ff6a45` ↔ #5778 (feedcb98, dir entry expands to both test files),
+  `task-felix-w13-boardsnapshot-fieldvis-seal` ↔ #5779 (b6171ae3, PR files ⊂ stored files —
+  board_live.ex untouched BY DESIGN per D109's seal-point ruling; stored files field was
+  over-broad, noted on the close). All three merge commits proven ancestors of origin/main via
+  `git merge-base --is-ancestor`, never CI timing. TRAPS CONFIRMED AND DODGED: (a) autostamp cannot
+  fire — none of the three merge criteria carry `"merge_gate": true` (systemic gap already filed as
+  `pds-bl-merge-gated-criteria-carry-the-flag`); (b) stored `github.issue` (5766/5725/5463) is a red
+  herring on ALL THREE — pairing is by changed-file diff, never by issue number; (c) the merge-gate
+  criterion TEXT is a copy-paste template identical across tasks (w13's variant lacks "on the PR"),
+  so text-match alone cannot catch a task/PR swap — the file-diff table is the guard. STAY-OPEN
+  sweep re-verified: `task-openapi-drift-chronic` (0/3, tooling gap real, drift not currently
+  firing), `task-felix-w14-sync-deadletter-classification` (dormant-infra watch),
+  `task-felix-w13-cyclecorrection-migration-growth-watch` (watch on an applied migration) all STAY
+  OPEN; the two `considering` tasks (bounded-read-watch, cyclefleet-reconcile-nplus1) unchanged.
+
+- **D113 — S1: realtime broadcast field-vis seal** (`task-e98797b38ca3b51e`, opus, round 1, medium).
+  Thread merged #5779's `to_card/4` Envelope decisions into `card_from_broadcast` (board.ex
+  L455-494, currently PURE and ungated; sole caller board_live.ex L272). SPEC: (1) promote
+  `field_visibility_gate/1` (board.ex L181-195) from `defp` to `def`; (2) `card_from_broadcast/3`
+  — inject `readable?`, stay 100% DB-free; gate EXACTLY the 7 text/PII fields to_card/4 gates
+  (priority, parent_id, labels, worker via `gated_worker/2`, next_criterion + criteria_list under
+  key "acceptance_criteria", description_excerpt under "description", design_doc);
+  (3) `lifecycle_status`/`github`/`github_synced`/`blocker_statuses` STAY UNGATED — parity law with
+  BOTH sealed paths (#5470 peek + #5779 snapshot); gating them would be new undiscussed behavior;
+  (4) board_live mount computes+assigns `readable?` on CONNECTED mount
+  (`Board.field_visibility_gate(@dataset)`); on disconnected mount assign `fn _ -> false end` —
+  no broadcast can arrive pre-connect, so behavior is identical, and FAIL-CLOSED is the seam's law
+  (mirrors the L212 no-DB-on-static-render pattern without a permissive default); `:refresh` (15s)
+  recomputes it so schema edits self-heal; schema resolved at most mount+refresh cadence, NEVER
+  per broadcast. E7 LEDGER: verify SKIPPED — fresh ground, premise smoke-cleared at L1 twice
+  (strategist + digest, both on origin/main), mutation proof builder-self-suppliable.
+  HIGH-FLIP-RISK: security field-visibility seam — reviewer must INDEPENDENTLY re-derive the gated
+  field set + re-run the mutation, and NAME that a second independent review is warranted pre-merge
+  (D109 discipline moved to review, not deleted).
+
+- **D114 — S2: D43 walk.ex glyph delegate + THE STILL-FRAME RULING: ⠿, not ⠋**
+  (`ttw17-bl-d43-elixir-walkex`, opus, round 1, small; re-parented from task-tui-goal — the Elixir
+  half executes under felix, the Go half stays task-tui). walk.ex `task_glyph/1` (L671-678, the
+  hardcoded ○/◐/⊘/●/✕/▸ fork) delegates to `StatusVocab` for the 5 KNOWN statuses, `▸`
+  unknown-guard preserved (mirror Go D100's guarded shape). RULING on the contested byte: the
+  spinner role degrades to **⠿** per the SHIPPED Elixir precedent (fleet_email.ex:578-580, charter
+  D5) — walk.ex's chip is the shared View+email STATIC context (walk.ex:617-618's own comment),
+  the same context class fleet_email already solved, NOT the Go terminal board. Go main's
+  `roleGlyph["progress"]="⠋"` (gridblocks.go) and #5838 (MERGED to origin/main a80ac7443 during
+  this Decide — the Go half is now DONE) are a TERMINAL-surface convention; the cross-language
+  delta is ruled DELIBERATE per-surface consistency, documented in the new coverage test. NO
+  dependency on #5838 either way (different language/files/gates — round 1). Blast radius
+  is exactly: walk_test.exs:310-324 parity table (◐→⠿, ⊘→!, ●→✓; open ○ / cancelled ✕ / someday ▸
+  unchanged — the L298-308 garbage-tolerance test still proves the guard) + email_golden.html
+  (2 hits of "◐ in_progress") regenerated IN THE SAME DIFF via the PROVEN recipe:
+  `MIX_ENV=test mix run --no-start` over `ParityFixture.tree()` +
+  `Render.render_html(_, render_opts(:email))` (byte-identical regen verified today, sha256
+  6f93f860…; there is NO mix task for it). Coverage gate (AC[1]) = an ExUnit test in walk_test.exs
+  deriving expected glyphs from StatusVocab (delegation makes drift structurally impossible;
+  mutation-proof by hardcoding one wrong byte). E7 LEDGER: verify ASSIGNED narrow (run-proof only
+  — golden-regen mechanism + walk_test green, both proven; the 2026-07-16 wave died mid-Digest
+  before ever running these).
+
+- **D115 — S3: authority-lock mutation-proof — HARNESS RULING (the wave's ONE pre-build verify;
+  it earned its cost)** (`task-felix-w18-authority-lock-mutation-proof`, opus, round 1, medium).
+  The mirror-query option is REJECTED — PROVEN VACUOUS (mirror stays green when `lock: "FOR SHARE"`
+  is deleted from cycle_fleet.ex; the real-drive test goes red). SHIPPED SHAPE: drive the REAL
+  `CycleFleet.bind_assignment_task/2` on connection B (`unboxed_run` + `Task.async` + rendezvous,
+  precedent cycle_fleet_test.exs:1611-1715) while connection A holds `FOR UPDATE` on the
+  **DATASET row** — the ONLY isolable target: locking the assignment row is FK-masked (bind's
+  `insert_all` RI-locks it → false green) and locking the wave row is RI-reached too (raw insert
+  with NO select still 55P03s → false green); dataset-row is present→55P03 / removed→{:ok}.
+  Session-level `SET lock_timeout` (SET LOCAL outside the txn is a NO-OP — measured), assert
+  `Postgrex.Error` pg_code 55P03, and RESET `lock_timeout = 0` in an after-block (session GUC
+  persists on the pooled conn and poisons later tests). Test MUST live INSIDE cycle_fleet_test.exs
+  (fixture helpers are defp). The red/green loop is LOCAL — `mix test` runs fine (OOM memory is
+  phx.server boot only); the mutation red-proof edits cycle_fleet.ex ONLY transiently in the
+  builder's isolated worktree, committed diff touches the TEST FILE ONLY. SCOPE NARROWED to
+  `bind_assignment_task` (the proven site); the other two sites (runtime_attempt_authority:4536
+  FOR UPDATE, runtime_usage authoritative_join:187 FOR SHARE) need their OWN isolable-row analysis
+  → backlog `felix-w19-bl-authority-lock-remaining-sites`. Wish premise "stale line refs" REFUTED
+  (1683/4536/164 all exact on origin/main).
+
+- **D116 — S4: registry staleability + route-tier drift FOLDED into one cloud slice**
+  (`task-felix-w18-registry-staleability-hardening`, opus, round 1, small;
+  `task-felix-w18-cloud-github-route-tier-drift` closed as folded — same files, one PR, one
+  builder). (a) `create_site` becomes AUTHORITATIVE: `Map.put` (never `put_new`) for
+  :barkpark_id/:team_id, mirroring the sanctioned `put_team_id/2` pattern (registry.ex:5328;
+  create_site is the file's ONLY put_new offender for tenant identity), + an override-attempt test
+  proving a client-supplied barkpark_id/team_id cannot win. (b) `put_env_var` TOCTOU: DOCUMENT the
+  narrow check-to-write window at the call site + a deterministic test that a write against a
+  deleted barkpark returns `{:error, changeset}` via the `assoc_constraint(:barkpark)` net
+  (env_var.ex:95 — the repo-wide convention); no lock/txn added (improvement-only: no live defect,
+  the net fails closed). (c) router.ex moduledoc L109 row for POST /v1/github/installations states
+  the team-admin tier (route calls `require_team_admin`, L3251) + extend the mirror test to assert
+  the tier for this route (its `@row_re` captures only method+path — structurally blind to tier
+  prose, so the assertion must be explicit). E7 LEDGER: verify SKIPPED — surveyor ran the harness
+  live TODAY (98/0) and every claim carries a rerun command.
+
+- **D117 — E7 EXPERIMENT LEDGER + PROVENANCE CORRECTIONS (Review completes the row).**
+  Verify ASSIGNED (3): S3 harness shape (flip-prone — DELIVERED decisively, refuted the mirror
+  option, found the dataset-row/false-green trap a builder would have shipped wrong), S2-narrow
+  run-proof (golden regen + walk_test — DELIVERED, both green), housekeeping close-pairing
+  (misclose writes false ledger evidence — DELIVERED the file-diff table + exact criterion text).
+  Verify SKIPPED (2): S1 (fresh, smoke-cleared twice, builder-self-suppliable mutation proof,
+  reviewer re-derives), S4 (surveyor ran the gates same-day). CORRECTIONS the row must carry:
+  (1) E6's own paper says its verify round was **6**, not the wish's "7"; (2) the kill-signal
+  baselines (E6 1.72M/33%, E4 2.4M/31%) exist NOWHERE in Barkpark outside our own wave paper —
+  `bp search "1.72M"` returns only us; both E4/E6 debriefs explicitly defer the token tally to the
+  research epic and no scoreboard rows were ever appended. Review MUST flag the baselines as
+  lead-supplied provenance; backlog filed on the research epic
+  (`grb-append-e4-e6-scoreboard-rows`) to append the missing rows from meter reads. Scoring:
+  total tokens + per-phase split vs E6/E4, premise-failures caught-vs-escaped (a skipped-verify
+  escape kills E7), review fixes, whether PREMISE_SMOKE/FLIP_RISK blocks fired (they did — the
+  strategist's 6-premise smoke block is in the paper), and the explicit E7 verdict.
+
+- **D118 — WAVE SHAPE.** 4 slices, ALL round 1 (file-disjoint, no inter-slice deps), ALL opus
+  (E7 knob e). Fence: api/lib/barkpark/tasks/board.ex + plugins/tasks/web/board_live.ex +
+  portable_doc/render/walk.ex + api/test/** named files + cloud registry/router files. Collision
+  scan clean (only #2907 touches api/lib — application.ex/host_vitals, disjoint; #5838/#5840/#5828
+  are Go/CLI/docs lanes). Builders: branch from origin/main, isolated worktrees, CC=/usr/bin/clang,
+  .ex waits for the Elixir Test gate, improvement-only.
+
+### Wave 19 roadmap (4 slices, round 1, parallel — disjoint files)
+
+| # | Slice | Task | Model | Size |
+|---|-------|------|-------|------|
+| S1 | card_from_broadcast realtime field-vis seal (/3 + injected readable?) | `task-e98797b38ca3b51e` | opus | medium |
+| S2 | D43 walk.ex glyph delegate → StatusVocab (⠿ still-frame, golden regen) | `ttw17-bl-d43-elixir-walkex` | opus | small |
+| S3 | bind_assignment_task real-drive lock-wait test (dataset-row 55P03) | `task-felix-w18-authority-lock-mutation-proof` | opus | medium |
+| S4 | cloud registry staleability + route-tier drift (folded) | `task-felix-w18-registry-staleability-hardening` | opus | small |
+
+Backlog filed: `felix-w19-bl-authority-lock-remaining-sites` (P3),
+`felix-w19-bl-email-golden-regen-mixtask` (P4), `grb-append-e4-e6-scoreboard-rows` (research epic).
+
+
 ## Wave log
+
+- **Wave 19 — 2026-07-23 — DECIDED (building). Arm: E (E7 — E6 + freshness-gated verify).**
+  Ratified D112–D118. Housekeeping executed at Decide: 3 merged-W18 tasks closed done 4/4 on
+  file-diff-verified PR pairings (#5777/#5778/#5779; autostamp can't fire — no merge_gate flag;
+  github.issue a red herring on all three). 4 opus round-1 slices building: realtime broadcast
+  field-vis seal (verify SKIPPED, HIGH-FLIP-RISK flagged for review), D43 walk.ex delegate with
+  the ⠿-not-⠋ still-frame ruling (Elixir D5 static-degrade precedent beats Go terminal
+  convention; golden regen recipe proven byte-identical), bind_assignment_task real-drive
+  lock-wait test (the wave's ONE pre-build verify — dataset-row FOR UPDATE is the only
+  mutation-sensitive target; mirror-query proven vacuous; scope narrowed, other 2 sites →
+  backlog), cloud registry staleability + folded tier-drift doc fix. E7 ledger: 3 verifies
+  assigned vs E6's 6; corrections recorded (E6 ran 6 not 7 verifies; 1.72M/2.4M baselines are
+  lead-supplied, no scoreboard rows exist — backlog filed to append them). Grade: pending
+  build+review.
 
 - **Wave 18 — 2026-07-23 — REVIEWED (A−, per `felix-pristine-wave-18-2026-07-23`). Arm: E (E4 —
   Fable-architected + Fable-graded).** All 3 round-1 slices BUILT, reviewer-verified, PUSHED with
