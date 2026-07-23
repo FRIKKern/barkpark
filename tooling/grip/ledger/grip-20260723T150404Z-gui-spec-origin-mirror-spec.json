@@ -1,0 +1,108 @@
+{
+  "id": "gui-spec-origin-mirror-spec",
+  "kind": "re-derivation-recipe",
+  "topic": "chat_live.ex mirror spec re-extracted on origin/main for ct-bl-stream-rich (advance_streaming/classify_tail/stable_boundary/skeleton + api/test golden candidates)",
+  "authored_by": "gui-spec-origin (chat-tui wave 2026-07-23 r3 verifier)",
+  "authored_utc": "2026-07-23T15:04:04Z",
+  "one_line": "origin/main HEAD ded132904 carries the felix W22/D131 1 MiB display cap; it is the ONLY semantic delta vs the worktree copy the survey read (confirmed by full file diff, 136 lines, all in the cap machinery). classify_tail/fence_kind/portabledoc_kind/stable_boundary/skeleton are byte-identical worktree<->origin/main.",
+  "origin_main_commit": "ded132904bc554d2e0e7e6edb9fd71bfe22dbc92",
+  "worktree_commit_diffed_against": "5ece241b0f2d17227db0425e77f9299a1ae67c94",
+  "spec": {
+    "advance_streaming/1_2": {
+      "clauses": [
+        "advance_streaming(nil, delta) -> advance_streaming(%{text:\"\", stable_html:nil, stable_len:0, capped:false}, delta)",
+        "advance_streaming(%{capped:true}=state, _delta) -> state  (terminal: further deltas are no-ops, neither accumulator nor re-render can grow)",
+        "advance_streaming(state, delta): text=state.text<>delta; if byte_size(text)>max_streaming_display_bytes() -> freeze_streaming(state, text); else advance boundary=stable_boundary(text); if boundary>state.stable_len re-render prefix through render_paper_html and bump stable_len, else return state unchanged"
+      ],
+      "location": "api/lib/barkpark_web/live/studio/chat_live.ex:5779-5802 (origin/main)"
+    },
+    "freeze_streaming/2": {
+      "behavior": "ONE last render up to the last stable balanced-fence boundary (if any beyond current stable_len); text is TRUNCATED to stable_len bytes (streaming_tail/1 then yields \"\" so the template shows only the honest marker, never a partial tail); capped:true set. If NO balanced boundary exists yet (one giant unbroken block) the bubble shows only the marker.",
+      "location": "chat_live.ex:5812-5828"
+    },
+    "max_streaming_display_bytes/0": {
+      "default": 1048576,
+      "override": "Application.get_env(:barkpark,:claude_chat,[]) |> Keyword.get(:max_streaming_display_bytes, @default_max_streaming_display_bytes)",
+      "location": "chat_live.ex:5777 (@default_max_streaming_display_bytes), 5830-5834",
+      "provenance": "felix W22 (charter D131 of the GUI-remake/felix charter, NOT the chat-tui charter -- chat-tui charter tops out at D74 on origin/main); task-felix-w22-chatlive-stream-display-cap; paper felix-pristine-wave-22-2026-07-23 names the exact seam 'chat_live.ex advance_streaming does uncapped state.text <> delta at the sink'"
+    },
+    "classify_tail/1": {
+      "returns": "{:text, tail} | {:component, kind, prose_before_component}",
+      "logic": [
+        "fence_count = count of literal ``` in tail; if ODD -> split at the LAST ``` occurrence, prose=before, fence=from that ``` to end, kind=fence_kind(fence)",
+        "else if forming_table?(tail) (trimmed tail starts with '|') -> {:component,\"table\",\"\"}",
+        "else if trimmed tail starts with '>' -> {:component,\"callout\",\"\"}",
+        "else -> {:text, tail}"
+      ],
+      "location": "chat_live.ex:5848-5866"
+    },
+    "fence_kind/1": {
+      "logic": "first line after ``` trimmed: \"mermaid\"->\"diagram\"; \"portabledoc\"->portabledoc_kind(rest); anything else (incl. plain ```elixir etc.)->\"code\"",
+      "location": "chat_live.ex:5869-5877"
+    },
+    "portabledoc_kind/1": {
+      "logic": "regex \"type\":\"([\\\\w-]+)\" on the partial JSON fence body: chart|heatmap->\"chart\"; stat|stats->\"stats\"; table->\"table\"; callout->\"callout\"; divider->\"code\"; any other named type or no match->\"block\"",
+      "location": "chat_live.ex:5880-5892"
+    },
+    "stable_boundary/1": {
+      "logic": "find the LAST \\n\\n occurrence (scanning matches reversed) whose preceding prefix has an EVEN count of ``` (balanced_fences?); returns that boundary offset, or 0 if none/no \\n\\n at all. This is a full O(n) re-scan of the WHOLE text on every delta (called out in the pre-cap comment as the compounding cost the byte cap exists to bound).",
+      "location": "chat_live.ex:5905-5919"
+    },
+    "skeleton_kinds": ["diagram", "chart", "stats", "table", "callout", "code", "block(default/catch-all)"],
+    "skeleton_component": {
+      "shape_per_kind": "chart=6 bars flex row; stats=3 flex tiles; table=3x3 grid of shape divs; (diagram/callout/code/block fall through to a generic shimmer -- verified only chart/stats/table get bespoke shapes at chat_live.ex:3859-3900, remaining kinds share the default branch)",
+      "css_class": "bp-chat-skel, data-skel={kind} attribute is the test hook",
+      "location": "chat_live.ex:3859-3900ish (defp skeleton/1, private HEEx function component)"
+    },
+    "template_render_order": {
+      "location": "chat_live.ex:2874-2903",
+      "order": [
+        "1. @streaming.stable_html (if present) renders through Phoenix.HTML.raw inside .bp-paper-surface.bp-chat-md",
+        "2. IF @streaming[:capped]: render ONLY the honest marker div (data-streaming-capped, text 'live preview truncated — the full response arrives on completion') and STOP -- no tail/skeleton markup at all",
+        "3. ELSE: case classify_tail(streaming_tail(@streaming)) of {:text,tail} -> plain pre-wrap div with a dim streaming cursor '▌' appended; {:component,kind,prose} -> prose div (if non-empty) THEN <.skeleton kind={kind}/>"
+      ]
+    },
+    "settle_path_D9": {
+      "location": "chat_live.ex:1362-1387 (handle_info assistant/message/content blocks)",
+      "confirms": "on turn completion, each text block appends via append_message(acc,:assistant,text, html: render_paper_html(text), ...) -- the SAME render_paper_html(markdown)=FromMarkdown.blocks()|>Render.render_blocks(%{style::article}) used for the streaming stable_html prefix. This is the D9 'settle path stays SOLE truth' anchor: the final HTML the ct-bl-stream-rich Go port must byte-match is produced by the identical function used mid-stream, just over the FULL text instead of a stable prefix.",
+      "cap_independence": "advance_streaming's cap comment explicitly names this as the reason truncating the LIVE bubble loses zero durable data: :1380-ish full-frame append is untouched by the display cap (display-only accumulator, never the durable sink)."
+    }
+  },
+  "diff_worktree_vs_origin_main": {
+    "command": "git diff origin/main -- api/lib/barkpark_web/live/studio/chat_live.ex",
+    "total_lines": 136,
+    "verdict": "the ENTIRE diff is the display-cap feature (capped field, freeze_streaming/2, @default_max_streaming_display_bytes, max_streaming_display_bytes/0, and the template's capped:if branch). classify_tail/fence_kind/portabledoc_kind/stable_boundary/balanced_fences?/skeleton/skeleton_label are UNCHANGED text in both trees -- no other semantic delta exists in this file between the surveyed worktree and origin/main.",
+    "implication_for_survey": "the digest's single named delta (the cap) is confirmed to be the COMPLETE set of deltas for this file, not merely the first one found -- Decide does not need to budget verify time for undiscovered deltas elsewhere in chat_live.ex."
+  },
+  "api_test_golden_candidates": {
+    "must_run_grep_result": "git grep -n 'stable_boundary\\|classify_tail' origin/main -- api/test/  => EXIT 1, ZERO matches (git grep no-match convention, not an error). No Elixir test calls these private functions BY NAME.",
+    "but": "api/test/barkpark_web/live/studio/chat_live_test.exs exercises the SAME behavior end-to-end through the LiveView (send stream_delta events, assert on rendered HTML) -- these ARE liftable golden input/output pairs, just indexed by fixture text rather than function name:",
+    "liftable_pairs": [
+      {"test": "chat_live_test.exs:864 'an unclosed fence shows a skeleton, never half-rendered source'", "input_deltas": ["```mermaid\\ngraph TD\\n", "\\n\\nA-->B"], "expected": "data-skel=\"diagram\", 'rendering diagram' text, NEVER 'graph TD' raw source leaked"},
+      {"test": "chat_live_test.exs:876 'each forming component gets its dedicated skeleton'", "input_output_table": [
+        ["```portabledoc\\n[{\"type\":\"chart\",\"kind\":\"bars\"", "chart"],
+        ["```portabledoc\\n[{\"type\":\"stats\",\"items\":[", "stats"],
+        ["```portabledoc\\n[{\"type\":\"callout\",\"tone\"", "callout"],
+        ["```elixir\\nIO.puts", "code"],
+        ["| Name | N |\\n| --- |", "table"],
+        ["> important note about", "callout"]
+      ], "note": "each row resets via a completed assistant message between probes -- lift as separate Go golden cases, not one continuous stream"},
+      {"test": "chat_live_test.exs:903 'at most ONE skeleton renders at a time, even with multiple fence starts'", "input": "```elixir\\n:ok\\n```\\n```mermaid\\ngraph TD\\n", "expected": "exactly 1 data-skel occurrence, kind=diagram (odd fence count keys on the LAST fence, per classify_tail)"},
+      {"test": "chat_live_test.exs:940 'prose before a forming component still streams as text'", "input": "Here is the diagram:\\n```mermaid\\ngraph", "expected": "prose 'Here is the diagram:' renders as plain text AND data-skel=\"diagram\" both present"},
+      {"test": "chat_live_test.exs:956 'the skeleton yields to the real component when the block completes'", "input_stream": "```portabledoc\\n[{\"type\":\"divider\"}]", "input_complete": "```portabledoc\\n[{\"type\":\"divider\"}]\\n```", "expected": "mid-stream: data-skel present; post-completion: NO data-skel, bp-paper-surface html present -- this pins the settle-supersedes-preview boundary"},
+      {"test": "chat_live_test.exs:1006 'a flood of well-formed deltas caps the display but completion still yields the FULL text'", "setup": "max_streaming_display_bytes overridden to 4096; 400x '48B chunk with \\n\\n boundaries (~19.2 KiB total, 4.7x cap)", "expected_mid_stream": "streaming.capped==true; byte_size(streaming.text) <= 4096+chunk_size; html has 'live preview truncated' + data-streaming-capped; NO '▌' cursor once frozen", "expected_post_completion": "full text (with a distinct sentinel) renders in FULL, unbounded by the display cap; 'live preview truncated' marker gone -- proves the cap is display-only, never durable-lossy"},
+      {"test": "chat_live_test.exs:1064 'once capped, further deltas do not grow the frozen display'", "setup": "cap=2048; 200 chunks to breach, then 200 MORE after freeze", "expected": "byte_size(streaming.text) IDENTICAL before/after the second batch -- proves advance_streaming(%{capped:true},_) is a true no-op, not merely under-cap"}
+    ],
+    "stream_delta_helper": "chat_live_test.exs:6260 -- stream_delta(text) wraps text into %{\"type\"=>\"stream_event\",\"event\"=>%{\"type\"=>\"content_block_delta\",\"delta\"=>%{\"type\"=>\"text_delta\",\"text\"=>text}}} (the Claude SSE delta shape); a Go port's fixture format should carry the same raw delta strings, not this envelope, since the Go client already has its own SSE-to-delta decode"
+  },
+  "prior_art_confirmed_via_bp_search": {
+    "query": "bp search query \"advance_streaming classify_tail chat_live mirror spec\"",
+    "hits_relevant": [
+      "task-felix-w22-chatlive-stream-display-cap -- the display-cap task itself, corroborates D131 provenance",
+      "felix-pristine-wave-22-2026-07-23 (paper) -- names the exact seam 'chat_live.ex advance_streaming does uncapped state.text <> delta at the sink'",
+      "bp-chat-tui-wave-2026-07-23-r3 (paper) -- the parent wave paper this verification feeds",
+      "task-31528ebd293d961c 'w2c: streaming skeletons — per-component placeholder while a block is forming' -- the GUI-side skeleton feature's own original build task"
+    ]
+  },
+  "rerun": "git show origin/main:api/lib/barkpark_web/live/studio/chat_live.ex | sed -n '5760,5960p'; git show origin/main:api/lib/barkpark_web/live/studio/chat_live.ex | grep -n 'capped\\|freeze_streaming\\|max_streaming_display_bytes'; git grep -n 'stable_boundary\\|classify_tail' origin/main -- api/test/; git diff origin/main -- api/lib/barkpark_web/live/studio/chat_live.ex"
+}

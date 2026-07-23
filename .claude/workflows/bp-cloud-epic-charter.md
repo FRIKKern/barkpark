@@ -1,76 +1,123 @@
-# Studio Space-Priority Desk (epic-cycle charter slot)
+# CLI-Reliability (epic-cycle charter slot)
 
 > NOTE ON THIS PATH: this filename is the rotating epic-cycle charter SLOT and has carried
-> earlier epics. The prior occupant — **Wave Session Card** (epic COMPLETE, #3981) — is
-> preserved verbatim at `.claude/workflows/bp-wave-session-card-charter.md`. Do NOT read this
-> file for wave-session-card history. This slot is now the memory of the
-> **Studio Space-Priority Desk** epic.
+> earlier epics. The prior occupant — **Studio Space-Priority Desk** — is preserved in full
+> (D1–D34 verbatim, plus later waves) at `.claude/workflows/bp-studio-space-priority-charter.md`;
+> do NOT read this file for SPD history. This slot is now the memory of the
+> **CLI-Reliability** throughput epic.
 >
-> Epic anchor: bp task **`studio-space-priority-desk`** (published, guerrilla).
-> Wave 1 paper: **`studio-responsive-desk-wave-2026-07-19`** (style=article).
-> Wave 2 (LAND) paper: **`studio-space-priority-desk-land-2026-07-19`** (style=article).
-> Decided 2026-07-19; amended 2026-07-19 (LAND wave, D19–D32).
+> Epic anchor: bp task **`task-09f4775e7ccc2cca`** (scoreboard-parent research epic).
+> Wave paper: **`cli-reliability-wave-2026-07-23`** (style=article).
+> Decided 2026-07-23.
 
 ## Vision
 
-The Studio desk becomes a layout system that visibly REASONS about space instead of crushing the middle pane. The active content pane (paper view / document editor) is the protected winner of every layout negotiation — it never drops below a readable measure (~55–70ch); all squeeze flows outward by explicit priority (list pane compresses first, then rails to 44px strips, then the Document inspector overlays instead of docking); at phone widths the desk becomes a single-pane drill with a breadcrumb. One shared anatomy vocabulary (role × priority × width-bucket) spans server and CSS, and the desk chrome comes up to the unified-aesthetic bar (type-scale tokens, Plex Mono) — while Structure.build's gated-tree contracts (Go-TUI wire shape, owned_schema_types single map, nav-model canonical `studio-nav-model`, reveal-via-ancestors, #1851 never-unreachable) stay untouched underneath.
+The CLI dev-loop's health instruments must be UNABLE to lie. Two freshly-verified
+non-Elixir false-green classes get fixed as permanent instruments, not patches:
+(1) `make doctor` / scripts/doctor.sh false-greens a stale installed `bp` binary
+because it diffs the binary's build commit against LOCAL HEAD instead of
+origin/main — a binary built in a diverged worktree that misses merged CLI
+changes (#5786-class) reports healthy. (2) The served scaffy catalog can drift
+from main silently because nothing in CI ever runs `go run ./scaffy/seed --check`
+(it WAS red for days until a manual re-seed on 2026-07-23 13:56Z). Both fixes are
+mutation-proven (a behind binary MUST red; corpus drift MUST red) and land with
+permanent regression harnesses, merging on the Go/CI lane parallel to the Elixir
+queue. Improvement-only; honest 2-slice wave.
 
 ## Decisions
 
-- **D1 — Hybrid layer split ratified.** CSS owns everything CONTINUOUS (clamp widths, protected measure, container-query overlay); the server owns everything DISCRETE (pane set, roles, strip/hide DOM); a width-bucket seam reconciles them. Why: CSS-only can't take over collapse (strips are server-rendered different DOM); server-per-resize janks — both sides of this split are now mechanically proven (browser harness + LiveView probe).
-- **D2 — Client-first bucket stamping.** A plain nonced inline script (theme-toggle pre-paint pattern) stamps `html[data-width-bucket]` before first paint and on resize with hysteresis; CSS keys off it instantly. The LiveView hook only pushes bucket TRANSITIONS to the server after connect. Why: `get_connect_params` is nil on the static render (proven) — first paint can never know a server-side bucket, so CSS must own initial layout; no flash-of-wrong-layout.
-- **D3 — Buckets & thresholds.** wide ≥1280 · standard 1024–1279 · narrow 640–1023 · phone <640 (viewport px), ±32px hysteresis dead-band per edge (narrow eagerly, widen reluctantly). Why: 604px fixed chrome + ~680px (66ch) floor = ~1284 break-even, live-measured; hysteresis proved 1 transition vs 10 under boundary jitter (node harness).
-- **D4 — Protected measure is a FLAT floor, Studio-scoped.** `.editor-panel .bp-paper-surface { min-inline-size: 55ch }` — never `min(100%, 55ch)` (silently no-ops; harness Bug 1), never on bare `.bp-paper-surface` (shared with public reader, chat bubbles, swatch demo). `.editor-panel` gets `container-type:inline-size; container-name:content` AND `position:relative` (container-type does NOT create a positioning context — the overlay needs it). The same protection extends to `.editor-body` (classic non-paper editor — a DIFFERENT selector with no .bp-paper-surface, verified uncovered) and the ONIX 60/40 split (stacks to column under a 720px container query).
-- **D5 — Priority squeeze requires the list pane to yield.** `.pane-column` relaxes from `width:260px; min-width:200px; flex-shrink:0` to `min-width:clamp(140px,18vw,260px); flex-shrink:1` (collapsed strips stay rigid 44px). Inspector-overlay container-query threshold = content floor + inspector width (≈860px), NOT a bare content width (harness Bug 2). At wide bucket the result is byte-identical to today — zero desktop change, measured at 1440/1280.
-- **D6 — Anatomy vocabulary lives at TWO sites.** PaneBuilder pane maps gain `role: :nav | :list` + `priority:` (panes[0]=nav/0; intermediate lists priority=idx; last pane :active); the shell stamps `data-role="content"` on `.editor-panel` and `data-role="inspector"` on `.bp-doc-sidebar` from editor assigns. Why: content/inspector are NOT PaneBuilder panes (editor renders from `@editor_doc`, sidebar nests inside it — verified); a builder told to "add an inspector pane" would hunt for something that doesn't exist.
-- **D7 — collapse?/3 survives as the wide-bucket reducer.** Display state = f(role, priority, bucket, has_editor); the wide (and standard) pane row is `not collapse?(idx, num_panes, has_editor)` verbatim — reproducing all 9 mapped nav transitions bit-identically. narrow → FULL iff last pane; phone → visible iff (last and no editor), content full-viewport otherwise. Existing pane_builder_test collapse pins are EXTENDED, never superseded.
-- **D8 — Wire fence.** Roles/priority decorate PaneBuilder pane maps only — never new Structure.Node types (Go TUI's fromDeskNode drops unknown subtrees) or new serialized fields. Structure.build has exactly 3 callers, all inside barkpark_web (verified repo-wide).
-- **D9 — Caps classification is part of the hook's DoD.** `width-bucket` MUST enter `@safe_events` in caps.ex (`:none` tier) or the deny-gate silently halts the event for every non-admin socket AND the comprehensiveness CI test reds — both failure modes reproduced live. The seam is a three-part change: handle_event + hook attr + caps entry.
-- **D10 — Beta-focus stays a fenced full-takeover override, not a model input.** `html[data-editor-focus="beta"]` wins over all bucket rules by cascade; it changes zero state collapse?/3 reads (no rebuild_panes on mode flip — proven). The bucket keeps stamping underneath so exiting Beta at any width lands in the correct state.
-- **D11 — pane_column's `:flex` attr is retired.** No CSS rule backs `.pane-column--flex`, no caller passes it, and its inline style emits `min-width:0` — the opposite of protection. The content winner is `.editor-panel`, not a revived pane class. The component test pins asserting the dead inline style ("flex: 1.1"/"width: auto") get updated in the same PR.
-- **D12 — sidebar_open stays server-default-true; narrow inspector behavior is pure CSS.** Overlay/off-canvas at standard/narrow is a container query on `data-role="inspector"` + `.is-open` — no connect-params seeding (would flash), no server default change. `.bp-doc-field` gains flex-wrap in the same slice (it crowds the moment the sidebar can narrow — verified missing).
-- **D13 — Phone drill rides the same model.** phone bucket = single visible surface (content if editor open, else last pane) + a breadcrumb strip INSIDE the pane area — NOT the topbar (avoids nav.ex / open PR #2907 and the nav_parity_sweep DOM-identity fence). Crumbs are `@panes` titles; clicks reuse `expand-pane` nav_path truncation verbatim — zero new server events. Topbar tabs at phone are CSS-hidden only, never server-omitted (the parity sweep locks tab DOM identity across routes).
-- **D14 — Restyle = mapping, not authoring.** Consume the already-emitted `var(--text-*)` chrome scale (design/check.mjs Part C gates DECLARATIONS only — consumption is free, verified) and self-host IBM Plex Mono into `api/priv/static/fonts/` + @font-face + `--font-mono` repoint (NOT available to Studio today; cloud's static root is separate — verified). `--cc-*` stays banned in Studio (D25/Part G). Literal-color gates: consume var(--…), update design/exemptions.json atomically if a count changes.
-- **D15 — bp-studio-ui-premium D19 is SUPERSEDED, not contradicted.** D19 rejected pane-column work for lack of proven crush; this wave's live measurements (900px viewport → ~21ch; 500px → 0px content pane with NO horizontal scroll — content unreachable) are the new evidence.
-- **D16 — root.html.heex is single-owner per round.** One ~5000-line inline style block; two slices touching it never dispatch in the same round. S1 pre-provisions the bucket-attribute CSS AND the breadcrumb CSS contract (`.bp-desk-crumbs` family) so later slices touch only .ex/test files.
-- **D17 — task-2532b0a2748e93ba is NOT a false-done baseline.** All 5 desk-structure fixes verified on main (commit 961e76d6f / PR #1186); the anatomy refactor assumes them safely. The unstamped criteria are a bookkeeping chore (backlogged), not missing work.
-- **D18 — docs-anchors-check.sh is NOT a local gate.** It hangs 15+ min on this contended checkout (unpruned find over node_modules/.omx — root-caused). CI runs it on clean checkouts; builders prove locally with literal-check + design/check.mjs + targeted mix test. A prune fix is backlogged.
-
-### LAND wave amendments (2026-07-19, D19–D32)
-
-- **D19 — Every builder runs on OPUS.** Fable 5 is spend-limited this session; a fable-assigned slice's builder dies instantly. This OVERRIDES the wave-1 roadmap table's `fable` marks on s1/s3/s4. `builder_model` is not a bp task field — the override is a dispatch-time argument, never a task mutation.
-- **D20 — RESCUE, not rebuild.** Round 1 was built and committed but never PR'd (s1 `059421d7e`, s2 `b3d6ac693`, s3 `7eb2e6d8f`). All three rebase onto `origin/main` with ZERO conflicts and pass every blocking gate individually AND stacked (union: 9 files, 554 insertions; 1867 Studio tests + 1096 portable_doc tests, 0 failures; `--warnings-as-errors` exit 0). Why: rebuilding proven, gate-green code is pure waste; from-charter rebuild survives only as a per-slice fallback that the evidence retired.
-- **D21 — The cross-epic collision is dead, not live.** #4392 never touched `root.html.heex`; #4393 did (4 `--life-*` token lines inside the GENERATED block) and MERGED mid-survey. No open PR touches `root.html.heex`, `pane_builder.ex`, or `structure.ex`. Why: there is no moving target to race — only a rebase onto a main that already moved.
-- **D22 — The true blocking-gate roster for `root.html.heex`.** `web-literal-check.sh` CANNOT see the file (its ROOTS are `web/app` + `web/components`). The real guards are `scripts/studio-literal-check.sh`, `node design/check.mjs` (Part E ratchet — `root.html.heex` pinned at 165, fails on growth AND shrink, and `lit-allow` does NOT exempt it), `scripts/paper-editor-mirror-check.sh` (`.bp-canvas-*` lockstep + generated-token byte compare), `scripts/studio-link-lint.sh` — all in the ONE `doc-gates` job — plus the `elixir` workflow. Why: a wrong roster makes builders prove the wrong things and miss a real gate.
-- **D23 — There is no workflow named "Elixir Test".** The workflow is `elixir`; the blocking job is `Test (Elixir 1.18.1 / OTP 27.0)`. `main` has NO branch protection, so "wait for the gate" is discipline, not mechanism. The `Format` job is advisory-by-design and is RED on main — it will be red on every PR of this epic and must never block a merge.
-- **D24 — main is GREEN and `434361b79` is NOT a prerequisite.** Its PR #1350 merged 2026-07-08 as `f1c17e8b9` (an ancestor of main); origin/main's test file is byte-identical to the branch's. Cherry-picking it is a no-op or a self-conflict. Why: a phantom prerequisite would serialize the rescue for nothing.
-- **D25 — Both bucket globals are canonical.** s1 ships `window.bpWidthBucket` and `window.__bpWidthBucket` as the SAME function `bucket(w, currentName?)`, deliberately aliased. The s1/s4 task-body disagreement is a documentation artifact — s4 may wire to either; do not "fix" it.
-- **D26 — D11 is factually false and stands PARTIALLY retired.** `api_tester_live.ex:468/487` are live `:flex` callers. s2 correctly retired only the dead `.pane-column--flex` class join and left its criterion 4 honestly unmet; `spd-bl-api-tester-flex-retire` owns the remainder. Never re-dispatch a builder to force full D11.
-- **D27 — The phone breadcrumb renders as a SIBLING before `<.pane_layout>`, never inside it.** `.pane-layout` is a nowrap ROW flex (`root.html.heex:1098`), so a crumbs child renders as a left sliver; its parent `.studio-shell` is a COLUMN flex where the pre-provisioned strip CSS (min-height 36px, border-bottom, overflow-x auto) is correct with zero new CSS. Why: this keeps s6 off `root.html.heex`, honoring D16 and letting Round 3 fan out.
-- **D28 — D16 held.** `.bp-desk-crumbs` / `-crumb` / `-sep` / `--current` ship complete in s1 with no server consumer. Round 3 therefore fans out: s5 owns `root.html.heex`, s6 touches only `.ex` + test files.
-- **D29 — `data-role="content"` stamps ALL FIVE `.editor-panel` roots.** paper (`components.ex:98`), media explorer (`:797`), beta (`:861`), classic (`editor.ex:367`), graph (`graph_view.ex:113`). Why: s1's CSS keys on the bare `.editor-panel` class, so the CSS authority has ALREADY classified all five — stamping only three creates a silent split where later `[data-role]` rules skip two panes that `.editor-panel` rules still hit. The floors are inert on media/graph (neither contains `.bp-paper-surface` or `.editor-body`), so inclusion costs one extra file and risks nothing.
-- **D30 — `data-role` selectors must be SCOPED.** 130 `data-role` values already exist on the Tasks board surface. Always write `.pane-layout > [data-role="…"]` or `html[data-width-bucket="…"] […]`, never a bare attribute selector. Why: bare selectors leak across surfaces the moment another plugin reuses a value.
-- **D31 — What lands is a FLAT 55ch floor, not a 55–70ch clamp.** The crush is fixed and measured (596px = 67.6ch at a 900px viewport vs 290px = 32.9ch on main); the upper clamp is UNBUILT and backlogged as `spd-b7-protected-measure-clamp`. Why: the epic's memory must not record a promise the code does not keep.
-- **D32 — Builders branch from `origin/main` explicitly, in isolated worktrees.** The primary checkout is routinely commits-behind and dirty with concurrent sessions' work; local `main` is not main. Why: a worktree cut from local main inherits a stale base plus phantom unpushed commits.
+- **D1 — merge-base semantics, not a bare origin/main swap.** Stale iff
+  `git diff --name-only $(git merge-base $BP_COMMIT origin/main) origin/main -- '*.go' go.mod go.sum internal cmd deploy.sh`
+  is non-empty. Why: proven on real fixture repos across the full verdict matrix —
+  a binary AHEAD with unpushed local Go commits has merge-base==tip and stays
+  green; a bare swap would false-red it (vm-doctor-matrix, 8/8 cells).
+- **D2 — guard order is load-bearing: cat-file → rev-parse → merge-base → diff.**
+  `git cat-file -e "$BP_COMMIT^{commit}"` (unknown commit → loud skip) FIRST,
+  then `git rev-parse --verify --quiet origin/main` (offline/no-ref → loud skip),
+  then non-empty merge-base, then the diff. Why: the bare one-liner FALSE-GREENS
+  offline — `$base` goes empty, the git error is swallowed, and an empty diff
+  reads ok (proof line: "BARE verdict: GREEN <-- FALSE-GREEN"). All new branches
+  route through bad()/skip()/ok() (SessionStart hook silence contract) and the
+  unconditional `exit 0   # advisory` tail stays (upgrade_test + hook contract).
+- **D3 — pathspec gains `deploy.sh`.** Why: root deploy.sh is a real binary input
+  (`make cli-assets-sync` vendors it into the embed); its root↔vendored identity
+  is enforced only by vendored-assets.yml — one word removes the dependency on
+  that external invariant (historic drift #757/#499).
+- **D4 — permanent harness `scripts/doctor.test.sh` (install-cli.test.sh
+  convention) wired via a NEW `.github/workflows/shell-harnesses.yml`.** Why:
+  doctor.sh false-greened twice in one week by two different routes (#5935 regex,
+  compare-target today) — patch-without-harness is how this file fails; and NO
+  existing CI lane runs any scripts/*.test.sh (zero `run:` hits repo-wide), so
+  "ride an existing job" was refuted — a lane must be authored. Rejected rival:
+  a `--selftest` flag inside doctor.sh (the checkout must audit the binary; keep
+  the advisory script lean).
+- **D5 — the harness's fake-git MUST stub `merge-base` (returning a plausible
+  SHA) and MUST place a fake `bp` on PATH.** Why: upgrade_test's fixture has
+  neither, so its PASS never exercises section 2 — copying it verbatim
+  reproduces the same blind spot one level down (vm-upgrade-test-interplay).
+- **D6 — autoseed tripwire = dedicated advisory workflow
+  `.github/workflows/scaffy-catalog-drift.yml` + `make seed-check`.** TOKENLESS
+  (seed --check reads the published perspective from guerrilla.barkpark.cloud by
+  design; NO guerrilla creds in CI) and ADVISORY (job-level
+  `continue-on-error: true`; remediation is a human re-seed, never a CI
+  mutation). Triggers: push-to-main with paths scaffy/commands/**,
+  scaffy/seed/**, internal/scaffy/**, its own yml; daily cron `17 6 * * *`;
+  workflow_dispatch. `concurrency.cancel-in-progress: false` — a literal `true`
+  reds never-cancel-main-check via doc-gates' `.github/workflows/**` glob
+  (mutation-proven both directions in preflight). The job summary distinguishes
+  UNREACHABLE (fetch failure — no table is even printed) from DRIFT (table rows)
+  from in-sync, so advisory reds aren't ambiguous noise. Why dedicated: bolting
+  an advisory network check onto a required gate's workflow muddies the gate
+  story.
+- **D7 — in-workflow self-test step.** Before the real check, mutate one .scaffy
+  in the RUNNER's ephemeral checkout, assert exit 1 + a DRIFT row naming that
+  command, restore via `git checkout --`. Why: the tripwire must re-prove it can
+  fail on every run, not once at merge time (astro-finder-drift precedent;
+  make-the-check-able-to-fail doctrine).
+- **D8 — claim the existing anchor tasks; file nothing new for the slices.**
+  Slice 1 = `scaffy-backlog-doctor-bp-freshness`, slice 2 =
+  `scaffy-backlog-seedcheck-ci-advisory`, both re-parented under
+  `task-09f4775e7ccc2cca`. Why: the wish's cited pdf-bl-doctor-bp-staleness-regex
+  is closed and covered a different bug (regex false-skip, #5935); these two open
+  tasks are the exact live ledger anchors — filing duplicates forks the ledger.
+  Slice 1 must diff against CURRENT doctor.sh (post-#5726): the no-stamp loud red
+  and `make cli-install` hint already exist and must be preserved.
+- **D9 — builders: Opus, both slices; slice 1 carries HIGH-FLIP-RISK.** The
+  flip-prone judgment is the doctor verdict matrix — legit up-to-date and
+  ahead-with-local-Go binaries MUST stay green. Reviewer re-derives that matrix
+  independently on fixtures (E2), and a genuinely independent second reviewer is
+  warranted before merge.
+- **D10 — post-merge obligations (lead):** one green `workflow_dispatch` run of
+  scaffy-catalog-drift.yml on main proving Actions-runner egress to
+  guerrilla.barkpark.cloud (unprovable pre-merge), and one live `make doctor` on
+  a deliberately-behind worktree confirming the RED fires in situ.
+- **D11 — premise corrections recorded honestly.** seed --check is GREEN today
+  (re-seeded 13:56Z by scaffy-dr-catalog-reseed) — slice 2 delivers the
+  tripwire, not a re-seed. The wish's task citation was stale. "Parallel to the
+  Elixir queue" is correctness-parallel only — elixir.yml runs on every PR
+  (~13-16 min wall) and main has ZERO branch protection; all gates are
+  discipline. No freshness path may ever consume `go version -m` vcs stamps
+  (unsound in nested worktrees — walk-up binds to the ancestor repo's HEAD;
+  the ldflags `commit` field is the only trustworthy signal).
 
 ## Roadmap
 
-Seven slices, four rounds. ROUNDS ARE LAW — a slice never dispatches beside its unmerged dependency, and `root.html.heex` has exactly one owner per round (D16). Per D19 every model column reads `opus` for the duration of this session.
-
-| # | Slice | Task | Round | Model | Size |
-|---|---|---|---|---|---|
-| 1 | CSS space-priority foundation — the crush fix; sole owner of `root.html.heex` this round | `spd-s1-css-foundation` | 1 | opus | large |
-| 2 | Width-bucket server seam, INERT (handle_event + caps entry + optional hook attr) | `spd-s2-bucket-server-seam` | 1 | opus | medium |
-| 3 | Pane anatomy roles + `display_state/4` table (`pane_builder.ex` + its test only) | `spd-s3-pane-anatomy-roles` | 1 | opus | medium |
-| 4 | Reconciliation — activate the hook, stamp `data-role` on all five content roots (D29), server strips at narrow/phone | `spd-s4-bucket-reconciliation` | 2 (after 1,2,3) | opus | large |
-| 5 | Desk chrome restyle — `--text-*` consumption + Plex Mono + peripheral-pane responsiveness | `spd-s5-desk-restyle` | 3 (after 4) | opus | medium |
-| 6 | Phone drill + breadcrumb component, rendered as a sibling before `<.pane_layout>` (D27) | `spd-s6-phone-drill-breadcrumb` | 3 (after 4) | opus | medium |
-| 7 | View↔edit + 720px measure-parity pins, `docs/cards/studio.md`, `docs/ops/merge-gates.md` currency | `spd-s7-parity-guard-card` | 4 (after 5,6) | opus | small |
-
-Backlog (filed as published children, future waves): `spd-b1-pane-state-persistence` · `spd-b2-docs-anchors-prune-fix` · `spd-b3-dead-admin-shell-css` · `spd-b4-stamp-2532-criteria` · `spd-b5-navshell-wave2-triage` · `spd-b6-sub500-phone-proof` · `spd-bl-api-tester-flex-retire` · `spd-b7-protected-measure-clamp` (the 55–70ch upper clamp D31 defers) · `spd-b8-editor-panel-blast-radius` (Sheets/Graph/Media inherit the 560px floor + inline-size container — unmeasured below 1024px) · `spd-b9-merge-gates-doc-currency` (`docs/ops/merge-gates.md` documents 2 of the 11 blocking doc-gates steps and names a workflow that does not exist).
+1. **Slice 1 (medium, round 1, Opus)** — doctor.sh merge-base staleness fix +
+   scripts/doctor.test.sh verdict-matrix harness + shell-harnesses.yml wiring.
+   Task `scaffy-backlog-doctor-bp-freshness`. Files: scripts/doctor.sh,
+   scripts/doctor.test.sh, .github/workflows/shell-harnesses.yml.
+2. **Slice 2 (small, round 1, Opus)** — scaffy-catalog-drift.yml advisory
+   tokenless tripwire + `make seed-check`. Task
+   `scaffy-backlog-seedcheck-ci-advisory`. Files:
+   .github/workflows/scaffy-catalog-drift.yml, Makefile.
+3. **Backlog (filed as published children, future waves):**
+   `clirel-bl-local-update-early-exit` — local-update.sh OLD==NEW early-exit
+   skips the bp rebuild (fixer-side residual; low severity since doctor's hint
+   is `make cli-install`, which rebuilds unconditionally);
+   `clirel-bl-go-tests-scaffy-paths` — go-tests.yml path filter misses
+   scaffy/commands/** so the corpus census test can go stale again (historic
+   7→12 incident, task-94df363c6ad6de68);
+   `clirel-bl-wire-orphan-shell-tests` — wire the four orphaned
+   scripts/*.test.sh into shell-harnesses.yml once slice 1 lands.
 
 ## Wave log
-
-- **2026-07-19 — Wave 2 (LAND), Decide.** Ground truth reshaped the wave: the design was already ratified and Round 1 already BUILT on three unmerged branches. Ten verifiers proved all three rebase clean onto `origin/main@567bf6e39`, pass every blocking gate (Part E ratchet unmoved at 165/165), compose when stacked (1867 + 1096 tests, 0 failures), and that the feared tlv `root.html.heex` collision was already merged and harmless. main proven green; `434361b79` proven unnecessary. Decisions D19–D32 ratified. Wave cut: Round 1 = three file-disjoint RESCUE tracks (`spd-s1`/`spd-s2`/`spd-s3` — rebase, gate, PR, merge); Rounds 2–4 (`spd-s4`, then `spd-s5`+`spd-s6`, then `spd-s7`) deferred to the lead's post-merge dispatch. Paper: `studio-space-priority-desk-land-2026-07-19`.
-
-- **2026-07-19 — Wave 2 (LAND), Review. Grade A−.** All three Round-1 rescues landed clean on `origin/main@87463fa3b` with the predicted diffs (s1 one file 171/7; s2 six files 133/2; s3 two files 250/0, additions-only) and each slice gate green. Review found ONE merge-blocking defect that no local gate could see and fixed it in place: **D33 — `container-type` is not free.** `container-type: inline-size` computes to `contain: layout style inline-size`, and LAYOUT containment makes `.editor-panel` a containing block for `position: fixed` descendants, which then also clip inside its `overflow: hidden`. The paper editor's four floating surfaces are SAFE (slash-menu, format-bubble, wikilink-menu and command-palette all `document.body.appendChild`), `.bp-ae-toast` is dead CSS — but `sheet_grid.ex`'s cell context menu is SERVER-rendered inside the panel with viewport coordinates, so it would have opened offset by the panel origin and clipped, at every width. Fix: `.editor-panel.sheet-editor { container-type: normal }` (the sheet surface has no container-queried child, so the carve-out is free). Second review fix: **D34 — the pane row gets a scroll escape valve.** With hard floors on both sides (`.pane-column` clamp + `.editor-panel` 560px) the flex row overflows below ~744px viewport in a drilled-document state, and `overflow: hidden` clipped the TAIL — which is the content pane. `.pane-layout` moves to `overflow-x: auto; overflow-y: hidden`: inert whenever nothing overflows (byte-identical at every ≥1024px desktop), and a scroll rather than a wall in the 640–744px band until `spd-s4`/`spd-s6` remove the overflow itself. Third fix (test-only, s3): pinned `priority == index` for non-`:active` panes, since the `:list` site computes `depth + 1` and nothing guarded the two staying equal. Stacked review-fixed union re-verified: all five CSS gates green (Part E ratchet still 165/165, delta 0) plus **1694 Studio-surface tests, 0 failures**. Ledger audited honest — three slices `in_progress` with per-criterion evidence, merge criteria correctly left for the lead, `spd-s2` criterion 3 an explained miss under D26; new child filed `spd-b10-container-fixed-position-audit`. Final branches: `…-foundat-0-r`, `…-server-seam-l-1` (unchanged), `…-lands-r-2-r`. Next wave: merge Round 1, then `spd-s4`, then `spd-s5`+`spd-s6` in parallel, then `spd-s7`.
