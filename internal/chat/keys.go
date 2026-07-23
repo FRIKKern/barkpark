@@ -15,6 +15,13 @@ import (
 // and on the conversation it PATCHes the draft first (charter D14: persist the
 // writable continuity set on quit) so no composer text is ever lost.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The `?` overlay owns the keyboard while open (charter D66): every key routes
+	// to handleHelpKey ONLY — esc/q/? close, j/k + g/G scroll, everything else is
+	// swallowed — mirroring cmd/barkpark/tui_update.go's helpOpen guard. This sits
+	// ABOVE the universal Ctrl+C so an open overlay is a modal, closed before quit.
+	if m.helpOpen {
+		return m.handleHelpKey(msg)
+	}
 	if msg.Type == tea.KeyCtrlC {
 		if m.screen == screenChat {
 			// Persist the draft, THEN quit — sequenced so the PATCH lands before
@@ -68,6 +75,12 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.loading = true
 		return m, m.loadSessionsCmd()
+	case "?":
+		// Open the key-reference overlay (charter D66). The picker has no composer,
+		// so `?` is unambiguous here — always the help toggle. Pure insertion: the
+		// switch has no default, so no other picker key changes.
+		m.helpOpen = true
+		return m, nil
 	case "q":
 		return m, tea.Quit
 	}
@@ -96,6 +109,16 @@ func (m Model) openPickerRow() (tea.Model, tea.Cmd) {
 // (PATCHing the draft), and the scroll keys drive the manual viewport. Every
 // other printable key edits the composer.
 func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// `?` opens the key-reference overlay (charter D66) — but ONLY on an EMPTY
+	// composer, so a `?` typed into a draft is text. This PURE guard sits at the
+	// VERY TOP, ahead of the D14 focus snap AND the KeyRunes catch-all: placed any
+	// later, the snap would collapse wfExpanded/wfAgentDetail as a side effect
+	// before the intercept could fire (a verified baseline). A non-empty composer
+	// falls straight through to the KeyRunes case below, which appends the rune.
+	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == '?' && m.input == "" {
+		m.helpOpen = true
+		return m, nil
+	}
 	// The workflow strip's focus zone (wave session-card charter D14). A strip
 	// that vanished (the run settled on a turn-boundary refetch) drops focus back
 	// to the composer before any key is read — no dead zone survives its panel.
