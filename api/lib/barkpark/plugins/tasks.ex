@@ -288,7 +288,7 @@ defmodule Barkpark.Plugins.Tasks do
   `Barkpark.Plugins.Registry.collect_desk_items/1` after the host's
   built-in groups — see `Barkpark.Structure.build_desk_items/3`).
 
-  Two entries:
+  Three entries:
 
     * a `:document_list` for the `task` type, gated on the `task` schema
       actually existing in the requested dataset — mirroring how the host
@@ -302,6 +302,10 @@ defmodule Barkpark.Plugins.Tasks do
       presence: the board reads the task corpus globally, so it is reachable
       from any dataset's desk. `/admin/*` (not `/studio/*`) so the desk-link
       scoper leaves the path intact — the pulse dashboard precedent.
+    * a `:link` to **Fleet** (`/admin/fleet`) — the Personal Dev Fleet desk
+      tile (`Barkpark.Plugins.Tasks.Web.FleetLive`), a read-only listener
+      roster. Ungated by schema presence for the same reason: the roster reads
+      the `type:listener` corpus globally (PDF-D19).
   """
   @impl Barkpark.Plugin
   def desk_items(dataset) do
@@ -315,6 +319,15 @@ defmodule Barkpark.Plugins.Tasks do
     # link.
     projects_link = %{type: :link, label: "Projects", path: "/admin/projects", icon: "columns"}
 
+    # The Personal Dev Fleet desk tile — a read-only listener roster at
+    # /admin/fleet (Barkpark.Plugins.Tasks.Web.FleetLive). Ungated by schema
+    # presence, exactly like the Projects link: the roster reads the
+    # type:listener corpus GLOBALLY (PDF-D19), so it is reachable from any
+    # dataset's desk. `/admin/*` (not `/studio/*`) so the desk-link scoper leaves
+    # the path intact — the pulse dashboard precedent. It vanishes with the whole
+    # Tasks plugin (the enablement highway skips a disabled plugin's callbacks).
+    fleet_link = %{type: :link, label: "Fleet", path: "/admin/fleet", icon: "activity"}
+
     task_list =
       if task_schema_present?(dataset) do
         [%{type: :document_list, label: "Tasks", doc_type: "task", icon: "✅"}]
@@ -322,7 +335,7 @@ defmodule Barkpark.Plugins.Tasks do
         []
       end
 
-    task_list ++ [projects_link]
+    task_list ++ [projects_link, fleet_link]
   end
 
   @doc """
@@ -346,6 +359,18 @@ defmodule Barkpark.Plugins.Tasks do
         icon: "columns",
         order: 35,
         active_when: "/admin/projects"
+      },
+      # The Personal Dev Fleet tile (Barkpark.Plugins.Tasks.Web.FleetLive at
+      # /admin/fleet) — the read-only listener roster. `order: 36` sits it right
+      # after Projects (35). Same `:ops` route enforcement + fresh-install
+      # invariant as Projects: the tab disappears entirely when the Tasks plugin
+      # is off. Active for any path under /admin/fleet.
+      %{
+        label: "Fleet",
+        path: "/admin/fleet",
+        icon: "activity",
+        order: 36,
+        active_when: "/admin/fleet"
       }
     ]
   end
@@ -440,7 +465,14 @@ defmodule Barkpark.Plugins.Tasks do
       # pulse dashboard precedent. This is the GUI realization of the task
       # design-language spec; the tasks plugin owns type:task, so the board
       # belongs in its namespace.
-      {:live, "/projects", Barkpark.Plugins.Tasks.Web.BoardLive, :index, auth: :ops}
+      {:live, "/projects", Barkpark.Plugins.Tasks.Web.BoardLive, :index, auth: :ops},
+      # Personal Dev Fleet desk tile — the read-only listener ROSTER
+      # (Barkpark.Plugins.Tasks.Web.FleetLive), mounted at /admin/fleet (the
+      # :ops bucket, admin-gated). Reads the flat global-per-dataset roster
+      # (PDF-D19), 5s poll, no PubSub. /admin (not /studio) so the desk-link
+      # scoper leaves the path intact — the Projects precedent above. The tasks
+      # plugin owns type:listener presence, so the tile lives in its namespace.
+      {:live, "/fleet", Barkpark.Plugins.Tasks.Web.FleetLive, :index, auth: :ops}
       # NOTE: the content-graph reads (/graph/orphans, /graph/dangling,
       # /graph/:id) are NO LONGER declared here. They moved to CORE
       # (router.ex `scope "/v1" … get("/graph/…")`) because the graph roots on
