@@ -257,7 +257,11 @@ defmodule Barkpark.Plugins.Bulldocs do
         id: "bulldocs.publish",
         noun: "bulldocs",
         verb: "publish",
-        summary: "Publish (upsert) a paper from a portable-doc or HTML payload.",
+        summary:
+          "Publish (upsert) a paper from a portable-doc or HTML payload. " <>
+            "Mechanical spacing law: vertical rhythm is content, not style — space sections " <>
+            "with explicit empty paragraph blocks ({\"type\":\"paragraph\",\"content\":[]}), " <>
+            "never renderer margins. See /papers/mechanical-spacing-doctrine.",
         http: %{method: "POST", path_template: "/v1/plugins/bulldocs/papers"},
         auth_tier: "ingest",
         args: [
