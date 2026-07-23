@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# doctor.test.sh — behavioral regression for scripts/doctor.sh SECTION 2
+# (installed-bp staleness). This is the harness that proves the compare-target
+# is origin/main via merge-base, not local HEAD — the false-green that shipped
+# twice in one week (regex #5935, then compare-target).
+#
+# WHY A DEDICATED HARNESS AND NOT upgrade_test.go: the Go
+# TestDoctorReleaseCadence fixture has NO fake `bp` on PATH and NO merge-base
+# stub, so its fixture takes the `else skip "no bp on PATH"` branch and NEVER
+# exercises section 2. Copying it verbatim reproduces the blind spot one level
+# down. So this harness builds REAL git repos (bare origin.git + working clone)
+# and puts a REAL fake `bp` on PATH that emits {"commit":"<sha>"} — the only way
+# to drive section 2's cat-file / rev-parse / merge-base / diff ladder.
+#
+# The full 8-cell verdict matrix (the flip-risk surface):
+#   1. at-tip                → GREEN  (bp commit == origin/main tip)
+#   2. behind-Go             → RED    (Go input changed on origin/main since bp)
+#   3. behind-docs-only      → GREEN  (only non-Go paths changed since bp)
+#   4. ahead-with-local-Go   → GREEN  (bp ahead; merge-base==origin/main tip)
+#   5. diverged              → RED    (Go changed past the common ancestor)
+#   6. unknown-commit        → SKIP   (bp commit absent from the checkout)
+#   7. no-stamp              → RED    (bp built without -ldflags: no commit)
+#   8. offline / no ref      → SKIP   (origin/main ref unavailable — LOUD, not ok)
+#
+# Templated on scripts/install-cli.test.sh.
+set -uo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+DOCTOR="$HERE/doctor.sh"
+fails=0
+pass() { echo "  PASS: $*"; }
+fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
+
+TMP="$(mktemp -d)"
+cleanup() { chmod -R u+w "$TMP" 2>/dev/null || true; find "$TMP" -depth -delete 2>/dev/null || true; }
+trap cleanup EXIT
+
+# ── assertion helpers ────────────────────────────────────────────────────────
+# A section-2 outcome line always starts with "installed bp". We must NOT let
+# section 1's "checkout is current with origin/main" (same tail!) satisfy a
+# section-2 green assertion — so a green check requires a line that carries BOTH
+# "installed bp" AND "is current".
+# NB: here-strings, not `printf | grep -q`. `grep -q` closes its input on the
+# first match; under `set -o pipefail` that SIGPIPEs the upstream printf and the
+# pipeline returns 141 (a size-dependent false negative). A here-string has no
+# upstream writer to kill, so the match verdict is the ONLY thing that matters.
+sec2_green() { grep -qE 'installed bp .*is current with origin/main' <<<"$1"; }
+sec2_red()   { grep -qF 'predates Go changes on origin/main' <<<"$1"; }
+has()        { grep -qF "$2" <<<"$1"; }
+
+# assert_green <name> <output>  — section 2 says current, and says nothing stale
+assert_green() {
+  if sec2_green "$2" && ! sec2_red "$2"; then pass "$1"; else
+    fail "$1"; printf '    --- doctor output ---\n%s\n    ---------------------\n' "$2"; fi
+}
+# assert_red <name> <output>  — section 2 flags stale, and does NOT green
+assert_red() {
+  if sec2_red "$2" && ! sec2_green "$2"; then pass "$1"; else
+    fail "$1"; printf '    --- doctor output ---\n%s\n    ---------------------\n' "$2"; fi
+}
+# assert_has <name> <output> <substr>  — an exact skip/red string is present …
+assert_has() {
+  if has "$2" "$3"; then pass "$1"; else
+    fail "$1 (missing: $3)"; printf '    --- doctor output ---\n%s\n    ---------------------\n' "$2"; fi
+}
+# … and section 2 must be neither green nor a stale RED (a clean SKIP).
+assert_clean_skip() {
+  if ! sec2_green "$2" && ! sec2_red "$2"; then pass "$1"; else
+    fail "$1 (leaked a green/red verdict)"; printf '    --- doctor output ---\n%s\n    ---------------------\n' "$2"; fi
+}
+
+# ── fixtures ────────────────────────────────────────────────────────────────
+GIT="git -c user.email=t@t -c user.name=t -c commit.gpgsign=false -c init.defaultBranch=main"
+
+# make_bp <bindir> <sha-or-empty> — a fake bp that emits the ldflags-style JSON
+# doctor.sh parses. Empty sha ⇒ no "commit" field (the no-stamp cell).
+make_bp() {
+  local bindir="$1" sha="$2"
+  mkdir -p "$bindir"
+  if [ -n "$sha" ]; then
+    cat > "$bindir/bp" <<EOF
+#!/bin/sh
+[ "\$1" = version ] && { printf '{"cli_version":"test","commit": "%s"}\n' "$sha"; exit 0; }
+exit 0
+EOF
+  else
+    cat > "$bindir/bp" <<'EOF'
+#!/bin/sh
+[ "$1" = version ] && { echo '{"cli_version":"test"}'; exit 0; }
+exit 0
+EOF
+  fi
+  chmod +x "$bindir/bp"
+}
+
+# base_repo <root> — a real clone whose origin/main tracking ref exists at a base
+# commit "A" carrying a Go file, deploy.sh, and a docs file. Echoes the work dir.
+base_repo() {
+  local root="$1" origin="$1/origin.git" work="$1/work"
+  $GIT init --quiet --bare "$origin"
+  $GIT init --quiet "$work"
+  $GIT -C "$work" symbolic-ref HEAD refs/heads/main
+  $GIT -C "$work" remote add origin "$origin"
+  mkdir -p "$work/scripts" "$work/internal/cli/setup/assets"
+  cp "$DOCTOR" "$work/scripts/doctor.sh"
+  printf 'echo deploy v1\n' > "$work/deploy.sh"
+  cp "$work/deploy.sh" "$work/internal/cli/setup/assets/deploy.sh"   # keep §4 quiet
+  printf 'package main\n\nfunc main() {}\n' > "$work/main.go"
+  printf 'docs v1\n' > "$work/README.md"
+  $GIT -C "$work" add -A
+  $GIT -C "$work" commit --quiet -m A
+  $GIT -C "$work" push --quiet -u origin main 2>/dev/null
+  $GIT -C "$work" fetch --quiet origin 2>/dev/null
+  echo "$work"
+}
+
+# advance_origin <work> <file> <content> <msg> — commit on main and publish it to
+# origin/main (a change the installed bp predates).
+advance_origin() {
+  local work="$1"
+  printf '%s\n' "$3" > "$work/$2"
+  $GIT -C "$work" add -A
+  $GIT -C "$work" commit --quiet -m "$4"
+  $GIT -C "$work" push --quiet origin main 2>/dev/null
+  $GIT -C "$work" fetch --quiet origin 2>/dev/null
+}
+
+run_doctor() { # <work> <bindir> — full doctor output, fake bp shadowing real bp
+  env PATH="$2:$PATH" BARKPARK_RELEASES_API_URL="https://example.invalid/releases" \
+    /bin/bash "$1/scripts/doctor.sh" 2>&1
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+echo "== doctor.sh section 2 — 8-cell verdict matrix =="
+
+# ── 1. at-tip → GREEN ────────────────────────────────────────────────────────
+R1="$TMP/c1"; mkdir -p "$R1"; W1="$(base_repo "$R1")"
+A1="$($GIT -C "$W1" rev-parse HEAD)"
+make_bp "$R1/bin" "$A1"
+assert_green "1. at-tip: bp == origin/main is GREEN" "$(run_doctor "$W1" "$R1/bin")"
+
+# ── 2. behind-Go → RED ───────────────────────────────────────────────────────
+R2="$TMP/c2"; mkdir -p "$R2"; W2="$(base_repo "$R2")"
+A2="$($GIT -C "$W2" rev-parse HEAD)"                 # bp built here …
+advance_origin "$W2" main.go 'package main // v2' 'B: go change'   # … origin moved on
+make_bp "$R2/bin" "$A2"
+assert_red "2. behind-Go: origin/main gained a .go change → RED" "$(run_doctor "$W2" "$R2/bin")"
+
+# ── 3. behind-docs-only → GREEN ──────────────────────────────────────────────
+R3="$TMP/c3"; mkdir -p "$R3"; W3="$(base_repo "$R3")"
+A3="$($GIT -C "$W3" rev-parse HEAD)"
+advance_origin "$W3" README.md 'docs v2' 'C: docs only'
+make_bp "$R3/bin" "$A3"
+assert_green "3. behind-docs-only: no Go input changed → GREEN" "$(run_doctor "$W3" "$R3/bin")"
+
+# ── 4. ahead-with-local-Go → GREEN ───────────────────────────────────────────
+# bp built at a LOCAL commit D ahead of origin/main (unpushed Go work). merge-base
+# (D, origin/main) == origin/main tip, so the diff is empty. A bare
+# `git diff BP_COMMIT origin/main` would FALSE-RED this — the flip that D1 forbids.
+R4="$TMP/c4"; mkdir -p "$R4"; W4="$(base_repo "$R4")"
+printf 'package main // local ahead\n' > "$W4/main.go"
+$GIT -C "$W4" add -A; $GIT -C "$W4" commit --quiet -m 'D: local unpushed go'   # NOT pushed
+D4="$($GIT -C "$W4" rev-parse HEAD)"
+make_bp "$R4/bin" "$D4"
+assert_green "4. ahead-with-local-Go: merge-base==tip → GREEN (not false-red)" "$(run_doctor "$W4" "$R4/bin")"
+
+# ── 5. diverged → RED ────────────────────────────────────────────────────────
+# origin/main advanced with a Go change (B); bp built on a sibling commit E off
+# the common ancestor A. merge-base(E, B)==A, diff(A,B) has the .go change → RED.
+R5="$TMP/c5"; mkdir -p "$R5"; W5="$(base_repo "$R5")"
+advance_origin "$W5" main.go 'package main // v2 diverge' 'B: go change on main'
+$GIT -C "$W5" checkout --quiet -b diverge "$($GIT -C "$W5" rev-list --max-parents=0 HEAD | tail -1)"
+printf 'docs on a divergent branch\n' > "$W5/README.md"
+$GIT -C "$W5" add -A; $GIT -C "$W5" commit --quiet -m 'E: divergent sibling'
+E5="$($GIT -C "$W5" rev-parse HEAD)"
+make_bp "$R5/bin" "$E5"
+assert_red "5. diverged: Go changed past the merge-base → RED" "$(run_doctor "$W5" "$R5/bin")"
+
+# ── 6. unknown-commit → SKIP ─────────────────────────────────────────────────
+R6="$TMP/c6"; mkdir -p "$R6"; W6="$(base_repo "$R6")"
+make_bp "$R6/bin" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"   # not in the checkout
+OUT6="$(run_doctor "$W6" "$R6/bin")"
+assert_has        "6. unknown-commit: loud skip line present" "$OUT6" "bp build commit not in this checkout"
+assert_clean_skip "6. unknown-commit: no green/red verdict leaked" "$OUT6"
+
+# ── 7. no-stamp → RED ────────────────────────────────────────────────────────
+R7="$TMP/c7"; mkdir -p "$R7"; W7="$(base_repo "$R7")"
+make_bp "$R7/bin" ""   # bp version emits no "commit" field
+assert_has "7. no-stamp: loud RED for unstamped bp" "$(run_doctor "$W7" "$R7/bin")" \
+  "installed bp has NO build-commit stamp"
+
+# ── 8. offline / no origin/main ref → SKIP ───────────────────────────────────
+# A repo with a commit bp CAN resolve (cat-file passes) but NO origin/main ref.
+# The bare merge-base form false-greens here; ours must LOUD-skip.
+R8="$TMP/c8"; mkdir -p "$R8"; W8="$R8/work"
+$GIT init --quiet "$W8"; $GIT -C "$W8" symbolic-ref HEAD refs/heads/main
+mkdir -p "$W8/scripts"; cp "$DOCTOR" "$W8/scripts/doctor.sh"
+printf 'echo deploy\n' > "$W8/deploy.sh"; printf 'package main\n' > "$W8/main.go"
+$GIT -C "$W8" add -A; $GIT -C "$W8" commit --quiet -m A
+A8="$($GIT -C "$W8" rev-parse HEAD)"     # exists → cat-file passes; no origin/main
+make_bp "$R8/bin" "$A8"
+OUT8="$(run_doctor "$W8" "$R8/bin")"
+# Assert on the section-2-UNIQUE tail, not the bare "origin/main ref unavailable"
+# — section 1b's release-cadence skip carries that same phrase and would false-pass.
+assert_has        "8. offline: LOUD skip when origin/main is unavailable" "$OUT8" "bp staleness check skipped"
+assert_clean_skip "8. offline: no green/red verdict leaked" "$OUT8"
+
+# ── negative control: prove the harness can SEE a false-green ────────────────
+# If section 2 ever regresses to comparing against the ancestor-only diff and
+# calls the behind-Go binary current, sec2_green would fire on cell 2. We assert
+# the inverse above; this line documents that the matrix is not vacuous — cells
+# 2 and 5 RED while 1/3/4 GREEN on the SAME code path is only possible if the
+# merge-base compare-target is live.
+
+echo
+if [ "$fails" -ne 0 ]; then
+  echo "doctor tests: $fails failure(s)" >&2
+  exit 1
+fi
+echo "doctor tests: PASS (8/8 verdict cells)"

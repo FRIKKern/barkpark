@@ -1,0 +1,46 @@
+name: Shell harnesses
+
+# Runs the repo's behavioral shell harnesses (scripts/*.test.sh) that no other
+# CI lane executes — a zero-`run:`-hit gap confirmed repo-wide. First tenant:
+# scripts/doctor.test.sh, the 8-cell verdict matrix for scripts/doctor.sh
+# section 2 (installed-bp staleness). doctor.sh false-greened TWICE in one week
+# (regex #5935, then compare-target) — a patch without a harness is how this
+# file regresses, so the harness rides its own required lane.
+
+on:
+  pull_request:
+    paths:
+      - "scripts/doctor.sh"
+      - "scripts/doctor.test.sh"
+      - ".github/workflows/shell-harnesses.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/doctor.sh"
+      - "scripts/doctor.test.sh"
+      - ".github/workflows/shell-harnesses.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shell-harnesses-${{ github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the suite dark
+  # (never-cancel-main-check.sh D12). The guard is a no-op on PRs (github.ref is
+  # never refs/heads/main there) and strictly never-cancel on main.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  doctor-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The harness builds fixture repos and diffs merge-base(bp, origin/main);
+          # nothing here reaches the real origin/main, but a full checkout keeps
+          # git operations unsurprising (no shallow-clone edge cases).
+          fetch-depth: 0
+      - name: doctor.sh syntax check
+        run: bash -n scripts/doctor.sh
+      - name: doctor.sh section-2 verdict matrix
+        run: bash scripts/doctor.test.sh
