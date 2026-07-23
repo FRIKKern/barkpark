@@ -1,9 +1,13 @@
 package cli
 
-// cloud_support_cmd_test.go proves `bp cloud support add` — the Personal Dev
-// Fleet's ONE ACTION (Wave C, PDF-D56..D62) — against FAKES only: an httptest
-// main (mutate / fleet bind routes / export / roster) plus an injected
-// SupportRunner recorder. No hcloud, no SSH, no sleeps beyond a shrunken poll.
+// cloud_support_cmd_test.go proves `bp cloud support add` + `remove` — the
+// Personal Dev Fleet's ONE ACTION and its mirror (Wave C, PDF-D56..D62,
+// D68..D72) — against FAKES only, on a TWO-HOST harness (PDF-D72): an httptest
+// MAIN (mutate / token mint+revoke / export / roster) AND a distinct httptest
+// CONTROL PLANE (barkparks list / fleet supports register+delete), seeded via
+// seedCloudLogin/SaveConfig(CloudURL). Every bind/unbind test asserts WHICH
+// host received the call — the round-1 single-fake-host harness is exactly why
+// the bind-targets-the-wrong-host bug passed 9/9 green.
 //
 // The load-bearing claims, one test each:
 //   - the eight named states run IN ORDER and the receipt is honest (happy path)
@@ -11,9 +15,12 @@ package cli
 //     main (PDF-D58; the roster row is written only after create succeeds)
 //   - the roster row rides content.status=provisioning + ttl_s, NEVER a
 //     top-level status, and is published in the same batch (PDF-D56)
-//   - bind is real: token minted, control-plane row registered with token_id
-//     (+ fleet_parent_id when --parent given), token delivered via a redacted
-//     0600 env write as BARKPARK_API_TOKEN — and never printed
+//   - bind is real AND correctly split (PDF-D69): the token is minted on the
+//     MAIN, the group record is registered on the CONTROL PLANE — which-host
+//     asserted; a missing Cloud login fails BEFORE the box create; the CP's
+//     401 / 422 no_team / 403 forbidden refusals get named narrations
+//   - parent auto-resolve (PDF-D70): url-host match (never the host column),
+//     one/zero/many branches, --parent wins outright
 //   - the dataset leg exports profile=dev, streams the exact tar bytes to the
 //     box, enables allow_bundle_import first, then merge-imports on-box
 //   - runtime: fleet files from origin/main content, agent CLI FAIL-OPEN,
@@ -21,6 +28,10 @@ package cli
 //     (the ssh one-liner is printed instead)
 //   - honest terminal states: roster-row write failure, bind mint failure,
 //     online-poll timeout (never faking online)
+//   - remove (PDF-D68): the ordered four-surface teardown, the identity fence,
+//     the verify-gone census (planted survivors caught + named, non-zero),
+//     double-remove idempotence, partial-state convergence, and the 403→401
+//     token probe (alive = named survivor)
 
 import (
 	"bytes"
@@ -131,8 +142,50 @@ func (f *fakeSupportRunner) scripts() string {
 	return b.String()
 }
 
-// supportMainRecorder is the fake MAIN: it serves the mutate, bind, export and
-// roster routes and records everything that arrives.
+// supportCallLog is a cross-host, cross-seam order log: the main recorder, the
+// CP recorder, and the provider wrapper all append to ONE list so a test can
+// assert the PDF-D68 teardown ORDER across all of them.
+type supportCallLog struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (l *supportCallLog) add(s string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls = append(l.calls, s)
+}
+
+func (l *supportCallLog) list() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]string, len(l.calls))
+	copy(out, l.calls)
+	return out
+}
+
+// supportAssertOrder asserts each want appears (as a substring) at a strictly
+// increasing position in log.
+func supportAssertOrder(t *testing.T, log []string, wants ...string) {
+	t.Helper()
+	idx := -1
+	for _, want := range wants {
+		found := -1
+		for i, c := range log {
+			if i > idx && strings.Contains(c, want) {
+				found = i
+				break
+			}
+		}
+		if found < 0 {
+			t.Fatalf("call containing %q not found after index %d\nlog:\n%s", want, idx, strings.Join(log, "\n"))
+		}
+		idx = found
+	}
+}
+
+// supportMainRecorder is the fake MAIN: it serves the mutate, token mint +
+// revoke, export and roster routes and records everything that arrives.
 type supportMainRecorder struct {
 	mu       sync.Mutex
 	requests []string          // "METHOD path" in arrival order
@@ -142,6 +195,14 @@ type supportMainRecorder struct {
 	mutateStatus int // 0 => 200
 	mintStatus   int
 	rosterRow    map[string]any // nil => empty roster
+
+	// remove-side knobs.
+	log                *supportCallLog // optional cross-host order log
+	revokeStatus       int             // 0 => 200 {revoked:true}
+	revoked            bool            // set once the revoke DELETE lands — drives the 403→401 probe
+	probeBearer        string          // the support's own raw token; the mint route answers 403/401 to it
+	probeStuckValid    bool            // planted survivor: the probe stays 403 after revoke
+	rosterDeleteHonest bool            // a delete mutation actually drops rosterRow
 }
 
 func newSupportMainRecorder() *supportMainRecorder {
@@ -170,17 +231,41 @@ func (m *supportMainRecorder) serve(t *testing.T) *httptest.Server {
 		m.mu.Lock()
 		m.requests = append(m.requests, r.Method+" "+r.URL.Path)
 		m.bodies[r.URL.Path] = body
+		if m.log != nil {
+			m.log.add("main " + r.Method + " " + r.URL.Path)
+		}
 		m.mu.Unlock()
 
 		switch {
 		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/data/mutate/"):
+			m.mu.Lock()
+			if m.rosterDeleteHonest && strings.Contains(string(body), `"delete"`) {
+				m.rosterRow = nil
+			}
 			status := m.mutateStatus
+			m.mu.Unlock()
 			if status == 0 {
 				status = http.StatusOK
 			}
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(`{"ok":true,"results":[]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/fleet/support-tokens":
+			// The census token probe: the support's OWN bearer reads 403 while the
+			// token is valid (authenticated, not admin) and 401 after revoke.
+			m.mu.Lock()
+			bearer := m.probeBearer
+			dead := m.revoked && !m.probeStuckValid
+			m.mu.Unlock()
+			if bearer != "" && r.Header.Get("Authorization") == "Bearer "+bearer {
+				if dead {
+					w.WriteHeader(http.StatusUnauthorized)
+					_, _ = w.Write([]byte(`{"error":{"code":"unauthorized"}}`))
+				} else {
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = w.Write([]byte(`{"error":{"code":"forbidden"}}`))
+				}
+				return
+			}
 			status := m.mintStatus
 			if status == 0 {
 				status = http.StatusOK
@@ -191,9 +276,23 @@ func (m *supportMainRecorder) serve(t *testing.T) *httptest.Server {
 			} else {
 				_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"no such route"}}`))
 			}
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/fleet/supports":
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"ok":true,"id":"support-row-1"}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/fleet/support-tokens/"):
+			id := strings.TrimPrefix(r.URL.Path, "/v1/fleet/support-tokens/")
+			m.mu.Lock()
+			status := m.revokeStatus
+			if status == 0 {
+				status = http.StatusOK
+			}
+			if status < 300 {
+				m.revoked = true
+			}
+			m.mu.Unlock()
+			w.WriteHeader(status)
+			if status < 300 {
+				_ = json.NewEncoder(w).Encode(map[string]any{"token_id": id, "revoked": true})
+			} else {
+				_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"no token with that id"}}`))
+			}
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/workspaces/") && strings.HasSuffix(r.URL.Path, "/export"):
 			w.Header().Set("Content-Type", "application/x-tar")
 			_, _ = w.Write([]byte(m.tarBytes))
@@ -212,6 +311,175 @@ func (m *supportMainRecorder) serve(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// supportCPRecorder is the fake CONTROL PLANE — the PDF-D72 second host. It
+// serves the fleet-registry routes (barkparks list, fleet supports register +
+// delete) and records everything, so tests can assert WHICH host received the
+// register/unbind calls.
+type supportCPRecorder struct {
+	mu       sync.Mutex
+	requests []string
+	bodies   map[string][]byte
+
+	rows           []map[string]any // GET /v1/barkparks payload
+	registerStatus int              // 0 => 201
+	registerBody   string           // non-2xx body override (e.g. `{"error":"no_team"}`)
+	deleteStatus   int              // 0 => 200
+	honestDelete   bool             // DELETE /v1/fleet/supports/:id actually drops the row
+	log            *supportCallLog
+}
+
+func newSupportCPRecorder() *supportCPRecorder {
+	return &supportCPRecorder{bodies: map[string][]byte{}}
+}
+
+func (c *supportCPRecorder) count(prefix string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, r := range c.requests {
+		if strings.HasPrefix(r, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+func (c *supportCPRecorder) serve(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		c.mu.Lock()
+		c.requests = append(c.requests, r.Method+" "+r.URL.Path)
+		c.bodies[r.URL.Path] = body
+		if c.log != nil {
+			c.log.add("cp " + r.Method + " " + r.URL.Path)
+		}
+		c.mu.Unlock()
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/barkparks":
+			c.mu.Lock()
+			rows := append([]map[string]any(nil), c.rows...)
+			c.mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"barkparks": rows})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/fleet/supports":
+			status := c.registerStatus
+			if status == 0 {
+				status = http.StatusCreated
+			}
+			w.WriteHeader(status)
+			if status < 300 {
+				_, _ = w.Write([]byte(`{"barkpark":{"id":"support-row-1","name":"hex","fleet_role":"support"}}`))
+			} else if c.registerBody != "" {
+				_, _ = w.Write([]byte(c.registerBody))
+			} else {
+				_, _ = w.Write([]byte(`{"error":"invalid"}`))
+			}
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/fleet/supports/"):
+			id := strings.TrimPrefix(r.URL.Path, "/v1/fleet/supports/")
+			status := c.deleteStatus
+			if status == 0 {
+				status = http.StatusOK
+			}
+			if status < 300 && c.honestDelete {
+				c.mu.Lock()
+				kept := c.rows[:0]
+				for _, row := range c.rows {
+					if fmt.Sprintf("%v", row["id"]) != id {
+						kept = append(kept, row)
+					}
+				}
+				c.rows = kept
+				c.mu.Unlock()
+			}
+			w.WriteHeader(status)
+			if status < 300 {
+				_, _ = w.Write([]byte(`{"ok":true,"status":"removed"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"error":"not_found"}`))
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not_found"}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// supportCPMainRow is one registered MAIN on the fake control plane. The host
+// column is a DECOY raw IP by design (mirroring live rows): PDF-D70's
+// auto-resolve must match by url host, never the host column.
+func supportCPMainRow(mainURL string) map[string]any {
+	return map[string]any{
+		"id": "cp-main-1", "name": "my-main", "url": mainURL,
+		"host": "198.51.100.7", "fleet_role": "main",
+	}
+}
+
+// supportSeedCP stands up the fake CONTROL PLANE and seeds the bp-login config
+// (CloudURL + CloudToken via SaveConfig — the precedented seedCloudLogin
+// pattern, which survives supportEnvIsolate's temp XDG_CONFIG_HOME). A
+// non-empty mainURL seeds one main row whose url matches the active main so a
+// bare `add` auto-resolves its parent (PDF-D70).
+func supportSeedCP(t *testing.T, mainURL string) (*supportCPRecorder, *httptest.Server) {
+	t.Helper()
+	cp := newSupportCPRecorder()
+	if mainURL != "" {
+		cp.rows = []map[string]any{supportCPMainRow(mainURL)}
+	}
+	srv := cp.serve(t)
+	seedCloudLogin(t, srv.URL)
+	return cp, srv
+}
+
+// supportFleetProvider wraps the in-memory FakeProvider with order logging and
+// planted-lie knobs for the census tests.
+type supportFleetProvider struct {
+	*cloud.FakeProvider
+	log         *supportCallLog
+	lieOnDelete bool           // planted survivor: Delete reports success but keeps the box
+	foreign     []cloud.Server // when non-nil, ListByLabel returns these verbatim
+}
+
+func (p *supportFleetProvider) Delete(ctx context.Context, name string) error {
+	if p.log != nil {
+		p.log.add("provider Delete " + name)
+	}
+	if p.lieOnDelete {
+		return nil
+	}
+	return p.FakeProvider.Delete(ctx, name)
+}
+
+func (p *supportFleetProvider) ListByLabel(ctx context.Context, key, val string) ([]cloud.Server, error) {
+	if p.log != nil {
+		p.log.add("provider ListByLabel " + key + "=" + val)
+	}
+	if p.foreign != nil {
+		return p.foreign, nil
+	}
+	return p.FakeProvider.ListByLabel(ctx, key, val)
+}
+
+// supportSeedBox plants one labeled support box in a fresh wrapped provider and
+// wires supportProviderFor to it. Callers must have run supportSaveSeams.
+func supportSeedBox(t *testing.T, log *supportCallLog, name, worker string) *supportFleetProvider {
+	t.Helper()
+	fp := cloud.NewFakeProvider()
+	if name != "" {
+		if _, err := fp.Create(context.Background(), cloud.ServerSpec{Name: name}); err != nil {
+			t.Fatalf("seed box: %v", err)
+		}
+		if err := fp.LabelServer(context.Background(), name, cloud.FleetSupportLabelKey, worker); err != nil {
+			t.Fatalf("label box: %v", err)
+		}
+	}
+	p := &supportFleetProvider{FakeProvider: fp, log: log}
+	supportProviderFor = func() (cloud.CloudProvider, error) { return p, nil }
+	return p
 }
 
 // supportHappyWiring installs the standard happy-path fakes: create succeeds,
@@ -264,6 +532,7 @@ func TestCloudSupportAddHappyPath(t *testing.T) {
 		"capacity": map[string]any{"size_class": "standard", "slots_total": 1, "slots_free": 1},
 	}
 	srv := main.serve(t)
+	cp, _ := supportSeedCP(t, srv.URL)
 
 	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"},
 		"add", "hex", "--agent", "claude", "--parent", "cp-row-7")
@@ -320,9 +589,17 @@ func TestCloudSupportAddHappyPath(t *testing.T) {
 		t.Fatalf("publish mutation wrong: %s", mutate.Mutations[1]["publish"])
 	}
 
-	// Bind: mint + control-plane row with token_id AND the explicit --parent.
-	if main.count("POST /v1/fleet/support-tokens") != 1 || main.count("POST /v1/fleet/supports") != 1 {
-		t.Fatalf("bind calls wrong: %v", main.requests)
+	// Bind (PDF-D69): the mint lands on the MAIN, the register on the CONTROL
+	// PLANE — which-host asserted BOTH ways (the round-1 harness could not see
+	// a wrong-host bind).
+	if main.count("POST /v1/fleet/support-tokens") != 1 || cp.count("POST /v1/fleet/supports") != 1 {
+		t.Fatalf("bind calls wrong: main=%v cp=%v", main.requests, cp.requests)
+	}
+	if main.count("POST /v1/fleet/supports") != 0 {
+		t.Fatalf("the register leg hit the MAIN — PDF-D69 requires the control plane: %v", main.requests)
+	}
+	if cp.count("POST /v1/fleet/support-tokens") != 0 {
+		t.Fatalf("the mint leg hit the CONTROL PLANE — it lives on the main: %v", cp.requests)
 	}
 	// The mint contract key is "name" (the endpoint 422s without it).
 	var mint map[string]any
@@ -333,7 +610,7 @@ func TestCloudSupportAddHappyPath(t *testing.T) {
 		t.Fatalf("mint body must carry name=hex (the endpoint's required key): %v", mint)
 	}
 	var reg map[string]any
-	if err := json.Unmarshal(main.bodies["/v1/fleet/supports"], &reg); err != nil {
+	if err := json.Unmarshal(cp.bodies["/v1/fleet/supports"], &reg); err != nil {
 		t.Fatalf("supports body not JSON: %v", err)
 	}
 	// parent_id + host are the CP endpoint's contract keys (PDF-D61).
@@ -418,6 +695,7 @@ func TestCloudSupportAddCreateFailureWritesNothing(t *testing.T) {
 	}
 	main := newSupportMainRecorder()
 	srv := main.serve(t)
+	supportSeedCP(t, srv.URL)
 
 	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
 	if code == exitOK {
@@ -452,6 +730,7 @@ func TestCloudSupportAddRosterRowFailure(t *testing.T) {
 	main := newSupportMainRecorder()
 	main.mutateStatus = http.StatusForbidden
 	srv := main.serve(t)
+	cp, _ := supportSeedCP(t, srv.URL)
 
 	_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
 	if code == exitOK {
@@ -466,6 +745,9 @@ func TestCloudSupportAddRosterRowFailure(t *testing.T) {
 	if got := main.count("POST /v1/fleet/support-tokens"); got != 0 {
 		t.Fatalf("bind ran after a roster-row failure (%d mint calls)", got)
 	}
+	if got := cp.count("POST /v1/fleet/supports"); got != 0 {
+		t.Fatalf("register ran after a roster-row failure (%d register calls)", got)
+	}
 }
 
 // TestCloudSupportAddBindMintFailure: the main lacks the fleet bind routes —
@@ -477,6 +759,7 @@ func TestCloudSupportAddBindMintFailure(t *testing.T) {
 	main := newSupportMainRecorder()
 	main.mintStatus = http.StatusNotFound
 	srv := main.serve(t)
+	cp, _ := supportSeedCP(t, srv.URL)
 
 	_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
 	if code == exitOK {
@@ -488,7 +771,7 @@ func TestCloudSupportAddBindMintFailure(t *testing.T) {
 	if !strings.Contains(stderr, "/v1/fleet/support-tokens") {
 		t.Fatalf("next step does not name the missing route\nstderr:\n%s", stderr)
 	}
-	if got := main.count("POST /v1/fleet/supports"); got != 0 {
+	if got := cp.count("POST /v1/fleet/supports"); got != 0 {
 		t.Fatalf("registration ran after mint failed")
 	}
 }
@@ -503,6 +786,7 @@ func TestCloudSupportAddOnlineTimeout(t *testing.T) {
 	main := newSupportMainRecorder()
 	main.rosterRow = map[string]any{"worker": "hex", "status": "provisioning"} // never gains capacity
 	srv := main.serve(t)
+	supportSeedCP(t, srv.URL)
 
 	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
 	if code == exitOK {
@@ -536,6 +820,7 @@ func TestCloudSupportAddAgentInstallFailOpen(t *testing.T) {
 		"capacity": map[string]any{"size_class": "light", "slots_total": 1, "slots_free": 1},
 	}
 	srv := main.serve(t)
+	supportSeedCP(t, srv.URL)
 
 	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex", "--agent", "codex")
 	if code != exitOK {
@@ -582,7 +867,8 @@ func TestCloudSupportAddDryRun(t *testing.T) {
 }
 
 // TestCloudSupportUsage: the fences — bad name, unknown agent, missing name,
-// and the honest not-built answer for remove.
+// for BOTH verbs (the round-1 "remove not built yet" stub + its test are
+// replaced as a pair by the real verb's fences).
 func TestCloudSupportUsage(t *testing.T) {
 	supportEnvIsolate(t)
 	cases := []struct {
@@ -593,7 +879,8 @@ func TestCloudSupportUsage(t *testing.T) {
 		{"missing name", []string{"add"}, "want exactly one <name>"},
 		{"bad name", []string{"add", "Bad_Name"}, "invalid support name"},
 		{"unknown agent", []string{"add", "hex", "--agent", "gemini"}, "unknown --agent"},
-		{"remove not built", []string{"remove", "hex"}, "not built yet"},
+		{"remove missing name", []string{"remove"}, "want exactly one <name>"},
+		{"remove bad name", []string{"remove", "Bad_Name"}, "invalid support name"},
 		{"unknown verb", []string{"paint", "hex"}, "unknown support command"},
 	}
 	for _, tc := range cases {
@@ -621,6 +908,7 @@ func TestCloudSupportAddJSONReceipt(t *testing.T) {
 		"capacity": map[string]any{"size_class": "standard", "slots_total": 1, "slots_free": 1},
 	}
 	srv := main.serve(t)
+	supportSeedCP(t, srv.URL) // bare add: the parent auto-resolves (PDF-D70)
 
 	stdout, _, code := runSupport(t, globals{server: srv.URL, token: "op-tok", output: "json", outputSet: true}, "add", "hex")
 	if code != exitOK {
@@ -647,5 +935,546 @@ func TestCloudSupportAddJSONReceipt(t *testing.T) {
 	}
 	if strings.Contains(stdout, "sup-ledger-tok-abc123") {
 		t.Fatalf("minted token leaked into the JSON receipt")
+	}
+}
+
+// ── bind rewire + auto-resolve (PDF-D69/D70) ─────────────────────────────────
+
+// TestCloudSupportAddMissingCloudTokenFailsBeforeCreate: a known-missing Cloud
+// credential must never bill a box (PDF-D69/D58) — the gate fires BEFORE the
+// provider create and names `bp login`.
+func TestCloudSupportAddMissingCloudTokenFailsBeforeCreate(t *testing.T) {
+	supportEnvIsolate(t)
+	runner := newFakeSupportRunner()
+	supportHappyWiring(t, runner)
+	supportCreateServer = func(context.Context, cloud.CloudProvider, string, string) (cloud.Server, error) {
+		t.Fatal("a missing Cloud login must fail BEFORE the box create")
+		return cloud.Server{}, nil
+	}
+	main := newSupportMainRecorder()
+	srv := main.serve(t)
+	// NO seedCloudLogin: the config has no CloudToken.
+
+	_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
+	if code != exitAuth {
+		t.Fatalf("want exit %d (auth), got %d\nstderr:\n%s", exitAuth, code, stderr)
+	}
+	if !strings.Contains(stderr, "bp login") {
+		t.Fatalf("the bp-login hint is missing\nstderr:\n%s", stderr)
+	}
+	main.mu.Lock()
+	defer main.mu.Unlock()
+	if len(main.requests) != 0 {
+		t.Fatalf("a logged-out add reached the main: %v", main.requests)
+	}
+}
+
+// TestCloudSupportAddBindWhichHost: the PDF-D69 which-host proof in isolation —
+// the mint NEVER hits the CP, the register NEVER hits the main, and the mint
+// body is byte-identical to the round-1 contract ({"name","worker"}).
+func TestCloudSupportAddBindWhichHost(t *testing.T) {
+	supportEnvIsolate(t)
+	runner := newFakeSupportRunner()
+	supportHappyWiring(t, runner)
+	main := newSupportMainRecorder()
+	main.rosterRow = map[string]any{
+		"worker": "hex", "status": "idle",
+		"capacity": map[string]any{"size_class": "standard", "slots_total": 1, "slots_free": 1},
+	}
+	srv := main.serve(t)
+	cp, _ := supportSeedCP(t, srv.URL)
+
+	_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
+	if code != exitOK {
+		t.Fatalf("exit %d\nstderr:\n%s", code, stderr)
+	}
+	if main.count("POST /v1/fleet/support-tokens") != 1 || cp.count("POST /v1/fleet/support-tokens") != 0 {
+		t.Fatalf("mint must land on the MAIN only: main=%v cp=%v", main.requests, cp.requests)
+	}
+	if cp.count("POST /v1/fleet/supports") != 1 || main.count("POST /v1/fleet/supports") != 0 {
+		t.Fatalf("register must land on the CONTROL PLANE only: main=%v cp=%v", main.requests, cp.requests)
+	}
+	var mint map[string]any
+	if err := json.Unmarshal(main.bodies["/v1/fleet/support-tokens"], &mint); err != nil {
+		t.Fatalf("mint body not JSON: %v", err)
+	}
+	if len(mint) != 2 || mint["name"] != "hex" || mint["worker"] != "hex" {
+		t.Fatalf("mint body must stay byte-identical to the round-1 contract: %v", mint)
+	}
+}
+
+// TestCloudSupportAddCPRefusalNarrations: the CP's credential-aware refusals
+// each get a NAMED narration — 401 → bp login, 422 no_team → bp team use,
+// 403 → team-admin / deploy-ability (the PAT ruling made explicit).
+func TestCloudSupportAddCPRefusalNarrations(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   int
+		body     string
+		wantHint string
+		wantExit int
+	}{
+		{"401 dead session", http.StatusUnauthorized, `{"error":"unauthorized"}`, "bp login", exitAuth},
+		{"422 no_team", http.StatusUnprocessableEntity, `{"error":"no_team"}`, "bp team use", exitGeneric},
+		{"403 forbidden", http.StatusForbidden, `{"error":"forbidden"}`, "a session needs team-admin, a PAT needs the deploy ability", exitAuth},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			supportEnvIsolate(t)
+			runner := newFakeSupportRunner()
+			supportHappyWiring(t, runner)
+			main := newSupportMainRecorder()
+			srv := main.serve(t)
+			cp, _ := supportSeedCP(t, srv.URL)
+			cp.registerStatus = tc.status
+			cp.registerBody = tc.body
+
+			_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
+			if code != tc.wantExit {
+				t.Fatalf("want exit %d, got %d\nstderr:\n%s", tc.wantExit, code, stderr)
+			}
+			if !strings.Contains(stderr, tc.wantHint) {
+				t.Fatalf("want the named narration %q\nstderr:\n%s", tc.wantHint, stderr)
+			}
+			// The honest written-state line still names the minted-but-unbound token.
+			if !strings.Contains(stderr, "NOT registered") {
+				t.Fatalf("honest state line missing\nstderr:\n%s", stderr)
+			}
+		})
+	}
+}
+
+// TestCloudSupportAddParentAutoResolve: PDF-D70's three branches + the
+// --parent-wins fast path + the host-column trap (a row whose HOST matches but
+// whose URL does not must NOT resolve — the host column is a raw IP on every
+// real row and matching it returns garbage by construction).
+func TestCloudSupportAddParentAutoResolve(t *testing.T) {
+	newMain := func(t *testing.T) (*supportMainRecorder, *httptest.Server) {
+		t.Helper()
+		main := newSupportMainRecorder()
+		main.rosterRow = map[string]any{
+			"worker": "hex", "status": "idle",
+			"capacity": map[string]any{"size_class": "standard", "slots_total": 1, "slots_free": 1},
+		}
+		return main, main.serve(t)
+	}
+
+	t.Run("exactly one url-host match resolves", func(t *testing.T) {
+		supportEnvIsolate(t)
+		runner := newFakeSupportRunner()
+		supportHappyWiring(t, runner)
+		_, srv := newMain(t)
+		cp, _ := supportSeedCP(t, srv.URL)
+		// Decoys: a support row (never a parent) and an unrelated main.
+		cp.rows = append(cp.rows,
+			map[string]any{"id": "cp-sup-9", "name": "old-sup", "url": srv.URL, "fleet_role": "support"},
+			map[string]any{"id": "cp-other", "name": "other-main", "url": "https://elsewhere.example", "fleet_role": "main"},
+		)
+
+		_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
+		if code != exitOK {
+			t.Fatalf("exit %d\nstderr:\n%s", code, stderr)
+		}
+		var reg map[string]any
+		if err := json.Unmarshal(cp.bodies["/v1/fleet/supports"], &reg); err != nil {
+			t.Fatalf("supports body not JSON: %v", err)
+		}
+		if reg["parent_id"] != "cp-main-1" {
+			t.Fatalf("auto-resolved parent_id wrong: %v", reg)
+		}
+	})
+
+	t.Run("zero matches refuses naming candidates before create", func(t *testing.T) {
+		supportEnvIsolate(t)
+		runner := newFakeSupportRunner()
+		supportHappyWiring(t, runner)
+		supportCreateServer = func(context.Context, cloud.CloudProvider, string, string) (cloud.Server, error) {
+			t.Fatal("a failed parent resolve must never create a box")
+			return cloud.Server{}, nil
+		}
+		main, srv := newMain(t)
+		cp, _ := supportSeedCP(t, "")
+		// The HOST-COLUMN TRAP: this row's host IS the main's host, but its url
+		// is elsewhere — PDF-D70 says NEVER match the host column, so this must
+		// be a zero-match refusal, not a resolve.
+		cp.rows = []map[string]any{{
+			"id": "cp-trap", "name": "trap-main",
+			"url":        "https://elsewhere.example",
+			"host":       strings.TrimPrefix(strings.TrimPrefix(srv.URL, "http://"), "https://"),
+			"fleet_role": "main",
+		}}
+
+		_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
+		if code == exitOK {
+			t.Fatalf("want refusal, got OK")
+		}
+		if !strings.Contains(stderr, "no control-plane row's url matches") {
+			t.Fatalf("refusal not named\nstderr:\n%s", stderr)
+		}
+		if !strings.Contains(stderr, "trap-main") {
+			t.Fatalf("candidates not named\nstderr:\n%s", stderr)
+		}
+		main.mu.Lock()
+		defer main.mu.Unlock()
+		if len(main.requests) != 0 {
+			t.Fatalf("a refused resolve reached the main: %v", main.requests)
+		}
+	})
+
+	t.Run("many matches refuses naming candidates", func(t *testing.T) {
+		supportEnvIsolate(t)
+		runner := newFakeSupportRunner()
+		supportHappyWiring(t, runner)
+		supportCreateServer = func(context.Context, cloud.CloudProvider, string, string) (cloud.Server, error) {
+			t.Fatal("an ambiguous parent resolve must never create a box")
+			return cloud.Server{}, nil
+		}
+		_, srv := newMain(t)
+		cp, _ := supportSeedCP(t, srv.URL)
+		cp.rows = append(cp.rows, map[string]any{"id": "cp-main-2", "name": "twin-main", "url": srv.URL, "fleet_role": "main"})
+
+		_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex")
+		if code == exitOK {
+			t.Fatalf("want refusal, got OK")
+		}
+		if !strings.Contains(stderr, "refusing to pick one") ||
+			!strings.Contains(stderr, "my-main") || !strings.Contains(stderr, "twin-main") {
+			t.Fatalf("ambiguity refusal must name every candidate\nstderr:\n%s", stderr)
+		}
+	})
+
+	t.Run("explicit --parent wins outright", func(t *testing.T) {
+		supportEnvIsolate(t)
+		runner := newFakeSupportRunner()
+		supportHappyWiring(t, runner)
+		_, srv := newMain(t)
+		cp, _ := supportSeedCP(t, srv.URL)
+
+		_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "add", "hex", "--parent", "cp-row-7")
+		if code != exitOK {
+			t.Fatalf("exit %d\nstderr:\n%s", code, stderr)
+		}
+		if got := cp.count("GET /v1/barkparks"); got != 0 {
+			t.Fatalf("--parent must skip the fleet list entirely, got %d GETs", got)
+		}
+		var reg map[string]any
+		if err := json.Unmarshal(cp.bodies["/v1/fleet/supports"], &reg); err != nil {
+			t.Fatalf("supports body not JSON: %v", err)
+		}
+		if reg["parent_id"] != "cp-row-7" {
+			t.Fatalf("explicit --parent must win: %v", reg)
+		}
+	})
+}
+
+// ── the mirror verb: remove (PDF-D68/D72) ────────────────────────────────────
+
+// supportRemoveWiring seeds the standard remove fixture: a main that answers
+// revoke + roster honestly, a CP carrying the main row AND the support row, a
+// provider holding the labeled box, and a runner that yields the probe secret.
+// Everything shares one order log.
+func supportRemoveWiring(t *testing.T) (*supportMainRecorder, *httptest.Server, *supportCPRecorder, *supportFleetProvider, *supportCallLog) {
+	t.Helper()
+	supportEnvIsolate(t)
+	runner := newFakeSupportRunner()
+	supportSaveSeams(t)
+	log := &supportCallLog{}
+
+	main := newSupportMainRecorder()
+	main.log = log
+	main.probeBearer = "sup-ledger-tok-abc123"
+	main.rosterDeleteHonest = true
+	main.rosterRow = map[string]any{"worker": "hex", "status": "idle"}
+	srv := main.serve(t)
+
+	cp, _ := supportSeedCP(t, srv.URL)
+	cp.log = log
+	cp.honestDelete = true
+	cp.rows = append(cp.rows, map[string]any{
+		"id": "support-row-1", "name": "hex", "fleet_role": "support",
+		"fleet_parent_id": "cp-main-1", "fleet_token_id": "tid-42",
+	})
+
+	provider := supportSeedBox(t, log, "warm-cafe01", "hex")
+	runner.outputs[supportProbeSecretScript] = "sup-ledger-tok-abc123\n"
+	supportRunnerFor = func(string) cloud.SupportRunner { return runner }
+	return main, srv, cp, provider, log
+}
+
+// TestCloudSupportRemoveHappyTeardown: the full PDF-D68 order — CP read FIRST,
+// token revoke on the main, identity-fenced box delete, roster-row delete via
+// the dataset-in-path mutate, CP row DELETE LAST — then the four-surface census
+// re-reads everything and reports delta zero, with the REAL 403→401 token probe.
+func TestCloudSupportRemoveHappyTeardown(t *testing.T) {
+	main, srv, cp, _, log := supportRemoveWiring(t)
+
+	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+	if code != exitOK {
+		t.Fatalf("want exit 0, got %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	// The teardown ORDER, across both hosts and the provider seam.
+	supportAssertOrder(t, log.list(),
+		"cp GET /v1/barkparks",                        // read FIRST — the sole durable token-id holder
+		"main DELETE /v1/fleet/support-tokens/tid-42", // then revoke on the main
+		"provider Delete warm-cafe01",                 // then the fenced box delete
+		"main POST /v1/data/mutate/production",        // then the roster row
+		"cp DELETE /v1/fleet/supports/support-row-1",  // CP row LAST
+	)
+
+	// The roster delete is the PDF-D44d dataset-in-path {id,type} mutate.
+	var mutate struct {
+		Mutations []map[string]map[string]any `json:"mutations"`
+	}
+	if err := json.Unmarshal(main.bodies["/v1/data/mutate/production"], &mutate); err != nil {
+		t.Fatalf("mutate body not JSON: %v", err)
+	}
+	if len(mutate.Mutations) != 1 || mutate.Mutations[0]["delete"] == nil ||
+		mutate.Mutations[0]["delete"]["id"] != "listener-hex" || mutate.Mutations[0]["delete"]["type"] != "listener" {
+		t.Fatalf("roster delete mutation wrong: %s", main.bodies["/v1/data/mutate/production"])
+	}
+
+	// The census RE-READS: a second label listing, a roster re-GET, a CP re-list.
+	listings := 0
+	for _, c := range log.list() {
+		if strings.Contains(c, "provider ListByLabel") {
+			listings++
+		}
+	}
+	if listings < 2 {
+		t.Fatalf("the census must RE-READ the provider (want >=2 listings, got %d)\nlog:\n%s", listings, strings.Join(log.list(), "\n"))
+	}
+	if main.count("GET /v1/fleet/roster") < 1 {
+		t.Fatalf("the census never re-read the roster: %v", main.requests)
+	}
+	if cp.count("GET /v1/barkparks") < 2 {
+		t.Fatalf("the census never re-read the control plane: %v", cp.requests)
+	}
+
+	// The token leg is the REAL probe: the support's own bearer hit the
+	// admin-gated mint endpoint (403 pre-revoke baseline, 401 after).
+	if !strings.Contains(stdout, "401 after revoke") {
+		t.Fatalf("token probe verdict missing\nstdout:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "census delta zero") {
+		t.Fatalf("census verdict missing\nstdout:\n%s", stdout)
+	}
+	// The probe secret is never printed.
+	if strings.Contains(stdout, "sup-ledger-tok-abc123") || strings.Contains(stderr, "sup-ledger-tok-abc123") {
+		t.Fatalf("the probe secret leaked into output")
+	}
+}
+
+// TestCloudSupportRemoveForeignIdentityRefusal: a box whose identity label
+// names a DIFFERENT support is REFUSED loudly — nothing is deleted anywhere
+// (the DeprovisionByIP fence, ported).
+func TestCloudSupportRemoveForeignIdentityRefusal(t *testing.T) {
+	main, srv, cp, provider, log := supportRemoveWiring(t)
+	provider.foreign = []cloud.Server{{
+		Name:   "warm-other",
+		IP:     "203.0.113.99",
+		Labels: map[string]string{cloud.FleetSupportLabelKey: "someone-else"},
+	}}
+
+	_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+	if code == exitOK {
+		t.Fatalf("want refusal, got OK")
+	}
+	if !strings.Contains(stderr, `"someone-else"`) || !strings.Contains(stderr, "REFUSING") {
+		t.Fatalf("the refusal must name the foreign identity\nstderr:\n%s", stderr)
+	}
+	for _, c := range log.list() {
+		if strings.Contains(c, "provider Delete") {
+			t.Fatalf("a foreign-identity box was deleted:\n%s", strings.Join(log.list(), "\n"))
+		}
+	}
+	if main.count("DELETE /v1/fleet/support-tokens/") != 0 {
+		t.Fatalf("the token was revoked despite the refusal: %v", main.requests)
+	}
+	if cp.count("DELETE /v1/fleet/supports/") != 0 {
+		t.Fatalf("the CP row was deleted despite the refusal: %v", cp.requests)
+	}
+}
+
+// TestCloudSupportRemoveTwoBoxAnomaly: >1 label match is a named anomaly —
+// never pick-one.
+func TestCloudSupportRemoveTwoBoxAnomaly(t *testing.T) {
+	_, srv, _, provider, log := supportRemoveWiring(t)
+	provider.foreign = []cloud.Server{
+		{Name: "warm-a", IP: "203.0.113.1", Labels: map[string]string{cloud.FleetSupportLabelKey: "hex"}},
+		{Name: "warm-b", IP: "203.0.113.2", Labels: map[string]string{cloud.FleetSupportLabelKey: "hex"}},
+	}
+
+	_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+	if code == exitOK {
+		t.Fatalf("want refusal, got OK")
+	}
+	if !strings.Contains(stderr, "2 boxes carry") || !strings.Contains(stderr, "warm-a") || !strings.Contains(stderr, "warm-b") {
+		t.Fatalf("the anomaly must name every box\nstderr:\n%s", stderr)
+	}
+	for _, c := range log.list() {
+		if strings.Contains(c, "provider Delete") {
+			t.Fatalf("an ambiguous match was deleted:\n%s", strings.Join(log.list(), "\n"))
+		}
+	}
+}
+
+// TestCloudSupportRemovePlantedSurvivors: every surface LIES about deleting —
+// the census catches and NAMES all four survivors and exits non-zero. This is
+// the proof the verify-gone check can fail (a census that cannot fail proves
+// nothing).
+func TestCloudSupportRemovePlantedSurvivors(t *testing.T) {
+	main, srv, cp, provider, _ := supportRemoveWiring(t)
+	provider.lieOnDelete = true     // box survives its "successful" delete
+	main.rosterDeleteHonest = false // roster row survives the mutate
+	cp.honestDelete = false         // CP row survives the DELETE
+	main.probeStuckValid = true     // token still answers 403 after revoke
+
+	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+	if code == exitOK {
+		t.Fatalf("planted survivors must exit non-zero\nstdout:\n%s", stdout)
+	}
+	all := stdout + stderr
+	for _, want := range []string{
+		"server warm-cafe01",              // survivor 1: the box
+		"roster row listener-hex still",   // survivor 2: the roster row
+		"control-plane row support-row-1", // survivor 3: the CP row
+		"STILL VALID",                     // survivor 4: the token (403, not 401)
+	} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("survivor %q not named\noutput:\n%s", want, all)
+		}
+	}
+}
+
+// TestCloudSupportRemoveDoubleRemoveIdempotent: everything already gone — the
+// second run exits 0 reporting already-gone, census clean.
+func TestCloudSupportRemoveDoubleRemoveIdempotent(t *testing.T) {
+	supportEnvIsolate(t)
+	runner := newFakeSupportRunner()
+	supportSaveSeams(t)
+	log := &supportCallLog{}
+
+	main := newSupportMainRecorder()
+	main.log = log
+	main.rosterRow = nil // roster row gone
+	srv := main.serve(t)
+
+	cp, _ := supportSeedCP(t, srv.URL) // only the main row — support row gone
+	cp.log = log
+	supportSeedBox(t, log, "", "") // provider holds no box
+	supportRunnerFor = func(string) cloud.SupportRunner { return runner }
+
+	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+	if code != exitOK {
+		t.Fatalf("double remove must exit 0, got %d\nstderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "already unbound") || !strings.Contains(stdout, "already gone") {
+		t.Fatalf("already-gone narration missing\nstdout:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "census delta zero") {
+		t.Fatalf("census verdict missing\nstdout:\n%s", stdout)
+	}
+	if main.count("DELETE /v1/fleet/support-tokens/") != 0 {
+		t.Fatalf("nothing to revoke, yet a revoke fired: %v", main.requests)
+	}
+}
+
+// TestCloudSupportRemovePartialStateConverges: the box is already gone but the
+// roster row + CP row survive (a crashed earlier remove) and the token is
+// already revoked (revoke answers 404) — the re-run converges to census-clean.
+func TestCloudSupportRemovePartialStateConverges(t *testing.T) {
+	supportEnvIsolate(t)
+	runner := newFakeSupportRunner()
+	supportSaveSeams(t)
+	log := &supportCallLog{}
+
+	main := newSupportMainRecorder()
+	main.log = log
+	main.revokeStatus = http.StatusNotFound // token already revoked
+	main.rosterDeleteHonest = true
+	main.rosterRow = map[string]any{"worker": "hex", "status": "provisioning"}
+	srv := main.serve(t)
+
+	cp, _ := supportSeedCP(t, srv.URL)
+	cp.log = log
+	cp.honestDelete = true
+	cp.rows = append(cp.rows, map[string]any{
+		"id": "support-row-1", "name": "hex", "fleet_role": "support", "fleet_token_id": "tid-42",
+	})
+	supportSeedBox(t, log, "", "") // box already gone
+	supportRunnerFor = func(string) cloud.SupportRunner { return runner }
+
+	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+	if code != exitOK {
+		t.Fatalf("partial state must converge to exit 0, got %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "already gone (404)") {
+		t.Fatalf("idempotent revoke narration missing\nstdout:\n%s", stdout)
+	}
+	if main.count("POST /v1/data/mutate/production") != 1 {
+		t.Fatalf("the surviving roster row was not deleted: %v", main.requests)
+	}
+	if cp.count("DELETE /v1/fleet/supports/support-row-1") != 1 {
+		t.Fatalf("the surviving CP row was not deleted: %v", cp.requests)
+	}
+	if !strings.Contains(stdout, "census delta zero") {
+		t.Fatalf("census verdict missing\nstdout:\n%s", stdout)
+	}
+}
+
+// TestCloudSupportRemoveDryRun: --dry-run prints the ordered plan and touches
+// NOTHING — no provider, no main, no CP, no login required.
+func TestCloudSupportRemoveDryRun(t *testing.T) {
+	supportEnvIsolate(t)
+	runner := newFakeSupportRunner()
+	supportSaveSeams(t)
+	supportProviderFor = func() (cloud.CloudProvider, error) {
+		t.Fatal("dry run must not touch the provider")
+		return nil, nil
+	}
+	supportRunnerFor = func(string) cloud.SupportRunner { return runner }
+	main := newSupportMainRecorder()
+	srv := main.serve(t)
+
+	stdout, _, code := runSupport(t, globals{server: srv.URL, token: "op-tok", dryRun: true}, "remove", "hex")
+	if code != exitOK {
+		t.Fatalf("dry run exit %d\nstdout:\n%s", code, stdout)
+	}
+	for _, want := range []string{"DRY RUN", "cp-read", "locate", "token", "server", "roster", "cp-row", "census"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("dry-run narration missing %q\nstdout:\n%s", want, stdout)
+		}
+	}
+	main.mu.Lock()
+	defer main.mu.Unlock()
+	if len(main.requests) != 0 {
+		t.Fatalf("dry run reached the main: %v", main.requests)
+	}
+}
+
+// TestCloudSupportRemoveCPRowForbiddenNarration: a 403 on the CP-row DELETE
+// warns with the NAMED credential fix (a bare "re-run" can never converge on a
+// credential refusal — PDF-D69/D71 vocabulary), continues, and the census still
+// names the surviving row with a non-zero exit.
+func TestCloudSupportRemoveCPRowForbiddenNarration(t *testing.T) {
+	main, srv, cp, _, _ := supportRemoveWiring(t)
+	cp.deleteStatus = http.StatusForbidden
+	cp.honestDelete = false
+
+	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+	if code == exitOK {
+		t.Fatalf("a surviving CP row must exit non-zero\nstdout:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "a session needs team-admin, a PAT needs the deploy ability") {
+		t.Fatalf("the 403 warn must name the credential fix\nstderr:\n%s", stderr)
+	}
+	all := stdout + stderr
+	if !strings.Contains(all, "control-plane row support-row-1 still registered") {
+		t.Fatalf("the census must still name the survivor\noutput:\n%s", all)
+	}
+	// Everything BEFORE the CP row still tore down (warn-and-continue, not stop).
+	if main.count("DELETE /v1/fleet/support-tokens/tid-42") != 1 {
+		t.Fatalf("the token revoke must still have run: %v", main.requests)
 	}
 }
