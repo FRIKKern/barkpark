@@ -145,6 +145,14 @@ defmodule BarkparkCloud.Registry.Barkpark do
     # the owner retrieves it only through the team-admin-gated /credentials route.
     field :admin_token_encrypted, :string
 
+    # push-relay spike (mobile charter D15b) — the per-barkpark shared secret the
+    # instance signs chat_blocked webhook deliveries with and Cloud's
+    # /v1/relay/chat-blocked/:barkpark_id receiver verifies against. SAME custody
+    # as admin_token_encrypted (Registry.Vault AES-256-GCM, never plaintext,
+    # never serialized in barkpark_json). Nil = no relay configured — the
+    # receiver answers a silent 404 (severable by absence).
+    field :push_relay_secret_encrypted, :string
+
     # dwb-4 content-template bootstrap. `template` is the deploy-template slug
     # picked at launch (validated in the go-live handler against
     # `Registry.known_templates/0`); the bootstrap_* columns are the outputs the

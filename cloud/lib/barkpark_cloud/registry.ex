@@ -2490,6 +2490,47 @@ defmodule BarkparkCloud.Registry do
     do: Vault.decrypt(ciphertext)
 
   @doc """
+  Mint (or rotate) the per-barkpark push-relay shared secret — the key the
+  INSTANCE will sign chat_blocked webhook deliveries with and Cloud's
+  `/v1/relay/chat-blocked/:barkpark_id` receiver verifies against (push-relay
+  spike, mobile charter D15b). Stored Vault-encrypted on the barkpark row,
+  EXACTLY the admin-token custody (`admin_token_encrypted`'s sibling).
+
+  Returns `{:ok, plaintext, barkpark}` — the plaintext exists to travel ONCE,
+  server-to-instance, when wave 2 registers the chat_blocked webhook row on the
+  box (the create_site content-publish idiom). It is never logged or audited by
+  value. Rotation overwrites: the previous secret stops verifying immediately
+  (an overlap window is a wave-2 concern; the verifier already accepts a secret
+  LIST when that lands).
+  """
+  @spec mint_push_relay_secret(Barkpark.t()) ::
+          {:ok, String.t(), Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def mint_push_relay_secret(%Barkpark{} = bp) do
+    secret = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+    bp
+    |> Ecto.Changeset.change(push_relay_secret_encrypted: Vault.encrypt(secret))
+    |> Repo.update()
+    |> case do
+      {:ok, updated} -> {:ok, secret, updated}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Decrypt a Barkpark's stored push-relay secret back to plaintext
+  (`reveal_admin_token/1`'s sibling — push-relay spike, charter D15b). Returns
+  `{:ok, secret}`, `{:ok, nil}` when no relay was ever configured for this
+  instance (the receiver's silent-404 severability case), or `:error` on
+  tampered ciphertext (fail-closed).
+  """
+  @spec reveal_push_relay_secret(Barkpark.t()) :: {:ok, binary() | nil} | :error
+  def reveal_push_relay_secret(%Barkpark{push_relay_secret_encrypted: nil}), do: {:ok, nil}
+
+  def reveal_push_relay_secret(%Barkpark{push_relay_secret_encrypted: ciphertext}),
+    do: Vault.decrypt(ciphertext)
+
+  @doc """
   Mint a one-click Studio login URL for a live instance (dwb-7 "Studio
   one-click entry").
 
