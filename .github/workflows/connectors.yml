@@ -127,6 +127,19 @@ jobs:
           shellcheck -S error scripts/connectors/w30-shim-sanitize-proof.sh
           bash scripts/connectors/w30-shim-sanitize-proof.sh
 
+      # The Wave-34 host preflight (D267): preflight-vercel.sh chains the four host
+      # prerequisites (vercel present, authenticated, sandbox entitlement under
+      # --scope guerrilla, ANTHROPIC_API_KEY) — each miss loud, named, exit 1 — and
+      # NEVER runs `vercel sandbox create`. The offline self-test drives a fake
+      # vercel on PATH through every leg (all-green + four named misses) plus a
+      # call-log tripwire that create is never invoked; sub-second, no real Vercel.
+      # This workflow hardcodes proof scripts BY NAME (it never glob-discovers
+      # scripts/connectors/), so this NAMED step is what makes the preflight run in CI.
+      - name: Vercel host preflight self-test (W34, D267)
+        run: |
+          shellcheck -S error scripts/connectors/preflight-vercel.sh
+          bash scripts/connectors/preflight-vercel.sh --self-test
+
   test:
     name: Typecheck + tests (real Postgres, zero skips)
     runs-on: ubuntu-latest

@@ -169,7 +169,13 @@ fi
 exit 0
 EOF
   chmod +x "$NODEDIR"/*
-  APP="$TMP/app"; mkdir -p "$APP/api" "$APP/deploy/systemd" "$APP/connectors"
+  APP="$TMP/app"; mkdir -p "$APP/api" "$APP/deploy/systemd" "$APP/connectors" "$APP/scripts/connectors"
+  # The Cloud sandbox runner source the deploy installs onto PATH (D265). A
+  # distinctive body so the Case-15 cmp is meaningful (a stale/wrong copy would
+  # differ). The env-node shebang is deliberately present — the whole point of the
+  # wrapper is that we never rely on it.
+  printf '#!/usr/bin/env node\n// fake cloud-sandbox-runner (harness source, %s)\nprocess.exit(0)\n' "$RANDOM" > "$APP/scripts/connectors/cloud-sandbox-runner.mjs"
+  chmod 0755 "$APP/scripts/connectors/cloud-sandbox-runner.mjs"
   printf 'BARKPARK_KEK=x\nBARKPARK_CLOAK_KEY=y\nPREVIEW_JWT_SECRET=z\nBARKPARK_RELEASE_CAPTURE_HMAC_SECRET=h\nDATABASE_URL=postgres://bp:pw@localhost/bp\n' > "$APP/.env"
   cp "$HERE/systemd/barkpark-slot@.service" "$APP/deploy/systemd/"
   cp "$HERE/systemd/barkpark-mcp.service" "$APP/deploy/systemd/"
@@ -188,6 +194,8 @@ run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NOD
     BARKPARK_MCP_ENV_FILE="$TMP/mcp.env" \
     BARKPARK_CONNECTORS_ENV_FILE="$TMP/connectors.env" \
     BARKPARK_NODE_LINK="$TMP/barkpark-node" \
+    BARKPARK_SANDBOX_RUNNER_BIN="$TMP/cloud-sandbox-runner" \
+    BARKPARK_SANDBOX_RUNNER_MJS="$TMP/cloud-sandbox-runner.mjs" \
     HOME="$TMP/home" FAKE_SHA="$2" HEALTH_CODE="$1" \
     DEPLOY_REF="${DEPLOY_REF:-}" DEPLOY_REMOTE="${DEPLOY_REMOTE:-}" \
     GO_HTTP="${GO_HTTP:-}" GO_FAIL="${GO_FAIL:-}" \
@@ -631,6 +639,44 @@ rc="$(run_deploy 200 seedsha2)"                                    # green activ
 check "second deploy exit 0"                      "[ '$rc' = '0' ]"
 check "flag still present after a full regen cycle" "grep -q '^BARKPARK_SITE_DEPLOY_APPLY=1\$' '$APP/.slots/green.env'"
 check "unseeded blue slot still has no flag"      "! grep -q 'BARKPARK_SITE_DEPLOY_APPLY' '$APP/.slots/blue.env'"
+rm -rf "$TMP"
+
+echo "== Case 15: cloud-sandbox-runner install (connectors D265) — wrapper execs barkpark-node, NOT the env-node shebang =="
+# NON-VACUITY (D266): file-presence alone would GREEN a shebang-only no-op (a bare
+# copy of the runner, whose `#!/usr/bin/env node` line cannot resolve node on the
+# live BEAM PATH). So the load-bearing check is on the wrapper CONTENT — it must
+# exec /usr/local/bin/barkpark-node — plus a byte-cmp of the installed .mjs against
+# the checkout source. Deleting the install lines flips EXACTLY these checks red;
+# every earlier case stays green (mutation-proof captured in the wave paper).
+setup_case
+rc="$(run_deploy 200 runnersha)"
+check "runner install: deploy exit 0 (non-fatal region)" "[ '$rc' = '0' ]"
+check "runner install: wrapper present + executable"     "[ -x '$TMP/cloud-sandbox-runner' ]"
+check "runner install: wrapper is a POSIX sh script"     "[ \"\$(head -1 '$TMP/cloud-sandbox-runner')\" = '#!/bin/sh' ]"
+check "runner install: wrapper CONTENT execs barkpark-node (not the env-node shebang)" "grep -q '^exec /usr/local/bin/barkpark-node ' '$TMP/cloud-sandbox-runner'"
+check "runner install: wrapper hands the .mjs to barkpark-node with argv passthrough" "grep -q '/usr/local/bin/cloud-sandbox-runner.mjs \"\$@\"' '$TMP/cloud-sandbox-runner'"
+check "runner install: wrapper is exactly 2 lines"       "[ \"\$(wc -l < '$TMP/cloud-sandbox-runner')\" -eq 2 ]"
+check "runner install: .mjs installed"                   "[ -f '$TMP/cloud-sandbox-runner.mjs' ]"
+check "runner install: installed .mjs is cmp-identical to the checkout source" "cmp -s '$TMP/cloud-sandbox-runner.mjs' '$APP/scripts/connectors/cloud-sandbox-runner.mjs'"
+check "runner install: success logged honestly"          "grep -q 'cloud-sandbox-runner installed' '$TMP/out.log'"
+# Idempotent redeploy: a second deploy re-copies both and stays green + identical.
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 runnersha2)"
+check "runner redeploy: exit 0"                          "[ '$rc' = '0' ]"
+check "runner redeploy: wrapper still execs barkpark-node" "grep -q '^exec /usr/local/bin/barkpark-node ' '$TMP/cloud-sandbox-runner'"
+check "runner redeploy: .mjs still cmp-identical to source" "cmp -s '$TMP/cloud-sandbox-runner.mjs' '$APP/scripts/connectors/cloud-sandbox-runner.mjs'"
+check "runner redeploy: no leftover .new tmpfiles"       "[ ! -e '$TMP/cloud-sandbox-runner.new' ] && [ ! -e '$TMP/cloud-sandbox-runner.mjs.new' ]"
+rm -rf "$TMP"
+
+# Missing source: the deploy must stay green (non-fatal) and say so — never brick
+# a good deploy because a checkout lacks the runner.
+setup_case
+rm -f "$APP/scripts/connectors/cloud-sandbox-runner.mjs"
+rc="$(run_deploy 200 norunnersha)"
+check "no runner source: deploy still exit 0 (non-fatal)" "[ '$rc' = '0' ]"
+check "no runner source: nothing installed"               "[ ! -e '$TMP/cloud-sandbox-runner' ]"
+check "no runner source: refused honestly (binary_not_found until next deploy)" "grep -q 'cloud-sandbox-runner NOT installed' '$TMP/out.log'"
 rm -rf "$TMP"
 
 echo

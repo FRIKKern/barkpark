@@ -367,6 +367,16 @@ re-issues the mail relay's Let's Encrypt cert via DNS-01, ships it to
   caddy`, start the old slot (`docker start …` / `systemctl start
   barkpark-slot@<slot>`).
 
+## Connectors `:cloud` runner (host prereqs)
+
+`instance-deploy.sh` installs the Cloud sandbox runner every deploy — the
+`.mjs` plus a 2-line `/usr/local/bin/cloud-sandbox-runner` wrapper that execs
+`barkpark-node` (never the `env node` shebang; the BEAM PATH has no `node`). Before
+attempting a live turn, run the non-creating preflight
+`scripts/connectors/preflight-vercel.sh` (vercel present + authed + sandbox
+entitlement under `--scope guerrilla` + `ANTHROPIC_API_KEY`). Full contract:
+`scripts/connectors/README.md` → *Wave 34 — host prerequisites*.
+
 ## Spawning a site (`bp cloud site`) — and proving it
 
 A **site** is not an instance. `bp cloud deploy` flips a whole Barkpark box
