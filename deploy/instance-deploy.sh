@@ -70,6 +70,14 @@ CONNECTORS_ENV_FILE="${BARKPARK_CONNECTORS_ENV_FILE:-/etc/barkpark/connectors.en
 # expand a variable in the executable position, and asdf's node lives under a
 # versioned dir). The deploy symlinks this at the resolved node.
 NODE_LINK="${BARKPARK_NODE_LINK:-/usr/local/bin/barkpark-node}"
+# Where the deploy installs the Cloud sandbox runner (connectors charter D265).
+# ClaudeChat resolves the BARE name "cloud-sandbox-runner" off the live BEAM PATH
+# (/usr/local/bin is on it, /proc-proven), so the WRAPPER basename must be exactly
+# that and :sandbox_runner config stays UNSET. Overridable ONLY so the offline
+# harness can redirect both writes into its temp dir — production keeps the
+# absolute /usr/local/bin paths the wrapper CONTENT hardcodes.
+SANDBOX_RUNNER_BIN="${BARKPARK_SANDBOX_RUNNER_BIN:-/usr/local/bin/cloud-sandbox-runner}"
+SANDBOX_RUNNER_MJS="${BARKPARK_SANDBOX_RUNNER_MJS:-/usr/local/bin/cloud-sandbox-runner.mjs}"
 log() { echo "[instance-deploy $(date -u +%H:%M:%S)] $*"; }
 
 # ---- ONE shared Caddyfile lock (site-spawner D27) --------------------------
@@ -918,6 +926,60 @@ if command -v go >/dev/null 2>&1; then
 else
   log "WARN: go not found — bp CLI NOT installed; Studio chat task hands unavailable until next deploy"
 fi
+
+# ---- Install the Cloud sandbox runner onto PATH (connectors charter D265).
+# ClaudeChat picks a provider turn by resolving the BARE executable name
+# "cloud-sandbox-runner" with System.find_executable on the LIVE BEAM PATH
+# (/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:… — /proc-proven
+# on guerrilla, with NO node resolvable and NO Environment= override). So the
+# runner's own `#!/usr/bin/env node` shebang ships as a SILENT NO-OP: the moment
+# a :cloud turn starts, ClaudeChat returns {:stop, :binary_not_found}. Two files,
+# re-copied EVERY deploy so they track the checkout (#3374 copy idiom):
+#   (1) the runner .mjs  -> $SANDBOX_RUNNER_MJS
+#   (2) a 2-line POSIX wrapper -> $SANDBOX_RUNNER_BIN whose basename matches the
+#       bare name ClaudeChat defaults to, execing the already-deployed,
+#       dependency-free /usr/local/bin/barkpark-node (v26.5.0 ELF, argv passthrough
+#       proven) against the installed .mjs — NEVER the env-node shebang. Because
+#       the basename IS the default, ClaudeChat's :sandbox_runner config stays UNSET.
+# Same LOUD-but-NON-FATAL contract as the bp/connectors blocks above: the app is
+# already live on the new slot, so a missing runner source or an unwritable target
+# logs a WARN and the deploy continues — a :cloud turn simply stays
+# :binary_not_found until the next deploy heals it. Writes are atomic (tmp on the
+# SAME target dir, then rename) so a concurrent reader never sees a half-written file.
+RUNNER_SRC="$APP/scripts/connectors/cloud-sandbox-runner.mjs"
+log "installing cloud-sandbox-runner -> $SANDBOX_RUNNER_BIN (wrapper) + $SANDBOX_RUNNER_MJS (.mjs)"
+install_sandbox_runner() { # returns non-zero (LOUD) on any failure; caller stays non-fatal
+  if [ ! -f "$RUNNER_SRC" ]; then
+    log "WARN: no $RUNNER_SRC in this checkout — cloud-sandbox-runner NOT installed; a :cloud turn stays :binary_not_found until next deploy"
+    return 1
+  fi
+  # (1) the .mjs, atomic (tmp on the SAME target dir, then rename), 0644.
+  if ! cp "$RUNNER_SRC" "$SANDBOX_RUNNER_MJS.new" 2>/dev/null \
+     || ! chmod 0644 "$SANDBOX_RUNNER_MJS.new" \
+     || ! mv -f "$SANDBOX_RUNNER_MJS.new" "$SANDBOX_RUNNER_MJS"; then
+    rm -f "$SANDBOX_RUNNER_MJS.new" 2>/dev/null || true
+    log "WARN: could not install $SANDBOX_RUNNER_MJS (unwritable target?) — cloud-sandbox-runner NOT installed this deploy"
+    return 1
+  fi
+  # (2) the wrapper, atomic, 0755. FIXED production paths on purpose — the wrapper
+  # runs on the box where both live under /usr/local/bin, and hardcoding
+  # barkpark-node here is the whole point: never trust the .mjs env-node shebang on
+  # the node-less BEAM PATH.
+  {
+    printf '#!/bin/sh\n'
+    printf 'exec /usr/local/bin/barkpark-node /usr/local/bin/cloud-sandbox-runner.mjs "$@"\n'
+  } > "$SANDBOX_RUNNER_BIN.new" 2>/dev/null || true
+  if [ ! -s "$SANDBOX_RUNNER_BIN.new" ] \
+     || ! chmod 0755 "$SANDBOX_RUNNER_BIN.new" \
+     || ! mv -f "$SANDBOX_RUNNER_BIN.new" "$SANDBOX_RUNNER_BIN"; then
+    rm -f "$SANDBOX_RUNNER_BIN.new" 2>/dev/null || true
+    log "WARN: could not install the $SANDBOX_RUNNER_BIN wrapper (unwritable target?) — cloud-sandbox-runner NOT installed this deploy"
+    return 1
+  fi
+  log "cloud-sandbox-runner installed -> $SANDBOX_RUNNER_BIN (exec barkpark-node cloud-sandbox-runner.mjs), .mjs versioned from the checkout"
+  return 0
+}
+install_sandbox_runner || true
 
 echo "$NEW" > "$STATE"
 log "HEALTHY — slot $TARGET live at $(git rev-parse --short HEAD)"

@@ -342,6 +342,81 @@ turns, zero orphans + snapshot cleanup) is the NEW named human gate
 `connectors-hg-live-cloud-multiturn` (D142) — this proof asserts the launch
 contract only, never a fabricated live conversation.
 
+# Wave 34 — host prerequisites: the deploy install + the LOUD preflight (D265–D267)
+
+Everything above proves the runner's *behavior* hermetically (fake `vercel`, bogus
+key). This section is the **host contract** — what a real box needs before a
+`:cloud` turn can actually run, and how the deploy satisfies it.
+
+## The install (D265) — the wrapper, not the shebang
+
+ClaudeChat picks a provider turn by resolving the **bare** name
+`cloud-sandbox-runner` with `System.find_executable` on the live BEAM `PATH`
+(`…:/usr/local/bin:…`, `/proc`-proven on guerrilla). That PATH has **no `node`**
+and the unit carries no `Environment=` override, so `cloud-sandbox-runner.mjs`'s own
+`#!/usr/bin/env node` shebang is a **silent no-op** — a `:cloud` turn returns
+`{:stop, :binary_not_found}` the moment it starts.
+
+`deploy/instance-deploy.sh` therefore installs **two** files every deploy
+(re-copied so they track the checkout), guarded LOUD but non-fatal:
+
+| Installed | Source | Mode | Why |
+|---|---|---|---|
+| `/usr/local/bin/cloud-sandbox-runner.mjs` | `scripts/connectors/cloud-sandbox-runner.mjs` | `0644` | the runner, versioned with the checkout |
+| `/usr/local/bin/cloud-sandbox-runner` | generated 2-line wrapper | `0755` | the executable ClaudeChat's bare name resolves to |
+
+The wrapper is exactly:
+
+```sh
+#!/bin/sh
+exec /usr/local/bin/barkpark-node /usr/local/bin/cloud-sandbox-runner.mjs "$@"
+```
+
+`barkpark-node` is the dependency-free ELF the deploy already places for the
+connectors bridge (COPY, ProtectHome-safe). Because the wrapper **basename is the
+default**, ClaudeChat's `:sandbox_runner` config stays **unset**. On-host proof
+after an auto-deploy:
+
+```bash
+which cloud-sandbox-runner                       # /usr/local/bin/cloud-sandbox-runner
+readlink -f "$(which cloud-sandbox-runner)"      # same (a real file, not a dangling link)
+head -2 /usr/local/bin/cloud-sandbox-runner      # #!/bin/sh  +  exec …/barkpark-node …
+```
+
+The install Case in `deploy/instance-deploy_test.sh` (Case 15) is non-vacuous by
+design: file-presence alone would green a shebang-only no-op, so the load-bearing
+assertion is on the wrapper **content** (`exec …/barkpark-node`) plus a byte-`cmp`
+of the installed `.mjs` against the source.
+
+## The preflight (D267) — `preflight-vercel.sh`
+
+A fast, **non-creating** gate an operator runs before attempting a live turn (and
+that CI self-tests). Four checks, cheapest-first, each miss LOUD + named + `exit 1`:
+
+```bash
+scripts/connectors/preflight-vercel.sh                 # exit 0 all green, exit 1 (named) at first miss
+scripts/connectors/preflight-vercel.sh --scope <team>  # override the team scope (default: guerrilla)
+scripts/connectors/preflight-vercel.sh --self-test     # offline hermetic self-test (fake vercel; no real Vercel)
+```
+
+| # | Check | Prereq it names |
+|---|---|---|
+| 1 | `command -v vercel` | the Vercel CLI is installed (`npm i -g vercel`) |
+| 2 | `vercel whoami` | the CLI is authenticated — `vercel login` or ambient `VERCEL_*` (the runner's local child allowlists `HOME`/`PATH`/`TMPDIR`/`VERCEL_*` only) |
+| 3 | `vercel sandbox list --scope guerrilla` | the team exists and holds the Sandbox entitlement — the entitlement-grade **non-creating** probe (`--scope guerrilla`, D111) |
+| 4 | `ANTHROPIC_API_KEY` set | the ambient key the isolated turn authenticates Claude with — **never** a run-secret (D110/D23) |
+
+It **never** runs `vercel sandbox create`: that path carries the **10-minute**
+create backstop (`CLOUD_SANDBOX_TIMEOUT`, `cloud-sandbox-runner.mjs:84`) — exactly
+the stall the preflight exists to catch *before* it happens. Portability: the
+script shells **no** bare `timeout` (macOS has neither `timeout` nor `gtimeout`);
+each probe reads stdin from `/dev/null` so a would-be prompt gets EOF instead of
+hanging.
+
+The **live** credentialed turn still rides the human gate
+`connectors-hg-live-isolated-cloud-turn` — this preflight only certifies the host
+is *ready* for it.
+
 ## Gate
 
 ```bash
@@ -355,7 +430,9 @@ bash -n scripts/connectors/d10-vercel-sandbox-coldstart.sh scripts/connectors/d1
   && shellcheck -S error scripts/connectors/w12-shim-confinement-proof.sh \
   && scripts/connectors/w12-shim-confinement-proof.sh \
   && shellcheck -S error scripts/connectors/w14-session-sandbox-proof.sh \
-  && scripts/connectors/w14-session-sandbox-proof.sh
+  && scripts/connectors/w14-session-sandbox-proof.sh \
+  && shellcheck -S error scripts/connectors/preflight-vercel.sh \
+  && scripts/connectors/preflight-vercel.sh --self-test
 ```
 
 ## What Wave 11 does NOT do (filed as backlog)
