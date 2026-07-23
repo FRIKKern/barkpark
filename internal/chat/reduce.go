@@ -190,7 +190,10 @@ type FetchTailEffect struct {
 	SinceSeq int
 	// Gen stamps the turn generation live when this GET was issued so the landing
 	// TailFetchedEvent can prove it belongs to the tail it would clear (charter
-	// D77 settle-race token). Every emit site carries State.Gen.
+	// D77 settle-race token). Every settle-boundary emit site (result, answered,
+	// wedge-tick, permission) carries State.Gen; the D42 workflow-expand
+	// HYDRATION refetch (keys.go) carries -1 — not a boundary, so its landing
+	// must never clear a live tail.
 	Gen int
 }
 

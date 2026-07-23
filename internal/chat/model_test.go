@@ -529,6 +529,35 @@ func TestWorkflowEnterExpandsEscCollapses(t *testing.T) {
 	}
 }
 
+// TestWorkflowExpandRefetchNeverClearsLiveTail pins the D42 hydration
+// refetch's charter-D77 semantics: expanding the workflow panel fires a
+// turn-boundary-shaped GET that is NOT a settle boundary, so its landing must
+// never clear a live streamed tail. The adversarial case is attach-mid-turn —
+// this client saw no init frame, so Gen and TailGen are both still 0 and a
+// zero-valued effect Gen would (wrongly) match; the emit site carries the -1
+// sentinel instead. Reverting keys.go to `Gen: 0` (or dropping the field)
+// makes this test fail.
+func TestWorkflowExpandRefetchNeverClearsLiveTail(t *testing.T) {
+	st := liveWorkflowState(t)
+	st.Tail = "attached mid-turn, streaming"
+	st.Phase = TurnStreaming // deltas arriving; no init observed → Gen==TailGen==0
+	m := wfTestModel(t, st)
+	m.focus = focusWorkflow
+
+	nm, cmd := m.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := nm.(Model)
+	if !got.wfExpanded {
+		t.Fatal("Enter on the focused strip must expand the detail")
+	}
+	if cmd == nil {
+		t.Fatal("the expand edge must fire the D42 refetch")
+	}
+	nm2, _ := got.Update(runCmd(cmd))
+	if tail := nm2.(Model).st.Tail; tail != "attached mid-turn, streaming" {
+		t.Fatalf("the hydration refetch must never clear a live tail, got %q", tail)
+	}
+}
+
 // TestWorkflowKeyRunesAlwaysCompose is the D14 regression: typing while the
 // panel holds focus lands in the composer and NEVER moves the panel selection
 // (focus snaps home so the next Enter sends instead of expanding).
