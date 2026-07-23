@@ -79,7 +79,11 @@ fi
 # ── 2. Installed bp binary stale? ────────────────────────────────────────────
 # bp embeds its build commit; it is stale only if Go-side inputs changed since.
 if command -v bp >/dev/null 2>&1; then
-  BP_COMMIT="$(bp version 2>/dev/null | sed -n 's/.*"commit": *"\([0-9a-f]*\)".*/\1/p')"
+  # Capture the bare hex SHA even when the build was dirty: a dirty tree stamps
+  # e.g. "2a8b147ee-dirty-purpose", so allow a non-quote suffix after the hex
+  # (\{7,\} anchors on a real short/long SHA, never a stray hex fragment) and
+  # emit only \1 — the bare hex the ancestry check below feeds to git cat-file.
+  BP_COMMIT="$(bp version 2>/dev/null | sed -n 's/.*"commit": *"\([0-9a-f]\{7,\}\)[^"]*".*/\1/p')"
   if [ -z "$BP_COMMIT" ]; then
     # No commit field at all → the binary was built by a bare `go build` with no
     # -ldflags, so its provenance is unverifiable. This is the PATH/dist
