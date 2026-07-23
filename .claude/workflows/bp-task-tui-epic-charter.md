@@ -2183,3 +2183,41 @@ on small-pipe hosts.
 for both in-body chip forks — scope-discipline deferral, fence claim corrected per D100).
 
 Next D-number: D104.
+
+### Wave 17 2026-07-23 (REVIEWED: all 3 slices green, zero review fixes, pushed + PRs open — Arm E config E6)
+
+**Arm E (E6) verdict-relevant facts:** Fable architect + Fable-graded review + freshness-gated
+lean survey produced 3/3 gate-green slices with ZERO reviewer fixes and zero premise failures
+caught post-build (the two premise corrections — the D89–D96 backfill false premise and the
+ttm-followup-help-copy divider/column false ACs — were both caught at Decide, pre-build, which is
+the system working). Token/escape accounting vs E4's 2.4M is the research epic's to tally
+(task-09f4775e7ccc2cca); nothing in this wave's quality signals kills the stacking claim.
+
+**Landed (review-verified, gates re-run green, pushed):**
+- **ttw17-rail-stop-hover** → PR #5837 (`loop-epic/reading-frame-rail-stops-gain-hover-pain-0`).
+  D99 exactly as chartered: HoverStop int on UIState, change-only setHoverStop (D95),
+  `rightPaneStopAt` factored as the ONE click+hover stop resolver (D42), windowFrame hover-stop
+  paint via hoverStyle with overflow-marker skip + alias-copy. Reviewer independently
+  mutation-tested the paint (disabling it reds TestWideRailHoverPaintsStop) and verified
+  newModel is the sole prod UIState constructor (the -1 default is safe). Narrow-mode
+  reading-frame hover = honest named residue.
+- **ttw17-d43-chip-delegate** → PR #5838 (`loop-epic/pdrender-in-body-task-chip-delegates-to--1`).
+  D100 guarded delegate; ▸ sentinel preserved; blocked ⊘→! silent shift named in PR body.
+  NOTE for a future slice: `ready`/`closed` in-body chips still render ▸ (outside D100's 5-status
+  set) — widening the delegate is a candidate once the Elixir twin lands.
+- **ttm-followup-help-copy** → PR #5839 (`loop-epic/bp-tasks-help-footer-teach-the-shipped-m-2`).
+  D101 mouse block, behavior-sourced, phantom-guarded (divider/resize/"drag the"), mutation-provable.
+
+**Ledger:** all 3 tasks honestly in_progress with criteria 0–N-1 evidence-stamped mid-claim and
+the merge criterion open for the LEAD; both backlog tasks published (ttw17-bl-live-tmux-drive,
+ttw17-bl-d43-elixir-walkex). Zero ledger fixes needed. Grade: A (commentary in the wave paper
+task-tui-wave-2026-07-23).
+
+**Next wave (dispatch order):** (1) LEAD merges #5837/#5838/#5839 (disjoint files, any order;
+Go-only gates — may merge on their own gate per repo law) and closes each task's merge criterion.
+(2) ttw17-bl-live-tmux-drive — the LIVE tmux "feels native" mouse drive (wheel, click-select,
+double-click descend, verb clicks, M toggle, shift-click) against guerrilla; cannot be proven
+offline, do not fake it. (3) ttw17-bl-d43-elixir-walkex — walk.ex task_glyph → status_vocab
+delegate + drift coverage for both in-body chip forks, closing D43 cross-surface. (4) Narrow-mode
+reading-frame hover (the named residue of D99) once a narrow right-pane resolver exists.
+(5) Candidate: widen the chip delegate to ready/closed alongside the Elixir twin.
