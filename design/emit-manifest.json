@@ -10,7 +10,7 @@
     "api/lib/barkpark_web/layouts/bulldocs.html.heex": "1895e3e406ad3f05a648c33e40d32ca8e2d7257a3ded72ee19f0b965d7985c64",
     "api/lib/barkpark_web/layouts/root.html.heex": "aec81cd6318fed7c253ea3d71592c1aec11c9dc220d119b69e6039f62525260f",
     "api/lib/barkpark_web/layouts/sheets.html.heex": "114d6051da4bcfd6bfcab5c24e792dc24091df0c3379755669a95da1a740e461",
-    "api/lib/barkpark_web/studio/tokens_gen.ex": "c52d441794d91f5a04be0d64e3cf1a7a4beb6b2d78136982f6c5f16fded4ef6b",
+    "api/lib/barkpark_web/studio/tokens_gen.ex": "6e0823043f4b24abb043e8434f23aafa56cf1e60c11a54d16050a3e3428039c0",
     "cloud/priv/static/app.css": "35692a047f3f51680ad933c9960153d83cb6618d75d9be13bb01c9e6ce656023",
     "cloud/priv/static/app.js": "51bedecd9f9fe16523d18b510564d07d7ca605feedcdef0c12d8fdfc8ed4d09f",
     "cloud/priv/static/styleguide.html": "09c39abf2838df0d33ea6e8a50e2d9d801686b315d95832c4af48e2bb2f66094",
