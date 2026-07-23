@@ -3205,6 +3205,37 @@ test("instanceDetailHtml switches the panel by tab: Overview keeps the sites gri
   assert.match(wh, /Prod/);
 });
 
+// ── agent-connect: the credentials modal (Connect agent) ────────────────────
+
+test("connectAgentHtml: the admin token renders MASKED and never rides a data-copy attribute", () => {
+  const html = hooks.connectAgentHtml({ url: "https://acme.barkpark.cloud", admin_token: "bp_admin_s3cret" });
+  // Masked by default (re-revealable ≠ show-by-default): password input + eye.
+  assert.match(html, /id="agent-connect-token"[^>]*type="password"/);
+  assert.match(html, /id="agent-connect-eye"/);
+  // The delegated [data-copy] toast echoes the copied text in cleartext — a live
+  // credential must NEVER sit in a data-copy attribute (copies are wired to
+  // copyText, whose toast carries no body).
+  assert.doesNotMatch(html, /data-copy="[^"]*bp_admin_s3cret/);
+  // Both halves of the agent env pair are present and labeled as the env vars.
+  assert.match(html, /BARKPARK_API_URL/);
+  assert.match(html, /BARKPARK_API_TOKEN/);
+  assert.match(html, /value="https:\/\/acme\.barkpark\.cloud"/);
+  assert.match(html, /id="agent-connect-env"/); // the one-click env-pair copy
+});
+
+test("connectAgentHtml escapes a hostile url/token instead of injecting markup", () => {
+  const html = hooks.connectAgentHtml({ url: 'x"><img src=x onerror=1>', admin_token: "<script>1</script>" });
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.doesNotMatch(html, /<script>1<\/script>/);
+});
+
+test("instanceHeader: Connect agent stays HIDDEN for a live box when the role is unknown (member-safe default)", () => {
+  // meCache is null in this sandbox (loadMe never ran), so the admin-only
+  // affordance must fall to hidden — a member never sees a 403-only button.
+  const html = hooks.instanceDetailHtml({ id: "abc", name: "Prod", host: "1.2.3.4", url: "https://prod" }, "overview");
+  assert.doesNotMatch(html, /id="inst-connect-agent"/);
+});
+
 // ── webhookCliChip: the ratified verb grammar, byte-for-byte with C7 ────────
 
 test("webhookCliChip emits `bp cloud webhook <verb> <instance>` and only appends --dataset off-default", () => {

@@ -4557,6 +4557,81 @@
     });
   }
 
+  // agent-connect: the modal body for GET /v1/barkparks/:id/credentials — the
+  // address, the masked admin token, and the copy-ready env pair a cloud agent
+  // environment wants (Claude Code web env vars, Cursor Cloud Secrets, Codex).
+  // The token is RE-revealable (stored encrypted on the control plane), so the
+  // copy says "treat as a secret" — never the PAT mint's "only time you'll see
+  // this". Pure; openConnectAgentModal wires it.
+  function connectAgentHtml(creds) {
+    return '<h2 class="modal-title" id="modal-title">Connect an agent</h2>' +
+      '<div class="notice notice-warn" role="alert">This is the instance&rsquo;s admin token &mdash; it grants full API access. Treat it as a secret.</div>' +
+      '<div class="field"><label class="label" for="agent-connect-url">BARKPARK_API_URL</label>' +
+        '<div class="token-reveal">' +
+          '<input class="form-input" id="agent-connect-url" type="text" readonly value="' + esc(creds.url || "") + '" />' +
+          '<button class="btn btn-sm" id="agent-connect-url-copy" type="button">Copy</button>' +
+        "</div>" +
+      "</div>" +
+      '<div class="field"><label class="label" for="agent-connect-token">BARKPARK_API_TOKEN</label>' +
+        '<div class="token-reveal">' +
+          '<div class="input-affix">' +
+            '<input class="form-input token-reveal-input" id="agent-connect-token" type="password" readonly value="' + esc(creds.admin_token || "") + '" />' +
+            '<button class="affix-btn" id="agent-connect-eye" type="button" tabindex="-1" aria-label="Show token">' + EYE_SVG + "</button>" +
+          "</div>" +
+          '<button class="btn btn-sm" id="agent-connect-token-copy" type="button">Copy</button>' +
+        "</div>" +
+      "</div>" +
+      '<p class="field-hint dim">Paste these two variables into the agent&rsquo;s environment settings &mdash; its committed MCP config and the <code>bp</code> CLI read them directly.</p>' +
+      '<div class="modal-actions">' +
+        '<button class="btn btn-sm" id="agent-connect-env" type="button">Copy as env pair</button>' +
+        '<button class="btn btn-primary" id="agent-connect-done" type="button">Done</button>' +
+      "</div>";
+  }
+
+  function openConnectAgentModal(creds) {
+    openModal(connectAgentHtml(creds));
+    // Masked by default (re-revealable ≠ show-by-default; over-the-shoulder
+    // safety wins), the eye discloses on demand — inverse of revealToken's
+    // one-moment default.
+    var input = $("#agent-connect-token");
+    var shown = false;
+    var eye = $("#agent-connect-eye");
+    if (eye) eye.addEventListener("click", function () {
+      shown = !shown;
+      if (input) input.type = shown ? "text" : "password";
+      eye.setAttribute("aria-label", shown ? "Hide token" : "Show token");
+    });
+    // Every copy goes through copyText — the delegated [data-copy] toast echoes
+    // the copied text in its body, which must never happen to a live credential.
+    var urlCopy = $("#agent-connect-url-copy");
+    if (urlCopy) urlCopy.addEventListener("click", function () { copyText(creds.url, "API URL copied"); });
+    var tokCopy = $("#agent-connect-token-copy");
+    if (tokCopy) tokCopy.addEventListener("click", function () { copyText(creds.admin_token, "Token copied"); });
+    var envCopy = $("#agent-connect-env");
+    if (envCopy) envCopy.addEventListener("click", function () {
+      copyText(
+        "BARKPARK_API_URL=" + (creds.url || "") + "\nBARKPARK_API_TOKEN=" + (creds.admin_token || ""),
+        "Env pair copied"
+      );
+    });
+    $("#agent-connect-done").addEventListener("click", closeModal);
+  }
+
+  // agent-connect: fetch the stored credentials, then open the modal. Failure
+  // copy rides the shared ERRORS map (no_admin_token / not_live / forbidden all
+  // have curated sentences there).
+  function openConnectAgent(bp, btn) {
+    if (btn) btn.disabled = true;
+    api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/credentials").then(function (r) {
+      if (btn) btn.disabled = false;
+      if (r.ok && r.data && r.data.admin_token) {
+        openConnectAgentModal(r.data);
+      } else {
+        toast({ kind: "error", title: "Couldn't fetch credentials", body: friendly(r.data, "Please try again.") });
+      }
+    });
+  }
+
   // Last fetched fleet, reused by the instance drill-down (avoids a second
   // round-trip on row click). Cleared after a launch so it refetches.
   var fleetCache = null;
@@ -5436,6 +5511,17 @@
       ? '<button class="btn btn-ghost btn-sm" id="inst-domain" type="button">Attach domain</button>'
       : "";
 
+    // agent-connect: reveal the stored admin credential + address as the env
+    // pair a cloud agent needs (Claude Code web, Cursor Cloud, Codex — the
+    // browser twin of `bp instance credentials`). Reveals a live admin
+    // credential → owner/admin only, mirrored UP-FRONT like the PAT ability
+    // picker (GR34) — a member never sees a button whose only outcome is a 403
+    // toast. meCache-null (deep-link before /v1/me) falls to hidden; the loadMe
+    // re-render seam repaints this header once the real role lands.
+    var connectBtn = lc.live && canMintAnyAbility()
+      ? '<button class="btn btn-ghost btn-sm" id="inst-connect-agent" type="button">Connect agent</button>'
+      : "";
+
     // GR24 (screens/02): the "bp CLI ▾" disclosure — opens the CLI card
     // (#inst-lifecycle-actions, the conduit-driven lifecycle surface). Renders
     // exactly when the card itself does (showLifecycleRow), so the toggle can
@@ -5470,7 +5556,7 @@
               : bp.host
                 ? updateBtn +
                   '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
-                  domainBtn + cliToggle
+                  domainBtn + connectBtn + cliToggle
                 : "";
 
     // The failed case is owned by the timeline now (its fail block shows the
@@ -5586,6 +5672,8 @@
     wireUpdatePanel(bp); // isu-w5: per-instance pin/unpin/pause/resume policy buttons
     var domain = $("#inst-domain");
     if (domain) domain.addEventListener("click", function () { openAttachDomainModal(bp); });
+    var connect = $("#inst-connect-agent");
+    if (connect) connect.addEventListener("click", function () { openConnectAgent(bp, connect); });
     // GR24: the "bp CLI ▾" disclosure — show/hide the CLI card and remember the
     // choice across SSE repaints (module state, see instanceCliOpen).
     var cliT = $("#inst-cli-toggle");
@@ -12089,6 +12177,10 @@
         // real answer is in, either the console paints or the non-operator is
         // bounced — the decision is never made on an unloaded me.
         if (currentView() === "operator") loadOperator();
+        // agent-connect twin: a deep-linked #instance/<id> painted its header
+        // before /v1/me resolved, so the admin-only Connect agent button fell to
+        // the member-safe hidden default. Repaint now that the role is known.
+        if (currentView() === "instance") reloadInstanceView();
       }
     });
   }
@@ -18200,6 +18292,9 @@
       // C6 instance-workspace tabs + the Webhooks tab (charter D49/D46/D51/D18/D5).
       instanceTabOf: instanceTabOf, instanceTabs: INSTANCE_TABS.slice(),
       instanceDetailHtml: instanceDetailHtml, instanceTabStripHtml: instanceTabStripHtml,
+      // agent-connect: the credentials modal body (masked token, no data-copy
+      // carrying the secret — the delegated toast echoes data-copy in cleartext).
+      connectAgentHtml: connectAgentHtml,
       webhookCliChip: webhookCliChip, cliChipHtml: cliChipHtml,
       webhookEventsHtml: webhookEventsHtml, webhookBannerHtml: webhookBannerHtml,
       webhookCardHtml: webhookCardHtml, deliveryTone: deliveryTone,

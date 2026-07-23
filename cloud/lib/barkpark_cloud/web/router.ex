@@ -67,7 +67,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/usage/summary    user      cross-instance usage-meter rollup for the team
       GET     /v1/barkparks/:id/domain-status user  per-domain, per-stage DNS/TLS/serving checklist (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
-      GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
+      GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin; session or root PAT)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
       DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, EMPTY (never {token:""}) for logout-everywhere (wave 2; admin token stays server-side)
@@ -2272,14 +2272,23 @@ defmodule BarkparkCloud.Web.Router do
   # token was reported on /succeed and stored ENCRYPTED, and this decrypts it for
   # the owner. Show-to-owner — treat the response as a secret.
   #
-  # ADMIN-gated + team-scoped, fail-closed: require_team_admin 401s an
-  # unauthenticated caller and 403s a member who is not owner/admin; a barkpark in
+  # ADMIN-gated + team-scoped, fail-closed: a browser SESSION or a ROOT-ability
+  # PAT authenticates (agent-connect: scripts fetch instance credentials with a
+  # dashboard-minted PAT instead of a password login); a sub-root PAT is 403 at
+  # the ability step — a read PAT must never reveal a live admin credential. The
+  # team-admin gate then 403s a member who is not owner/admin; a barkpark in
   # ANOTHER team (or no such id) is the SAME 404 — NO existence leak for a
   # non-member. 404 "no_admin_token" when the row never got one (ip-only succeed /
   # pre-feature instance); 500 if the stored ciphertext fails to decrypt.
   get "/v1/barkparks/:id/credentials" do
-    # RBAC (rbac-roles): reveals a live admin credential → team admin (owner/admin) only.
-    conn = Auth.require_team_admin(conn, [])
+    # RBAC (rbac-roles): reveals a live admin credential → team admin (owner/admin)
+    # only, via session or root PAT. require_user_or_pat assigns current_user +
+    # current_team, so require_team_admin composes without re-authing (its
+    # require_user step is skipped when current_user is present); the halted
+    # guard keeps a 401/403 from double-sending.
+    conn = Auth.require_user_or_pat(conn, [])
+    conn = Auth.require_ability(conn, "root")
+    conn = if conn.halted, do: conn, else: Auth.require_team_admin(conn, [])
 
     cond do
       conn.halted ->

@@ -2083,6 +2083,40 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert conn.status == 403
     end
 
+    test "a ROOT-ability PAT of a team admin gets credentials (agent-connect)" do
+      {owner, team} = user_with_team()
+
+      {:ok, pat_token, _} =
+        Accounts.create_personal_access_token(owner, team, %{name: "ci", abilities: ["root"]})
+
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "203.0.113.10", admin_token: "bp_admin_via-pat")
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat_token)
+
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["admin_token"] == "bp_admin_via-pat"
+      assert body["url"] == bp.url
+    end
+
+    test "a sub-root PAT (read) → 403, never the token" do
+      {owner, team} = user_with_team()
+
+      {:ok, pat_token, _} =
+        Accounts.create_personal_access_token(owner, team, %{name: "ro", abilities: ["read"]})
+
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "203.0.113.11", admin_token: "bp_admin_hidden-ro")
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat_token)
+
+      assert conn.status == 403
+      refute String.contains?(conn.resp_body, "bp_admin_hidden-ro")
+    end
+
     test "a user from ANOTHER team → 404, no existence leak (never the token)" do
       {_owner, team} = user_with_team()
       bp = barkpark_fixture(team)

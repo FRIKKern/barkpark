@@ -124,8 +124,10 @@ settings** (web UI) can provide:
 - **Network egress allowlist** — add `guerrilla.barkpark.cloud` (and
   `github.com` for the installer); a blocked host fails with "Host not in
   allowlist".
-- **Env vars** — `BARKPARK_API_URL` and `BARKPARK_API_TOKEN` (scoped token,
-  never admin — [Token scoping](REMOTE.md#token-scoping)).
+- **Env vars** — `BARKPARK_API_URL` and `BARKPARK_API_TOKEN`. Get both from
+  your instance page on the Cloud dashboard (**Connect agent**, owner/admin
+  only) or `bp instance credentials <id>`; prefer a scoped token where you have
+  one — [Token scoping](REMOTE.md#token-scoping).
 
 Verify inside a session: `bp task ready` (empty list = connected, no open work).
 
