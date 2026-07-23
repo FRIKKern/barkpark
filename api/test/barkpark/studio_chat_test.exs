@@ -619,6 +619,60 @@ defmodule Barkpark.StudioChatTest do
       assert :noop = StudioChat.unarchive_session("nope")
     end
 
+    test "delete_session with a RESTRICT runtime ledger returns {:error, changeset}, never a crash" do
+      s = new_session()
+
+      # A managed-codex session that recorded a runtime usage receipt: its
+      # session_id FK is on_delete: :restrict (migration 20260715000900), so the
+      # session cannot be hard-deleted while the ledger row lives. Seed one
+      # directly — the receipt table is append-only (the immutability trigger
+      # blocks UPDATE/DELETE, not INSERT), and task_id needs a real document.
+      task_doc =
+        Barkpark.Repo.insert!(%Barkpark.Content.Document{
+          doc_id: "sc-restrict-#{System.unique_integer([:positive])}",
+          type: "task",
+          title: "restrict guard task",
+          status: "published",
+          content: %{},
+          rev: Ecto.UUID.generate()
+        })
+
+      {1, _} =
+        Barkpark.Repo.insert_all(Barkpark.StudioChat.RuntimeUsage.Receipt, [
+          %{
+            id: Ecto.UUID.generate(),
+            cycle_id: Ecto.UUID.generate(),
+            assignment_id: Ecto.UUID.generate(),
+            session_id: s.id,
+            task_id: task_doc.id,
+            task_doc_id: "sc-restrict-task",
+            task_worker_id: "worker-1",
+            task_epoch: 1,
+            task_work_digest: "0123456789abcdef",
+            provider: "codex",
+            provider_session_id: "thread-1",
+            turn_id: "turn-1",
+            boundary: "baseline",
+            observation_state: "observed",
+            counter_domain: "tokens",
+            counters: %{},
+            payload_hash: String.duplicate("a", 64),
+            inserted_at: DateTime.utc_now()
+          }
+        ])
+
+      # Mapped to a changeset error — never an unhandled Ecto.ConstraintError
+      # crashing the admin LiveView. Mutation: strip the foreign_key_constraint
+      # mapping in delete_session/2 → Repo.delete raises → this assert fails.
+      assert {:error, %Ecto.Changeset{} = cs} = StudioChat.delete_session(s.id)
+
+      assert {"has recorded runtime usage receipts and cannot be deleted", _} =
+               cs.errors[:id]
+
+      # A failed delete leaves the session intact — a bounded, recoverable outcome.
+      assert StudioChat.get_session(s.id) != nil
+    end
+
     test "archive stamps archived_at; unarchive clears it — status is untouched" do
       s = new_session()
       {:ok, _} = StudioChat.update_status(s.id, "working")

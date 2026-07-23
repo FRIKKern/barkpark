@@ -406,6 +406,19 @@ defmodule Barkpark.StudioChat do
   chat-owned dir keyed by the session id and must not outlive the row. Archiving
   keeps files; only a permanent delete purges them. The file purge runs AFTER a
   successful row delete and never raises (a stray FS error can't fail the delete).
+
+  ## RESTRICT children (managed-codex runtime ledgers)
+
+  Two append-only ledgers reference `chat_sessions.id` with `on_delete: :restrict`
+  — `chat_runtime_usage_receipts` (migration 20260715000900) and
+  `epic_assignment_runtime_attempts` (migration 20260715001300). A managed-codex
+  session that ever recorded a runtime attempt or usage receipt therefore CANNOT
+  be hard-deleted: a bare `Repo.delete` would raise an unhandled
+  `Ecto.ConstraintError` and crash the admin chat LiveView. The delete goes
+  through a changeset that maps BOTH RESTRICT constraints, so the violation comes
+  back as `{:error, %Ecto.Changeset{}}` the caller can render — never a crash.
+  Callers offer archive instead (`archive_session/2`), which leaves the ledgers
+  intact.
   """
   @spec delete_session(String.t(), :global | binary()) ::
           {:ok, Session.t()} | {:error, term()} | :noop
@@ -415,7 +428,19 @@ defmodule Barkpark.StudioChat do
         :noop
 
       session ->
-        case Repo.delete(session) do
+        changeset =
+          session
+          |> Ecto.Changeset.change()
+          |> Ecto.Changeset.foreign_key_constraint(:id,
+            name: "chat_runtime_usage_receipts_session_id_fkey",
+            message: "has recorded runtime usage receipts and cannot be deleted"
+          )
+          |> Ecto.Changeset.foreign_key_constraint(:id,
+            name: "epic_assignment_runtime_attempts_session_id_fkey",
+            message: "has a recorded runtime attempt and cannot be deleted"
+          )
+
+        case Repo.delete(changeset) do
           {:ok, _} = ok ->
             delete_session_attachments(session.id)
             ok

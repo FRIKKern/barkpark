@@ -193,6 +193,60 @@ defmodule Barkpark.StudioChat.RuntimeTelemetryTest do
     assert registered.limitations == RuntimeTelemetry.registered_host_limitations()
   end
 
+  test "a runtime event whose session was deleted mid-flight is an explicit error, not an FK crash" do
+    session_id = create_session()
+
+    # The delete-commits-first race: the session row is gone before the in-flight
+    # telemetry event lands. The Receipt insert carries a real session_id FK and
+    # `on_conflict: :nothing` does NOT suppress an FK violation, so without the
+    # locked pre-check the insert_all would raise Postgrex.Error out of
+    # Repo.transaction. The FOR SHARE guard turns it into a bounded result.
+    assert {:ok, %StudioChat.Session{}} = StudioChat.delete_session(session_id)
+
+    assert {:error, :session_not_found} =
+             RuntimeTelemetry.observe(session_id, usage_event(session_id))
+  end
+
+  test "the Recorder survives a runtime event for a session deleted out from under it" do
+    session_id = create_session()
+    {:ok, recorder} = Recorder.ensure(%{session_id: session_id, provider: "codex", mode: "plan"})
+
+    assert {:ok, %StudioChat.Session{}} = StudioChat.delete_session(session_id)
+
+    # The Recorder fire-and-forgets observe/2's result, so a RAISED FK abort would
+    # kill the GenServer. With the guard, observe returns {:error, :session_not_found}
+    # and the Recorder stays alive (mutation: strip the pre-check → this exits).
+    send(recorder, {:studio_chat_runtime_event, usage_event(session_id)})
+    :sys.get_state(recorder)
+    assert Process.alive?(recorder)
+
+    DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, recorder)
+  end
+
+  defp usage_event(session_id) do
+    %Event{
+      provider: "codex",
+      session_id: session_id,
+      provider_session_id: "thread-race",
+      turn_id: "turn-race",
+      idempotency_key: "usage-race-#{System.unique_integer([:positive])}",
+      durability: :durable,
+      kind: :usage,
+      usage: %{
+        total: %{
+          total_tokens: 5,
+          input_tokens: 3,
+          cached_input_tokens: nil,
+          output_tokens: 2,
+          reasoning_output_tokens: nil
+        },
+        last: %{},
+        model_context_window: nil
+      },
+      native: %{}
+    }
+  end
+
   defp create_session do
     id = Ecto.UUID.generate()
 
