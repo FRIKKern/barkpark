@@ -5,7 +5,7 @@
 # (Cloud session-authed proxy -> instance admin-gated mint) against LIVE
 # guerrilla, then runs the FULL v1 journey AS the minted token:
 #
-#   fleet/cascade walk -> capabilities -> structure tree ->
+#   fleet/cascade walk -> capabilities -> structure admin-floor oracle ->
 #   /v1/tasks/prime?view=brief -> /v1/tasks/events?since=0 ->
 #   SSE welcome frame on /v1/data/listen/production -> one paper read ->
 #   chat floor: sessions list + send/approve/interrupt legs.
@@ -130,12 +130,28 @@ else
   bad "GET /v1/capabilities"
 fi
 
-# structure: the server desk tree (cascade rungs: workspace/project/dataset).
-if curl -sf "${auth[@]}" "$INSTANCE_URL/v1/structure/$DATASET" >/dev/null; then
-  ok "GET /v1/structure/$DATASET -> 200 (cascade tree)"
-else
-  bad "GET /v1/structure/$DATASET"
-fi
+# structure: /v1/structure is ADMIN-gated (router :require_admin) and the
+# mobile app never calls it — the cascade rides the Cloud fleet walk +
+# /v1/capabilities. As the member-shaped minted token this MUST bounce:
+# the admin floor holding is the assertion (in fallback mode the configured
+# token may be admin, so a 200 is accepted there and labeled as such).
+structure_status=$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" \
+  "$INSTANCE_URL/v1/structure/$DATASET")
+case "$structure_status" in
+  401 | 403)
+    ok "GET /v1/structure/$DATASET -> $structure_status (admin floor holds against the member token)"
+    ;;
+  200)
+    if [ "$mode" = "exchange" ]; then
+      bad "GET /v1/structure/$DATASET -> 200 — the minted token cleared an ADMIN surface"
+    else
+      ok "GET /v1/structure/$DATASET -> 200 (fallback token is admin-tier; member oracle deferred)"
+    fi
+    ;;
+  *)
+    bad "GET /v1/structure/$DATASET -> $structure_status"
+    ;;
+esac
 
 # tasks prime (brief view) — the mobile Tasks tab's first paint.
 prime_status=$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" \
