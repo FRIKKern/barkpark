@@ -52,6 +52,14 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   # Reasoning-effort tiers the CLI's `--effort` flag accepts (probed v2.1.205,
   # charter D48). Ascending intensity; defined here so build_args' guard sees it.
   @efforts ~w(low medium high xhigh max)
+  # Ceiling on the Port stdout line-reassembly buffer (Session.handle_info →
+  # parse_chunk). The CLI emits newline-delimited JSON, so in normal operation
+  # the buffer only ever holds the trailing partial line. A malformed or stalled
+  # stream that never emits a newline would otherwise grow one binary without
+  # bound in the long-lived per-session GenServer (the codex-twin scar-class).
+  # Config-overridable per host/test via `config :barkpark, :claude_chat,
+  # max_buffer_bytes: N` (validator.ex @default/config/0/Keyword.get technique).
+  @default_max_buffer_bytes 8 * 1024 * 1024
 
   @doc """
   Whether the chat may run on this host. ON by default; requires the flag
@@ -83,6 +91,16 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   @doc "The configured Claude binary (default `claude`)."
   @spec binary() :: String.t()
   def binary, do: Keyword.get(config(), :binary, @default_binary)
+
+  @doc """
+  Byte ceiling on the Port stdout line-reassembly buffer (`@default_max_buffer_bytes`,
+  8 MiB). Overridable via `config :barkpark, :claude_chat, max_buffer_bytes: N`
+  (tests shrink it to force the overflow path). Read in `Session.handle_info` where
+  the raw bytes arrive — a newline-free stream never yields a complete line, so the
+  cap must live at the accumulation seam, not the event path (charter D126).
+  """
+  @spec max_buffer_bytes() :: pos_integer()
+  def max_buffer_bytes, do: Keyword.get(config(), :max_buffer_bytes, @default_max_buffer_bytes)
 
   @doc """
   The subprocess command as `{executable, args}`. Defaults to the Claude CLI
@@ -979,6 +997,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       bounded tail of the child's captured stderr rides along (empty on a clean
       exit, `nil` on the crash/idle-reap paths that carry no captured stderr) so
       the UI can tell a rejected-argv death from an ordinary end (charter D54)
+    * `{:claude_chat_error, :buffer_overflow, stderr_tail}` — the stdout
+      line-reassembly buffer crossed `max_buffer_bytes/0`; the session closed the
+      Port and stopped cleanly. Carries the same bounded stderr tail as an exit so
+      the UI can surface the captured reason.
 
   The session monitors the sink and shuts the subprocess down when the sink
   dies, so an abandoned LiveView never leaks a `claude` process.
@@ -1478,10 +1500,36 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     @impl true
     def handle_info({port, {:data, chunk}}, %{port: port} = state) do
-      {events, rest} = ClaudeChat.parse_chunk(state.buffer, chunk)
-      # Thread state so a control_response ack can prune its pending entry.
-      state = Enum.reduce(events, %{state | buffer: rest}, &dispatch_event/2)
-      {:noreply, state}
+      # Cap the line-reassembly buffer WHERE the bytes arrive (charter D126). The
+      # CLI streams newline-delimited JSON, so parse_chunk normally hands back only
+      # the trailing partial line — but a malformed/stalled stream that never emits
+      # a newline would grow `state.buffer` without bound in this long-lived
+      # per-session GenServer (the codex-twin scar-class). Check the accumulated
+      # size BEFORE parse_chunk consumes it: on breach close the Port and stop the
+      # session with a named overflow error. terminate/2 still runs (revokes the
+      # MCP token + removes the stderr tmpfile) — port is nil'd so it closes once.
+      buffered = byte_size(state.buffer) + byte_size(chunk)
+      cap = ClaudeChat.max_buffer_bytes()
+
+      if buffered > cap do
+        Logger.warning(
+          "claude chat: stdout buffer #{buffered} bytes exceeds #{cap}-byte cap; closing session"
+        )
+
+        if port in Port.list(), do: Port.close(port)
+
+        send(
+          state.sink,
+          {:claude_chat_error, :buffer_overflow, read_stderr_tail(state[:stderr_path])}
+        )
+
+        {:stop, :normal, %{state | port: nil}}
+      else
+        {events, rest} = ClaudeChat.parse_chunk(state.buffer, chunk)
+        # Thread state so a control_response ack can prune its pending entry.
+        state = Enum.reduce(events, %{state | buffer: rest}, &dispatch_event/2)
+        {:noreply, state}
+      end
     end
 
     def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
