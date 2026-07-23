@@ -1926,6 +1926,30 @@ Backlog filed: `task-felix-w22-bl-recorder-bounds` (P2), `task-felix-w22-bl-webh
 
 ## Wave log
 
+- **Wave 22 — 2026-07-23 — BUILT + REVIEWED, grade A. Arm: E (E6+E7 winning recipe — barkpark_web
+  resource-bound sweep).** Both round-1 slices built green, reviewed, and re-proven by the
+  reviewer's OWN mutations (not just the builders'): S1 claude_chat transport buffer cap
+  (`task-felix-w21-bl-claudechat-buffer-parity`, branch
+  `loop-epic/claude-chat-transport-buffer-cap-data-ha-0-r`, 129/0 — reviewer re-neutered the cap,
+  the named-overflow test went red, restored green) and S2 chat_live streaming display cap
+  (`task-felix-w22-chatlive-stream-display-cap`, branch
+  `loop-epic/chat-live-streaming-display-cap-stable-b-1-r`, 293/0 — reviewer mutated the byte
+  check to `if false`, BOTH new tests red). The D131 HIGH-FLIP-RISK display-only judgment was
+  independently re-derived from source by the reviewer (dead `is_binary` turn_completed branch at
+  chat_live.ex:1244-1247 — streaming is always nil-or-map; codex durable = Recorder runtime_text,
+  recorder.ex:1045-1046 accumulate + persist_runtime_text :1272-1276; claude durable = full-frame
+  blocks append :1380-1388, never streaming.text) — but per protocol a genuinely SEPARATE second
+  reviewer is still owed before merge. Both slice gates were also re-run green on the INTEGRATED
+  tree (both slices' files together — true cross-slice proof). Review fixes: both builders left
+  `mix format` violations that would red the CI Format gate (claude_chat.ex overflow send;
+  chat_live_test.exs three overlong lines) — formatted on the `-r` branches, gates re-run green
+  byte-identical. Ledger clean (honest stamps, merge-gated criteria open, lifecycle
+  in_progress). New backlog filed at review: `task-felix-w22-bl-chatlive-overflow-banner` (P4 —
+  S1's named :buffer_overflow sink message is swallowed by ChatLive's catch-all; user sees the
+  generic DOWN teardown copy). NEXT WAVE: merge both `-r` branches (lead closes the merge-gated
+  criteria), then the strongest open vein is `task-felix-w22-bl-recorder-bounds` (P2 — the REAL
+  codex durable accumulator, recorder.ex:1046, out of the barkpark_web fence).
+
 - **Wave 22 — 2026-07-23 — DECIDED (building). Arm: E (E6+E7 winning recipe — barkpark_web
   resource-bound sweep).** Ratified D130–D134. Headline: honest census of the 252-file
   barkpark_web tree = exactly TWO unbounded-and-reachable streaming accumulators, both now wave
