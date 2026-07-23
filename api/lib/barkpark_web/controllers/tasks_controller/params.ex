@@ -11,7 +11,7 @@ defmodule BarkparkWeb.TasksController.Params do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Repo
-  alias Barkpark.Content.Document
+  alias Barkpark.Content.{CallerContext, Document, Envelope}
   alias Barkpark.Content.Scope
   alias Barkpark.Tasks.{Criteria, QueueGate}
   alias Barkpark.Tasks.Edge
@@ -158,6 +158,36 @@ defmodule BarkparkWeb.TasksController.Params do
   #     content echo, no work digests, claim cut to {worker, epoch, now}, and
   #     the nine measured diet cuts below. `child_count` is NOT set here —
   #     list callers add it via `render_brief/2` from one batched query.
+  # ─── field-visibility seal (fail-closed) ────────────────────────────────
+  #
+  # Redact a task document's `content` through the canonical Envelope
+  # field-visibility chokepoint under the request's caller BEFORE it is rendered
+  # into any wire shape. A `private` / `owner_only` / `readable_by` field the
+  # caller may not see — and any encrypted-ciphertext field — is DROPPED from
+  # `content`, so it can never reach the `content` echo NOR any top-level key
+  # `render_doc` / `render_brief` / `render_doc_with_counts` / `child_summary`
+  # promote off it (they all read `doc.content`).
+  #
+  # This is the missing sibling of the already-sealed Tasks read surfaces
+  # (`Barkpark.Tasks.Query`'s measure/agg branch → `Envelope.field_readable?`,
+  # and the board peek panel). This JSON echo never adopted the same seal.
+  # LATENT today — a full schema scan found no task field declaring visibility,
+  # so `redact/4` returns `content` unchanged and every response is
+  # byte-identical for the already-readable case. It fails CLOSED the instant a
+  # task field declares visibility: the field is redacted, never leaked.
+  #
+  # `caller` is the request principal (`CallerContext.from_conn/1`): an admin
+  # token sees all (no redaction); a non-admin token / anonymous caller is
+  # subject to the field's declared visibility. `schema` is the resolved "task"
+  # `%SchemaDefinition{}` (nil ⇒ only encrypted ciphertext is dropped; declared
+  # visibility needs the schema present). `Envelope.redact/4` is the same
+  # `redact_by_field_visibility` chokepoint as `Envelope.render/3`.
+  @spec seal(Document.t(), CallerContext.t(), term()) :: Document.t()
+  def seal(%Document{} = doc, %CallerContext{} = caller, schema) do
+    redacted = Envelope.redact(doc.content || %{}, schema, caller, Map.get(doc, :owner_id))
+    %{doc | content: redacted}
+  end
+
   def render_doc(doc, view \\ :full)
 
   def render_doc(%Document{} = doc, :full) do
