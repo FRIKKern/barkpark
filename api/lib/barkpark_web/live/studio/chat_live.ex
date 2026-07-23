@@ -2879,17 +2879,30 @@ defmodule BarkparkWeb.Studio.ChatLive do
             >
               {Phoenix.HTML.raw(@streaming.stable_html)}
             </div>
-            <%= case classify_tail(streaming_tail(@streaming)) do %>
-              <% {:text, tail} -> %>
-                <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;" data-gutter-text>{tail}<span class="text-dim">▌</span></div>
-              <% {:component, kind, prose} -> %>
-                <div
-                  :if={String.trim(prose) != ""}
-                  class="text-sm"
-                  style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
-                  data-gutter-text
-                >{prose}</div>
-                <.skeleton kind={kind} />
+            <%!-- Display cap breached (charter D131): the live preview froze at the
+                  last stable block; the still-forming tail is dropped and an honest
+                  marker stands in. The full response arrives untruncated on completion. --%>
+            <div
+              :if={@streaming[:capped]}
+              class="text-xs text-dim"
+              style="padding: 4px 0; font-style: italic;"
+              data-streaming-capped
+            >
+              live preview truncated — the full response arrives on completion
+            </div>
+            <%= if !@streaming[:capped] do %>
+              <%= case classify_tail(streaming_tail(@streaming)) do %>
+                <% {:text, tail} -> %>
+                  <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;" data-gutter-text>{tail}<span class="text-dim">▌</span></div>
+                <% {:component, kind, prose} -> %>
+                  <div
+                    :if={String.trim(prose) != ""}
+                    class="text-sm"
+                    style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
+                    data-gutter-text
+                  >{prose}</div>
+                  <.skeleton kind={kind} />
+              <% end %>
             <% end %>
           </div>
 
@@ -5744,21 +5757,80 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # or ```portabledoc fence — a half fence would render as a broken block).
   # The stable prefix renders through the paper engine once per boundary
   # advance; only the still-forming tail re-renders as plain text per delta.
+  #
+  # DISPLAY-ONLY CAP (felix W22, charter D131). `state.text` is a purely
+  # cosmetic in-flight preview for BOTH providers — the durable text is the
+  # claude full-frame append (:1380) and the codex Recorder runtime_text, never
+  # this accumulator (the codex turn_completed `is_binary` branch is dead — this
+  # always returns a map). A runaway or hostile stream of many small WELL-FORMED
+  # deltas would otherwise grow one assign unboundedly for the whole turn AND
+  # compound cost: stable_boundary re-scans the FULL text per delta and each new
+  # boundary re-renders the FULL prefix through the paper engine (the compounding
+  # re-render is the actual DoS — the LiveView wedged at 5000 deltas in the W22
+  # probe). So we bound the DISPLAY at a config-overridable byte cap: on breach
+  # we do one final render up to the last stable balanced-fence boundary, drop
+  # the still-forming tail (NEVER a mid-fence byte slice — file doctrine below +
+  # the chat_tool_renderer render-only-truncation law), and freeze. Truncating
+  # the live bubble loses ZERO durable data; the full response lands on
+  # completion. Turn-abort was rejected (D131): it kills a legitimate long answer
+  # and cannot undo the Recorder's already-accumulated durable text.
+  @default_max_streaming_display_bytes 1_048_576
 
   defp advance_streaming(nil, delta),
-    do: advance_streaming(%{text: "", stable_html: nil, stable_len: 0}, delta)
+    do: advance_streaming(%{text: "", stable_html: nil, stable_len: 0, capped: false}, delta)
+
+  # Once capped the live bubble is frozen: every further delta is ignored, so
+  # neither the accumulator nor the per-delta full-prefix re-render can grow. The
+  # terminal state is safe because the durable full text still arrives on
+  # completion (this accumulator is display-only for both providers).
+  defp advance_streaming(%{capped: true} = state, _delta), do: state
 
   defp advance_streaming(state, delta) do
     text = state.text <> delta
-    state = %{state | text: text}
+
+    if byte_size(text) > max_streaming_display_bytes() do
+      freeze_streaming(state, text)
+    else
+      state = %{state | text: text}
+      boundary = stable_boundary(text)
+
+      if boundary > state.stable_len do
+        prefix = binary_part(text, 0, boundary)
+        %{state | stable_len: boundary, stable_html: render_paper_html(prefix)}
+      else
+        state
+      end
+    end
+  end
+
+  # Cap breached: do ONE last render up to the last stable balanced-fence
+  # boundary, discard the still-forming tail (freeze the text at that boundary so
+  # `streaming_tail/1` yields nothing and the template shows the honest marker),
+  # and mark the state terminal. If no balanced boundary exists yet (stable_len
+  # stays 0 — one giant unbroken block, the W22 probe shape) the bubble shows
+  # only the marker; the durable full text is unaffected.
+  defp freeze_streaming(state, text) do
     boundary = stable_boundary(text)
 
-    if boundary > state.stable_len do
-      prefix = binary_part(text, 0, boundary)
-      %{state | stable_len: boundary, stable_html: render_paper_html(prefix)}
-    else
-      state
-    end
+    {stable_html, stable_len} =
+      if boundary > state.stable_len do
+        {render_paper_html(binary_part(text, 0, boundary)), boundary}
+      else
+        {state.stable_html, state.stable_len}
+      end
+
+    %{
+      text: binary_part(text, 0, stable_len),
+      stable_html: stable_html,
+      stable_len: stable_len,
+      capped: true
+    }
+  end
+
+  defp max_streaming_display_bytes do
+    :barkpark
+    |> Application.get_env(:claude_chat, [])
+    |> Keyword.get(:max_streaming_display_bytes, @default_max_streaming_display_bytes)
   end
 
   defp streaming_tail(%{text: text, stable_len: stable_len}) do

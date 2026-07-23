@@ -996,6 +996,96 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "▌"
     end
 
+    # felix W22 (charter D131): the streaming display accumulator is bounded at a
+    # config-overridable byte cap. A flood of many small WELL-FORMED deltas keeps
+    # the transport buffer near-empty yet would grow this display assign (and
+    # re-render the full prefix per delta) unboundedly. On breach the live bubble
+    # freezes at the last stable block with an honest marker; the DURABLE full
+    # text still lands untruncated on completion (this accumulator is
+    # display-only for both providers).
+    test "a flood of well-formed deltas caps the display but completion still yields the FULL text",
+         %{view: view} do
+      # shrink the cap far below the flood; merge into the live :claude_chat env
+      # so `enabled`/`command` survive, and restore on exit.
+      prev = Application.get_env(:barkpark, :claude_chat, [])
+
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(prev, :max_streaming_display_bytes, 4096)
+      )
+
+      on_exit(fn -> Application.put_env(:barkpark, :claude_chat, prev) end)
+
+      # Well-formed prose with balanced-fence block boundaries — the buffer stays
+      # complete-lines the whole time (the transport cap never trips), only THIS
+      # sink grows. 400 × ~48B ≈ 19.2 KiB, ~4.7× the 4096 cap.
+      chunk = "Lorem ipsum dolor sit amet, consectetur adipi.\n\n"
+
+      for _ <- 1..400 do
+        send(view.pid, {:claude_chat_event, stream_delta(chunk)})
+      end
+
+      html = render(view)
+      streaming = lv_assigns(view)[:streaming]
+
+      # RED-BEFORE (uncapped): streaming.text would grow to the full ~19.2 KiB
+      # flood. GREEN (capped): it froze at the last stable boundary at/under the
+      # cap plus at most one delta of slack.
+      assert streaming.capped == true
+      assert byte_size(streaming.text) <= 4096 + byte_size(chunk)
+      # the honest marker stands in for the dropped forming tail
+      assert html =~ "live preview truncated"
+      assert html =~ "data-streaming-capped"
+      # never a live cursor once frozen (the tail was dropped at a stable boundary)
+      refute html =~ "▌"
+
+      # …and the completion path is UNBOUNDED by the display cap: a full frame far
+      # larger than the cap renders in full, sentinel and all.
+      full = String.duplicate("full durable body paragraph. ", 1000) <> "ZZ_FULL_TAIL_SENTINEL_ZZ"
+
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => full}]}
+         }}
+      )
+
+      done = render(view)
+      assert done =~ "ZZ_FULL_TAIL_SENTINEL_ZZ"
+      # the streamed preview is superseded (no marker lingers post-completion)
+      refute done =~ "live preview truncated"
+    end
+
+    # A capped state is terminal: every further delta is ignored, so neither the
+    # accumulator nor the per-delta full-prefix re-render can keep growing.
+    test "once capped, further deltas do not grow the frozen display", %{view: view} do
+      prev = Application.get_env(:barkpark, :claude_chat, [])
+
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(prev, :max_streaming_display_bytes, 2048)
+      )
+
+      on_exit(fn -> Application.put_env(:barkpark, :claude_chat, prev) end)
+
+      chunk = "The quick brown fox jumps over the lazy dog.\n\n"
+      for _ <- 1..200, do: send(view.pid, {:claude_chat_event, stream_delta(chunk)})
+
+      frozen = lv_assigns(view)[:streaming]
+      assert frozen.capped == true
+      frozen_size = byte_size(frozen.text)
+
+      # 200 more deltas after the freeze must not budge the frozen text.
+      for _ <- 1..200, do: send(view.pid, {:claude_chat_event, stream_delta(chunk)})
+      after_more = lv_assigns(view)[:streaming]
+      assert after_more.capped == true
+      assert byte_size(after_more.text) == frozen_size
+    end
+
     test "assistant markdown renders through the paper engine", %{view: view} do
       send(
         view.pid,
