@@ -185,6 +185,72 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
     refute File.exists?(marker)
   end
 
+  test "a runaway newline-free stream is capped, not buffered — port closed, callers fail closed" do
+    # A tiny canned-handshake app-server stub: it answers `--version` to cross the
+    # readiness gate, walks the initialize/account/thread handshake with fixed
+    # responses, then — on the first turn — floods newline-free bytes forever. With
+    # no reassembly cap this pins `state.buffer` and every caller hangs to timeout;
+    # with the cap the port is closed and the pending turn fails `:buffer_overflow`.
+    id = System.unique_integer([:positive])
+    binary = Path.join(System.tmp_dir!(), "codex_flood_#{id}.sh")
+
+    File.write!(binary, """
+    #!/bin/sh
+    if [ "$1" = "--version" ]; then
+      echo 'codex-cli 0.144.1'
+      exit 0
+    fi
+    IFS= read -r line                                    # initialize
+    printf '{"id":1,"result":{}}\\n'
+    IFS= read -r line                                    # initialized notification
+    IFS= read -r line                                    # account/read
+    printf '{"id":2,"result":{"requiresOpenaiAuth":false}}\\n'
+    IFS= read -r line                                    # thread/start
+    printf '{"id":3,"result":{"thread":{"id":"thread-1"}}}\\n'
+    IFS= read -r line                                    # turn/start -> flood
+    while :; do
+      printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    done
+    """)
+
+    File.chmod!(binary, 0o755)
+    on_exit(fn -> File.rm(binary) end)
+
+    prior = Application.get_env(:barkpark, :codex_app_server)
+    Application.put_env(:barkpark, :codex_app_server, max_buffer_bytes: 64 * 1024)
+
+    on_exit(fn ->
+      if prior do
+        Application.put_env(:barkpark, :codex_app_server, prior)
+      else
+        Application.delete_env(:barkpark, :codex_app_server)
+      end
+    end)
+
+    assert {:ok, runtime} =
+             Codex.start(%{
+               binary: binary,
+               sink: self(),
+               session_id: "barkpark-session",
+               timeout_ms: 5_000
+             })
+
+    port = :sys.get_state(runtime.runtime).port
+    assert Port.info(port) != nil, "port should be open after a clean handshake"
+
+    # Threshold-crossing assertion: the pending turn caller fails closed with the
+    # bound's atom (never :timeout, which is what unbounded code returns).
+    assert {:error, :buffer_overflow} = Codex.send_turn(runtime, "flood")
+
+    assert_receive {:studio_chat_runtime_event,
+                    %Event{kind: :protocol_error, error: %{"code" => "buffer_overflow"}}}
+
+    assert Port.info(port) == nil, "port must be closed on buffer breach"
+
+    assert :ok = Codex.close(runtime)
+  end
+
   defp ordered?(wire, methods) do
     {ordered, _offset} =
       Enum.reduce(methods, {true, 0}, fn method, {ordered, offset} ->
