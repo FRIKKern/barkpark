@@ -1,0 +1,59 @@
+{
+  "run_id": "grip-20260723T061456Z",
+  "recipes": [
+    {
+      "subject": "tooling/scaffy-duels/METER.md",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:tooling/scaffy-duels/METER.md | sed -n '1,40p'",
+      "derived_level": "L1",
+      "deps": ["tooling/scaffy-duels/METER.md"],
+      "observed_at": "2026-07-23T06:00:00Z",
+      "note": "verified cost formula (rev checked 2026-07-18, reproduces total_cost_usd on 24/24 duel envelopes); cache-write TTL split (1h=2.00x, 5m=1.25x, read=0.10x) is load-bearing — the naive 1.25x-only textbook formula underreports by ~24%."
+    },
+    {
+      "subject": "tooling/scaffy-duels/meter.py",
+      "quantity": "grep:-n",
+      "rerun": "grep -n 'def compute_cost\\|def verify_envelope\\|glob.glob' tooling/scaffy-duels/meter.py",
+      "derived_level": "L1",
+      "deps": ["tooling/scaffy-duels/meter.py"],
+      "observed_at": "2026-07-23T06:00:00Z",
+      "note": "meter.py verify walks *.agent.json envelopes carrying total_cost_usd + usage; it does NOT ingest raw Claude Code session .jsonl transcripts (Task-tool subagent logs never carry total_cost_usd). compute_cost() is reusable as a formula but not runnable via `meter.py verify` against this epic-cycle's wave artifacts — a new small aggregator is required (see below), and its output must be labeled 'computed', not 'reported', per METER.md tier-3."
+    },
+    {
+      "subject": "felix-pristine-wave-20-2026-07-23 (this wave, W20) raw run artifacts",
+      "quantity": "path:located",
+      "rerun": "ls ~/.claude/projects/-Volumes-SATECHI-github-barkpark--claude-worktrees-e2-review-w17/406f9acc-915f-46bb-80cb-735aea29f71f/subagents/workflows/wf_2c9b2e75-d63/",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T06:00:00Z",
+      "note": "confirmed by matching journal.jsonl's stored 'direction' text verbatim against this wave's Digest synthesis text (REFUTE-AND-TRIPWIRE opener). 21 agent-*.jsonl files, full per-turn usage objects present."
+    },
+    {
+      "subject": "E4 = felix-pristine-wave-18-2026-07-23 raw run artifacts",
+      "quantity": "path:located",
+      "rerun": "ls ~/.claude/projects/-Volumes-SATECHI-github-barkpark--claude-worktrees-e2-review-w17/406f9acc-915f-46bb-80cb-735aea29f71f/subagents/workflows/wf_61734411-a89/",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T06:00:00Z",
+      "note": "confirmed by journal.jsonl direction text 'FELIX W18 — Arm E (E4), Fable-architected + Fable-graded'. 20 agent-*.jsonl files (2464 lines, 677 unique message ids after dedup). NOT gone — survives on disk despite the worktree itself being long merged/removed."
+    },
+    {
+      "subject": "E6 = task-tui-wave-2026-07-23 raw run artifacts",
+      "quantity": "path:located",
+      "rerun": "ls ~/.claude/projects/-Volumes-SATECHI-github-barkpark--claude-worktrees-e2-review-w17/406f9acc-915f-46bb-80cb-735aea29f71f/subagents/workflows/wf_626db4ff-ff1/",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T06:00:00Z",
+      "note": "confirmed by journal.jsonl direction text 'W17 = RECONCILE-THEN-FINISH, run as Arm E config E6'. 24 agent-*.jsonl files (1867 lines, 477 unique message ids after dedup). NOT gone."
+    },
+    {
+      "subject": "E4 (wf_61734411-a89) + E6 (wf_626db4ff-ff1) meter tally",
+      "quantity": "computed:usd+tokens",
+      "rerun": "python3 /private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/406f9acc-915f-46bb-80cb-735aea29f71f/scratchpad/tally_wf.py <workflow-dir>  # dedup-by-message-id (last-occurrence-wins, matching METER.md's banned-naive-sum warning — same msg id repeats 2-3x per turn from streaming partials), then compute_cost() per METER.md formula per model, summed",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T06:14:56Z",
+      "note": "PROOF-OF-CONCEPT RUN RESULTS: E4 = $63.75 computed / 62,319,436 raw all-axis tokens (677 unique turns, 3 models: fable-5 $29.03, sonnet-5 $19.09, opus-4-8 $15.63). E6 = $46.61 computed / 38,866,530 raw all-axis tokens (477 unique turns, same 3 models + 1 unrated '<synthetic>' system entry correctly excluded not silently dropped). BOTH figures are wildly larger than the lead-cited baselines (E4 'total 2.4M', E6 'total 1.72M') — off by roughly 26x and 22x respectively. This is strong corroborating evidence for the digest's suspicion that the 2.4M/1.72M figures were copied/estimated, not meter-derived by this or an equivalent method — Review/Decide should NOT reuse 2.4M/1.72M as ground truth without reconciling the gap (possible causes: different token axis definition, e.g. output-only or dedup-by-content instead of all-axis-per-turn sum; a narrower agent subset; or the baseline was simply invented)."
+    }
+  ]
+}

@@ -1649,7 +1649,108 @@ Backlog filed: `felix-w19-bl-authority-lock-remaining-sites` (P3),
 `felix-w19-bl-email-golden-regen-mixtask` (P4), `grb-append-e4-e6-scoreboard-rows` (research epic).
 
 
+## Wave 20 Decisions (2026-07-23) — REFUTE-AND-TRIPWIRE: FK-ABORT SCAR-CLASS, CLOUD/ (Arm: E, E6+E7 recipe, 3rd surface)
+
+- **D119 — PREMISE REFUTED AT THE FINEST RUNNABLE GRAIN: genuine cloud/ FK-abort fix count = 0.**
+  The wish's "~17 unguarded cloud FK files" is W18's pre-D106 naive-grep count (provenance fully
+  traced: first appears in W18 survey, overturned in-paper by V-cloud, corrected by D106; NO
+  post-D106 artifact re-asserts it). Live census on origin/main at CHANGESET granularity: all 19
+  belongs_to-bearing cloud/ schemas (36 changeset fns, 25 belongs_to = 25 `references()` FK
+  columns 1:1) pair every FK-casting changeset with `assoc_constraint`/`foreign_key_constraint`.
+  The inert-name (declared-but-mismatched translator) class is structurally absent TODAY: zero
+  custom `name:` in cloud/ migrations AND schemas — both Ecto sides derive the identical
+  `<table>_<column>_fkey` (verified in vendored ecto + ecto_sql source). Zero
+  cast_assoc/put_assoc/build_assoc repo-wide, zero `insert_all` in cloud/lib, sole `Repo.insert!`
+  (oauth State) has no FK column. The one changeset-bypass FK write (`device_auth.ex` `approve/2`
+  `update_all` setting user_id) is UNREACHABLE as a scar — NO code path in cloud/ deletes a User
+  row, and the id is always the caller's own live-session id, re-proven per request by
+  `Accounts.verify_user_session_token/1`'s fresh `Repo.get(User, ...)`. Background writers doubly
+  sealed (constraints + Oban/Task.Supervisor isolation). D99's filter held: only "no `references()`
+  FK" excluded (`Site.current_deployment_id` plain binary_id, sole such column).
+
+- **D120 — BUILD = ONE TRIPWIRE, RUN-PROVEN AT VERIFY (`task-felix-w20-fk-census-tripwire`).**
+  The manual re-census this class has run four consecutive waves (W16/W17/W18/W20) becomes the
+  machine's job: `cloud/test/barkpark_cloud/fk_census_test.exs`, a reflection test enumerating all
+  BarkparkCloud schemas — every belongs_to-casting changeset must declare a matching
+  `:foreign_key` constraint whose NAME is live in pg_constraint (the inert-translator case code
+  inspection cannot catch). NOT designed on paper — V1 (opus spike) ran all five failure modes
+  against a real migrated cloud test DB: baseline 2208/0; enumeration non-vacuous (24 schemas /
+  19 belongs_to-bearing / 25 assocs / 27 FK casts / 25 declared constraints, count-floor asserted
+  because the FIRST run WAS vacuously green on 0 loaded modules — fixed via `Code.ensure_loaded?`);
+  mutation RED on stripped `assoc_constraint(:barkpark)` (env_var.ex) with precise
+  `:missing_constraint` message; inert-name RED on `name: :env_vars_barkpark_id_WRONG_fkey`;
+  restore GREEN, lib/ byte-identical. DUAL-MATCH is load-bearing: `Constraint.field` is the ASSOC
+  name for `assoc_constraint` (18 schemas) but the COLUMN name for `foreign_key_constraint`
+  (usage/sample.ex) — resolve via `__schema__(:association, f).owner_key` OR direct column match.
+  Full verbatim harness preserved in the wave Paper (spike worktree is volatile). Mutation
+  red-proof is a MERGE CRITERION, not a flourish. Moduledoc must carry the local-DB-drift caveat
+  (CI's fresh migrate is the authority; a drifted shared local DB can false-red).
+
+- **D121 — chat_changeset/4 is SPECIAL-CASED, not just excluded.** The sole non-arity-2 changeset
+  on a belongs_to schema (`EmailSettings.chat_changeset/4`) keeps its asserted-exact exclusion in
+  the generic enumerator (any NEW arity!=2 changeset fails that test), but gains an explicit
+  hand-written call using the real public vocab sources (`Notifications.chat_events/0` +
+  `Notifications.chat_channel_types/0` — both zero-arg source-of-truth accessors, verified) with
+  the same declared+live assertion on its `assoc_constraint(:team)`. No silent skip anywhere:
+  `@plain_binary_id_fields` and `@changeset_bypass_writes` stay as documented, reason-bearing attrs.
+
+- **D122 — SLICE 2 = METER TRUTH (rides `grb-append-e4-e6-scoreboard-rows`, research epic — no
+  duplicate felix child).** Verify PROVED the E4/E6 raw transcripts SURVIVE (wf_61734411-a89,
+  wf_626db4ff-ff1, identified by exact journal direction-text match) and ran a
+  dedup-by-message-id + METER.md-formula tally end-to-end: E4 = $63.75 / 62.3M all-axis tokens
+  (677 unique turns), E6 = $46.61 / 38.9M (477 turns) — **22–26x larger than the lead-cited
+  2.40M/1.72M**, which now propagate unverified across 4 documents. Ruling: NEVER "reconcile
+  toward" the old figures — REPLACE with labeled-COMPUTED figures (METER.md tier-3), name the gap
+  and the token-definition explicitly (all-axis incl. cache reads = the $-cost axis; the old
+  figures' definition is unknown). Slice lands the durable aggregator
+  `tooling/scaffy-duels/tally_wf.py` (PoC verbatim in the wave Paper; scratchpad copy is
+  ephemeral), corrects the E4/E6 rows with method quoted, and leaves the exact command Review
+  uses for THIS wave's own row (wf_2c9b2e75-d63). Premise-failure-caught-pre-build stays the
+  recipe's headline metric — this wave IS the third-surface data point.
+
+- **D123 — LEDGER HOUSEKEEPING EXECUTED AT DECIDE.** `task-felix-w18-registry-staleability-hardening`
+  closed done 4/4 (PR #5917 MERGED, mergeCommit 91df62c5f ancestor-verified on origin/main; lease
+  had lapsed post-merge — re-claimed epoch 9, criterion 2 stamped with merge evidence, sealed).
+  W16/W17 census tasks stay SEALED as-is (confirmed done 3/3, correct scope) — W20's
+  changeset-granularity evidence lives on the NEW tripwire task, never a reopen of a
+  correctly-closed task. Fence re-verified live at Decide: ZERO open PRs touch cloud/**
+  (#5917 merged); builders re-run the exact `gh pr list` fence check at PR time (~40 agents).
+
+- **D124 — WAVE SHAPE + BACKLOG.** 2 slices, both round 1, both opus, file-disjoint
+  (cloud/test/** vs tooling/scaffy-duels/**). No HIGH-FLIP-RISK slice: the wave's flip-prone
+  judgment (census refute) was dual-derived pre-build (4 surveyors + V1's runtime crosscheck);
+  reviewer must still independently re-run the mutation red-proof (strip one real constraint →
+  red → restore → green). Gates: slice 1 = cloud.yml recipe locally
+  (`cd cloud && CC=/usr/bin/clang mix deps.get && MIX_ENV=test mix ecto.create/migrate && mix
+  format --check-formatted && mix test`), slice 2 = tally reruns reproducing the computed figures.
+  Backlog filed: `task-felix-w20-bl-devauth-approve-bypass-guard` (P3 — activates the moment any
+  user-deletion path lands in cloud/), `task-felix-w20-bl-cloud-testdb-drift` (P4 — local shared
+  barkpark_cloud_test drift: phantom migration 20260723000000 + orphan
+  `barkparks.fleet_parent_id` FK; false-red risk for local runs, CI unaffected).
+
+### Wave 20 roadmap (2 slices, round 1, parallel — disjoint files)
+
+| # | Slice | Task | Model | Size |
+|---|-------|------|-------|------|
+| S1 | FK-census reflection tripwire in cloud.yml's own gate (mutation-proven) | `task-felix-w20-fk-census-tripwire` | opus | medium |
+| S2 | Durable meter tally + labeled-computed E4/E6 scoreboard rows (gap named) | `grb-append-e4-e6-scoreboard-rows` | opus | small |
+
+Backlog filed: `task-felix-w20-bl-devauth-approve-bypass-guard` (P3),
+`task-felix-w20-bl-cloud-testdb-drift` (P4).
+
+
 ## Wave log
+
+- **Wave 20 — 2026-07-23 — DECIDED (building). Arm: E (E6+E7 winning recipe, 3rd surface —
+  cloud/ FK-abort sweep).** Ratified D119–D124. Headline: the wish's "~17 unguarded cloud FK
+  files" premise DIED pre-build (changeset-granularity census: 19/19 schemas sealed, 0 genuine;
+  inert-name class structurally absent; sole bypass unreachable — no user-deletion path exists).
+  Wave = refute-and-tripwire: 1 run-proven reflection-test slice making the four-wave manual
+  re-census the machine's job (all five failure modes exercised at Verify incl. vacuous-green and
+  inert-name reds), + 1 meter-truth slice replacing the unverified 2.40M/1.72M scoreboard figures
+  with computed $63.75/62.3M (E4) and $46.61/38.9M (E6) — a 22–26x gap, named not nudged.
+  Housekeeping: w18-registry-staleability closed 4/4 on #5917 merge evidence. Grade: pending
+  build+review.
 
 - **Wave 19 — 2026-07-23 — DECIDED (building). Arm: E (E7 — E6 + freshness-gated verify).**
   Ratified D112–D118. Housekeeping executed at Decide: 3 merged-W18 tasks closed done 4/4 on
