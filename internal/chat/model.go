@@ -95,6 +95,13 @@ type Model struct {
 	modelChoice  string
 	effortChoice string
 
+	// The `?` key-reference overlay (charter D66). helpOpen replaces the frame
+	// with renderHelpOverlay and routes every key to handleHelpKey; helpScroll is
+	// the windowed body's top row. Both reset on close, so the exact prior
+	// screen/focus/scroll/panel state is restored untouched.
+	helpOpen   bool
+	helpScroll int
+
 	// now is the injected clock (tests fix it; Run wires time.Now).
 	now func() time.Time
 }
@@ -214,8 +221,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View paints the foregrounded screen.
+// View paints the foregrounded screen. The `?` overlay (charter D66) REPLACES
+// the whole frame while open — the same body-replace cmd/barkpark's tui_view
+// uses — so it reads over either screen and closing restores the exact prior
+// paint (helpOpen never mutated the underlying view state).
 func (m Model) View() string {
+	if m.helpOpen {
+		return m.renderHelpOverlay(m.width, m.height)
+	}
 	if m.screen == screenPicker {
 		return m.renderPicker()
 	}

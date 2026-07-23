@@ -1343,7 +1343,10 @@ func (m Model) renderPicker() string {
 		b.WriteString("\n" + noticeStyle.Render(m.fleetNotice))
 	}
 
-	b.WriteString("\n\n" + dimStyle.Render("↑/↓ move · enter attach · n new · r refresh · q quit"))
+	// The picker hint line (charter D71 fold): advertise the full navigation
+	// vocabulary the roster actually supports — pgup/pgdn + g/G paging shipped in
+	// #5896 but never reached this line, and `?` opens the key-reference overlay.
+	b.WriteString("\n\n" + dimStyle.Render("↑/↓ move · pgup/pgdn · g/G ends · enter attach · n new · r refresh · ? help · q quit"))
 	return b.String()
 }
 
