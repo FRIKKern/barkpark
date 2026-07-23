@@ -873,4 +873,112 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert profile == "cloud"
     end
   end
+
+  # ── Per-write workspace_admin? re-gate on theme/plugin writes (W34, D268) ──
+  #
+  # Belt parity with toggle_execution_profile (W23-2/D211). The W26
+  # `:scoped_admin` mount gate rejects an outsider AT MOUNT, so the LIVE threat
+  # these tests model is NOT an outsider mounting — it is a role DOWNGRADE that
+  # lands AFTER a legitimate admin has already mounted (defense-in-depth: a
+  # LiveView outlives the mount check). Each test mounts as a real workspace
+  # admin, downgrades that membership admin → member mid-socket via a direct
+  # Repo write (there is no public revoke API), then fires the handler on the
+  # STILL-MOUNTED view. `workspace_admin?/2` does a fresh `Repo.one` per call
+  # (auth.ex membership/2 — zero socket cache), so the downgrade is seen at the
+  # very next click and the write must fail closed.
+  #
+  # ORACLE LAW (D268): the load-bearing assertion is the targeted STATE being
+  # UNCHANGED (theme read-back / plugin-override map). The bare substring
+  # `html =~ "owner or admin of this workspace"` is FORBIDDEN — it also matches
+  # the static help text at settings_live.ex and passes with the belt deleted.
+  # The flash oracle here is the refusal-UNIQUE prefix "You need to be an owner
+  # or admin" (do_toggle_execution_profile's wording), never the static phrase.
+  describe "per-write workspace_admin? re-gate — theme/plugin writes (W34, D268)" do
+    setup %{conn: conn} do
+      {:ok, admin_tok} =
+        Auth.create_token("w34-admin-raw", "w34 admin", "production", ["read", "write", "admin"])
+
+      {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "w34-ws", name: "W34 Belt WS"})
+      {:ok, proj} = Barkpark.Tenancy.create_project_with_dataset(ws, %{name: "W34P"})
+
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, admin_tok.id, "admin")
+
+      conn = init_test_session(conn, %{"api_token" => "w34-admin-raw"})
+      {:ok, conn: conn, ws: ws, proj: proj, admin_tok: admin_tok}
+    end
+
+    defp w34_settings_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/studio/settings"
+
+    # Mid-socket role downgrade with NO public revoke API: mutate the membership
+    # row directly admin → member. Targeted by principal_id so the write is
+    # unambiguous even if the workspace later grows other memberships.
+    defp downgrade_to_member!(ws, principal_id) do
+      Barkpark.Tenancy.Membership
+      |> Repo.get_by!(workspace_id: ws.id, principal_id: principal_id)
+      |> Ecto.Changeset.change(role: "member")
+      |> Repo.update!()
+    end
+
+    defp reread(ws), do: Barkpark.Tenancy.get_workspace_by_id(ws.id)
+
+    test "set_workspace_theme is REFUSED after a mid-socket admin→member downgrade — theme unchanged",
+         %{conn: conn, ws: ws, proj: proj, admin_tok: admin_tok} do
+      {:ok, view, _html} = live(conn, w34_settings_url(ws, proj))
+
+      # Baseline: this fresh workspace has NO persisted "theme" settings key.
+      # (The RESOLVED theme defaults to "evergreen" — the only theme shipping —
+      # so we must assert on the raw persisted key, not the resolved value, or a
+      # refused write is indistinguishable from a landed one.)
+      refute Map.has_key?(reread(ws).settings || %{}, "theme")
+
+      downgrade_to_member!(ws, admin_tok.id)
+
+      html =
+        render_change(view, "set_workspace_theme", %{"theme" => "evergreen", "ws" => ws.id})
+
+      # STATE ORACLE (load-bearing): the write never persisted settings["theme"].
+      refute Map.has_key?(reread(ws).settings || %{}, "theme")
+      # Flash oracle: refusal-unique prefix present, success phrase absent.
+      assert html =~ "You need to be an owner or admin"
+      refute html =~ "Workspace theme set to"
+    end
+
+    test "toggle_plugin is REFUSED after a mid-socket admin→member downgrade — no override persisted",
+         %{conn: conn, ws: ws, proj: proj, admin_tok: admin_tok} do
+      {:ok, view, _html} = live(conn, w34_settings_url(ws, proj))
+      name = pick_plugin()
+
+      # Baseline: no plugin override exists for this workspace.
+      refute Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(reread(ws)), name)
+
+      downgrade_to_member!(ws, admin_tok.id)
+
+      html = render_click(view, "toggle_plugin", %{"plugin" => name, "ws" => ws.id})
+
+      # STATE ORACLE (load-bearing): no plugin override was written.
+      refute Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(reread(ws)), name)
+      assert html =~ "You need to be an owner or admin"
+    end
+
+    test "set_plugin_placement is REFUSED after a mid-socket admin→member downgrade — no placement override persisted",
+         %{conn: conn, ws: ws, proj: proj, admin_tok: admin_tok} do
+      {:ok, view, _html} = live(conn, w34_settings_url(ws, proj))
+      name = pick_plugin()
+
+      refute Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(reread(ws)), name)
+
+      downgrade_to_member!(ws, admin_tok.id)
+
+      html =
+        render_change(view, "set_plugin_placement", %{
+          "plugin" => name,
+          "placement" => "main",
+          "ws" => ws.id
+        })
+
+      # STATE ORACLE (load-bearing): no placement override was written.
+      refute Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(reread(ws)), name)
+      assert html =~ "You need to be an owner or admin"
+    end
+  end
 end

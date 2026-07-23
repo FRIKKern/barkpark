@@ -253,7 +253,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # load comes from StudioChrome resolving the persisted value.
   def handle_event("set_workspace_theme", %{"theme" => theme} = params, socket) do
     guard_bound_ws(socket, params, fn ->
-      do_set_workspace_theme(socket, theme)
+      guard_ws_admin(socket, "theme", fn ->
+        do_set_workspace_theme(socket, theme)
+      end)
     end)
   end
 
@@ -267,19 +269,21 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # deletes: the doc types move to the …Rest folder.
   def handle_event("toggle_plugin", %{"plugin" => name} = params, socket) do
     guard_bound_ws(socket, params, fn ->
-      case current_row(socket, name) do
-        %{enabled: enabled} ->
-          put_plugin_override(socket, name, %{"enabled" => not enabled},
-            flash:
-              if(enabled,
-                do: "Disabled #{display_name(name)} for this workspace.",
-                else: "Enabled #{display_name(name)} for this workspace."
-              )
-          )
+      guard_ws_admin(socket, "plugins", fn ->
+        case current_row(socket, name) do
+          %{enabled: enabled} ->
+            put_plugin_override(socket, name, %{"enabled" => not enabled},
+              flash:
+                if(enabled,
+                  do: "Disabled #{display_name(name)} for this workspace.",
+                  else: "Enabled #{display_name(name)} for this workspace."
+                )
+            )
 
-        nil ->
-          {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
-      end
+          nil ->
+            {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
+        end
+      end)
     end)
   end
 
@@ -290,17 +294,19 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       )
       when placement in ["main", "plugins", "top_menu"] do
     guard_bound_ws(socket, params, fn ->
-      # Same unknown-plugin guard as toggle_plugin: a forged plugin name must not
-      # persist a junk override entry into the workspace settings.
-      case current_row(socket, name) do
-        %{} ->
-          put_plugin_override(socket, name, %{"placement" => placement},
-            flash: "Moved #{display_name(name)} to #{placement_label(placement)}."
-          )
+      guard_ws_admin(socket, "plugin placement", fn ->
+        # Same unknown-plugin guard as toggle_plugin: a forged plugin name must
+        # not persist a junk override entry into the workspace settings.
+        case current_row(socket, name) do
+          %{} ->
+            put_plugin_override(socket, name, %{"placement" => placement},
+              flash: "Moved #{display_name(name)} to #{placement_label(placement)}."
+            )
 
-        nil ->
-          {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
-      end
+          nil ->
+            {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
+        end
+      end)
     end)
   end
 
@@ -371,6 +377,40 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          |> put_flash(
            :error,
            "Scope changed — nothing was saved. Reloaded this workspace's settings."
+         )}
+
+      true ->
+        fun.()
+    end
+  end
+
+  # ── Per-write workspace-admin authority re-gate (connectors W34, D268) ──
+  #
+  # The scoped-admin mount gate (W26 `LiveAuth.:scoped_admin`) authorizes the
+  # actor against the TARGET workspace AT MOUNT — but a LiveView outlives that
+  # single check. A role downgrade (admin → member, or the actor removed from
+  # the workspace) AFTER mount leaves a still-mounted socket able to fire these
+  # theme / plugin writes under authority that is no longer true. So every
+  # state-changing workspace mutation re-reads the actor's LIVE membership role
+  # at the write boundary, exactly as `do_toggle_execution_profile/1` does
+  # (D211): `workspace_admin?/2` runs a FRESH `Repo.one` per call
+  # (auth.ex membership/2 — zero socket cache), so a mid-socket downgrade IS
+  # seen here. Fail-closed, negated-cond-first: a principal who is not an
+  # owner/admin of the bound workspace is REFUSED with ZERO writes. This is the
+  # per-target-workspace authority check `guard_bound_ws/3` (the stale-scope
+  # belt) does not perform; the two compose, guard_bound_ws first.
+  defp guard_ws_admin(socket, thing, fun) do
+    ws = socket.assigns[:current_workspace]
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    cond do
+      not (is_map(ws) and not is_nil(principal) and
+               TenancyAuth.workspace_admin?(principal, ws.id)) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "You need to be an owner or admin of this workspace to change its #{thing}."
          )}
 
       true ->
