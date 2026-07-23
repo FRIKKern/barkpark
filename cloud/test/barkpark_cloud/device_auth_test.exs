@@ -437,7 +437,8 @@ defmodule BarkparkCloud.DeviceAuthTest do
           device_code_hash: "dc-#{suffix}",
           user_code_hash: "uc-#{suffix}",
           status: "approved",
-          expires_at: DateTime.add(DateTime.utc_now(), 600, :second) |> DateTime.truncate(:microsecond)
+          expires_at:
+            DateTime.add(DateTime.utc_now(), 600, :second) |> DateTime.truncate(:microsecond)
         },
         overrides
       )
