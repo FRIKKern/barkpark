@@ -2510,6 +2510,25 @@ new ratchet into a real gate.
   drift OVERTAKEN at Decide: #5936 landed the Fleet-tab test repair on tip. thinking_pulse
   INERT (D41 probe provenance); channels/Bandit-8MB, Port lifecycle, zero-spawn all re-proven.
   3 backlog children filed. Grade: pending build+review.
+- **Wave 21 — 2026-07-23 — BUILT + REVIEWED, grade A. Arm: E (E6+E7 winning recipe — interop
+  resource-bound sweep).** Both round-1 slices landed on pushed PR branches, gates re-run green
+  at review, mutations independently re-run (S1 cap disabled → the new test REDs with
+  `{:error,:timeout}`; S2 yield forced to 60s → exactly the 3 deadline tests RED). S1 codex
+  buffer cap (`task-felix-w21-codex-buffer-cap`) — final branch
+  `loop-epic/fix-studio-chat-cap-codex-session-line-r-0-r`, one review fix (mix format on
+  protocol.ex, would have red the CI format gate); adversarial pass held (post-breach calls hit
+  the `%{failure:}` guards, no Port.command-after-close path). S2 DeployRunner ctl deadlines
+  (`task-felix-w21-deployrunner-cmd-deadlines`) — final branch
+  `loop-epic/fix-sites-bound-deployrunner-control-pla-1`, zero fixes; the HIGH-FLIP-RISK
+  happy-path preservation was independently re-derived (all three arms byte-identical on prompt
+  return) — the lead still owes the named independent second review at merge per E2. Ledger
+  audit clean (zero fixes; 4/5 stamped each, merge criterion honestly open; 5 backlog children
+  published). Known residue: S2's line-shift staled ~12 Traversal.FileModule fingerprints for
+  deploy_runner.ex in `.sobelow-skips` (advisory gate; owned by
+  `task-felix-sobelow-baseline-reconcile`, D41). NEXT: lead merges both PRs after the Elixir
+  Test gate (+ closes criterion 4 on both tasks); W22's natural take is
+  `task-felix-w21-bl-claudechat-buffer-parity` (P3, S1's overflow/2 is the template), P4 backlog
+  as fill. Debrief: paper `felix-pristine-wave-21-2026-07-23`.
 
 - **Wave 21 — 2026-07-23 — DECIDED (building). Arm: E (E6+E7 winning recipe — interop
   resource-bound sweep).** Ratified D125–D129. Headline: the wish's named target
