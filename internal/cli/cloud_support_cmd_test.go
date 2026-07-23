@@ -1452,3 +1452,29 @@ func TestCloudSupportRemoveDryRun(t *testing.T) {
 		t.Fatalf("dry run reached the main: %v", main.requests)
 	}
 }
+
+// TestCloudSupportRemoveCPRowForbiddenNarration: a 403 on the CP-row DELETE
+// warns with the NAMED credential fix (a bare "re-run" can never converge on a
+// credential refusal — PDF-D69/D71 vocabulary), continues, and the census still
+// names the surviving row with a non-zero exit.
+func TestCloudSupportRemoveCPRowForbiddenNarration(t *testing.T) {
+	main, srv, cp, _, _ := supportRemoveWiring(t)
+	cp.deleteStatus = http.StatusForbidden
+	cp.honestDelete = false
+
+	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+	if code == exitOK {
+		t.Fatalf("a surviving CP row must exit non-zero\nstdout:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "a session needs team-admin, a PAT needs the deploy ability") {
+		t.Fatalf("the 403 warn must name the credential fix\nstderr:\n%s", stderr)
+	}
+	all := stdout + stderr
+	if !strings.Contains(all, "control-plane row support-row-1 still registered") {
+		t.Fatalf("the census must still name the survivor\noutput:\n%s", all)
+	}
+	// Everything BEFORE the CP row still tore down (warn-and-continue, not stop).
+	if main.count("DELETE /v1/fleet/support-tokens/tid-42") != 1 {
+		t.Fatalf("the token revoke must still have run: %v", main.requests)
+	}
+}

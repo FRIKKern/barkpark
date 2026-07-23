@@ -1107,6 +1107,12 @@ func (r *supportRemoveRun) stepCPRow() (int, bool) {
 			r.done("cp-row", row.ID+" removed")
 		case status == http.StatusNotFound:
 			r.done("cp-row", row.ID+" already gone (404)")
+		case status == http.StatusUnauthorized:
+			// A re-run cannot converge on a dead session — name the fix (the
+			// same credential contract add narrates, PDF-D69/D71).
+			r.out.errf("⚠ cp-row: the control plane answered 401: %s — the Cloud session is missing or dead; run `bp login`, then re-run. Continuing; the census below is the truth", supportTrim(resp))
+		case status == http.StatusForbidden:
+			r.out.errf("⚠ cp-row: the control plane answered 403: %s — a session needs team-admin, a PAT needs the deploy ability; fix the credential, then re-run. Continuing; the census below is the truth", supportTrim(resp))
 		default:
 			r.out.errf("⚠ cp-row: the control plane answered %d: %s — continuing; the census below is the truth", status, supportTrim(resp))
 		}
