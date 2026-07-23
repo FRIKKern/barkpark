@@ -82,8 +82,9 @@ const (
 )
 
 // scaffyRemotePageLimit is the query page size — the server's max limit clamp
-// (mirrors paperPageSize), so the catalog drains in one round-trip today and
-// the pagination loop still holds past 1000 commands.
+// (mirrors paperPageSize). BOTH remote callers drain the catalog with an offset
+// loop — ls --remote (runScaffyLsRemote) and pull (scaffyFetchCommandDocs) — so
+// a catalog past 1000 commands is fully paged, never truncated at one page.
 const scaffyRemotePageLimit = 1000
 
 // scaffyStdin is the consent prompt's input; scaffyStdinIsTTY reports whether
@@ -150,31 +151,79 @@ func runScaffyLs(out *writer, g globals, args []string) int {
 // generic query endpoint (D50 — zero new API; tokenless works when the schema
 // is public) and renders it through the existing table machinery: the
 // documents envelope is already special-cased in renderTable.
+//
+// It pages via an offset loop (mirroring scaffyFetchCommandDocs) so a catalog
+// past scaffyRemotePageLimit commands drains fully — a single doRequest would
+// silently truncate at the server's limit clamp. Pages accumulate as RAW
+// json.RawMessage documents, NOT the typed scaffyCommandDoc: that struct has no
+// Description field and would drop the table's description column. The pages are
+// re-assembled into the {documents:[…]} envelope that renderTable and -o json
+// (renderRaw) already expect.
 func runScaffyLsRemote(out *writer, g globals) int {
 	ctx := resolveContext(g)
-	params := url.Values{}
-	params.Set("fields", "title,concept,variant,domain,description")
-	params.Set("order", "concept:asc")
-	params.Set("limit", strconv.Itoa(scaffyRemotePageLimit))
-	u := scaffyCommandQueryURL(ctx) + "?" + params.Encode()
+	base := scaffyCommandQueryURL(ctx)
+	headers := scaffyAuthHeaders(ctx)
 
-	status, body, err := doRequest("GET", u, scaffyAuthHeaders(ctx), nil)
+	docs := make([]json.RawMessage, 0)
+	offset := 0
+	for {
+		params := url.Values{}
+		params.Set("fields", "title,concept,variant,domain,description")
+		params.Set("order", "concept:asc")
+		params.Set("limit", strconv.Itoa(scaffyRemotePageLimit))
+		params.Set("offset", strconv.Itoa(offset))
+		u := base + "?" + params.Encode()
+
+		status, body, err := doRequest("GET", u, headers, nil)
+		if err != nil {
+			return useError(out, "network", "scaffy ls --remote: "+err.Error(), exitGeneric)
+		}
+		if status < 200 || status >= 300 {
+			ae := classifyError(status, body)
+			renderError(out, ae)
+			return ae.exit
+		}
+
+		page := scaffyRawDocuments(unwrapResult(body))
+		docs = append(docs, page...)
+		if len(page) < scaffyRemotePageLimit {
+			break
+		}
+		offset += scaffyRemotePageLimit
+	}
+
+	payload, err := json.Marshal(struct {
+		Documents []json.RawMessage `json:"documents"`
+	}{Documents: docs})
 	if err != nil {
-		return useError(out, "network", "scaffy ls --remote: "+err.Error(), exitGeneric)
+		return useError(out, "internal", "scaffy ls --remote: "+err.Error(), exitGeneric)
 	}
-	if status < 200 || status >= 300 {
-		ae := classifyError(status, body)
-		renderError(out, ae)
-		return ae.exit
-	}
-
-	payload := unwrapResult(body)
 	if out.machineOut() {
 		out.renderRaw(payload)
 	} else {
 		renderTable(out, payload)
 	}
 	return exitOK
+}
+
+// scaffyRawDocuments pulls the documents array out of a query payload as raw
+// bytes, tolerating both the unwrapped {documents:[…]} shape and a still-wrapped
+// {result:{documents:[…]}} one. Raw messages preserve every served field (the
+// description column especially) that the typed scaffyCommandDoc would drop.
+func scaffyRawDocuments(payload []byte) []json.RawMessage {
+	var env struct {
+		Result struct {
+			Documents []json.RawMessage `json:"documents"`
+		} `json:"result"`
+		Documents []json.RawMessage `json:"documents"`
+	}
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return nil
+	}
+	if env.Documents != nil {
+		return env.Documents
+	}
+	return env.Result.Documents
 }
 
 // runScaffyPull is `bp scaffy pull <concept>[/<variant>]` — the D49 pipeline:
