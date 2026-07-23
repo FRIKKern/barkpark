@@ -1832,7 +1832,114 @@ Backlog filed: `task-felix-w21-bl-claudechat-buffer-parity` (P3),
 `task-felix-w21-bl-janitor-ps-bound` (P4).
 
 
+## Wave 22 Decisions (2026-07-23) — BARKPARK_WEB RESOURCE-BOUND SWEEP: TWO-SEAM STREAMING CAP (Arm: E, E6+E7 recipe)
+
+- **D130 — S1 = CLAUDE_CHAT TRANSPORT BUFFER CAP, RIDES THE FILED OPEN TASK
+  (`task-felix-w21-bl-claudechat-buffer-parity`, promoted P3→P1).** Zero drift: every coordinate
+  the task cites re-verified line-fresh on origin/main at Decide (parse_chunk :1160-1161, :data
+  handler :1480-1483, buffer init :1349, config/0 :1182, terminate :1502-1516); task
+  open/unclaimed; no open PR touches the file. Fix exactly as pinned + D126: byte ceiling checked
+  IN the :data handler (a newline-free stream never yields a complete line, so the cap must live
+  where bytes arrive); sibling `:max_buffer_bytes` in the EXISTING atom-keyed `:claude_chat`
+  app-env keyword read by config/0 (never a new `__MODULE__` key); module-attr default 8 MiB
+  (codex-twin symmetry); guarded Port.close + named `:buffer_overflow`; hermetic chatty
+  newline-free sh-stub mutation proof on the proven put_chat_config command seam (describe
+  "session subprocess", ~:692). TEMPLATE = the MERGED validator.ex technique; PR #5949 (codex
+  twin) is REFERENCE-ONLY — still OPEN and red (Test/Sobelow/Format) at Decide. SEVERITY
+  RE-DERIVED LIVE (supersedes W21's defense-in-depth framing for THIS module): claude is LIVE on
+  guerrilla — barkpark_prod chat_sessions = 38 rows ALL provider='claude', 10 active in the last
+  7 days, no BARKPARK_CLAUDE_CHAT override. NOTE for future re-derivations: the db name
+  `barkpark` on guerrilla is a near-empty decoy; prod is `barkpark_prod` per DATABASE_URL — a
+  query against `barkpark` false-negatives as role/db errors.
+
+- **D131 — S2 = SINK-SIDE STREAMING DISPLAY CAP (`task-felix-w22-chatlive-stream-display-cap`),
+  SURVIVES VERIFY BUT REFRAMED; SEMANTICS DECIDED = TRUNCATE-WITH-MARKER AT A STABLE BOUNDARY,
+  DISPLAY-ONLY.** advance_streaming (chat_live.ex:5748-5762) does uncapped `state.text <> delta`,
+  shared by BOTH providers (codex Runtime.Event :1231-1237 + raw claude :1282-1297). RUN-PROVEN
+  at verify: 1000×200B well-formed deltas → streaming.text = 200000B, stable_len=0 (linear
+  growth, all tail); 5000 deltas WEDGED the LiveView (:sys.get_state 5s timeout — the compounding
+  full-prefix re-render is an independent DoS signal). REFRAME (digest premise REFUTED): the
+  accumulator is cosmetic-in-flight for BOTH providers — chat_live.ex:1245's `is_binary`
+  turn_completed branch is DEAD (advance_streaming always returns a map; codex appends nothing
+  from the socket), codex durable text = Recorder runtime_text (recorder.ex:1046, out of fence →
+  D134 backlog), claude durable = the full assistant frame (:1380-1388, transitively
+  per-line-bounded once S1 merges). So S2 bounds a live-display memory + re-render DoS on the
+  LiveView process, NOT persistence integrity — it must be sold as exactly that. SEMANTICS:
+  truncate/freeze at the LAST STABLE balanced-fence boundary with an honest marker; stop
+  accumulating and stop re-rendering past the cap; NEVER a mid-fence byte slice (the file's own
+  :2465-2471 doctrine + chat_tool_renderer's render-only-truncation law); turn-abort REJECTED
+  (kills legitimate long answers; cannot undo the Recorder's already-accumulated durable text).
+  Config: sibling `:max_streaming_display_bytes` in the same `:claude_chat` keyword, module-attr
+  default 1 MiB. Completion paths untouched — the full text still lands. HIGH-FLIP-RISK: the
+  display-only judgment; the reviewer independently re-derives the dead-branch + Recorder
+  provenance; an independent second reviewer is warranted before merge.
+
+- **D132 — GATE BASELINE: OVERTAKEN BY EVENTS AT DECIDE — NO SLICE, NO TASK.** The digest's
+  main-red (4 Fleet-tab failures: 3× PluginTopMenuTest + 1× NavParitySweepTest, proven at
+  d4cf409ba and corroborated on #5949's branch) was FIXED by #5936 (59cd65d58) which repaired
+  both test files (honest two-tab shape + curated /admin/fleet routes) alongside its CSS fix.
+  Its own elixir run was in_progress at Decide — the LEAD confirms main green before merging W22
+  PRs. Residual note (no task): the gate has a hole — a CANCELLED run at a tip is never
+  auto-retried, so a tip can sit unverified (0f2497d55's own run was cancelled).
+
+- **D133 — HONEST CENSUS VERDICT ROWS (refutations, no slices).** Tree-wide sweep of the
+  252-file api/lib/barkpark_web: exactly TWO unbounded-and-reachable streaming accumulators
+  (S1, S2). (a) thinking_pulse.text <> text (chat_live.ex:1332-1340) = INERT: fed solely by
+  delta["thinking"], which the real CLI wire NEVER populates (charter D41 of the studio-chat
+  epic = a direct versioned live probe, v2.1.205, both models; zero thinking_delta frames in any
+  provenance-stamped fixture across 2.1.206–2.1.212); the ONE place real thinking text appears
+  on the wire (full buffered assistant frames) is silently DROPPED by the handler's catch-all —
+  correct today; a future refactor that renders thinking snippets must not wire that text into
+  an accumulator without a cap. Caveat: the D41 probe is version-pinned; no fresh CLI probe this
+  wave. (b) Channels BOUNDED: every handle_in overwrites single scalars/small maps; inbound WS
+  frames capped only by Bandit's implicit 8MB default (no app-level max_frame_size — note, not
+  a defect). (c) cache_body_reader BOUNDED-BY-PARSER (total-budget :length mechanism re-traced)
+  but OVERSIZED for the unauthenticated pre-signature webhook path → D134 backlog. (d) Port
+  lifecycle ALREADY-GOOD re-proven (merged no-orphan test; guarded close; exec-wrapped spawn).
+  (e) Zero System.cmd/:os.cmd/System.shell/:erlang.open_port anywhere in the tree; sole
+  Port.open = claude_chat.ex:1317. (f) append_message/@messages row-count already capped at 500
+  (prior tasks) — different class, no action.
+
+- **D134 — WAVE SHAPE + BACKLOG.** 2 slices, both round 1, both opus, file-disjoint
+  (claude_chat.ex + its test vs chat_live.ex + its test). Gates are single-file
+  `CC=/usr/bin/clang mix test`; the full 6-file chat suite ran green THIS wave (444/0 in 337.5s
+  under load-avg 143 — slow is host contention, not recipe failure). Backlog filed as published
+  epic children: `task-felix-w22-bl-recorder-bounds` (P2 — recorder.ex:1046 runtime_text
+  uncapped `<>` is the REAL codex durable accumulator, + source_markdown persisted into an
+  unbounded :text column with no validate_length; the third seam, out of the barkpark_web
+  fence), `task-felix-w22-bl-webhook-body-rightsize` (P3 — ~101MB unauthenticated pre-signature
+  webhook buffering vs GitHub's 25MB max, no RateLimit on that pipeline; path-scoped cap + rate
+  limit, never lower the global constant), `task-felix-w22-bl-codex-completion-deadbranch`
+  (P3 — the dead is_binary branch means codex never appends a live completion row from the
+  socket; latent, codex dark in prod).
+
+### Wave 22 roadmap (2 slices, round 1, parallel — disjoint files)
+
+| # | Slice | Task | Model | Size |
+|---|-------|------|-------|------|
+| S1 | claude_chat transport buffer cap — :data-handler byte ceiling, port closed + :buffer_overflow, mutation-proven | `task-felix-w21-bl-claudechat-buffer-parity` | opus | medium |
+| S2 | chat_live streaming display cap — stable-boundary truncate-with-marker, display-only, HIGH-FLIP-RISK | `task-felix-w22-chatlive-stream-display-cap` | opus | medium |
+
+Backlog filed: `task-felix-w22-bl-recorder-bounds` (P2), `task-felix-w22-bl-webhook-body-rightsize` (P3),
+`task-felix-w22-bl-codex-completion-deadbranch` (P3).
+
+
 ## Wave log
+
+- **Wave 22 — 2026-07-23 — DECIDED (building). Arm: E (E6+E7 winning recipe — barkpark_web
+  resource-bound sweep).** Ratified D130–D134. Headline: honest census of the 252-file
+  barkpark_web tree = exactly TWO unbounded-and-reachable streaming accumulators, both now wave
+  slices: the filed W21 claude_chat transport buffer (zero drift, promoted P3→P1 — claude proven
+  LIVE in prod: 38/38 chat_sessions provider='claude', 10 active <7d, prod db = barkpark_prod
+  not the decoy `barkpark`) and the grep-invisible chat_live advance_streaming sink (run-proven:
+  200KB linear growth at 1000 deltas, LiveView WEDGED at 5000 — an independent re-render DoS).
+  Digest's "codex persistence rides the sink accumulator" premise REFUTED at verify (dead
+  is_binary branch at :1245; Recorder runtime_text is the real durable source, out of fence →
+  backlog); S2 reframed display-only, semantics = stable-boundary truncate-with-marker
+  (turn-abort rejected), HIGH-FLIP-RISK flagged for independent re-derivation. Gate-baseline
+  drift OVERTAKEN at Decide: #5936 landed the Fleet-tab test repair on tip. thinking_pulse
+  INERT (D41 probe provenance); channels/Bandit-8MB, Port lifecycle, zero-spawn all re-proven.
+  3 backlog children filed. Grade: pending build+review.
 
 - **Wave 21 — 2026-07-23 — DECIDED (building). Arm: E (E6+E7 winning recipe — interop
   resource-bound sweep).** Ratified D125–D129. Headline: the wish's named target
