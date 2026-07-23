@@ -533,6 +533,11 @@ program.go/detail_render.go), not trusted from strategists.
     *Why:* the one parity gate that actually EXISTS in-repo is semrole; there is no `design/check`
     hex gate yet (verified — spec §6 is aspirational), so "drift gate green" here = semrole parity +
     the glyph-budget guard; don't fork semrole, don't collateral-damage the CLI/cloud role hues.
+    [SUPERSEDED 2026-07-23 / D98]: this "spec §6 aspirational" finding is stale — `design/check.mjs`
+    Part B ("§6") now gates cross-surface lifecycle parity (green; `node design/check.mjs`). The gate
+    covers the EMITTED chain (Go board `tokens_gen.go` / `paper-surface.css` / Studio `--life-*` +
+    `studio/tokens_gen.ex` vs `tokens.lifecycle`); pdrender's in-body chip vocabulary
+    (`inline.go taskStatusGlyph`) is hand-written and stays OUTSIDE the gate — that gap is D43.
 
 38. **Motion rides the EXISTING heartbeat (`anim.Alive` + `UIState.Frame`) — the spinner frame
     index is `Frame % 10`, NEVER wall-clock, so an idle board stays byte-stable and goldens hold.**
@@ -1531,6 +1536,9 @@ honest truncation, one view).
   `semrole.TaskLifecycles()` against `RoleFor`). There is NO `design/check` hex gate — spec §6 is
   aspirational. So `RoleFor` stays byte-identical (D37) and "drift-gate green" = semrole parity +
   the glyph-budget guard, both kept green.
+  [SUPERSEDED 2026-07-23 / D98]: stale — `design/check.mjs` Part B ("§6") now exists and gates the
+  emitted lifecycle chain green; pdrender in-body chips (`inline.go taskStatusGlyph`) remain the
+  one ungated residue — D43.
 - Current board vocabulary is the wave-5 CALM set (`StatusGlyph`: ● in_progress / ◐ blocked /
   ○ ready·open / ✓ done — all steady, `done` rendered DIM via `roleStyle(RoleOK)=dimStyle`). The
   redesign changes glyphs+colors, NOT the role map.
@@ -1592,6 +1600,9 @@ status hexes in `theme.go` are BYTE-EQUAL to the spec §1 table (`#60a5fa` blue 
   checkout (it is the aesthetic-unification epic's artifact, built elsewhere). So shared-vocabulary
   conformance is enforced by: (a) the TUI hexes == spec §1 table exactly, (b) `RoleFor`↔`semrole`
   parity, (c) the glyph-budget guard — all three GREEN. There is no live cross-file diff to run.
+  [SUPERSEDED 2026-07-23 / D98]: a live cross-file gate now exists — `design/check.mjs` Part B
+  ("§6") gates the emitted lifecycle chain (green). Only pdrender's in-body chips
+  (`inline.go taskStatusGlyph`) stay outside it — that residue is D43.
 - **pdrender in-body chips still drift and that is CHARTERED (D43).** `walk.ex task_glyph` (and its
   `inline.go` twin) still render `○ open / ◐ in_progress / ⊘ blocked / ● done / ✕ cancelled` — the
   OLD set — so a wikilink chip inside a rendered paper can show a task with a different glyph than the
@@ -2042,3 +2053,126 @@ generated, never hand-edited).
 **Honest gaps:** nobody has driven a real terminal — every behavior is proven by constructed `tea.MouseMsg` at computed coordinates; the etiquette footnote is invisible below ~96 inner cols (sheds by design — most portrait panes never see it); reading-frame rail stops have no hover tint (needs the merged reducer + threading HoverTarget into the frame renderers); wide-mode footer verbs expose no click targets (honest, documented).
 
 **Next wave:** (1) the INTEGRATION slice above — one merged mouse reducer, full-suite + goldens + a LIVE tmux mouse drive against guerrilla (wheel, click-select, double-click descend, verb clicks, M toggle, shift-click selection) — the wish's "feels native" bar can only be judged in a real terminal; (2) hover for reading-frame rails + wide panes once the reducer is one; (3) charter backfill of D89–D96; (4) the D43 pdrender glyph-unify and §6 hygiene still stand from wave 15.
+
+### Wave 17 2026-07-23 (DECIDE: post-wave-16 reconciliation + reconcile-then-finish; Arm E config E6; D98–D103)
+
+Run as research-program **Arm E (E6)** — Fable architect × Fable grade × freshness-gated lean
+survey (paper `task-tui-wave-2026-07-23`; parent research epic task-09f4775e7ccc2cca). The wish's
+asserted backlog was partially stale; this entry makes the wave-log true again, then the wave
+finishes what is genuinely open. Verification basis: 5-Sonnet lean survey + 6 deep verifiers with
+run-proofs (see the wave paper).
+
+**D98 — Post-wave-16 reconciliation (the wave-16 entry above is now READ THROUGH THIS NOTE).**
+Four merges reshaped the mouse-era board after wave 16 closed and were never recorded here:
+
+- **#3908 (f315c80e2, 2026-07-17): hover TRANSFORMS from background paint to accent-FOREGROUND
+  grammar.** D94/D95's "hoverBg/pressedBg from existing chrome tokens, padTo the row" background-
+  tint law is RETIRED, not extended: the hovered row re-renders whole in bold chrome-accent
+  foreground (chat Phases-pane grammar), zero background; `faintStyle`/`faintPaint`/`hoverBg` are
+  gone. The never-flickers changed-only guard (D95) survives unchanged. `render.go` only; ledger
+  task task-5baf1fe7daa9e0ae (done, was orphaned — re-parented under task-tui-goal this wave).
+- **#4240 (755c9d4cd, 2026-07-19): D97's "depth-0 right pane is a non-interactive preview" is
+  RETIRED.** The right pane now scrolls (`previewScroll`), click-ENTERS the previewed task,
+  and live-previews the hovered board row; `enterTask` is single-open descent; `openTaskRefs`
+  caps the checked radio to the one deepest open task. Ledger task task-713856c53559145b (done,
+  was orphaned — re-parented under task-tui-goal this wave).
+- **#2397 (91531b27b, 2026-07-11, task-737067baa53cbcfd): picker-style hover + checked radio.**
+  Found only by this wave's uncapped git sweep — merged the day after wave 16 closed. Its HOVER
+  half was retired outright by #3908; its CHECKED-RADIO half (entered task's board-row glyph
+  renders ●, `OpenTasks` derived from the stack at compose time) SURVIVES in `compose.go` today.
+  Recorded here so the surviving mechanism has a home; task re-parented under task-tui-goal.
+- **#4393 (aeefae415, 2026-07-19): cross-epic dependency, not a task-tui decision.** Owned by
+  task-lifecycle-visibility (ledger owner tlv-s2-tokens-manifest-chain) but regenerates
+  internal/taskboard's `tokens_gen.go`/`board.go`/`semrole` chain directly — considering ◌ +
+  researching ◎ join the 9-state LIFE_ORDER. Confirms and WIDENS the still-open D43 gap:
+  `internal/pdrender/inline.go` `taskStatusGlyph` is a hardcoded 5-case switch unaware of ◌/◎.
+- (minor, same window) 228808699 (2026-07-13, detail_render.go attempts/now-pulse) and #3760
+  (340203ad8, 2026-07-16, context threading into the SSE listener, live.go) — small, recorded,
+  no D-numbers. Out of scope by diff: #3761 (internal/cli error envelopes only), #4153 (api/lib
+  Elixir `?view=brief` only — its own commit message says taskboard untouched).
+
+**Correction, not new backfill: line 2032's "Charter debt: D89–D96 exist only in the wave-16 task
+briefs, not in this file" was ALREADY FALSE when written.** Commit 4fc8bb136 (2026-07-10T00:00:39)
+added the full D89–D97 numbered block (lines ~1216–1300) fifty-three minutes before b2a8a8f46
+(00:53:49) wrote that debt note; task-tui-mouse's close-time description (23:17:34 the prior day)
+already cites "decisions D89–D97". No backfill work remains — the wish's "D89–D96 backfill" item
+was a false premise, caught pre-build.
+
+**Ledger corrections (recorded, executed via bp this wave):** the wish's epic id
+task-3be0030a7769861d is a MIS-POINTER — 28-revision history proves it was always the foreign
+sealed chat-tui task wsc-ad-tui (paste error, not a ledger mutation). The epic spine is and stays
+**task-tui-goal** (carries wave_status + wave_paper). task-70eb8244dd1e702a ("TUI locks strip",
+foreign epic expressive-agent-loops, labels files:internal/taskboard/) is EXCLUDED from this wave,
+not adopted: its PR #2457 is merged on main but the task sits open/unclaimed with the merge
+criterion unstamped — stale foreign bookkeeping, named here so a concurrent claim is visible.
+
+**D99 — Rail-stop hover is a NEW state, depth>0 only, in the post-#3908 grammar.** `HoverTarget`
+(a task-Ref string) structurally cannot key a (frame, stop) rail stop — the slice adds
+`HoverStop int` (-1 = none) with the same change-only debounce as `setHoverTarget` (D95). Writer:
+extend `wideMouseMotion` for the right pane by FACTORING `rightPaneMouse`'s stop resolution
+(compose.go:677-695) into ONE shared helper so click and hover agree line-for-line (D42
+one-producer discipline). Paint: `windowFrame` gains a hover-stop parameter and paints the hovered
+stop's body line via the SAME `hoverStyle` accent-foreground grammar — one hover language per
+screen. SCOPING LAW: the wide depth-0 PREVIEW has NO stops (`previewLines` passes stops=nil,
+cursor=-1) — there is nothing to hover-paint there; #4240 already completed depth-0 hover
+behavior (left tints, right previews). Goldens stay byte-frozen (all render at rest; new field
+defaults -1); every new paint test forces color via `withChrome(t)` — the default profile emits
+no SGR, so an unforced hover-paint test passes vacuously.
+
+**D100 — D43 closes Go-side as a GUARDED delegate, not a naive one and not a fourth table.**
+`taskStatusGlyph` delegates to `glyphForRole(roleForStatus(status))` — the UNSTYLED accessor (the
+chip is Dim-wrapped; `glyphForStatus` would double-style) — but ONLY for the known set {open,
+in_progress, blocked, done, cancelled}; everything else keeps the ▸ unknown-status guard
+(roleForStatus's default maps ANY unknown to "open"/○, which would silently collapse ▸ —
+run-proven). Consequences, run-proven: in_progress ◐→⠋ (steady braille, inherits the STEADY_
+PROGRESS exception free), done ●→✓ (teal), blocked ⊘→! (silent vocabulary shift, zero existing
+coverage — reviewer told here), cancelled ✕ unchanged; exactly two taskchip_test assertion
+deltas; ZERO golden diffs (no golden sets TaskResolver). The Elixir twin (`walk.ex task_glyph`,
+byte-identical fork, ready delegate target `status_vocab.ex`) stays NAMED BACKLOG **for scope
+discipline** — the earlier "felix PRs #5777/#5779 open" fence reason is FALSE (both MERGED,
+neither touches walk.ex); the deferral survives only as scope, and the record says so.
+
+**D101 — Help copy is sourced from SHIPPED behavior, never from the task's own stale prose.**
+ttm-followup-help-copy's AC1 + purpose fields claimed "divider dragging" and "column-local
+scrolling/resizing" — grep-proven NEVER-EXISTED gestures (the wide split is X-threshold routing;
+the unit is a PANE, not a column). ACs and purpose scrubbed at Decide. The true gesture set help
+must teach: wheel scrolls the pane under the pointer (board cursor step / reading free-scroll /
+depth-0 preview scroll), click selects, click-on-selected activates (= Enter; a double-click is
+two presses, for free — no separate code path), M toggles mouse capture, opt/shift-click is the
+terminal-native selection bypass ("opt/shift-click selects · M mouse"). Additive help-text-only
+change; zero golden coupling.
+
+**D102 — "Spec §6" drift gate: RECORD + CLOSE, with a bounded carve-out.** The three "spec §6 is
+aspirational" wave-log claims were true when written and are now superseded (annotations stamped
+above): `design/check.mjs` Part B ("§6") gates the emitted lifecycle chain green (9 states ×
+glyph/colour/frames across Go board + paper-surface.css + Studio `--life-*` + `tokens_gen.ex`,
+plus done/closed-teal ≠ status.ok-green tripwire); Part A byte-freezes 18 emitted artifacts. NOT
+covered: pdrender's hand-written in-body chips — that residue IS D43 (D100). DISTINCT §6: the
+charter's "§5/§6 authoring-quality/hygiene" arm (save-gate, completeness score, `bp task lint`)
+is a DIFFERENT §6 and is NOT addressed or closed by this disposition.
+
+**D103 — The internal/cli test hang is a pre-existing pipe-buffer deadlock; fix the harness, not
+the CLI.** `captureExecuteCode` (cli_test.go) redirects os.Stdout to a fresh os.Pipe() and drains
+only AFTER Execute() returns; on small-pipe-buffer hosts (~512B effective) printLoginHelp's 1952-
+byte help text deadlocks the writer → `go test ./...` panics at the 10m timeout in
+TestExecuteBuiltinHelpHonoursGlobalHelp. Byte-identical on origin/main (9 behind, 0 ahead —
+NOT wave-introduced); invisible on Linux CI (64KiB pipes). Fix = drain concurrently
+(goroutine + io.Copy started before Execute). Mutation proof is built in: the isolated run fails
+in ~15s before the fix, passes after.
+
+**The wave (4 slices, all round 1, disjoint files; builders OPUS per E6; gates per slice in the
+task briefs — all dry-run green at Decide):**
+
+1. **w17-rail-stop-hover** (medium) — D99. internal/taskboard: types.go + compose.go +
+   program.go + compose_test.go (+ detail_render.go only if the paint seam demands it).
+2. **w17-d43-chip-delegate** (small) — D100. internal/pdrender: inline.go + taskchip_test.go
+   (+ a delegate-parity tripwire test so the chip vocabulary can't silently re-fork).
+3. **ttm-followup-help-copy** (small, pre-existing task, ACs corrected per D101) —
+   internal/cli: tasks_board_cmd.go + tasks_board_cmd_test.go.
+4. **w17-cli-pipe-capture-fix** (small) — D103. internal/cli/cli_test.go only.
+
+**Named backlog (filed as published tasks, not faked):** the LIVE tmux mouse "feels native" drive
+(cannot be proven offline); the D43 Elixir half (walk.ex → status_vocab delegate + gate coverage
+for both in-body chip forks — scope-discipline deferral, fence claim corrected per D100).
+
+Next D-number: D104.
