@@ -194,6 +194,13 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       active: "Projects"
     },
     %{
+      route: "/admin/fleet",
+      disposition: :plugin,
+      plugin: "tasks",
+      url: "/admin/fleet",
+      active: "Fleet"
+    },
+    %{
       route: "/admin/onixedit/bokbasen",
       disposition: :plugin,
       plugin: "onixedit",
@@ -226,6 +233,7 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       disposition: :reflect_only
     },
     %{route: "/w/:workspace_slug/p/:project_slug/admin/projects", disposition: :reflect_only},
+    %{route: "/w/:workspace_slug/p/:project_slug/admin/fleet", disposition: :reflect_only},
     %{route: "/w/:workspace_slug/p/:project_slug/admin/pulse", disposition: :reflect_only},
     %{
       route: "/w/:workspace_slug/p/:project_slug/admin/onixedit/bokbasen",
