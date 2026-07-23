@@ -141,7 +141,11 @@ func composeAt(m Model, width, height int) string {
 			avail = 1
 		}
 		body, stops := m.frameContent(top, width, now)
-		win := windowFrame(body, stops, top.Cursor, top.Scroll, avail, width)
+		// Narrow-mode reading frames have no pointer-stop resolver this wave (the
+		// hover router is wide-only, charter D99) — so no hover paint here. The
+		// windowFrame paint seam already serves them; wiring a narrow resolver is
+		// named residue in the PR.
+		win := windowFrame(body, stops, top.Cursor, top.Scroll, -1, avail, width)
 		for len(win) < avail {
 			win = append(win, "")
 		}
@@ -181,7 +185,10 @@ func composeAt(m Model, width, height int) string {
 		}
 	} else {
 		body, stops := m.frameContent(top, rightW, now)
-		rightLines = windowFrame(body, stops, top.Cursor, top.Scroll, inner, rightW)
+		// The wide reading pane paints the hovered rail stop (charter D99): a
+		// board-row hover would have taken the preview branch above and cleared
+		// HoverStop, so a non-negative HoverStop here always belongs to THIS frame.
+		rightLines = windowFrame(body, stops, top.Cursor, top.Scroll, m.ui.HoverStop, inner, rightW)
 	}
 
 	rows := make([]string, 0, inner+1)
@@ -212,7 +219,9 @@ func (m Model) previewLines(t Task, width, avail int, now time.Time) []string {
 		scroll = m.previewScroll
 	}
 	body, _ := RenderTaskDetail(m.previewDetail(t), ChildrenOf(m.tasks, t.DocID), -1, width, now)
-	return windowFrame(body, nil, -1, scroll, avail, width)
+	// The depth-0 preview has NO stops (stops=nil, cursor=-1) — nothing to select,
+	// nothing to hover-paint (hoverStop=-1); #4240 owns depth-0 hover.
+	return windowFrame(body, nil, -1, scroll, -1, avail, width)
 }
 
 // previewDetail is a task's preview-pane detail: the reading index's entry, or
@@ -323,22 +332,47 @@ func readingFooter(st UIState, width int) string {
 // (-1) makes the viewport FOLLOW the cursor's stop (charter D18); Scroll>=0 is an
 // absolute free-scroll offset (space/u/d, and the zero-value top-of-frame a fresh
 // push opens on). Hidden overflow is marked with the same dim ↑/↓ affordances the
-// board spine uses.
-func windowFrame(body []string, stops []Stop, cursor, scroll, avail, width int) []string {
+// board spine uses. hoverStop is the rail stop under the mouse pointer (-1 for
+// none, charter D99): its body line repaints in the accent FOREGROUND
+// (hoverPaint/hoverStyle — the board's hover grammar), distinct from the cursor
+// stop's ▎ bar the body already carries. hoverStop<0 paints nothing, so a
+// pointer-free frame (goldens, the keyboard flow, the stop-less depth-0 preview)
+// is byte-identical.
+func windowFrame(body []string, stops []Stop, cursor, scroll, hoverStop, avail, width int) []string {
 	if avail <= 0 {
 		return nil
 	}
-	if len(body) <= avail {
-		return body
+	windowed := len(body) > avail
+	var win []string
+	top := 0
+	if !windowed {
+		win = body
+	} else {
+		top = readingWindowTop(len(body), stops, cursor, scroll, avail)
+		win = make([]string, avail)
+		copy(win, body[top:top+avail])
+		if top > 0 {
+			win[0] = dimStyle.Render(truncate(strings.Repeat(" ", 2)+"↑ more above", width))
+		}
+		if below := len(body) - (top + avail); below > 0 {
+			win[avail-1] = dimStyle.Render(truncate(strings.Repeat(" ", 2)+"↓ more below", width))
+		}
 	}
-	top := readingWindowTop(len(body), stops, cursor, scroll, avail)
-	win := make([]string, avail)
-	copy(win, body[top:top+avail])
-	if top > 0 {
-		win[0] = dimStyle.Render(truncate(strings.Repeat(" ", 2)+"↑ more above", width))
-	}
-	if below := len(body) - (top + avail); below > 0 {
-		win[avail-1] = dimStyle.Render(truncate(strings.Repeat(" ", 2)+"↓ more below", width))
+	// Hover tint (charter D99): the stop under the pointer repaints in the accent
+	// foreground — but only when its body line is inside the window and is NOT the
+	// row an ↑/↓ overflow marker took (the marker owns that row).
+	if hoverStop >= 0 && hoverStop < len(stops) {
+		if row := stops[hoverStop].Line - top; row >= 0 && row < len(win) {
+			markerTop := windowed && top > 0 && row == 0
+			markerBot := windowed && len(body)-(top+avail) > 0 && row == avail-1
+			if !markerTop && !markerBot {
+				if !windowed {
+					// win aliases the caller's body slice — copy before mutating one line.
+					win = append([]string(nil), body...)
+				}
+				win[row] = hoverPaint(win[row])
+			}
+		}
 	}
 	return win
 }
@@ -439,7 +473,7 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 	// pointer leaving the panes (chrome, crumb, gutter) clears the tint instead
 	// of leaving it stale.
 	if ev.Action == tea.MouseActionMotion {
-		return m.wideMouseMotion(cx, cy, inner, now)
+		return m.wideMouseMotion(cx, cy, innerW, inner, now)
 	}
 	if ev.Action == tea.MouseActionRelease {
 		return m, nil // the press acted; the release is not an input of its own
@@ -472,25 +506,38 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 	}
 }
 
-// wideMouseMotion is wide-mode hover (ttm-s3 fused into ttm-s5's router): only
-// the left board pane's spine rows tint — the wide pane shares flattenSpine's
-// hover paint with the narrow board, so resolving the row Ref is all it takes.
-// The right pane's rail stops and the depth-0 preview have no hover tint (the
-// same honest gap as the narrow reading frames). Change-only mutation through
-// setHoverTarget stays the debounce (charter D95); anything off the board
-// pane's spine rows resolves to "" and clears the tint.
-func (m Model) wideMouseMotion(cx, cy, inner int, now time.Time) (Model, tea.Cmd) {
+// wideMouseMotion is wide-mode hover (ttm-s3 fused into ttm-s5's router). Two
+// mutually-exclusive tints, one per pane, keyed on the X threshold:
+//
+//   - the LEFT board pane's spine rows tint through HoverTarget — the wide pane
+//     shares flattenSpine's hover paint with the narrow board, so resolving the
+//     row Ref is all it takes; and
+//   - the RIGHT reading pane's rail stops tint through HoverStop (charter D99),
+//     resolved via rightPaneStopAt — the SAME stop producer the click router
+//     reads, so hover and click can never disagree. The depth-0 preview has no
+//     stops, so it resolves to -1 (#4240).
+//
+// The dead inter-pane gutter, chrome and prose fall through to neither branch and
+// clear BOTH tints — so crossing from a board row to a rail stop hands the tint
+// over cleanly. Change-only mutation through setHoverTarget/setHoverStop stays the
+// debounce (charter D95): a Motion that moves neither is a no-op.
+func (m Model) wideMouseMotion(cx, cy, innerW, inner int, now time.Time) (Model, tea.Cmd) {
 	target := ""
-	if cx >= 0 && cx < boardPaneWidth && cy >= 1 && cy-1 < inner {
+	stop := -1
+	switch {
+	case cx >= 0 && cx < boardPaneWidth && cy >= 1 && cy-1 < inner:
 		idTop, avail := m.wideBoardPaneAvail(inner, now)
 		if idx := m.wideBoardRowIndex(cy-1, idTop, avail, now); idx >= 0 {
 			if rows := m.visibleRows(); idx < len(rows) {
 				target = rows[idx].docID
 			}
 		}
+	case cx >= boardPaneWidth+paneGutter2 && cy >= 1 && cy-1 < inner:
+		stop = m.rightPaneStopAt(cy-1, innerW, inner, now)
 	}
-	ui, changed := setHoverTarget(m.ui, target)
-	if !changed {
+	ui, tChanged := setHoverTarget(m.ui, target)
+	ui, sChanged := setHoverStop(ui, stop)
+	if !tChanged && !sChanged {
 		return m, nil
 	}
 	m.ui = ui
@@ -670,6 +717,31 @@ func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.T
 	if ev.Button != tea.MouseButtonLeft || ev.Action != tea.MouseActionPress {
 		return m, nil
 	}
+	if idx := m.rightPaneStopAt(pl, innerW, inner, now); idx >= 0 {
+		if top.Cursor == idx {
+			nm, cmd := m.descend()
+			return nm.(Model), cmd
+		}
+		(&m).setTopCursor(idx)
+		return m, nil
+	}
+	return m, nil // prose / empty line / overflow marker — nothing to select
+}
+
+// rightPaneStopAt is the ONE reading-frame stop resolver both the click router
+// (rightPaneMouse) and the hover painter (wideMouseMotion) read, so a click and a
+// hover on the same wide right-pane row can never disagree about which rail stop —
+// if any — sits under the pointer (charter D99). Given a pane row `pl` it returns
+// the stop index on that body line, or -1 when there is nothing to select: the
+// stop-less depth-0 preview (#4240), an ↑/↓ overflow-marker row, or a
+// prose/gutter/empty line. It re-derives the paint's window offset
+// (readingWindowTop) from the SAME geometry composeAt paints, so resolution and
+// paint stay pixel-locked.
+func (m Model) rightPaneStopAt(pl, innerW, inner int, now time.Time) int {
+	top := m.topFrame()
+	if top.Kind == FrameBoard {
+		return -1 // depth-0 preview has no stops (previewLines passes stops=nil)
+	}
 	rightW := innerW - boardPaneWidth - paneGutter2
 	if rightW < minReadingWidth {
 		rightW = minReadingWidth
@@ -677,23 +749,18 @@ func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.T
 	body, stops := m.frameContent(top, rightW, now)
 	wtop := readingWindowTop(len(body), stops, top.Cursor, top.Scroll, inner)
 	if wtop > 0 && pl == 0 {
-		return m, nil // ↑ more-above marker
+		return -1 // ↑ more-above marker
 	}
 	if len(body)-(wtop+inner) > 0 && pl == inner-1 {
-		return m, nil // ↓ more-below marker
+		return -1 // ↓ more-below marker
 	}
 	bodyLine := wtop + pl
 	for i, s := range stops {
 		if s.Line == bodyLine {
-			if top.Cursor == i {
-				nm, cmd := m.descend()
-				return nm.(Model), cmd
-			}
-			(&m).setTopCursor(i)
-			return m, nil
+			return i
 		}
 	}
-	return m, nil // prose / empty line — nothing to select
+	return -1 // prose / empty line — nothing to select
 }
 
 // scrollPreview moves the wide depth-0 preview viewport one wheel notch,

@@ -312,6 +312,19 @@ type UIState struct {
 	// with no mouse is byte-identical. Cleared on any key input, so the
 	// keyboard flow is untouched.
 	HoverTarget string
+	// HoverStop is the index of the reading-frame rail stop currently under the
+	// mouse pointer in the WIDE right pane, -1 for none (charter D99). It is the
+	// reading-frame twin of HoverTarget — a SEPARATE field, never an overload:
+	// resolved by wideMouseMotion from a Motion MouseMsg through the SAME stop
+	// producer the click router reads (rightPaneStopAt), set through the
+	// change-only setHoverStop guard (the debounce IS the change guard, charter
+	// D95). windowFrame repaints exactly this stop's body line in the accent
+	// FOREGROUND (hoverPaint/hoverStyle) — distinct from the cursor stop's ▎ bar
+	// the body already carries. -1 paints nothing, so a reading frame with no
+	// pointer is byte-identical (goldens, keyboard flow). The depth-0 preview has
+	// no stops (previewLines passes stops=nil), so it is always -1 there (#4240).
+	// Cleared on any key input, so the keyboard flow is untouched.
+	HoverStop int
 	// MouseReleased is the mouse-mode toggle (charter D96): false (the zero
 	// value, and the program's start state) means mouse reporting is ON — the
 	// board's footer verbs are clickable and hover tints; true means the user
