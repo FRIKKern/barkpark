@@ -761,6 +761,46 @@ defmodule BarkparkCloud.RegistryTest do
     end
   end
 
+  describe "create_site/2 — server-authoritative tenant identity" do
+    test "derives barkpark_id/team_id from the box, not from caller attrs" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+
+      {:ok, site} = Registry.create_site(bp, %{name: "S", slug: "s-auth"})
+
+      assert site.barkpark_id == bp.id
+      assert site.team_id == bp.team_id
+    end
+
+    test "HOSTILE attrs: a client-supplied barkpark_id/team_id cannot override the server value" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+
+      # Another team's box — the values an attacker would try to smuggle in.
+      other_team = team_fixture()
+      other_bp = barkpark_fixture(other_team)
+
+      {:ok, site} =
+        Registry.create_site(bp, %{
+          name: "S",
+          slug: "s-hostile",
+          barkpark_id: other_bp.id,
+          team_id: other_team.id
+        })
+
+      # The attrs lost: identity is the box's, never the caller's.
+      assert site.barkpark_id == bp.id
+      assert site.team_id == bp.team_id
+      refute site.barkpark_id == other_bp.id
+      refute site.team_id == other_team.id
+
+      # Persisted authoritative (survives a refetch).
+      persisted = Repo.get(Site, site.id)
+      assert persisted.barkpark_id == bp.id
+      assert persisted.team_id == bp.team_id
+    end
+  end
+
   describe "append_deployment_console/2 (gh-5)" do
     defp deployment_fixture(team) do
       bp = barkpark_fixture(team)

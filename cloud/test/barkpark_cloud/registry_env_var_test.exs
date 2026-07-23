@@ -41,6 +41,39 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
     bp
   end
 
+  describe "TOCTOU net: assoc_constraint(:barkpark) catches a write against a deleted box" do
+    test "insert of a barkpark-scoped env var pointing at a DELETED barkpark → {:error, changeset}" do
+      # put_env_var's ownership gate re-reads the barkpark before writing, so the
+      # only way the FK target vanishes is the narrow check-to-write TOCTOU window
+      # (a concurrent delete_barkpark landing between the gate and Repo.insert).
+      # This exercises the net that closes that window DIRECTLY — no concurrency
+      # needed: build the exact changeset put_env_var would, against an id whose
+      # row no longer exists, and prove assoc_constraint(:barkpark) turns it into a
+      # changeset error rather than a raw FK 500. Fail closed: the write never lands.
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      deleted_id = bp.id
+      {:ok, _} = Registry.delete_barkpark(bp)
+
+      assert {:error, %Ecto.Changeset{} = cs} =
+               %EnvVar{}
+               |> EnvVar.changeset(%{
+                 team_id: team.id,
+                 key: "RACE_KEY",
+                 scope: "barkpark",
+                 barkpark_id: deleted_id,
+                 value_encrypted: "ciphertext"
+               })
+               |> Repo.insert()
+
+      # The failure is specifically the barkpark FK net, not something else.
+      assert %{barkpark: [_ | _]} = errors_on(cs)
+
+      # Nothing persisted for that dangling id.
+      assert Repo.all(from e in EnvVar, where: e.barkpark_id == ^deleted_id) == []
+    end
+  end
+
   describe "put_env_var/2 + reveal_env_var/1" do
     test "round-trips: ciphertext at rest, plaintext on reveal" do
       team = team_fixture()

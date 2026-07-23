@@ -3312,6 +3312,17 @@ defmodule BarkparkCloud.Registry do
         {:error, :write_once}
 
       true ->
+        # TOCTOU NOTE (intentional, fails closed): the ownership gate above
+        # (`barkpark_in_team?`) reads the barkpark row, then this branch writes —
+        # a concurrent `delete_barkpark/1` landing in that narrow check-to-write
+        # window would insert against a now-missing FK target. This is NOT locked
+        # or wrapped in a txn on purpose (improvement-only; no live defect): the
+        # `assoc_constraint(:barkpark)` net on EnvVar.changeset (env_var.ex:95 —
+        # the repo-wide convention agent_event/agent_token/provision_job/site all
+        # carry) turns that lost race into `{:error, %Ecto.Changeset{}}` at
+        # `Repo.insert_or_update` below. The cross-tenant/dangling write never
+        # lands; the caller gets a changeset error, not a 500.
+        #
         # Required/derived columns always set; the optional flags are carried
         # only when the caller actually supplied them (presence-checked, so an
         # explicit `is_secret: false` is honoured and isn't confused with absent),
@@ -3561,11 +3572,20 @@ defmodule BarkparkCloud.Registry do
     # needs the site id). A container / unbound site mints nothing.
     {content_secret, attrs} = maybe_mint_content_secret(attrs)
 
+    # AUTHORITATIVE tenant identity: a Site's box (`barkpark_id`) and team
+    # (`team_id`) are derived from the `%Barkpark{}` argument, NEVER from caller
+    # attrs. Map.put (not put_new) so a client-supplied `:barkpark_id`/`:team_id`
+    # in attrs can never win — the safety lives in THIS context fn, not in the
+    # router's fixed-allowlist. Mirrors put_team_id/2 (:5328) and
+    # create_deployment's `Map.put(attrs, :site_id, ...)`. String-key variants are
+    # dropped first so a stray `"barkpark_id"` cannot both survive and collide with
+    # the atom key (a mixed-key changeset cast would raise).
     prepared =
       attrs
       |> put_site_read_token()
-      |> Map.put_new(:barkpark_id, barkpark.id)
-      |> Map.put_new(:team_id, barkpark.team_id)
+      |> Map.drop(["barkpark_id", "team_id"])
+      |> Map.put(:barkpark_id, barkpark.id)
+      |> Map.put(:team_id, barkpark.team_id)
 
     case %Site{} |> Site.changeset(prepared) |> Repo.insert() do
       {:ok, site} ->
