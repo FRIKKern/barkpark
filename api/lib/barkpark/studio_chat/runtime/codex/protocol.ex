@@ -137,7 +137,10 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Protocol do
       idempotency_key: "codex:buffer_overflow:#{context.sequence}",
       durability: :durable,
       kind: :protocol_error,
-      error: %{"code" => "buffer_overflow", "detail" => "reassembly buffer exceeded #{byte_size} bytes"},
+      error: %{
+        "code" => "buffer_overflow",
+        "detail" => "reassembly buffer exceeded #{byte_size} bytes"
+      },
       native: %{}
     }
   end
