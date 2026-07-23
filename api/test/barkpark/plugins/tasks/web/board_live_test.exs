@@ -376,7 +376,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
-  describe "Board.card_from_broadcast/2 (pure, wave 2)" do
+  describe "Board.card_from_broadcast/3 (pure, wave 2 + W19 field-vis seal)" do
     test "projects worker/labels/priority/github and carries prev blocker_statuses" do
       prev = card("open", doc_id: "bc-1", blocker_statuses: ["done", "open"])
 
@@ -394,7 +394,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
           }
         )
 
-      c = Board.card_from_broadcast(doc, prev)
+      c = Board.card_from_broadcast(doc, prev, all_readable())
 
       assert c.doc_id == "bc-1"
       assert c.title == "Wire the mirror"
@@ -419,11 +419,84 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
           }
         )
 
-      c = Board.card_from_broadcast(doc, nil)
+      c = Board.card_from_broadcast(doc, nil, all_readable())
 
       assert c.worker == "cmux-7"
       # unseen (prev == nil) → empty blockers; readiness waits for :refresh.
       assert c.blocker_statuses == []
+    end
+
+    test "the readable? predicate redacts EXACTLY the 7 gated text/PII fields, ungated stays" do
+      # A predicate that marks the schema-private text/PII fields unreadable —
+      # the same set `to_card/4` gates. `lifecycle_status`/`github`/
+      # `github_synced`/`blocker_statuses` are NOT in this set (parity law).
+      private = ~w(priority parent_id labels assignee claim description design_doc
+                   acceptance_criteria)
+      redacting = fn field -> field not in private end
+
+      prev = card("open", doc_id: "bc-sec", blocker_statuses: ["done", "open"])
+
+      doc =
+        msg_doc("bc-sec", "Sealed broadcast",
+          content: %{
+            "lifecycle_status" => "in_progress",
+            "priority" => 2,
+            "parent_id" => "epic-9",
+            "labels" => ["proj:board"],
+            "assignee" => "studio:doey",
+            "description" => "SECRET-BODY-should-not-leak",
+            "design_doc" => "SECRET-DESIGN-should-not-leak",
+            "acceptance_criteria" => [
+              %{"criterion" => "SECRET-CRITERION", "met" => false}
+            ],
+            "github" => %{"repo" => "FRIKKern/barkpark", "issue" => 42, "state" => "synced"}
+          }
+        )
+
+      c = Board.card_from_broadcast(doc, prev, redacting)
+
+      # the 7 gated fields are redacted to their empty/nil value…
+      assert c.priority == nil
+      assert c.parent_id == nil
+      assert c.labels == []
+      assert c.worker == nil
+      assert c.next_criterion == nil
+      assert c.criteria_list == nil
+      assert c.description_excerpt == nil
+      assert c.design_doc == nil
+
+      # …while the UNGATED fields still project (parity with #5470 peek + #5779
+      # snapshot): lifecycle, github, github_synced, and the carried blockers.
+      assert c.title == "Sealed broadcast"
+      assert c.lifecycle_status == "in_progress"
+      assert c.github["issue"] == 42
+      assert c.github_synced == false
+      assert c.blocker_statuses == ["done", "open"]
+      # the derived criteria COUNT stays ungated (count-vs-text law) — text gone,
+      # tally intact.
+      assert c.criteria == %{met: 0, total: 1}
+    end
+
+    test "a fail-closed predicate (fn _ -> false end) redacts every gated field" do
+      doc =
+        msg_doc("bc-fc", "Disconnected-shape",
+          content: %{
+            "lifecycle_status" => "open",
+            "priority" => 1,
+            "labels" => ["x"],
+            "assignee" => "w",
+            "description" => "SECRET"
+          }
+        )
+
+      c = Board.card_from_broadcast(doc, nil, fn _ -> false end)
+
+      assert c.priority == nil
+      assert c.labels == []
+      assert c.worker == nil
+      assert c.description_excerpt == nil
+      # ungated survive even under fail-closed.
+      assert c.lifecycle_status == "open"
     end
   end
 
@@ -443,7 +516,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       moved =
         Board.card_from_broadcast(
           msg_doc("mv1", "Now working", content: %{"lifecycle_status" => "in_progress"}),
-          prev
+          prev,
+          all_readable()
         )
 
       {board, change} = Board.apply_change(board, moved)
@@ -488,7 +562,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
             content: %{"lifecycle_status" => "done"},
             updated_at: now
           ),
-          prev
+          prev,
+          all_readable()
         )
 
       {board, change} = Board.apply_change(board, closed)
@@ -519,7 +594,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       cancelled =
         Board.card_from_broadcast(
           msg_doc("cx1", "Abandoned", content: %{"lifecycle_status" => "cancelled"}),
-          prev
+          prev,
+          all_readable()
         )
 
       {board, change} = Board.apply_change(board, cancelled)
@@ -1617,6 +1693,90 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "realtime broadcast field-visibility seal (card_from_broadcast/3 Envelope gate)" do
+    # SIBLING of the snapshot deck seal, but on the REALTIME path: the mount
+    # computes `readable?` from the seeded `task` schema and threads it into
+    # `card_from_broadcast/3`, so a live `{:document_changed}` event carrying a
+    # schema-private field NEVER paints it on the deck card (or the gantt). The
+    # SECRET arrives ONLY via the broadcast (the seeded doc is benign) so this
+    # isolates the realtime seal from the snapshot one.
+    #
+    # MUTATION (proves the refutes bite): unthread the predicate at board_live.ex
+    # L272 — pass a permissive `fn _ -> true end` instead of
+    # `socket.assigns.readable?` — and the SECRET strings reappear on the card →
+    # these refutes go RED.
+    setup do
+      {:ok, _schema} =
+        Barkpark.Content.upsert_schema(
+          %{
+            "name" => "task",
+            "title" => "Task",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{
+                "name" => "description",
+                "title" => "Body",
+                "type" => "text",
+                "visibility" => "private"
+              },
+              %{
+                "name" => "acceptance_criteria",
+                "title" => "Criteria",
+                "type" => "array",
+                "visibility" => "private"
+              }
+            ]
+          },
+          "production"
+        )
+
+      # A benign in_progress card the mount snapshot picks up — no private text
+      # yet; the SECRET arrives only through the broadcast below.
+      task("rt-sec", "Realtime sealed", lifecycle: "in_progress", assignee: "studio:doey")
+
+      :ok
+    end
+
+    test "a broadcast carrying schema-private description/criteria is redacted on the deck card",
+         %{conn: conn} do
+      {:ok, view, html} = live(conn, "/admin/projects")
+      assert html =~ "Realtime sealed"
+
+      # A live event mutates the card to carry the schema-private fields.
+      send(
+        view.pid,
+        task_event(
+          "rt-sec",
+          "Realtime sealed",
+          "task.updated",
+          %{
+            "lifecycle_status" => "in_progress",
+            "assignee" => "studio:doey",
+            "description" => "SECRET-RT-BODY-should-not-leak",
+            "acceptance_criteria" => [
+              %{"criterion" => "SECRET-RT-CRITERION", "met" => false, "evidence" => ""}
+            ]
+          },
+          ~U[2026-07-08 09:00:00Z]
+        )
+      )
+
+      html = render(view)
+
+      # the always-public title still paints…
+      assert html =~ "Realtime sealed"
+
+      # …but the schema-private text never reaches the deck card (`card-desc` /
+      # `card-criteria`) NOR the expanded in-flight gantt (`gantt-criteria`).
+      refute html =~ "SECRET-RT-BODY-should-not-leak"
+      refute html =~ "SECRET-RT-CRITERION"
+      refute html =~ ~s(data-role="card-desc")
+      refute html =~ ~s(data-role="card-criteria")
+      refute html =~ ~s(data-role="gantt-criteria")
+    end
+  end
+
   describe "peek context & insight (wave 14)" do
     setup do
       task("ctx-grand", "Grand goal", lifecycle: "open")
@@ -2176,6 +2336,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
   defp put_some(map, _key, nil), do: map
   defp put_some(map, key, value), do: Map.put(map, key, value)
+
+  # The permissive visibility predicate the pure `card_from_broadcast/3` /
+  # `apply_change/3` unit tests inject: no schema means every field reads
+  # (legacy parity). The gating behavior gets its own redaction cases.
+  defp all_readable, do: fn _ -> true end
 
   defp card(status, opts \\ []) do
     %{

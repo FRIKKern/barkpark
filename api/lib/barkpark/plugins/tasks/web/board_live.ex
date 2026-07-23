@@ -48,7 +48,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   worker — subscription is per-socket only (the github-bridge CI landmine that
   breaks the full ExUnit sandbox).
 
-  When a `{:document_changed, %{type: "task"}}` arrives, `Board.card_from_broadcast/2`
+  When a `{:document_changed, %{type: "task"}}` arrives, `Board.card_from_broadcast/3`
   projects the one changed doc, `Board.apply_change/3` re-buckets it (a LIGHT
   optimistic move, D9) and reports a `change` the render keys its flash/slide off
   (`data-just-moved` + a CSS `@keyframes`, CSP-safe). The done-today tally climbs
@@ -211,11 +211,22 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     # DB-free `Board.build([])`), and load the real snapshot ONCE, on connect.
     board = if connected, do: Board.snapshot(dataset: @dataset), else: Board.build([])
 
+    # FIELD-VISIBILITY SEAL (felix W19): compute the fail-closed visibility
+    # predicate ONCE per mount and thread it into every `card_from_broadcast/3`,
+    # so a realtime broadcast card is gated by the SAME schema decisions as the
+    # `Board.snapshot` fetched cards — WITHOUT re-resolving the schema per event.
+    # On the disconnected (dead) render assign `fn _ -> false end`: no DB touch
+    # (mirrors the L212 no-snapshot-on-static-render guard) and no broadcast can
+    # arrive pre-connect, so fail-closed is free of behavioral cost. `:refresh`
+    # recomputes it, so a schema edit self-heals within one reconcile cadence.
+    readable? = if connected, do: Board.field_visibility_gate(@dataset), else: fn _ -> false end
+
     {:ok,
      socket
      |> assign(:dataset, @dataset)
      |> assign(:loading, not connected)
      |> assign(:board, board)
+     |> assign(:readable?, readable?)
      |> assign(:last_change, nil)
      |> assign(:notice, nil)
      |> assign(:seen, MapSet.new())
@@ -269,7 +280,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     else
       board = socket.assigns.board
       prev = board.cards_by_id[Content.published_id(doc.doc_id)]
-      card = Board.card_from_broadcast(doc, prev)
+      card = Board.card_from_broadcast(doc, prev, socket.assigns.readable?)
       {board, change} = Board.apply_change(board, card)
 
       {:noreply,
@@ -289,9 +300,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_ms)
 
+    # Recompute the visibility predicate alongside the snapshot (felix W19): a
+    # schema edit made after mount self-heals into the realtime path within one
+    # reconcile cadence, never per broadcast.
     {:noreply,
      socket
      |> assign(:board, Board.snapshot(dataset: socket.assigns.dataset))
+     |> assign(:readable?, Board.field_visibility_gate(socket.assigns.dataset))
      |> assign(:last_change, nil)
      |> refresh_peek()
      |> assign_view()}
