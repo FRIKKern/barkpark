@@ -1,0 +1,55 @@
+{
+  "run_id": "grip-20260723T035936Z",
+  "recipes": [
+    {
+      "subject": "cmd:git",
+      "quantity": "git:worktree",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git worktree list | wc -l",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-23T03:59:36Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:rev-list",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git rev-list --left-right --count HEAD...origin/main",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-23T03:59:36Z"
+    },
+    {
+      "subject": "scripts/go-format-drift-ceiling.sh",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:scripts/go-format-drift-ceiling.sh",
+      "derived_level": "L2",
+      "deps": [
+        "scripts/go-format-drift-ceiling.sh"
+      ],
+      "observed_at": "2026-07-23T03:59:36Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:pr",
+      "rerun": "gh pr list --state open --json number,headRefName,files | jq '[.[].files[].path] | map(select(test(\"internal/chat|internal/pdrender|chat_cmd\")))'",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T03:59:36Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:pr",
+      "rerun": "gh pr view 5828 --json files,body,state",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T03:59:36Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get task-17c9c8592348cfaa",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T03:59:36Z"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "grip_id": "api-callsite-bangness-and-accounts-fence-2026-07-23",
+  "verifier": "verifier-api-callsite-bangness-and-accounts-fence",
+  "wave": "felix-pristine-wave-18-2026-07-23",
+  "assignment": "For the 8 api-side shape-match schemas, enumerate insert/update call sites, classify bang vs non-bang, map to route/pipeline; deep-check accounts/{webauthn_credential,user_session,user_email_token}.ex for the same shape and rule fold-in-or-backlog.",
+  "verdict": "CENSUS-CORRECTING: 7 of the 8 named api-side files (all but auth/api_token.ex) already declare assoc_constraint, which IS a foreign_key_constraint under the hood (Ecto raises Ecto.ConstraintError on any DB constraint violation the changeset does not declare, for BOTH Repo.insert and Repo.insert! alike) -- they do not match the 'zero foreign_key_constraint' shape and are NOT open FK-abort scars. Only auth/api_token.ex is a genuine open instance: two real references() FK columns (workspace_id, owner_user_id), zero assoc_constraint/foreign_key_constraint, 8 insert/update call sites, all non-bang (Repo.insert/Repo.update, none bang), softest reachable route is POST /v1/auth/tokens under [:user_auth, :require_user] (any authenticated user, not admin) via create_personal_access_token/3 -- but workspace_id there is server-derived (default_workspace_id()), never client-supplied, so the crash trigger is a race (workspace deleted concurrently) not attacker input. accounts/{webauthn_credential,user_session,user_email_token}.ex all cast a real NOT NULL references(:users, on_delete: :delete_all) user_id AND all three already declare assoc_constraint(:user) -- they fail the shape-match test the same way the other 7 do. Fold-in recommendation: do NOT fold the accounts/ trio into the fence -- they are structurally out of scope (already guarded), not open backlog.",
+  "recipes": [
+    {
+      "claim": "assoc_constraint/2 is implemented as add_constraint(changeset, :foreign_key, ...) -- textually identical constraint TYPE to foreign_key_constraint/3, and Ecto.Repo.Schema.constraints_to_errors/3 raises Ecto.ConstraintError whenever a DB constraint violation has no matching declared constraint on the changeset, for both Repo.insert and Repo.insert! (the bang/non-bang split happens only after this internal step)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'def assoc_constraint' -A 16 api/deps/ecto/lib/ecto/changeset.ex; sed -n '1029,1061p' api/deps/ecto/lib/ecto/repo/schema.ex"
+    },
+    {
+      "claim": "7 of the 8 named api-side shape-match files (auth/api_token.ex is the sole exception) declare assoc_constraint on every belongs_to actually cast in their changeset -- role_permission.ex:29 assoc_constraint(:role), membership.ex:46 assoc_constraint(:workspace), project.ex:40 assoc_constraint(:workspace), dataset.ex:34 assoc_constraint(:project), social_identity.ex:21 assoc_constraint(:user), org_domain.ex:28 assoc_constraint(:organization), saml_connection.ex:32 assoc_constraint(:organization), oidc_connection.ex:64 assoc_constraint(:organization)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && for f in api/lib/barkpark/auth/api_token.ex api/lib/barkpark/tenancy/role_permission.ex api/lib/barkpark/tenancy/membership.ex api/lib/barkpark/tenancy/project.ex api/lib/barkpark/tenancy/dataset.ex api/lib/barkpark/sso/social_identity.ex api/lib/barkpark/sso/org_domain.ex api/lib/barkpark/sso/saml_connection.ex api/lib/barkpark/sso/oidc_connection.ex; do echo \"=== $f ===\"; grep -n 'assoc_constraint\\|foreign_key_constraint' \"$f\"; done"
+    },
+    {
+      "claim": "api_tokens.workspace_id and api_tokens.owner_user_id are both real references() FK columns (nullable, on_delete: :nilify_all) added by dedicated migrations, and api_token.ex's changeset casts both with zero assoc_constraint/foreign_key_constraint guard anywhere in the module",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'references(:workspaces\\|references(:users' api/priv/repo/migrations/20260527110100_add_tenancy_columns.exs api/priv/repo/migrations/20260708130000_add_owner_user_id_to_api_tokens.exs; grep -n 'assoc_constraint\\|foreign_key_constraint' api/lib/barkpark/auth/api_token.ex"
+    },
+    {
+      "claim": "8 ApiToken insert/update call sites, all non-bang (Repo.insert/Repo.update, never insert!/update!): auth.ex:269 create_token (nil-ws branch), auth.ex:391 insert_token_with_membership (in Repo.transaction), auth.ex:486 create_personal_access_token (nil-ws branch), auth.ex:596 create_share_token, auth.ex:738 create_claude_session_token, plugins/tickets/keys.ex:93 mint, plugins/tickets/keys.ex:151/217 rotate/stamp (Repo.update); seeds/demo.ex:594 is a `{:ok,_} =` pattern-match crash-on-error but is dev-seed code, never an HTTP route",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'ApiToken.changeset\\|Repo.insert\\|Repo.update' api/lib/barkpark/auth.ex api/lib/barkpark/plugins/tickets/keys.ex api/lib/barkpark/seeds/demo.ex"
+    },
+    {
+      "claim": "the softest reachable route touching an ApiToken insert is POST /v1/auth/tokens under pipe_through([:user_auth, :require_user]) -- ANY authenticated user (not admin) self-mints via create_personal_access_token/3; owner_user_id is hard-bound server-side to current_user.id and workspace_id is never read from params (defaults to default_workspace_id()), so it is not attacker-input-triggerable, only a concurrent-deletion race. Every other ApiToken mint route (POST /v1/shares/tokens, POST /w/:ws/p/:proj/v1/tokens, POST /w/:ws/p/:proj/v1/chat/tokens, POST /v1/plugins/tickets/keys) sits behind require_admin or scoped_admin",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && sed -n '1514,1526p' api/lib/barkpark_web/router.ex; sed -n '1934,1947p;2263,2281p' api/lib/barkpark_web/router.ex; sed -n '232,242p' api/lib/barkpark_web/controllers/auth_controller.ex; sed -n '1,7p;30,36p' api/lib/barkpark_web/controllers/ticket_keys_controller.ex"
+    },
+    {
+      "claim": "accounts/webauthn_credential.ex, user_session.ex, user_email_token.ex each cast a real NOT NULL references(:users, on_delete: :delete_all) user_id column AND each already declares assoc_constraint(:user) in its changeset -- they fail the shape-match test (zero foreign_key_constraint) the same way 7/8 of the named files do, so they do NOT belong in the fence as open instances",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'assoc_constraint\\|foreign_key_constraint' api/lib/barkpark/accounts/webauthn_credential.ex api/lib/barkpark/accounts/user_session.ex api/lib/barkpark/accounts/user_email_token.ex; grep -n 'references(:users' api/priv/repo/migrations/20260629150100_create_user_sessions.exs api/priv/repo/migrations/20260629150200_create_user_email_tokens.exs api/priv/repo/migrations/20260705113646_create_webauthn_credentials.exs"
+    },
+    {
+      "claim": "all insert/update call sites for the accounts/ trio go through Barkpark.Accounts / Barkpark.Accounts.Webauthn with user_id server-derived from the authenticated session, never client-supplied -- consistent with the already-declared assoc_constraint guard, not an open leak",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'WebauthnCredential.changeset\\|UserSession.changeset\\|UserEmailToken.changeset' api/lib/barkpark/accounts.ex api/lib/barkpark/accounts/webauthn.ex"
+    }
+  ]
+}
