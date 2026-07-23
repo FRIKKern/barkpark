@@ -160,10 +160,38 @@ defmodule Barkpark.Tasks.Board do
     docs = load_task_docs(dataset)
     status_by_pk = Map.new(docs, fn d -> {d.id, lifecycle_of(d)} end)
     blockers_by_pk = load_blocker_targets(Map.keys(status_by_pk))
+    readable? = field_visibility_gate(dataset)
 
     docs
-    |> Enum.map(&to_card(&1, blockers_by_pk, status_by_pk))
+    |> Enum.map(&to_card(&1, blockers_by_pk, status_by_pk, readable?))
     |> build(now: now)
+  end
+
+  # Field-visibility seal (felix W18) — resolve the `task` schema ONCE per
+  # snapshot (dataset-scoped, NOT per card) and return a fail-closed
+  # visibility predicate `(field :: String.t()) -> boolean()`. This mirrors
+  # board_live's peek seal (load_peek/peek_schema/peek_field_readable?, merged
+  # #5470) and `tasks/query.ex` measure_field_readable?/2: an ANONYMOUS caller,
+  # so any content field the schema declares private / owner_only / readable_by
+  # is redacted from the card projection — and therefore from every derived
+  # copy (`family_walk/4` rows, `gantt_data/1`, `focus_of/1`) which read the
+  # gated card fields, never the raw doc. A nil schema (miss) leaves every field
+  # undeclared ⇒ public (legacy parity), never a crash. One indexed
+  # `Content.get_schema/3` per snapshot bounds the cost.
+  defp field_visibility_gate(dataset) do
+    schema =
+      case Content.get_schema("task", dataset, []) do
+        {:ok, schema} -> schema
+        _ -> nil
+      end
+
+    fn field ->
+      Barkpark.Content.Envelope.field_readable?(
+        schema,
+        field,
+        Barkpark.Content.CallerContext.anonymous()
+      )
+    end
   end
 
   # Fetch every task doc for the dataset, then collapse each logical id's
@@ -192,7 +220,20 @@ defmodule Barkpark.Tasks.Board do
     |> Enum.group_by(fn {from, _to} -> from end, fn {_from, to} -> to end)
   end
 
-  defp to_card(doc, blockers_by_pk, status_by_pk) do
+  # Project one fetched task doc into a normalized card. `readable?` is the
+  # snapshot-wide fail-closed field-visibility predicate (`field_visibility_gate/1`):
+  # THE single seal point (charter W18). Every private-capable content field is
+  # gated here so the deck card AND every derived copy — `family_walk/4`'s tree
+  # rows, `gantt_data/1`'s root row, `focus_of/1`'s focus line — inherit the
+  # redaction from the card fields (they never re-read the raw doc). Gating at
+  # the render sites instead would let the two derived copies diverge, so the
+  # gate lives HERE. The text-bearing fields (description_excerpt, design_doc,
+  # criteria_list, next_criterion — the last two BOTH read raw acceptance_criteria
+  # text) plus the peek-parity fields (labels, priority, parent_id, worker) are
+  # gated; the derived criteria COUNT (`Tasks.criteria_progress/1`, a pure
+  # %{met,total} tally that never carries criterion text) stays UNGATED per the
+  # peek's own count-vs-text law.
+  defp to_card(doc, blockers_by_pk, status_by_pk, readable?) do
     content = doc.content || %{}
 
     blocker_statuses =
@@ -203,22 +244,35 @@ defmodule Barkpark.Tasks.Board do
     %{
       doc_id: Content.published_id(doc.doc_id),
       title: doc.title,
-      priority: Map.get(content, "priority"),
-      parent_id: Map.get(content, "parent_id"),
-      labels: normalize_labels(Map.get(content, "labels")),
-      worker: Map.get(content, "assignee") || get_in(content, ["claim", "worker"]),
+      priority: if(readable?.("priority"), do: Map.get(content, "priority")),
+      parent_id: if(readable?.("parent_id"), do: Map.get(content, "parent_id")),
+      labels:
+        if(readable?.("labels"), do: normalize_labels(Map.get(content, "labels")), else: []),
+      # worker is drawn from `assignee` OR the nested `claim.worker`; redact it
+      # unless BOTH sources are readable (fail-closed union — a private claim
+      # must not leak its worker through the assignee-shaped field, and vice
+      # versa).
+      worker: gated_worker(content, readable?),
       lifecycle_status: lifecycle_of(doc),
       criteria: Tasks.criteria_progress(content),
       github: Link.get(doc),
       github_synced: Link.synced?(doc),
       blocker_statuses: blocker_statuses,
-      next_criterion: next_criterion(content),
-      description_excerpt: excerpt(Map.get(content, "description")),
-      design_doc: string_presence(Map.get(content, "design_doc")),
-      criteria_list: criteria_list(content),
+      next_criterion: if(readable?.("acceptance_criteria"), do: next_criterion(content)),
+      description_excerpt:
+        if(readable?.("description"), do: excerpt(Map.get(content, "description"))),
+      design_doc:
+        if(readable?.("design_doc"), do: string_presence(Map.get(content, "design_doc"))),
+      criteria_list: if(readable?.("acceptance_criteria"), do: criteria_list(content)),
       created_at: doc.inserted_at,
       updated_at: doc.updated_at
     }
+  end
+
+  defp gated_worker(content, readable?) do
+    if readable?.("assignee") and readable?.("claim") do
+      Map.get(content, "assignee") || get_in(content, ["claim", "worker"])
+    end
   end
 
   # The card-sized criteria CHECKLIST — text + met only (evidence stays in the

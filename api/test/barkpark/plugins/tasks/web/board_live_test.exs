@@ -1534,14 +1534,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       refute html =~ ~s(data-role="peek-criterion")
       refute html =~ ~s(data-role="peek-evidence")
 
-      # NOTE (scope): the same private `description` / `acceptance_criteria`
-      # values still surface via the deck card (`card-criteria`,
-      # `description_excerpt`) and the gantt (`gantt-criteria`) — SEPARATE
-      # `Board.snapshot` list-card reads this slice deliberately does not touch
-      # (brief: "peek ONLY; do NOT touch the list-card reads at ~L904/977/998").
-      # That sibling field-visibility bypass is filed as its own backlog child
-      # (task-felix-w13-boardsnapshot-fieldvis-seal), so these assertions are
-      # scoped to the peek surface, never the deck card or the gantt.
+      # NOTE (sibling now sealed): the same private `description` /
+      # `acceptance_criteria` values were ALSO leaking via the deck card
+      # (`card-desc`, `card-criteria`) and the gantt (`gantt-criteria`) off the
+      # SEPARATE `Board.snapshot` list-card reads. That sibling bypass is now
+      # sealed at `Board.to_card/4` (felix W18, task-felix-w13-boardsnapshot-fieldvis-seal)
+      # and proven by the "deck card + gantt field-visibility seal" describe
+      # below (and `board_test.exs`). These peek assertions stay scoped to the
+      # peek surface.
     end
 
     test "a peek field with NO visibility declaration stays public (legacy parity)",
@@ -1554,6 +1554,66 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       assert html =~ ~s(data-role="peek")
       assert html =~ "urgent-label"
+    end
+  end
+
+  describe "deck card + gantt field-visibility seal (Board.snapshot Envelope gate)" do
+    # SIBLING of the peek seal: `Board.snapshot`'s `to_card/4` hand-picks the
+    # same content fields for the DECK CARD (and, through the derived family
+    # rows, the GANTT). Seed a `task` schema marking `description` +
+    # `acceptance_criteria` private plus an in_progress doc carrying them; the
+    # rendered board must never paint the private text on the card or in the
+    # gantt. Mutation: strip the `if(readable?...)` gate from `to_card/4` and
+    # the SECRET strings reappear → these refutes go RED.
+    setup do
+      {:ok, _schema} =
+        Barkpark.Content.upsert_schema(
+          %{
+            "name" => "task",
+            "title" => "Task",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{
+                "name" => "description",
+                "title" => "Body",
+                "type" => "text",
+                "visibility" => "private"
+              },
+              %{
+                "name" => "acceptance_criteria",
+                "title" => "Criteria",
+                "type" => "array",
+                "visibility" => "private"
+              }
+            ]
+          },
+          "production"
+        )
+
+      task("deck-sec", "Sealed board task",
+        lifecycle: "in_progress",
+        description: "SECRET-DECK-BODY-should-not-leak",
+        criteria: [%{"criterion" => "SECRET-DECK-CRITERION", "met" => false, "evidence" => ""}]
+      )
+
+      :ok
+    end
+
+    test "the deck card + gantt OMIT a schema-private field for the board viewer",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      # The always-public title still paints the card...
+      assert html =~ "Sealed board task"
+
+      # ...but the private text never reaches the deck card (`card-desc` /
+      # `card-criteria`) NOR the expanded in-flight gantt (`gantt-criteria`).
+      refute html =~ "SECRET-DECK-BODY-should-not-leak"
+      refute html =~ "SECRET-DECK-CRITERION"
+      refute html =~ ~s(data-role="card-desc")
+      refute html =~ ~s(data-role="card-criteria")
+      refute html =~ ~s(data-role="gantt-criteria")
     end
   end
 
