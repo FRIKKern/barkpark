@@ -1917,6 +1917,18 @@ defmodule BarkparkWeb.Router do
     delete("/:name", SecretController, :delete)
   end
 
+  # ── Fleet support tokens — admin-only mint + revoke (PDF-D57/D60) ───────
+  # The main mints a WRITE-capable, per-support ledger token (label
+  # fleet-support-<name>) so a remote support machine works the ledger as a
+  # distinct, attributable actor; DELETE revokes it at teardown. Admin gate =
+  # WHO may mint, not the minted token's scope. Secret returned ONCE.
+  scope "/v1/fleet/support-tokens", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    post("/", FleetSupportTokenController, :create)
+    delete("/:token_id", FleetSupportTokenController, :delete)
+  end
+
   # ── Instance self-update — admin-only apply trigger + status ───────────
   # POST starts the configured update command (503 unless the box opted in
   # via BARKPARK_SELF_UPDATE_APPLY=1, 409 while a run is in flight); GET
