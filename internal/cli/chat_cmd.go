@@ -25,6 +25,21 @@ import (
 // BEFORE the stray-args reject and the TTY gate, because listing/watching the
 // herd is exactly what a pipe or a script wants (`bp chat ls -o json | jq`,
 // `bp chat ls --watch` in a monitor pane).
+//
+// `bp chat --theme <identity>` reskins the transcript to a design-system palette
+// (charter D61-D64). chat --theme = the SKIN IDENTITY axis (evergreen/charple/
+// ember/fjord/iris), which is DISTINCT from `bp paper --theme` = the light/dark
+// MODE axis; chat mode is fixed dark.
+//
+// chatThemeIdentities are the skin identities `bp chat --theme` accepts — the
+// genPalette ids in internal/pdrender/tokens_gen.go. Resolve/ThemeFor already
+// fall back to evergreen for an id the palette map doesn't carry, but we mirror
+// the set HERE so the fallback is LOUD (a stderr notice) instead of a silent
+// reskin the user never asked for.
+var chatThemeIdentities = map[string]bool{
+	"evergreen": true, "charple": true, "ember": true, "fjord": true, "iris": true,
+}
+
 func runChat(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if len(args) > 0 && args[0] == "ls" {
 		return runChatLs(out, g, ctx, args[1:])
@@ -33,11 +48,49 @@ func runChat(out *writer, g globals, ctx manifest.Context, args []string) int {
 		printChatHelp(out)
 		return exitOK
 	}
+
+	// `--theme <identity>` reskins the transcript to a design-system palette
+	// (charter D61-D64). This is the SKIN IDENTITY axis — evergreen/charple/ember/
+	// fjord/iris — DISTINCT from `bp paper --theme` which selects a light/dark
+	// MODE; chat mode stays dark. It is PEELED here, before the stray-arg reject,
+	// so the flag never trips the "no arguments" gate (mirrors how `ls` is peeled
+	// above). Precedence: this flag > BP_THEME/config (ResolveThemeID) > evergreen.
+	themeFlag := ""
+	var rest []string
+	for i := 0; i < len(args); i++ {
+		key, inlineVal, hasInline := splitFlagToken(args[i])
+		if key == "--theme" {
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--theme")
+			if err != nil {
+				return usageErrf(out, func() { printChatHelp(out) }, "%v", err)
+			}
+			themeFlag = v
+			i = ni - 1
+			continue
+		}
+		rest = append(rest, args[i])
+	}
+	args = rest
+
 	// The client takes no other positionals or flags of its own; reject stray
 	// args so a typo fails loudly instead of being silently ignored.
 	if len(args) > 0 {
 		return usageErrf(out, func() { printChatHelp(out) },
 			"bp chat takes no arguments besides `ls` (got %q)", args[0])
+	}
+
+	// Resolve the skin identity by precedence and validate it. An UNKNOWN id is
+	// NOT an error (correcting the old AC): it falls back to evergreen with a
+	// one-line stderr notice, so a typo degrades to the default skin instead of
+	// crashing a full-screen program.
+	themeID := strings.TrimSpace(themeFlag)
+	if themeID == "" {
+		fileCfg, _ := LoadConfig() // missing/unreadable config → nil → env/default
+		themeID = strings.TrimSpace(ResolveThemeID(fileCfg))
+	}
+	if !chatThemeIdentities[themeID] {
+		out.errf("bp chat: unknown --theme %q — using evergreen (choices: charple, ember, evergreen, fjord, iris)", themeID)
+		themeID = DefaultThemeID
 	}
 
 	// A full-screen alt-screen TUI needs a real terminal. Without one (piped,
@@ -56,6 +109,7 @@ func runChat(out *writer, g globals, ctx manifest.Context, args []string) int {
 		Workspace: ctx.Workspace,
 		Project:   ctx.Project,
 		Dataset:   ctx.Dataset,
+		Theme:     themeID,
 	}
 	if err := chat.Run(cfg); err != nil {
 		out.errf("bp chat: %v", err)
@@ -222,8 +276,13 @@ func chatLsAge(agentStateAt, lastActiveAt string, now time.Time) string {
 
 // printChatHelp prints the short help block for `bp chat`.
 func printChatHelp(out *writer) {
-	out.outf("usage: bp chat            open the herd (interactive TUI)")
-	out.outf("       bp chat ls [--watch]   list the herd without a TTY")
+	out.outf("usage: bp chat [--theme <skin>]   open the herd (interactive TUI)")
+	out.outf("       bp chat ls [--watch]       list the herd without a TTY")
+	out.outf("")
+	out.outf("  --theme <skin>   design-system palette: evergreen (default), charple,")
+	out.outf("                   ember, fjord, iris — the SKIN IDENTITY (mode stays dark;")
+	out.outf("                   distinct from `bp paper --theme` which picks light/dark).")
+	out.outf("                   Unknown skin → evergreen (with a notice). Also BP_THEME.")
 	out.outf("")
 	out.outf("Open the native terminal chat client — the second surface of One Chat, Two")
 	out.outf("Surfaces, driving the SAME engine Studio chat drives over the /v1/chat wire.")

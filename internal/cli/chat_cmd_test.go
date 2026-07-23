@@ -85,6 +85,38 @@ func TestChatRejectsArgs(t *testing.T) {
 	if code != exitUsage {
 		t.Fatalf("unknown ls flag exit code = %d, want %d", code, exitUsage)
 	}
+
+	// `--theme charple` is ACCEPTED: the flag is peeled BEFORE the stray-arg
+	// reject, so it must NOT trip the "takes no arguments" gate. A non-TTY writer
+	// then stops it at the terminal gate — proving the flag was consumed and the
+	// run proceeded past the reject (not rejected as a stray positional).
+	stdout.Reset()
+	stderr.Reset()
+	code = runChat(w, globals{}, manifest.Context{Server: srv.URL}, []string{"--theme", "charple"})
+	if code != exitGeneric {
+		t.Fatalf("`--theme charple` exit = %d, want %d (accepted, then TTY-gated)", code, exitGeneric)
+	}
+	if strings.Contains(stderr.String(), "takes no arguments") {
+		t.Fatalf("`--theme charple` must NOT be rejected as a stray arg: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "needs a terminal") {
+		t.Fatalf("`--theme charple` should reach the TTY gate, got %q", stderr.String())
+	}
+
+	// A bogus skin FALLS BACK to evergreen with a stderr notice (never an
+	// error/crash and never a stray-arg reject) — it too proceeds to the TTY gate.
+	stdout.Reset()
+	stderr.Reset()
+	code = runChat(w, globals{}, manifest.Context{Server: srv.URL}, []string{"--theme", "not-a-skin"})
+	if code != exitGeneric {
+		t.Fatalf("bogus `--theme` exit = %d, want %d (fallback, then TTY-gated)", code, exitGeneric)
+	}
+	if !strings.Contains(stderr.String(), "unknown --theme") || !strings.Contains(stderr.String(), "evergreen") {
+		t.Fatalf("bogus `--theme` must print a fallback notice naming evergreen, got %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "takes no arguments") {
+		t.Fatalf("bogus `--theme` must fall back, NOT stray-arg reject: %q", stderr.String())
+	}
 }
 
 // chatLsTestServer serves the widened sidebar wire (agent_state / cost) for

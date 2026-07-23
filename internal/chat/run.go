@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/FRIKKern/barkpark/internal/pdrender"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -23,6 +24,12 @@ type Config struct {
 	Workspace string
 	Project   string
 	Dataset   string
+	// Theme is the resolved design-system SKIN IDENTITY (evergreen/charple/ember/
+	// fjord/iris) the transcript renders in — DISTINCT from `bp paper --theme`
+	// which selects a light/dark MODE. The CLI resolves it (flag > BP_THEME/config
+	// > evergreen) before handing it in; an empty or unknown id degrades to
+	// evergreen inside pdrender.ThemeFor. Mode is fixed DARK here (no mode axis).
+	Theme string
 }
 
 // streamer owns the live SSE subscription's lifecycle. The chat stream is
@@ -85,6 +92,14 @@ func (s *streamer) stop() {
 // as a command), so a dead server lands an honest error state on the picker
 // instead of freezing the prompt.
 func Run(cfg Config) error {
+	// Reskin the transcript BEFORE the program starts. chatRegistry (render.go) is
+	// the package var every render call reads at CALL time, so reassigning it here
+	// reskins the whole conversation with ZERO edits to render.go — the theme flows
+	// in purely through this seam. This is the SKIN IDENTITY axis (design-system
+	// palette), NOT the light/dark MODE axis `bp paper --theme` drives; mode stays
+	// dark. An empty/unknown cfg.Theme falls back to evergreen inside ThemeFor.
+	chatRegistry = pdrender.DefaultRegistry(pdrender.ThemeFor(cfg.Theme, "dark"))
+
 	tr := NewHTTPTransport(cfg.BaseURL, cfg.Token)
 	stream := &streamer{tr: tr}
 	m := newModel(tr, stream, cfg)
