@@ -26,6 +26,10 @@ defmodule BarkparkWeb.TasksControllerTest do
   alias BarkparkWeb.TasksController.Params
 
   @token "barkpark-test-tasks-token"
+  # A NON-admin token — the default @token carries "admin", which BYPASSES the
+  # field-visibility seal (admins see all). The seal's redaction is only
+  # observable under a non-admin caller.
+  @nonadmin_token "barkpark-test-tasks-nonadmin"
   @dataset "production"
 
   setup do
@@ -88,6 +92,13 @@ defmodule BarkparkWeb.TasksControllerTest do
   defp authed(conn) do
     conn
     |> put_req_header("authorization", "Bearer " <> @token)
+    |> put_req_header("content-type", "application/json")
+  end
+
+  # Authenticate as the NON-admin token (field-visibility seal applies).
+  defp nonadmin(conn) do
+    conn
+    |> put_req_header("authorization", "Bearer " <> @nonadmin_token)
     |> put_req_header("content-type", "application/json")
   end
 
@@ -2852,5 +2863,110 @@ defmodule BarkparkWeb.TasksControllerTest do
   defp test_token_id do
     alias Barkpark.Auth.ApiToken
     Repo.get_by!(ApiToken, token_hash: ApiToken.hash_token(@token)).id
+  end
+
+  # ─── field-visibility seal (fail-closed) ────────────────────────────────
+  # The Tasks JSON read surfaces serialize `doc.content`. Once a task schema
+  # field declares per-field visibility (`private`/`owner_only`/`readable_by`),
+  # a non-admin caller must NOT see it. These lock that the seal
+  # (`Params.seal/3` → `Envelope.redact/4`) is wired at every read path and is
+  # caller-aware — an admin still sees the field, so the seal is a redaction,
+  # not a blanket drop. MUTATION-PROOF: each redaction assertion FAILS against
+  # the pre-seal controller (raw content echo) and PASSES after.
+  describe "field-visibility seal" do
+    setup %{scope: scope} do
+      {:ok, _} =
+        Auth.create_token(@nonadmin_token, "test-tasks-nonadmin", "test", ["read", "write"])
+
+      # Declare a PRIVATE field on the task schema for this tenant (updates the
+      # real "task" schema row register_schemas! seeded — visibility rides its
+      # `fields`; render never consults the schema, only the seal does).
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "task",
+            "title" => "Task",
+            "fields" => [
+              %{"name" => "secret_field", "private" => true},
+              %{"name" => "public_field"}
+            ]
+          },
+          @dataset,
+          scope
+        )
+
+      :ok
+    end
+
+    test "GET /v1/tasks/:id redacts a private content field for a non-admin caller",
+         %{conn: conn, scope: scope} do
+      id = uniq("seal-show")
+      mk_task!(id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
+
+      content =
+        conn |> nonadmin() |> get("/v1/tasks/#{id}") |> json_response(200) |> get_in(["doc", "content"])
+
+      refute Map.has_key?(content, "secret_field"),
+             "private field leaked through the single-task JSON echo"
+
+      assert content["public_field"] == "VISIBLE"
+    end
+
+    test "an admin caller still sees the private field (seal is caller-aware, not a blanket drop)",
+         %{conn: conn, scope: scope} do
+      id = uniq("seal-admin")
+      mk_task!(id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
+
+      content =
+        conn |> authed() |> get("/v1/tasks/#{id}") |> json_response(200) |> get_in(["doc", "content"])
+
+      assert content["secret_field"] == "TOP-SECRET"
+      assert content["public_field"] == "VISIBLE"
+    end
+
+    test "GET /v1/tasks (list) redacts the private field for a non-admin caller",
+         %{conn: conn, scope: scope} do
+      id = uniq("seal-list")
+      task = mk_task!(id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
+
+      doc =
+        conn
+        |> nonadmin()
+        |> get("/v1/tasks")
+        |> json_response(200)
+        |> Map.fetch!("docs")
+        |> Enum.find(&(&1["doc_id"] == task.doc_id))
+
+      assert doc, "task not present in the list response"
+      refute Map.has_key?(doc["content"], "secret_field"),
+             "private field leaked through the task LIST JSON echo"
+
+      assert doc["content"]["public_field"] == "VISIBLE"
+    end
+
+    test "GET /v1/tasks/:id/edges redacts the private field on a dependency for a non-admin caller",
+         %{conn: conn, scope: scope} do
+      from_id = uniq("seal-edge-from")
+      dep_id = uniq("seal-edge-dep")
+      from = mk_task!(from_id, scope, %{"public_field" => "root"})
+      dep = mk_task!(dep_id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
+
+      {:ok, _} = Tasks.add_dep(from.id, dep.id, "blocks", nil)
+
+      dependencies =
+        conn
+        |> nonadmin()
+        |> get("/v1/tasks/#{from_id}/edges")
+        |> json_response(200)
+        |> Map.fetch!("dependencies")
+
+      dep_doc = Enum.find(dependencies, &(&1["doc_id"] == dep.doc_id))
+      assert dep_doc, "dependency not present in the edges response"
+
+      refute Map.has_key?(dep_doc["content"], "secret_field"),
+             "private field leaked through the deps/edges JSON echo"
+
+      assert dep_doc["content"]["public_field"] == "VISIBLE"
+    end
   end
 end

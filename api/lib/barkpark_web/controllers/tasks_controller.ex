@@ -46,6 +46,7 @@ defmodule BarkparkWeb.TasksController do
 
   alias Barkpark.{Content, Repo, Tasks}
   alias Barkpark.Tasks.Fleet
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Document
   alias Barkpark.Content.Graph
   alias Barkpark.Tasks.Edge
@@ -90,6 +91,11 @@ defmodule BarkparkWeb.TasksController do
   # shape with edge counts (the server default STAYS full — SDK/Studio/
   # taskboard untouched).
   defp render_task_list(docs, conn, params) do
+    # Field-visibility seal (fail-closed): redact each doc's content under the
+    # request's caller BEFORE either view renders it, so a private/owner_only
+    # field can never leak through the `content` echo or a promoted key.
+    docs = seal_docs(docs, conn)
+
     case Params.parse_view(params["view"]) do
       :brief ->
         child_counts = Params.batch_child_counts(docs, scope_opts(conn))
@@ -132,19 +138,25 @@ defmodule BarkparkWeb.TasksController do
       # shape. Brief prime also trims recent_events to 5 rows (full keeps the
       # limit default of 10) — orientation, not replay; required for the ≤5 KB
       # brief-prime target (charter decision 12).
+      # Field-visibility seal (fail-closed): render the CARDS off content-redacted
+      # docs. The raw `in_progress` is kept for rails/notices below (they read
+      # only parent_id/claim — never carriers of per-field visibility).
+      sealed_in_progress = seal_docs(in_progress, conn)
+      sealed_ready = seal_docs(ready, conn)
+
       {in_progress_cards, ready_cards} =
         case view do
           :brief ->
-            child_counts = Params.batch_child_counts(in_progress ++ ready, scope)
+            child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            {Enum.map(in_progress, &Params.render_brief(&1, child_counts)),
-             Enum.map(ready, &Params.render_brief(&1, child_counts))}
+            {Enum.map(sealed_in_progress, &Params.render_brief(&1, child_counts)),
+             Enum.map(sealed_ready, &Params.render_brief(&1, child_counts))}
 
           :full ->
-            counts = Params.batch_edge_counts(in_progress ++ ready)
+            counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
 
-            {Enum.map(in_progress, &Params.render_doc_with_counts(&1, counts)),
-             Enum.map(ready, &Params.render_doc_with_counts(&1, counts))}
+            {Enum.map(sealed_in_progress, &Params.render_doc_with_counts(&1, counts)),
+             Enum.map(sealed_ready, &Params.render_doc_with_counts(&1, counts))}
         end
 
       events = if view == :brief, do: Enum.take(events, 5), else: events
@@ -302,7 +314,7 @@ defmodule BarkparkWeb.TasksController do
                 with_rail_extras(
                   %{
                     ok: true,
-                    doc: Params.render_doc(doc),
+                    doc: Params.render_doc(seal_doc(doc, conn)),
                     help: Params.mutation_help(:claim, doc, worker_id)
                   },
                   doc,
@@ -353,10 +365,12 @@ defmodule BarkparkWeb.TasksController do
         # render_doc) to keep the payload lean and avoid deep recursion.
         children = child_tasks(doc.doc_id, conn)
 
+        # Field-visibility seal (fail-closed): the doc AND its child summaries
+        # are rendered off content-redacted docs under the request's caller.
         json(conn, %{
           ok: true,
-          doc: Params.render_doc_with_counts(doc, counts),
-          children: Enum.map(children, &Params.child_summary/1),
+          doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts),
+          children: Enum.map(seal_docs(children, conn), &Params.child_summary/1),
           child_count: length(children)
         })
 
@@ -419,7 +433,7 @@ defmodule BarkparkWeb.TasksController do
               with_rail_extras(
                 %{
                   ok: true,
-                  doc: Params.render_doc(doc),
+                  doc: Params.render_doc(seal_doc(doc, conn)),
                   help: Params.mutation_help(:claim_by_id, doc, worker_id)
                 },
                 doc,
@@ -484,7 +498,7 @@ defmodule BarkparkWeb.TasksController do
           # fires (L1 notices are informational; refusal is the L4 task).
           json(
             conn,
-            with_rail_extras(close_response(doc, worker_id), doc, baseline_rev, conn, params)
+            with_rail_extras(close_response(doc, worker_id, conn), doc, baseline_rev, conn, params)
           )
 
         {:error, {:doc_changed_since_claim, current_rev, changed_fields}} ->
@@ -527,7 +541,7 @@ defmodule BarkparkWeb.TasksController do
         {:ok, %Document{} = doc} ->
           json(conn, %{
             ok: true,
-            doc: Params.render_doc(doc),
+            doc: Params.render_doc(seal_doc(doc, conn)),
             help: Params.mutation_help(:release, doc, worker_id)
           })
 
@@ -553,10 +567,13 @@ defmodule BarkparkWeb.TasksController do
   # (Criteria.progress/1 returns nil — omit, never "0/0").
   # axi-s4 R5: the envelope also carries `help` (next-command templates —
   # after a close that is `bp task next <worker>`), a sibling of `warnings`.
-  defp close_response(%Document{} = doc, worker_id) do
+  defp close_response(%Document{} = doc, worker_id, conn) do
     base = %{
       ok: true,
-      doc: Params.render_doc(doc),
+      # Field-visibility seal (fail-closed) on the echoed doc; the warning
+      # computation below stays on the RAW doc (it is about the actor's own
+      # close, never a visibility decision).
+      doc: Params.render_doc(seal_doc(doc, conn)),
       help: Params.mutation_help(:close, doc, worker_id)
     }
 
@@ -595,7 +612,7 @@ defmodule BarkparkWeb.TasksController do
 
       case Tasks.stage(task.id, state, opts) do
         {:ok, %Document{} = doc} ->
-          json(conn, %{ok: true, doc: Params.render_doc(doc)})
+          json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
 
         {:error, {:illegal_transition, from, to}} ->
           # A refused transition (bad target OR an illegal table pair) is a 422
@@ -663,7 +680,7 @@ defmodule BarkparkWeb.TasksController do
           # pulse's bumped one).
           json(conn, %{
             ok: true,
-            doc: Params.render_doc(doc),
+            doc: Params.render_doc(seal_doc(doc, conn)),
             help: Params.mutation_help(:stamp, doc, worker_id)
           })
 
@@ -736,7 +753,7 @@ defmodule BarkparkWeb.TasksController do
           # epoch the caller last saw.
           json(conn, %{
             ok: true,
-            doc: Params.render_doc(doc),
+            doc: Params.render_doc(seal_doc(doc, conn)),
             help: Params.mutation_help(:pulse, doc, worker_id)
           })
 
@@ -793,10 +810,12 @@ defmodule BarkparkWeb.TasksController do
         deps = Tasks.dependencies(task.id, kind: kind_opt)
         dependents = Tasks.dependents(task.id, kind: kind_opt)
 
+        # Field-visibility seal (fail-closed): the deps/next graph is rendered
+        # off content-redacted docs under the request's caller.
         json(conn, %{
           ok: true,
-          dependencies: Enum.map(deps, &Params.render_doc/1),
-          dependents: Enum.map(dependents, &Params.render_doc/1)
+          dependencies: Enum.map(seal_docs(deps, conn), &Params.render_doc/1),
+          dependents: Enum.map(seal_docs(dependents, conn), &Params.render_doc/1)
         })
 
       {:error, :not_found} ->
@@ -1017,6 +1036,40 @@ defmodule BarkparkWeb.TasksController do
     conn.params["dataset"] || "production"
   end
 
+  # ─── field-visibility seal (fail-closed) ────────────────────────────────
+  # Redact each task doc's `content` under the request's caller through the
+  # canonical Envelope chokepoint (`Params.seal/3` → `Envelope.redact/4`) before
+  # it is serialized. ONE caller + "task"-schema resolve per request, applied to
+  # every doc the response echoes — the list, single-doc, edges/next, and
+  # mutation-ack paths all pass their docs through here so NO `render_doc`
+  # emission is fail-open. Latent hardening: with no task field declaring
+  # visibility today the wire is byte-identical; it fails closed the moment one
+  # does. Siblings already sealed: `Barkpark.Tasks.Query`'s measure/agg branch
+  # and the board peek panel — this closes the JSON echo they left behind.
+  defp seal_docs(docs, conn) when is_list(docs) do
+    {caller, schema} = seal_ctx(conn)
+    Enum.map(docs, &Params.seal(&1, caller, schema))
+  end
+
+  defp seal_doc(%Document{} = doc, conn) do
+    {caller, schema} = seal_ctx(conn)
+    Params.seal(doc, caller, schema)
+  end
+
+  # The request principal + the resolved "task" schema — resolved ONCE and
+  # reused across a list. A missing schema (`{:error, :not_found}`) yields nil:
+  # `Envelope.redact/4` then still drops encrypted ciphertext, and declared
+  # visibility (which needs the schema) simply has nothing to act on.
+  defp seal_ctx(conn) do
+    schema =
+      case Content.get_schema("task", request_dataset(conn), scope_opts(conn)) do
+        {:ok, s} -> s
+        _ -> nil
+      end
+
+    {CallerContext.from_conn(conn), schema}
+  end
+
   # ─── POST /v1/tasks/edges ───────────────────────────────────────────────
 
   def add_edge(conn, params) do
@@ -1067,7 +1120,7 @@ defmodule BarkparkWeb.TasksController do
       {:ok, task} ->
         case Tasks.relabel_by_id(task.id, add, remove, caller_token_id(conn)) do
           {:ok, %Document{} = doc} ->
-            json(conn, %{ok: true, doc: Params.render_doc(doc)})
+            json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
 
           {:error, reason} ->
             conn
@@ -1092,7 +1145,7 @@ defmodule BarkparkWeb.TasksController do
       {:ok, task} ->
         case Tasks.update_paper_refs_by_id(task.id, add, remove, caller_token_id(conn)) do
           {:ok, %Document{} = doc} ->
-            json(conn, %{ok: true, doc: Params.render_doc(doc)})
+            json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
 
           {:error, reason} ->
             conn
@@ -1135,7 +1188,7 @@ defmodule BarkparkWeb.TasksController do
 
                 json(
                   conn,
-                  %{ok: true, doc: Params.render_doc(doc)}
+                  %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))}
                   |> maybe_put(:rail_rev, Tasks.rail_rev(new_parent_doc_id, scope))
                   |> maybe_put(:from_rail_rev, Tasks.rail_rev(old_parent, scope))
                 )

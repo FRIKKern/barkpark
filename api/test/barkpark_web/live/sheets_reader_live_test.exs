@@ -788,6 +788,62 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     end
   end
 
+  # ── field-visibility seal (fail-closed) ─────────────────────────────────────
+  # The anonymous public reader serializes `doc.content` into SheetGrid. Once a
+  # sheet schema field declares per-field visibility, an anonymous visitor must
+  # NOT see it. The reader seals the content through the canonical Envelope
+  # chokepoint under the ANONYMOUS caller (mirroring the public paper reader).
+  # The only content the reader surfaces is the grid ("tabs"), so the
+  # MUTATION-PROOF marks "tabs" private and asserts the cell value is redacted:
+  # it FAILS against the pre-seal reader (raw content → cell present) and PASSES
+  # after (schema-declared-private "tabs" dropped → cell gone).
+  describe "field-visibility seal" do
+    setup do
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      %{scope: [workspace_id: ws.id, project_id: project.id]}
+    end
+
+    defp declare_sheet_field!(field, scope) do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "sheet", "title" => "Sheet", "fields" => [field]},
+          @dataset,
+          scope
+        )
+
+      :ok
+    end
+
+    test "a schema-declared-private grid field is redacted from the anonymous reader",
+         %{conn: conn, scope: scope} do
+      create_draft!("rdr-seal-priv", one_tab(%{"A1" => %{"v" => "topsecretcell"}}))
+      publish!("rdr-seal-priv")
+
+      # The grid-bearing content field is private → the anonymous reader must
+      # not render its cells.
+      declare_sheet_field!(%{"name" => "tabs", "private" => true}, scope)
+
+      {:ok, _view, html} = live(conn, "/sheets/rdr-seal-priv")
+
+      refute html =~ ~s(data-v="topsecretcell"),
+             "a private grid field leaked to the anonymous sheet reader"
+    end
+
+    test "with no visibility declared the seal is a byte-identical no-op (cells still render)",
+         %{conn: conn, scope: scope} do
+      create_draft!("rdr-seal-public", one_tab(%{"A1" => %{"v" => "topsecretcell"}}))
+      publish!("rdr-seal-public")
+
+      # Same field, NO visibility flag → the seal drops nothing (latent no-op),
+      # proving the redaction is schema-driven, not a blanket strip.
+      declare_sheet_field!(%{"name" => "tabs"}, scope)
+
+      {:ok, _view, html} = live(conn, "/sheets/rdr-seal-public")
+
+      assert html =~ ~s(data-v="topsecretcell")
+    end
+  end
+
   # preview-contract pc-w2: the sheet reader emits the shared social-share head
   # (og/twitter) from the sheet's preview manifest, in the DEAD render (crawlers
   # + unfurlers run no JS). A sheet's raw type maps to og:type=website (D8) —
