@@ -49,6 +49,18 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "G", "end":
 		m.pickCursor = len(m.sessions)
 		return m.syncHerdCursorFromIndex(), nil
+	case "pgup":
+		m.pickCursor -= m.pickerPage() // page by one window (g/home stays the full jump)
+		if m.pickCursor < 0 {
+			m.pickCursor = 0
+		}
+		return m.syncHerdCursorFromIndex(), nil
+	case "pgdown":
+		m.pickCursor += m.pickerPage()
+		if m.pickCursor > len(m.sessions) {
+			m.pickCursor = len(m.sessions)
+		}
+		return m.syncHerdCursorFromIndex(), nil
 	case "enter":
 		return m.openPickerRow()
 	case "n":

@@ -1307,14 +1307,30 @@ func (m Model) renderPicker() string {
 		b.WriteString(noticeStyle.Render("Could not load sessions: "+m.pickErr) + "\n")
 		b.WriteString(dimStyle.Render("press r to retry · q to quit"))
 	default:
-		for i, r := range rows {
+		// Window the ROW BLOCK ONLY by summed PHYSICAL lines (a workflow row is
+		// one navigable entry spanning three lines) — the header above and the
+		// notice/footer below always paint. m.height<=0 (bare test Models, no
+		// WindowSizeMsg yet) falls back to show-all, never an empty paint.
+		start, end := 0, len(rows)
+		if m.height > 0 {
+			counts := rowLineCounts(rows)
+			start = m.followPickTop()
+			end = pickerFitEnd(counts, m.pickerAvail(), start)
+		}
+		if start > 0 {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more above", start)) + "\n")
+		}
+		for i := start; i < end; i++ {
 			cursor := "  "
-			line := r
+			line := rows[i]
 			if i == m.pickCursor {
 				cursor = youStyle.Render("▸ ")
-				line = titleStyle.Render(r)
+				line = titleStyle.Render(rows[i])
 			}
 			b.WriteString(cursor + line + "\n")
+		}
+		if below := len(rows) - end; below > 0 {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more below", below)) + "\n")
 		}
 		if len(m.sessions) == 0 {
 			b.WriteString("\n" + dimStyle.Render("No sessions yet — the row above starts your first one."))
@@ -1355,6 +1371,114 @@ func (m Model) pickerRows() []string {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// ── picker windowing (cursor-follow viewport) ────────────────────────────────
+//
+// The picker windows its ROW BLOCK the way the taskboard windows its spine
+// (windowSpine): a viewport clipped to the terminal, ↑/↓ "N more" affordances
+// for hidden overflow, and a top that slides so the cursor row never leaves
+// view. Rows are variable-HEIGHT here (a workflow session is one navigable row
+// spanning three physical lines), so all budgets count physical lines, never
+// row indices.
+
+// rowLineCounts is each picker row's physical-line span (1 + embedded
+// newlines) — the unit every windowing budget is charged in.
+func rowLineCounts(rows []string) []int {
+	counts := make([]int, len(rows))
+	for i, r := range rows {
+		counts[i] = strings.Count(r, "\n") + 1
+	}
+	return counts
+}
+
+// pickerAvail is the physical-line budget for the row block: the frame minus
+// the chrome renderPicker paints outside the loop (title + rule + blank above;
+// two footer lines below; one more when the fleet notice is up). Floored at 1
+// so a pathologically short terminal still paints the cursor row — never an
+// empty list.
+func (m Model) pickerAvail() int {
+	chrome := 6
+	if m.fleetNotice != "" {
+		chrome++
+	}
+	avail := m.height - chrome
+	if avail < 1 {
+		avail = 1
+	}
+	return avail
+}
+
+// pickerFitEnd is the exclusive end row of the window starting at top: rows
+// are admitted while their summed physical lines fit the budget, with one line
+// re-charged per more-indicator (↑ when top > 0, ↓ when rows remain below).
+// At least one row is always admitted so a row taller than the whole budget
+// (workflow card on a tiny terminal) still paints rather than looping forever.
+func pickerFitEnd(counts []int, avail, top int) int {
+	fit := func(budget int) int {
+		end, used := top, 0
+		for end < len(counts) && used+counts[end] <= budget {
+			used += counts[end]
+			end++
+		}
+		return end
+	}
+	budget := avail
+	if top > 0 {
+		budget-- // the ↑ indicator line
+	}
+	end := fit(budget)
+	if end < len(counts) {
+		end = fit(budget - 1) // the ↓ indicator line
+	}
+	if end <= top {
+		end = top + 1
+	}
+	return end
+}
+
+// followPickTop slides the stored viewport top the minimum distance that keeps
+// pickCursor's FULL physical-line span inside the window (cursor-follow). Pure:
+// render calls it for the effective top, the key/sync paths persist it back to
+// m.pickTop so paging accumulates. m.height<=0 means show-all (top 0).
+func (m Model) followPickTop() int {
+	if m.height <= 0 {
+		return 0
+	}
+	rows := m.pickerRows()
+	if len(rows) == 0 {
+		return 0
+	}
+	counts := rowLineCounts(rows)
+	avail := m.pickerAvail()
+	cursor := clamp(m.pickCursor, 0, len(rows)-1)
+	top := clamp(m.pickTop, 0, len(rows)-1)
+	if cursor < top {
+		return cursor
+	}
+	for top < cursor && cursor >= pickerFitEnd(counts, avail, top) {
+		top++
+	}
+	return top
+}
+
+// pickerPage is one window's worth of navigable rows — the pgup/pgdn stride.
+// Show-all (no height yet) pages the whole roster, i.e. a full jump.
+func (m Model) pickerPage() int {
+	if m.height <= 0 {
+		return len(m.sessions)
+	}
+	rows := m.pickerRows()
+	if len(rows) == 0 {
+		return 1
+	}
+	counts := rowLineCounts(rows)
+	start := m.followPickTop()
+	n := pickerFitEnd(counts, m.pickerAvail(), start) - start
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 // herdRowLine paints one session's herd row — one physical line: the

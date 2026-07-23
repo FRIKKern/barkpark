@@ -60,6 +60,7 @@ type Model struct {
 	// resort, so the cursor follows its session, never its row number.
 	sessions    []SessionSummary
 	pickCursor  int
+	pickTop     int // first visible picker ROW (viewport top) — cursor-follow windowing; distinct from the transcript scroll
 	pickErr     string
 	loading     bool
 	herd        HerdState
@@ -448,6 +449,7 @@ func (m Model) syncCursorFromHerd() Model {
 		for i, s := range order {
 			if s.ID == m.herd.Cursor {
 				m.pickCursor = i + 1
+				m.pickTop = m.followPickTop()
 				return m
 			}
 		}
@@ -465,9 +467,11 @@ func (m Model) syncHerdCursorFromIndex() Model {
 	order := m.orderedSessions()
 	if m.pickCursor <= 0 || m.pickCursor > len(order) {
 		m.herd.Cursor = ""
+		m.pickTop = m.followPickTop()
 		return m
 	}
 	m.herd.Cursor = order[m.pickCursor-1].ID
+	m.pickTop = m.followPickTop()
 	return m
 }
 
