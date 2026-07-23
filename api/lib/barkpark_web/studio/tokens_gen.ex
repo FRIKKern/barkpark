@@ -48,6 +48,20 @@ defmodule BarkparkWeb.Studio.TokensGen do
   # Neutral gray fallback for an unrecognised / missing status.
   def status_health_unknown, do: "#6b7280"
 
+  # Personal Dev Fleet listener-status DATA tones (fleet_live.ex @pills dot +
+  # track tint at /admin/fleet) — the PDF-D23 vocabulary as inline-style hex,
+  # categorical listener-liveness DATA, not a CSS role. STRING keys: the
+  # consumer keys by the runtime status string; an unrecognised status falls
+  # back to "idle" in FleetLive.pill/1.
+  def fleet_status,
+    do: %{
+      "working" => "#16a34a",
+      "idle" => "#64748b",
+      "blocked" => "#dc2626",
+      "provisioning" => "#7c3aed",
+      "offline" => "#94a3b8"
+    }
+
   # Lifecycle mirror — one row per state, canonical emission order. glyph +
   # ascii are text CONTENT; light/dark are the adaptive hue LABELS (the applied
   # colour is var(--life-<state>) from the GENERATED CSS block). Mirrors

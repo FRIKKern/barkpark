@@ -253,6 +253,12 @@ for (const role of ["operational", "degraded", "partial_outage", "major_outage",
   ok(HEX.test(statusHealth[role] || ""), `color.statusHealth.${role} must be #rrggbb, got ${JSON.stringify(statusHealth[role])}`);
 }
 
+// --- fleet listener-status tones (color.fleetStatus): 5 single hex ----------
+const fleetStatus = color.fleetStatus || {};
+for (const role of ["working", "idle", "blocked", "provisioning", "offline"]) {
+  ok(HEX.test(fleetStatus[role] || ""), `color.fleetStatus.${role} must be #rrggbb, got ${JSON.stringify(fleetStatus[role])}`);
+}
+
 // --- error page palette (color.errorPage): 3 single fixed-dark hex ----------
 // Intentionally NON-theme-aware (a stark always-dark error card) — one hex each.
 const errorPage = color.errorPage || {};
@@ -351,5 +357,5 @@ console.log("OK: design/tokens.json is well-formed and complete.");
 console.log("  color roles: 10 base + 4 status (ok/warn/danger/info), light+dark");
 console.log(`  lifecycle states: ${REQUIRED_LIFE.length} reconciled 1:1 with internal/semrole + taskboard`);
 console.log("  fonts: chrome (self-hosted Inter) / mono / reading; type: chrome + reading scales");
-console.log("  paper/email/callout/mailChrome/provider/cloudChrome/authButton/statusChrome/statusHealth/errorPage/readerInfo: shape-gated");
+console.log("  paper/email/callout/mailChrome/provider/cloudChrome/authButton/statusChrome/statusHealth/fleetStatus/errorPage/readerInfo: shape-gated");
 process.exit(0);
