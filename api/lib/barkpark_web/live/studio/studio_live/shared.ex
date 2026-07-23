@@ -357,6 +357,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           {:noreply,
            put_flash(socket, :error, "Publish blocked: #{format_wall_details(details)}")}
 
+        # The E3 tag-registry wall (authoring-excellence D80): an unknown-tag
+        # rejection names each unregistered tag with its nearest suggestion, so
+        # the fix is one flash away — never the content-free "Action failed".
+        {:error, {:unknown_tag, payload}} ->
+          {:noreply,
+           put_flash(socket, :error, "Publish blocked: #{format_wall_details(payload)}")}
+
+        # The E4 dedup wall (authoring-excellence D80/D81): a near-duplicate
+        # rejection surfaces the incumbent's published id plus the fix, so the
+        # author can extend that document instead of re-publishing a twin.
+        {:error, {:duplicate_of, payload}} ->
+          {:noreply,
+           put_flash(socket, :error, "Publish blocked: #{format_wall_details(payload)}")}
+
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Action failed")}
       end
@@ -374,6 +388,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   """
   def format_wall_details(details) when is_list(details) do
     details |> Enum.map(&format_wall_details/1) |> Enum.join(" · ")
+  end
+
+  # The E3 tag-registry rejection (authoring-excellence D80/D81): each
+  # unregistered tag names itself with its best-first trgm suggestions — "unknown
+  # tag 'serach' — did you mean 'search'?". Bounded upstream (≤12 names via the
+  # label-spine `@max_tags`, ≤3 suggestions/name via `@suggestion_limit`), so no
+  # truncation is needed here. Ordered BEFORE the generic `%{}` clause below —
+  # this payload has no field/rule/fix, so it must not fall through to it.
+  def format_wall_details(%{unknown: unknown, suggestions: suggestions})
+      when is_list(unknown) and is_map(suggestions) do
+    unknown
+    |> Enum.map(fn name ->
+      case Map.get(suggestions, name, []) do
+        [] ->
+          "unknown tag '#{name}'"
+
+        names ->
+          "unknown tag '#{name}' — did you mean #{Enum.map_join(names, ", ", &"'#{&1}'")}?"
+      end
+    end)
+    |> Enum.join(" · ")
+  end
+
+  # The E4 dedup rejection (authoring-excellence D81): the payload's `:message`
+  # is FIXED generic prose that lacks the one actionable datum — the incumbent's
+  # published id lives in `:duplicate_of`. So the flash composes fresh from that
+  # id plus guidance consistent with the wall's @hints prose. `:similar`/`:advise`
+  # are UNCAPPED upstream and deliberately NOT rendered here — only the incumbent
+  # id. Ordered BEFORE the generic `%{}` clause below.
+  def format_wall_details(%{duplicate_of: incumbent}) when is_binary(incumbent) do
+    "duplicate of #{incumbent} — extend that document, or differentiate this one's title/tags"
   end
 
   def format_wall_details(%{} = detail) do
@@ -445,6 +490,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
             {:error, {:label_spine, details}} ->
               {ok, halted, err, walled + 1, wall_detail || format_wall_details(details)}
+
+            # The E3/E4 wall shapes (authoring-excellence D80): an unknown-tag or
+            # near-duplicate rejection is a WALL block, not a generic failure —
+            # fold both into the `walled` accumulator (first-wall_detail idiom) so
+            # the batch flash attributes them to the wall with a concrete fix.
+            {:error, {:unknown_tag, payload}} ->
+              {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
+
+            {:error, {:duplicate_of, payload}} ->
+              {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
 
             _ ->
               {ok, halted, err + 1, walled, wall_detail}
