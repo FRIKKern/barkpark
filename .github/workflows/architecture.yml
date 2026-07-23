@@ -19,6 +19,7 @@ on:
       - "api/**"
       - "internal/**"
       - "js/**"
+      - "apps/**"
       - "tooling/concept-map/**"
       - "tooling/symbol-graph/**"
       - ".github/workflows/architecture.yml"

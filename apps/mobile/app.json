@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Barkpark",
+    "slug": "barkpark-mobile",
+    "version": "0.1.0",
+    "scheme": "barkpark",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "platforms": ["ios", "android"],
+    "ios": {
+      "bundleIdentifier": "cloud.barkpark.mobile",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "cloud.barkpark.mobile",
+      "edgeToEdgeEnabled": true
+    }
+  }
+}
