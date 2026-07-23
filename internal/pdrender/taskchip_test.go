@@ -180,7 +180,7 @@ func TestTaskChipEmptyTitleFallsBackToAlias(t *testing.T) {
 // this is the anti-refork guard. A future hand-edit that re-hardcodes a chip
 // glyph diverging from gridblocks.go fails HERE.
 func TestTaskChipGlyphDelegatesToGatedVocabulary(t *testing.T) {
-	for _, status := range []string{"open", "in_progress", "blocked", "done", "cancelled"} {
+	for _, status := range []string{"open", "ready", "in_progress", "blocked", "done", "closed", "cancelled", "considering", "researching"} {
 		got := taskStatusGlyph(status)
 		want := glyphForRole(roleForStatus(status))
 		if got != want {
