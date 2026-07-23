@@ -80,7 +80,9 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLiveTest do
   end
 
   defp now_iso, do: DateTime.utc_now() |> DateTime.to_iso8601()
-  defp iso_ago(seconds), do: DateTime.utc_now() |> DateTime.add(-seconds, :second) |> DateTime.to_iso8601()
+
+  defp iso_ago(seconds),
+    do: DateTime.utc_now() |> DateTime.add(-seconds, :second) |> DateTime.to_iso8601()
 
   describe "mount + render" do
     test "paints the header and the empty-state when there are no listeners", %{conn: conn} do
@@ -156,16 +158,23 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLiveTest do
       ctx = %{dataset: @dataset, workspace_id: ws.id}
 
       # ON (tasks enabled by default) — the highway surfaces Fleet under the ws.
-      on_desk = Enum.map(Registry.collect_desk_items(baseline: [], ctx: ctx), &Map.get(&1, :label))
-      on_menu = Enum.map(Registry.collect_top_menu_entries(baseline: [], ctx: ctx), &Map.get(&1, :label))
+      on_desk =
+        Enum.map(Registry.collect_desk_items(baseline: [], ctx: ctx), &Map.get(&1, :label))
+
+      on_menu =
+        Enum.map(Registry.collect_top_menu_entries(baseline: [], ctx: ctx), &Map.get(&1, :label))
+
       assert "Fleet" in on_desk
       assert "Fleet" in on_menu
 
       # OFF — disable the tasks plugin for this workspace.
       {:ok, _} = Tenancy.set_workspace_plugin_settings(ws.id, %{"tasks" => %{"enabled" => false}})
 
-      off_desk = Enum.map(Registry.collect_desk_items(baseline: [], ctx: ctx), &Map.get(&1, :label))
-      off_menu = Enum.map(Registry.collect_top_menu_entries(baseline: [], ctx: ctx), &Map.get(&1, :label))
+      off_desk =
+        Enum.map(Registry.collect_desk_items(baseline: [], ctx: ctx), &Map.get(&1, :label))
+
+      off_menu =
+        Enum.map(Registry.collect_top_menu_entries(baseline: [], ctx: ctx), &Map.get(&1, :label))
 
       refute "Fleet" in off_desk,
              "the Fleet desk link must disappear when the Tasks plugin is off"
@@ -202,11 +211,22 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLiveTest do
     end
 
     test "humanizes recent → distant ages", %{now: now} do
-      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, -2, :second)), now) == "just now"
-      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, -30, :second)), now) == "30s"
-      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, -300, :second)), now) == "5m"
-      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, -7200, :second)), now) == "2h"
-      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, -172_800, :second)), now) == "2d"
+      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, -2, :second)), now) ==
+               "just now"
+
+      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, -30, :second)), now) ==
+               "30s"
+
+      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, -300, :second)), now) ==
+               "5m"
+
+      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, -7200, :second)), now) ==
+               "2h"
+
+      assert FleetLive.relative_age(
+               DateTime.to_iso8601(DateTime.add(now, -172_800, :second)),
+               now
+             ) == "2d"
     end
 
     test "a missing or unparsable last_seen reads em-dash, never a crash", %{now: now} do
@@ -215,7 +235,8 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLiveTest do
     end
 
     test "a future last_seen clamps to just now (never a negative age)", %{now: now} do
-      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, 60, :second)), now) == "just now"
+      assert FleetLive.relative_age(DateTime.to_iso8601(DateTime.add(now, 60, :second)), now) ==
+               "just now"
     end
   end
 end
