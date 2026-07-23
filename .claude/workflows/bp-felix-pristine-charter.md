@@ -1507,6 +1507,24 @@ Backlog filed: `task-felix-w18-authority-lock-mutation-proof` (P3),
 
 ## Wave log
 
+- **Wave 18 — 2026-07-23 — REVIEWED (A−, per `felix-pristine-wave-18-2026-07-23`). Arm: E (E4 —
+  Fable-architected + Fable-graded).** All 3 round-1 slices BUILT, reviewer-verified, PUSHED with
+  PRs: FK-abort family close (api_token FK translators + cloud device_auth assoc_constraint,
+  #5777 on `loop-epic/fk-abort-family-close-apitoken-cloud-dev-0-r` — one reviewer format fix),
+  studio_chat telemetry-race FOR-SHARE pre-check + delete_session RESTRICT→changeset + chat_live
+  flash (#5778), Board.snapshot field-visibility seal at to_card/4 (#5779). Reviewer re-ran every
+  gate green on final state (10/0+35/0, 104/0+178/0, 104/0) and confirmed parity with the #5470
+  peek seal (lifecycle_status + github ungated in BOTH projections — no divergence). Ledger clean:
+  all 3 tasks in_progress with merge gates honestly open for the LEAD; residuals honest —
+  `card_from_broadcast/2` realtime re-leak filed as `task-e98797b38ca3b51e`, approve/2 changeset
+  bypass documented not changed. DEVIATION: D109's dual INDEPENDENT review ran as one reviewer's
+  two adversarial passes, not two agents. E4 score: 0 premise failures escaped to build,
+  review-repair load = 1 trivial format fix; quality axis SUPPORTS E4, token axis pending the
+  meter read. NEXT: lead merges #5777/#5778/#5779 (each WAITS for the Elixir Test gate; #5777 also
+  carries cloud/), closes each task's merge criterion, then the realtime broadcast seal
+  (task-e98797b38ca3b51e) is the sharpest open child; backlog: authority-lock mutation proof (P3),
+  registry staleability (P4), github route-tier drift (P4).
+
 - **Wave 18 — 2026-07-23 — DECIDED (building). Arm: E (E4 — Fable-architected + Fable-graded, lean
   base).** Ratified D105–D111; recovered the stranded W17 D98–D104 text (unpushed local-main commit
   46fb0d67e) into the pushed charter. Ghost 07-22 W18 paper ruled an abandoned attempt (published, 21
