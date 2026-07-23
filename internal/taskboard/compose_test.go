@@ -17,7 +17,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 // composeSubjectID is the fixture's drilled-into task.
@@ -78,7 +80,7 @@ func composeFixture() Model {
 			OrphansFocusSet: focusOf(composeSubjectID, "sse-decode", "sse-debounce", "sse-conn-dot"),
 			Counts:          map[string]int{"in_progress": 2, "done": 1},
 		},
-		ui:      UIState{Conn: ConnLive, LastSync: at("2026-07-04T17:28:00Z"), CollapsedEpics: map[string]bool{}},
+		ui:      UIState{Conn: ConnLive, LastSync: at("2026-07-04T17:28:00Z"), CollapsedEpics: map[string]bool{}, HoverStop: -1},
 		details: details,
 		tasks:   tasks,
 		papers: map[string]PaperState{
@@ -935,5 +937,202 @@ func TestPaperActResolvesCursorStop(t *testing.T) {
 	got, ok := m.readingSubjectTask()
 	if !ok || got.DocID != stops[0].Ref {
 		t.Fatalf("paper act resolved %+v (ok=%v), want the cursor stop %q", got, ok, stops[0].Ref)
+	}
+}
+
+// ── Reading-frame rail-stop hover (charter D99) ──────────────────────────────
+
+// probeHoverOpen returns the live SGR open sequence hoverStyle emits under the
+// active color profile, so a test can assert a line wears the accent hover
+// restyle without hard-coding escape bytes.
+func probeHoverOpen(t *testing.T) string {
+	t.Helper()
+	rendered := hoverStyle.Render("\x00\x00")
+	i := strings.Index(rendered, "\x00\x00")
+	if i <= 0 {
+		t.Fatalf("hoverStyle rendered no open sequence under this profile: %q", rendered)
+	}
+	return rendered[:i]
+}
+
+// Depth>0: a Motion over a right-pane rail stop PAINTS that stop's body line in
+// the accent foreground (hoverStyle) — the SAME grammar as the board hover,
+// distinct from the cursor stop's ▎ bar. Mirrors TestWideMouseRightRailClickSelectsStop
+// (the click twin). withChrome + a truecolor profile are mandatory: the default
+// profile emits no SGR, so the paint would be the identity and prove nothing.
+func TestWideRailHoverPaintsStop(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+	withChrome(t)
+
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 60, true // tall enough that the detail body fits
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	_, innerW, inner := m.wideGeom()
+	rightW := innerW - boardPaneWidth - paneGutter2
+	body, stops := m.frameContent(m.topFrame(), rightW, m.now())
+	if len(body) > inner {
+		t.Fatalf("fixture body (%d) must fit the pane (%d) so stops are on-screen", len(body), inner)
+	}
+	if len(stops) < 2 {
+		t.Fatalf("need >=2 rail stops to prove the paint tracks the pointer, got %d", len(stops))
+	}
+
+	// Baseline: no pointer (HoverStop -1) paints nothing.
+	m.ui.HoverStop = -1
+	before := composeAt(m, innerW, m.height-1)
+
+	// Drive a hover Motion over stop 1's body line (body fits ⇒ pane line == body
+	// line ⇒ composeAt row == body line + 1).
+	target := stops[1]
+	m2, _ := m.wideMouseMotion(boardPaneWidth+paneGutter2, target.Line+1, innerW, inner, m.now())
+	if m2.ui.HoverStop != 1 {
+		t.Fatalf("motion over stop 1 set HoverStop %d, want 1", m2.ui.HoverStop)
+	}
+	after := composeAt(m2, innerW, m.height-1)
+
+	if after == before {
+		t.Fatal("a hovered rail stop produced NO visible change in the styled frame")
+	}
+	hoverOpen := probeHoverOpen(t)
+	bl, al := strings.Split(before, "\n"), strings.Split(after, "\n")
+	if len(bl) != len(al) {
+		t.Fatalf("hover changed the line count: %d vs %d", len(bl), len(al))
+	}
+	changed, changedIdx := 0, -1
+	for i := range al {
+		if ansi.Strip(al[i]) != ansi.Strip(bl[i]) {
+			t.Errorf("line %d: hover changed the VISIBLE text (styling only expected)\n got: %q\nwant: %q",
+				i, ansi.Strip(al[i]), ansi.Strip(bl[i]))
+		}
+		if al[i] == bl[i] {
+			continue
+		}
+		changed, changedIdx = changed+1, i
+		if !strings.Contains(al[i], hoverOpen) {
+			t.Errorf("line %d changed without the accent hover restyle:\n%q", i, al[i])
+		}
+	}
+	if changed != 1 {
+		t.Fatalf("hover restyled %d lines, want exactly 1 (only the hovered stop)", changed)
+	}
+	if changedIdx != target.Line+1 {
+		t.Fatalf("hover painted composeAt row %d, want %d (the stop's pane row)", changedIdx, target.Line+1)
+	}
+	// The painted change lands in the RIGHT pane, never the left board pane.
+	r := []rune(ansi.Strip(al[changedIdx]))
+	if len(r) <= boardPaneWidth+paneGutter2 || strings.TrimSpace(string(r[:boardPaneWidth])) != strings.TrimSpace(string([]rune(ansi.Strip(bl[changedIdx]))[:boardPaneWidth])) {
+		t.Fatalf("hover altered the LEFT board pane, want the right reading pane only:\n%q", al[changedIdx])
+	}
+}
+
+// The change guard IS the debounce (charter D95): a second Motion onto the SAME
+// stop returns an unchanged model — no re-render, no flicker.
+func TestWideRailHoverFlickerGuard(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 60, true
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	_, innerW, inner := m.wideGeom()
+	rightW := innerW - boardPaneWidth - paneGutter2
+	_, stops := m.frameContent(m.topFrame(), rightW, m.now())
+	if len(stops) < 1 {
+		t.Fatalf("need >=1 rail stop, got %d", len(stops))
+	}
+	x, y := boardPaneWidth+paneGutter2, stops[0].Line+1
+
+	m2, _ := m.wideMouseMotion(x, y, innerW, inner, m.now())
+	if m2.ui.HoverStop != 0 {
+		t.Fatalf("first motion set HoverStop %d, want 0", m2.ui.HoverStop)
+	}
+	// setHoverStop reports change=false on the repeat — the direct debounce proof.
+	if _, changed := setHoverStop(m2.ui, 0); changed {
+		t.Fatal("setHoverStop reported a change for the SAME stop (debounce broken)")
+	}
+	before := composeAt(m2, innerW, m2.height-1)
+	m3, _ := m2.wideMouseMotion(x, y, innerW, inner, m2.now())
+	if m3.ui.HoverStop != 0 {
+		t.Fatalf("second motion onto the same stop moved HoverStop to %d, want 0", m3.ui.HoverStop)
+	}
+	if got := composeAt(m3, innerW, m3.height-1); got != before {
+		t.Fatal("a re-hover of the same stop changed the frame (flicker)")
+	}
+}
+
+// A Motion off the rail stops — the dead inter-pane gutter, or a prose body line
+// with no stop — CLEARS HoverStop back to -1 (the tint yields the moment the
+// pointer leaves a stop, exactly as leaving a board row clears HoverTarget).
+func TestWideRailHoverClearsOffStop(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 60, true
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	_, innerW, inner := m.wideGeom()
+	rightW := innerW - boardPaneWidth - paneGutter2
+	body, stops := m.frameContent(m.topFrame(), rightW, m.now())
+	if len(body) > inner || len(stops) < 1 {
+		t.Fatalf("fixture must fit the pane with >=1 stop (body %d/pane %d, stops %d)", len(body), inner, len(stops))
+	}
+	x := boardPaneWidth + paneGutter2
+
+	// Hover a stop, then slide into the dead gutter → cleared.
+	hov, _ := m.wideMouseMotion(x, stops[0].Line+1, innerW, inner, m.now())
+	if hov.ui.HoverStop != 0 {
+		t.Fatalf("hover a stop set HoverStop %d, want 0", hov.ui.HoverStop)
+	}
+	gutter, _ := hov.wideMouseMotion(boardPaneWidth, stops[0].Line+1, innerW, inner, hov.now())
+	if gutter.ui.HoverStop != -1 {
+		t.Fatalf("motion into the dead gutter kept HoverStop %d, want -1", gutter.ui.HoverStop)
+	}
+
+	// Slide onto a prose body line (no stop sits there) → cleared.
+	stopLine := map[int]bool{}
+	for _, s := range stops {
+		stopLine[s.Line] = true
+	}
+	prose := -1
+	for ln := 0; ln < len(body); ln++ {
+		if !stopLine[ln] && strings.TrimSpace(ansi.Strip(body[ln])) != "" {
+			prose = ln
+			break
+		}
+	}
+	if prose < 0 {
+		t.Fatal("fixture body has no non-stop prose line to prove the clear")
+	}
+	onProse, _ := hov.wideMouseMotion(x, prose+1, innerW, inner, hov.now())
+	if onProse.ui.HoverStop != -1 {
+		t.Fatalf("motion onto a prose line kept HoverStop %d, want -1", onProse.ui.HoverStop)
+	}
+}
+
+// NEGATIVE (the scoping law, #4240): a wide DEPTH-0 preview has no stops, so a
+// right-pane Motion resolves to -1 for every pane row and a stale HoverStop never
+// paints there — depth-0 hover is #4240's, not this slice's.
+func TestWideRailHoverDepth0HasNoStop(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 60, true
+	m.ui.Cursor = 1 // preview the subject; the stack is still just the board (depth 0)
+	_, innerW, inner := m.wideGeom()
+
+	for pl := 0; pl < inner; pl++ {
+		if idx := m.rightPaneStopAt(pl, innerW, inner, m.now()); idx != -1 {
+			t.Fatalf("depth-0 rightPaneStopAt(%d) = %d, want -1 (the preview has no stops)", pl, idx)
+		}
+	}
+	// A right-pane Motion at depth 0 clears any stale HoverStop to -1.
+	m.ui.HoverStop = 5
+	m2, _ := m.wideMouseMotion(boardPaneWidth+paneGutter2, 3, innerW, inner, m.now())
+	if m2.ui.HoverStop != -1 {
+		t.Fatalf("depth-0 right-pane hover set HoverStop %d, want -1", m2.ui.HoverStop)
+	}
+	// The paint is byte-identical whether HoverStop is a stale 5 or a clean -1 —
+	// previewLines hard-wires stops=nil/hoverStop=-1, so nothing can paint.
+	clean, stale := m, m
+	clean.ui.HoverStop, stale.ui.HoverStop = -1, 5
+	if composeAt(clean, innerW, m.height-1) != composeAt(stale, innerW, m.height-1) {
+		t.Fatal("depth-0 preview painted a hover stop (it has none — #4240 owns depth-0 hover)")
 	}
 }

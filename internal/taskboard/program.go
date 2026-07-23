@@ -205,6 +205,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 			CollapsedEpics: map[string]bool{},
 			Flashes:        map[string]time.Time{},
 			Conn:           ConnPolling,
+			HoverStop:      -1, // -1 = no reading-frame stop under the pointer (charter D99)
 		},
 		// The board is ALWAYS stack level 0 (charter D11/D29) — enter descends onto
 		// it, esc no-ops at this root. papers caches async FramePaper fetches by slug.
@@ -426,6 +427,22 @@ func setHoverTarget(st UIState, target string) (UIState, bool) {
 	return st, true
 }
 
+// setHoverStop is setHoverTarget's reading-frame twin (charter D95/D99, the
+// never-flickers law) for the WIDE right pane's rail stops. It stores the
+// rightPaneStopAt-resolved stop index under the pointer (-1 when the pointer is
+// over prose, the dead gutter, chrome, an ↑/↓ overflow marker, or the stop-less
+// depth-0 preview) and reports whether it CHANGED. The change guard IS the
+// debounce: bubbletea fires one Motion per cell the pointer crosses, but every
+// Motion resolving to the SAME stop returns changed=false, so the caller
+// short-circuits the re-render — no timer, no new cadence. A -1 clears the tint.
+func setHoverStop(st UIState, stop int) (UIState, bool) {
+	if stop == st.HoverStop {
+		return st, false
+	}
+	st.HoverStop = stop
+	return st, true
+}
+
 // handleKey is the navigation-shell dispatcher (charter D29): two navigation
 // domains, one entry point keyed on the stack-top frame kind. The BOARD frame
 // (level 0) keeps its native grammar unchanged; a pushed reading frame
@@ -447,6 +464,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// the two input modes never fight over the selection. Routed through the same
 	// guard the pointer uses, so a board with no active hover pays nothing.
 	m.ui, _ = setHoverTarget(m.ui, "")
+	m.ui, _ = setHoverStop(m.ui, -1)
 
 	switch key {
 	case "ctrl+c", "q":
@@ -828,6 +846,7 @@ func (m Model) toggleMouse() (tea.Model, tea.Cmd) {
 	m.ui.MouseReleased = true
 	m.ui.HoverFooterVerb = 0
 	m.ui, _ = setHoverTarget(m.ui, "")
+	m.ui, _ = setHoverStop(m.ui, -1)
 	return m, tea.DisableMouse
 }
 
