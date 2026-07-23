@@ -4,6 +4,7 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
 
   alias Barkpark.PortableDoc.Render.Walk
   alias Barkpark.PortableDoc.Render.Palettes
+  alias Barkpark.PortableDoc.Render.StatusVocab
 
   @email Palettes.email_palette()
   @article Palettes.article_palette()
@@ -308,11 +309,16 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
 
     test "status glyphs cover the lifecycle; unknown gets the neutral pointer" do
+      # Human-readable pin of the ladder as the chip actually renders it (charter
+      # D5 / D114): the `in_progress` spinner degrades to the ⠿ still-frame, and
+      # `blocked`/`done` carry the manifest glyphs ! / ✓. open (○), cancelled (✕)
+      # and the unknown sentinel (▸) are unchanged. This table is the readable
+      # twin of the manifest-derived delegation test below.
       for {status, glyph} <- [
             {"open", "○"},
-            {"in_progress", "◐"},
-            {"blocked", "⊘"},
-            {"done", "●"},
+            {"in_progress", "⠿"},
+            {"blocked", "!"},
+            {"done", "✓"},
             {"cancelled", "✕"},
             {"someday", "▸"}
           ] do
@@ -321,6 +327,36 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
         node = %{"kind" => "PdWikilink", "target" => "T", "children" => ["T"]}
         assert Walk.render_body(node, @width, pal) =~ "#{glyph} #{status}"
       end
+    end
+
+    test "task_glyph DELEGATES to the StatusVocab manifest — glyphs derived, spinner degraded to ⠿" do
+      # Expected glyphs are DERIVED from design/status-manifest.json via
+      # StatusVocab, never hardcoded here — the chip cannot silently drift from
+      # the one source of truth. The single deliberate transform is charter D5:
+      # the `progress` (in_progress) spinner role renders the ⠿ still-frame on
+      # this Elixir surface, matching the sibling emitter fleet_email.ex and
+      # DELIBERATELY unlike Go pdrender's terminal ⠋ frame — a per-surface
+      # consistency choice, not drift.
+      for {status, role} <- StatusVocab.statuses() do
+        expected =
+          if StatusVocab.spinner?(role), do: "⠿", else: StatusVocab.glyph_for_role(role)
+
+        hit = %{@task_hit | status: status, criteria: nil, priority: nil}
+        pal = Map.put(@email, :wikilinks, %{"T" => hit})
+        node = %{"kind" => "PdWikilink", "target" => "T", "children" => ["T"]}
+
+        assert Walk.render_body(node, @width, pal) =~ "#{expected} #{status}",
+               "chip drifted from the manifest for status #{inspect(status)} (role #{inspect(role)})"
+      end
+
+      # The spinner role specifically resolves to the ⠿ still-frame — NOT the raw
+      # manifest glyph (which is "" for the animated role) and NOT Go's ⠋ frame.
+      hit = %{@task_hit | status: "in_progress", criteria: nil, priority: nil}
+      pal = Map.put(@email, :wikilinks, %{"T" => hit})
+      node = %{"kind" => "PdWikilink", "target" => "T", "children" => ["T"]}
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ "⠿ in_progress"
+      refute html =~ "⠋"
     end
 
     test "chip escapes hostile resolver strings (title/status/id)" do
