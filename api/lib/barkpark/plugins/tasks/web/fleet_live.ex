@@ -52,21 +52,20 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Tasks.Fleet
+  alias BarkparkWeb.Studio.TokensGen
 
   @refresh_ms 5_000
   @dataset "production"
 
   # PDF-D23 vocabulary, complete. `offline` is derived at read time by
-  # `Fleet.roster`; `provisioning` is cloud-written (Wave C, live now). Each
-  # entry: {label, dot color, subtle track tint}. Colors are literal (CSP-safe
-  # inline styles) and chosen to read on both light and dark Studio chrome.
-  @pills %{
-    "working" => {"working", "#16a34a"},
-    "idle" => {"idle", "#64748b"},
-    "blocked" => {"blocked", "#dc2626"},
-    "provisioning" => {"provisioning", "#7c3aed"},
-    "offline" => {"offline", "#94a3b8"}
-  }
+  # `Fleet.roster`; `provisioning` is cloud-written (Wave C, live now). The dot
+  # + track-tint colors are the fleet-status DATA tones emitted from
+  # design/tokens.json (color.fleetStatus) into the generated, literal-exempt
+  # `BarkparkWeb.Studio.TokensGen` — CSP-safe inline styles fed from the token
+  # system, never a hand-copied hex (mirrors presence_state.ex's
+  # `TokensGen.presence_palette/0`). Resolved at compile time, like @colors there.
+  # Map is status-string => hex; the pill label is the status itself.
+  @fleet_colors TokensGen.fleet_status()
 
   @impl true
   def mount(_params, _session, socket) do
@@ -198,10 +197,16 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLive do
   unexpected status renders instead of crashing the row.
   """
   @spec pill(String.t() | nil) :: {String.t(), String.t()}
-  def pill(status) when is_binary(status), do: Map.get(@pills, status, elem_idle())
-  def pill(_), do: elem_idle()
+  def pill(status) when is_binary(status) do
+    case Map.fetch(@fleet_colors, status) do
+      {:ok, color} -> {status, color}
+      :error -> idle_pill()
+    end
+  end
 
-  defp elem_idle, do: Map.fetch!(@pills, "idle")
+  def pill(_), do: idle_pill()
+
+  defp idle_pill, do: {"idle", Map.fetch!(@fleet_colors, "idle")}
 
   @doc """
   A compact relative age (`"just now"`, `"12s"`, `"5m"`, `"2h"`, `"3d"`) from an
