@@ -847,6 +847,13 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
   defp echo_script(word), do: write_script("#!/usr/bin/env bash\necho #{word}\n")
 
+  # A control-plane stub that HANGS for `secs` before echoing `word` and exiting
+  # 0 — stands in for a wedged `systemd-run` / `systemctl` (a stuck D-Bus, a
+  # unit that won't stop). An UNBOUNDED System.cmd blocks the caller the full
+  # `secs`; the deadline wrapper must cut it off far sooner.
+  defp slow_ctl_script(secs, word),
+    do: write_script("#!/usr/bin/env bash\nsleep #{secs}\necho #{word}\n")
+
   # A run-state dir isolated per test (must survive a "restart" — a fresh
   # GenServer — so it is a real dir, not deleted mid-test).
   defp run_dir do
@@ -1191,6 +1198,117 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert status.failure_reason =~ "BUILD failed (exit 12)"
       assert status.failure_reason =~ "disk full during npm ci"
       assert Enum.map(status.stages, & &1.name) == ~w(PLAN BUILD)
+    end
+  end
+
+  # ── control-plane System.cmd deadlines (never wedge the singleton) ─────────
+  #
+  # (felix W21) The three synchronous ctl commands — systemd-run (in {:trigger}),
+  # `systemctl is-active` (in {:status}), and `systemctl stop` (in the
+  # {:unit_deadline} watchdog) — run INSIDE the singleton GenServer. Unbounded, a
+  # hung external process would freeze the Runner for every slug (and safe_call
+  # cannot rescue the handle_info watchdog). Each test drives a HANGING stub under
+  # a SHRUNK ctl_cmd_timeout_ms and asserts the RAW GenServer.call returns under a
+  # wall-clock cut (~deadline, well below the stub's sleep) + a degraded result —
+  # so it REDS on the unbounded code and greens only when the deadline fires.
+  # These target the raw GenServer.call/:timer.tc, NEVER public status/1 (whose
+  # safe_call masks the wedge by timing out at 5s and returning the fallback).
+  describe "control-plane System.cmd deadlines" do
+    test "a hung systemd-run is force-killed: {:trigger} returns start_failed under the deadline" do
+      dir = run_dir()
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {slow_ctl_script(2, "ok"), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: stub("exit 0"),
+        ctl_cmd_timeout_ms: 400
+      )
+
+      pid = Process.whereis(DeployRunner)
+
+      {us, reply} =
+        :timer.tc(fn -> GenServer.call(pid, {:trigger, req("slow-spawn")}, 10_000) end)
+
+      # Degraded return: a hung launch is a start failure, never a crash.
+      assert reply == {:error, :start_failed}
+      # Wall-clock cut: bounded ~400ms; unbounded would block ≥2s (the stub sleep).
+      assert us < 1_500_000,
+             "trigger took #{div(us, 1000)}ms — the systemd-run deadline did not fire (unbounded?)"
+    end
+
+    test "a hung systemctl is-active degrades to \"unknown\": {:status} finalizes :done under the deadline" do
+      dir = run_dir()
+
+      seed_manifest(dir, "slow-active",
+        build_id: "b7",
+        status:
+          "BPSTAGE name=PLAN status=ok build_id=b7\nBPSTAGE name=BUILD status=started build_id=b7\n"
+      )
+
+      # init re-attach sees the unit ACTIVE ⇒ it stays :running in state.units.
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {echo_script("active"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0")
+      )
+
+      pid = start_fresh_runner()
+      assert %{state: :running} = GenServer.call(pid, {:status, "slow-active"})
+
+      # Now the liveness probe HANGS; the next observe must not block the caller.
+      put_cfg(is_active_cmd: {slow_ctl_script(2, "active"), []}, ctl_cmd_timeout_ms: 400)
+
+      {us, status} =
+        :timer.tc(fn -> GenServer.call(pid, {:status, "slow-active"}, 10_000) end)
+
+      # Degraded: "unknown" is terminal ⇒ the run finalizes rather than pinning :running.
+      assert status.state == :done
+
+      assert us < 1_500_000,
+             "status took #{div(us, 1000)}ms — the is-active deadline did not fire (unbounded?)"
+    end
+
+    test "a hung systemctl stop is force-killed: {:unit_deadline} still finalizes :done/-2 under the deadline" do
+      dir = run_dir()
+
+      seed_manifest(dir, "slow-stop",
+        build_id: "b4",
+        status: "BPSTAGE name=BUILD status=started build_id=b4\n"
+      )
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        is_active_cmd: {echo_script("active"), []},
+        systemctl_stop_cmd: {slow_ctl_script(2, "stopped"), []},
+        systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+        command: stub("exit 0"),
+        ctl_cmd_timeout_ms: 400
+      )
+
+      pid = start_fresh_runner()
+      assert %{state: :running} = GenServer.call(pid, {:status, "slow-stop"})
+
+      # Fire the watchdog; its `systemctl stop` HANGS. A call queued behind the
+      # handle_info measures its wall-clock (GenServer messages are serial).
+      send(pid, {:unit_deadline, "slow-stop"})
+
+      {us, status} =
+        :timer.tc(fn -> GenServer.call(pid, {:status, "slow-stop"}, 10_000) end)
+
+      # The watchdog finalizes regardless — the deadline only bounds HOW LONG.
+      assert status.state == :done
+      assert status.exit_code == -2
+
+      assert us < 1_500_000,
+             "unit_deadline finalize took #{div(us, 1000)}ms — the systemctl stop deadline did not fire (unbounded?)"
     end
   end
 end

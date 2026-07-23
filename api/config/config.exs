@@ -402,7 +402,12 @@ config :barkpark, Barkpark.Sites.DeployRunner,
   memory_max: "1500M",
   cpu_quota: "150%",
   max_log_lines: 500,
-  run_deadline_ms: 1_800_000
+  run_deadline_ms: 1_800_000,
+  # Hard deadline for the synchronous control-plane System.cmd calls (systemd-run
+  # launch, `systemctl is-active`, `systemctl stop`) that run inside the singleton
+  # GenServer — a hung systemd/systemctl can't wedge {:trigger}/{:status} or the
+  # {:unit_deadline} watchdog. Bounds the CTL call, not the build (run_deadline_ms).
+  ctl_cmd_timeout_ms: 15_000
 
 # Site SOURCE PROVISIONER (Barkpark.Sites.Provisioner) — materializes a shipped
 # starter template into `<sites_dir>/<slug>/src` before BUILD (site-spawner
