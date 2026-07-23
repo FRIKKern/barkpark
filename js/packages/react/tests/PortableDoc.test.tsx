@@ -607,6 +607,24 @@ describe('PortableDoc — the type-keyed renderer', () => {
       expect(html).toContain('style="--i:0.111"')
     })
 
+    it('heading composes a content[] inline array, not just bare text (compose.ex heading twin)', () => {
+      // The capstone's 16/16 headings persist the `content[]` shape compose.ex
+      // already composes; reading `text` alone rendered an empty `<h2></h2>`.
+      const html = renderPortableDocument([
+        {
+          type: 'heading',
+          level: 2,
+          content: [
+            { type: 'text', value: 'The ' },
+            { type: 'text', value: 'Operator', marks: ['strong'] },
+            { type: 'text', value: "'s Leash" },
+          ],
+        },
+      ])
+      expect(html).toContain('<h2>The <span style="font-weight:bold">Operator</span>&#39;s Leash</h2>')
+      expect(html).not.toContain('<h2></h2>')
+    })
+
     it('asciicast figcaption uses a plain color, not the var() the figure caption uses', () => {
       const html = renderPortableDocument([
         { type: 'asciicast', src: 'https://ex.com/c.cast', caption: 'rec' },

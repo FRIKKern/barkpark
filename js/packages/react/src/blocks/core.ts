@@ -41,7 +41,12 @@ const heading: Emit = (b) => {
     raw === 1 || raw === 2 || raw === 3 || raw === '1' || raw === '2' || raw === '3'
       ? Number(raw)
       : 2
-  return `<h${level}>${escapeHtml(str(b.text))}</h${level}>`
+  // Dual-shape body, byte-for-byte the compose.ex heading twin (compose_block
+  // heading): a non-empty `content` inline array composes through the shared
+  // inline dispatcher; otherwise the bare `text` string (escaped). The 16/16
+  // capstone headings persist the `content[]` shape — reading `text` alone left
+  // them rendering an empty `<h2></h2>`.
+  return `<h${level}>${renderInlines(paragraphInline(b))}</h${level}>`
 }
 
 const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
