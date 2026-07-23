@@ -461,6 +461,122 @@ defmodule Barkpark.Connectors.Catalog do
     |> Enum.group_by(& &1.provider)
   end
 
+  # ── The inbound webhook / interactions endpoint (D260) ──────────────────────
+  #
+  # DRIFT POSTURE (same posture as `connectable?/1`): there is NO catalog endpoint
+  # on the bridge, so Studio cannot ASK it "what is your webhook route for X?" —
+  # this table MIRRORS the bridge's per-connector `webhook:` blocks. SOURCE OF
+  # TRUTH: `connectors/src/connector/types.ts` (`ConnectorWebhook.keySource`) plus
+  # each connector's registry entry (`connectors/src/connectors/*.ts`). Keep in
+  # lockstep with them; a drift here mis-SHOWS a display string, never breaks a
+  # route (Phoenix mounts NONE of these — the Node bridge serves them behind Caddy,
+  # D34/D39; this is a copyable convenience mirror of the ops runbooks).
+  #
+  #   * PATH-keyed (`keySource: "path"`) — the install key IS a path segment, so
+  #     the URL is per-install: `{base}{prefix}/webhooks/<provider>/<install_key>`.
+  #     discord (install_key = applicationId; the portal field is literally
+  #     "Interactions Endpoint URL") and whatsapp (each Meta app points at its own
+  #     per-number URL).
+  #   * PAYLOAD-keyed (`keySource: "payload"`) — the request_url is APP-WIDE (one
+  #     URL for every workspace; the key is dug out of the body), so the URL omits
+  #     the install key: `{base}{prefix}/webhooks/<provider>`. slack (team_id) and
+  #     teams (tenant id).
+  #   * NONE — telegram (polling, no HTTP route), imessage (no HTTP seam at all),
+  #     github/linear (TOOL/outbound — the agent acts on them, nothing inbound).
+  #     `webhook_endpoint/2` returns nil and the card shows no endpoint row.
+  @webhook_specs %{
+    "discord" => %{
+      key_source: :path,
+      label: "Interactions Endpoint URL",
+      help:
+        "Deploy the route and let Discord PING-validate it BEFORE you Save — the portal " <>
+          "refuses an unreachable URL, and a later failing endpoint is silently removed. See " <>
+          "connectors/docs/discord-byo-bot.md (deploy the webhook route before you save the URL)."
+    },
+    "whatsapp" => %{
+      key_source: :path,
+      label: "Webhook Callback URL",
+      help:
+        "Paste as the Meta webhook Callback URL (HTTPS only); the phone number id is the " <>
+          "install key. See docs/ops/whatsapp-meta.md."
+    },
+    "slack" => %{
+      key_source: :payload,
+      label: "Event Subscriptions Request URL",
+      help:
+        "Paste into Event Subscriptions → Request URL — one app-wide URL for every workspace " <>
+          "(Slack demuxes the team from the payload). See docs/ops/slack-app.md."
+    },
+    "teams" => %{
+      key_source: :payload,
+      label: "Messaging Endpoint",
+      help:
+        "One app-wide URL; Teams demuxes tenants from the payload. See " <>
+          "docs/ops/teams-azure-bot.md."
+    }
+  }
+
+  @doc """
+  The inbound webhook / interactions endpoint an operator pastes into a provider's
+  portal for a given install — or `nil` for a provider that exposes none (D260).
+
+  Returns `%{key_source: :path | :payload, label: String.t(), help: String.t(),
+  url: String.t() | nil}`. `:url` is the display string ONLY (Phoenix mounts no
+  route — the Node bridge serves it behind Caddy). It is `nil` when the instance's
+  PUBLIC base is not configured, and the caller renders the honest
+  "endpoint unavailable" state rather than any URL: pasting `Endpoint.url/0` (the
+  app's own origin) or the loopback `bridge_url` (127.0.0.1) into a vendor portal
+  is a guaranteed verification failure.
+
+  For a PAYLOAD-keyed provider the URL is app-wide and `install_key` is ignored.
+  """
+  @spec webhook_endpoint(String.t(), String.t()) :: map() | nil
+  def webhook_endpoint(provider, install_key)
+      when is_binary(provider) and is_binary(install_key) do
+    case Map.get(@webhook_specs, provider) do
+      nil -> nil
+      spec -> Map.put(spec, :url, webhook_url(spec.key_source, provider, install_key))
+    end
+  end
+
+  def webhook_endpoint(_, _), do: nil
+
+  defp webhook_url(key_source, provider, install_key) do
+    case public_base() do
+      nil ->
+        nil
+
+      base ->
+        suffix =
+          case key_source do
+            :path -> "/webhooks/#{provider}/#{install_key}"
+            :payload -> "/webhooks/#{provider}"
+          end
+
+        base <> path_prefix() <> suffix
+    end
+  end
+
+  # THE PUBLIC BASE an operator pastes into a vendor portal — the instance's public
+  # origin (`:capabilities_base_url`), which is set ONLY in runtime.exs's prod
+  # block. NO DEFAULT on purpose: nil in dev/test/unconfigured ⇒ the honest
+  # "endpoint unavailable" render. Deliberately NOT the `"http://localhost:4000"`
+  # default other consumers use (capabilities.ex / cycle_fleet_controller.ex): a
+  # webhook URL that defaults to localhost is a paste error waiting to happen.
+  defp public_base do
+    case Application.get_env(:barkpark, :capabilities_base_url) do
+      base when is_binary(base) and base != "" -> String.trim_trailing(base, "/")
+      _ -> nil
+    end
+  end
+
+  # The connectors HTTP path prefix (`config :barkpark, Barkpark.Connectors,
+  # path_prefix:` — config.exs), default "/connectors". Mirrors the bridge's Caddy
+  # route + `webhook-server.ts`'s `{prefix}/webhooks/...` grammar.
+  defp path_prefix do
+    Application.get_env(:barkpark, Barkpark.Connectors, [])[:path_prefix] || "/connectors"
+  end
+
   @doc """
   The api_token LABEL a connector's per-install chat token carries (D48/D51).
 
