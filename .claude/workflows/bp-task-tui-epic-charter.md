@@ -2303,4 +2303,44 @@ first-in-line named backlog (cannot be proven offline; do not fake).
 Wave paper: task-tui-wave-2026-07-23b. Scoreboard row (Review's step) under
 task-09f4775e7ccc2cca per D107(3).
 
+### Wave 18 2026-07-23 (REVIEWED: both slices green, zero review fixes, pushed + PRs open — Arm E config E6+E7)
+
+**Arm E (E6+E7) verdict-relevant facts:** second consecutive wave with ZERO reviewer fixes —
+the reviewer independently re-ran three of the builders' mutation proofs (compose.go:148 → -1
+reds all three narrow paint tests; a +1 top-math drift in frameHitTargets reds the scrolled
+parity test with the exact predicted message; slice 2's switch-narrowed-to-5 reds with the
+exact predicted `taskStatusGlyph("ready")` line) and both gates green on the exact pushed
+heads. The wish's original nav-shell premise was refuted at Strategize (stale ~6x, as the
+user predicted); the pivot to the charter's real residue (W17 dispatch items 4–5) was the
+system working, and both premise-smokes at build time confirmed genuinely-unbuilt before
+spending an edit.
+
+**Landed (review-verified, gates re-run green, pushed):**
+- **ttw18-narrow-rail-hover** → PR #6002 (`loop-epic/narrow-mode-reading-frame-rail-stops-gai-0`).
+  D99 closed + D105 exactly as chartered: mouseMotion reading-frame branch → setHoverStop
+  (D95 debounce reused unmodified, wide's dual-set mirrored), compose.go:148 wired to
+  m.ui.HoverStop, and the D42/D105c hardening — frameHitTargets now CALLS readingWindowTop
+  (inline top-math copy deleted). Five tests incl. the truecolor-forced paint trio and the
+  windowed Scroll=8 hit⇄paint parity tripwire. Goldens byte-frozen at rest.
+- **ttw18-chip-full-manifest** → PR #6003 (`loop-epic/in-body-task-chips-speak-the-full-9-stat-1`).
+  D43 closed Go-side + D106: taskStatusGlyph's guarded allowlist widened 5→9 in strict
+  two-file lockstep with its tripwire test; ▸ sentinel preserved; status-manifest-check.sh
+  untouched and all-PASS. With #5915 already merged (D107), BOTH in-body chip forks now
+  delegate — D43's cross-surface one-status-language is done pending merge.
+
+**Ledger:** both tasks honestly in_progress, criteria evidence-stamped mid-claim, merge
+criterion open for the LEAD. One reviewer addition: **ttw18-bl-narrow-reading-width-skew**
+(P3) files the builder-flagged pre-existing fork — narrow stop/scroll math measures at
+readingWidth() (full m.width) while composeAt/hit-map paint at boardGeometry width (−3/−4
+gutter); latent until a title wraps differently at the two widths; same drift class D105c
+just killed for the window top. Grade: A (commentary in wave paper task-tui-wave-2026-07-23b).
+
+**Next wave (dispatch order):** (1) LEAD merges #6002 + #6003 (package-disjoint, any order,
+Go gate only) and closes each task's merge criterion. (2) ttw17-bl-live-tmux-drive — the
+LIVE tmux feels-native mouse drive is now the LAST mouse item standing and blocks judging
+the wish's native bar; cannot be proven offline, do not fake it. (3)
+ttw18-bl-narrow-reading-width-skew — one width producer for narrow reading frames (the last
+known hit⇄paint drift vector). (4) ttw18-bl-wide-footer-verb-clicks (P3) if the mouse story
+is to be uniform. (5) ttw18-bl-go-toolchain-skew stays P4 latent.
+
 Next D-number: D109.
