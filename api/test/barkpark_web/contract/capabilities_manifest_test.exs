@@ -98,6 +98,26 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       types_flag = Enum.find(cmd["flags"], &(&1["name"] == "types"))
       assert types_flag["type"] == "string"
     end
+
+    test "search declares the `fields` projection flag (controller already threads it)",
+         %{conn: conn} do
+      # The search controller (search/2 + search_local/2) already projects each
+      # hit through `params["fields"]`, but the flag was undeclared — an agent
+      # reading the manifest could not discover the token-thrifty projection.
+      # This closes that pure declaration gap.
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "search.query")
+
+      assert cmd != nil, "search.query command not found in manifest"
+
+      fields_flag = Enum.find(cmd["flags"], &(&1["name"] == "fields"))
+
+      assert fields_flag != nil,
+             "search.query must declare a `fields` flag; got: " <>
+               "#{inspect(Enum.map(cmd["flags"], & &1["name"]))}"
+
+      assert fields_flag["type"] == "string"
+    end
   end
 
   describe "media.upload path contract (BUG 2)" do
@@ -793,18 +813,14 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "anon manifest leaked the chat noun name"
     end
 
-    # DOCUMENTING pin, not a fix — see the "OPEN D36 GAP" comment above the
-    # chat core_cmd block in capabilities.ex. RequireChatAccess.chat_scope/1
-    # (require_chat_access.ex) DOES authorize a workspace-bound
+    # D36 CLOSED (charter D16): `chat` is an ORTHOGONAL capability, not a rank.
+    # RequireChatAccess.chat_scope/1 authorizes a workspace-bound
     # `permissions: ["chat"]` Connector token at `/v1/chat/*` (resolves to
-    # `{:workspace, ws}`), but tier_for_token/1 here only recognizes
-    # admin/write/read, so that same token projects at manifest tier "none"
-    # and existence-hiding strips the whole `chat` noun from its own manifest.
-    # Remapping `chat` into tier_for_token/1 is D36-gated (chat_* is a HOT
-    # connectors surface) — this test intentionally PINS the current
-    # (stripped) behavior so a future D36-confirmed remap changes this
-    # assertion on purpose, not by accident.
-    test "a workspace token carrying only `chat` (no admin/write/read) still gets chat stripped (D36 open)",
+    # `{:workspace, ws}`), and tier_for_token/1 now mirrors that grant: the
+    # token's base tier stays "none" (chat lifts no rank), but a `+chat`
+    # capability rides alongside so project/2's chat_visible?/2 side-branch
+    # projects the `chat` noun + its seven verbs — and ONLY the chat noun.
+    test "a workspace token carrying only `chat` sees the chat noun WITHOUT any rank lift (D36 orthogonal)",
          %{conn: conn} do
       ws = Barkpark.TenancyFixtures.create_workspace!()
       raw_token = "chat-only-#{System.unique_integer([:positive])}"
@@ -816,17 +832,65 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         |> get("/v1/capabilities")
         |> json_response(200)
 
+      # Orthogonal, not a rank: the echoed tier stays "none" — chat grants
+      # discovery of its own noun, never a doc/task rank.
       assert manifest["auth_tier"] == "none",
-             "chat-only workspace token currently projects at tier \"none\" (D36 open); " <>
+             "chat is orthogonal — a chat-only token must still echo base tier \"none\"; " <>
                "got: #{inspect(manifest["auth_tier"])}"
 
+      # The whole chat noun + its seven verbs are now discoverable by their
+      # own token.
+      assert Enum.any?(manifest["nouns"], &(&1["name"] == "chat")),
+             "chat-capability workspace token must discover the chat noun"
+
+      chat_ids =
+        manifest["commands"]
+        |> Enum.filter(&(&1["noun"] == "chat"))
+        |> Enum.map(& &1["id"])
+        |> Enum.sort()
+
+      assert chat_ids == Enum.sort(@chat_commands),
+             "chat-capability token must see exactly the seven chat verbs; got: #{inspect(chat_ids)}"
+
+      # GUARD — chat lifts NO other noun's tier. The base tier stays "none", so
+      # the chat-only token must see EXACTLY the anonymous (tier-none) noun set
+      # PLUS the chat noun — nothing from a higher rank leaks in. The delta
+      # against the anon baseline is precisely {"chat"}.
+      anon = conn |> get("/v1/capabilities") |> json_response(200)
+      anon_nouns = anon["nouns"] |> Enum.map(& &1["name"]) |> MapSet.new()
+      chat_only_nouns = manifest["nouns"] |> Enum.map(& &1["name"]) |> MapSet.new()
+
+      assert MapSet.difference(chat_only_nouns, anon_nouns) == MapSet.new(["chat"]),
+             "chat capability must add ONLY the chat noun over the anon baseline; delta: " <>
+               "#{inspect(MapSet.difference(chat_only_nouns, anon_nouns) |> MapSet.to_list())}"
+
+      # And the reverse: the chat token loses none of the anon-visible nouns.
+      assert MapSet.subset?(anon_nouns, chat_only_nouns),
+             "chat capability must not drop any anon-visible noun"
+    end
+
+    # GUARD — the orthogonal grant is chat-ONLY: a plain [read, write] token
+    # (no chat permission) still gets the whole chat noun existence-hidden.
+    test "a [read, write] token (no chat permission) still gets chat stripped", %{conn: conn} do
+      ws = Barkpark.TenancyFixtures.create_workspace!()
+      raw_token = "rw-nochat-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Barkpark.Auth.create_token(raw_token, "rw-nochat", "test", ["read", "write"], ws.id)
+
+      manifest =
+        conn
+        |> put_req_header("authorization", "Bearer #{raw_token}")
+        |> get("/v1/capabilities")
+        |> json_response(200)
+
+      assert manifest["auth_tier"] == "write"
+
       refute Enum.any?(manifest["commands"], &(&1["noun"] == "chat")),
-             "chat-only token unexpectedly sees a chat command — if D36 shipped the tier " <>
-               "remap, update this pin instead of leaving it red"
+             "a [read, write] token must not see any chat command"
 
       refute Enum.any?(manifest["nouns"], &(&1["name"] == "chat")),
-             "chat-only token unexpectedly sees the chat noun — if D36 shipped the tier " <>
-               "remap, update this pin instead of leaving it red"
+             "a [read, write] token must not see the chat noun"
     end
   end
 

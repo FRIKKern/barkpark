@@ -9166,6 +9166,15 @@
             }
           },
           {
+            "description": "Project each hit's content to a comma-separated allowlist of field names (e.g. title,slug) — a token-thrifty response shape. Already honored by the controller; declared here so agents can discover it.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "published (default) | drafts | raw.",
             "in": "query",
             "name": "perspective",
@@ -9685,6 +9694,15 @@
             "description": "Restrict to several document types — a comma-separated allowlist (e.g. post,author).",
             "in": "query",
             "name": "types",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Project each hit's content to a comma-separated allowlist of field names (e.g. title,slug) — a token-thrifty response shape. Already honored by the controller; declared here so agents can discover it.",
+            "in": "query",
+            "name": "fields",
             "required": false,
             "schema": {
               "type": "string"

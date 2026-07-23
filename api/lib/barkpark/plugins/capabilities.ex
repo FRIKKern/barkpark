@@ -101,11 +101,16 @@ defmodule Barkpark.Plugins.Capabilities do
   """
   @spec project(map(), tier()) :: map()
   def project(%{} = manifest, caller_tier) when is_binary(caller_tier) do
+    # The rank the caller is ranked by; the `+chat` capability (if any) rides
+    # alongside and is consulted ONLY by the orthogonal chat side-branch.
+    base = base_tier(caller_tier)
     commands = Map.get(manifest, "commands", [])
     nouns = Map.get(manifest, "nouns", [])
 
     visible_commands =
-      Enum.filter(commands, fn cmd -> visible?(command_tier(cmd), caller_tier) end)
+      Enum.filter(commands, fn cmd ->
+        visible?(command_tier(cmd), base) or chat_visible?(cmd, caller_tier)
+      end)
 
     visible_noun_names =
       visible_commands
@@ -117,7 +122,7 @@ defmodule Barkpark.Plugins.Capabilities do
 
     projected =
       manifest
-      |> Map.put("auth_tier", caller_tier)
+      |> Map.put("auth_tier", base)
       |> Map.put("nouns", visible_nouns)
       |> Map.put("commands", visible_commands)
 
@@ -162,6 +167,15 @@ defmodule Barkpark.Plugins.Capabilities do
 
   An absent / nil token is `"none"`. A present token maps to the highest
   global tier its permissions satisfy: `admin` > `write` > `read`.
+
+  D36 (charter D16) — `chat` is an ORTHOGONAL capability, NOT a rank. A
+  workspace-bound token carrying the `chat` permission but no doc/task tier
+  may still DISCOVER the `chat` noun. That capability rides ALONGSIDE the base
+  tier as a `"<base>+chat"` suffix (e.g. `"none+chat"`, `"read+chat"`) so it
+  lifts nothing else: the base rank is unchanged, and `project/2` splits the
+  suffix off before ranking. This mirrors `RequireChatAccess.chat_scope/1`
+  (admin is already covered by the base tier; the added case is the non-admin,
+  workspace-bound `chat` token that the runtime authorizes at `{:workspace,_}`).
   """
   @spec tier_for_token(struct() | nil) :: tier()
   def tier_for_token(nil), do: "none"
@@ -169,12 +183,43 @@ defmodule Barkpark.Plugins.Capabilities do
   def tier_for_token(token) do
     alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
-    cond do
-      TenancyAuth.permits?(token, :admin) -> "admin"
-      TenancyAuth.permits?(token, :write) -> "write"
-      TenancyAuth.permits?(token, :read) -> "read"
-      true -> "none"
+    base =
+      cond do
+        TenancyAuth.permits?(token, :admin) -> "admin"
+        TenancyAuth.permits?(token, :write) -> "write"
+        TenancyAuth.permits?(token, :read) -> "read"
+        true -> "none"
+      end
+
+    # A global-admin caller already discovers `chat` through the rank ladder;
+    # the suffix is only for the non-admin, workspace-bound `chat` token —
+    # exactly the principal RequireChatAccess authorizes at `{:workspace, ws}`.
+    if base != "admin" and Barkpark.Auth.has_permission?(token, "chat") and
+         not is_nil(Map.get(token, :workspace_id)) do
+      base <> "+chat"
+    else
+      base
     end
+  end
+
+  # The doc/task RANK carried by a (possibly `+chat`-suffixed) caller tier. The
+  # orthogonal `chat` capability rides alongside the rank and never lifts it, so
+  # every rank comparison and the echoed `auth_tier` use the base alone.
+  @spec base_tier(tier()) :: tier()
+  def base_tier(caller_tier) when is_binary(caller_tier) do
+    case :binary.split(caller_tier, "+") do
+      [base | _] -> base
+      _ -> caller_tier
+    end
+  end
+
+  # True when the caller may DISCOVER the orthogonal `chat` noun: an explicit
+  # `+chat` capability suffix, OR a global-admin/ingest caller (who already sees
+  # every noun through the normal rank ladder). This is the ONLY orthogonal
+  # grant — it widens visibility for `noun == "chat"` and nothing else.
+  @spec chat_cap?(tier()) :: boolean()
+  defp chat_cap?(caller_tier) when is_binary(caller_tier) do
+    String.contains?(caller_tier, "+chat") or base_tier(caller_tier) in ["admin", "ingest"]
   end
 
   # ── Superset assembly ────────────────────────────────────────────────────
@@ -220,16 +265,20 @@ defmodule Barkpark.Plugins.Capabilities do
 
     _ = plugin_module_to_name
 
+    # Echo the base rank only — the orthogonal `+chat` capability suffix never
+    # appears on the wire (it is an internal projection input, not a tier).
+    base = base_tier(caller_tier)
+
     %{
       "manifest_version" => @manifest_version,
       "server" => server,
-      "auth_tier" => caller_tier,
+      "auth_tier" => base,
       "generated_at" => generated_at,
       "etag" => "",
       "nouns" => core_nouns ++ plugin_nouns,
       "commands" => core_commands ++ plugin_commands
     }
-    |> maybe_put_build(caller_tier, opts)
+    |> maybe_put_build(base, opts)
     |> maybe_gate_views(opts)
     |> then(fn m -> Map.put(m, "etag", etag_for(m)) end)
   end
@@ -370,6 +419,15 @@ defmodule Barkpark.Plugins.Capabilities do
 
   defp command_noun(%{"noun" => n}) when is_binary(n), do: n
   defp command_noun(_), do: nil
+
+  # Orthogonal chat side-branch (D36 / charter D16). The seven `chat.*` commands
+  # DECLARE `auth_tier: "admin"` (unchanged — admin/ingest keep discovering them
+  # through the rank ladder), but a caller holding the `chat` capability ALSO
+  # discovers the `chat` noun. This is a capability grant, not a rank lift: it
+  # widens visibility for `noun == "chat"` ONLY, so no other noun's tier moves.
+  defp chat_visible?(cmd, caller_tier) do
+    command_noun(cmd) == "chat" and chat_cap?(caller_tier)
+  end
 
   defp noun_name(%{"name" => n}) when is_binary(n), do: n
   defp noun_name(_), do: nil
@@ -1294,6 +1352,13 @@ defmodule Barkpark.Plugins.Capabilities do
             "types",
             "string",
             "Restrict to several document types — a comma-separated allowlist (e.g. post,author)."
+          ),
+          flag(
+            "fields",
+            "string",
+            "Project each hit's content to a comma-separated allowlist of field names " <>
+              "(e.g. title,slug) — a token-thrifty response shape. Already honored by the " <>
+              "controller; declared here so agents can discover it."
           ),
           flag("perspective", "string", "published (default) | drafts | raw.")
         ],
@@ -2288,15 +2353,17 @@ defmodule Barkpark.Plugins.Capabilities do
       # transport calls, not content mutations, so bp does not run the content
       # --dry-run/confirm path (same treatment as the auth.* exchanges).
       #
-      # OPEN D36 GAP (documented, NOT fixed here): `tier_for_token/1` above only
-      # recognizes admin/write/read, so a workspace-bound `permissions: ["chat"]`
-      # Connector token (RequireChatAccess.chat_scope/1 DOES authorize it, at
-      # `{:workspace, ws}`) projects at manifest tier "none" — the whole `chat`
-      # noun gets existence-hidden from its own token. Remapping `chat` into
-      # tier_for_token/1 touches the HOT connectors chat_* surface and needs D36
-      # charter confirmation first; see
-      # `capabilities_manifest_test.exs` "chat-only token" pin for the
-      # regression guard on the CURRENT (stripped) behavior.
+      # D36 CLOSED (charter D16 is the demanded confirmation). `chat` is an
+      # ORTHOGONAL capability, not a rank: `tier_for_token/1` above appends a
+      # `+chat` suffix to a workspace-bound `permissions: ["chat"]` Connector
+      # token's base tier (mirroring RequireChatAccess.chat_scope/1's
+      # `{:workspace, ws}` grant), and `project/2` honors it through the
+      # `chat_visible?/2` side-branch — which widens visibility for `noun ==
+      # "chat"` ONLY, lifting no other noun's tier. These commands keep
+      # `auth_tier: "admin"` on the wire, so admin/ingest still discover them
+      # through the rank ladder and anon/`[read,write]` callers still get `chat`
+      # stripped. See the `capabilities_manifest_test.exs` "chat-capability
+      # workspace token" pin for the projected-visibility guard.
       core_cmd(
         "chat.create_session",
         "chat",
