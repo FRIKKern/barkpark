@@ -39,6 +39,9 @@ on:
     - cron: "17 6 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: scaffy-catalog-drift-${{ github.ref }}
   # LITERAL false — strictly never-cancel. A daily/advisory audit has no reason
@@ -73,7 +76,12 @@ jobs:
           trap restore EXIT
 
           printf '\n# scaffy-catalog-drift self-test marker\n' >> "$target"
-          out="$(go run ./scaffy/seed --check 2>&1)"; code=$?
+          # `|| code=$?`, never `; code=$?`: Actions' default run shell is
+          # `bash -e {0}`, so a bare failing substitution aborts the step
+          # BEFORE code is captured — the self-test would fail exactly when
+          # the tripwire correctly reds.
+          code=0
+          out="$(go run ./scaffy/seed --check 2>&1)" || code=$?
           restore; trap - EXIT
           echo "$out"
 
@@ -97,7 +105,10 @@ jobs:
       - name: Audit served catalog vs main
         run: |
           set -uo pipefail
-          out="$(make seed-check 2>&1)"; code=$?
+          # errexit-safe capture (default run shell is `bash -e {0}`): a drift
+          # exit 1 must reach the summary logic below, not abort the step.
+          code=0
+          out="$(make seed-check 2>&1)" || code=$?
           echo "$out"
 
           summary() { printf '%s\n' "$@" >>"$GITHUB_STEP_SUMMARY"; }
