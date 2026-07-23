@@ -80,6 +80,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # staging gate is green.
   @channels ~w(prod staging)
 
+  # Personal Dev Fleet roles (Wave C, PDF-D61). A "main" is the developer's home
+  # base; a "support" is a subordinate box bound to exactly one main. NULL (absent
+  # from this list) is the third, un-enumerated state: "ungrouped" — every legacy
+  # row, never validated against this set.
+  @fleet_roles ~w(main support)
+
   # The worker-reported host lands here via succeed_job/2 — an IPv4/IPv6 address
   # or a DNS hostname. Permissive enough for all three (and the FakeProvider's
   # 10.0.0.1-style IPs), but rejects oversized junk and control chars: only
@@ -211,6 +217,19 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :last_verified_at, :utc_datetime_usec
     field :verify_reachable, :boolean
 
+    # Personal Dev Fleet GROUP record (Wave C, PDF-D61). The two-tier main -> N
+    # supports relationship lives on THIS machine row (no new table, no join):
+    #   * `fleet_role` is "main" | "support" | nil (ungrouped — every legacy row).
+    #   * `fleet_parent_id` is the SELF-referential FK to the main's id, set ONLY
+    #     on support rows (`on_delete: :nilify_all` — a deleted main orphans, never
+    #     cascade-deletes, its supports). Modelled as a self `belongs_to`.
+    #   * `fleet_token_id` is the OPAQUE minted-token id (for later revocation),
+    #     never the secret — distinct custody from `admin_token_encrypted`, so it
+    #     IS serialized in barkpark_json. Written only through `fleet_changeset/2`.
+    field :fleet_token_id, :string
+    belongs_to :fleet_parent, __MODULE__, foreign_key: :fleet_parent_id, type: :binary_id
+    field :fleet_role, :string
+
     belongs_to :team, BarkparkCloud.Accounts.Team
 
     timestamps(type: :utc_datetime_usec)
@@ -224,6 +243,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def update_states, do: @update_states
   def channels, do: @channels
   def providers, do: @providers
+  def fleet_roles, do: @fleet_roles
 
   @doc "The public zone managed Barkparks live under (`barkpark.cloud`)."
   @spec base_domain() :: String.t()
@@ -520,6 +540,51 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def verify_changeset(barkpark, attrs) do
     barkpark
     |> cast(attrs, [:last_verified_at, :verify_reachable])
+  end
+
+  @doc """
+  Narrow changeset for the Personal Dev Fleet GROUP record (Wave C, PDF-D61) —
+  only the three fleet columns are castable, so binding a machine into (or out
+  of) a fleet can never rename a Barkpark or reassign its Team (the same
+  containment posture as `verify_changeset/2`). The relationship invariants:
+
+    * `fleet_role` must be `main` or `support` when set. NULL is the un-enumerated
+      "ungrouped" state and passes through untouched (legacy rows).
+    * `fleet_parent_id` is REQUIRED when `fleet_role == "support"` (a support with
+      no main is meaningless) and FORBIDDEN when `fleet_role == "main"` (a main IS
+      the root — it has no parent). An ungrouped row constrains neither.
+    * `assoc_constraint(:fleet_parent)` maps the self-FK so a parent id that names
+      no row fails as a validation error, never a 500.
+
+  Written only by `Registry.register_support_barkpark/2` (via the team-scoped
+  `/v1/fleet/supports` endpoint).
+  """
+  def fleet_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [:fleet_role, :fleet_parent_id, :fleet_token_id])
+    |> validate_inclusion(:fleet_role, @fleet_roles)
+    |> validate_length(:fleet_token_id, max: 255)
+    |> validate_fleet_parent()
+    |> assoc_constraint(:fleet_parent)
+  end
+
+  # role=support ⇒ parent required; role=main ⇒ parent forbidden; nil role
+  # (ungrouped) ⇒ no constraint. `get_field` reads the post-cast value so the
+  # rule sees both the incoming change and any already-persisted value.
+  defp validate_fleet_parent(changeset) do
+    role = get_field(changeset, :fleet_role)
+    parent = get_field(changeset, :fleet_parent_id)
+
+    cond do
+      role == "support" and is_nil(parent) ->
+        add_error(changeset, :fleet_parent_id, "is required for a support")
+
+      role == "main" and not is_nil(parent) ->
+        add_error(changeset, :fleet_parent_id, "is forbidden for a main")
+
+      true ->
+        changeset
+    end
   end
 
   @doc """

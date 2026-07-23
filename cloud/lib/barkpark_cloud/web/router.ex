@@ -1810,6 +1810,131 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/fleet/supports → 201 {barkpark} — register a SUPPORT machine as a
+  # fleet group row bound to a main (Personal Dev Fleet Wave C, PDF-D61). Body:
+  # {name, parent_id, host?, token_id?}. `parent_id` MUST resolve to a Barkpark
+  # in the CALLER'S team — a cross-team (or unknown/malformed) parent is the same
+  # 404, no existence leak; a parent that is ITSELF a support is 422 (the shape is
+  # exactly two-tier main -> N supports, never a chain). The created row carries
+  # fleet_role:"support", fleet_parent_id:<main>, fleet_token_id:<opaque id>.
+  # Team-scoped WRITE, same credential-aware family as go-live: a PAT must carry
+  # the `deploy` ability; a session must be team-admin (owner/admin).
+  post "/v1/fleet/supports" do
+    conn = Auth.require_user_or_pat(conn, [])
+
+    conn =
+      cond do
+        conn.halted -> conn
+        conn.assigns[:current_token] -> Auth.require_ability(conn, "deploy")
+        is_nil(conn.assigns[:current_team]) -> conn
+        Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
+        true -> conn |> json(403, %{error: "forbidden"}) |> halt()
+      end
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      not (is_binary(conn.body_params["name"]) and conn.body_params["name"] != "") ->
+        json(conn, 422, %{error: "invalid", details: %{name: ["can't be blank"]}})
+
+      not is_binary(conn.body_params["parent_id"]) ->
+        json(conn, 422, %{error: "invalid", details: %{parent_id: ["can't be blank"]}})
+
+      true ->
+        team = conn.assigns.current_team
+        name = conn.body_params["name"]
+
+        case Registry.get_barkpark(conn.body_params["parent_id"]) do
+          # A support may never be a parent — two-tier is the whole shape. Refuse
+          # BEFORE the team match would 404 it, so an in-team support parent gets a
+          # clear 422 rather than being conflated with a cross-team miss.
+          %Barkpark{team_id: tid, fleet_role: "support"} when tid == team.id ->
+            json(conn, 422, %{
+              error: "invalid_parent",
+              detail: "a support cannot be a parent (fleets are two-tier: main -> supports)"
+            })
+
+          %Barkpark{team_id: tid} = parent when tid == team.id ->
+            attrs = %{
+              name: name,
+              slug: slugify(name),
+              host: string_param_or_nil(conn.body_params["host"]),
+              parent_id: parent.id,
+              token_id: string_param_or_nil(conn.body_params["token_id"])
+            }
+
+            case Registry.register_support_barkpark(team, attrs) do
+              {:ok, support} ->
+                push_event(team.id, "fleet")
+                json(conn, 201, %{barkpark: barkpark_json(support)})
+
+              {:error, :limit_reached} ->
+                json(conn, 403, %{
+                  error: "limit_reached",
+                  limit: Billing.barkpark_limit(team),
+                  upgrade_path: "/v1/billing/checkout"
+                })
+
+              {:error, %Ecto.Changeset{} = cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
+
+          # Cross-team, unknown, or malformed parent id → 404 (no existence leak).
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # DELETE /v1/fleet/supports/:id → 200 {ok:true, status:"removed"} — unbind +
+  # delete a SUPPORT fleet row (Personal Dev Fleet Wave C, PDF-D61). Team-scoped:
+  # a wrong-team / unknown / malformed id is the same 404 (no existence leak).
+  # ONLY a support row is removable here — a main (or an ungrouped legacy row) is
+  # refused 409, so this endpoint can never tear down the developer's home base.
+  # ADMIN-gated, like DELETE /v1/barkparks/:id (require_primary_team_admin halts
+  # 401 / 422 no_team / 403 for a plain member).
+  delete "/v1/fleet/supports/:id" do
+    conn = Auth.require_primary_team_admin(conn)
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid, fleet_role: "support"} = support when tid == team.id ->
+            case Registry.delete_barkpark(support) do
+              {:ok, _} ->
+                push_event(team.id, "fleet")
+                json(conn, 200, %{ok: true, status: "removed"})
+
+              {:error, %Ecto.Changeset{} = cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
+
+          # Exists in-team but is a main / ungrouped — NOT a support. Refuse: this
+          # endpoint unbinds supports only (a main is deleted via /v1/barkparks).
+          %Barkpark{team_id: tid} when tid == team.id ->
+            json(conn, 409, %{
+              error: "not_a_support",
+              detail: "only support rows can be unbound here"
+            })
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   # OC24 pattern law (async triggers): record an instance-lifecycle operator
   # TRIGGER post-commit, on the SUCCESS branch only — best-effort, the
   # barkpark.go_live discipline: the action already succeeded (a job enqueued,
@@ -7403,6 +7528,13 @@ defmodule BarkparkCloud.Web.Router do
       # verdict, distinct from the null "never verified".
       last_verified_at: bp.last_verified_at,
       verify_reachable: bp.verify_reachable,
+      # Personal Dev Fleet GROUP record (Wave C, PDF-D61) — the machine's role in
+      # a fleet (main | support | nil ungrouped), the main it binds to, and the
+      # opaque revocation-token id. `fleet_token_id` is deliberately NOT a secret
+      # (custody note in the schema), so it is safe to serialize here.
+      fleet_role: bp.fleet_role,
+      fleet_parent_id: bp.fleet_parent_id,
+      fleet_token_id: bp.fleet_token_id,
       inserted_at: bp.inserted_at
     }
 
