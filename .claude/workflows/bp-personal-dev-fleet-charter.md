@@ -784,7 +784,11 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   `pdf-mvp0-fleet-card-spa` (r1, fable, fleet card + add-support flow + SUPPORT_STEP_ORDER,
   one OC9 slice) · `pdf-mvp0-offload-spa` (r2 AFTER fleet-card merges, opus, order file + watch
   via app-token-direct) · `pdf-mvp0-journey-proof` (r2 AFTER all four merge, fable, the
-  browser-journey proof-that-must-fire inheriting the folded r3 dialect). Backlog filed:
-  console-managed provider key (D62 amendment gate), server-side support remove, catalog
-  generalization, LIMIT_* compose passthrough, non-admin token task-lifecycle tests, full group
-  view. Wave Paper: `personal-dev-fleet-wave-mvp0-2026-07-24`.
+  browser-journey proof-that-must-fire inheriting the folded r3 dialect). Backlog filed
+  (published ids, Decide close 2026-07-24): `pdf-bl-console-key-custody` (D62 amendment,
+  owner-sign-off gated) · `pdf-bl-support-remove-serverside` · `pdf-bl-catalog-generalization` ·
+  `pdf-bl-limit-env-passthrough` · `pdf-bl-nonadmin-task-tests` · `pdf-bl-fleet-group-view`.
+  Also at Decide close: `pdf-wc-support-proof` annotated SUPERSEDED-BY-FOLD (per D90 — its
+  dialect lives on via `git show 6c24833a4:scripts/pdf-support-proof.sh`, reachable from any
+  worktree of this repo); the epic heartbeat reads building; the wave Paper carries the full
+  verification digest + decisions + plan. Wave Paper: `personal-dev-fleet-wave-mvp0-2026-07-24`.
