@@ -208,8 +208,10 @@ defmodule Barkpark.Content.Envelope do
 
   Fail-closed and consistent with `render/3`'s visibility rules:
 
-    * `nil` / `:internal` caller and admins ⇒ unrestricted (internal/system
-      reads; their output still rides the `render/3` redaction boundary).
+    * `:internal` caller and admins ⇒ unrestricted (internal/system reads;
+      their output still rides the `render/3` redaction boundary). A `nil`
+      caller FAILS CLOSED — the most restrictive anonymous principal, mirroring
+      `render/3`'s nil clause; it is NEVER an "unrestricted" signal.
     * reserved (`_id`…) and promoted (`title`/`status`/`doc_id`) fields ⇒ always
       allowed.
     * a declared `private` / `owner_only` / `readable_by` field ⇒ allowed ONLY
@@ -219,7 +221,18 @@ defmodule Barkpark.Content.Envelope do
       parity). Encrypted-marked fields are already immune (stored ciphertext
       never matches a plaintext probe).
   """
-  def field_readable?(_schema, _field_name, nil), do: true
+  # No caller context => FAIL CLOSED. A nil caller is the most restrictive
+  # anonymous principal: a declared private / owner_only / readable_by field is
+  # NEVER filterable/orderable by it. This mirrors `render/3`'s nil clause
+  # (see :149-153) — a nil caller is the anonymous PUBLIC-ONLY principal, never
+  # an "internal full-content" signal. Internal/writer paths that must reference
+  # a private field in a WHERE/ORDER clause pass the explicit `:internal`
+  # sentinel below — NEVER nil. (Every production caller already threads a
+  # %CallerContext{}; this fail-closed default is defence in depth.)
+  def field_readable?(_schema, _field_name, nil), do: false
+
+  # Explicit internal/full-content sentinel — internal/system reads whose output
+  # still rides the `render/3` redaction boundary. Not reachable from a request path.
   def field_readable?(_schema, _field_name, :internal), do: true
   def field_readable?(_schema, _field_name, %CallerContext{is_admin: true}), do: true
 
@@ -241,7 +254,9 @@ defmodule Barkpark.Content.Envelope do
     end
   end
 
-  def field_readable?(_schema, _field_name, _ctx), do: true
+  # Any other caller shape => FAIL CLOSED (mirrors `render/3`'s redaction default
+  # — an unrecognized principal is the most restrictive, never a bypass).
+  def field_readable?(_schema, _field_name, _ctx), do: false
 
   # Top-level segment of a (possibly nested / `content.`-prefixed) filter path —
   # `content.meta.seo` and `meta.seo` both resolve their visibility against the
