@@ -162,6 +162,17 @@ func (c *consoleEmitter) addSecret(s string) {
 	}
 }
 
+// redact scrubs registered secrets + secret patterns from s without emitting a
+// line — the same posture logf applies, exposed so step-report details and
+// fail-error text inherit it. Reads the secret set at CALL time, so secrets
+// registered mid-chain are covered. nil-safe.
+func (c *consoleEmitter) redact(s string) string {
+	if c == nil {
+		return redactConsoleLine(s, nil)
+	}
+	return redactConsoleLine(s, c.secrets)
+}
+
 // logf formats + redacts one console line and reports it best-effort. A report
 // error is logged to stderr and swallowed — console narration must never fail a
 // provision. nil-safe (no reporter → no-op).
