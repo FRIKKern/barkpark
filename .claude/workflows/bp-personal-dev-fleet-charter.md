@@ -792,3 +792,28 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   dialect lives on via `git show 6c24833a4:scripts/pdf-support-proof.sh`, reachable from any
   worktree of this repo); the epic heartbeat reads building; the wave Paper carries the full
   verification digest + decisions + plan. Wave Paper: `personal-dev-fleet-wave-mvp0-2026-07-24`.
+- **2026-07-24 · MVP-0 round-1 REVIEW (grade A−).** All 3 round-1 slices built; the two green
+  ones adversarially re-verified and fixed in place; the CP slice's gate is CI-bound (no local
+  BEAM) and its ledger says so honestly. THE find: the Go↔CP claim envelope MISMATCHED — the CP's
+  `support_provision_claim_json` reuses the FLAT `claim_json` dialect (`job_id`/`claim_token`
+  top-level) while the Go slice decoded only the PDF-D83 nested pin (`job:{id,claim_token}`);
+  strictly decoded, every claim would have failed "missing job.id" and the halves would never
+  meet. FIXED Go-side: `claimSupport` now tolerates BOTH dialects (nested first, flat fallback),
+  end-to-end test pins the flat drain (`loop-epic/provisioner-worker-executes-provision-su-1-r`,
+  fcb309166). SPA fixes (`loop-epic/console-fleet-card-add-support-flow-supp-2-r`, 949e9efdc):
+  the add-support name is now fenced in the modal to the provisioner's DNS-label shape (an
+  off-shape name would queue, spin, and fail minutes later at `validateSupportSpec`), and the
+  presence-slot lookup is attribute-scan (no throwable interpolated selector). SPA↔CP contract
+  CROSS-CHECKED GREEN: the CP reads `barkpark_id` (parent_id alias) and answers 202. Re-derived
+  independently (HIGH-FLIP-RISK custody): parent admin token is header-only, redaction-registered
+  from line zero, claim/mint bodies withheld from errors — holds; note the step-report path
+  bypasses console redaction and relies on message discipline (a genuinely independent second
+  reviewer is warranted before merge per the flip-risk protocol). TWO CP-side defects for the
+  lead, NOT fixable on a green slice: (1) `reap_stale_provision_jobs` is KIND-BLIND at 12 min
+  default while the support chain legitimately runs to 30 (verify budget alone is 10) — a healthy
+  support job gets re-pended mid-flight; the CP needs a per-kind stale threshold ≥ 30 min for
+  `provision_support`. (2) The CP claim map sends the row NAME as `support.name`; the SPA fence
+  makes name==slug for new rows, but the CP should send the SLUG for defense in depth. Merge
+  order: CP branch (CI green first — its gate never ran) → provisioner `-r` → SPA `-r`; then
+  dispatch round-2 `pdf-mvp0-offload-spa` (after the SPA train merges) and
+  `pdf-mvp0-journey-proof` (after all four + deploy + #6038; closes epic criterion 1 per D33/D90).
