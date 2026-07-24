@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# bp-shim — the live-smoke's read-only guard + invocation logger.
+#
+# It is placed on PATH ahead of the real binary as the name `bp`, so every `bp …`
+# the spawned agent runs routes here. It (1) appends a timestamped record of the
+# full argument vector to $BP_SHIM_LOG — this log is the ENVELOPE-INDEPENDENT
+# source for the --full escape-rate metric — and (2) hard-blocks mutating `task`
+# verbs so the ledger chore can never touch a real task even if the agent
+# misbehaves. Everything else is passed through verbatim to the real built bp.
+#
+# Env (set by run-live-smoke.sh):
+#   BP_SHIM_LOG  path to the append-only invocation log
+#   BP_REAL      absolute path to the real built bp binary (worktree main build)
+set -euo pipefail
+: "${BP_SHIM_LOG:?bp-shim: BP_SHIM_LOG must be set}"
+: "${BP_REAL:?bp-shim: BP_REAL must be set}"
+
+printf '%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(printf '%q ' "$@")" >> "$BP_SHIM_LOG"
+
+# Defensive read-only fence: refuse mutating task verbs WITHOUT reaching the real
+# binary. The chore is read-only by construction; this makes it read-only by force.
+if [[ "${1:-}" == "task" ]]; then
+  case "${2:-}" in
+    next|claim|close|stamp|create|update|move|stage|release|delete|rm)
+      echo "bp-shim: BLOCKED mutating 'task ${2}' — live-smoke is strictly read-only" >&2
+      exit 3
+      ;;
+  esac
+fi
+
+exec "$BP_REAL" "$@"

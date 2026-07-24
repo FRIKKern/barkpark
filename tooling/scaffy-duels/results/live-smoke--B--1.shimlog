@@ -1,0 +1,10 @@
+2026-07-24T09:57:31Z	version 
+2026-07-24T09:57:37Z	capabilities -o json --full 
+2026-07-24T09:57:43Z	task ready -o json 
+2026-07-24T09:57:48Z	task ready -o json --all 
+2026-07-24T09:57:56Z	task ready --help 
+2026-07-24T09:58:06Z	task get bp-login-ux-w2-live-e2e -o json 
+2026-07-24T09:58:07Z	task get task-96a908af98698118 -o json 
+2026-07-24T09:58:07Z	task get gh-1 -o json 
+2026-07-24T09:58:07Z	task get bp-cloud-build-epic -o json 
+2026-07-24T09:58:08Z	task get task-e640bb01fca6ea38 -o json 
