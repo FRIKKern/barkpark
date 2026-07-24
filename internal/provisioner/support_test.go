@@ -752,3 +752,58 @@ func TestRunOnceSupport_NoJob_NoWiring(t *testing.T) {
 		t.Fatalf("unwired support drain must no-op, got claimed=%v err=%v", claimed, err)
 	}
 }
+
+// TestReportDetailLines pins the multi-line console contract for a failed
+// on-box step (task-63a199c0a0ce2a06): the sshrunner embeds the remote
+// command's full captured output in the error (bp's error body + the barkpark
+// journal tail), and the CP caps a single console line at 2000 chars — so the
+// worker must ship the detail one console line per physical line, never as one
+// truncatable blob. Pure-function test; the report closure consumes this.
+func TestReportDetailLines(t *testing.T) {
+	got := reportDetailLines("exit status 8: Warning: known hosts\r\nbp: server error (Fabc123)\n\n--- barkpark journal tail ---\n[error] ** (Postgrex.Error) unique_violation\n")
+	want := []string{
+		"exit status 8: Warning: known hosts",
+		"bp: server error (Fabc123)",
+		"--- barkpark journal tail ---",
+		"[error] ** (Postgrex.Error) unique_violation",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d lines %q, want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("line %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+
+	// Single-line details stay single-line; an empty detail still yields the
+	// one (blank) header slot so the caller's `lines[0]` render is total.
+	if got := reportDetailLines("plain"); len(got) != 1 || got[0] != "plain" {
+		t.Fatalf("single-line detail mangled: %q", got)
+	}
+	if got := reportDetailLines(""); len(got) != 1 {
+		t.Fatalf("empty detail must keep one slot, got %q", got)
+	}
+}
+
+// TestSupportImportStep_SharedBuilderEvidence proves the worker chain's import
+// step IS the shared evidence-carrying builder (cloud.SupportMergeImportStep):
+// bp output echoed, journal tail on failure, exit status preserved, token
+// redacted. The CLI chain asserts the same via its own supportImportStep.
+func TestSupportImportStep_SharedBuilderEvidence(t *testing.T) {
+	s := supportImportStep("wsx", "bp_admin_tok987")
+	joined := strings.Join(s.Argv, " ")
+	for _, want := range []string{
+		"cloud workspace import 'wsx'",
+		`printf '%s\n' "$out"`,
+		"journalctl -u barkpark -n 120 --no-pager",
+		"exit $rc",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("worker import step must carry %q\nargv: %s", want, joined)
+		}
+	}
+	if len(s.Redact) == 0 || s.Redact[0] != "bp_admin_tok987" {
+		t.Fatalf("worker import step must Redact the box admin token, got %v", s.Redact)
+	}
+}

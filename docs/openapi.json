@@ -119,6 +119,7 @@
                   "forbidden_field",
                   "halted",
                   "idempotency_key_in_use",
+                  "import_constraint_violation",
                   "internal_error",
                   "invalid_enrollment",
                   "invalid_filter",

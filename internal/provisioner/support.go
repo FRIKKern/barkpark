@@ -245,7 +245,19 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 		// (the ledger token and the box admin token register mid-chain).
 		detail = console.redact(detail)
 		if detail != "" {
-			console.logf("%s: %s — %s", step, status, detail)
+			// A failed on-box step's detail can be MULTI-LINE (the sshrunner embeds
+			// the remote command's full captured output — bp's error body, the
+			// barkpark journal tail). The CP caps a single console line at 2000
+			// chars, so shipping the blob as one line would truncate exactly the
+			// evidence it exists to carry (task-63a199c0a0ce2a06 fired blind this
+			// way). Split: first line inline with the step header, each subsequent
+			// non-blank line as its own console entry. The step-detail sink below
+			// still receives the FULL multi-line text (it is uncapped server-side).
+			lines := reportDetailLines(detail)
+			console.logf("%s: %s — %s", step, status, lines[0])
+			for _, l := range lines[1:] {
+				console.logf("  · %s", l)
+			}
 		} else {
 			console.logf("%s: %s", step, status)
 		}
@@ -348,6 +360,22 @@ type supportRun struct {
 
 	ledgerToken string // minted for the box, delivered 0600 — never narrated
 	tokenID     string
+}
+
+// reportDetailLines splits a step detail into the console lines that carry it:
+// CR-stripped, blank interior lines dropped, always at least one element (the
+// first line, even when blank) so the caller's header line renders. Pure so the
+// multi-line console contract is testable without a harness.
+func reportDetailLines(detail string) []string {
+	raw := strings.Split(strings.ReplaceAll(detail, "\r\n", "\n"), "\n")
+	lines := []string{strings.TrimRight(strings.ReplaceAll(raw[0], "\r", ""), " ")}
+	for _, l := range raw[1:] {
+		l = strings.TrimRight(strings.ReplaceAll(l, "\r", ""), " ")
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 // failStep reports the honest terminal state for a failed step and tears the
@@ -782,16 +810,12 @@ esac`
 
 // supportImportStep merge-imports the staged bundle into the box's OWN
 // localhost API with the BOX's minted admin token (BP_TOK env — Argv only,
-// redacted; never the parent's token).
+// redacted; never the parent's token). Delegates to the ONE shared builder
+// (cloud.SupportMergeImportStep) so this chain and the CLI chain cannot drift,
+// and so the on-box failure carries its evidence (bp's error body + the box's
+// barkpark journal tail — task-63a199c0a0ce2a06 fired blind without them).
 func supportImportStep(ws, boxAdminToken string) cloud.CaddyStep {
-	script := `set -e; export BP_TOK='` + boxAdminToken + `'; export PATH=/usr/local/bin:/usr/bin:$PATH
-bp -s http://localhost:4000 --token "$BP_TOK" cloud workspace import '` + ws + `' --file /opt/barkpark-fleet/dataset.tar --yes --merge`
-	return cloud.CaddyStep{
-		Title:  "merge-import the scrubbed dataset bundle into the box (bp cloud workspace import --merge)",
-		Cmd:    "bp cloud workspace import " + ws + " --file /opt/barkpark-fleet/dataset.tar --yes --merge (token redacted)",
-		Argv:   []string{"bash", "-lc", script},
-		Redact: []string{boxAdminToken},
-	}
+	return cloud.SupportMergeImportStep(ws, boxAdminToken)
 }
 
 // supportFleetFilesStep writes the fleet runtime from origin/main CONTENT

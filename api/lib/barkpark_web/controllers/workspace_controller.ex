@@ -278,6 +278,13 @@ defmodule BarkparkWeb.WorkspaceController do
 
   An empty or truncated body answers 422 `invalid_bundle` — an honest refusal
   rather than the MatchError-driven 500 it used to raise (PDS-D50).
+
+  A bundle row that collides with RESIDENT target content on a constraint the
+  merge arbiter does not cover (any non-primary-key unique index, e.g. the
+  `(name, dataset) WHERE dataset_id IS NULL` schema partial) answers 409
+  `import_constraint_violation` naming the violated constraint + table — never
+  the opaque `internal_error` 500 the live support chain died blind on
+  (task-63a199c0a0ce2a06). Non-constraint Postgres raises still 500 loudly.
   """
   def import(conn, %{"workspace_slug" => _slug} = params) do
     case params["mode"] || "clean" do
@@ -327,6 +334,7 @@ defmodule BarkparkWeb.WorkspaceController do
     })
   rescue
     e in InvalidBundleError -> invalid_bundle(conn, e)
+    e in Postgrex.Error -> constraint_conflict_or_reraise(conn, e, __STACKTRACE__)
   end
 
   defp merge_import(conn, bundle) do
@@ -358,6 +366,7 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   rescue
     e in InvalidBundleError -> invalid_bundle(conn, e)
+    e in Postgrex.Error -> constraint_conflict_or_reraise(conn, e, __STACKTRACE__)
   end
 
   # PDS-D50 — the engine RAISES on bytes that cannot be a bundle (empty,
@@ -367,6 +376,52 @@ defmodule BarkparkWeb.WorkspaceController do
     conn
     |> put_status(:unprocessable_entity)
     |> json(%{error: %{code: e.code, message: e.message}})
+  end
+
+  # The Postgres error classes an import can hit against RESIDENT target
+  # content: the merge arbiter is each member's primary key ONLY, so a bundle
+  # row colliding with a different-id resident row on any OTHER unique index
+  # (and, under `session_replication_role = replica`, any check/not-null the
+  # replica role does NOT disable) raises straight through the engine.
+  @import_constraint_pg_codes ~w(
+    unique_violation exclusion_violation check_violation
+    not_null_violation foreign_key_violation
+  )a
+
+  # task-63a199c0a0ce2a06 — the on-box support-chain import 500'd LIVE and the
+  # caller learned only "exit status 8": a constraint-class Postgrex raise
+  # escaped as an opaque `internal_error` whose body names nothing. Surface the
+  # constraint honestly instead: 409, machine-branchable code, the violated
+  # constraint + table + Postgres code in `details`, the full Postgres message
+  # (which names the colliding key values) as `message`. DELIBERATELY NARROW —
+  # only the constraint classes above are caught; any other Postgrex raise (a
+  # genuine engine bug: bad SQL, missing column, privilege failure) still
+  # crashes loudly into the 500 path with its stacktrace, mirroring the export
+  # rescue's posture. The data-loss refuse guard (PDS-D9 workspace_slug_conflict)
+  # is untouched — it returns an error tuple, never a raise.
+  defp constraint_conflict_or_reraise(
+         conn,
+         %Postgrex.Error{postgres: %{code: code} = pg} = e,
+         _stacktrace
+       )
+       when code in @import_constraint_pg_codes do
+    conn
+    |> put_status(:conflict)
+    |> json(%{
+      error: %{
+        code: "import_constraint_violation",
+        message: Exception.message(e),
+        details: %{
+          pg_code: Atom.to_string(code),
+          constraint: pg[:constraint],
+          table: pg[:table]
+        }
+      }
+    })
+  end
+
+  defp constraint_conflict_or_reraise(_conn, %Postgrex.Error{} = e, stacktrace) do
+    reraise(e, stacktrace)
   end
 
   # PDS-D15/D16 — stamp WHERE the imported data came from into the target

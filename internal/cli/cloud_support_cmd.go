@@ -1380,16 +1380,13 @@ esac`
 
 // supportImportStep merge-imports the staged bundle into the box's OWN
 // localhost API with the box's minted admin token (BP_TOK env — Argv only,
-// redacted; never in the narrated Title/Cmd).
+// redacted; never in the narrated Title/Cmd). Delegates to the ONE shared
+// builder (cloud.SupportMergeImportStep) so this chain and the worker chain
+// cannot drift, and so the on-box failure carries its evidence (bp's error
+// body + the box's barkpark journal tail — task-63a199c0a0ce2a06 fired blind
+// without them).
 func supportImportStep(ws, adminToken string) cloud.CaddyStep {
-	script := `set -e; export BP_TOK='` + adminToken + `'; export PATH=/usr/local/bin:/usr/bin:$PATH
-bp -s http://localhost:4000 --token "$BP_TOK" cloud workspace import '` + ws + `' --file /opt/barkpark-fleet/dataset.tar --yes --merge`
-	return cloud.CaddyStep{
-		Title:  "merge-import the scrubbed dataset bundle into the box (bp cloud workspace import --merge)",
-		Cmd:    "bp cloud workspace import " + ws + " --file /opt/barkpark-fleet/dataset.tar --yes --merge (token redacted)",
-		Argv:   []string{"bash", "-lc", script},
-		Redact: []string{adminToken},
-	}
+	return cloud.SupportMergeImportStep(ws, adminToken)
 }
 
 // supportFleetFilesStep writes the fleet runtime from origin/main CONTENT:

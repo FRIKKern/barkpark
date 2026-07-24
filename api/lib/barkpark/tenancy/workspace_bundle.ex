@@ -271,7 +271,30 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             %{tables: tables, total_rows: total, manifest: manifest}
           end)
         after
-          set_replication_role!("DEFAULT")
+          # THE BLINDFOLD (task-63a199c0a0ce2a06). When a member import raises —
+          # e.g. a 23505 against a non-arbiter unique index — this transaction is
+          # already ABORTED, so the role reset itself raises 25P02
+          # (in_failed_sql_transaction)… and an exception raised in an `after`
+          # clause REPLACES the one propagating through it. Every member-loop
+          # failure therefore reached the wire as an unnamed 25P02 500 instead
+          # of the true first error (live-reproduced by the support chain, and
+          # pinned by the controller's 409 constraint test). Guard the reset so
+          # the ORIGINAL exception survives. Swallowing the failed reset leaks
+          # nothing: `SET session_replication_role` (non-LOCAL, but issued
+          # INSIDE this transaction) is reverted by the rollback itself, so the
+          # pooled connection leaves the aborted transaction on the DEFAULT
+          # role either way. On the success path the reset still runs and still
+          # raises loudly on any genuine failure-to-reset (connection death
+          # aborts the commit with it).
+          try do
+            set_replication_role!("DEFAULT")
+          rescue
+            e in Postgrex.Error ->
+              case e.postgres do
+                %{code: :in_failed_sql_transaction} -> :ok
+                _ -> reraise(e, __STACKTRACE__)
+              end
+          end
         end
       end,
       timeout: :infinity

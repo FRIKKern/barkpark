@@ -10,6 +10,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
   import Barkpark.TenancyFixtures
 
+  alias Barkpark.{Content, Tenancy}
+  alias Barkpark.Plugins.Bootstrap
   alias Barkpark.Repo
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.{Archive, Catalog}
@@ -848,6 +850,120 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
              ]) == 1
 
       assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [ws_a.id]) == 0
+    end
+  end
+
+  # ── The support-box merge-import scenario (task-63a199c0a0ce2a06) ───────────
+  #
+  # The live provision_support chain fired THREE times with the same blind
+  # signature (bp exit 8 = box-side 5xx) importing a template-launched parent's
+  # dev/dataset bundle into a fresh box. This test reproduces the box's exact
+  # documented state and the chain's exact sequence IN CI, so the engine half of
+  # the diagnosis is pinned mechanically: if the merge engine can crash on this
+  # state, the raise is named HERE, not on a torn-down Hetzner box.
+
+  describe "support-box merge-import scenario (task-63a199c0a0ce2a06)" do
+    test "dev/dataset bundle into Default ws + Bootstrap schemas + ensured same-slug shell imports clean; Default slot untouched" do
+      # FRESH-BOX SHAPE: the migrate-seeded Default workspace holds the
+      # boot-time plugin schemas (Bootstrap stamps them into the Default
+      # production slot — same names, same `dataset` string as any parent's).
+      {default_ws, default_proj} = ensure_default_scope!()
+      {:ok, _prod} = Tenancy.get_or_create_dataset(default_proj.id, "production")
+      assert {:ok, _n} = Bootstrap.register_all_schemas()
+
+      default_schema_count =
+        scalar(
+          "SELECT count(*) FROM schema_definitions WHERE workspace_id = $1::text::uuid",
+          [default_ws.id]
+        )
+
+      # A schema NAME the box's Default slot already owns (the cross-workspace
+      # same-name case the live import always carries); "tplarticle" when the
+      # plugin registry is empty under test.
+      overlap =
+        case Repo.query!(
+               "SELECT name FROM schema_definitions WHERE workspace_id = $1::text::uuid " <>
+                 "AND dataset = 'production' ORDER BY name LIMIT 1",
+               [default_ws.id]
+             ).rows do
+          [[name]] -> name
+          [] -> "tplarticle"
+        end
+
+      # PARENT: the template bootstrap's exact shape (internal/bootstrap) —
+      # workspace + "default" project + "production" dataset, schemas and seed
+      # docs written through the SCOPED write path. "production" is deliberately
+      # SHARED with the Default workspace, exactly as on a live parent.
+      parent = create_workspace!(unique("tpl-instance"))
+      parent_proj = create_project!(parent, "default")
+      {:ok, _ds} = Tenancy.get_or_create_dataset(parent_proj.id, "production")
+      scope = [workspace_id: parent.id, project_id: parent_proj.id]
+
+      for name <- Enum.uniq([overlap, "tplarticle"]) do
+        assert {:ok, _} =
+                 Content.upsert_schema(
+                   %{"name" => name, "title" => name, "fields" => []},
+                   "production",
+                   scope
+                 )
+      end
+
+      {:ok, _doc} =
+        create_document_in!(
+          parent,
+          parent_proj,
+          "tplarticle",
+          %{"doc_id" => "tpl-doc-1"},
+          "production"
+        )
+
+      # Export BOTH grains: the dev/dataset bundle is what the support chain
+      # ships; the full bundle exists only to drive a complete purge below.
+      {:ok, full_bundle} = WorkspaceBundle.export(parent.id)
+      {full_manifest, _} = Archive.unpack(full_bundle)
+      {:ok, dev_bundle} = WorkspaceBundle.export(parent.id, profile: :dev, dataset: "production")
+      {dev_manifest, _} = Archive.unpack(dev_bundle)
+      assert dev_manifest["profile"] == "dev"
+      assert dev_manifest["dataset"] == "production"
+
+      # THE BOX: the parent lives on another machine — remove every parent row,
+      # then replay supportEnsureWorkspaceStep (POST /api/workspaces): a
+      # same-slug EMPTY shell with its own Default project + production dataset.
+      purge_workspace!(parent.id, full_manifest)
+      shell = create_workspace!(parent.slug)
+      shell_proj = create_project!(shell, "default")
+      {:ok, _shell_ds} = Tenancy.get_or_create_dataset(shell_proj.id, "production")
+      refute shell.id == parent.id
+
+      # THE IMPORT the chain runs (bp cloud workspace import --merge).
+      assert {:ok, stats} = WorkspaceBundle.import_bundle(dev_bundle, mode: :merge)
+      assert stats.total_rows > 0
+
+      # The shell was adopted: the bundle's workspace owns the slug again.
+      assert scalar("SELECT id::text FROM workspaces WHERE slug = $1", [parent.slug]) ==
+               parent.id
+
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [shell.id]) == 0
+
+      # The parent's content really landed at the dev/dataset grain.
+      assert scalar("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [
+               parent.id
+             ]) > 0
+
+      assert scalar(
+               "SELECT count(*) FROM schema_definitions WHERE workspace_id = $1::text::uuid",
+               [parent.id]
+             ) == length(Enum.uniq([overlap, "tplarticle"]))
+
+      # The resident Default slot is UNTOUCHED — same workspace, same schema
+      # rows, none adopted/overwritten by the import.
+      assert scalar("SELECT count(*) FROM workspaces WHERE id = $1::text::uuid", [default_ws.id]) ==
+               1
+
+      assert scalar(
+               "SELECT count(*) FROM schema_definitions WHERE workspace_id = $1::text::uuid",
+               [default_ws.id]
+             ) == default_schema_count
     end
   end
 

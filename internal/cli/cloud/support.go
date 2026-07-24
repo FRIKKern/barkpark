@@ -208,3 +208,40 @@ func ConfigureSupportHost(ctx context.Context, runner SupportRunner, opts Suppor
 
 	return secrets, nil
 }
+
+// SupportMergeImportStep builds the on-box merge-import step BOTH support
+// chains run (the CLI's `bp cloud support add` and the CP worker's
+// provision_support): bp merge-imports the staged dataset bundle into the
+// box's OWN localhost API with the BOX's minted admin token — never the
+// parent's. ONE shared builder: the two chains carried byte-copied scripts and
+// the failure mode drifted blind (task-63a199c0a0ce2a06 — the live import 500
+// surfaced as a bare "exit status 8" because bp's error body and the box-side
+// crash log never left the box).
+//
+// The script therefore CARRIES ITS EVIDENCE: bp's combined output is ALWAYS
+// echoed, and on a non-zero exit the box's own barkpark journal tail (the
+// Phoenix crash report behind a 500) follows before the exit status is
+// preserved. Custody: the admin token rides Argv only and is listed in Redact,
+// so the runner scrubs it from any captured output; everything else the step
+// can print is box-local error text (bp's stderr, journal lines), which is
+// exactly what the job console must surface for the next failure to name
+// itself.
+func SupportMergeImportStep(ws, boxAdminToken string) CaddyStep {
+	script := `set -e; export BP_TOK='` + boxAdminToken + `'; export PATH=/usr/local/bin:/usr/bin:$PATH
+rc=0
+out=$(bp -s http://localhost:4000 --token "$BP_TOK" cloud workspace import '` + ws + `' --file /opt/barkpark-fleet/dataset.tar --yes --merge 2>&1) || rc=$?
+printf '%s\n' "$out"
+if [ "$rc" -ne 0 ]; then
+  echo "bp import exited $rc — box-side evidence follows"
+  echo '--- barkpark journal tail (journalctl -u barkpark -n 120) ---'
+  journalctl -u barkpark -n 120 --no-pager 2>&1 || true
+  echo '--- end barkpark journal tail ---'
+fi
+exit $rc`
+	return CaddyStep{
+		Title:  "merge-import the scrubbed dataset bundle into the box (bp cloud workspace import --merge)",
+		Cmd:    "bp cloud workspace import " + ws + " --file /opt/barkpark-fleet/dataset.tar --yes --merge (token redacted)",
+		Argv:   []string{"bash", "-lc", script},
+		Redact: []string{boxAdminToken},
+	}
+}
