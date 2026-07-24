@@ -67,7 +67,10 @@ npx expo run:android --variant release
 ```
 
 **Release build required for the binding verdict** — debug JS + dev WebView skew
-every axis. Verify the device: `adb devices` shows exactly one `device` row.
+every axis. This is enforced, not honor-system: the scripts auto-detect a
+DEBUGGABLE APK (`dumpsys package`) and mark the whole run **ADVISORY** in
+RESULTS.md, same as an emulator (detected via `ro.kernel.qemu` OR
+`ro.boot.qemu`). Verify the device: `adb devices` shows exactly one `device` row.
 
 ## 3 · Measure — one command
 
@@ -95,6 +98,11 @@ WebView version, emulator flag) — the lead needs it to stamp the verdict.
 - **Scroll axis** rides `adb shell dumpsys gfxinfo <pkg> framestats` — modern
   Android WebView renders in-process, so the app package's frame data covers it.
   `Flags != 0` rows (first-draw frames) are excluded per the Android docs.
+  framestats retains only ~120 frames, so the driver dumps **and resets after
+  every swipe** (20 down + 2 up by default, sized to traverse the full
+  104-block document); the parser aggregates all per-swipe sections, so the
+  strict 0-frames>100ms axis grades the WHOLE pass, not just its tail.
+  RESULTS.md records sections + frames graded.
 - **Memory axis** compares `warm0` (1 active WebView) against `warm3` (1 active
   + 3 mounted-undestroyed) — marginal = delta/3. Warm views are stacked behind
   the active one, `pointerEvents="none"`, never unmounted.

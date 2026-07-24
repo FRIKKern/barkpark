@@ -51,10 +51,14 @@ function coldLoad(name) {
 // dumpsys gfxinfo framestats: ---PROFILEDATA--- CSV sections; frame duration =
 // (FRAME_COMPLETED - INTENDED_VSYNC) / 1e6 ms; Flags != 0 rows are excluded
 // (first-draw / surface-changed frames, per the Android docs).
+// run-scroll.sh dumps + resets after EVERY swipe (framestats retains only
+// ~120 frames), so one file carries many sections — ALL are aggregated here,
+// which is what makes the strict 0-frames>100ms axis cover the whole pass.
 function scroll(name) {
   const raw = read(name)
   if (!raw) return null
   const durations = []
+  let sectionCount = 0
   const sections = raw.split('---PROFILEDATA---')
   for (let i = 1; i < sections.length; i += 2) {
     const lines = sections[i].trim().split('\n')
@@ -63,6 +67,7 @@ function scroll(name) {
     const fIntended = header.indexOf('IntendedVsync')
     const fCompleted = header.indexOf('FrameCompleted')
     if (fFlags < 0 || fIntended < 0 || fCompleted < 0) continue
+    sectionCount++
     for (const line of lines.slice(1)) {
       const cols = line.split(',')
       if (cols.length <= fCompleted) continue
@@ -75,6 +80,7 @@ function scroll(name) {
   const mean = durations.reduce((a, b) => a + b, 0) / durations.length
   return {
     frames: durations.length,
+    sections: sectionCount,
     avgFps: 1000 / mean,
     jankyPct: (100 * durations.filter((d) => d > 16.6).length) / durations.length,
     over100: durations.filter((d) => d > 100).length,
@@ -116,7 +122,7 @@ function grade(axis, metric, value, threshold, pass) {
 
 grade('1 cold-load', `P50 (inline, n=${inline?.n ?? 0})`, inline?.p50 ?? null, '<= 800 ms', inline && inline.p50 <= 800)
 grade('1 cold-load', 'P95 (inline)', inline?.p95 ?? null, '<= 1500 ms', inline && inline.p95 <= 1500)
-grade('2 scroll', `avg fps (${sc?.frames ?? 0} frames)`, sc ? Number(sc.avgFps.toFixed(1)) : null, '>= 50 fps', sc && sc.avgFps >= 50)
+grade('2 scroll', `avg fps (${sc?.frames ?? 0} frames / ${sc?.sections ?? 0} sections)`, sc ? Number(sc.avgFps.toFixed(1)) : null, '>= 50 fps', sc && sc.avgFps >= 50)
 grade('2 scroll', 'janky % (>16.6 ms)', sc ? Number(sc.jankyPct.toFixed(1)) : null, '<= 17 %', sc && sc.jankyPct <= 17)
 grade('2 scroll', 'frames > 100 ms', sc?.over100 ?? null, '= 0', sc && sc.over100 === 0)
 grade('3 memory', 'total PSS, 4 WebViews (MB)', warm3 !== null ? Number(warm3.toFixed(1)) : null, '<= 350 MB', warm3 !== null && warm3 <= 350)
@@ -133,15 +139,24 @@ const missing = rows.filter((r) => r.verdict === 'MISSING')
 const failed = rows.filter((r) => r.verdict === 'FAIL')
 const overall = missing.length ? 'INCOMPLETE' : failed.length ? 'FAIL' : 'PASS'
 const isEmulator = device.emulator === '1'
+// Debug APKs skew every axis: the run is advisory regardless of where it ran
+// (review F4). run-all.sh writes build= from dumpsys package DEBUGGABLE.
+const isDebug = device.build === 'debug'
+const advisoryReasons = [
+  ...(isEmulator ? ['emulator'] : []),
+  ...(isDebug ? ['debug APK'] : []),
+]
+const advisory = advisoryReasons.length > 0
+const advisoryTag = advisory ? ` [${advisoryReasons.join(' + ').toUpperCase()} — ADVISORY ONLY]` : ''
 
 // ---- render ----------------------------------------------------------------
 const pad = (s, n) => String(s).padEnd(n)
 let table = `${pad('axis', 18)}${pad('metric', 42)}${pad('value', 12)}${pad('threshold', 24)}verdict\n`
 for (const r of rows) table += `${pad(r.axis, 18)}${pad(r.metric, 42)}${pad(fmt(r.value), 12)}${pad(r.threshold, 24)}${r.verdict}\n`
 
-console.log(`\nD11 verdict — device: ${device.model || 'unknown'} (Android ${device.android || '?'})${isEmulator ? ' [EMULATOR — ADVISORY ONLY]' : ''}\n`)
+console.log(`\nD11 verdict — device: ${device.model || 'unknown'} (Android ${device.android || '?'})${advisoryTag}\n`)
 console.log(table)
-console.log(`OVERALL: ${overall}${isEmulator ? ' (advisory — the binding verdict requires real mid-tier hardware)' : ''}`)
+console.log(`OVERALL: ${overall}${advisory ? ` (ADVISORY — ${advisoryReasons.join(' + ')}; the binding verdict requires real mid-tier hardware on a RELEASE build)` : ''}`)
 if (overall === 'FAIL') console.log('Consequence (charter D11): native prose fast-path promotes into v1; wave-2 renderer budget re-plans (crown cr-059).')
 
 const md = `# WebView spike — D11 results
@@ -150,8 +165,8 @@ const md = `# WebView spike — D11 results
 - **Device:** ${device.model || 'UNKNOWN'} (${device.device || '?'}, Android ${device.android || '?'}, SDK ${device.sdk || '?'})
 - **System WebView:** ${device.webview || 'unknown'}
 - **react-native-webview:** 13.16.1 · Expo SDK 57 · RN 0.86 · new architecture
-- **Run kind:** ${isEmulator ? 'EMULATOR — advisory tripwire only, NOT the binding verdict' : 'real hardware'}
-- **Build:** <!-- release or debug — release required for the binding verdict -->
+- **Run kind:** ${advisory ? `ADVISORY ONLY (${advisoryReasons.join(' + ')}) — NOT the binding verdict` : 'real hardware, release build (binding-verdict eligible)'}
+- **Build:** ${device.build || 'unknown'} (auto-detected via dumpsys package DEBUGGABLE; release required for the binding verdict)
 
 | Axis | Metric | Value | Threshold | Verdict |
 |---|---|---|---|---|
@@ -162,6 +177,7 @@ ${rows.map((r) => `| ${r.axis} | ${r.metric} | ${fmt(r.value)} | ${r.threshold} 
 ${overall === 'FAIL' ? '> Any single FAIL promotes the native prose fast-path into v1 and re-plans wave 2’s renderer budget (charter D11, crown cr-059).\n' : ''}
 Cold-load detail: inline ${inline ? inline.vals.join(', ') : 'n/a'} ms · file ${file ? file.vals.join(', ') : 'n/a'} ms (rn_ms = WebView mount → FMP, double-rAF after DOMContentLoaded).
 Notes: 3 mermaid mounts stay inert (mermaid not bundled). avg fps = 1000 / mean frame duration over Flags==0 frames; janky = frames over the 16.6 ms budget.
+Scroll coverage: framestats dumped + reset after EVERY swipe (gfxinfo retains only ~120 frames) — ${sc ? `${sc.sections} sections aggregated, ${sc.frames} frames graded` : 'n/a'} across the whole pass, not just its tail.
 `
 writeFileSync(join(RESULTS, 'RESULTS.md'), md)
 console.log(`\nwrote ${join(RESULTS, 'RESULTS.md')}`)
