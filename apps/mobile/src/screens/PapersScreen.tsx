@@ -1,0 +1,193 @@
+// Papers tab — the list screen, live on the minted token via
+// GET /v1/data/query/:dataset/paper (fields-projected light; newest-updated
+// first). Selecting a row opens the native reader. Honest states: loading,
+// error-with-retry, empty, ready with pull-to-refresh — the same idiom as
+// the Tasks and Chat tabs. Read-only against production by construction.
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
+
+import { makeInstanceClient, type InstanceConnection } from '../api/instance'
+import { fetchPaperList, type PaperListItem } from '../api/papers'
+import { relativeTime } from './ChatScreen'
+import { PaperReaderScreen } from './PaperReaderScreen'
+import { useTheme, type Theme } from '../ui/theme'
+
+type ListState =
+  | { phase: 'loading' }
+  | { phase: 'error'; message: string }
+  | { phase: 'ready'; papers: PaperListItem[]; refreshing: boolean; loadedAtMs: number }
+
+export function PapersScreen({ connection }: { connection: InstanceConnection }) {
+  const theme = useTheme()
+  const [state, setState] = useState<ListState>({ phase: 'loading' })
+  const [attempt, setAttempt] = useState(0)
+  const [openPaper, setOpenPaper] = useState<{ id: string; title?: string } | undefined>(undefined)
+  const client = useMemo(() => makeInstanceClient(connection), [connection])
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const papers = await fetchPaperList(client, connection.dataset)
+        if (alive) setState({ phase: 'ready', papers, refreshing: false, loadedAtMs: Date.now() })
+      } catch {
+        if (alive) setState({ phase: 'error', message: 'Could not load papers from your Barkpark.' })
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [client, connection.dataset, attempt])
+
+  const retry = useCallback(() => {
+    setState({ phase: 'loading' })
+    setAttempt((a) => a + 1)
+  }, [])
+
+  const refresh = useCallback(() => {
+    setState((prev) =>
+      prev.phase === 'ready' ? { ...prev, refreshing: true } : { phase: 'loading' },
+    )
+    setAttempt((a) => a + 1)
+  }, [])
+
+  if (openPaper !== undefined) {
+    return (
+      <PaperReaderScreen
+        connection={connection}
+        paperId={openPaper.id}
+        paperTitle={openPaper.title}
+        onBack={() => setOpenPaper(undefined)}
+      />
+    )
+  }
+
+  if (state.phase === 'loading') {
+    return (
+      <View style={[styles.center, { backgroundColor: theme.bg }]}>
+        <ActivityIndicator color={theme.accent} />
+        <Text style={[styles.muted, { color: theme.textMuted }]}>Loading papers…</Text>
+      </View>
+    )
+  }
+
+  if (state.phase === 'error') {
+    return (
+      <View style={[styles.center, { backgroundColor: theme.bg }]}>
+        <Text style={[styles.body, { color: theme.danger }]}>{state.message}</Text>
+        <Pressable accessibilityRole="button" onPress={retry}>
+          <Text style={[styles.link, { color: theme.accent }]}>Try again</Text>
+        </Pressable>
+      </View>
+    )
+  }
+
+  if (state.papers.length === 0) {
+    return (
+      <View style={[styles.center, { backgroundColor: theme.bg }]}>
+        <Text style={[styles.body, { color: theme.text }]}>No papers yet.</Text>
+        <Text style={[styles.muted, { color: theme.textMuted }]}>
+          Published papers on this Barkpark show up here.
+        </Text>
+        <Pressable accessibilityRole="button" onPress={retry}>
+          <Text style={[styles.link, { color: theme.accent }]}>Refresh</Text>
+        </Pressable>
+      </View>
+    )
+  }
+
+  return (
+    <FlatList
+      style={{ backgroundColor: theme.bg }}
+      contentContainerStyle={styles.listContent}
+      data={state.papers}
+      keyExtractor={(paper) => paper._id}
+      refreshControl={
+        <RefreshControl
+          refreshing={state.refreshing}
+          onRefresh={refresh}
+          tintColor={theme.accent}
+        />
+      }
+      renderItem={({ item }) => (
+        <PaperRow
+          paper={item}
+          nowMs={state.loadedAtMs}
+          theme={theme}
+          onPress={() => setOpenPaper({ id: item._id, title: item.title })}
+        />
+      )}
+    />
+  )
+}
+
+function PaperRow({
+  paper,
+  nowMs,
+  theme,
+  onPress,
+}: {
+  paper: PaperListItem
+  nowMs: number
+  theme: Theme
+  onPress: () => void
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={[styles.row, { backgroundColor: theme.surface, borderColor: theme.border }]}
+    >
+      <Text numberOfLines={2} style={[styles.title, { color: theme.text }]}>
+        {paper.title}
+      </Text>
+      {paper.description !== undefined && (
+        <Text numberOfLines={2} style={[styles.description, { color: theme.textMuted }]}>
+          {paper.description}
+        </Text>
+      )}
+      <View style={styles.rowMeta}>
+        {paper.main_tag !== undefined && (
+          <Text style={[styles.pill, { color: theme.accent, borderColor: theme.accent }]}>
+            {paper.main_tag}
+          </Text>
+        )}
+        {paper._updatedAt !== undefined && (
+          <Text style={[styles.metaText, { color: theme.textMuted }]}>
+            {relativeTime(paper._updatedAt, nowMs)}
+          </Text>
+        )}
+      </View>
+    </Pressable>
+  )
+}
+
+const styles = StyleSheet.create({
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
+  listContent: { padding: 16, gap: 10 },
+  row: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 6, marginBottom: 8 },
+  title: { fontSize: 15, fontWeight: '600', lineHeight: 20 },
+  description: { fontSize: 13, lineHeight: 18 },
+  rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  pill: {
+    fontSize: 11,
+    fontWeight: '700',
+    borderWidth: 1,
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    overflow: 'hidden',
+  },
+  metaText: { fontSize: 12 },
+  body: { fontSize: 15, textAlign: 'center' },
+  muted: { fontSize: 13, textAlign: 'center' },
+  link: { fontSize: 14, textDecorationLine: 'underline' },
+})
