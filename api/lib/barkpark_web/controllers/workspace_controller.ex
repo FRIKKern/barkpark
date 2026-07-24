@@ -325,16 +325,21 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp clean_import(conn, bundle) do
-    {:ok, stats} = WorkspaceBundle.import_bundle(bundle)
+    case WorkspaceBundle.import_bundle(bundle) do
+      {:ok, stats} ->
+        json(conn, %{
+          tables: stats.tables,
+          total_rows: stats.total_rows,
+          provenance: stamp_provenance(stats.manifest)
+        })
 
-    json(conn, %{
-      tables: stats.tables,
-      total_rows: stats.total_rows,
-      provenance: stamp_provenance(stats.manifest)
-    })
+      {:error, other} ->
+        import_failed(conn, :clean, other)
+    end
   rescue
     e in InvalidBundleError -> invalid_bundle(conn, e)
     e in Postgrex.Error -> constraint_conflict_or_reraise(conn, e, __STACKTRACE__)
+    e -> log_import_crash_and_reraise(:clean, e, __STACKTRACE__)
   end
 
   defp merge_import(conn, bundle) do
@@ -363,10 +368,64 @@ defmodule BarkparkWeb.WorkspaceController do
             }
           }
         })
+
+      {:error, other} ->
+        import_failed(conn, :merge, other)
     end
   rescue
     e in InvalidBundleError -> invalid_bundle(conn, e)
     e in Postgrex.Error -> constraint_conflict_or_reraise(conn, e, __STACKTRACE__)
+    e -> log_import_crash_and_reraise(:merge, e, __STACKTRACE__)
+  end
+
+  # task-96d8ab2b582818a4 — THE SILENT 500. Round-3 live fire: the on-box merge
+  # import answered `internal_error` in 251ms and the captured box journal held
+  # NO error line for the request. Two mechanisms can produce exactly that
+  # silence, and both are closed here:
+  #
+  #   1. An `{:error, term}` shape this controller did not pattern-match either
+  #      raised CaseClauseError (merge) / MatchError (clean) or fell through to
+  #      the FallbackController — whose catch-all renders `internal_error`
+  #      WITHOUT logging (Ecto's `Repo.transaction` can legitimately return
+  #      `{:error, :rollback}` when a nested transaction rolled back, so this is
+  #      a reachable class, not paranoia). `import_failed/3` now LOGS the term
+  #      at error level (Plug.RequestId's request_id is already on
+  #      Logger.metadata) and answers a NAMED 500 `import_failed` whose message
+  #      carries the term — this surface is admin-gated, so naming the cause
+  #      leaks nothing.
+  #   2. A raise on the import path IS logged — but by Bandit, AFTER the
+  #      response is sent, and the support chain's evidence capture snapshots
+  #      the journal milliseconds after `bp` exits, so the crash log loses that
+  #      race (and a `Bandit.TransportError{error: :closed}` is never logged at
+  #      all under the default `log_client_closures: false`). The rescue-all
+  #      below logs the exception BEFORE the 500 is rendered, so the box-side
+  #      journal tail always carries the true cause — then reraises, keeping
+  #      crash semantics (a wide rescue that answered politely would hide
+  #      engine bugs behind a retry hint).
+  defp import_failed(conn, mode, term) do
+    detail = inspect(term, limit: 25, printable_limit: 500)
+
+    Logger.error(
+      "WorkspaceController.import(#{mode}): import_bundle returned an unhandled error " <>
+        "term — answering a named 500 import_failed instead of a silent internal_error. " <>
+        "term=#{detail}"
+    )
+
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      :internal_server_error,
+      "import_failed",
+      "workspace bundle import failed: #{detail}"
+    )
+  end
+
+  defp log_import_crash_and_reraise(mode, e, stacktrace) do
+    Logger.error(
+      "WorkspaceController.import(#{mode}) raised — logged pre-response so the box-side " <>
+        "journal capture cannot race it away: " <> Exception.format(:error, e, stacktrace)
+    )
+
+    reraise(e, stacktrace)
   end
 
   # PDS-D50 — the engine RAISES on bytes that cannot be a bundle (empty,
@@ -421,6 +480,14 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp constraint_conflict_or_reraise(_conn, %Postgrex.Error{} = e, stacktrace) do
+    # Non-constraint Postgres raise (bad SQL, privilege failure, transport…):
+    # still a loud 500 — but log it HERE, before the response, for the same
+    # journal-race reason as log_import_crash_and_reraise/3.
+    Logger.error(
+      "WorkspaceController.import: non-constraint Postgres raise on the import path: " <>
+        Exception.format(:error, e, stacktrace)
+    )
+
     reraise(e, stacktrace)
   end
 
