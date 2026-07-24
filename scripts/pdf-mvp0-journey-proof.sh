@@ -1113,10 +1113,13 @@ for r in rows:
             print("      provision_error: %s" % str(err)[:600])
         con = r.get("provision_console")
         if isinstance(con, list):
-            for line in con[-14:]:
+            # The WHOLE console (bounded): the evidence-carrying import step
+            # echoes bp output + a journal tail — truncating to a short tail
+            # cost round 6 its root cause. Cap generously, never at 14.
+            for line in con[-220:]:
                 if isinstance(line, dict):
                     line = line.get("line") or line.get("text") or json.dumps(line)
-                print("      | %s" % str(line)[:220])
+                print("      | %s" % str(line)[:400])
         break' "$SNAP" 2>/dev/null || true
     say "      the worker tears its half-built box down on chain failure (SupportProvisionWith.failStep);"
     say "      the provisioning roster row ages to offline honestly (PDF-D10)"
