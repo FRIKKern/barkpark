@@ -63,3 +63,18 @@ All 12 capstone judgment calls are RATIFIED on the recommended column (recorded 
 ## Wave log
 
 (append-only; one dated H3 per wave)
+
+### Wave 2026-07-24 — wave 1 built + reviewed, grade A-
+
+**Landed (4 slices, all pushed, PRs open, lead merges):**
+
+- `ctx-s1-brief-manifest` → PR #6052 (`loop-epic/born-brief-bp-capabilities-machine-outpu-0`). Born-brief `bp capabilities`: BRIEF-KEEP-LIST v1 tuples, 95,915 B → 26,502 B (3.62x / 27.6%, under the 32% tripwire). Full protective kit (invoke-completeness, legend pin, cut-list pin, ratio tripwire, hostile synthetic, `--full` byte-identity, table-untouched — first coverage this stdout ever had). Fixture regen 40→142 commands; frozen duel pair committed; `docs/cli/fixtures/**` added to go-tests.yml. Reviewer re-ran the Go gate green and additionally proved caps-brief fixture == briefManifest(caps-full) byte-identical. No fixes needed.
+- `ctx-s3-nil-polarity` → PR #6053. envelope.ex nil clause + :244 catch-all flipped fail-CLOSED; listen_controller fail-open nil seam REMOVED; selftest-tripwired `scripts/nil-polarity-check.sh` fence wired into doc-gates.yml. Reviewer independently re-derived the dead-path claim (all 6 callers thread non-nil; `ScopeHelpers.from_assigns` always puts `:caller_context` via `from_conn` → `anonymous()`). Runnable gates green locally; **elixir.yml on the PR is the binding mix proof**. Comment-sweep follow-up filed: `task-3afeb5994c839c27`.
+- `ctx-s4-did-you-mean` → PR #6054. `task show`→`get`, `task list`→`ls` aliases (stderr note, stdout byte-identical); `error.hint` did-you-mean threaded into JSON envelopes via `usageErrHintf` sibling (63 no-op usageErrf sites untouched). Go gate green; reviewer verified clean merge + combined green suite with s1's 142-command fixture.
+- `ctx-s2-seal-query-rows` → PR #6055 (**CI-gated, second-review-owed**). `rows_for_query/3` sealed with the explicit dataset cascade; preview passes `socket.assigns.dataset` (HIGH-FLIP-RISK judgment re-derived by reviewer — the adjacent `agg_for_query` fetcher already threads it). Mix gate unrun locally (no toolchain, charter-designated); criteria 2/4/5 stay open pending elixir.yml green. An independent second reviewer is warranted before merge per the flip-risk protocol.
+
+**Cross-slice:** all four merge cleanly together; combined Go suite + fence scripts green on the integration merge. s2's gate correctly passes `anonymous()`, composing with s3's flip. Structural note for the dedup ledger: `row_field_visibility_gate/1` is now the third inline copy of the anonymous-gate helper (board.ex, board_live.ex, query.ex) — `ctx-b6-memoized-visibility-gate` is the natural consolidation point.
+
+**Deferred by design (round 2, sequenced behind s1):** `ctx-s5-count-tokens`, `ctx-s6-live-smoke`.
+
+**Next wave:** (1) lead merges round 1 — order: #6052 (s1) first, then #6053/#6054 (independent), #6055 after elixir.yml green + independent dataset-threading second review; lead closes each task's merge-gated criteria on merge. (2) Dispatch `ctx-s5-count-tokens` once s1 is on main (bytes-pending fallback works without a key; `ctx-b5` human key provisioning unblocks the token leg). (3) Dispatch `ctx-s6-live-smoke` after s1 merges (arm A needs the brief-default binary from main); pre-register before any run. (4) Token verdict either confirms tuples or files the >10% amendment. Wave 2 proper: paired duel (`ctx-b1`), census thresholds measured-first.
