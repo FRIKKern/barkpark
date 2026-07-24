@@ -104,6 +104,13 @@ type supportHarness struct {
 	mintToken    string
 	parentToken  string
 	exportedTars int
+
+	// failEchoLeg, when set to "mutate" or "mint", makes that parent-main leg
+	// answer 500 with a body that ECHOES the parent token plus echoSecret (an
+	// unregistered secret-like string) — the header-echoing error page the
+	// custody fixes defend against.
+	failEchoLeg string
+	echoSecret  string
 }
 
 func newSupportHarness(t *testing.T) *supportHarness {
@@ -112,6 +119,13 @@ func newSupportHarness(t *testing.T) *supportHarness {
 		rosterLive:  true,
 		mintToken:   "sup-ledger-tok-abc123",
 		parentToken: "parent-admin-tok-hunter2-XYZ",
+		echoSecret:  "would-be-minted-tok-9f8e7d",
+	}
+
+	// echoFail writes the header-echoing 500 body for the failEchoLeg leg.
+	echoFail := func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"error":"internal","request_headers":"Authorization: Bearer %s","token":%q}`, h.parentToken, h.echoSecret)
 	}
 
 	h.main = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -123,9 +137,17 @@ func newSupportHarness(t *testing.T) *supportHarness {
 		switch {
 		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/data/mutate/"):
 			h.add("mutate")
+			if h.failEchoLeg == "mutate" {
+				echoFail(w)
+				return
+			}
 			fmt.Fprint(w, `{"ok":true}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/fleet/support-tokens":
 			h.add("mint")
+			if h.failEchoLeg == "mint" {
+				echoFail(w)
+				return
+			}
 			fmt.Fprintf(w, `{"token":%q,"token_id":"tid-1"}`, h.mintToken)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/workspaces/"):
 			h.add("export")
@@ -410,15 +432,22 @@ func TestRunOnceSupport_RosterTimeout_FailsNeverSucceeds(t *testing.T) {
 // the happy path and the timeout-fail path.
 func TestSupport_CredentialCustody(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		rosterLive bool
+		name        string
+		rosterLive  bool
+		failEchoLeg string // parent-main leg that 500s with a token-echoing body
 	}{
-		{"happy_path", true},
-		{"roster_timeout_fail", false},
+		{"happy_path", true, ""},
+		{"roster_timeout_fail", false, ""},
+		// Header-echoing error pages: the non-2xx body CONTAINS the parent token
+		// (plus an unregistered secret-like string). The mutate leg pins the
+		// step-detail + fail-body redaction; the mint leg pins the withheld body.
+		{"mutate_500_echoes_token", true, "mutate"},
+		{"mint_500_echoes_token", true, "mint"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newSupportHarness(t)
 			h.rosterLive = tc.rosterLive
+			h.failEchoLeg = tc.failEchoLeg
 			runner := &supportFakeRunner{capacityJSON: `{"size_class":"standard"}`}
 			var deleted []string
 			w := h.worker(runner, &deleted)
@@ -440,12 +469,22 @@ func TestSupport_CredentialCustody(t *testing.T) {
 			if strings.Contains(scripts, h.parentToken) {
 				t.Fatal("CUSTODY VIOLATION: the parent admin token was written into an on-box script")
 			}
+			// A failed leg must actually exercise the /fail sink…
+			if tc.failEchoLeg != "" && len(h.fails) != 1 {
+				t.Fatalf("the %s-500 scenario must report exactly one fail, got %d", tc.failEchoLeg, len(h.fails))
+			}
+			// …and a mint error must withhold the WHOLE body: even UNREGISTERED
+			// secret-shaped content must never surface (redaction cannot scrub a
+			// token the worker never learned).
+			if tc.failEchoLeg == "mint" && strings.Contains(cpOutput, h.echoSecret) {
+				t.Fatal("CUSTODY VIOLATION: the mint error echoed the response body")
+			}
 			// The minted ledger token: never in step/console output…
 			if strings.Contains(cpOutput, h.mintToken) {
 				t.Fatal("CUSTODY VIOLATION: the ledger token leaked into step/console output")
 			}
 			// …but on the happy path it IS delivered to the box (0600 env).
-			if tc.rosterLive && !strings.Contains(scripts, h.mintToken) {
+			if tc.rosterLive && tc.failEchoLeg == "" && !strings.Contains(scripts, h.mintToken) {
 				t.Fatal("the ledger token never reached the box env — the listener could not authenticate")
 			}
 			// Provider keys are NEVER written (PDF-D62/D88): no provider/model key
@@ -470,7 +509,7 @@ func TestSupport_CredentialCustody(t *testing.T) {
 					t.Fatal("the unit-install step must Redact the ledger token")
 				}
 			}
-			if !importSeen {
+			if tc.failEchoLeg == "" && !importSeen {
 				t.Fatal("the on-box merge-import step never ran")
 			}
 		})

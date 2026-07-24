@@ -236,6 +236,10 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 	console.logf("provisioning support %s for main %s (dataset %s)…", name, parentURL, spec.Support.Dataset)
 
 	report := func(step, status, detail string) {
+		// The CP /step sink is NOT redacted server-side — scrub the detail before
+		// it leaves the worker, against the secret set as it stands at CALL time
+		// (the ledger token and the box admin token register mid-chain).
+		detail = console.redact(detail)
 		if detail != "" {
 			console.logf("%s: %s — %s", step, status, detail)
 		} else {
@@ -347,13 +351,18 @@ type supportRun struct {
 // control plane. The teardown runs on a FRESH bounded context — the chain ctx
 // may already be cancelled/expired. Returns the (nil-teardown) fail triple.
 func (r *supportRun) failStep(_ context.Context, step string, cause error) (string, Teardown, error) {
+	// The returned error IS the /fail POST body (and the drain's stderr) — build
+	// it from scrubbed text so both inherit console redaction. %s, never %w:
+	// nothing unwraps these, and a wrapped cause would resurface unscrubbed text.
+	// The report closure scrubs its own detail — the raw cause stays here.
+	causeText := r.console.redact(cause.Error())
 	r.report(step, "failed", cause.Error())
 	tctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if derr := r.seams.DeleteServer(tctx, r.host.Name); derr != nil {
-		return "", nil, fmt.Errorf("support %s: %s: %w (AND box %s teardown failed: %v — reclaim it manually)", r.name, step, cause, r.host.Name, derr)
+		return "", nil, fmt.Errorf("support %s: %s: %s (AND box %s teardown failed: %s — reclaim it manually)", r.name, step, causeText, r.host.Name, r.console.redact(derr.Error()))
 	}
-	return "", nil, fmt.Errorf("support %s: %s: %w (box torn down; the roster row ages to offline honestly)", r.name, step, cause)
+	return "", nil, fmt.Errorf("support %s: %s: %s (box torn down; the roster row ages to offline honestly)", r.name, step, causeText)
 }
 
 // ── content sub-steps ────────────────────────────────────────────────────────
@@ -400,7 +409,9 @@ func (r *supportRun) contentMintToken(ctx context.Context) error {
 		return fmt.Errorf("support-token mint: cannot reach the main: %w", err)
 	}
 	if status < 200 || status >= 300 {
-		return fmt.Errorf("support-token mint: main answered %d: %s", status, supportTrimBody(resp))
+		// Body withheld: a non-2xx mint body can still carry the token (e.g. a
+		// header-echoing error page) — supportTrimBody is NEVER used on a mint.
+		return fmt.Errorf("support-token mint: main answered %d (body withheld — mint responses can carry the token)", status)
 	}
 	tok, tokID := supportParseMint(resp)
 	if tok == "" {
