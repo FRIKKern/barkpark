@@ -98,6 +98,40 @@ const FLIP_RISK_BLOCK = `FLIP-RISK DUAL-REVIEW (E2, graduated into this cycle 20
 - REVIEW acts on it: for any slice flagged high-flip-risk, the single wave-reviewer performs a DISTINCT independent re-derivation of that judgment (not a re-read of the builder's reasoning), AND explicitly flags — in the slice verdict and in next_wave — that a genuinely INDEPENDENT second reviewer is warranted before merge.
 HONEST LIMIT: this workflow spawns exactly ONE reviewer, so the actual dispatch of that second reviewer is a MANUAL LEAD STEP — the lead already reviews the full diff and merges by hand. Review's job here is to NAME when independence is owed, not to auto-spawn it.`
 
+// The journey is the wave's human story at agent grain — the debrief agent's
+// raw material (epic-memory design D1). REQUIRED of every agent: the debrief
+// runs DAYS later, when this run's session files are gone; a journey that is
+// not in a report (and thence a Paper) does not exist.
+const JOURNEY_FIELD = {
+  type: 'object', additionalProperties: false,
+  required: ['mission', 'key_moments', 'outcome', 'meaning'],
+  properties: {
+    mission: { type: 'string', description: 'your assignment as you understood it, one line' },
+    key_moments: {
+      type: 'array',
+      description: '2-5 turning points or surprises, written for a human reader following the epic later — never a step log ("read A, then B" is a log; "expected X in warmpool.go, found the opposite — that killed direction A" is a moment). Fewer honest moments beat padded ones.',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['moment', 'evidence'],
+        properties: {
+          moment: { type: 'string', description: 'what turned or surprised you, and what it changed' },
+          evidence: { type: 'string', description: 'the file:line, command output, paper/task id, or observation that caused it' },
+        },
+      },
+    },
+    outcome: { type: 'string', description: 'where you landed, one or two lines' },
+    meaning: { type: 'string', description: 'the so-what for THIS wave: how your outcome should change what happens next' },
+  },
+}
+
+// Wall-clock telemetry (design D6). The script cannot call Date.now() (banned
+// for resume-safety), so the Fable phases carry the clock: fleets are
+// bracketed by Fable checkpoints, so phase boundaries are these stamps.
+const FABLE_STAMPS = {
+  started_at: { type: 'string', description: 'output of `date -u +%FT%TZ`, run as your FIRST command (wall-clock telemetry, epic-memory D6)' },
+  ended_at: { type: 'string', description: 'output of `date -u +%FT%TZ`, run as your LAST command before returning' },
+}
+
 const STRATEGY_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'survey', 'journey', 'started_at', 'ended_at'],
@@ -157,40 +191,6 @@ const FACT_ITEMS = {
 
 // Evidence has LEVELS, and the higher ones are cheap — say which one you used.
 const FACTS_DESCRIPTION = 'load-bearing facts you actually verified, never assumed. Evidence takes several forms, and the strongest are cheap: `git show origin/main:<path>` reads what is really on main (not your worktree, which may be ahead, behind, or dirty), and a curl against a running host reads what is really deployed — both are fast enough to be the default, not a luxury (measured here: `git show` 34-54ms; a localhost curl 96-172ms warm, ~925ms cold). A worktree file:line is a perfectly good form too, but it is a claim about YOUR checkout and nothing more — do not quote it as a claim about main or about prod. Whichever form you used, put the command that re-derives it in that fact\'s rerun field.'
-
-// The journey is the wave's human story at agent grain — the debrief agent's
-// raw material (epic-memory design D1). REQUIRED of every agent: the debrief
-// runs DAYS later, when this run's session files are gone; a journey that is
-// not in a report (and thence a Paper) does not exist.
-const JOURNEY_FIELD = {
-  type: 'object', additionalProperties: false,
-  required: ['mission', 'key_moments', 'outcome', 'meaning'],
-  properties: {
-    mission: { type: 'string', description: 'your assignment as you understood it, one line' },
-    key_moments: {
-      type: 'array',
-      description: '2-5 turning points or surprises, written for a human reader following the epic later — never a step log ("read A, then B" is a log; "expected X in warmpool.go, found the opposite — that killed direction A" is a moment). Fewer honest moments beat padded ones.',
-      items: {
-        type: 'object', additionalProperties: false,
-        required: ['moment', 'evidence'],
-        properties: {
-          moment: { type: 'string', description: 'what turned or surprised you, and what it changed' },
-          evidence: { type: 'string', description: 'the file:line, command output, paper/task id, or observation that caused it' },
-        },
-      },
-    },
-    outcome: { type: 'string', description: 'where you landed, one or two lines' },
-    meaning: { type: 'string', description: 'the so-what for THIS wave: how your outcome should change what happens next' },
-  },
-}
-
-// Wall-clock telemetry (design D6). The script cannot call Date.now() (banned
-// for resume-safety), so the Fable phases carry the clock: fleets are
-// bracketed by Fable checkpoints, so phase boundaries are these stamps.
-const FABLE_STAMPS = {
-  started_at: { type: 'string', description: 'output of `date -u +%FT%TZ`, run as your FIRST command (wall-clock telemetry, epic-memory D6)' },
-  ended_at: { type: 'string', description: 'output of `date -u +%FT%TZ`, run as your LAST command before returning' },
-}
 
 const SURVEY_SCHEMA = {
   type: 'object', additionalProperties: false,
