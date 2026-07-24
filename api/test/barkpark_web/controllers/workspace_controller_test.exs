@@ -790,6 +790,51 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
              ).rows == [[1]]
     end
 
+    test "unmatched engine {:error, term} → NAMED, LOGGED 500 import_failed — never the silent internal_error (task-96d8ab2b582818a4)",
+         %{conn: conn} do
+      # The round-3 live fire: 500 internal_error, zero log lines — an
+      # `{:error, term}` no controller clause matched fell through to the
+      # FallbackController's unlogged catch-all (Ecto's Repo.transaction can
+      # legitimately return {:error, :rollback} on a nested-rollback commit
+      # downgrade). The :import_fault seam forces exactly that term through the
+      # REAL unpack + HTTP path; the wire must answer a named import_failed
+      # carrying the term, and the log must name it BEFORE the response.
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      Application.put_env(:barkpark, :import_fault, {:error, :rollback})
+
+      on_exit(fn ->
+        Application.delete_env(:barkpark, :allow_bundle_import)
+        Application.delete_env(:barkpark, :import_fault)
+      end)
+
+      raw_admin = "ws-merge-fault-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Fault RT WS"}, admin_token(raw_admin))
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+
+      {resp, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          conn
+          |> authed(raw_admin)
+          |> put_req_header("content-type", "application/x-tar")
+          |> post("/api/workspaces/#{target.slug}/import?mode=merge", bundle)
+        end)
+
+      assert resp.status == 500
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "import_failed"
+      assert err["message"] =~ ":rollback"
+      # request_id stamped by the shared emitter — the operator can grep for it.
+      assert is_binary(err["request_id"])
+
+      # NEVER SILENT: the term is logged at error level before the response.
+      assert log =~ "unhandled error"
+      assert log =~ ":rollback"
+    end
+
     test "unknown mode → 422 invalid_mode (never silently treated as clean)",
          %{conn: conn, member_ws: member_ws} do
       raw_admin = "ws-merge-bad-#{System.unique_integer([:positive])}"

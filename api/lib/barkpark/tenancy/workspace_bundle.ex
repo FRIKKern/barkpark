@@ -126,7 +126,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   alias Barkpark.Content.Scope
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.{Dataset, Project, Workspace}
-  alias Barkpark.Tenancy.WorkspaceBundle.{Archive, Catalog, ExportScopeError}
+  alias Barkpark.Tenancy.WorkspaceBundle.{Archive, Catalog, ExportScopeError, InvalidBundleError}
 
   @type stats :: %{
           tables: %{optional(String.t()) => non_neg_integer()},
@@ -247,10 +247,28 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
     {manifest, dumps} = Archive.unpack(bundle)
 
+    # A readable tar whose manifest names a DIFFERENT format is a caller
+    # mistake, not an engine fault — InvalidBundleError so the HTTP edge
+    # answers 422 invalid_bundle instead of the opaque 500 the old
+    # ArgumentError produced (task-96d8ab2b582818a4).
     if manifest["format"] != Archive.format() do
-      raise ArgumentError, "not a #{Archive.format()} bundle: #{inspect(manifest["format"])}"
+      raise InvalidBundleError,
+        code: "invalid_bundle",
+        message: "not a #{Archive.format()} bundle: format=#{inspect(manifest["format"])}"
     end
 
+    # Test-only fault seam (mirrors :export_copy_fault): when configured, the
+    # import RETURNS the given {:error, term} after the real unpack + format
+    # check, so the HTTP edge's unmatched-term contract (named, logged 500
+    # import_failed — task-96d8ab2b582818a4) is provable over the wire without
+    # mocking the engine. `nil` in every non-test env.
+    case Application.get_env(:barkpark, :import_fault) do
+      {:error, _term} = fault -> fault
+      nil -> run_import(manifest, dumps, mode)
+    end
+  end
+
+  defp run_import(manifest, dumps, mode) do
     Repo.transaction(
       fn ->
         # PDS-D9 pre-flight runs BEFORE the replica-role flip so the empty-shell
@@ -944,10 +962,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     Repo.query!("DROP TABLE #{qi(tmp)}", [])
   end
 
+  # A manifest member without an order_columns arbiter is a STALE BUNDLE the
+  # caller can fix by re-exporting — InvalidBundleError (422 invalid_bundle at
+  # the HTTP edge), never an opaque ArgumentError 500 (task-96d8ab2b582818a4).
   defp merge_upsert(table, _cols, order_cols, _dump) do
-    raise ArgumentError,
-          "merge import needs a non-empty order_columns arbiter for #{inspect(table)}, " <>
-            "got #{inspect(order_cols)} — re-export the bundle with a current manifest"
+    raise InvalidBundleError,
+      code: "invalid_bundle",
+      message:
+        "merge import needs a non-empty order_columns arbiter for #{inspect(table)}, " <>
+          "got #{inspect(order_cols)} — re-export the bundle with a current manifest"
   end
 
   defp set_replication_role!(role) do
