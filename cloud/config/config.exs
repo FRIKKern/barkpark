@@ -178,6 +178,14 @@ config :barkpark_cloud, BarkparkCloud.ArchiveStore,
   bucket: nil,
   location: "fsn1"
 
+# push-relay spike (mobile charter D15): the swappable transport for one push
+# notification send (BarkparkCloud.Push.Adapter). NotConfigured is the honest
+# default — no APNs/FCM credentials exist in any environment yet, so every
+# delivery cancels terminally (never retried, never faked). Wave 2 lands real
+# adapters + creds (human-gate steps in the NotConfigured moduledoc); tests wire
+# BarkparkCloud.PushFakeAdapter in config/test.exs.
+config :barkpark_cloud, :push_adapter, BarkparkCloud.Push.Adapters.NotConfigured
+
 # oban-substrate: the cloud control plane's job + cron engine. Postgres-backed
 # on BarkparkCloud.Repo (no Redis). A near-verbatim port of the proven api/ Oban
 # setup (api/config/config.exs:81-118), trimmed to what the control plane needs

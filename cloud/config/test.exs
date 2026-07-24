@@ -90,6 +90,12 @@ config :barkpark_cloud, BarkparkCloud.Web.Router,
 # tokens are rejected). runtime.exs reads WORKER_TOKEN in prod.
 config :barkpark_cloud, :worker_token, "worker-token-test-fixed"
 
+# push-relay spike: the process-local fake push transport. Worker tests run
+# jobs in-process via Oban.Testing's perform_job/2, so the fake programs its
+# verdict and records sends in the TEST process's dictionary (no global state,
+# async-safe).
+config :barkpark_cloud, :push_adapter, BarkparkCloud.PushFakeAdapter
+
 # oban-substrate: manual testing mode — Oban inserts jobs but its queue pollers
 # and Cron plugin do NOT auto-execute, so the SQL.Sandbox stays deterministic.
 # Tests assert enqueues with Oban.Testing and run a job synchronously via

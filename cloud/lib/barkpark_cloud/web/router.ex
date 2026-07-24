@@ -70,6 +70,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
+      POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
       POST    /v1/fleet/supports   user      register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
       DELETE  /v1/fleet/supports/:id user    unbind + delete a SUPPORT fleet row (PDF-D61; mains refused 409)
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
@@ -183,6 +184,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/sites/:id/github  admin  disconnect a Site's GitHub link (gh-4)
       POST    /v1/webhooks/github/:site_id —  GitHub push → enqueue Deployment (HMAC)
       POST    /v1/sites/webhooks/content-publish/:site_id —*  content-publish webhook → ISR revalidate (signed)
+      POST    /v1/relay/chat-blocked/:barkpark_id —*  instance chat_blocked webhook → member-device push fan-out (signed; D15)
       GET     /v1/tls/ask          —         on-demand-TLS gate (200/404 by domain)
       POST    /v1/builder/claim    worker    atomic next-queued deployment claim
       POST    /v1/builder/deployments/:id/transition worker fenced status update
@@ -225,6 +227,7 @@ defmodule BarkparkCloud.Web.Router do
     Metrics,
     Notifications,
     OAuth,
+    Push,
     Registry,
     Repo,
     Telemetry,
@@ -370,7 +373,13 @@ defmodule BarkparkCloud.Web.Router do
   # site-spawner W5 (charter D46): the content-publish receiver verifies an HMAC
   # over the EXACT bytes the box signed, so its raw body must be cached too
   # (the parsed JSON map is not stable enough to re-derive the signature).
-  @raw_body_path_prefixes ["/v1/webhooks/github/", "/v1/sites/webhooks/content-publish/"]
+  # push-relay spike (charter D15b): the chat_blocked relay receiver verifies the
+  # instance's HMAC over the exact signed bytes, so its raw body is cached too.
+  @raw_body_path_prefixes [
+    "/v1/webhooks/github/",
+    "/v1/sites/webhooks/content-publish/",
+    "/v1/relay/chat-blocked/"
+  ]
 
   # RemoteIp resolver options, built once at compile time. Only X-Forwarded-For
   # is honored (Caddy's forwarding header); `proxies` lists the loopback CIDRs of
@@ -2327,6 +2336,35 @@ defmodule BarkparkCloud.Web.Router do
           _ ->
             json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # POST /v1/push/device-tokens {platform, token, metadata?} → 201 — register
+  # THIS device for needs-you push (push-relay spike, mobile charter D15a).
+  # USER-authed: the row binds to the calling user; per-user × per-device rows
+  # (see Push.DevicePushToken). Idempotent: re-registering the same
+  # (platform, token) upserts — clears revoked_at, refreshes metadata — so the
+  # app can register on every launch. The registered token is NOT echoed back
+  # (the client already holds it; keep responses minimal). 422 on an unknown
+  # platform / missing-short token. Registration rows are the relay's ONLY
+  # switch: zero rows → the chat_blocked receiver fans out to nothing.
+  post "/v1/push/device-tokens" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Push.register_device_token(conn.assigns.current_user, conn.body_params) do
+        {:ok, device} ->
+          json(conn, 201, %{
+            id: device.id,
+            platform: device.platform,
+            registered: true
+          })
+
+        {:error, %Ecto.Changeset{}} ->
+          json(conn, 422, %{error: "invalid"})
+      end
     end
   end
 
@@ -6212,6 +6250,66 @@ defmodule BarkparkCloud.Web.Router do
                 # Debounced (charter D44): N publishes in the window = ONE rebuild.
                 _ = Sites.AutoDeployWorker.enqueue(site.id)
                 json(conn, 202, %{ok: true, trigger: "content-auto"})
+
+              {:error, _reason} ->
+                # A bad OR expired signature is the same 401 — never leak which.
+                json(conn, 401, %{error: "bad_signature"})
+            end
+        end
+    end
+  end
+
+  # POST /v1/relay/chat-blocked/:barkpark_id — NO bearer auth (HMAC IS the auth).
+  # Push-relay spike (mobile charter D15b/D15c): Cloud's inbound receiver for the
+  # INSTANCE-originated chat_blocked webhook — the box's Webhooks.Dispatcher
+  # signs every delivery `x-barkpark-signature: t=<unix>,v1=<hex>` (HMAC-SHA256
+  # over "<t>.<raw-body>", ±300s replay window); verification reuses
+  # Sites.ContentPublishVerifier, the byte-for-byte CP-side twin of that signing
+  # (same scheme, same tolerance, constant-time compare).
+  #
+  # Per-BARKPARK route on purpose: the D59h payload identifies no user and its
+  # workspace_id is an instance-side value Cloud cannot uniquely resolve (the
+  # charter-D45 ambiguity that made content-publish per-site). The opaque
+  # :barkpark_id names the instance; its OWN Vault-stored secret
+  # (Registry.reveal_push_relay_secret/1) proves the sender. The route:
+  #   1. Loads the barkpark (404 silently when missing or no relay secret is
+  #      configured — a probe cannot tell them apart).
+  #   2. Verifies the signature over the cached raw bytes. 401 on a forged OR
+  #      stale signature (no detail).
+  #   3. Fans out via Push.enqueue_chat_blocked_fanout/2 — one Oban job per
+  #      registered member device (row-absence severable: zero registrations →
+  #      202 {enqueued: 0}, nothing fires). 422 when session_id is absent
+  #      (nothing to deep-link to).
+  post "/v1/relay/chat-blocked/:barkpark_id" do
+    bp = Registry.get_barkpark(conn.path_params["barkpark_id"])
+
+    cond do
+      is_nil(bp) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.reveal_push_relay_secret(bp) do
+          {:ok, nil} ->
+            # No relay configured — same shape as "not found" so a probe cannot
+            # distinguish unconfigured from nonexistent.
+            json(conn, 404, %{error: "not_found"})
+
+          :error ->
+            json(conn, 500, %{error: "secret_unreadable"})
+
+          {:ok, secret} when is_binary(secret) ->
+            raw = raw_request_body(conn)
+            sig = get_first_header(conn, "x-barkpark-signature")
+
+            case Sites.ContentPublishVerifier.verify(raw, sig, [secret]) do
+              :ok ->
+                case Push.enqueue_chat_blocked_fanout(bp, conn.body_params) do
+                  {:ok, enqueued} ->
+                    json(conn, 202, %{ok: true, enqueued: enqueued})
+
+                  {:error, :invalid_payload} ->
+                    json(conn, 422, %{error: "invalid_payload"})
+                end
 
               {:error, _reason} ->
                 # A bad OR expired signature is the same 401 — never leak which.
