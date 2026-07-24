@@ -44,9 +44,14 @@ ledger, the charter, or git, it does not exist.
   `budget.spent()` sampled at phase boundaries → per-phase deltas (the honest
   grain; per-agent splits are not exposed). Wall-clock: Fable phases stamp
   `date -u` start/end; wave start via `args` (Date.now() is banned in
-  scripts). Fleet shape: script counts. Interrupts: `agent()` nulls, builder
-  BLOCKED reports, gate failures, resumed runs — attributed per phase.
-  Review renders stats + a per-phase table in the Paper.
+  scripts). Wave start is measured as the strategist's started_at — the
+  strategist IS the wave's first act (deliberate narrowing of the earlier
+  'via args' idea). Fleet shape: script counts. Interrupts: `agent()` nulls,
+  builder BLOCKED reports, gate failures, resumed runs — attributed per phase.
+  Review renders stats + a per-phase table in the Paper. Review's own token
+  delta exists only in the run's return value (Review cannot know its cost
+  before writing the Paper) — the LEAD pastes the returned telemetry into the
+  charter wave-log entry when cross-wave Review-cost trends matter.
 - D7 **Process retro with teeth.** Review writes one honest efficiency verdict
   per phase, each tied to a telemetry row or a journey moment (wasted
   surveys, duplicate verifies, builders burned on BLOCKED).
@@ -77,4 +82,4 @@ task-board/task-detail/task-list · status-legend.
 
 ## Wave log
 
-(design approved; implementation not started)
+2026-07-24 — D1–D9 implemented on feat/epic-memory-journeys-debrief (journey schemas+tripwire, drift-checks, clock stamps, beauty contract, telemetry+retro, doc routing, meta refresh, bp-epic-debrief skill). Authoritative gate: module-scope smoke harness (see plan Global Constraints); parse-only node --check is a false negative on this file.

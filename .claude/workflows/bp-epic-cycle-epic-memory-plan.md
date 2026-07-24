@@ -18,7 +18,9 @@
 - `facts[].rerun` stays OPTIONAL (charter D3: demote, never reject). Do not touch the provenance gate semantics (length in == length out).
 - Telemetry honesty (design D9): record only what was measured, at measured grain. `budget.spent()` deltas are per-phase; per-agent token splits DO NOT EXIST — never present them.
 - Main checkout stays on `main`. Workflow/skill code changes go through a worktree branch + PR. Docs-only commits (design/plan/charter) may land directly on main by explicit path (`git pull --rebase origin main && git push`, never `--force`, never `git add -A`).
-- Syntax gate for every workflow.js edit: `node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js` → exit 0, no output.
+- Authoritative gate for every workflow.js edit — the module-scope smoke harness (parse-only checks CANNOT run this file: it is an async-wrapped classic-script body with a legal top-level return, so `node --check` fails on it by design). From the repo/worktree root, this must print MODULE-SCOPE-OK:
+  `node -e 'const fs=require("fs");const s=fs.readFileSync(".claude/workflows/bp-epic-cycle.workflow.js","utf8").replace(/^export /m,"");const AF=Object.getPrototypeOf(async function(){}).constructor;const boom=async()=>{throw new Error("SENTINEL")};const fn=new AF("args","budget","agent","parallel","pipeline","phase","log","workflow",s);fn({wish:"smoke",charter_exists:false},{total:null,spent:()=>0,remaining:()=>Infinity},boom,boom,boom,()=>{},()=>{},boom).then(()=>console.log("UNEXPECTED-COMPLETE"),e=>console.log(e.message==="SENTINEL"?"MODULE-SCOPE-OK":"MODULE-SCOPE-ERROR: "+e.message))'`
+  It executes module scope with stub globals (schemas, tripwires, fan-out floors all evaluate) and a sentinel agent — it caught a real TDZ crash mid-branch that parse-only checks passed.
 
 ---
 
@@ -145,11 +147,11 @@ for (const [name, schema] of [
 - [ ] **Step 4: Verify**
 
 ```bash
-node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js && echo PARSE-OK
+Run the module-scope smoke harness (Global Constraints) — must print MODULE-SCOPE-OK
 grep -c 'journey: JOURNEY_FIELD' .claude/workflows/bp-epic-cycle.workflow.js
 ```
 
-Expected: `PARSE-OK`; count `7`.
+Expected: smoke harness prints `MODULE-SCOPE-OK`; count `8` (7 wirings + the tripwire's own error string).
 
 - [ ] **Step 5: Commit**
 
@@ -189,7 +191,7 @@ Return journey{}: mission (one line), 2-5 key_moments — each a turning point o
 - [ ] **Step 3: Verify + commit**
 
 ```bash
-node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js && echo PARSE-OK
+Run the module-scope smoke harness (Global Constraints) — must print MODULE-SCOPE-OK
 grep -c '\${JOURNEY_BLOCK}' .claude/workflows/bp-epic-cycle.workflow.js
 git add .claude/workflows/bp-epic-cycle.workflow.js
 git commit -m "feat(epic-cycle): JOURNEY_BLOCK prompt contract for all seven agents"
@@ -236,7 +238,7 @@ DRIFT-CHECK MODE (epic-memory D4): prior wave Paper ${q.prior_paper} already ans
 - [ ] **Step 4: Verify + commit**
 
 ```bash
-node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js && echo PARSE-OK
+Run the module-scope smoke harness (Global Constraints) — must print MODULE-SCOPE-OK
 grep -c "drift-check" .claude/workflows/bp-epic-cycle.workflow.js
 git add .claude/workflows/bp-epic-cycle.workflow.js
 git commit -m "feat(epic-cycle): universal search-first + drift-check survey mode (epic-memory D4)"
@@ -277,7 +279,7 @@ CLOCK STAMPS (telemetry, epic-memory D6): run `date -u +%FT%TZ` as your first co
 - [ ] **Step 4: Verify + commit**
 
 ```bash
-node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js && echo PARSE-OK
+Run the module-scope smoke harness (Global Constraints) — must print MODULE-SCOPE-OK
 grep -c '\.\.\.FABLE_STAMPS' .claude/workflows/bp-epic-cycle.workflow.js   # expect 4
 grep -c 'CLOCK STAMPS' .claude/workflows/bp-epic-cycle.workflow.js          # expect 4
 git add .claude/workflows/bp-epic-cycle.workflow.js
@@ -319,7 +321,7 @@ The debrief section MUST carry builder journey cards (from every builder's journ
 - [ ] **Step 5: Verify + commit**
 
 ```bash
-node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js && echo PARSE-OK
+Run the module-scope smoke harness (Global Constraints) — must print MODULE-SCOPE-OK
 grep -c 'JOURNEY ROSTER\|BEAUTIFUL BY CONTRACT\|FACTS TABLE' .claude/workflows/bp-epic-cycle.workflow.js   # expect 3
 git add .claude/workflows/bp-epic-cycle.workflow.js
 git commit -m "feat(epic-cycle): Paper beauty contract + journey rosters + facts table (epic-memory D2/D4)"
@@ -430,8 +432,8 @@ And in the wave-level numbered steps add after step 9's text (extended in Task 7
 - [ ] **Step 6: Verify + commit**
 
 ```bash
-node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js && echo PARSE-OK
-grep -c 'budget.spent()' .claude/workflows/bp-epic-cycle.workflow.js   # expect 8 (t0 + 6 phase samples + review)
+Run the module-scope smoke harness (Global Constraints) — must print MODULE-SCOPE-OK
+grep -c 'budget.spent()' .claude/workflows/bp-epic-cycle.workflow.js   # expect 10 (8 executable samples + comment + grain string)
 grep -c 'WAVE TELEMETRY' .claude/workflows/bp-epic-cycle.workflow.js   # expect 1
 git add .claude/workflows/bp-epic-cycle.workflow.js
 git commit -m "feat(epic-cycle): per-phase token/clock/interrupt telemetry + Review retro (epic-memory D6/D7)"
@@ -459,7 +461,7 @@ git commit -m "feat(epic-cycle): per-phase token/clock/interrupt telemetry + Rev
 - [ ] **Step 3: Verify + commit**
 
 ```bash
-node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js && echo PARSE-OK
+Run the module-scope smoke harness (Global Constraints) — must print MODULE-SCOPE-OK
 grep -c 'doc_facts_routed' .claude/workflows/bp-epic-cycle.workflow.js   # expect 3 (required + property + prompt)
 git add .claude/workflows/bp-epic-cycle.workflow.js
 git commit -m "feat(epic-cycle): Decide routes durable repo-facts into owning docs card (epic-memory D5)"
@@ -480,7 +482,7 @@ git commit -m "feat(epic-cycle): Decide routes durable repo-facts into owning do
 - [ ] **Step 2: Verify + commit**
 
 ```bash
-node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js && echo PARSE-OK
+Run the module-scope smoke harness (Global Constraints) — must print MODULE-SCOPE-OK
 git add .claude/workflows/bp-epic-cycle.workflow.js
 git commit -m "docs(epic-cycle): meta.phases reflects journeys, drift-checks, telemetry retro"
 ```
@@ -589,10 +591,10 @@ git commit -m "feat(skills): bp-epic-debrief — premium epic debrief author (ep
 - [ ] **Step 1: Whole-file sanity on the final state**
 
 ```bash
-node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js && echo PARSE-OK
-grep -c 'journey: JOURNEY_FIELD' .claude/workflows/bp-epic-cycle.workflow.js   # 7
+Run the module-scope smoke harness (Global Constraints) — must print MODULE-SCOPE-OK
+grep -c 'journey: JOURNEY_FIELD' .claude/workflows/bp-epic-cycle.workflow.js   # 8 (7 wirings + the tripwire's own error string)
 grep -c '\.\.\.FABLE_STAMPS' .claude/workflows/bp-epic-cycle.workflow.js       # 4
-grep -c 'budget.spent()' .claude/workflows/bp-epic-cycle.workflow.js           # 8
+grep -c 'budget.spent()' .claude/workflows/bp-epic-cycle.workflow.js           # 10 (8 executable samples + comment + grain string)
 ```
 
 - [ ] **Step 2: Re-read the full diff** (`git diff origin/main`) against the spec's D1–D9 — every decision must map to a hunk; every hunk to a decision.
@@ -603,7 +605,7 @@ grep -c 'budget.spent()' .claude/workflows/bp-epic-cycle.workflow.js           #
 git push -u origin feat/epic-memory-journeys-debrief
 gh pr create --head feat/epic-memory-journeys-debrief \
   --title "feat(epic-cycle): epic memory — journeys, wave telemetry, drift-checks, premium debrief skill" \
-  --body "Implements .claude/workflows/bp-epic-cycle-epic-memory-design.md (D1-D9): required journey{} on all seven agent schemas + tripwire; Paper beauty contract with journey rosters; universal search-first + drift-check survey mode; per-phase token/clock/interrupt telemetry persisted by Review with a per-phase retro; Decide doc-fact routing; new bp-epic-debrief skill. Gates: node --input-type=module --check + grep contract counts (in plan).
+  --body "Implements .claude/workflows/bp-epic-cycle-epic-memory-design.md (D1-D9): required journey{} on all seven agent schemas + tripwire; Paper beauty contract with journey rosters; universal search-first + drift-check survey mode; per-phase token/clock/interrupt telemetry persisted by Review with a per-phase retro; Decide doc-fact routing; new bp-epic-debrief skill. Gates: module-scope smoke harness (must print MODULE-SCOPE-OK) + grep contract counts (in plan).
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 ```
