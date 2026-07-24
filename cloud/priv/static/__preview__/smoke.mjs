@@ -2020,6 +2020,56 @@ const EXPECTATIONS = {
         assert.ok(!html.includes("Loading"), "no card is left spinning after its request settles");
     },
   },
+  // ── MVP-0 Personal Dev Fleet (pdf-mvp0-fleet-card-spa): the fleet card ─────
+  "fleet-support-provisioning": {
+    what: "the fleet card with a support mid-provision — the 5-rung SUPPORT theater, never a secure rung",
+    container: "instance-body",
+    includes: ["fleet-support-card", "fleet-support-theater", "new-steps",
+      "Configuring the runtime", 'data-step="verify"'],
+    excludes: ['data-step="secure"', 'data-step="freshen"'],
+  },
+  "fleet-support-online": {
+    what: "the fleet card with an ONLINE support — the BYO-model-key step in the card; the roster read answers the documents envelope and the presence pipeline renders --online from THAT fixture",
+    check(reg, hooks, ctx) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      // The static card half: key step + the presence slot (this fake DOM can't
+      // observe the async attribute-selector paint — the chip pipeline is
+      // asserted below from the same fixtures the paint consumes).
+      for (const needle of ["fleet-support-card", "support-key-step", "Hand your box its model key",
+        "data-support-presence=", "never stored by Barkpark",
+        "/etc/barkpark/fleet-listener.env &amp;&amp; systemctl restart barkpark-fleet-listener"]) {
+        assert.ok(body.includes(needle), "#instance-body missing " + JSON.stringify(needle));
+      }
+      // The wire half: the app-token mint fired and the browser-direct roster
+      // read landed on the /v1/fleet/roster arm (absolute-origin stripped).
+      assert.ok(ctx.calls.some((c) => c.method === "POST" && /\/app-token$/.test(c.path)),
+        "the member app token must be minted (in-memory only)");
+      const roster = route("fleet-support-online", "GET", "/v1/fleet/roster");
+      assert.ok(Array.isArray(roster.body.documents), "the roster rides the documents envelope (PDF-D21)");
+      // The presence pipeline over the SAME fixture the paint consumes:
+      // online DERIVED (idle ⇒ not offline) + the validated capacity object.
+      const support = SCENARIOS["fleet-support-online"].data.barkparks.find((b) => b.fleet_role === "support");
+      const slot = hooks.presenceSlotHtml(roster.body.documents, support);
+      assert.ok(slot.includes("fleet-presence--online"), "idle must render the derived Online chip");
+      assert.ok(slot.includes("Online · idle"), "the stored status renders as-is beside the derived Online");
+      assert.ok(slot.includes("standard · 1/1 slots free"), "the capacity object renders");
+      assert.ok(ctx.calls.some((c) => c.path === "/v1/fleet/roster" || /\/v1\/fleet\/roster$/.test(c.path)),
+        "the roster was actually fetched browser-direct");
+    },
+  },
+  "fleet-support-failed": {
+    what: "the fleet card with a STUCK support — honest failed state, never lies online",
+    container: "instance-body",
+    includes: ["fleet-support-card", "Setup failed",
+      "no heartbeat within the provisioning budget"],
+    excludes: ["fleet-presence--online", "support-key-step"],
+  },
+  "fleet-support-empty": {
+    what: "the fleet card empty state on a live main — the add-a-support CTA",
+    container: "instance-body",
+    includes: ["fleet-support-card", "No support servers yet", 'id="fleet-add-support-cta"'],
+    excludes: ["fleet-support-row"],
+  },
 };
 
 function countMatches(hay, needle) {
