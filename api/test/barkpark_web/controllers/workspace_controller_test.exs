@@ -734,7 +734,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert scoped_row_count("documents", target.id) > 0
     end
 
-    test "409 import_constraint_violation NAMING the violated constraint when a bundle row collides with resident content on a non-arbiter unique index — never a blind 500 (task-63a199c0a0ce2a06)",
+    test "409 import_constraint_violation names the constraint on a non-arbiter unique collision — never a blind 500 (task-63a199c0a0ce2a06)",
          %{conn: conn} do
       Application.put_env(:barkpark, :allow_bundle_import, true)
       on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)

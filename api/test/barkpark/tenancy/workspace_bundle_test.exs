@@ -862,8 +862,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # the diagnosis is pinned mechanically: if the merge engine can crash on this
   # state, the raise is named HERE, not on a torn-down Hetzner box.
 
-  describe "support-box scenario: dev/dataset bundle of a bootstrap-style workspace into a fresh box (task-63a199c0a0ce2a06)" do
-    test "merge-import over {Default ws + Bootstrap plugin schemas + ensured same-slug empty shell} succeeds and leaves the resident Default slot untouched" do
+  describe "support-box merge-import scenario (task-63a199c0a0ce2a06)" do
+    test "dev/dataset bundle into Default ws + Bootstrap schemas + ensured same-slug shell imports clean; Default slot untouched" do
       # FRESH-BOX SHAPE: the migrate-seeded Default workspace holds the
       # boot-time plugin schemas (Bootstrap stamps them into the Default
       # production slot — same names, same `dataset` string as any parent's).
