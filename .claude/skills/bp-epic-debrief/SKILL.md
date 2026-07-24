@@ -16,7 +16,7 @@ You are composing the story of a whole epic for a human who wants fast, premium 
 3. Every wave Paper: follow `wave_paper` fields + `bp search query "<epic> wave"` — these carry journey cards, decisions, proofs, facts tables, telemetry + retro sections.
 4. `git log --oneline` + merged PRs touching the epic's surfaces (task ids in PR bodies: `Task: <id>`).
 
-DURABLE STORES ONLY — session files from wave runs are gone; never claim data that is not in a Paper, the ledger, the charter, or git (design D1). If a wave predates telemetry, SAY SO in the Paper — never backfill numbers (honesty rule D9).
+DURABLE STORES ONLY — session files from wave runs are gone; never claim data that is not in a Paper, the ledger, the charter, or git (the design's forcing constraint). If a wave predates telemetry, SAY SO in the Paper — never backfill numbers (honesty rule D9).
 
 ## Compose (block crib: helpers/blocks.md — exact JSON shapes)
 

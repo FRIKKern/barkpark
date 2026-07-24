@@ -470,6 +470,18 @@ for (const [name, schema] of [
   }
 }
 
+// Same class of tripwire for the clock: telemetry.clock reads these stamps.
+for (const [name, schema] of [
+  ['STRATEGY_SCHEMA', STRATEGY_SCHEMA], ['AIM_SCHEMA', AIM_SCHEMA],
+  ['PLAN_SCHEMA', PLAN_SCHEMA], ['REVIEW_SCHEMA', REVIEW_SCHEMA],
+]) {
+  for (const key of ['started_at', 'ended_at']) {
+    if (!schema.properties[key] || !(schema.required || []).includes(key)) {
+      throw new Error(`${name}.${key} is missing or optional — the wall-clock telemetry carrier (design D6) was dropped; clock arrays would silently go null.`)
+    }
+  }
+}
+
 // ── Phase 1: Strategize — one Fable mind, unhurried; the direction sets the wave's ceiling ──
 phase('Strategize')
 const strategist = await agent(
@@ -522,7 +534,7 @@ ${strategist.direction}
 YOUR ASSIGNMENT [${q.key}]: ${q.question}
 WHY IT MATTERS: ${q.why}
 ${q.mode === 'drift-check' ? `
-DRIFT-CHECK MODE (epic-memory D4): prior wave Paper ${q.prior_paper} already answered this. Read it, re-run its facts' rerun commands, and report each fact CONFIRMED or DRIFTED in your facts[] (with a fresh rerun command). Spend remaining time ONLY on the delta — what changed, what was never asked. Do not re-derive settled ground.` : ''}
+DRIFT-CHECK MODE (epic-memory D4): prior wave Paper ${q.prior_paper || 'MISSING — the strategist omitted prior_paper; treat this as research mode and say so in findings'} already answered this. Read it, re-run its facts' rerun commands, and report each fact CONFIRMED or DRIFTED in your facts[] (with a fresh rerun command). Spend remaining time ONLY on the delta — what changed, what was never asked. Do not re-derive settled ground.` : ''}
 
 Search Barkpark FIRST (\`bp search query "<terms>"\` — the \`query\` sub-verb is REQUIRED; dropping it exits 2 with \`unknown command "search"\`, and that failure reads exactly like a real absence of prior art, so check the exit code — papers and tasks carry prior art the tree doesn't), then grep/read the repo${CHARTER_EXISTS ? `; the charter at ${CHARTER_PATH} is a fair source` : ''}. Answer honestly — "the premise is wrong" is a valid and valuable answer. Every load-bearing fact needs evidence you actually derived, and its \`rerun\` command.
 
@@ -700,7 +712,24 @@ const wave = (architect.wave || []).slice(0, 8)
 log(`Architect cut ${wave.length} slices (${wave.filter((w) => w.builder_model === 'fable').length} fable); charter_written=${architect.charter_written}; tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}; backlog=${architect.backlog_filed}`)
 SPENT.decide = budget.spent()
 if (wave.length === 0) {
-  return { surveys: surveys.length, verifications: verifications.length, wave_paper: WAVE_PAPER, wave: 0, built: 0, note: 'architect cut no slices', decisions: architect.decisions_summary }
+  return {
+    surveys: surveys.length, verifications: verifications.length, wave_paper: WAVE_PAPER, wave: 0, built: 0, note: 'architect cut no slices', decisions: architect.decisions_summary,
+    telemetry: {
+      grain: 'partial — wave cut zero slices; build/review never ran',
+      tokens_by_phase: {
+        strategize: SPENT.strategize - SPENT.t0,
+        survey: SPENT.survey - SPENT.strategize,
+        digest: SPENT.digest - SPENT.survey,
+        verify: SPENT.verify - SPENT.digest,
+        decide: SPENT.decide - SPENT.verify,
+      },
+      interrupts: {
+        surveyors_lost: surveyAssignments.length - surveys.length,
+        verifiers_lost: verifyAssignments.length - verifications.length,
+        facts_demoted_no_rerun: surveyGrip.demoted + verifyGrip.demoted,
+      },
+    },
+  }
 }
 
 const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
@@ -792,7 +821,7 @@ const telemetry = {
     surveyors_lost: surveyAssignments.length - surveys.length,
     verifiers_lost: verifyAssignments.length - verifications.length,
     builders_lost: buildNow.length - built.length,
-    gates_failed: built.length - greenBuilt.length,
+    slices_not_green: built.length - greenBuilt.length,
     facts_demoted_no_rerun: surveyGrip.demoted + verifyGrip.demoted,
   },
 }
