@@ -646,6 +646,14 @@ func (r *supportAddRun) stepDataset() (int, bool) {
 			exitGeneric)
 	}
 
+	r.state("dataset", fmt.Sprintf("ensuring workspace %q exists on the box (already-exists is fine)", r.ws))
+	if err := r.runner.Run(supportCtx(), supportEnsureWorkspaceStep(r.ws, r.secrets.AdminToken)); err != nil {
+		return r.fail("dataset", "workspace ensure on the box failed: "+err.Error(),
+			fmt.Sprintf("box %s bound at %s; bundle staged but not imported", r.host.Name, r.host.IP),
+			fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
+			exitGeneric)
+	}
+
 	r.state("dataset", fmt.Sprintf("merge-importing %s into the box's local workspace %q", r.dataset, r.ws))
 	if err := r.runner.Run(supportCtx(), supportImportStep(r.ws, r.secrets.AdminToken)); err != nil {
 		return r.fail("dataset", "on-box import failed: "+err.Error(),
@@ -1341,6 +1349,32 @@ sh /opt/barkpark/scripts/install-cli.sh`
 	return cloud.CaddyStep{
 		Title: "install the bp CLI on the box (scripts/install-cli.sh)",
 		Argv:  []string{"bash", "-lc", script},
+	}
+}
+
+// supportEnsureWorkspaceStep creates the import's target workspace on the box
+// when it does not exist yet (task-2ba0270056e7da6e, mirrored from the worker
+// chain in internal/provisioner/support.go). A TEMPLATE-launched main's
+// bootstrap workspace slug exists on NO fresh box (only "default" is seeded),
+// and importing such a bundle live-failed box-side; pre-creating an empty
+// same-slug shell routes the merge-import through the live-proven PDS-D9
+// adopt branch (empty shell → delete → import). 409/422 (already exists) is
+// tolerated so a re-run converges and ws="default" is byte-neutral. ws is
+// fenced by supportSlugRe before any step builds.
+func supportEnsureWorkspaceStep(ws, adminToken string) cloud.CaddyStep {
+	script := `set -e; export BP_TOK='` + adminToken + `'
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://localhost:4000/api/workspaces \
+  -H "Authorization: Bearer $BP_TOK" -H 'Content-Type: application/json' \
+  --data '{"name":"` + ws + `","slug":"` + ws + `"}')
+case "$code" in
+  2*|409|422) exit 0 ;;
+  *) echo "workspace ensure: POST /api/workspaces answered HTTP $code" >&2; exit 1 ;;
+esac`
+	return cloud.CaddyStep{
+		Title:  "ensure the target workspace '" + ws + "' exists on the box (POST /api/workspaces — already-exists is fine)",
+		Cmd:    "curl -X POST http://localhost:4000/api/workspaces {name/slug: " + ws + "} (token redacted)",
+		Argv:   []string{"bash", "-lc", script},
+		Redact: []string{adminToken},
 	}
 }
 

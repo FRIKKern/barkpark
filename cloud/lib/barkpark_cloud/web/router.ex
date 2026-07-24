@@ -4801,11 +4801,18 @@ defmodule BarkparkCloud.Web.Router do
         # absent is fine (back-compat — the ip-only succeed path is unchanged).
         # dwb-4: the worker MAY also report the content-bootstrap outputs
         # alongside — stored (secrets Vault-encrypted) in the same transaction.
+        # task-5866ec745efcd7f7: a provision_support worker MAY report the OPAQUE
+        # id of the ledger token it minted on the parent main as `token_id`; the
+        # Registry persists it as the SUPPORT row's fleet_token_id (the sole
+        # durable token-id holder, PDF-D68 — what `bp cloud support remove`
+        # revokes). Additive + tolerant both ways: absent → the ip-only path is
+        # byte-unchanged (older workers), and a non-support row never takes it.
         # claim-fence (bp-c55): the worker MAY echo the claim_token it holds; when
         # present the Registry fences a stale re-claim, when absent behavior is
         # unchanged (the deployed Go fleet doesn't echo it yet — Stage 1 compat).
         opts =
           succeed_opts(conn.body_params["admin_token"], conn.body_params["bootstrap"]) ++
+            fleet_token_id_opts(conn.body_params["token_id"]) ++
             claim_token_opts(conn)
 
         case Registry.succeed_job(conn.path_params["id"], conn.body_params["ip"], opts) do
@@ -7734,6 +7741,15 @@ defmodule BarkparkCloud.Web.Router do
   # malformed/absent field preserves the pre-bootstrap succeed path.
   defp succeed_opts(token, %{} = bootstrap), do: succeed_opts(token) ++ [bootstrap: bootstrap]
   defp succeed_opts(token, _bootstrap), do: succeed_opts(token)
+
+  # task-5866ec745efcd7f7: build the succeed_job opts from the (optional)
+  # reported ledger-token id. A non-empty binary becomes `[token_id: t]`;
+  # anything else (missing/blank/non-string — every pre-fix worker) yields `[]`,
+  # preserving the ip-only succeed path byte-for-byte.
+  defp fleet_token_id_opts(token_id) when is_binary(token_id) and token_id != "",
+    do: [token_id: token_id]
+
+  defp fleet_token_id_opts(_), do: []
 
   # dwb-4 launch validation: nil/blank means "no template" (valid — the
   # pre-template path); a non-empty string must be in the known catalog; any

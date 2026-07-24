@@ -1302,6 +1302,15 @@ defmodule BarkparkCloud.Registry do
   "read_token" => …, "env" => %{…}}`). The plain slugs land as columns; the read
   token and the env map (which contains the read token) are Vault-encrypted in
   the SAME transaction. Absent → the columns stay nil.
+
+  `opts` may also carry `:token_id` (task-5866ec745efcd7f7) — the OPAQUE id of
+  the ledger token a provision_support worker minted on the parent main. It
+  persists as `fleet_token_id` on the SUPPORT row (mirroring how the CLI
+  register path sets it via `register_support_barkpark/2`) so `bp cloud support
+  remove` can later revoke the token — the CP row is the sole durable token-id
+  holder (PDF-D68). Persisted ONLY when the owning row is `fleet_role:
+  "support"`; on any other row the value is ignored (a main never carries a
+  token id). Absent → the column stays nil (older workers, back-compat).
   """
   @spec succeed_job(binary(), String.t(), keyword()) ::
           {:ok, ProvisionJob.t()}
@@ -1309,6 +1318,7 @@ defmodule BarkparkCloud.Registry do
   def succeed_job(id, ip, opts \\ []) when is_binary(id) and is_binary(ip) and is_list(opts) do
     admin_token = Keyword.get(opts, :admin_token)
     bootstrap = Keyword.get(opts, :bootstrap)
+    token_id = Keyword.get(opts, :token_id)
     claim_token = Keyword.get(opts, :claim_token)
 
     case uuid_or_nil(id) do
@@ -1357,7 +1367,7 @@ defmodule BarkparkCloud.Registry do
                          |> ProvisionJob.changeset(%{status: "succeeded", result_ip: ip})
                          |> Repo.update(),
                        {:ok, _barkpark} <-
-                         upsert_succeeded_barkpark(job, ip, admin_token, bootstrap) do
+                         upsert_succeeded_barkpark(job, ip, admin_token, bootstrap, token_id) do
                     job
                   else
                     {:error, reason} -> Repo.rollback(reason)
@@ -1393,7 +1403,8 @@ defmodule BarkparkCloud.Registry do
          %ProvisionJob{barkpark_id: barkpark_id},
          ip,
          admin_token,
-         bootstrap
+         bootstrap,
+         token_id
        ) do
     case Repo.get(Barkpark, barkpark_id) do
       nil ->
@@ -1403,6 +1414,7 @@ defmodule BarkparkCloud.Registry do
         %{health_status: "up", host: ip, agent_status: "offline"}
         |> maybe_put_admin_token(admin_token)
         |> maybe_put_bootstrap(bootstrap)
+        |> maybe_put_fleet_token_id(barkpark, token_id)
         |> then(&upsert_health(barkpark, &1))
     end
   end
@@ -1447,6 +1459,19 @@ defmodule BarkparkCloud.Registry do
   end
 
   defp put_bootstrap_env(attrs, _), do: attrs
+
+  # task-5866ec745efcd7f7: fold the provision_support worker's reported ledger
+  # token id into the provision-success write — but ONLY onto a SUPPORT row
+  # (mirroring register_support_barkpark/2's custody: a main never carries a
+  # token id, and the value is an OPAQUE revocation handle, never a secret).
+  # A missing/blank id, or a non-support row, leaves the attrs untouched so the
+  # ip-only succeed path is unchanged (back-compat with pre-fix workers).
+  defp maybe_put_fleet_token_id(attrs, %Barkpark{fleet_role: "support"}, token_id)
+       when is_binary(token_id) and token_id != "" do
+    Map.put(attrs, :fleet_token_id, token_id)
+  end
+
+  defp maybe_put_fleet_token_id(attrs, _barkpark, _token_id), do: attrs
 
   @doc """
   Mark provision job `id` failed with `error`. The owning Barkpark stays in its

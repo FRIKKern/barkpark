@@ -480,6 +480,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
   under the same containment: they land ONLY in the provision-success write
   (`Registry.succeed_job/3`, secrets already Vault-encrypted at the call site),
   and the agent report path never builds them into its attrs.
+
+  `fleet_token_id` (task-5866ec745efcd7f7) is castable here under the same
+  containment: it lands ONLY in the provision-success write for a
+  `provision_support` job (`Registry.succeed_job/3` guards it to
+  `fleet_role: "support"` rows), the agent report path never builds it, and it
+  is an OPAQUE revocation handle — never the token value itself.
   """
   def health_changeset(barkpark, attrs) do
     barkpark
@@ -495,12 +501,14 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :bootstrap_project,
       :bootstrap_dataset,
       :bootstrap_read_token_encrypted,
-      :bootstrap_env_encrypted
+      :bootstrap_env_encrypted,
+      :fleet_token_id
     ])
     |> validate_length(:host, max: 255)
     |> validate_format(:host, @host_format)
     |> validate_inclusion(:health_status, @health_statuses)
     |> validate_inclusion(:agent_status, @agent_statuses)
+    |> validate_length(:fleet_token_id, max: 255)
   end
 
   @doc """
