@@ -8,7 +8,9 @@ a server.
 
 ```
 merge to main
-   ├─ cloud/**  changed → deploy CONTROL PLANE  (barkpark.cloud / barkpark-cp)
+   ├─ cloud/** | internal/** | cmd/** changed → deploy CONTROL PLANE  (barkpark.cloud / barkpark-cp)
+   │    (internal/ + cmd/ because bp-provisioner is cross-built from
+   │     ./cmd/barkpark-provisioner — an internal-only worker fix must roll the CP)
    └─ api/** | internal/** | connectors/** changed → deploy CONTENT INSTANCE (guerrilla)
         every deploy: build the IDLE blue/green slot (active one keeps serving)
         → health-gate it → flip Caddy's upstream (graceful reload) → stop old.

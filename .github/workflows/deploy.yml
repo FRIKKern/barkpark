@@ -11,6 +11,7 @@ on:
       - "cloud/**"
       - "api/**"
       - "internal/**"
+      - "cmd/**"
       - "deploy/**"
       # Shipped starter templates: the box builds sites FROM these trees, so a
       # templates-only merge (e.g. a search-starter fix) must roll the box too —
@@ -66,7 +67,12 @@ jobs:
           echo "diff base: $base"
           changed="$(git diff --name-only "$base" "${{ github.sha }}")"
           echo "changed files:"; echo "$changed"
-          if echo "$changed" | grep -qE '^(cloud|deploy)/'; then echo "cp=true" >> "$GITHUB_OUTPUT"; else echo "cp=false" >> "$GITHUB_OUTPUT"; fi
+          # internal/ + cmd/ ride the control plane too: bp-provisioner is
+          # cross-built from ./cmd/barkpark-provisioner (code under
+          # internal/cli/cloud), so an internal-only worker fix must roll the
+          # CP or the stale binary keeps provisioning (bit us 2026-07-24: the
+          # secrets-chain fix deployed guerrilla but left the CP worker broken).
+          if echo "$changed" | grep -qE '^(cloud|deploy|internal|cmd)/'; then echo "cp=true" >> "$GITHUB_OUTPUT"; else echo "cp=false" >> "$GITHUB_OUTPUT"; fi
           # connectors/ rides the content instance: instance-deploy.sh npm-installs
           # it and restarts barkpark-connectors behind the /connectors route.
           if echo "$changed" | grep -qE '^(api|internal|deploy|connectors)/'; then echo "instance=true" >> "$GITHUB_OUTPUT"; else echo "instance=false" >> "$GITHUB_OUTPUT"; fi
