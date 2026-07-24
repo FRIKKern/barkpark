@@ -1,16 +1,16 @@
 # pdf-mvp0-journey-proof — transcript
-# tree: ccf0c95727c8e2d5236a3dd7b8ba1712f495e9ee (worktree-agent-a1a4563de2c2177ab) · host: darwin · 2026-07-24T13:36:18Z
+# tree: 6beab2582a9616d902e176c74b6f30fed3ada2e0 (loop-epic/mvp0-journey-proof) · host: darwin · 2026-07-24T15:27:27Z
 # command: scripts/pdf-mvp0-journey-proof.sh
 
 ──────────────────────────────────────────────────────────────────────────────
-PDF MVP-0 JOURNEY PROOF — run — run 20260724T133618Z-13786
+PDF MVP-0 JOURNEY PROOF — run — run 20260724T152727Z-58019
 ──────────────────────────────────────────────────────────────────────────────
 tree:        /Users/frikkjarl/Documents/GitHub/barkpark/.claude/worktrees/agent-a1a4563de2c2177ab
-worktree:    ccf0c95727c8e2d5236a3dd7b8ba1712f495e9ee (worktree-agent-a1a4563de2c2177ab)
+worktree:    6beab2582a9616d902e176c74b6f30fed3ada2e0 (loop-epic/mvp0-journey-proof)
 main:        https://guerrilla.barkpark.cloud (dataset production)
 cp:          https://api.barkpark.cloud
-names:       main mvp0proof-m-260724133618 · support mvp0proof-s-260724133618 · phantom mvp0proof-negctl-260724133618 · order mvp0proof-order-260724133618
-ttl bracket: ttl_s=30 · provisioning below 20 · offline from 41 (skew 10s) · support poll floor 900s
+names:       main mvp0proof-m-260724152727 · support mvp0proof-s-260724152727 · phantom mvp0proof-negctl-260724152727 · order mvp0proof-order-260724152727
+ttl bracket: ttl_s=30 · provisioning below 20 · offline from 41 (skew 10s) · support poll floor 1800s
 
 ──────────────────────────────────────────────────────────────────────────────
 RUNG 0 — PRECONDITION — bearers, credential-empty law, PR #6038, CP+provisioner routes, teardown-capability (ABORT-only)
@@ -25,5 +25,129 @@ RUNG 0 — PRECONDITION — bearers, credential-empty law, PR #6038, CP+provisio
       building bp: go build -o $WORKDIR/bp ./cmd/barkpark …
       bp built (52385250 bytes)
       control plane knows 3 managed host(s) (the teardown project must intersect these)
-  ABORT  0   env:teardown-credential-unusable
-         the NAMED teardown credential (hcloud 'barkpark' context) did not answer 'hcloud server list' — without a working fleet-project credential the support box could never be removed (server-side support remove is backlog). Set PDFJP_TEARDOWN_HCLOUD_TOKEN or an hcloud 'barkpark' context. Nothing created.
+      teardown project (PDFJP_TEARDOWN_HCLOUD_TOKEN (env)) lists 6 box(es); CP-managed ∩ teardown-project = 116.203.91.216,116.203.98.0,5.75.169.183
+      teardown-capability PROVEN: the 'PDFJP_TEARDOWN_HCLOUD_TOKEN (env)' credential reaches the CP's provisioning project (shared host 116.203.91.216,116.203.98.0,5.75.169.183)
+  PASS   0   bearers resolve; journey credential-empty (no HCLOUD_TOKEN); PR #6038 merged; CP + provisioner + guerrilla routes answer their contracted anon-401s; roster serves the documents envelope; bp fresh; and the NAMED teardown credential provably reaches the CP's provisioning project
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 1 — CREATE-MAIN — POST /v1/launch → the /new journey's calls → the main reads live
+──────────────────────────────────────────────────────────────────────────────
+  1a $ POST https://api.barkpark.cloud/v1/auth/register {email:bolla+mvp0proof-m-260724152727@jarl.no, team_name:mvp0proof-m-260724152727} (password random, never printed)
+      register -> HTTP 201; journey team 6aa55e0d-deae-47ed-a074-37416881afa2 (session 43 bytes — never printed)
+  1b $ POST https://api.barkpark.cloud/v1/launch {name:mvp0proof-m-260724152727, template:astro-search-starter}   (journey session; trial auto-starts, dwb-13)
+      receipt (HTTP 201):
+      | {"barkpark":{"git_commit":null,"verify_reachable":null,"last_verified_at":null,"update_running_release":null,"agent_status":"offline","fleet_role":null,"fleet_token_id":null,"custom_host":null,"pinned_release":null,"channel":"prod","fleet_parent_id":null,"provider":"hetzner","provision_console":[],"autoupdate_enabled":true,"host":null,"autoupdate_paused":false,"update_latest_release":null,"suspended_reason":null,"suspended":false,"server_type":null,"autoupdate_triggered_at":null,"region":null,"version":null,"mode":"managed","slug":"mvp0proof-m-260724152727","team_id":"6aa55e0d-deae-47ed-a074-37416881afa2","id":"f5aeaec1-4d5a-4eda-bc1e-20cf7ffcc31a","name":"mvp0proof-m-260724152727","url":"https://mvp0proof-m-260724152727.barkpark.cloud","health_status":"unknown","inserted_at":"2026-07-24T15:27:39.423027Z","last_seen_at":null,"provision_steps":[],"update_checked_at":null,"update_state":"unknown"}}      main registered: id=f5aeaec1-4d5a-4eda-bc1e-20cf7ffcc31a (label barkpark-managed; CP-deprovisionable via DELETE /v1/barkparks/:id)
+  main mvp0proof-m-260724152727 host=—              health=unknown steps=—
+  main mvp0proof-m-260724152727 host=—              health=unknown steps=create:started,create:done,secure:started
+  main mvp0proof-m-260724152727 host=—              health=unknown steps=create:started,create:done,secure:started
+  main mvp0proof-m-260724152727 host=—              health=unknown steps=create:started,create:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724152727 host=—              health=unknown steps=create:started,create:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724152727 host=—              health=unknown steps=create:started,create:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724152727 host=—              health=down   steps=create:started,create:done,secure:started,secure:done,configure:started,configure:done
+  main mvp0proof-m-260724152727 host=178.104.41.183   health=up     steps=create:started,create:done,secure:started,secure:done,configure:started,configure:done,content:started,content:done,verify:started,verify:progress,verify:progress,verify:progress,verify:done,ready:started,ready:done
+      LIVE MAIN: id=f5aeaec1-4d5a-4eda-bc1e-20cf7ffcc31a url=https://mvp0proof-m-260724152727.barkpark.cloud host=178.104.41.183 health=up
+      GET /v1/barkparks/:id/credentials -> HTTP 200 (admin_token 41 bytes — never printed); journey main = https://mvp0proof-m-260724152727.barkpark.cloud
+      journey-main roster GET -> documents-envelope: yes
+  PASS   1   create-main via CP HTTP only: mvp0proof-m-260724152727 launched (template astro-search-starter) → polled provision_steps → live (host set, health up) at https://mvp0proof-m-260724152727.barkpark.cloud; credentials surface revealed the instance admin token; the journey main serves its roster
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 2 — ADD-SUPPORT — POST /v1/fleet/supports mode=provision → the support onlines only after its own beat (PDF-D89)
+──────────────────────────────────────────────────────────────────────────────
+  $ POST https://api.barkpark.cloud/v1/fleet/supports {name:mvp0proof-s-260724152727, barkpark_id:f5aeaec1-4d5a-4eda-bc1e-20cf7ffcc31a, mode:provision}
+      receipt (HTTP 202):
+      | {"job_id":"e441f9b9-250b-491f-8e61-7416b7a57238","barkpark":{"git_commit":null,"verify_reachable":null,"last_verified_at":null,"update_running_release":null,"agent_status":"offline","fleet_role":"support","fleet_token_id":null,"custom_host":null,"pinned_release":null,"channel":"prod","fleet_parent_id":"f5aeaec1-4d5a-4eda-bc1e-20cf7ffcc31a","provider":"hetzner","provision_console":[],"autoupdate_enabled":true,"host":null,"autoupdate_paused":false,"update_latest_release":null,"suspended_reason":null,"suspended":false,"server_type":null,"autoupdate_triggered_at":null,"region":null,"version":null,"mode":"managed","slug":"mvp0proof-s-260724152727","team_id":"6aa55e0d-deae-47ed-a074-37416881afa2","id":"68093861-5252-41b8-9980-e3ea7a02154a","name":"mvp0proof-s-260724152727","url":null,"health_status":"unknown","inserted_at":"2026-07-24T15:28:53.020447Z","last_seen_at":null,"provision_steps":[],"update_checked_at":null,"update_state":"unknown"}}      support registered host-nil: id=68093861-5252-41b8-9980-e3ea7a02154a job_id=e441f9b9-250b-491f-8e61-7416b7a57238 (the provision_support job the Go provisioner drains)
+  support steps=[create:started]  roster=ABSENT
+  support steps=[create:started]  roster=ABSENT
+  support steps=[create:started]  roster=ABSENT
+  support steps=[create:started]  roster=ABSENT
+  support steps=[create:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started]  roster=ABSENT
+  support steps=[create:started,create:done,configure:started,configure:done,content:started]  roster=provisioning
+  support steps=[create:started,create:done,configure:started,configure:done,content:started]  roster=provisioning
+  support steps=[create:started,create:done,configure:started,configure:done,content:started]  roster=provisioning
+  support steps=[create:started,create:done,configure:started,configure:done,content:started]  roster=provisioning
+  support steps=[create:started,create:done,configure:started,configure:done,content:started,content:failed]  roster=provisioning
+      SUPPORT JOB FAILED (provision_status=claimed; steps=[create:started,create:done,configure:started,configure:done,content:started,content:failed]) — quoting the job's own evidence:
+      | configure: freshen — progress Updating Barkpark build-87972d0dec6f0dc9adb3e9fb468628b4aa27643e-3-g83c41e66c → cli-v1.16.0-14-gbd3e28f07…
+      | configure: freshen — done Updated Barkpark to cli-v1.16.0-14-gbd3e28f07
+      | configure: secrets-mint — per-instance secrets minted
+      | configure: secrets-install — installing per-instance secrets + restarting Barkpark
+      | configure: migrate — running database migrations
+      | configure: admin-token — installing the minted admin token
+      | configure: health-local — probing http://localhost:4000/api/schemas on the box
+      | configure: health-local — ok
+      | configure: done
+      | content: started
+      | content: progress — publishing the provisioning roster row on the main
+      | content: progress — minting the support's ledger token on the main
+      | content: progress — pulling the scrubbed mvp0proof-m-260724152727/production dataset onto the box
+      | content: failed — on-box merge-import: ssh caddy step "merge-import the scrubbed dataset bundle into the box (bp cloud workspace import --merge)" on 46.225.61.223: exit status 8: Warning: Permanently added '46.225.61.223
+      the worker tears its half-built box down on chain failure (SupportProvisionWith.failStep);
+      the provisioning roster row ages to offline honestly (PDF-D10)
+  FAIL   2   the provision_support chain reported a FAILED step (steps=[create:started,create:done,configure:started,configure:done,content:started,content:failed]) — a genuine substrate failure, quoted above
+
+cleanup: the run died before R5 — emergency support teardown of mvp0proof-s-260724152727
+cleanup: server-side support remove is backlog (pdf-bl-support-remove-serverside);
+cleanup: the box lives in the CP's provisioning project — remove it with the
+cleanup: NAMED teardown credential:  bp cloud support remove mvp0proof-s-260724152727
+→ cp-read: reading the support's control-plane record (GET /v1/barkparks on https://api.barkpark.cloud)
+✓ cp-read — no control-plane support row named "mvp0proof-s-260724152727" (already unbound)
+→ locate: listing boxes labeled barkpark-fleet-support=mvp0proof-s-260724152727
+✓ locate — no box carries barkpark-fleet-support=mvp0proof-s-260724152727 (already gone)
+✓ token — no token id on record — nothing to revoke
+→ roster: deleting roster row listener-mvp0proof-s-260724152727 on https://mvp0proof-m-260724152727.barkpark.cloud (dataset production)
+✓ roster — listener-mvp0proof-s-260724152727 delete submitted (the census re-reads it)
+→ census: re-reading all four surfaces (delete responses prove nothing)
+  · token: no token id was on record
+{"dataset":"production","ok":true,"residue":null,"support":"mvp0proof-s-260724152727"}
+cleanup: deleting the CP support row (journey session)
+cleanup: deprovisioning the R1 main mvp0proof-m-260724152727 (DELETE /v1/barkparks/f5aeaec1-4d5a-4eda-bc1e-20cf7ffcc31a)
