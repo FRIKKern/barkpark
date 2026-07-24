@@ -7,7 +7,7 @@
 // The persisted config (MMKV) is the single source of truth; every
 // transition writes it first, then mirrors it into React state — reopening
 // the app lands exactly where the user left off (last-location memory).
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 
@@ -22,9 +22,11 @@ import {
   rememberAndSave,
   saveCloudSession,
 } from './src/state/appConfig'
+import { useChatRollup } from './src/chat/useChatRollup'
+import { ChatScreen } from './src/screens/ChatScreen'
 import { ConnectScreen } from './src/screens/ConnectScreen'
 import { LoginScreen, type CloudSession } from './src/screens/LoginScreen'
-import { ChatScreen, PapersScreen } from './src/screens/StubScreens'
+import { PapersScreen } from './src/screens/StubScreens'
 import { TasksScreen } from './src/screens/TasksScreen'
 import { TabBar, type TabKey } from './src/ui/TabBar'
 import { useTheme } from './src/ui/theme'
@@ -57,7 +59,16 @@ export default function App() {
     setTab('tasks')
   }, [])
 
-  const connection = connectionFromConfig(config)
+  // Memoized on the config object: connection identity must be STABLE across
+  // re-renders — every consumer keys effects on it (the Tasks tab's client +
+  // listen() stream, the chat session store, the rollup poll). A fresh object
+  // per render would resubscribe streams on every render, and the rollup
+  // poll's own setState would then feed that loop.
+  const connection = useMemo(() => connectionFromConfig(config), [config])
+
+  // Needs-you badge (ratified R3): blocked sessions from GET /v1/chat/rollup.
+  const rollup = useChatRollup(connection)
+  const chatBadge = rollup?.counts.blocked ?? 0
 
   let body
   if (!hasCloudSession(config)) {
@@ -69,10 +80,10 @@ export default function App() {
       <View style={styles.shell}>
         <View style={styles.content}>
           {tab === 'tasks' && <TasksScreen connection={connection} />}
-          {tab === 'chat' && <ChatScreen />}
+          {tab === 'chat' && <ChatScreen connection={connection} />}
           {tab === 'papers' && <PapersScreen />}
         </View>
-        <TabBar active={tab} onSelect={setTab} />
+        <TabBar active={tab} onSelect={setTab} badges={{ chat: chatBadge }} />
       </View>
     )
   }
