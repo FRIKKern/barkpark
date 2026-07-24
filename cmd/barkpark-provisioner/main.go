@@ -273,6 +273,25 @@ func run(args []string) int {
 		// restart) for an attach-domain job (idempotent). Runs in its own
 		// goroutine below, exactly like the deprovision loop.
 		AttachDomain: provisioner.DefaultAttachDomain(seams),
+		// The provision_support drain (Personal Dev Fleet MVP-0, PDF-D83): the
+		// server-side support bring-up — create the box, configure it, pull the
+		// scrubbed dataset, install the listener runtime, verify the roster reads
+		// online-with-capacity — all from claim-payload credentials, so no local
+		// Hetzner token is ever needed by the developer. Runs in its own goroutine
+		// below, like resurrect/deprovision/attach-domain. Same telemetry seams
+		// (steps + live console); the parent main's admin token rides the claim
+		// payload and is NEVER logged or written to the box.
+		SupportProvision: provisioner.DefaultSupportProvision(provisioner.SupportSeams{
+			Provider: provider,
+			StepReporter: (&provisioner.HTTPStepReporter{
+				ControlURL: *controlURL,
+				Token:      tok,
+			}).Report,
+			ConsoleReporter: (&provisioner.HTTPConsoleReporter{
+				ControlURL: *controlURL,
+				Token:      tok,
+			}).Report,
+		}),
 		// Auto-recover orphan boxes (a prior double-failure: succeed-report failed →
 		// teardown → provider.Delete failed → box marked barkpark-orphaned=true). The
 		// sweep deletes ONLY those labeled boxes — never a managed/live box — so it is
@@ -338,7 +357,18 @@ func run(args []string) int {
 		return 0
 	}
 
-	fmt.Fprintf(os.Stderr, "barkpark-provisioner: draining %s (provision + deprovision + attach-domain + resurrect) every %s\n", *controlURL, interval.String())
+	fmt.Fprintf(os.Stderr, "barkpark-provisioner: draining %s (provision + deprovision + attach-domain + resurrect + support) every %s\n", *controlURL, interval.String())
+
+	go func() {
+		_ = w.RunSupportWith(ctx, func(claimed bool, err error) {
+			switch {
+			case err != nil:
+				fmt.Fprintf(os.Stderr, "barkpark-provisioner: support cycle error: %v\n", err)
+			case claimed:
+				fmt.Fprintln(os.Stderr, "barkpark-provisioner: provisioned a support")
+			}
+		})
+	}()
 
 	go func() {
 		_ = w.RunResurrectWith(ctx, func(claimed bool, err error) {
