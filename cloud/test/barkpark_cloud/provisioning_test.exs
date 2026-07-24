@@ -297,6 +297,56 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert Registry.claim_next_job("ct-2") == nil
     end
 
+    test "a claimed provision_support job past the GENERIC threshold is NOT re-claimable " <>
+           "(per-kind staleness, task-314de6aa36248bea)" do
+      {_user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      {:ok, main} = main |> Barkpark.fleet_changeset(%{fleet_role: "main"}) |> Repo.update()
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Support Lazy",
+          slug: "support-lazy",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      {:ok, job} = Registry.enqueue_support_provision_job(support)
+      {%ProvisionJob{} = claimed, _} = Registry.claim_next_support_provision_job("sup-A")
+      assert claimed.id == job.id
+
+      # Age the claim past the generic (~12m) threshold but under the support
+      # (35m) budget — the Go support chain legitimately runs to 30 minutes, so
+      # a second worker polling must NOT be handed the still-healthy job.
+      mid_flight_at =
+        DateTime.utc_now()
+        |> DateTime.add(-(Registry.stale_after_seconds() + 60), :second)
+        |> DateTime.truncate(:microsecond)
+
+      _ =
+        from(j in ProvisionJob, where: j.id == ^job.id)
+        |> Repo.update_all(set: [claimed_at: mid_flight_at])
+
+      assert Registry.claim_next_support_provision_job("sup-B") == nil
+      assert Repo.get(ProvisionJob, job.id).claim_token == "sup-A"
+
+      # Past the SUPPORT threshold the claim is honestly abandoned → re-claimable.
+      stale_at =
+        DateTime.utc_now()
+        |> DateTime.add(-(Registry.support_stale_after_seconds() + 60), :second)
+        |> DateTime.truncate(:microsecond)
+
+      _ =
+        from(j in ProvisionJob, where: j.id == ^job.id)
+        |> Repo.update_all(set: [claimed_at: stale_at])
+
+      assert {%ProvisionJob{} = reclaimed, %Barkpark{}} =
+               Registry.claim_next_support_provision_job("sup-B")
+
+      assert reclaimed.id == job.id
+      assert reclaimed.claim_token == "sup-B"
+    end
+
     test "a stale claim past the attempt cap is FAILED instead of re-handed-out" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
