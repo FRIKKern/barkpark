@@ -97,12 +97,13 @@ HONEST LIMIT: this workflow spawns exactly ONE reviewer, so the actual dispatch 
 
 const STRATEGY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'survey'],
+  required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'survey', 'journey'],
   properties: {
     direction: { type: 'string', description: 'bold strategic direction for THIS wave: what the finished experience looks/feels like, the choices you are leaning toward, what matters most right now' },
     direction_debate: { type: 'string', description: 'the rival directions you seriously developed and argued against each other, why the winner won, and the sharpest attack on the winner you found (with how the wave absorbs it) — a direction that never faced a rival is usually the first idea, not the best one' },
     paper_id: { type: 'string', description: 'slug of the PUBLISHED wave strategy Paper you created (style=article)' },
     paper_created: { type: 'boolean', description: 'true only after you created AND published the Paper and read it back from the server' },
+    journey: JOURNEY_FIELD,
     survey: {
       type: 'array',
       description: '5-20 broad survey assignments; each becomes one Sonnet surveyor. Cast a WIDE net — cheap width now buys precise depth later',
@@ -151,9 +152,35 @@ const FACT_ITEMS = {
 // Evidence has LEVELS, and the higher ones are cheap — say which one you used.
 const FACTS_DESCRIPTION = 'load-bearing facts you actually verified, never assumed. Evidence takes several forms, and the strongest are cheap: `git show origin/main:<path>` reads what is really on main (not your worktree, which may be ahead, behind, or dirty), and a curl against a running host reads what is really deployed — both are fast enough to be the default, not a luxury (measured here: `git show` 34-54ms; a localhost curl 96-172ms warm, ~925ms cold). A worktree file:line is a perfectly good form too, but it is a claim about YOUR checkout and nothing more — do not quote it as a claim about main or about prod. Whichever form you used, put the command that re-derives it in that fact\'s rerun field.'
 
+// The journey is the wave's human story at agent grain — the debrief agent's
+// raw material (epic-memory design D1). REQUIRED of every agent: the debrief
+// runs DAYS later, when this run's session files are gone; a journey that is
+// not in a report (and thence a Paper) does not exist.
+const JOURNEY_FIELD = {
+  type: 'object', additionalProperties: false,
+  required: ['mission', 'key_moments', 'outcome', 'meaning'],
+  properties: {
+    mission: { type: 'string', description: 'your assignment as you understood it, one line' },
+    key_moments: {
+      type: 'array',
+      description: '2-5 turning points or surprises, written for a human reader following the epic later — never a step log ("read A, then B" is a log; "expected X in warmpool.go, found the opposite — that killed direction A" is a moment). Fewer honest moments beat padded ones.',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['moment', 'evidence'],
+        properties: {
+          moment: { type: 'string', description: 'what turned or surprised you, and what it changed' },
+          evidence: { type: 'string', description: 'the file:line, command output, paper/task id, or observation that caused it' },
+        },
+      },
+    },
+    outcome: { type: 'string', description: 'where you landed, one or two lines' },
+    meaning: { type: 'string', description: 'the so-what for THIS wave: how your outcome should change what happens next' },
+  },
+}
+
 const SURVEY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['key', 'findings', 'coverage', 'facts', 'risks', 'open_questions'],
+  required: ['key', 'findings', 'coverage', 'facts', 'risks', 'open_questions', 'journey'],
   properties: {
     key: { type: 'string' },
     findings: { type: 'string', description: 'the answer, honestly — including "the premise is wrong" when it is' },
@@ -169,15 +196,17 @@ const SURVEY_SCHEMA = {
     },
     risks: { type: 'array', items: { type: 'string' } },
     open_questions: { type: 'array', items: { type: 'string' }, description: 'what you could NOT settle in the timebox — candidates for the verify round' },
+    journey: JOURNEY_FIELD,
   },
 }
 
 const AIM_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['synthesis', 'verification', 'paper_updated', 'heartbeat_stamped'],
+  required: ['synthesis', 'verification', 'paper_updated', 'heartbeat_stamped', 'journey'],
   properties: {
     synthesis: { type: 'string', description: 'what the survey established, where reports contradict each other or the direction, and what remains unknown that the Decide phase cannot live without' },
     paper_updated: { type: 'boolean', description: 'true only after you appended the survey digest (incl. coverage map + not-founds) AND the verify plan to the wave Paper and re-published it' },
+    journey: JOURNEY_FIELD,
     verification: {
       type: 'array',
       description: 'the LAST explore round: 1-15 targeted assignments. YOU pick the fleet — model per assignment, and which claims must be PROVEN by actually running tests/gates rather than read',
@@ -200,7 +229,7 @@ const AIM_SCHEMA = {
 
 const VERIFY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['key', 'findings', 'coverage', 'facts', 'proofs', 'risks'],
+  required: ['key', 'findings', 'coverage', 'facts', 'proofs', 'risks', 'journey'],
   properties: {
     key: { type: 'string' },
     findings: { type: 'string', description: 'the answer, honestly — including "the premise is wrong" when it is' },
@@ -229,6 +258,7 @@ const VERIFY_SCHEMA = {
       },
     },
     risks: { type: 'array', items: { type: 'string' } },
+    journey: JOURNEY_FIELD,
   },
 }
 
@@ -302,7 +332,7 @@ function gateFactProvenance(reports) {
 
 const PLAN_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['charter_written', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'wave'],
+  required: ['charter_written', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'wave', 'journey'],
   properties: {
     charter_written: { type: 'boolean', description: `true only after you actually wrote/updated ${CHARTER_PATH}` },
     paper_updated: { type: 'boolean', description: 'true only after you appended verification results + decisions + the wave plan (with task ids) to the wave Paper and re-published it' },
@@ -311,6 +341,7 @@ const PLAN_SCHEMA = {
     backlog_filed: { type: 'string', description: 'discovered-but-deferred work you filed as published child tasks (ids), or "none"' },
     heartbeat_stamped: { type: 'boolean', description: 'true only after wave_status on the epic task says the wave is building' },
     decisions_summary: { type: 'string' },
+    journey: JOURNEY_FIELD,
     wave: {
       type: 'array',
       description: 'this wave of build slices, ≤8, integration-ordered',
@@ -336,7 +367,7 @@ const PLAN_SCHEMA = {
 
 const BUILD_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['ok', 'task_id', 'task_claimed', 'branch', 'summary', 'gate_command', 'gate_passed', 'review', 'files_changed', 'ledger_stamps'],
+  required: ['ok', 'task_id', 'task_claimed', 'branch', 'summary', 'gate_command', 'gate_passed', 'review', 'files_changed', 'ledger_stamps', 'journey'],
   properties: {
     ok: { type: 'boolean' },
     task_id: { type: 'string' },
@@ -348,13 +379,15 @@ const BUILD_SCHEMA = {
     review: { type: 'string', description: 'honest self-review: what could break, blind spots' },
     files_changed: { type: 'array', items: { type: 'string' } },
     ledger_stamps: { type: 'string', description: 'the task mutations you made DURING the build — the claim, each `bp task stamp` (per-criterion --met evidence + honest --miss notes), each `bp task pulse` now-line at claim/phase boundaries, and deviation notes — proof the ledger stayed live and the now-line moved' },
+    journey: JOURNEY_FIELD,
   },
 }
 
 const REVIEW_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'paper_closed', 'heartbeat_stamped', 'next_wave', 'overall_verdict'],
+  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'paper_closed', 'heartbeat_stamped', 'next_wave', 'overall_verdict', 'journey'],
   properties: {
+    journey: JOURNEY_FIELD,
     reviewed: {
       type: 'array',
       description: 'one entry per built slice you reviewed',
@@ -382,6 +415,24 @@ const REVIEW_SCHEMA = {
     next_wave: { type: 'string', description: 'what the next wave should take and why — the direction handoff' },
     overall_verdict: { type: 'string', description: 'did this wave move the WISH forward; cross-slice coherence; risks' },
   },
+}
+
+// Epic-memory tripwire (design D1): every report carries journey{} — the
+// debrief agent's raw material. An edit that drops one starves the debrief
+// SILENTLY, days later, when nothing else can notice. Identity check, not
+// truthiness: a forked copy of the field drifts exactly like a dropped one.
+for (const [name, schema] of [
+  ['STRATEGY_SCHEMA', STRATEGY_SCHEMA], ['SURVEY_SCHEMA', SURVEY_SCHEMA],
+  ['AIM_SCHEMA', AIM_SCHEMA], ['VERIFY_SCHEMA', VERIFY_SCHEMA],
+  ['PLAN_SCHEMA', PLAN_SCHEMA], ['BUILD_SCHEMA', BUILD_SCHEMA],
+  ['REVIEW_SCHEMA', REVIEW_SCHEMA],
+]) {
+  if (schema.properties.journey !== JOURNEY_FIELD) {
+    throw new Error(`${name}.journey is missing or forked — the epic-memory carrier (design D1) was dropped. Wire journey: JOURNEY_FIELD.`)
+  }
+  if (!(schema.required || []).includes('journey')) {
+    throw new Error(`${name} does not REQUIRE journey — an optional journey decays to absent under load (design D1).`)
+  }
 }
 
 // ── Phase 1: Strategize — one Fable mind, unhurried; the direction sets the wave's ceiling ──
