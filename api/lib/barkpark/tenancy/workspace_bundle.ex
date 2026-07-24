@@ -321,9 +321,26 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   defp run_import(manifest, dumps, mode) do
     Repo.transaction(
       fn ->
-        # PDS-D9 pre-flight runs FIRST, before any trigger/constraint DDL, so
-        # the empty-shell delete's FK cascades AND teardown triggers
-        # (workspaces_teardown_cycle_ledger) fire with everything live.
+        # FIRST: drain the deferred-trigger queue, or the DDL below cannot run.
+        # The epic-ledger FKs into `documents` are DEFERRABLE INITIALLY
+        # DEFERRED (20260715001200/1300), so any earlier delete of documents in
+        # THIS transaction (the ExUnit sandbox wraps a whole test in one — its
+        # seeding/teardown queues exactly this; live-proven by CI as
+        # `ERROR 55006 (object_in_use) cannot ALTER TABLE "documents" because
+        # it has pending trigger events`, and in prod the adopt-shell delete
+        # below can queue the same class) leaves referenced-side RI events
+        # pending until COMMIT, and Postgres refuses ALTER TABLE on any table
+        # with pending events. Forcing IMMEDIATE fires them NOW — outcome-
+        # equivalent (they would have fired at commit; a violation surfaces
+        # earlier, never differently) — and makes events queued later in this
+        # transaction fire at their own statement's end, so the queue is empty
+        # at every DDL point. Transaction-scoped; no privilege required.
+        Repo.query!("SET CONSTRAINTS ALL IMMEDIATE", [])
+
+        # PDS-D9 pre-flight runs FIRST among the import's own writes, before
+        # any trigger/constraint DDL, so the empty-shell delete's FK cascades
+        # AND teardown triggers (workspaces_teardown_cycle_ledger) fire with
+        # everything live.
         if mode == :merge, do: adopt_or_refuse_root_slug!(manifest)
 
         # Only tables that exist on the target participate in the DDL passes;
@@ -383,6 +400,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # what the data guarantees. FKs pointing INTO member tables from outside are
   # untouched — the import never deletes parents nor updates arbiter keys, so
   # they cannot fire. Returns what to restore.
+  #
+  # Interpolated identifiers: `table`/`conname` come from pg_constraint for
+  # tables named by an admin-gated bundle manifest, quoted via qi/1;
+  # `defn` is pg_get_constraintdef output. No request-shaped input reaches
+  # the SQL string — same posture as copy_into/merge_upsert below.
+  # sobelow_skip ["SQL.Query"]
   defp drop_member_fks!(names) do
     member_fks =
       Repo.query!(
@@ -406,6 +429,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     member_fks
   end
 
+  # Identifiers/defn straight from pg_constraint / pg_get_constraintdef (see
+  # drop_member_fks! above) — never request input.
+  # sobelow_skip ["SQL.Query"]
   defp restore_member_fks!(member_fks) do
     Enum.each(member_fks, fn [table, conname, defn] ->
       # An already-NOT VALID definition must not double the suffix.
@@ -421,7 +447,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # DISABLE/ENABLE TRIGGER USER on every member table — ownership-privilege,
   # and USER cannot touch internally generated FK triggers (those are handled
   # by the constraint drop above). Alphabetical for a deterministic
-  # lock-acquisition order.
+  # lock-acquisition order. `table` is manifest-named + existence-checked and
+  # qi/1-quoted; `action` is guard-pinned to two literals — no request input.
+  # sobelow_skip ["SQL.Query"]
   defp alter_user_triggers!(names, action) when action in ["DISABLE", "ENABLE"] do
     Enum.each(Enum.sort(names), fn table ->
       Repo.query!("ALTER TABLE public.#{qi(table)} #{action} TRIGGER USER", [])
