@@ -97,7 +97,8 @@ func TestApplySnapshotConnStates(t2 *testing.T) {
 		t2.Fatalf("board not swapped: %d orphans, want 1", len(m.board.Orphans))
 	}
 
-	// A failed refetch → ConnOffline, board preserved.
+	// A failed refetch → ConnOffline, board preserved, and the strip says WHY
+	// (a silently dark board reads as "no tasks" — the 8 MiB cap incident).
 	good := m.board
 	m, _ = m.applySnapshot(snapshotMsg{err: errors.New("dial tcp: refused")})
 	if m.ui.Conn != ConnOffline {
@@ -105,6 +106,19 @@ func TestApplySnapshotConnStates(t2 *testing.T) {
 	}
 	if len(m.board.Orphans) != len(good.Orphans) {
 		t2.Fatal("failed refetch clobbered the last good board")
+	}
+	if !strings.Contains(m.ui.Strip.Message, "dial tcp: refused") {
+		t2.Fatalf("failed refetch strip = %q, want the fetch error surfaced", m.ui.Strip.Message)
+	}
+	if m.ui.Strip.Role != RoleDanger {
+		t2.Fatalf("failed refetch strip role = %v, want RoleDanger", m.ui.Strip.Role)
+	}
+
+	// The next landed snapshot clears the sync-failure strip.
+	m.lastLiveEvent = clk.now()
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{Tasks: []Task{t("a")}, FetchedAt: clk.now()}})
+	if m.ui.Strip.Message != "" {
+		t2.Fatalf("landed snapshot should clear the sync-failure strip, got %q", m.ui.Strip.Message)
 	}
 }
 
