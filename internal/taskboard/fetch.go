@@ -76,14 +76,23 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 	}
 }
 
+// maxBoardFetchBytes bounds the board's task-corpus fetch. The generic
+// GetConditional cap (8 MiB, sized for the capabilities manifest) went dark on
+// guerrilla when /v1/tasks?limit=1000 crossed 9.1 MB (2026-07-24). 32 MiB buys
+// ~3× corpus growth of headroom; the real fix is the two-level board (brief
+// tier on the board, detail on focus — /papers/ctx-compression-taskboard-
+// flagship), which shrinks this fetch instead of chasing it with a bigger cap.
+const maxBoardFetchBytes = 32 << 20
+
 // getJSON issues an authenticated GET to a top-level path, reusing the Client's
-// configured http.Client and bearer token (via the public GetConditional
-// helper, called with no If-None-Match so it always fetches the body). It does
-// not modify apiclient. Every error carries the path, and a non-200 carries the
-// status plus a one-line body hint, so the shell's degraded banner can say
-// WHICH call failed and why ("GET /v1/tasks/prime: status 401: …").
+// configured http.Client and bearer token (via the public GetConditionalBounded
+// helper, called with no If-None-Match so it always fetches the body, and the
+// board's own maxBoardFetchBytes cap). It does not modify apiclient. Every
+// error carries the path, and a non-200 carries the status plus a one-line body
+// hint, so the shell's degraded banner can say WHICH call failed and why
+// ("GET /v1/tasks/prime: status 401: …").
 func getJSON(c *apiclient.Client, path string) ([]byte, error) {
-	res, err := c.GetConditional(c.BaseURL()+path, "")
+	res, err := c.GetConditionalBounded(c.BaseURL()+path, "", maxBoardFetchBytes)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}

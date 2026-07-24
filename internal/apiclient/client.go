@@ -263,9 +263,19 @@ type ConditionalGetResult struct {
 // GetConditional issues an authenticated GET to an ABSOLUTE url, attaching
 // If-None-Match when ifNoneMatch is non-empty so the server can answer 304 Not
 // Modified. It returns the status, the body (read fully, nil on 304), and the
-// response ETag. This is an additive, behaviour-preserving helper used by the
-// manifest fetcher — it does not alter any existing method.
+// response ETag. The body read is bounded at maxManifestBytes — the right cap
+// for the manifest/capabilities-sized payloads this helper was written for.
+// Callers whose responses legitimately grow past that (the task board's corpus
+// fetch crossed it at 9.1 MB) use GetConditionalBounded with their own cap.
 func (c *Client) GetConditional(url, ifNoneMatch string) (*ConditionalGetResult, error) {
+	return c.GetConditionalBounded(url, ifNoneMatch, maxManifestBytes)
+}
+
+// GetConditionalBounded is GetConditional with a caller-chosen body cap. A
+// response larger than maxBytes errors instead of being silently truncated —
+// a truncated JSON body would parse as garbage or, worse, as a plausible
+// prefix. The cap is a refusal, never a trim.
+func (c *Client) GetConditionalBounded(url, ifNoneMatch string, maxBytes int64) (*ConditionalGetResult, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -288,12 +298,12 @@ func (c *Client) GetConditional(url, ifNoneMatch string) (*ConditionalGetResult,
 		ETag:       resp.Header.Get("ETag"),
 	}
 	if resp.StatusCode != http.StatusNotModified {
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 		if err != nil {
 			return nil, err
 		}
-		if int64(len(body)) > maxManifestBytes {
-			return nil, fmt.Errorf("capabilities manifest response exceeds %d bytes — refusing to parse a truncated body", maxManifestBytes)
+		if int64(len(body)) > maxBytes {
+			return nil, fmt.Errorf("response exceeds %d bytes — refusing to parse a truncated body", maxBytes)
 		}
 		res.Body = body
 	}

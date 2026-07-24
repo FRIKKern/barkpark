@@ -1,6 +1,7 @@
 package taskboard
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -157,6 +158,36 @@ func TestFetchSnapshot_ListError(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("list error %q should contain %q", err, want)
 		}
+	}
+}
+
+// TestFetchSnapshot_CorpusPastManifestCap — the 2026-07-24 incident: the
+// guerrilla corpus crossed apiclient's 8 MiB manifest cap and the board went
+// dark. The board's fetch now carries its own maxBoardFetchBytes bound, so a
+// list body past 8 MiB (padded with trailing whitespace, which json.Unmarshal
+// tolerates) must decode fine.
+func TestFetchSnapshot_CorpusPastManifestCap(t *testing.T) {
+	listBody, primeBody := fixtureParts(t)
+	pad := bytes.Repeat([]byte(" "), (9<<20)-len(listBody)) // total > 8 MiB
+	bigList := append(append([]byte{}, listBody...), pad...)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/tasks":
+			_, _ = w.Write(bigList)
+		case "/v1/tasks/prime":
+			_, _ = w.Write(primeBody)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	snap, err := FetchSnapshot(newClient(srv.URL))
+	if err != nil {
+		t.Fatalf("a corpus past the 8 MiB manifest cap must fetch under the board's own bound, got: %v", err)
+	}
+	if len(snap.Tasks) == 0 {
+		t.Fatal("padded corpus decoded to zero tasks")
 	}
 }
 

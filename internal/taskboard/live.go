@@ -169,6 +169,12 @@ func (m Model) handleBackstop() (Model, tea.Cmd) {
 func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	if msg.err != nil {
 		m.ui.Conn = ConnOffline
+		// Surface WHY in the strip — getJSON builds its errors precisely so this
+		// banner can name the failing call ("GET /v1/tasks: response exceeds…").
+		// Without this line the board goes silently dark on a fetch error, which
+		// reads as "no tasks" instead of "sync failed" (the 8 MiB cap incident).
+		// The next landed snapshot clears the strip on the success path below.
+		m.ui.Strip = ActionStrip{Message: "sync failed — " + msg.err.Error(), Role: RoleDanger}
 		return m, nil
 	}
 	// Out-of-order guard: compare against the newest snapshot APPLIED this
