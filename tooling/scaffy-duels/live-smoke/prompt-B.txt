@@ -1,0 +1,10 @@
+You are a new engineer onboarding to the Barkpark CLI (the `bp` command). Start by discovering the CLI: run `bp capabilities -o json --full` and read the machine-readable command manifest it returns so you understand what nouns, verbs, commands, arguments, and flags are available.
+
+Then complete this small, strictly READ-ONLY ledger chore using what you just learned:
+1. Run `bp task ready` to list the tasks currently available to work on.
+2. Choose the five highest-priority ready tasks.
+3. For each of the five, run `bp task get <id>` and read its description.
+4. Produce a final numbered list of those five tasks; for each give its id, its title, and a one-sentence summary (in your own words) of what the task asks for.
+5. Finally, state two facts drawn from the manifest you read at the start: (a) roughly how many ready tasks there were in total, and (b) which noun in the manifest carries the most commands.
+
+Hard rule: this is READ-ONLY. Do NOT create, claim, close, stamp, update, move, stage, release, or otherwise modify any task, and do not modify any file. Only run read commands and report your findings.
