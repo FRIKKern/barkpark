@@ -1196,6 +1196,31 @@ const fleetRosterFixture = [
   },
 ];
 
+// ── MVP-0 offload fixtures (pdf-mvp0-offload-spa, PDF-D87/D92) ───────────────
+// An order is an ASSIGNEE-ROUTED type:task doc filed on the MAIN via the
+// browser-direct mutate seam; the listener (muscle-2, the online support above)
+// claims it, works it, closes it. These model GET /v1/tasks/:id (the .doc
+// envelope) + the roster read in each ladder state the watch folds: filed ->
+// claimed -> working -> done, plus the blocked terminal.
+const OFFLOAD_ORDER_ID = "5b2c1e00-0000-4000-8000-0000000000d1";
+const offloadOrderTask = (lifecycle, claim) => ({
+  doc_id: OFFLOAD_ORDER_ID,
+  type: "task",
+  kind: "task",
+  title: "Summarise the release notes",
+  description: "Read the last three tagged releases and draft a changelog.",
+  lifecycle_status: lifecycle,
+  assignee: "muscle-2",
+  priority: 2,
+  claim: claim || null,
+  status: "published",
+});
+const offloadRoster = (status, task) => [{
+  worker: "muscle-2", agent: "claude", scope: "production", status,
+  capacity: { size_class: "standard", slots_total: 1, slots_free: status === "working" ? 0 : 1 },
+  last_seen: tMinus(8), ttl_s: 30, task: task || null,
+}];
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -2783,6 +2808,58 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── MVP-0 OFFLOAD (pdf-mvp0-offload-spa, PDF-D87/D92): the order watch ladder ─
+  // The offload action renders on the ONLINE support (muscle-2); the watch folds
+  // the task read + the roster read into filed -> claimed -> working -> done with
+  // honest blocked/failed terminals. Each scenario pins one rung.
+  "offload-filing": {
+    label: "Offload — the order is filed (open), waiting for the support to claim it",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub, sites: [], audit: [],
+      fleetRoster: offloadRoster("idle", null),
+      orderTask: offloadOrderTask("open", null),
+    },
+  },
+  "offload-working": {
+    label: "Offload — the support has claimed AND is WORKING the order (roster beats working)",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub, sites: [], audit: [],
+      fleetRoster: offloadRoster("working", OFFLOAD_ORDER_ID),
+      orderTask: offloadOrderTask("in_progress", { worker: "muscle-2", epoch: 1, ts_iso: "2026-07-24T12:00:00Z" }),
+    },
+  },
+  "offload-done": {
+    label: "Offload — the order is DONE (terminal success; the poll stops)",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub, sites: [], audit: [],
+      fleetRoster: offloadRoster("idle", null),
+      orderTask: offloadOrderTask("done", { worker: "muscle-2", epoch: 1, ts_iso: "2026-07-24T12:00:00Z" }),
+    },
+  },
+  "offload-blocked": {
+    label: "Offload — the support hit a BLOCKER (honest terminal; the ladder snaps)",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub, sites: [], audit: [],
+      fleetRoster: offloadRoster("blocked", OFFLOAD_ORDER_ID),
+      orderTask: offloadOrderTask("blocked", { worker: "muscle-2", epoch: 1, ts_iso: "2026-07-24T12:00:00Z" }),
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -2904,6 +2981,20 @@ export function route(name, method, path, state) {
   }
   if (method === "POST" && p === "/v1/fleet/supports") {
     return d.addSupport || { status: 202, body: { ok: true } };
+  }
+  // MVP-0 offload (pdf-mvp0-offload-spa): the order is FILED via the browser-
+  // direct mutate seam and WATCHED via GET /v1/tasks/:id — both land here (the
+  // absolute origin is already stripped above). The mutate answers success
+  // unless a scenario pins the publish-wall 422 via d.orderMutate; the task read
+  // returns the scenario's order doc in its {ok, doc} envelope, else 404.
+  if (method === "POST" && /^\/v1\/data\/mutate\/[^/]+$/.test(p)) {
+    return d.orderMutate || { status: 200, body: { transactionId: "tx-preview", results: [] } };
+  }
+  const offloadTaskMatch = p.match(/^\/v1\/tasks\/([^/]+)$/);
+  if (method === "GET" && offloadTaskMatch) {
+    return d.orderTask
+      ? { status: 200, body: { ok: true, doc: d.orderTask } }
+      : { status: 404, body: { ok: false, error: "task not found" } };
   }
 
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };

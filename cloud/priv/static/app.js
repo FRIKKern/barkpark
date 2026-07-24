@@ -5509,6 +5509,8 @@
     if (addSupportCta) addSupportCta.addEventListener("click", function () { openAddSupportModal(bp); });
     // Data-gated (not DOM-gated): no-ops unless this main has a LIVE support.
     if (!isSupportBp(bp)) loadSupportPresence(bp, supportsOf(fleetCache, bp.id));
+    // MVP-0 offload (pdf-mvp0-offload-spa): each live support's Offload button.
+    if (!isSupportBp(bp)) wireOffloadActions(bp, supportsOf(fleetCache, bp.id));
   }
 
   // The thin DOM mount for the lifecycle action row — an extension of the
@@ -5946,7 +5948,7 @@
       // surfaces use, folded over the SUPPORT tables (never a secure step).
       body = '<div class="fleet-support-theater">' + newStepsHtml(provisionSteps(bp, now)) + "</div>";
     } else if (lc.live) {
-      body = supportKeyStepHtml(bp);
+      body = supportKeyStepHtml(bp) + offloadSupportActionHtml(bp);
     } else {
       body = ""; // removing / suspended states keep the head chip only
     }
@@ -17327,6 +17329,411 @@
       '<path d="' + d + '" fill="#000000"/></svg>';
   }
 
+  // ══════════════════════════════════ MVP-0 OFFLOAD: file an order + watch it
+  // (PDF-D87/D92, round-2 slice pdf-mvp0-offload-spa). The data plane is
+  // APP-TOKEN-DIRECT: the browser mints a member app token (mintAppToken — the
+  // fleet-card slice's in-memory cache) and talks to the MAIN's API directly.
+  // An order is an ASSIGNEE-ROUTED type:task doc filed on the main via
+  // POST {main.url}/v1/data/mutate/{dataset}; the fleet-listener claims tasks
+  // whose `assignee` equals its own worker name, works it on the box, and this
+  // card watches it filed -> claimed -> working -> done off the roster + task
+  // reads. Every derivation here is PURE + node-pinned via __bpTestHook; the DOM
+  // mounts (the modal, the 4s watch poll) are browser-verified.
+
+  // Normalise a scheme-less/​trailing-slashed main URL and join a path — the
+  // browser-direct sibling of api() (rosterUrl is the roster-only special case;
+  // this is the general one the mutate + task reads share). PURE.
+  function mainDirectUrl(mainUrl, path) {
+    var base = String(mainUrl || "").replace(/\/+$/, "");
+    if (!/^https?:\/\//.test(base)) base = "https://" + base;
+    return base + String(path || "");
+  }
+
+  // The worker identity an order routes to: the listener registers under the
+  // support's slug (its box identity), name as the fallback — the SAME identity
+  // rosterRowFor matches a presence row by, so an order's `assignee` lines up
+  // with the roster row the watch reads back. PURE.
+  function offloadWorkerName(support) {
+    support = support || {};
+    return String(support.slug || support.name || "");
+  }
+
+  // The dataset the order is filed on (the listener's scope). Total: a support
+  // that carries neither falls back to the fleet default "production". PURE.
+  function offloadDataset(support) {
+    support = support || {};
+    return String(support.dataset || support.scope || "production");
+  }
+
+  // PURE: the two mutation batches that FILE an order on the MAIN. An order is a
+  // type:task doc createOrReplace'd OPEN then PUBLISHED (an unpublished order is
+  // invisible to the claim queue). assignee = the support's worker name (the
+  // listener claims by matching it); priority 2 is the fleet-order default.
+  // `opts.tagged` adds the seeded "order" tag — the named contingency arm below.
+  function offloadOrderDoc(id, support, fields, opts) {
+    fields = fields || {};
+    opts = opts || {};
+    var doc = {
+      _id: String(id),
+      _type: "task",
+      kind: "task",
+      lifecycle_status: "open",
+      title: String(fields.title || ""),
+      description: String(fields.description || ""),
+      assignee: offloadWorkerName(support),
+      priority: 2,
+    };
+    if (opts.tagged) doc.tags = [{ tag: "order", strength: 80, rationale: "fleet order" }];
+    return {
+      create: { mutations: [{ createOrReplace: doc }] },
+      publish: { mutations: [{ publish: { id: String(id), type: "task" } }] },
+    };
+  }
+
+  // PURE: the tag-seed contingency (PDF-D42 precedent). A FRESH main's publish
+  // wall can 422 an untagged order (label_spine / unknown_tag) — the "order" tag
+  // doc doesn't exist yet. Seed a minimal PUBLISHED tag, then retry the order
+  // publish WITH tags (offloadOrderDoc(..., {tagged:true})).
+  function offloadOrderTagSeed() {
+    return {
+      create: { mutations: [{ createOrReplace: { _id: "order", _type: "tag", title: "order" } }] },
+      publish: { mutations: [{ publish: { id: "order", type: "tag" } }] },
+    };
+  }
+
+  // PURE: does this publish rejection call for the tag-seed arm? ONLY a 422 whose
+  // code is label_spine / unknown_tag (both the mutate envelope's {error:{code}}
+  // and a bare-string error shape are read). Any other failure is NOT retried
+  // with a tag — that would paper over a real refusal.
+  function offloadPublishNeedsTag(status, data) {
+    if (status !== 422) return false;
+    var err = (data && data.error) || {};
+    var code = typeof err === "string" ? err : err.code;
+    return code === "label_spine" || code === "unknown_tag";
+  }
+
+  // PURE: may an order be offloaded to this support RIGHT NOW? Only an ONLINE
+  // support can — an order to an offline/keyless box would sit unclaimed. The
+  // refusal copy POINTS AT THE BYO KEY STEP (PDF-D88): the usual reason a live
+  // box never beats is that it has no model key yet. `rosterRow` is the support's
+  // roster row (null = the read hasn't landed / no heartbeat).
+  function offloadEligibility(support, rosterRow) {
+    var lc = instanceLifecycle(support || {});
+    if (lc.failed) return { allowed: false, reason: "failed",
+      copy: "This support never finished provisioning, so it can't take an order." };
+    if (!lc.live) return { allowed: false, reason: "provisioning",
+      copy: "This support is still coming up — it can take orders once it's online." };
+    var chip = presenceChip(rosterRow);
+    if (chip.state === "unknown") return { allowed: false, reason: "no_heartbeat",
+      copy: "This box hasn't sent a heartbeat yet — it likely has no model key. Hand it its key (the step above), then offload once it's online." };
+    if (!chip.online) return { allowed: false, reason: "offline",
+      copy: "This box is offline, so an order would sit unclaimed. Check its listener and its model key (the step above), then try again." };
+    return { allowed: true, reason: "online", copy: "" };
+  }
+
+  // The watch ladder vocabulary — reused through the SHARED newStepsHtml step
+  // grammar (the provisioning theater renders the identical component).
+  var OFFLOAD_STEP_ORDER = ["filed", "claimed", "working", "done"];
+  var OFFLOAD_STEP_LABELS = {
+    filed: "Order filed — waiting for the support to claim it",
+    claimed: "Claimed by the support",
+    working: "Working the order",
+    done: "Done",
+  };
+
+  // PURE + DEFENSIVE over shape: read lifecycle/claim/assignee off a
+  // GET /v1/tasks/:id doc. The fields ride the doc top-level on some reads and
+  // under doc.content on others (render_doc vs the raw content map), so read
+  // BOTH — the first non-null wins, never a throw.
+  function offloadTaskFields(taskDoc) {
+    var d = taskDoc || {};
+    var c = (d.content && typeof d.content === "object") ? d.content : {};
+    return {
+      lifecycle: d.lifecycle_status || c.lifecycle_status || null,
+      claim: d.claim || c.claim || null,
+      assignee: d.assignee || c.assignee || null,
+    };
+  }
+
+  // PURE: fold the task read + the roster read into ONE ladder stage + a terminal
+  // flag (the poll stops on terminal). The TASK doc is authoritative for the
+  // lifecycle; the roster adds live "working right now" truth (a claimed-but-idle
+  // worker reads claimed, a beating "working" one reads working). A roster row
+  // reporting `blocked` is an honest blocked terminal even before the doc flips.
+  //   open / considering / researching / null -> filed
+  //   in_progress + roster working             -> working
+  //   in_progress (claimed, not beating)       -> claimed
+  //   done      -> done    (terminal, success)
+  //   blocked   -> blocked (terminal, needs attention)
+  //   cancelled -> failed  (terminal)
+  function offloadWatchStage(taskDoc, rosterDocs, workerName) {
+    var f = offloadTaskFields(taskDoc);
+    var lc = f.lifecycle;
+    if (lc === "done") return { stage: "done", terminal: true, failed: false };
+    if (lc === "cancelled") return { stage: "failed", terminal: true, failed: true };
+    if (lc === "blocked") return { stage: "blocked", terminal: true, failed: true };
+    var row = rosterRowFor(rosterDocs, { slug: workerName, name: workerName });
+    var status = row && typeof row.status === "string" ? row.status : null;
+    if (status === "blocked") return { stage: "blocked", terminal: true, failed: true };
+    if (lc === "in_progress") {
+      return status === "working"
+        ? { stage: "working", terminal: false, failed: false }
+        : { stage: "claimed", terminal: false, failed: false };
+    }
+    return { stage: "filed", terminal: false, failed: false };
+  }
+
+  // PURE: the ladder DISPLAY ROWS in the newStepsHtml grammar. A terminal success
+  // paints all rungs done; a blocked/failed terminal SNAPS on the rung it died on
+  // (newStepsHtml renders the rows behind a `failed` role as skipped), so the
+  // ladder reads honestly. `sinceMs` (optional) paces the active rung's clock.
+  function offloadWatchRows(watch, sinceMs) {
+    watch = watch || {};
+    var stage = watch.stage || "filed";
+    // Where the ladder has reached; blocked/failed land on the "working" rung.
+    var reached = { filed: 0, claimed: 1, working: 2, done: 3, blocked: 2, failed: 2 };
+    var idx = reached[stage];
+    if (idx == null) idx = 0;
+    return OFFLOAD_STEP_ORDER.map(function (step, i) {
+      var role;
+      if (i < idx) role = "ok";
+      else if (i === idx) role = watch.failed ? "failed" : (watch.terminal ? "ok" : "active");
+      else role = "pending";
+      var row = { step: step, label: OFFLOAD_STEP_LABELS[step], role: role };
+      if (role === "active" && typeof sinceMs === "number" && sinceMs >= 0) row.elapsedMs = sinceMs;
+      return row;
+    });
+  }
+
+  // PURE: the watch panel markup — the ladder (newStepsHtml) plus an honest
+  // terminal banner. The order title is caller free-text -> esc'd; the banners
+  // are STATIC copy only, so nothing here can carry markup.
+  function offloadWatchPanelHtml(order, watch, sinceMs) {
+    order = order || {};
+    watch = watch || {};
+    var rows = offloadWatchRows(watch, sinceMs);
+    var banner = "";
+    if (watch.stage === "done") {
+      banner = '<div class="notice notice-ok" role="status"><b>Done.</b> The support finished this order.</div>';
+    } else if (watch.stage === "blocked") {
+      banner = '<div class="notice notice-warn" role="alert"><b>Blocked.</b> The support hit a blocker and needs a hand — open the task on the box to see why.</div>';
+    } else if (watch.stage === "failed") {
+      banner = '<div class="notice notice-error" role="alert"><b>Cancelled.</b> This order was cancelled before it finished.</div>';
+    }
+    return '<div class="offload-watch" data-offload-watch="' + esc(order.id || "") + '">' +
+      '<div class="offload-watch-head"><span class="offload-watch-title">' + esc(order.title || "Order") + "</span></div>" +
+      newStepsHtml(rows) +
+      banner +
+    "</div>";
+  }
+
+  // PURE: honest inline copy for a file/publish failure (the mutate envelope is
+  // {error:{code|message}} — friendly() reads it; the transport-level 0/401/403
+  // get their own steer).
+  function offloadFileErrorCopy(status, data) {
+    if (status === 0) return "Couldn't reach the Barkpark — check its address and try again.";
+    if (status === 401 || status === 403) return "The app token was rejected — reload and try again.";
+    return friendly(data, "Couldn't file the order — please try again.");
+  }
+
+  // The offload affordance on a LIVE support row: the button + the slot the watch
+  // ladder mounts into. Eligibility is RE-CHECKED at click time against a fresh
+  // roster read (an offline box refuses honestly, pointing at the key step), so
+  // the button renders on every live support and the refusal is one click away.
+  function offloadSupportActionHtml(support) {
+    support = support || {};
+    return '<div class="offload-action">' +
+      '<button class="btn btn-ghost btn-sm" type="button" data-offload-support="' + esc(support.id) + '">Offload a task&hellip;</button>' +
+      '<div class="offload-slot" data-offload-slot="' + esc(support.id) + '"></div>' +
+    "</div>";
+  }
+
+  // Attribute-scan for a slot keyed on a support id — an exotic id would make an
+  // interpolated selector THROW mid-paint (ids are UUIDs today, but the mount
+  // must never be the thing that breaks). Mirrors loadSupportPresence's scan.
+  function offloadSlotFor(supportId) {
+    var slots = document.querySelectorAll("[data-offload-slot]");
+    for (var i = 0; i < slots.length; i++) {
+      if (slots[i].getAttribute("data-offload-slot") === String(supportId)) return slots[i];
+    }
+    return null;
+  }
+
+  // Raw browser-direct POST to the MAIN's mutate seam (NOT api() — different
+  // origin, app-token bearer). Resolves {status, data}; data null on a
+  // decode/network failure. Mirrors fetchFleetRoster's total shape.
+  function fleetMutate(mainUrl, dataset, token, body) {
+    return fetch(mainDirectUrl(mainUrl, "/v1/data/mutate/" + encodeURIComponent(dataset)), {
+      method: "POST",
+      headers: { "Accept": "application/json", "Content-Type": "application/json", "Authorization": "Bearer " + token },
+      body: JSON.stringify(body),
+    }).then(function (res) {
+      return res.json().then(function (d) { return { status: res.status, data: d }; })
+        .catch(function () { return { status: res.status, data: null }; });
+    }).catch(function () { return { status: 0, data: null }; });
+  }
+
+  // Raw browser-direct GET of the order's task doc. GET /v1/tasks/:id answers
+  // {ok, doc, ...}; the caller reads .doc (falling back to the whole body).
+  function fetchOffloadTask(mainUrl, token, id) {
+    return fetch(mainDirectUrl(mainUrl, "/v1/tasks/" + encodeURIComponent(id)), {
+      headers: { "Accept": "application/json", "Authorization": "Bearer " + token },
+    }).then(function (res) {
+      if (!res.ok) return { status: res.status, data: null };
+      return res.json().then(function (d) { return { status: res.status, data: (d && d.doc) || d }; })
+        .catch(function () { return { status: res.status, data: null }; });
+    }).catch(function () { return { status: 0, data: null }; });
+  }
+
+  function offloadNewId() {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+    return "order-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+  }
+
+  // The DOM mount (add-listener-if-present, browser-verified): each live
+  // support's Offload button opens the flow. Called right after loadSupportPresence.
+  function wireOffloadActions(mainBp, supports) {
+    (supports || []).forEach(function (s) {
+      if (!instanceLifecycle(s).live) return;
+      var btns = document.querySelectorAll("[data-offload-support]");
+      for (var i = 0; i < btns.length; i++) {
+        if (btns[i].getAttribute("data-offload-support") === String(s.id)) {
+          (function (support, btn) {
+            btn.addEventListener("click", function () { startOffload(mainBp, support); });
+          })(s, btns[i]);
+          break;
+        }
+      }
+    });
+  }
+
+  // Click -> mint the app token -> read the roster -> eligibility gate. An
+  // offline/keyless support refuses HONESTLY here (pointing at the key step); an
+  // online one opens the order modal. The token threads through so the file +
+  // watch reuse it (never re-minted per keystroke).
+  function startOffload(mainBp, support) {
+    if (!mainBp || !mainBp.url) {
+      toast({ kind: "error", title: "Can't reach this Barkpark", body: "No address on the main instance." });
+      return;
+    }
+    mintAppToken(mainBp.id).then(function (token) {
+      if (!token) {
+        toast({ kind: "error", title: "Couldn't authorize", body: "Failed to mint an app token for this Barkpark." });
+        return;
+      }
+      fetchFleetRoster(mainBp.url, token).then(function (r) {
+        var elig = offloadEligibility(support, rosterRowFor(r.documents, support));
+        if (!elig.allowed) {
+          toast({ kind: "info", title: "Can't offload yet", body: elig.copy });
+          return;
+        }
+        openOffloadModal(mainBp, support, token);
+      });
+    });
+  }
+
+  function openOffloadModal(mainBp, support, token) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Offload a task to ' + esc(support.name) + "</h2>" +
+      '<p class="modal-sub">File an order on this Barkpark. <b>' + esc(offloadWorkerName(support)) +
+        "</b> claims it, works it on the box, and you watch it here.</p>" +
+      '<form id="offload-form">' +
+        '<label class="label" for="offload-title">Title</label>' +
+        '<input class="form-input" id="offload-title" placeholder="Summarise the release notes" required autocomplete="off">' +
+        '<label class="label" for="offload-brief">Brief</label>' +
+        '<textarea class="form-input" id="offload-brief" rows="4" placeholder="What should the support do?" spellcheck="false"></textarea>' +
+        '<div id="offload-error" class="form-error" hidden></div>' +
+        '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+          '<button class="btn btn-primary" type="submit" id="offload-go">File the order</button></div>' +
+      "</form>"
+    );
+    var form = $("#offload-form");
+    if (form) form.addEventListener("submit", function (e) { e.preventDefault(); submitOffload(mainBp, support, token); });
+  }
+
+  // File the order: createOrReplace -> publish, with the tag-seed contingency on
+  // a label_spine/unknown_tag 422 (seed the "order" tag, retry the order WITH
+  // tags). On success the modal closes and the watch ladder mounts + polls.
+  function submitOffload(mainBp, support, token) {
+    var errEl = $("#offload-error");
+    var title = (($("#offload-title") || {}).value || "").trim();
+    var brief = (($("#offload-brief") || {}).value || "").trim();
+    if (errEl) errEl.hidden = true;
+    if (!title) {
+      if (errEl) { errEl.hidden = false; errEl.textContent = "Give the order a title."; }
+      return;
+    }
+    var btn = $("#offload-go");
+    if (btn) { btn.disabled = true; btn.textContent = "Filing…"; }
+    var id = offloadNewId();
+    var dataset = offloadDataset(support);
+    var fields = { title: title, description: brief };
+    var order = { id: id, title: title, filedAt: Date.now() };
+
+    var fail = function (msg) {
+      if (btn) { btn.disabled = false; btn.textContent = "File the order"; }
+      if (errEl) { errEl.hidden = false; errEl.textContent = msg; }
+      else toast({ kind: "error", title: "Couldn't file the order", body: msg });
+    };
+    var ok2xx = function (s) { return s >= 200 && s < 300; };
+    var post = function (b) { return fleetMutate(mainBp.url, dataset, token, b); };
+
+    var base = offloadOrderDoc(id, support, fields);
+    post(base.create).then(function (cr) {
+      if (!ok2xx(cr.status)) { fail(offloadFileErrorCopy(cr.status, cr.data)); return; }
+      post(base.publish).then(function (pr) {
+        if (ok2xx(pr.status)) { offloadFiled(mainBp, support, order, token); return; }
+        if (!offloadPublishNeedsTag(pr.status, pr.data)) { fail(offloadFileErrorCopy(pr.status, pr.data)); return; }
+        // NAMED CONTINGENCY: seed the "order" tag, then retry the order tagged.
+        var seed = offloadOrderTagSeed();
+        post(seed.create).then(function () {
+          post(seed.publish).then(function () {
+            var tagged = offloadOrderDoc(id, support, fields, { tagged: true });
+            post(tagged.create).then(function (cr2) {
+              if (!ok2xx(cr2.status)) { fail(offloadFileErrorCopy(cr2.status, cr2.data)); return; }
+              post(tagged.publish).then(function (pr2) {
+                if (ok2xx(pr2.status)) { offloadFiled(mainBp, support, order, token); return; }
+                fail(offloadFileErrorCopy(pr2.status, pr2.data));
+              });
+            });
+          });
+        });
+      });
+    });
+  }
+
+  // The order is live: close the modal, mount the watch ladder in the support's
+  // slot at the FILED frame, and start the ~4s poll.
+  function offloadFiled(mainBp, support, order, token) {
+    closeModal();
+    toast({ kind: "success", title: "Order filed", body: order.title });
+    var slot = offloadSlotFor(support.id);
+    if (!slot) return;
+    slot.innerHTML = offloadWatchPanelHtml(order, { stage: "filed", terminal: false, failed: false }, 0);
+    pollOffloadWatch(mainBp, support, order, token, 0);
+  }
+
+  // Poll roster + task every ~4s, fold to the ladder, repaint, STOP on terminal
+  // (or when the panel is gone, or after a ~10-minute ceiling). The roster is a
+  // poll-read by charter law (PDF-D17) — no SSE relay.
+  function pollOffloadWatch(mainBp, support, order, token, ticks) {
+    if (ticks > 150) return;
+    var slot = offloadSlotFor(support.id);
+    if (!slot || !slot.querySelector("[data-offload-watch]")) return; // panel gone -> stop
+    var workerName = offloadWorkerName(support);
+    Promise.all([
+      fetchFleetRoster(mainBp.url, token),
+      fetchOffloadTask(mainBp.url, token, order.id),
+    ]).then(function (res) {
+      var still = offloadSlotFor(support.id);
+      if (!still || !still.querySelector("[data-offload-watch]")) return;
+      var watch = offloadWatchStage(res[1].data, res[0].documents, workerName);
+      still.innerHTML = offloadWatchPanelHtml(order, watch, Date.now() - order.filedAt);
+      if (watch.terminal) return; // poll-stop on terminal
+      setTimeout(function () { pollOffloadWatch(mainBp, support, order, token, ticks + 1); }, 4000);
+    });
+  }
+
   // Test-only escape hatch (same pattern as the sheet-grid hook): a node:vm
   // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
   // in a real browser, so this is a no-op in production.
@@ -17839,6 +18246,18 @@
       rosterCapacityText: rosterCapacityText, rosterUrl: rosterUrl,
       supportKeyCommand: supportKeyCommand, supportKeyStepHtml: supportKeyStepHtml,
       fleetNest: fleetNest, fleetNestedRowsHtml: fleetNestedRowsHtml,
+      // MVP-0 offload (PDF-D87/D92, pdf-mvp0-offload-spa): the order-doc
+      // builder + tag-seed contingency, the eligibility gate, the watch
+      // reducer/rows/panel, and the browser-direct URL join. DOM mounts
+      // (startOffload / submitOffload / pollOffloadWatch) are browser-verified.
+      mainDirectUrl: mainDirectUrl, offloadWorkerName: offloadWorkerName,
+      offloadDataset: offloadDataset, offloadOrderDoc: offloadOrderDoc,
+      offloadOrderTagSeed: offloadOrderTagSeed, offloadPublishNeedsTag: offloadPublishNeedsTag,
+      offloadEligibility: offloadEligibility, offloadStepOrder: OFFLOAD_STEP_ORDER,
+      offloadStepLabels: OFFLOAD_STEP_LABELS, offloadTaskFields: offloadTaskFields,
+      offloadWatchStage: offloadWatchStage, offloadWatchRows: offloadWatchRows,
+      offloadWatchPanelHtml: offloadWatchPanelHtml, offloadFileErrorCopy: offloadFileErrorCopy,
+      offloadSupportActionHtml: offloadSupportActionHtml,
     });
   }
 })();

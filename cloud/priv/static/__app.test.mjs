@@ -9952,3 +9952,173 @@ test("nested support rows carry fleet-row--support + the role chip; a bare fleet
   assert.equal(hooks.fleetRow(FLEET_MAIN), hooks.fleetRow(FLEET_MAIN, undefined));
   assert.ok(!/fleet-row--support/.test(hooks.fleetRow(FLEET_MAIN)));
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// MVP-0 OFFLOAD (pdf-mvp0-offload-spa, PDF-D87/D92): file an assignee-routed
+// order to a support and watch it claim -> working -> done, app-token-direct.
+// Appended at the tail (OC9 append-only law). Pure helpers only; the DOM mounts
+// (startOffload / submitOffload / pollOffloadWatch) are browser-verified.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Cross-realm normalise: hooks return objects built inside the node:vm
+// sandbox (a different Object/Array prototype), so deepEqual's strict
+// prototype check fails on them — JSON round-trip them into this realm first
+// (the same reason the fleet tests spread `[...x.map(...)]`).
+const J = (x) => JSON.parse(JSON.stringify(x));
+
+test("mainDirectUrl: scheme-less rows get https://, schemed pass through, trailing slashes trimmed, path joined", () => {
+  assert.equal(hooks.mainDirectUrl("https://main.example", "/v1/tasks/x"), "https://main.example/v1/tasks/x");
+  assert.equal(hooks.mainDirectUrl("main.example/", "/v1/fleet/roster"), "https://main.example/v1/fleet/roster");
+  assert.equal(hooks.mainDirectUrl("http://localhost:4000", "/v1/data/mutate/production"), "http://localhost:4000/v1/data/mutate/production");
+  assert.equal(hooks.mainDirectUrl("", "/x"), "https:///x"); // total: never throws on junk
+});
+
+test("offloadWorkerName: the listener identity — slug preferred (box identity), name the fallback", () => {
+  assert.equal(hooks.offloadWorkerName({ slug: "muscle-1", name: "Muscle One" }), "muscle-1");
+  assert.equal(hooks.offloadWorkerName({ name: "muscle-2" }), "muscle-2");
+  assert.equal(hooks.offloadWorkerName({}), "");
+  assert.equal(hooks.offloadWorkerName(null), "");
+});
+
+test("offloadDataset: the listener's scope — dataset > scope > the fleet default production", () => {
+  assert.equal(hooks.offloadDataset({ dataset: "staging" }), "staging");
+  assert.equal(hooks.offloadDataset({ scope: "production" }), "production");
+  assert.equal(hooks.offloadDataset({}), "production");
+});
+
+test("offloadOrderDoc: assignee = the support worker name, filed OPEN, and the PUBLISH mutation is included", () => {
+  const support = { slug: "muscle-1", name: "muscle-1" };
+  const o = hooks.offloadOrderDoc("ord-1", support, { title: "Summarise notes", description: "the brief" });
+  const cor = o.create.mutations[0].createOrReplace;
+  assert.equal(cor._id, "ord-1");
+  assert.equal(cor._type, "task");
+  assert.equal(cor.kind, "task");
+  assert.equal(cor.lifecycle_status, "open");
+  assert.equal(cor.assignee, "muscle-1"); // routed by assignee → the listener claims it
+  assert.equal(cor.priority, 2);
+  assert.equal(cor.title, "Summarise notes");
+  assert.equal(cor.description, "the brief");
+  assert.ok(!("tags" in cor), "the first-pass order carries NO tags (the tag arm is the contingency)");
+  // The publish mutation MUST accompany the create — an unpublished order is
+  // invisible to the claim queue.
+  assert.deepEqual(J(o.publish.mutations[0]), { publish: { id: "ord-1", type: "task" } });
+});
+
+test("offloadOrderDoc {tagged}: the contingency retry seeds tags:=[{tag:order,...}]", () => {
+  const o = hooks.offloadOrderDoc("ord-2", { slug: "m" }, { title: "t" }, { tagged: true });
+  assert.deepEqual(J(o.create.mutations[0].createOrReplace.tags), [{ tag: "order", strength: 80, rationale: "fleet order" }]);
+});
+
+test("offloadOrderTagSeed: createOrReplace a minimal type:tag order doc, then publish it", () => {
+  const s = hooks.offloadOrderTagSeed();
+  assert.deepEqual(J(s.create.mutations[0].createOrReplace), { _id: "order", _type: "tag", title: "order" });
+  assert.deepEqual(J(s.publish.mutations[0]), { publish: { id: "order", type: "tag" } });
+});
+
+test("offloadPublishNeedsTag: ONLY a 422 label_spine/unknown_tag arms the tag seed (env code AND bare-string shapes)", () => {
+  assert.equal(hooks.offloadPublishNeedsTag(422, { error: { code: "label_spine" } }), true);
+  assert.equal(hooks.offloadPublishNeedsTag(422, { error: { code: "unknown_tag" } }), true);
+  assert.equal(hooks.offloadPublishNeedsTag(422, { error: "unknown_tag" }), true);
+  assert.equal(hooks.offloadPublishNeedsTag(422, { error: { code: "duplicate_of" } }), false); // a real refusal, not retried
+  assert.equal(hooks.offloadPublishNeedsTag(409, { error: { code: "label_spine" } }), false); // wrong status
+  assert.equal(hooks.offloadPublishNeedsTag(422, null), false);
+});
+
+test("offloadEligibility: ONLY an ONLINE support may take an order; every refusal points at the key step", () => {
+  const live = FLEET_SUPPORT_LIVE;
+  const online = hooks.offloadEligibility(live, { worker: "muscle-1", status: "idle" });
+  assert.equal(online.allowed, true);
+  // Offline / no-heartbeat / provisioning / failed all REFUSE, and the copy
+  // steers the operator at the BYO key step (PDF-D88).
+  const offline = hooks.offloadEligibility(live, { worker: "muscle-1", status: "offline" });
+  assert.equal(offline.allowed, false);
+  assert.equal(offline.reason, "offline");
+  assert.match(offline.copy, /model key|the step above/i);
+  const noBeat = hooks.offloadEligibility(live, null);
+  assert.equal(noBeat.allowed, false);
+  assert.equal(noBeat.reason, "no_heartbeat");
+  assert.match(noBeat.copy, /model key|the step above/i);
+  const prov = hooks.offloadEligibility({ id: "s", host: null, provision_status: null }, { status: "idle" });
+  assert.equal(prov.allowed, false);
+  assert.equal(prov.reason, "provisioning");
+  const failed = hooks.offloadEligibility({ id: "s", host: null, provision_status: "failed" }, { status: "idle" });
+  assert.equal(failed.allowed, false);
+  assert.equal(failed.reason, "failed");
+});
+
+test("offloadTaskFields: reads lifecycle/claim/assignee off BOTH the doc top-level AND doc.content", () => {
+  assert.deepEqual(J(hooks.offloadTaskFields({ lifecycle_status: "open", assignee: "m" })),
+    { lifecycle: "open", claim: null, assignee: "m" });
+  assert.deepEqual(J(hooks.offloadTaskFields({ content: { lifecycle_status: "in_progress", claim: { worker: "m" }, assignee: "m" } })),
+    { lifecycle: "in_progress", claim: { worker: "m" }, assignee: "m" });
+  assert.deepEqual(J(hooks.offloadTaskFields(null)), { lifecycle: null, claim: null, assignee: null });
+});
+
+test("offloadWatchStage: fold task + roster into the filed→claimed→working→done ladder with honest terminals", () => {
+  const w = "muscle-1";
+  // filed: published + open, no worker beating.
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "open" }, [], w)),
+    { stage: "filed", terminal: false, failed: false });
+  // claimed: in_progress but the worker is idle (claimed, not yet beating working).
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "in_progress" }, [{ worker: "muscle-1", status: "idle" }], w)),
+    { stage: "claimed", terminal: false, failed: false });
+  // working: in_progress AND the roster shows the worker WORKING.
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "in_progress" }, [{ worker: "muscle-1", status: "working" }], w)),
+    { stage: "working", terminal: false, failed: false });
+  // done: terminal success — the poll stops.
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "done" }, [], w)),
+    { stage: "done", terminal: true, failed: false });
+  // blocked: honest terminal (from the task doc OR a blocked roster beat).
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "blocked" }, [], w)),
+    { stage: "blocked", terminal: true, failed: true });
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "in_progress" }, [{ worker: "muscle-1", status: "blocked" }], w)),
+    { stage: "blocked", terminal: true, failed: true });
+  // cancelled → failed terminal.
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "cancelled" }, [], w)),
+    { stage: "failed", terminal: true, failed: true });
+  // total over junk: a null doc reads filed, never throws.
+  assert.equal(hooks.offloadWatchStage(null, null, w).stage, "filed");
+});
+
+test("offloadWatchRows: the ladder roles per stage; a blocked/failed terminal SNAPS the rungs behind it", () => {
+  const step = (rows, s) => rows.find((r) => r.step === s).role;
+  const filed = hooks.offloadWatchRows({ stage: "filed" });
+  assert.deepEqual([...filed.map((r) => r.role)], ["active", "pending", "pending", "pending"]);
+  const claimed = hooks.offloadWatchRows({ stage: "claimed" });
+  assert.deepEqual([...claimed.map((r) => r.role)], ["ok", "active", "pending", "pending"]);
+  const working = hooks.offloadWatchRows({ stage: "working" }, 12000);
+  assert.deepEqual([...working.map((r) => r.role)], ["ok", "ok", "active", "pending"]);
+  assert.equal(working.find((r) => r.step === "working").elapsedMs, 12000); // paces the active rung
+  const done = hooks.offloadWatchRows({ stage: "done", terminal: true });
+  assert.deepEqual([...done.map((r) => r.role)], ["ok", "ok", "ok", "ok"]);
+  const blocked = hooks.offloadWatchRows({ stage: "blocked", terminal: true, failed: true });
+  assert.deepEqual([...blocked.map((r) => r.role)], ["ok", "ok", "failed", "pending"]);
+  assert.equal(step(blocked, "working"), "failed");
+});
+
+test("offloadWatchPanelHtml: renders the shared step ladder + honest terminal banners; the title is esc'd", () => {
+  const filed = hooks.offloadWatchPanelHtml({ id: "ord-1", title: "Ship it" }, { stage: "filed" });
+  assert.match(filed, /new-steps/); // the SHARED step-row grammar
+  assert.match(filed, /data-offload-watch="ord-1"/);
+  assert.match(filed, /Ship it/);
+  assert.match(hooks.offloadWatchPanelHtml({ id: "d", title: "x" }, { stage: "done" }), /notice-ok/);
+  assert.match(hooks.offloadWatchPanelHtml({ id: "b", title: "x" }, { stage: "blocked" }), /notice-warn/);
+  assert.match(hooks.offloadWatchPanelHtml({ id: "f", title: "x" }, { stage: "failed" }), /notice-error/);
+  // XSS: a hostile order title renders as TEXT, never markup.
+  const evil = hooks.offloadWatchPanelHtml({ id: "e", title: "<img src=x onerror=alert(1)>" }, { stage: "filed" });
+  assert.ok(!evil.includes("<img src=x"), "the order title must be escaped");
+});
+
+test("offloadSupportActionHtml: the Offload button + the watch slot, both keyed on the support id", () => {
+  const html = hooks.offloadSupportActionHtml({ id: "sup-1" });
+  assert.match(html, /data-offload-support="sup-1"/);
+  assert.match(html, /data-offload-slot="sup-1"/);
+  assert.match(html, /Offload a task/);
+});
+
+test("offloadFileErrorCopy: honest transport steers (0 / 401 / 403) else the friendly envelope", () => {
+  assert.match(hooks.offloadFileErrorCopy(0, null), /reach the Barkpark/);
+  assert.match(hooks.offloadFileErrorCopy(401, null), /token/);
+  assert.match(hooks.offloadFileErrorCopy(403, null), /token/);
+  assert.equal(typeof hooks.offloadFileErrorCopy(500, { error: "boom" }), "string");
+});

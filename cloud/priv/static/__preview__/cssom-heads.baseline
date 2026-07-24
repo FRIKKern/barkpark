@@ -9,4 +9,4 @@
 #
 # Measured 2026-07-21 on app.css @ sha256 176f441387bc… (Chrome 150.0.7871.129,
 # node v22.22.0): 1203 authored heads == 1203 CSSOM rules, MISSES 0.
-1228
+1233
