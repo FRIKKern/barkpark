@@ -117,6 +117,8 @@ const STRATEGY_SCHEMA = {
           key: { type: 'string', description: 'short kebab-case label' },
           question: { type: 'string', description: 'a concrete, answerable question about the repo/product/ledger — name suspected files, claims to check, seams to map' },
           why: { type: 'string', description: 'how the answer changes the plan' },
+          mode: { type: 'string', enum: ['research', 'drift-check'], description: "drift-check = a prior wave Paper already answered this; the surveyor re-runs its stored rerun commands and reports drift instead of re-deriving (epic-memory D4). Default: research." },
+          prior_paper: { type: 'string', description: 'REQUIRED when mode=drift-check: the paper id that answered it' },
         },
       },
     },
@@ -446,8 +448,8 @@ const strategist = await agent(
 ${USER_WISH_BLOCK}
 
 ${CHARTER_EXISTS
-    ? `The epic charter exists at ${CHARTER_PATH} — read it FULLY, plus the epic's bp task tree${EPIC_TASK_ID ? ` (bp task get ${EPIC_TASK_ID} carries children)` : ''} and the prior wave Papers/debriefs it names. Reconcile the charter with what actually landed, then set the direction for THIS wave: what matters most now, what should be finished vs started, where the quality bar (Kinsta/Vercel) is not yet met.`
-    : `This is the FOUNDING wave — no charter yet. Ground yourself honestly: \`bp search query "<terms>"\` for prior papers/tasks on this topic (the \`query\` sub-verb is REQUIRED; without it the command exits 2 and looks like "no prior art"), then read the surfaces the wish actually touches — verification is the fleets' job, but the DIRECTION is yours alone, and a direction set on an unread codebase is a guess.`}
+    ? `The epic charter exists at ${CHARTER_PATH} — read it FULLY, plus the epic's bp task tree${EPIC_TASK_ID ? ` (bp task get ${EPIC_TASK_ID} carries children)` : ''} and the prior wave Papers/debriefs it names. Reconcile the charter with what actually landed, then set the direction for THIS wave: what matters most now, what should be finished vs started, where the quality bar (Kinsta/Vercel) is not yet met. THEN SEARCH BEFORE ASKING (epic-memory D4): \`bp search query "<epic terms>"\` for prior wave Papers and debriefs on this topic. Any survey question a prior Paper already answered becomes a drift-check assignment (mode='drift-check', prior_paper=<id>) — verification is cheap, re-research is not.`
+    : `This is the FOUNDING wave — no charter yet. Ground yourself honestly: \`bp search query "<terms>"\` for prior papers/tasks on this topic (the \`query\` sub-verb is REQUIRED; without it the command exits 2 and looks like "no prior art"), then read the surfaces the wish actually touches — verification is the fleets' job, but the DIRECTION is yours alone, and a direction set on an unread codebase is a guess. If prior papers already answer a question you were going to ask, file it as mode='drift-check' with prior_paper set.`}
 
 WORK THE PROBLEM PROPERLY, in whatever order serves you:
 - GROUND: read until further reading stops changing your mind — the charter/ledger/prior papers above, the real code of the surfaces involved, adjacent systems that constrain the design. Depth is your call; a clock is not.
@@ -487,6 +489,8 @@ ${strategist.direction}
 
 YOUR ASSIGNMENT [${q.key}]: ${q.question}
 WHY IT MATTERS: ${q.why}
+${q.mode === 'drift-check' ? `
+DRIFT-CHECK MODE (epic-memory D4): prior wave Paper ${q.prior_paper} already answered this. Read it, re-run its facts' rerun commands, and report each fact CONFIRMED or DRIFTED in your facts[] (with a fresh rerun command). Spend remaining time ONLY on the delta — what changed, what was never asked. Do not re-derive settled ground.` : ''}
 
 Search Barkpark FIRST (\`bp search query "<terms>"\` — the \`query\` sub-verb is REQUIRED; dropping it exits 2 with \`unknown command "search"\`, and that failure reads exactly like a real absence of prior art, so check the exit code — papers and tasks carry prior art the tree doesn't), then grep/read the repo${CHARTER_EXISTS ? `; the charter at ${CHARTER_PATH} is a fair source` : ''}. Answer honestly — "the premise is wrong" is a valid and valuable answer. Every load-bearing fact needs evidence you actually derived, and its \`rerun\` command.
 
