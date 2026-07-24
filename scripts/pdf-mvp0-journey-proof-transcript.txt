@@ -1,15 +1,15 @@
 # pdf-mvp0-journey-proof — transcript
-# tree: c8b8c54a00c080d4c280f97580d906c764239312 (loop-epic/mvp0-journey-proof-fire2) · host: darwin · 2026-07-24T20:56:22Z
+# tree: 72438f6e9b7b3ba9846c8379c1f0e517c9c373de (loop-epic/mvp0-journey-proof-fire3) · host: darwin · 2026-07-24T22:44:49Z
 # command: scripts/pdf-mvp0-journey-proof.sh
 
 ──────────────────────────────────────────────────────────────────────────────
-PDF MVP-0 JOURNEY PROOF — run — run 20260724T205622Z-94218
+PDF MVP-0 JOURNEY PROOF — run — run 20260724T224449Z-86630
 ──────────────────────────────────────────────────────────────────────────────
 tree:        /Users/frikkjarl/Documents/GitHub/barkpark/.claude/worktrees/agent-a1a4563de2c2177ab
-worktree:    c8b8c54a00c080d4c280f97580d906c764239312 (loop-epic/mvp0-journey-proof-fire2)
+worktree:    72438f6e9b7b3ba9846c8379c1f0e517c9c373de (loop-epic/mvp0-journey-proof-fire3)
 main:        https://guerrilla.barkpark.cloud (dataset production)
 cp:          https://api.barkpark.cloud
-names:       main mvp0proof-m-260724205622 · support mvp0proof-s-260724205622 · phantom mvp0proof-negctl-260724205622 · order mvp0proof-order-260724205622
+names:       main mvp0proof-m-260724224449 · support mvp0proof-s-260724224449 · phantom mvp0proof-negctl-260724224449 · order mvp0proof-order-260724224449
 ttl bracket: ttl_s=30 · provisioning below 20 · offline from 41 (skew 10s) · support poll floor 1800s
 
 ──────────────────────────────────────────────────────────────────────────────
@@ -32,33 +32,43 @@ RUNG 0 — PRECONDITION — bearers, credential-empty law, PR #6038, CP+provisio
 ──────────────────────────────────────────────────────────────────────────────
 RUNG 1 — CREATE-MAIN — POST /v1/launch → the /new journey's calls → the main reads live
 ──────────────────────────────────────────────────────────────────────────────
-  1a $ POST https://api.barkpark.cloud/v1/auth/register {email:bolla+mvp0proof-m-260724205622@jarl.no, team_name:mvp0proof-m-260724205622} (password random, never printed)
-      register -> HTTP 201; journey team 8790afb3-95bd-4185-8868-e9435c76ada4 (session 43 bytes — never printed)
-  1b $ POST https://api.barkpark.cloud/v1/launch {name:mvp0proof-m-260724205622, template:astro-search-starter}   (journey session; trial auto-starts, dwb-13)
+  1a $ POST https://api.barkpark.cloud/v1/auth/register {email:bolla+mvp0proof-m-260724224449@jarl.no, team_name:mvp0proof-m-260724224449} (password random, never printed)
+      register -> HTTP 201; journey team df27a738-f307-4b42-8a30-9dc5a3ae0876 (session 43 bytes — never printed)
+  1b $ POST https://api.barkpark.cloud/v1/launch {name:mvp0proof-m-260724224449, template:astro-search-starter}   (journey session; trial auto-starts, dwb-13)
       receipt (HTTP 201):
-      | {"barkpark":{"update_running_release":null,"last_verified_at":null,"autoupdate_paused":false,"autoupdate_triggered_at":null,"pinned_release":null,"fleet_parent_id":null,"server_type":null,"health_status":"unknown","host":null,"provider":"hetzner","inserted_at":"2026-07-24T20:56:32.012168Z","update_state":"unknown","autoupdate_enabled":true,"fleet_token_id":null,"update_checked_at":null,"fleet_role":null,"channel":"prod","verify_reachable":null,"suspended":false,"custom_host":null,"last_seen_at":null,"team_id":"8790afb3-95bd-4185-8868-e9435c76ada4","version":null,"mode":"managed","update_latest_release":null,"slug":"mvp0proof-m-260724205622","region":null,"id":"57cf95b3-d239-40b8-a8f4-1841854255eb","name":"mvp0proof-m-260724205622","git_commit":null,"provision_console":[],"provision_steps":[],"url":"https://mvp0proof-m-260724205622.barkpark.cloud","suspended_reason":null,"agent_status":"offline"}}      main registered: id=57cf95b3-d239-40b8-a8f4-1841854255eb (label barkpark-managed; CP-deprovisionable via DELETE /v1/barkparks/:id)
-  main mvp0proof-m-260724205622 host=—              health=unknown steps=—
-  main mvp0proof-m-260724205622 host=—              health=unknown steps=create:started,create:done,secure:started
-  main mvp0proof-m-260724205622 host=—              health=unknown steps=create:started,create:done,secure:started
-  main mvp0proof-m-260724205622 host=—              health=unknown steps=create:started,create:done,secure:started
-  main mvp0proof-m-260724205622 host=—              health=unknown steps=create:started,create:done,secure:started,secure:done,configure:started
-  main mvp0proof-m-260724205622 host=—              health=unknown steps=create:started,create:done,secure:started,secure:done,configure:started
-  main mvp0proof-m-260724205622 host=—              health=unknown steps=create:started,create:done,secure:started,secure:done,configure:started
-  main mvp0proof-m-260724205622 host=—              health=unknown steps=create:started,create:done,secure:started,secure:done,configure:started
-  main mvp0proof-m-260724205622 host=—              health=unknown steps=create:started,create:done,secure:started,secure:done,configure:started
-  main mvp0proof-m-260724205622 host=—              health=down   steps=create:started,create:done,secure:started,secure:done,configure:started,configure:done
-  main mvp0proof-m-260724205622 host=91.98.139.58     health=up     steps=create:started,create:done,secure:started,secure:done,configure:started,configure:done,content:started,content:done,verify:started,verify:progress,verify:progress,verify:progress,verify:done,ready:started,ready:done
-      LIVE MAIN: id=57cf95b3-d239-40b8-a8f4-1841854255eb url=https://mvp0proof-m-260724205622.barkpark.cloud host=91.98.139.58 health=up
-      GET /v1/barkparks/:id/credentials -> HTTP 200 (admin_token 41 bytes — never printed); journey main = https://mvp0proof-m-260724205622.barkpark.cloud
+      | {"barkpark":{"update_running_release":null,"last_verified_at":null,"autoupdate_paused":false,"autoupdate_triggered_at":null,"pinned_release":null,"fleet_parent_id":null,"server_type":null,"health_status":"unknown","host":null,"provider":"hetzner","inserted_at":"2026-07-24T22:44:59.920043Z","update_state":"unknown","autoupdate_enabled":true,"fleet_token_id":null,"update_checked_at":null,"fleet_role":null,"channel":"prod","verify_reachable":null,"suspended":false,"custom_host":null,"last_seen_at":null,"team_id":"df27a738-f307-4b42-8a30-9dc5a3ae0876","version":null,"mode":"managed","update_latest_release":null,"slug":"mvp0proof-m-260724224449","region":null,"id":"f165cf94-e1f6-4ff1-adfe-108e2509bad3","name":"mvp0proof-m-260724224449","git_commit":null,"provision_console":[],"provision_steps":[],"url":"https://mvp0proof-m-260724224449.barkpark.cloud","suspended_reason":null,"agent_status":"offline"}}      main registered: id=f165cf94-e1f6-4ff1-adfe-108e2509bad3 (label barkpark-managed; CP-deprovisionable via DELETE /v1/barkparks/:id)
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=—
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=unknown steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started
+  main mvp0proof-m-260724224449 host=—              health=up     steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started,configure:done,content:started
+  main mvp0proof-m-260724224449 host=178.104.41.183   health=up     steps=create:started,create:done,freshen:started,freshen:done,secure:started,secure:done,configure:started,configure:done,content:started,content:done,verify:started,verify:progress,verify:progress,verify:progress,verify:done,ready:started,ready:done
+      LIVE MAIN: id=f165cf94-e1f6-4ff1-adfe-108e2509bad3 url=https://mvp0proof-m-260724224449.barkpark.cloud host=178.104.41.183 health=up
+      GET /v1/barkparks/:id/credentials -> HTTP 200 (admin_token 41 bytes — never printed); journey main = https://mvp0proof-m-260724224449.barkpark.cloud
       journey-main roster GET -> documents-envelope: yes
-  PASS   1   create-main via CP HTTP only: mvp0proof-m-260724205622 launched (template astro-search-starter) → polled provision_steps → live (host set, health up) at https://mvp0proof-m-260724205622.barkpark.cloud; credentials surface revealed the instance admin token; the journey main serves its roster
+  PASS   1   create-main via CP HTTP only: mvp0proof-m-260724224449 launched (template astro-search-starter) → polled provision_steps → live (host set, health up) at https://mvp0proof-m-260724224449.barkpark.cloud; credentials surface revealed the instance admin token; the journey main serves its roster
 
 ──────────────────────────────────────────────────────────────────────────────
 RUNG 2 — ADD-SUPPORT — POST /v1/fleet/supports mode=provision → the support onlines only after its own beat (PDF-D89)
 ──────────────────────────────────────────────────────────────────────────────
-  $ POST https://api.barkpark.cloud/v1/fleet/supports {name:mvp0proof-s-260724205622, barkpark_id:57cf95b3-d239-40b8-a8f4-1841854255eb, mode:provision}
+  $ POST https://api.barkpark.cloud/v1/fleet/supports {name:mvp0proof-s-260724224449, barkpark_id:f165cf94-e1f6-4ff1-adfe-108e2509bad3, mode:provision}
       receipt (HTTP 202):
-      | {"job_id":"000220d9-9886-4311-89c9-0c1170ee8f45","barkpark":{"update_running_release":null,"last_verified_at":null,"autoupdate_paused":false,"autoupdate_triggered_at":null,"pinned_release":null,"fleet_parent_id":"57cf95b3-d239-40b8-a8f4-1841854255eb","server_type":null,"health_status":"unknown","host":null,"provider":"hetzner","inserted_at":"2026-07-24T20:58:17.480855Z","update_state":"unknown","autoupdate_enabled":true,"fleet_token_id":null,"update_checked_at":null,"fleet_role":"support","channel":"prod","verify_reachable":null,"suspended":false,"custom_host":null,"last_seen_at":null,"team_id":"8790afb3-95bd-4185-8868-e9435c76ada4","version":null,"mode":"managed","update_latest_release":null,"slug":"mvp0proof-s-260724205622","region":null,"id":"5ff6ed9c-ec1a-48fc-94df-77d7e94b337f","name":"mvp0proof-s-260724205622","git_commit":null,"provision_console":[],"provision_steps":[],"url":null,"suspended_reason":null,"agent_status":"offline"}}      support registered host-nil: id=5ff6ed9c-ec1a-48fc-94df-77d7e94b337f job_id=000220d9-9886-4311-89c9-0c1170ee8f45 (the provision_support job the Go provisioner drains)
+      | {"job_id":"f082f028-d371-4693-a618-db0b50cfac7d","barkpark":{"update_running_release":null,"last_verified_at":null,"autoupdate_paused":false,"autoupdate_triggered_at":null,"pinned_release":null,"fleet_parent_id":"f165cf94-e1f6-4ff1-adfe-108e2509bad3","server_type":null,"health_status":"unknown","host":null,"provider":"hetzner","inserted_at":"2026-07-24T22:48:28.013012Z","update_state":"unknown","autoupdate_enabled":true,"fleet_token_id":null,"update_checked_at":null,"fleet_role":"support","channel":"prod","verify_reachable":null,"suspended":false,"custom_host":null,"last_seen_at":null,"team_id":"df27a738-f307-4b42-8a30-9dc5a3ae0876","version":null,"mode":"managed","update_latest_release":null,"slug":"mvp0proof-s-260724224449","region":null,"id":"3c1065b1-35f4-405b-8319-8239331f01b6","name":"mvp0proof-s-260724224449","git_commit":null,"provision_console":[],"provision_steps":[],"url":null,"suspended_reason":null,"agent_status":"offline"}}      support registered host-nil: id=3c1065b1-35f4-405b-8319-8239331f01b6 job_id=f082f028-d371-4693-a618-db0b50cfac7d (the provision_support job the Go provisioner drains)
   support steps=[—]  roster=ABSENT
   support steps=[create:started]  roster=ABSENT
   support steps=[create:started]  roster=ABSENT
@@ -79,27 +89,24 @@ RUNG 2 — ADD-SUPPORT — POST /v1/fleet/supports mode=provision → the suppor
   support steps=[create:started,create:done,configure:started]  roster=ABSENT
   support steps=[create:started,create:done,configure:started]  roster=ABSENT
   support steps=[create:started,create:done,configure:started]  roster=ABSENT
-  support steps=[create:started,create:done,configure:started]  roster=ABSENT
-  support steps=[create:started,create:done,configure:started]  roster=ABSENT
-  support steps=[create:started,create:done,configure:started]  roster=ABSENT
-  support steps=[create:started,create:done,configure:started]  roster=ABSENT
-  support steps=[create:started,create:done,configure:started]  roster=ABSENT
-  support steps=[create:started,create:done,configure:started]  roster=ABSENT
-  support steps=[create:started,create:done,configure:started,configure:done,content:started]  roster=provisioning
-  support steps=[create:started,create:done,configure:started,configure:done,content:started]  roster=provisioning
-  support steps=[create:started,create:done,configure:started,configure:done,content:started]  roster=provisioning
-  support steps=[create:started,create:done,configure:started,configure:done,content:started]  roster=provisioning
-  support steps=[create:started,create:done,configure:started,configure:done,content:started]  roster=provisioning
+curl: (6) Could not resolve host: mvp0proof-m-260724224449.barkpark.cloud
+  support steps=[—]  roster=ABSENT
+curl: (6) Could not resolve host: mvp0proof-m-260724224449.barkpark.cloud
+  support steps=[—]  roster=ABSENT
   support steps=[create:started,create:done,configure:started,configure:done,content:started,content:failed]  roster=provisioning
-      SUPPORT JOB FAILED (provision_status=claimed; steps=[create:started,create:done,configure:started,configure:done,content:started,content:failed]) — quoting the job's own evidence:
-      | provisioning support mvp0proof-s-260724205622 for main https://mvp0proof-m-260724205622.barkpark.cloud (dataset production)…
+      SUPPORT JOB FAILED (provision_status=failed; steps=[create:started,create:done,configure:started,configure:done,content:started,content:failed]) — quoting the job's own evidence:
+      provision_error: support mvp0proof-s-260724224449: content: on-box merge-import: ssh caddy step "merge-import the scrubbed dataset bundle into the box (bp cloud workspace import --merge)" on 46.224.19.120: exit status 8: Warning: Permanently added '46.224.19.120' (ED25519) to the list of known hosts.
+{"error":{"code":"internal_error","hint":"Retry shortly; if it persists, report the request_id to the API operator.","message":"server error (GMVblPV_ruXRLpsAABOB)","request_id":"GMVblPV_ruXRLpsAABOB"},"ok":false}
+bp import exited 8 — box-side evidence follows
+--- barkpark journal tail (journalctl -u barkpark -n 
+      | provisioning support mvp0proof-s-260724224449 for main https://mvp0proof-m-260724224449.barkpark.cloud (dataset production)…
       | create: started
-      | create: progress — box warm-d4922928 up at 46.225.61.223 — waiting for sshd
-      | create: done — 46.225.61.223
+      | create: progress — box warm-b085cfac up at 46.224.19.120 — waiting for sshd
+      | create: done — 46.224.19.120
       | configure: started
       | configure: freshen — started
-      | configure: freshen — progress Updating Barkpark build-87972d0dec6f0dc9adb3e9fb468628b4aa27643e-3-g83c41e66c → build-c8b8c54a00c080d4c280f97580d906c764239312…
-      | configure: freshen — done Updated Barkpark to build-c8b8c54a00c080d4c280f97580d906c764239312
+      | configure: freshen — progress Updating Barkpark build-87972d0dec6f0dc9adb3e9fb468628b4aa27643e-3-g83c41e66c → build-72438f6e9b7b3ba9846c8379c1f0e517c9c373de…
+      | configure: freshen — done Updated Barkpark to build-72438f6e9b7b3ba9846c8379c1f0e517c9c373de
       | configure: secrets-mint — per-instance secrets minted
       | configure: secrets-install — installing per-instance secrets + restarting Barkpark
       | configure: migrate — running database migrations
@@ -110,149 +117,149 @@ RUNG 2 — ADD-SUPPORT — POST /v1/fleet/supports mode=provision → the suppor
       | content: started
       | content: progress — publishing the provisioning roster row on the main
       | content: progress — minting the support's ledger token on the main
-      | content: progress — pulling the scrubbed mvp0proof-m-260724205622/production dataset onto the box
-      | content: failed — on-box merge-import: ssh caddy step "merge-import the scrubbed dataset bundle into the box (bp cloud workspace import --merge)" on 46.225.61.223: exit status 8: Warning: Permanently added '46.225.61.223' (ED25519) to the list of known hosts.
-      |   · {"error":{"code":"internal_error","hint":"Retry shortly; if it persists, report the request_id to the API operator.","message":"server error (GMVVnQ-695dzZd4AAAHS)","request_id":"GMVVnQ-695dzZd4AAAHS"},"ok":false}
+      | content: progress — pulling the scrubbed mvp0proof-m-260724224449/production dataset onto the box
+      | content: failed — on-box merge-import: ssh caddy step "merge-import the scrubbed dataset bundle into the box (bp cloud workspace import --merge)" on 46.224.19.120: exit status 8: Warning: Permanently added '46.224.19.120' (ED25519) to the list of known hosts.
+      |   · {"error":{"code":"internal_error","hint":"Retry shortly; if it persists, report the request_id to the API operator.","message":"server error (GMVblPV_ruXRLpsAABOB)","request_id":"GMVblPV_ruXRLpsAABOB"},"ok":false}
       |   · bp import exited 8 — box-side evidence follows
       |   · --- barkpark journal tail (journalctl -u barkpark -n 120) ---
-      |   · Jul 24 21:01:06 warm-d4922928 start.sh[2571]: Compiling lib/barkpark_web/router.ex (it's taking more than 10s)
-      |   · Jul 24 21:01:15 warm-d4922928 start.sh[2571]: Generated barkpark app
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.273 [info] Plugins.Bootstrap: registered schema "paper" (dataset="production", visibility="public") from plugin "bulldocs"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.286 [info] Plugins.Bootstrap: registered schema "form_response" (dataset="production", visibility="private") from plugin "bulldocs"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.312 [info] Plugins.Bootstrap: registered schema "coordinatorLoop" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.318 [info] Plugins.Bootstrap: registered schema "gameClock" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.325 [info] Plugins.Bootstrap: registered schema "timeState" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.333 [info] Plugins.Bootstrap: registered schema "player" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.342 [info] Plugins.Bootstrap: registered schema "ability" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.352 [info] Plugins.Bootstrap: registered schema "cameraPreset" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.364 [info] Plugins.Bootstrap: registered schema "weapon" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.376 [info] Plugins.Bootstrap: registered schema "projectileType" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.385 [info] Plugins.Bootstrap: registered schema "enemyType" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.392 [info] Plugins.Bootstrap: registered schema "bossType" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.398 [info] Plugins.Bootstrap: registered schema "bossAbility" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.403 [info] Plugins.Bootstrap: registered schema "runRuleset" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.409 [info] Plugins.Bootstrap: registered schema "waveTemplate" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.414 [info] Plugins.Bootstrap: registered schema "spreeTier" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.420 [info] Plugins.Bootstrap: registered schema "scalingCurve" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.426 [info] Plugins.Bootstrap: registered schema "playerStat" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.432 [info] Plugins.Bootstrap: registered schema "upgradeCard" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.438 [info] Plugins.Bootstrap: registered schema "rune" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.442 [info] Plugins.Bootstrap: registered schema "pickup" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.446 [info] Plugins.Bootstrap: registered schema "sound" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.450 [info] Plugins.Bootstrap: registered schema "vfx" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.455 [info] Plugins.Bootstrap: registered schema "hudElement" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.459 [info] Plugins.Bootstrap: registered schema "overlay" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.463 [info] Plugins.Bootstrap: registered schema "arena" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.468 [info] Plugins.Bootstrap: registered schema "theme" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.476 [info] Plugins.Bootstrap: registered schema "mediaAsset" (dataset="production", visibility="private") from plugin "media"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.480 [info] Plugins.Bootstrap: registered schema "mediaCollection" (dataset="production", visibility="private") from plugin "media"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.517 [info] Plugins.Bootstrap: registered schema "book" (dataset="production", visibility="private") from plugin "onixedit"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.526 [info] Plugins.Bootstrap: registered schema "quiz" (dataset="production", visibility="private") from plugin "quiz"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.535 [info] Plugins.Bootstrap: registered schema "command" (dataset="production", visibility="public") from plugin "scaffy"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.542 [info] Plugins.Bootstrap: registered schema "sheet" (dataset="production", visibility="private") from plugin "sheets"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.560 [info] Plugins.Bootstrap: registered schema "task" (dataset="production", visibility="public") from plugin "tasks"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.572 [info] Plugins.Bootstrap: registered schema "listener" (dataset="production", visibility="private") from plugin "tasks"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.581 [info] Plugins.Bootstrap: registered schema "ticket" (dataset="production", visibility="private") from plugin "tickets"
-      |   · Jul 24 21:01:25 warm-d4922928 start.sh[2571]: 21:01:25.785 [info] Codelists.EDItEUR: seeding bundled snapshot /opt/barkpark/api/_build/prod/lib/barkpark/priv/codelists/onix-issue-73.xml (plugin=onixedit, issue=73)
-      |   · Jul 24 21:01:42 warm-d4922928 start.sh[2571]: 21:01:42.654 [info] Codelists.EDItEUR: seeded 166 list(s) from bundled snapshot
-      |   · Jul 24 21:01:42 warm-d4922928 start.sh[2571]: 21:01:42.662 [info] Codelists.EDItEUR: seeding bundled Thema snapshot /opt/barkpark/api/_build/prod/lib/barkpark/priv/codelists/thema-1.6/thema-v1.6-en.json (plugin=onixedit, issue=1.6)
-      |   · Jul 24 21:01:57 warm-d4922928 start.sh[2571]: 21:01:57.934 [error] Codelists.EDItEUR: Thema seed raised — connection is closed because of an error, disconnect or timeout
-      |   · Jul 24 21:01:57 warm-d4922928 start.sh[2571]: 21:01:57.955 [error] Postgrex.Protocol (#PID<0.5464.0> ({Postgrex.Protocol, "barkpark_prod"})) disconnected: ** (DBConnection.ConnectionError) client #PID<0.5486.0> (:proc_lib) timed out because it queued and checked out the connection for longer than 15000ms
-      |   · Jul 24 21:01:57 warm-d4922928 start.sh[2571]: #PID<0.5486.0> (:proc_lib) was at location:
-      |   · Jul 24 21:01:57 warm-d4922928 start.sh[2571]:     :erlang.port_command/3
-      |   · Jul 24 21:01:57 warm-d4922928 start.sh[2571]:     :prim_inet.send/4
-      |   · Jul 24 21:01:57 warm-d4922928 start.sh[2571]:     (postgrex 0.22.3) lib/postgrex/protocol.ex:3383: Postgrex.Protocol.do_send/3
-      |   · Jul 24 21:01:57 warm-d4922928 start.sh[2571]:     (postgrex 0.22.3) lib/postgrex/protocol.ex:2184: Postgrex.Protocol.bind_execute/4
-      |   · Jul 24 21:01:57 warm-d4922928 start.sh[2571]:     (db_connection 2.10.2) lib/db_connection/holder.ex:379: DBConnection.Holder.holder_apply/4
-      |   · Jul 24 21:01:57 warm-d4922928 start.sh[2571]:     (db_connection 2.10.2) lib/db_connection.ex:1558: DBConnection.run_execute/5
-      |   · Jul 24 21:01:57 warm-d4922928 start.sh[2571]:     (db_connection 2.10.2) lib/db_connection.ex:1592: DBConnection.run/4
-      |   · Jul 24 21:01:58 warm-d4922928 start.sh[2571]: 21:01:58.438 [info] Running BarkparkWeb.Endpoint with Bandit 1.12.0 at :::4000 (http)
-      |   · Jul 24 21:01:58 warm-d4922928 start.sh[2571]: 21:01:58.444 [info] Access BarkparkWeb.Endpoint at https://template.barkpark.cloud
-      |   · Jul 24 21:02:00 warm-d4922928 start.sh[2571]: 21:02:00.256 [info] oban.job.start worker="Barkpark.Tenancy.Workers.PlaygroundReaper" queue="playground_ttl" duration=nil
-      |   · Jul 24 21:02:00 warm-d4922928 start.sh[2571]: 21:02:00.257 [info] oban.job.start worker="Barkpark.Audit.ExportWorker" queue="default" duration=nil
-      |   · Jul 24 21:02:00 warm-d4922928 start.sh[2571]: 21:02:00.257 [info] oban.job.start worker="Barkpark.Webhooks.StuckDeliverySweeper" queue="default" duration=nil
-      |   · Jul 24 21:02:00 warm-d4922928 start.sh[2571]: 21:02:00.257 [info] oban.job.start worker="Barkpark.Tasks.TtlSweeper" queue="tasks_ttl" duration=nil
-      |   · Jul 24 21:02:00 warm-d4922928 start.sh[2571]: 21:02:00.274 [info] oban.job.stop worker="Barkpark.Audit.ExportWorker" queue="default" duration=10245921
-      |   · Jul 24 21:02:00 warm-d4922928 start.sh[2571]: 21:02:00.275 [info] oban.job.stop worker="Barkpark.Webhooks.StuckDeliverySweeper" queue="default" duration=10664610
-      |   · Jul 24 21:02:00 warm-d4922928 start.sh[2571]: 21:02:00.276 [info] oban.job.stop worker="Barkpark.Tenancy.Workers.PlaygroundReaper" queue="playground_ttl" duration=14353446
-      |   · Jul 24 21:02:00 warm-d4922928 start.sh[2571]: 21:02:00.298 [info] oban.job.stop worker="Barkpark.Tasks.TtlSweeper" queue="tasks_ttl" duration=38910712
-      |   · Jul 24 21:02:02 warm-d4922928 start.sh[2571]: 21:02:02.237 request_id=GMVVlC3_ymk_3eUAAnoh [info] GET /api/schemas
-      |   · Jul 24 21:02:02 warm-d4922928 start.sh[2571]: 21:02:02.318 request_id=GMVVlC3_ymk_3eUAAnoh workspace_id=ad90a119-f4c8-4ed5-954b-201e163cad38 workspace_slug=default project_id=d2806933-54bc-4aa1-a6f3-bd89b461f84c [info] Sent 200 in 80ms
-      |   · Jul 24 21:02:03 warm-d4922928 systemd[1]: Stopping Barkpark...
-      |   · Jul 24 21:02:03 warm-d4922928 start.sh[2571]: 21:02:03.948 [notice] SIGTERM received - shutting down
-      |   · Jul 24 21:02:09 warm-d4922928 start.sh[2571]: 21:02:09.096 [error] GenServer Barkpark.Auth.Finch.Supervisor terminating
-      |   · Jul 24 21:02:09 warm-d4922928 start.sh[2571]: ** (stop) killed
-      |   · Jul 24 21:02:09 warm-d4922928 start.sh[2571]: Last message: {:EXIT, #PID<0.5444.0>, :killed}
-      |   · Jul 24 21:02:10 warm-d4922928 systemd[1]: barkpark.service: Deactivated successfully.
-      |   · Jul 24 21:02:10 warm-d4922928 systemd[1]: Stopped Barkpark.
-      |   · Jul 24 21:02:10 warm-d4922928 systemd[1]: barkpark.service: Consumed 3min 37.079s CPU time.
-      |   · Jul 24 21:02:10 warm-d4922928 systemd[1]: Started Barkpark.
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.865 [info] Plugins.Bootstrap: registered schema "paper" (dataset="production", visibility="public") from plugin "bulldocs"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.879 [info] Plugins.Bootstrap: registered schema "form_response" (dataset="production", visibility="private") from plugin "bulldocs"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.899 [info] Plugins.Bootstrap: registered schema "coordinatorLoop" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.911 [info] Plugins.Bootstrap: registered schema "gameClock" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.921 [info] Plugins.Bootstrap: registered schema "timeState" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.935 [info] Plugins.Bootstrap: registered schema "player" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.943 [info] Plugins.Bootstrap: registered schema "ability" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.952 [info] Plugins.Bootstrap: registered schema "cameraPreset" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.961 [info] Plugins.Bootstrap: registered schema "weapon" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.970 [info] Plugins.Bootstrap: registered schema "projectileType" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.982 [info] Plugins.Bootstrap: registered schema "enemyType" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:13 warm-d4922928 start.sh[3700]: 21:02:13.991 [info] Plugins.Bootstrap: registered schema "bossType" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:13.999 [info] Plugins.Bootstrap: registered schema "bossAbility" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.008 [info] Plugins.Bootstrap: registered schema "runRuleset" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.017 [info] Plugins.Bootstrap: registered schema "waveTemplate" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.025 [info] Plugins.Bootstrap: registered schema "spreeTier" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.031 [info] Plugins.Bootstrap: registered schema "scalingCurve" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.037 [info] Plugins.Bootstrap: registered schema "playerStat" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.044 [info] Plugins.Bootstrap: registered schema "upgradeCard" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.051 [info] Plugins.Bootstrap: registered schema "rune" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.059 [info] Plugins.Bootstrap: registered schema "pickup" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.066 [info] Plugins.Bootstrap: registered schema "sound" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.074 [info] Plugins.Bootstrap: registered schema "vfx" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.082 [info] Plugins.Bootstrap: registered schema "hudElement" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.089 [info] Plugins.Bootstrap: registered schema "overlay" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.096 [info] Plugins.Bootstrap: registered schema "arena" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.103 [info] Plugins.Bootstrap: registered schema "theme" (dataset="production", visibility="private") from plugin "frt"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.114 [info] Plugins.Bootstrap: registered schema "mediaAsset" (dataset="production", visibility="private") from plugin "media"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.121 [info] Plugins.Bootstrap: registered schema "mediaCollection" (dataset="production", visibility="private") from plugin "media"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.154 [info] Plugins.Bootstrap: registered schema "book" (dataset="production", visibility="private") from plugin "onixedit"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.167 [info] Plugins.Bootstrap: registered schema "quiz" (dataset="production", visibility="private") from plugin "quiz"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.177 [info] Plugins.Bootstrap: registered schema "command" (dataset="production", visibility="public") from plugin "scaffy"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.188 [info] Plugins.Bootstrap: registered schema "sheet" (dataset="production", visibility="private") from plugin "sheets"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.217 [info] Plugins.Bootstrap: registered schema "task" (dataset="production", visibility="public") from plugin "tasks"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.225 [info] Plugins.Bootstrap: registered schema "listener" (dataset="production", visibility="private") from plugin "tasks"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.235 [info] Plugins.Bootstrap: registered schema "ticket" (dataset="production", visibility="private") from plugin "tickets"
-      |   · Jul 24 21:02:14 warm-d4922928 start.sh[3700]: 21:02:14.380 [info] Codelists.EDItEUR: seeding bundled snapshot /opt/barkpark/api/_build/prod/lib/barkpark/priv/codelists/onix-issue-73.xml (plugin=onixedit, issue=73)
-      |   · Jul 24 21:02:23 warm-d4922928 start.sh[3700]: 21:02:23.461 [info] Codelists.EDItEUR: seeded 166 list(s) from bundled snapshot
-      |   · Jul 24 21:02:23 warm-d4922928 start.sh[3700]: 21:02:23.462 [info] Codelists.EDItEUR: seeding bundled Thema snapshot /opt/barkpark/api/_build/prod/lib/barkpark/priv/codelists/thema-1.6/thema-v1.6-en.json (plugin=onixedit, issue=1.6)
-      |   · Jul 24 21:02:35 warm-d4922928 start.sh[3700]: 21:02:35.865 [info] Codelists.EDItEUR: seeded Thema codelist (plugin=onixedit, list_id=onixedit:thema, issue=1.6)
-      |   · Jul 24 21:02:36 warm-d4922928 start.sh[3700]: 21:02:36.330 [info] Running BarkparkWeb.Endpoint with Bandit 1.12.0 at :::4000 (http)
-      |   · Jul 24 21:02:36 warm-d4922928 start.sh[3700]: 21:02:36.332 [info] Access BarkparkWeb.Endpoint at https://template.barkpark.cloud
-      |   · Jul 24 21:02:36 warm-d4922928 start.sh[3700]: 21:02:36.614 request_id=GMVVnC7SpZtrGQQAAAGS [info] GET /api/schemas
-      |   · Jul 24 21:02:36 warm-d4922928 start.sh[3700]: 21:02:36.766 request_id=GMVVnC7SpZtrGQQAAAGS workspace_id=ad90a119-f4c8-4ed5-954b-201e163cad38 workspace_slug=default project_id=d2806933-54bc-4aa1-a6f3-bd89b461f84c [info] Sent 200 in 151ms
-      |   · Jul 24 21:02:39 warm-d4922928 start.sh[3700]: 21:02:39.897 request_id=GMVVnPK4rdu7CEoAAAGi [info] POST /api/workspaces
-      |   · Jul 24 21:02:39 warm-d4922928 start.sh[3700]: 21:02:39.991 request_id=GMVVnPK4rdu7CEoAAAGi workspace_id=ad90a119-f4c8-4ed5-954b-201e163cad38 workspace_slug=default project_id=d2806933-54bc-4aa1-a6f3-bd89b461f84c [info] Sent 201 in 93ms
-      |   · Jul 24 21:02:40 warm-d4922928 start.sh[3700]: 21:02:40.384 request_id=GMVVnQ-695dzZd4AAAHS [info] POST /api/workspaces/mvp0proof-m-260724205622/import
-      |   · Jul 24 21:02:40 warm-d4922928 start.sh[3700]: 21:02:40.635 request_id=GMVVnQ-695dzZd4AAAHS workspace_id=ad90a119-f4c8-4ed5-954b-201e163cad38 workspace_slug=default project_id=d2806933-54bc-4aa1-a6f3-bd89b461f84c [info] Sent 500 in 251ms
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.018 [info] Plugins.Bootstrap: registered schema "timeState" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.024 [info] Plugins.Bootstrap: registered schema "player" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.032 [info] Plugins.Bootstrap: registered schema "ability" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.039 [info] Plugins.Bootstrap: registered schema "cameraPreset" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.045 [info] Plugins.Bootstrap: registered schema "weapon" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.051 [info] Plugins.Bootstrap: registered schema "projectileType" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.057 [info] Plugins.Bootstrap: registered schema "enemyType" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.066 [info] Plugins.Bootstrap: registered schema "bossType" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.071 [info] Plugins.Bootstrap: registered schema "bossAbility" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.078 [info] Plugins.Bootstrap: registered schema "runRuleset" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.084 [info] Plugins.Bootstrap: registered schema "waveTemplate" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.090 [info] Plugins.Bootstrap: registered schema "spreeTier" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.096 [info] Plugins.Bootstrap: registered schema "scalingCurve" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.104 [info] Plugins.Bootstrap: registered schema "playerStat" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.108 [info] Plugins.Bootstrap: registered schema "upgradeCard" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.113 [info] Plugins.Bootstrap: registered schema "rune" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.118 [info] Plugins.Bootstrap: registered schema "pickup" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.123 [info] Plugins.Bootstrap: registered schema "sound" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.127 [info] Plugins.Bootstrap: registered schema "vfx" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.132 [info] Plugins.Bootstrap: registered schema "hudElement" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.136 [info] Plugins.Bootstrap: registered schema "overlay" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.140 [info] Plugins.Bootstrap: registered schema "arena" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.145 [info] Plugins.Bootstrap: registered schema "theme" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.151 [info] Plugins.Bootstrap: registered schema "mediaAsset" (dataset="production", visibility="private") from plugin "media"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.156 [info] Plugins.Bootstrap: registered schema "mediaCollection" (dataset="production", visibility="private") from plugin "media"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.172 [info] Plugins.Bootstrap: registered schema "book" (dataset="production", visibility="private") from plugin "onixedit"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.178 [info] Plugins.Bootstrap: registered schema "quiz" (dataset="production", visibility="private") from plugin "quiz"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.184 [info] Plugins.Bootstrap: registered schema "command" (dataset="production", visibility="public") from plugin "scaffy"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.190 [info] Plugins.Bootstrap: registered schema "sheet" (dataset="production", visibility="private") from plugin "sheets"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.201 [info] Plugins.Bootstrap: registered schema "task" (dataset="production", visibility="public") from plugin "tasks"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.207 [info] Plugins.Bootstrap: registered schema "listener" (dataset="production", visibility="private") from plugin "tasks"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.213 [info] Plugins.Bootstrap: registered schema "ticket" (dataset="production", visibility="private") from plugin "tickets"
+      |   · Jul 24 22:50:57 warm-b085cfac start.sh[2340]: 22:50:57.336 [info] Codelists.EDItEUR: seeding bundled snapshot /opt/barkpark/api/_build/prod/lib/barkpark/priv/codelists/onix-issue-73.xml (plugin=onixedit, issue=73)
+      |   · Jul 24 22:51:10 warm-b085cfac start.sh[2340]: 22:51:10.369 [info] Codelists.EDItEUR: seeded 166 list(s) from bundled snapshot
+      |   · Jul 24 22:51:10 warm-b085cfac start.sh[2340]: 22:51:10.375 [info] Codelists.EDItEUR: seeding bundled Thema snapshot /opt/barkpark/api/_build/prod/lib/barkpark/priv/codelists/thema-1.6/thema-v1.6-en.json (plugin=onixedit, issue=1.6)
+      |   · Jul 24 22:51:20 warm-b085cfac start.sh[2340]: 22:51:20.589 [info] Codelists.EDItEUR: seeded Thema codelist (plugin=onixedit, list_id=onixedit:thema, issue=1.6)
+      |   · Jul 24 22:51:20 warm-b085cfac start.sh[2340]: 22:51:20.923 [info] Running BarkparkWeb.Endpoint with Bandit 1.12.0 at :::4000 (http)
+      |   · Jul 24 22:51:20 warm-b085cfac start.sh[2340]: 22:51:20.924 [info] Access BarkparkWeb.Endpoint at https://template.barkpark.cloud
+      |   · Jul 24 22:51:27 warm-b085cfac start.sh[2340]: 22:51:27.339 request_id=GMVbjLyTkV4Cb-0AAlQy [info] GET /api/schemas
+      |   · Jul 24 22:51:27 warm-b085cfac start.sh[2340]: 22:51:27.400 request_id=GMVbjLyTkV4Cb-0AAlQy workspace_id=ad90a119-f4c8-4ed5-954b-201e163cad38 workspace_slug=default project_id=d2806933-54bc-4aa1-a6f3-bd89b461f84c [info] Sent 200 in 60ms
+      |   · Jul 24 22:51:29 warm-b085cfac systemd[1]: Stopping Barkpark...
+      |   · Jul 24 22:51:29 warm-b085cfac start.sh[2340]: 22:51:29.238 [notice] SIGTERM received - shutting down
+      |   · Jul 24 22:51:35 warm-b085cfac systemd[1]: barkpark.service: Deactivated successfully.
+      |   · Jul 24 22:51:35 warm-b085cfac systemd[1]: Stopped Barkpark.
+      |   · Jul 24 22:51:35 warm-b085cfac systemd[1]: barkpark.service: Consumed 2min 47.490s CPU time.
+      |   · Jul 24 22:51:35 warm-b085cfac systemd[1]: Started Barkpark.
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.200 [info] Plugins.Bootstrap: registered schema "paper" (dataset="production", visibility="public") from plugin "bulldocs"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.210 [info] Plugins.Bootstrap: registered schema "form_response" (dataset="production", visibility="private") from plugin "bulldocs"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.224 [info] Plugins.Bootstrap: registered schema "coordinatorLoop" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.235 [info] Plugins.Bootstrap: registered schema "gameClock" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.242 [info] Plugins.Bootstrap: registered schema "timeState" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.255 [info] Plugins.Bootstrap: registered schema "player" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.265 [info] Plugins.Bootstrap: registered schema "ability" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.273 [info] Plugins.Bootstrap: registered schema "cameraPreset" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.280 [info] Plugins.Bootstrap: registered schema "weapon" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.287 [info] Plugins.Bootstrap: registered schema "projectileType" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.292 [info] Plugins.Bootstrap: registered schema "enemyType" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.297 [info] Plugins.Bootstrap: registered schema "bossType" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.302 [info] Plugins.Bootstrap: registered schema "bossAbility" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.309 [info] Plugins.Bootstrap: registered schema "runRuleset" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.314 [info] Plugins.Bootstrap: registered schema "waveTemplate" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.320 [info] Plugins.Bootstrap: registered schema "spreeTier" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.325 [info] Plugins.Bootstrap: registered schema "scalingCurve" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.330 [info] Plugins.Bootstrap: registered schema "playerStat" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.336 [info] Plugins.Bootstrap: registered schema "upgradeCard" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.343 [info] Plugins.Bootstrap: registered schema "rune" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.348 [info] Plugins.Bootstrap: registered schema "pickup" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.354 [info] Plugins.Bootstrap: registered schema "sound" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.360 [info] Plugins.Bootstrap: registered schema "vfx" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.364 [info] Plugins.Bootstrap: registered schema "hudElement" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.368 [info] Plugins.Bootstrap: registered schema "overlay" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.372 [info] Plugins.Bootstrap: registered schema "arena" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.377 [info] Plugins.Bootstrap: registered schema "theme" (dataset="production", visibility="private") from plugin "frt"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.383 [info] Plugins.Bootstrap: registered schema "mediaAsset" (dataset="production", visibility="private") from plugin "media"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.387 [info] Plugins.Bootstrap: registered schema "mediaCollection" (dataset="production", visibility="private") from plugin "media"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.415 [info] Plugins.Bootstrap: registered schema "book" (dataset="production", visibility="private") from plugin "onixedit"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.426 [info] Plugins.Bootstrap: registered schema "quiz" (dataset="production", visibility="private") from plugin "quiz"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.432 [info] Plugins.Bootstrap: registered schema "command" (dataset="production", visibility="public") from plugin "scaffy"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.437 [info] Plugins.Bootstrap: registered schema "sheet" (dataset="production", visibility="private") from plugin "sheets"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.454 [info] Plugins.Bootstrap: registered schema "task" (dataset="production", visibility="public") from plugin "tasks"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.460 [info] Plugins.Bootstrap: registered schema "listener" (dataset="production", visibility="private") from plugin "tasks"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.465 [info] Plugins.Bootstrap: registered schema "ticket" (dataset="production", visibility="private") from plugin "tickets"
+      |   · Jul 24 22:51:38 warm-b085cfac start.sh[3402]: 22:51:38.576 [info] Codelists.EDItEUR: seeding bundled snapshot /opt/barkpark/api/_build/prod/lib/barkpark/priv/codelists/onix-issue-73.xml (plugin=onixedit, issue=73)
+      |   · Jul 24 22:51:45 warm-b085cfac start.sh[3402]: 22:51:45.626 [info] Codelists.EDItEUR: seeded 166 list(s) from bundled snapshot
+      |   · Jul 24 22:51:45 warm-b085cfac start.sh[3402]: 22:51:45.628 [info] Codelists.EDItEUR: seeding bundled Thema snapshot /opt/barkpark/api/_build/prod/lib/barkpark/priv/codelists/thema-1.6/thema-v1.6-en.json (plugin=onixedit, issue=1.6)
+      |   · Jul 24 22:51:55 warm-b085cfac start.sh[3402]: 22:51:55.979 [info] Codelists.EDItEUR: seeded Thema codelist (plugin=onixedit, list_id=onixedit:thema, issue=1.6)
+      |   · Jul 24 22:51:56 warm-b085cfac start.sh[3402]: 22:51:56.344 [info] Running BarkparkWeb.Endpoint with Bandit 1.12.0 at :::4000 (http)
+      |   · Jul 24 22:51:56 warm-b085cfac start.sh[3402]: 22:51:56.346 [info] Access BarkparkWeb.Endpoint at https://template.barkpark.cloud
+      |   · Jul 24 22:51:57 warm-b085cfac start.sh[3402]: 22:51:57.805 request_id=GMVbk9RI-mRrGQQAABMR [info] GET /api/schemas
+      |   · Jul 24 22:51:57 warm-b085cfac start.sh[3402]: 22:51:57.931 request_id=GMVbk9RI-mRrGQQAABMR workspace_id=ad90a119-f4c8-4ed5-954b-201e163cad38 workspace_slug=default project_id=d2806933-54bc-4aa1-a6f3-bd89b461f84c [info] Sent 200 in 125ms
+      |   · Jul 24 22:52:00 warm-b085cfac start.sh[3402]: 22:52:00.216 [info] oban.job.start worker="Barkpark.Tasks.TtlSweeper" queue="tasks_ttl" duration=nil
+      |   · Jul 24 22:52:00 warm-b085cfac start.sh[3402]: 22:52:00.216 [info] oban.job.start worker="Barkpark.Tenancy.Workers.PlaygroundReaper" queue="playground_ttl" duration=nil
+      |   · Jul 24 22:52:00 warm-b085cfac start.sh[3402]: 22:52:00.216 [info] oban.job.start worker="Barkpark.Audit.ExportWorker" queue="default" duration=nil
+      |   · Jul 24 22:52:00 warm-b085cfac start.sh[3402]: 22:52:00.216 [info] oban.job.start worker="Barkpark.Webhooks.StuckDeliverySweeper" queue="default" duration=nil
+      |   · Jul 24 22:52:00 warm-b085cfac start.sh[3402]: 22:52:00.244 [info] oban.job.stop worker="Barkpark.Tenancy.Workers.PlaygroundReaper" queue="playground_ttl" duration=6974844
+      |   · Jul 24 22:52:00 warm-b085cfac start.sh[3402]: 22:52:00.244 [info] oban.job.stop worker="Barkpark.Webhooks.StuckDeliverySweeper" queue="default" duration=17917075
+      |   · Jul 24 22:52:00 warm-b085cfac start.sh[3402]: 22:52:00.245 [info] oban.job.stop worker="Barkpark.Tasks.TtlSweeper" queue="tasks_ttl" duration=26114852
+      |   · Jul 24 22:52:00 warm-b085cfac start.sh[3402]: 22:52:00.246 [info] oban.job.stop worker="Barkpark.Audit.ExportWorker" queue="default" duration=26216726
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]: 22:52:02.154 request_id=GMVblNeyW8_Lk84AAAXC [info] POST /api/workspaces
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]: 22:52:02.219 request_id=GMVblNeyW8_Lk84AAAXC workspace_id=ad90a119-f4c8-4ed5-954b-201e163cad38 workspace_slug=default project_id=d2806933-54bc-4aa1-a6f3-bd89b461f84c [info] Sent 201 in 65ms
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]: 22:52:02.654 request_id=GMVblPV_ruXRLpsAABOB [info] POST /api/workspaces/mvp0proof-m-260724224449/import
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]: 22:52:02.794 request_id=GMVblPV_ruXRLpsAABOB workspace_id=ad90a119-f4c8-4ed5-954b-201e163cad38 workspace_slug=default project_id=d2806933-54bc-4aa1-a6f3-bd89b461f84c [error] WorkspaceController.import: non-constraint Postgres raise on the import path: ** (Postgrex.Error) ERROR 42501 (insufficient_privilege) permission denied to set parameter "sessi
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (ecto_sql 3.13.5) lib/ecto/adapters/sql.ex:1113: Ecto.Adapters.SQL.raise_sql_call_error/1
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (barkpark 0.1.0) lib/barkpark/tenancy/workspace_bundle.ex:278: anonymous fn/3 in Barkpark.Tenancy.WorkspaceBundle.run_import/3
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (barkpark 0.1.0) lib/barkpark/repo.ex:6: anonymous fn/1 in Barkpark.Repo.transaction/2
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (ecto 3.13.6) lib/ecto/repo/transaction.ex:11: anonymous fn/3 in Ecto.Repo.Transaction.transact/4
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (ecto_sql 3.13.5) lib/ecto/adapters/sql.ex:1473: anonymous fn/3 in Ecto.Adapters.SQL.checkout_or_transaction/4
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (db_connection 2.10.2) lib/db_connection.ex:1760: DBConnection.run_transaction/5
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (barkpark 0.1.0) lib/barkpark_web/controllers/workspace_controller.ex:346: BarkparkWeb.WorkspaceController.merge_import/2
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (barkpark 0.1.0) lib/barkpark_web/controllers/workspace_controller.ex:1: BarkparkWeb.WorkspaceController.action/2
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]: 22:52:02.823 request_id=GMVblPV_ruXRLpsAABOB workspace_id=ad90a119-f4c8-4ed5-954b-201e163cad38 workspace_slug=default project_id=d2806933-54bc-4aa1-a6f3-bd89b461f84c [info] Sent 500 in 169ms
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]: 22:52:02.832 request_id=GMVblPV_ruXRLpsAABOB workspace_id=ad90a119-f4c8-4ed5-954b-201e163cad38 workspace_slug=default project_id=d2806933-54bc-4aa1-a6f3-bd89b461f84c [error] ** (Postgrex.Error) ERROR 42501 (insufficient_privilege) permission denied to set parameter "session_replication_role"
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (ecto_sql 3.13.5) lib/ecto/adapters/sql.ex:1113: Ecto.Adapters.SQL.raise_sql_call_error/1
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (barkpark 0.1.0) lib/barkpark/tenancy/workspace_bundle.ex:278: anonymous fn/3 in Barkpark.Tenancy.WorkspaceBundle.run_import/3
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (barkpark 0.1.0) lib/barkpark/repo.ex:6: anonymous fn/1 in Barkpark.Repo.transaction/2
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (ecto 3.13.6) lib/ecto/repo/transaction.ex:11: anonymous fn/3 in Ecto.Repo.Transaction.transact/4
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (ecto_sql 3.13.5) lib/ecto/adapters/sql.ex:1473: anonymous fn/3 in Ecto.Adapters.SQL.checkout_or_transaction/4
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (db_connection 2.10.2) lib/db_connection.ex:1760: DBConnection.run_transaction/5
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (barkpark 0.1.0) lib/barkpark_web/controllers/workspace_controller.ex:346: BarkparkWeb.WorkspaceController.merge_import/2
+      |   · Jul 24 22:52:02 warm-b085cfac start.sh[3402]:     (barkpark 0.1.0) lib/barkpark_web/controllers/workspace_controller.ex:1: BarkparkWeb.WorkspaceController.action/2
       |   · --- end barkpark journal tail ---
       the worker tears its half-built box down on chain failure (SupportProvisionWith.failStep);
       the provisioning roster row ages to offline honestly (PDF-D10)
   FAIL   2   the provision_support chain reported a FAILED step (steps=[create:started,create:done,configure:started,configure:done,content:started,content:failed]) — a genuine substrate failure, quoted above
 
-cleanup: the run died before R5 — emergency support teardown of mvp0proof-s-260724205622
+cleanup: the run died before R5 — emergency support teardown of mvp0proof-s-260724224449
 cleanup: server-side support remove is backlog (pdf-bl-support-remove-serverside);
 cleanup: the box lives in the CP's provisioning project — remove it with the
-cleanup: NAMED teardown credential:  bp cloud support remove mvp0proof-s-260724205622
+cleanup: NAMED teardown credential:  bp cloud support remove mvp0proof-s-260724224449
 → cp-read: reading the support's control-plane record (GET /v1/barkparks on https://api.barkpark.cloud)
-✓ cp-read — no control-plane support row named "mvp0proof-s-260724205622" (already unbound)
-→ locate: listing boxes labeled barkpark-fleet-support=mvp0proof-s-260724205622
-✓ locate — no box carries barkpark-fleet-support=mvp0proof-s-260724205622 (already gone)
+✓ cp-read — no control-plane support row named "mvp0proof-s-260724224449" (already unbound)
+→ locate: listing boxes labeled barkpark-fleet-support=mvp0proof-s-260724224449
+✓ locate — no box carries barkpark-fleet-support=mvp0proof-s-260724224449 (already gone)
 ✓ token — no token id on record — nothing to revoke
-→ roster: deleting roster row listener-mvp0proof-s-260724205622 on https://mvp0proof-m-260724205622.barkpark.cloud (dataset production)
-✓ roster — listener-mvp0proof-s-260724205622 delete submitted (the census re-reads it)
+→ roster: deleting roster row listener-mvp0proof-s-260724224449 on https://mvp0proof-m-260724224449.barkpark.cloud (dataset production)
+✓ roster — listener-mvp0proof-s-260724224449 delete submitted (the census re-reads it)
 → census: re-reading all four surfaces (delete responses prove nothing)
   · token: no token id was on record
-{"dataset":"production","ok":true,"residue":null,"support":"mvp0proof-s-260724205622"}
+{"dataset":"production","ok":true,"residue":null,"support":"mvp0proof-s-260724224449"}
 cleanup: deleting the CP support row (journey session)
-cleanup: deprovisioning the R1 main mvp0proof-m-260724205622 (DELETE /v1/barkparks/57cf95b3-d239-40b8-a8f4-1841854255eb)
+cleanup: deprovisioning the R1 main mvp0proof-m-260724224449 (DELETE /v1/barkparks/f165cf94-e1f6-4ff1-adfe-108e2509bad3)
