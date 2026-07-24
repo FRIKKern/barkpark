@@ -6017,6 +6017,15 @@
     return friendly(data, "Couldn't add the support server — please try again.");
   }
 
+  // The name becomes the box's WORKER IDENTITY end-to-end: the provider label,
+  // the listener-<name> roster row, systemd env — the provisioner fences it to
+  // a DNS-label shape (validateSupportSpec) and refuses anything else AFTER the
+  // job is queued. Validate here so the trap never leaves the modal: an
+  // off-shape name would otherwise queue, spin, and fail minutes later.
+  function supportNameValid(name) {
+    return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(String(name || ""));
+  }
+
   function openAddSupportModal(bp) {
     openModal(
       '<h2 class="modal-title" id="modal-title">Add a support server to ' + esc(bp.name) + "</h2>" +
@@ -6039,6 +6048,13 @@
     if (errEl) errEl.hidden = true;
     if (!value) {
       if (errEl) { errEl.hidden = false; errEl.textContent = "Give the support server a name."; }
+      return;
+    }
+    if (!supportNameValid(value)) {
+      if (errEl) {
+        errEl.hidden = false;
+        errEl.textContent = "Use a short lowercase name — letters, numbers and dashes, like muscle-1. It becomes the box's worker identity.";
+      }
       return;
     }
     var st = addSupportFlowReducer("name", { type: "submit" });
@@ -6106,7 +6122,14 @@
     if (!targets.length || !mainBp || !mainBp.url) return;
     var paint = function (documents) {
       targets.forEach(function (s) {
-        var slot = document.querySelector('[data-support-presence="' + s.id + '"]');
+        // Attribute-scan rather than an interpolated selector: an exotic id
+        // (quotes, brackets) would make querySelector THROW mid-paint; ids are
+        // UUIDs today, but the paint must never be the thing that breaks.
+        var slot = null;
+        var slots = document.querySelectorAll("[data-support-presence]");
+        for (var si = 0; si < slots.length; si++) {
+          if (slots[si].getAttribute("data-support-presence") === String(s.id)) { slot = slots[si]; break; }
+        }
         if (slot) slot.innerHTML = presenceSlotHtml(documents, s);
       });
     };
@@ -17808,7 +17831,7 @@
       // browser-verified.
       supportStepOrder: SUPPORT_STEP_ORDER, supportStepLabels: SUPPORT_STEP_LABELS,
       supportStepExpectedMs: SUPPORT_STEP_EXPECTED_MS,
-      isSupportBp: isSupportBp, supportsOf: supportsOf,
+      isSupportBp: isSupportBp, supportsOf: supportsOf, supportNameValid: supportNameValid,
       fleetSupportCardHtml: fleetSupportCardHtml, supportRowHtml: supportRowHtml,
       addSupportFlowReducer: addSupportFlowReducer, addSupportErrorCopy: addSupportErrorCopy,
       presenceChip: presenceChip, presenceChipHtml: presenceChipHtml,

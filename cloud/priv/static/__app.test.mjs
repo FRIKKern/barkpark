@@ -9857,6 +9857,15 @@ test("addSupportErrorCopy: honest 409 no_admin_token and 403 limit_reached state
   assert.match(hooks.addSupportErrorCopy(500, {}), /Couldn't add the support server/);
 });
 
+test("supportNameValid mirrors the provisioner's DNS-label fence — the trap never leaves the modal", () => {
+  for (const good of ["muscle-1", "a", "worker9", "a-b-c", "x".repeat(63)]) {
+    assert.equal(hooks.supportNameValid(good), true, good + " must be accepted");
+  }
+  for (const bad of ["My Support", "Muscle_1", "-lead", "trail-", "UPPER", "", "x".repeat(64), "a.b"]) {
+    assert.equal(hooks.supportNameValid(bad), false, JSON.stringify(bad) + " must be refused (the Go chain would fail it after queueing)");
+  }
+});
+
 test("presenceChip: online is DERIVED (status !== \"offline\") — never a stored literal", () => {
   assert.deepEqual({ ...hooks.presenceChip({ status: "idle" }) },
     { state: "idle", online: true, label: "Online · idle" });
