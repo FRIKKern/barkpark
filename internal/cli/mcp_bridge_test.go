@@ -178,10 +178,12 @@ func TestBridgeInputSchema_Derivation(t *testing.T) {
 
 // TestBridgeShadowing proves the curated-twin IDs are shadowed while the
 // distinct by-id claim and a non-covered doc verb still generate — over a real
-// MCP session's tools/list. doc.create is synthesised (the fixture carries only
-// doc.get/ls/query/mutate), and the three chat.* verbs are synthesised too (herd
-// charter D75h — the fixture full-manifest.json has NO chat.* because the verbs
-// are existence-hidden at write tier; the fixture is deliberately not churned).
+// MCP session's tools/list. doc.create and the chat.* verbs are synthesised
+// (herd charter D75h). The 2026-07-24 fixture regen (ctx-s1-brief-manifest)
+// captured an ADMIN-tier manifest that now carries doc.create and chat.*
+// natively, so the synthesised appends duplicate live entries — harmless
+// (AddTool replaces on same name) and kept so the test stays self-contained
+// against an older or write-tier fixture too.
 // The test asserts the shadow set is scoped to EXACTLY the curated twins and
 // never over-shadows a sibling verb — and, on a combined curated+bridge server
 // (the shape `--tools all` actually assembles), that each shadowed chat verb's
