@@ -47,6 +47,7 @@ const SURVEY_MODEL = A.survey_model || 'sonnet'
 const REVIEW_MODEL = A.review_model || 'fable'
 const CHARTER_EXISTS = !!A.charter_exists
 const LEAD_NOTES = A.lead_notes ? `\n\nLEAD NOTES THIS WAVE:\n${A.lead_notes}` : ''
+const SPENT = { t0: budget.spent() }
 
 const USER_WISH_BLOCK = `THE USER'S WISH (this is the focus — everything serves it, judged holistically, not as a checklist):
 """
@@ -403,7 +404,7 @@ const BUILD_SCHEMA = {
 
 const REVIEW_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'paper_closed', 'heartbeat_stamped', 'next_wave', 'overall_verdict', 'journey', 'started_at', 'ended_at'],
+  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'paper_closed', 'heartbeat_stamped', 'next_wave', 'overall_verdict', 'retro', 'telemetry_appended', 'journey', 'started_at', 'ended_at'],
   properties: {
     journey: JOURNEY_FIELD,
     ...FABLE_STAMPS,
@@ -433,6 +434,20 @@ const REVIEW_SCHEMA = {
     heartbeat_stamped: { type: 'boolean', description: 'true only after wave_status on the epic task says the wave is complete and names the wave Paper' },
     next_wave: { type: 'string', description: 'what the next wave should take and why — the direction handoff' },
     overall_verdict: { type: 'string', description: 'did this wave move the WISH forward; cross-slice coherence; risks' },
+    retro: {
+      type: 'array',
+      description: 'PROCESS RETRO (epic-memory D7): one honest efficiency verdict PER PHASE (strategize, survey, digest, verify, decide, build, review), each tied to a telemetry row or a journey moment — wasted surveys, duplicate verifies, builders burned on BLOCKED. "no waste seen" is a valid verdict; manufactured criticism is not.',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['phase', 'verdict', 'suggestion'],
+        properties: {
+          phase: { type: 'string' },
+          verdict: { type: 'string', description: 'what actually happened, tied to evidence' },
+          suggestion: { type: 'string', description: 'one concrete efficiency change, or "keep as is"' },
+        },
+      },
+    },
+    telemetry_appended: { type: 'boolean', description: 'true only after the wave telemetry (stat-grid headline + per-phase table, at measured grain) AND the retro landed in the Paper debrief and it re-published' },
   },
 }
 
@@ -488,6 +503,7 @@ if (surveyAssignments.length < SURVEY_FLOOR) {
   throw new Error(`Survey fan-out floor: the strategist returned ${surveyAssignments.length} survey assignment(s), below the floor of ${SURVEY_FLOOR}. Width is the cheapest part of a wave and a narrow survey is how a wave misses prior art it then rebuilds. Re-run Strategize with a wider net (5-20 assignments) rather than proceeding.`)
 }
 const WAVE_PAPER = strategist.paper_id
+SPENT.strategize = budget.spent()
 log(`Strategist set direction; wave paper ${WAVE_PAPER} (created=${strategist.paper_created}); ${surveyAssignments.length} survey assignments`)
 
 // ── Phase 2: Survey — wide cheap Sonnet sweep, ~5 minutes each ──
@@ -521,6 +537,7 @@ ${JOURNEY_BLOCK}`,
 // miniature. Mutating here means every downstream reader sees the gated array.
 const surveyGrip = gateFactProvenance(surveys)
 log(`${surveys.length}/${surveyAssignments.length} surveyors reported; provenance gate: ${surveyGrip.demoted}/${surveyGrip.total} fact(s) DEMOTED (no rerun command)`)
+SPENT.survey = budget.spent()
 
 // ── Phase 3: Digest — one Fable mind, ~10 minutes, designs the verify fleet ──
 phase('Digest')
@@ -565,6 +582,7 @@ if (verifyAssignments.length < VERIFY_FLOOR) {
   throw new Error(`Verify fan-out floor: the digest returned ${verifyAssignments.length} verify assignment(s), below the floor of ${VERIFY_FLOOR}. Verify is the LAST round before the plan is cut — nobody checks after it. A wave that surveyed wide and then verified nothing is deciding on unproven claims. Re-run Digest with a real verify fleet (1-15 assignments, floor ${VERIFY_FLOOR}) rather than proceeding.`)
 }
 log(`Digest done; verify fleet: ${verifyAssignments.length} (${verifyAssignments.filter((v) => v.model === 'opus').length} opus, ${verifyAssignments.filter((v) => v.verify_commands).length} with live proofs)`)
+SPENT.digest = budget.spent()
 
 // ── Phase 4: Verify — the Fable-designed fleet closes the unknowns ──
 //
@@ -618,6 +636,7 @@ ${JOURNEY_BLOCK}`,
 // Same single interception for the verify round, at its own resolve.
 const verifyGrip = gateFactProvenance(verifications)
 log(`${verifications.length}/${verifyAssignments.length} verifiers reported; ${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs; provenance gate: ${verifyGrip.demoted}/${verifyGrip.total} fact(s) DEMOTED (no rerun command)`)
+SPENT.verify = budget.spent()
 
 // ── Phase 5: Decide — one Fable mind finalizes charter + wave + tasks ──
 phase('Decide')
@@ -677,6 +696,7 @@ ${GATES_BLOCK}${LEAD_NOTES}`,
 if (!architect) throw new Error('Decide phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
 const wave = (architect.wave || []).slice(0, 8)
 log(`Architect cut ${wave.length} slices (${wave.filter((w) => w.builder_model === 'fable').length} fable); charter_written=${architect.charter_written}; tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}; backlog=${architect.backlog_filed}`)
+SPENT.decide = budget.spent()
 if (wave.length === 0) {
   return { surveys: surveys.length, verifications: verifications.length, wave_paper: WAVE_PAPER, wave: 0, built: 0, note: 'architect cut no slices', decisions: architect.decisions_summary }
 }
@@ -734,6 +754,46 @@ Catalog-first (measured law, /papers/scaffy-benchmark): before hand-editing a re
 
 const greenBuilt = built.filter((r) => r.ok && r.gate_passed && r.branch)
 log(`Build: ${greenBuilt.length}/${built.length} slices green`)
+SPENT.build = budget.spent()
+
+// Wave telemetry (design D6, honesty rule D9): measured grain ONLY. Tokens
+// are per-phase deltas of budget.spent() — the runtime exposes nothing finer;
+// per-agent splits DO NOT EXIST and must never be presented. Wall-clock comes
+// from the Fable stamps (fleets are bracketed by Fable checkpoints). Interrupts
+// are the countable frictions: lost agents (skips/API deaths), failed gates.
+const telemetry = {
+  grain: 'tokens = per-phase output-token deltas from budget.spent(); clock = Fable date -u stamps; per-agent token splits are NOT measured — never invent them',
+  tokens_by_phase: {
+    strategize: SPENT.strategize - SPENT.t0,
+    survey: SPENT.survey - SPENT.strategize,
+    digest: SPENT.digest - SPENT.survey,
+    verify: SPENT.verify - SPENT.digest,
+    decide: SPENT.decide - SPENT.verify,
+    build: SPENT.build - SPENT.decide,
+    review: 'in flight — lands in the run return, not the Paper (Review cannot know its own cost)',
+  },
+  clock: {
+    strategize: [strategist.started_at, strategist.ended_at],
+    survey_bracket: [strategist.ended_at, aim.started_at],
+    digest: [aim.started_at, aim.ended_at],
+    verify_bracket: [aim.ended_at, architect.started_at],
+    decide: [architect.started_at, architect.ended_at],
+    build_bracket: [architect.ended_at, 'review start — see Review stamps'],
+  },
+  fleet: {
+    surveyors: `${surveys.length}/${surveyAssignments.length} reported`,
+    verifiers: `${verifications.length}/${verifyAssignments.length} reported (${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs)`,
+    builders: `${built.length}/${buildNow.length} reported, ${greenBuilt.length} green`,
+    deferred_by_rounds_law: deferred.length,
+  },
+  interrupts: {
+    surveyors_lost: surveyAssignments.length - surveys.length,
+    verifiers_lost: verifyAssignments.length - verifications.length,
+    builders_lost: buildNow.length - built.length,
+    gates_failed: built.length - greenBuilt.length,
+    facts_demoted_no_rerun: surveyGrip.demoted + verifyGrip.demoted,
+  },
+}
 
 // ── Phase 7: Review — one Fable mind reviews, fixes, grades, debriefs, hands off ──
 phase('Review')
@@ -757,6 +817,9 @@ ${JSON.stringify(wave.map((w) => ({ title: w.title, task_id: w.task_id, round: w
 
 DEFERRED SLICES (round ≥2 — NOT built this run BY DESIGN, the sequenced-rounds law; do not grade their absence as a failure): ${deferred.length === 0 ? 'none' : deferred.map((w) => `${w.task_id} (round ${w.round}, after ${(w.after || []).join('+')})`).join('; ')}. Your next_wave handoff MUST spell out the dispatch order: merge round 1, then each deferred slice as its deps merge.
 
+WAVE TELEMETRY (measured in-script — persist it in the Paper debrief as a stat-grid headline + a per-phase table; the debrief agent runs DAYS later when this run's files are gone; honesty rule D9 — measured grain only, never per-agent token splits):
+${JSON.stringify(telemetry, null, 2)}
+
 For EACH green slice, in integration order:
 1. \`git checkout -b <branch>-r <branch>\` in your worktree; study the full diff vs its merge-base with origin/main. Chase the builder's own doubts first.
 2. Review adversarially for correctness (edge cases, escaping, stale-state, error paths) AND against the Kinsta/Vercel quality bar (honest loading/empty/error states, legibility, feedback, consistency with the charter's design decisions). Distrust vacuous green — spot-check that the load-bearing tests actually pin the behavior claimed.
@@ -768,7 +831,7 @@ Then, once, for the wave:
 6. LEDGER AUDIT: for every slice task, verify the builder claimed it, stamped honest evidence AS THEY WORKED (their ledger_stamps claim vs the task's actual state), and left lifecycle truthful (in_progress, not done — merge-gated criteria stay open for the lead). Not-green slices' tasks must say so. Verify tasks NOT in this wave weren't touched. Fix ledger lies/omissions directly via bp and record them in ledger_fixes.
 7. GRADE (Cody mandate): a letter grade A+..F for the wave as it will merge, judged against the WISH — correctness, completeness, bloat, aesthetics; tree-tidiness has no value. The commentary must EARN the grade: name what is genuinely strong AND what falls short. Never a bare number. Do not manufacture criticism to look rigorous.
 8. WAVE LOG: APPEND a '### Wave <today>' entry to the charter's ## Wave log (Edit tool): what landed, what stalled, what the next wave should take. Set wave_log_appended=true only after you actually wrote it.
-9. CLOSE THE WAVE PAPER (${WAVE_PAPER}): append the final DEBRIEF section and re-publish — what shipped (per slice: task, final branch, verdict), what stalled and why, the grade + commentary, the ledger audit outcome, what the next wave should take. Read the Paper top to bottom first: it now tells the whole wave's story (direction → survey coverage → verification proofs → decisions → outcome) — fix any section a later phase invalidated (a decision reversed, a proof superseded) with a dated correction note rather than silent rewriting. Report the Paper id in paper_closed. The debrief section MUST carry builder journey cards (from every builder's journey{}, including not-green slices — a stall is a story), your own journey, and the telemetry + retro sections (see WAVE TELEMETRY below).
+9. CLOSE THE WAVE PAPER (${WAVE_PAPER}): append the final DEBRIEF section and re-publish — what shipped (per slice: task, final branch, verdict), what stalled and why, the grade + commentary, the ledger audit outcome, what the next wave should take. Read the Paper top to bottom first: it now tells the whole wave's story (direction → survey coverage → verification proofs → decisions → outcome) — fix any section a later phase invalidated (a decision reversed, a proof superseded) with a dated correction note rather than silent rewriting. Report the Paper id in paper_closed. The debrief section MUST carry builder journey cards (from every builder's journey{}, including not-green slices — a stall is a story), your own journey, and the telemetry + retro sections (see WAVE TELEMETRY below). Include the RETRO: one verdict per phase in retro[], mirrored into the Paper's debrief section.
 10. HEARTBEAT + HANDOFF: stamp the epic task's wave_status ("wave: complete — grade <g>, paper ${WAVE_PAPER}") and re-publish; set heartbeat_stamped accordingly. Put the direction handoff in next_wave; per slice report final_branch (the -r branch if you changed anything), gate_passed on your final state, and an honest verdict incl. anything the lead must know before merging (the lead closes merge-gated criteria on merge — name them).
 11. **PUSH EVERY FINAL BRANCH AND OPEN ITS PR. THE WAVE IS NOT DONE UNTIL YOU DO.** This is step 11 because SIX consecutive waves ended with built, reviewed, gate-passing work sitting on local-only branches in a SHARED multi-session checkout that other cycles reset — roughly 20 slices that existed only because a human went looking for them. A branch you do not push is work this wave did not do. For each green slice, from your worktree:
    \`git push -u origin <final_branch>\` then \`gh pr create --head <final_branch> --title "<conventional-commit title>" --body "<what it does + the gate you re-ran + Task: <task_id>>"\`.
@@ -782,6 +845,7 @@ ${FLIP_RISK_BLOCK}`,
     { label: 'review', phase: 'Review', schema: REVIEW_SCHEMA, model: REVIEW_MODEL, isolation: 'worktree' }
   )
 }
+SPENT.review = budget.spent()
 
 const reviewedByTask = {}
 for (const r of (review && review.reviewed) || []) reviewedByTask[r.task_id] = r
@@ -828,4 +892,7 @@ return {
   paper_closed: review ? review.paper_closed : null,
   next_wave: review ? review.next_wave : null,
   overall_verdict: review ? review.overall_verdict : null,
+  telemetry: { ...telemetry, tokens_by_phase: { ...telemetry.tokens_by_phase, review: SPENT.review - SPENT.build } },
+  retro: review ? review.retro : null,
+  telemetry_appended: review ? review.telemetry_appended : false,
 }
