@@ -1,0 +1,29 @@
+# pdf-mvp0-journey-proof — transcript
+# tree: ccf0c95727c8e2d5236a3dd7b8ba1712f495e9ee (worktree-agent-a1a4563de2c2177ab) · host: darwin · 2026-07-24T13:36:18Z
+# command: scripts/pdf-mvp0-journey-proof.sh
+
+──────────────────────────────────────────────────────────────────────────────
+PDF MVP-0 JOURNEY PROOF — run — run 20260724T133618Z-13786
+──────────────────────────────────────────────────────────────────────────────
+tree:        /Users/frikkjarl/Documents/GitHub/barkpark/.claude/worktrees/agent-a1a4563de2c2177ab
+worktree:    ccf0c95727c8e2d5236a3dd7b8ba1712f495e9ee (worktree-agent-a1a4563de2c2177ab)
+main:        https://guerrilla.barkpark.cloud (dataset production)
+cp:          https://api.barkpark.cloud
+names:       main mvp0proof-m-260724133618 · support mvp0proof-s-260724133618 · phantom mvp0proof-negctl-260724133618 · order mvp0proof-order-260724133618
+ttl bracket: ttl_s=30 · provisioning below 20 · offline from 41 (skew 10s) · support poll floor 900s
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 0 — PRECONDITION — bearers, credential-empty law, PR #6038, CP+provisioner routes, teardown-capability (ABORT-only)
+──────────────────────────────────────────────────────────────────────────────
+      config bearers loaded (.token 41 bytes, .cloud_token 43 bytes — never printed)
+      credential-empty law holds: no HCLOUD_TOKEN in the journey shell
+      GitHub PR #6038 merged: yes (merge sha 96879b11c)
+      anon POST /v1/fleet/supports (control plane) -> HTTP 401
+      anon POST /v1/internal/support-jobs/claim (control plane) -> HTTP 401
+      anon POST /v1/fleet/support-tokens (guerrilla) -> HTTP 401
+      GET /v1/fleet/roster?dataset=production -> HTTP 200, documents-envelope: yes
+      building bp: go build -o $WORKDIR/bp ./cmd/barkpark …
+      bp built (52385250 bytes)
+      control plane knows 3 managed host(s) (the teardown project must intersect these)
+  ABORT  0   env:teardown-credential-unusable
+         the NAMED teardown credential (hcloud 'barkpark' context) did not answer 'hcloud server list' — without a working fleet-project credential the support box could never be removed (server-side support remove is backlog). Set PDFJP_TEARDOWN_HCLOUD_TOKEN or an hcloud 'barkpark' context. Nothing created.
