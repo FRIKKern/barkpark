@@ -1,0 +1,24 @@
+{
+  "name": "barkpark-webview-spike",
+  "version": "0.0.1",
+  "private": true,
+  "description": "THROWAWAY WebView spike harness (charter D11) — NOT product code, NOT a pnpm workspace member. Install with npm, run on Android.",
+  "main": "index.js",
+  "scripts": {
+    "harness": "node build-harness.mjs",
+    "start": "expo start",
+    "android": "expo run:android",
+    "measure": "bash scripts/run-all.sh"
+  },
+  "dependencies": {
+    "expo": "~57.0.8",
+    "expo-file-system": "~57.0.1",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-webview": "13.16.1"
+  },
+  "devDependencies": {
+    "babel-preset-expo": "~57.0.4"
+  }
+}
