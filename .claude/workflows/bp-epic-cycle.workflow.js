@@ -100,13 +100,14 @@ HONEST LIMIT: this workflow spawns exactly ONE reviewer, so the actual dispatch 
 
 const STRATEGY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'survey', 'journey'],
+  required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'survey', 'journey', 'started_at', 'ended_at'],
   properties: {
     direction: { type: 'string', description: 'bold strategic direction for THIS wave: what the finished experience looks/feels like, the choices you are leaning toward, what matters most right now' },
     direction_debate: { type: 'string', description: 'the rival directions you seriously developed and argued against each other, why the winner won, and the sharpest attack on the winner you found (with how the wave absorbs it) — a direction that never faced a rival is usually the first idea, not the best one' },
     paper_id: { type: 'string', description: 'slug of the PUBLISHED wave strategy Paper you created (style=article)' },
     paper_created: { type: 'boolean', description: 'true only after you created AND published the Paper and read it back from the server' },
     journey: JOURNEY_FIELD,
+    ...FABLE_STAMPS,
     survey: {
       type: 'array',
       description: '5-20 broad survey assignments; each becomes one Sonnet surveyor. Cast a WIDE net — cheap width now buys precise depth later',
@@ -183,6 +184,14 @@ const JOURNEY_FIELD = {
   },
 }
 
+// Wall-clock telemetry (design D6). The script cannot call Date.now() (banned
+// for resume-safety), so the Fable phases carry the clock: fleets are
+// bracketed by Fable checkpoints, so phase boundaries are these stamps.
+const FABLE_STAMPS = {
+  started_at: { type: 'string', description: 'output of `date -u +%FT%TZ`, run as your FIRST command (wall-clock telemetry, epic-memory D6)' },
+  ended_at: { type: 'string', description: 'output of `date -u +%FT%TZ`, run as your LAST command before returning' },
+}
+
 const SURVEY_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['key', 'findings', 'coverage', 'facts', 'risks', 'open_questions', 'journey'],
@@ -207,11 +216,12 @@ const SURVEY_SCHEMA = {
 
 const AIM_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['synthesis', 'verification', 'paper_updated', 'heartbeat_stamped', 'journey'],
+  required: ['synthesis', 'verification', 'paper_updated', 'heartbeat_stamped', 'journey', 'started_at', 'ended_at'],
   properties: {
     synthesis: { type: 'string', description: 'what the survey established, where reports contradict each other or the direction, and what remains unknown that the Decide phase cannot live without' },
     paper_updated: { type: 'boolean', description: 'true only after you appended the survey digest (incl. coverage map + not-founds) AND the verify plan to the wave Paper and re-published it' },
     journey: JOURNEY_FIELD,
+    ...FABLE_STAMPS,
     verification: {
       type: 'array',
       description: 'the LAST explore round: 1-15 targeted assignments. YOU pick the fleet — model per assignment, and which claims must be PROVEN by actually running tests/gates rather than read',
@@ -337,7 +347,7 @@ function gateFactProvenance(reports) {
 
 const PLAN_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['charter_written', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'wave', 'journey'],
+  required: ['charter_written', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'wave', 'journey', 'started_at', 'ended_at'],
   properties: {
     charter_written: { type: 'boolean', description: `true only after you actually wrote/updated ${CHARTER_PATH}` },
     paper_updated: { type: 'boolean', description: 'true only after you appended verification results + decisions + the wave plan (with task ids) to the wave Paper and re-published it' },
@@ -347,6 +357,7 @@ const PLAN_SCHEMA = {
     heartbeat_stamped: { type: 'boolean', description: 'true only after wave_status on the epic task says the wave is building' },
     decisions_summary: { type: 'string' },
     journey: JOURNEY_FIELD,
+    ...FABLE_STAMPS,
     wave: {
       type: 'array',
       description: 'this wave of build slices, ≤8, integration-ordered',
@@ -390,9 +401,10 @@ const BUILD_SCHEMA = {
 
 const REVIEW_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'paper_closed', 'heartbeat_stamped', 'next_wave', 'overall_verdict', 'journey'],
+  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'paper_closed', 'heartbeat_stamped', 'next_wave', 'overall_verdict', 'journey', 'started_at', 'ended_at'],
   properties: {
     journey: JOURNEY_FIELD,
+    ...FABLE_STAMPS,
     reviewed: {
       type: 'array',
       description: 'one entry per built slice you reviewed',
@@ -462,6 +474,7 @@ Your output:
 3. survey — 5-20 BROAD assignments for cheap Sonnet surveyors. Cast a wide net: suspected files, prior art (in the repo AND in bp papers/tasks), claims to check, seams to map, adjacent systems that might constrain the design, and every load-bearing assumption your stress-test surfaced. Width is cheap here — ask everything you'd want a scout report on. The Digest phase distills; you do not need to be precise yet.
 4. OPEN THE WAVE PAPER: create + publish the wave strategy Paper (slug like <epic>-wave-<YYYY-MM-DD>, style=article): the wish, your direction, the direction debate (candidates weighed, why the winner won), the survey plan (every question + why). This Paper is the wave's living story — every later phase appends to it; someone opening it mid-wave sees exactly where the wave stands. Read it back before setting paper_created=true.
 5. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}: flat wave_status ("wave: surveying — <one-line direction>") + flat wave_paper (the Paper's id), then re-publish.` : 'if a published epic parent task already exists for this epic, stamp its wave_status + wave_paper; if none exists yet, skip (Decide creates it).'}
+CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
 ${JOURNEY_BLOCK}
 ${PREMISE_SMOKE_BLOCK}
 ${PAPER_BLOCK}
@@ -535,6 +548,7 @@ Your job:
    - Verify plan: every assignment (question, model, what will be RUN as proof) — so the Paper states what is in flight while the verifiers work.
    Set paper_updated=true only after you re-published and read it back.
 4. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}'s flat wave_status field ("wave: verifying — <one-line synthesis>") and re-publish.` : 'if a published epic parent task for this epic already exists, stamp its wave_status; if none exists yet, set heartbeat_stamped=true and move on (Decide creates it).'}
+CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
 ${JOURNEY_BLOCK}
 ${PREMISE_SMOKE_BLOCK}
 ${PAPER_BLOCK}
@@ -645,6 +659,7 @@ Your job:
    - Wave plan: every slice with its task id, surface, builder model, gate — so the Paper states what is in flight while the builders work.
    Set paper_updated=true only after you re-published and read it back.
 8. HEARTBEAT: stamp the epic task's wave_status ("wave: building <n> slices — <one-line plan>") + wave_paper=${WAVE_PAPER} and re-publish. Set heartbeat_stamped=true only after you did.
+CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
 ${JOURNEY_BLOCK}
 ${TASKS_BLOCK}
 ${PREMISE_SMOKE_BLOCK}
@@ -754,6 +769,7 @@ Then, once, for the wave:
 11. **PUSH EVERY FINAL BRANCH AND OPEN ITS PR. THE WAVE IS NOT DONE UNTIL YOU DO.** This is step 11 because SIX consecutive waves ended with built, reviewed, gate-passing work sitting on local-only branches in a SHARED multi-session checkout that other cycles reset — roughly 20 slices that existed only because a human went looking for them. A branch you do not push is work this wave did not do. For each green slice, from your worktree:
    \`git push -u origin <final_branch>\` then \`gh pr create --head <final_branch> --title "<conventional-commit title>" --body "<what it does + the gate you re-ran + Task: <task_id>>"\`.
    The body MUST carry a single canonical \`Task: <task_id>\` line (not \`Tasks: a + b\`) or the PR↔task gate fails. Do NOT merge — the lead merges. Report per slice \`pushed: true\` and \`pr\`; if a push or PR genuinely fails, report \`pushed: false\` with the verbatim error, and say so in overall_verdict — never silently. A wave that grades A with unpushed branches has not earned it, and you must say that in the commentary.
+CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
 ${JOURNEY_BLOCK}
 ${TASKS_BLOCK}
 ${PAPER_BLOCK}
