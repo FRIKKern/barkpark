@@ -70,6 +70,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
+      DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, empty for logout-everywhere (wave 2; admin token stays server-side)
       POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
       POST    /v1/fleet/supports   user      register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
       DELETE  /v1/fleet/supports/:id user    unbind + delete a SUPPORT fleet row (PDF-D61; mains refused 409)
@@ -2401,6 +2402,91 @@ defmodule BarkparkCloud.Web.Router do
 
               {:error, :app_token_unsupported} ->
                 json(conn, 409, %{error: "app_token_unsupported"})
+
+              {:error, :no_admin_token} ->
+                json(conn, 404, %{
+                  error: "no_admin_token",
+                  detail:
+                    "No admin token is stored for this instance yet. It is captured at " <>
+                      "provision time — a pre-existing instance may need a re-provision."
+                })
+
+              {:error, :decrypt_failed} ->
+                json(conn, 500, %{error: "decrypt_failed"})
+
+              {:error, :instance_error} ->
+                json(conn, 502, %{error: "instance_unreachable"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # DELETE /v1/barkparks/:id/app-token → 200 — the revoke half of the
+  # member-reachable app-token exchange (wave 2, mob-w2-app-token-revoke).
+  # Body {"token": raw} kills exactly that token (logout on THIS device — the
+  # phone presents the credential it wants dead; relayed once, never stored);
+  # an EMPTY body means logout-everywhere: the instance revokes every live
+  # app:<email> token for the CALLING user, email derived SERVER-SIDE from the
+  # session — a caller can never aim this at another user's tokens. Same
+  # custody physics as the mint above: the stored admin token is decrypted and
+  # used server-side only, never serialized into any response. USER-authed +
+  # TEAM-SCOPED fail-closed: wrong-team / nonexistent / malformed id is the
+  # SAME 404. Rate-limited per IP (`app_token_revoke:<ip>` bucket, 10/min, D7).
+  # 404 not_found when the instance knows no such token; 409 revoke_unsupported
+  # when the instance predates the revoke route (D8 capability-vs-absence);
+  # the rest mirror the mint arm. Audited as "barkpark.app_token_revoked" —
+  # the mode and count, NEVER a token value.
+  delete "/v1/barkparks/:id/app-token" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      match?(
+        {:error, :rate_limited},
+        DeviceAuthRateLimiter.check("app_token_revoke:" <> (peer_ip(conn) || "unknown"))
+      ) ->
+        json(conn, 429, %{error: "rate_limited"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            mode =
+              case conn.body_params do
+                %{"token" => raw} when is_binary(raw) and raw != "" ->
+                  {:token, raw}
+
+                _ ->
+                  {:email, conn.assigns.current_user.email}
+              end
+
+            case Registry.revoke_app_token(bp, mode) do
+              {:ok, payload} ->
+                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.app_token_revoked", %{
+                  name: bp.name,
+                  mode: elem(mode, 0),
+                  revoked_count: payload["revoked_count"]
+                })
+
+                json(conn, 200, payload)
+
+              {:error, :not_found} ->
+                json(conn, 404, %{error: "not_found"})
+
+              {:error, :not_live} ->
+                json(conn, 409, %{error: "not_live"})
+
+              {:error, :revoke_unsupported} ->
+                json(conn, 409, %{error: "revoke_unsupported"})
 
               {:error, :no_admin_token} ->
                 json(conn, 404, %{

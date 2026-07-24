@@ -812,6 +812,17 @@ defmodule BarkparkWeb.Router do
     # cloud user (JIT-provisioned member, charter D5). The admin credential
     # never reaches the member; the plaintext minted token is the payload.
     post("/app-tokens", AppTokenController, :create)
+
+    # ── App-token revoke, instance half (wave 2, mob-w2-app-token-revoke) ──
+    # DELETE /app-tokens — admin-bearer-gated body revoke ({"token": raw}, or
+    # {"email": e} → every live "app:<e>"-labelled token). DELETE …/current —
+    # the bearer revokes ITSELF (possession is the authorization; admin
+    # bearers refused so the stored custody credential can't self-destruct).
+    # Both only SET revoked_at: Auth.verify_token/1 already filters revoked
+    # rows in its WHERE clause, so a revoked token fails closed on its next
+    # use with zero read-path changes.
+    delete("/app-tokens/current", AppTokenController, :delete_current)
+    delete("/app-tokens", AppTokenController, :delete)
   end
 
   # ── Bulldocs paper reader (LiveView) ────────────────────────────────────
