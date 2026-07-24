@@ -532,6 +532,46 @@ func TestRunOnceSupport_CreateFailure_WritesNothing(t *testing.T) {
 	}
 }
 
+// TestRunOnceSupport_FlatClaimDialect proves the claim decode tolerates the
+// CP's ACTUAL envelope: support_provision_claim_json reuses the flat claim_json
+// shape (job_id/claim_token at the TOP level, no job/barkpark nesting) while
+// the PDF-D83 pin nests them. The support map is identical in both dialects —
+// the whole chain must drain to a succeed either way.
+func TestRunOnceSupport_FlatClaimDialect(t *testing.T) {
+	h := newSupportHarness(t)
+	h.claimJSON = func() string {
+		return fmt.Sprintf(`{"job_id":"job-sup-flat","claim_token":"ct-flat","name":"helper","slug":"helper","region":"nbg1","server_type":"cx23","env":{},"template":null,"support":{"parent_url":%q,"parent_admin_token":%q,"dataset":"production","workspace":"default","name":"helper"}}`,
+			h.main.URL, h.parentToken)
+	}
+	runner := &supportFakeRunner{capacityJSON: `{"size_class":"standard"}`}
+	var deleted []string
+	w := h.worker(runner, &deleted)
+
+	claimed, err := w.RunOnceSupport(context.Background())
+	if err != nil {
+		t.Fatalf("flat-dialect claim must drain cleanly, got: %v", err)
+	}
+	if !claimed {
+		t.Fatal("the flat-dialect job should have been claimed")
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.succeeds) != 1 {
+		t.Fatalf("want one succeed on the flat dialect, got %d (fails: %v)", len(h.succeeds), h.fails)
+	}
+	var sb map[string]any
+	if err := json.Unmarshal([]byte(h.succeeds[0]), &sb); err != nil {
+		t.Fatalf("succeed body not JSON: %v", err)
+	}
+	if ct, _ := sb["claim_token"].(string); ct != "ct-flat" {
+		t.Fatalf("the flat dialect's claim token must be echoed on succeed, got %q", ct)
+	}
+	if len(deleted) != 0 {
+		t.Fatalf("no teardown on the flat-dialect happy path, deleted: %v", deleted)
+	}
+}
+
 // TestRunOnceSupport_NoJob_NoWiring covers the quiet paths: a 204 claim is not
 // an error, and a worker without the support seam skips the queue entirely.
 func TestRunOnceSupport_NoJob_NoWiring(t *testing.T) {

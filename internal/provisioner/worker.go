@@ -1532,6 +1532,32 @@ func (w *Worker) claimSupport(ctx context.Context) (SupportJobSpec, bool, error)
 		}
 	}
 	if strings.TrimSpace(spec.Job.ID) == "" {
+		// TOLERATED DIALECT: the CP's support_provision_claim_json reuses the FLAT
+		// claim_json envelope (job_id/claim_token/name/slug/region/server_type at
+		// the top level, `support` nested) — the resurrect precedent's shape —
+		// while the PDF-D83 pin nests them under job/barkpark. Accept both so the
+		// two halves meet regardless of which dialect the merged CP speaks; the
+		// `support` map decodes identically either way.
+		var flat struct {
+			JobID      string `json:"job_id"`
+			ClaimToken string `json:"claim_token"`
+			Name       string `json:"name"`
+			Slug       string `json:"slug"`
+			Region     string `json:"region"`
+			ServerType string `json:"server_type"`
+		}
+		if err := json.Unmarshal(data, &flat); err == nil && strings.TrimSpace(flat.JobID) != "" {
+			spec.Job.ID = flat.JobID
+			spec.Job.ClaimToken = flat.ClaimToken
+			if spec.Barkpark.Name == "" {
+				spec.Barkpark.Name = flat.Name
+				spec.Barkpark.Slug = flat.Slug
+				spec.Barkpark.Region = flat.Region
+				spec.Barkpark.ServerType = flat.ServerType
+			}
+		}
+	}
+	if strings.TrimSpace(spec.Job.ID) == "" {
 		// CUSTODY: never echo the claim body here — a 200 payload carries
 		// support.parent_admin_token, and this error lands in the worker journal.
 		return SupportJobSpec{}, false, fmt.Errorf("support claim response missing job.id (body withheld — it carries credentials)")
