@@ -344,6 +344,37 @@ func noVerbMsg(n *manifest.TreeNoun, noun, typed string) string {
 	return fmt.Sprintf("%s with verbs: %s", base, strings.Join(verbs, ", "))
 }
 
+// nounHint returns the machine-mode did-you-mean suggestion for a mistyped noun
+// — the ready-to-run "barkpark <noun>" for the nearest known noun, or "" when
+// nothing is close enough to be a likely typo. It replays nearestNoun (the same
+// matcher usageSuggestNouns prints to human stderr) so the `-o json` error
+// envelope's `hint` field carries the identical suggestion an agent can execute.
+func nounHint(tree *manifest.Tree, typed string) string {
+	if best, ok := nearestNoun(typed, tree.NounNames()); ok {
+		return "barkpark " + best
+	}
+	return ""
+}
+
+// verbHint returns the machine-mode did-you-mean suggestion for a mistyped verb
+// under a KNOWN noun — "barkpark <noun> <verb>" for the nearest verb, or "" when
+// nothing is close. The verb-level sibling of nounHint (replays nearestVerb,
+// mirroring usageSuggestVerb's human stderr line).
+func verbHint(tree *manifest.Tree, noun, typed string) string {
+	n, ok := lookupNoun(tree, noun)
+	if !ok {
+		return ""
+	}
+	verbs := make([]string, 0, len(n.Verbs))
+	for _, c := range n.Verbs {
+		verbs = append(verbs, c.Verb)
+	}
+	if best, ok := nearestVerb(typed, verbs); ok {
+		return "barkpark " + noun + " " + best
+	}
+	return ""
+}
+
 // nearestNoun returns the known noun closest to typed by Levenshtein distance,
 // when that distance is small enough to be a likely typo. Returns ("", false)
 // when nothing is close, so an unrelated word doesn't get a misleading hint.
