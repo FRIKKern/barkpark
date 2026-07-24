@@ -167,7 +167,11 @@ TTL_S="${PDFJP_NEG_TTL:-30}"                    # phantom ttl — NEVER the 1800
 SKEW="${PDFJP_SKEW:-10}"
 ONLINE_EDGE=$((TTL_S - SKEW))                   # below this: MUST provisioning
 OFFLINE_EDGE=$((TTL_S + 1 + SKEW))              # at/after this: MUST offline
-POLL_BUDGET="${PDFJP_POLL_BUDGET:-900}"         # support online poll floor (s)
+POLL_BUDGET="${PDFJP_POLL_BUDGET:-1800}"        # provision-poll ceiling (s) — the
+                                                # support chain's own bound is 30
+                                                # min (DefaultSupportProvisionTimeout);
+                                                # polling less would FAIL a run the
+                                                # worker later legitimately succeeds
 NEG_BEAT_EVERY=5
 PR_6038=6038                                    # the CP-deploy-filter fix
 
@@ -271,6 +275,41 @@ gh_get() { # repo-relative path -> body (public, unauthenticated)
 
 curl_roster() { main_get "/v1/fleet/roster?dataset=$DATASET"; }
 
+# The JOURNEY main (the R1 instance) — the support binds to IT, its roster is
+# THE roster the support onlines on, and the offload data plane targets it.
+# JMAIN_TOKEN is the R1 main's own admin token, revealed to the team admin by
+# GET /v1/barkparks/:id/credentials (the /new journey's own surface) — header
+# use only, never printed.
+JMAIN_URL=""; JMAIN_TOKEN=""
+
+# The FRESH JOURNEY TEAM (the brief's R0: "fresh journey team with auto-trial").
+# The stranger registers via POST /v1/auth/register and drives EVERY journey leg
+# with that session — the trial auto-starts at go-live (dwb-13), its ceiling of
+# ONE main is saturated by R1, and add-support still succeeds because supports
+# are quota-exempt (PDF-D86 — this run proves that decision live). The session
+# token + password live only in-process, never printed.
+JTEAM_TOKEN=""; JTEAM_ID=""
+
+jcp_get() { # path -> body (journey-team session bearer)
+  curl -sS --max-time 25 -H "Authorization: Bearer $JTEAM_TOKEN" "$CP_BASE$1"
+}
+
+jcp_post_code() { # path json-body outfile -> http code (journey-team session)
+  curl -sS --max-time 30 -o "$3" -w '%{http_code}' -X POST "$CP_BASE$1" \
+    -H "Authorization: Bearer $JTEAM_TOKEN" -H 'Content-Type: application/json' \
+    -d "$2" 2>/dev/null | tr -dc '0-9' | tail -c 3
+}
+
+jcp_delete_code() { # path outfile -> http code (journey-team session)
+  curl -sS --max-time 30 -o "$2" -w '%{http_code}' -X DELETE "$CP_BASE$1" \
+    -H "Authorization: Bearer $JTEAM_TOKEN" 2>/dev/null | tr -dc '0-9' | tail -c 3
+}
+
+jroster() { # the R1 main's roster (the journey truth for R2-R5)
+  curl -sS --max-time 25 -H "Authorization: Bearer $JMAIN_TOKEN" \
+    "$JMAIN_URL/v1/fleet/roster?dataset=$DATASET"
+}
+
 row_of() { # worker; roster JSON on stdin -> that row as one-line JSON, or ""
   W="$1" python3 -c '
 import json, os, sys
@@ -346,7 +385,11 @@ cleanup() {
   fi
   if [ -n "$PHANTOM_PUBLISHED" ] && [ -z "$PHANTOM_DELETED" ]; then
     say "cleanup: deleting phantom roster row $PHANTOM_ROW_ID"
-    delete_doc "$MAIN_BASE" "$ADMIN_TOKEN" "$PHANTOM_ROW_ID" "listener"
+    if [ -n "$JMAIN_URL" ] && [ -n "$JMAIN_TOKEN" ]; then
+      delete_doc "$JMAIN_URL" "$JMAIN_TOKEN" "$PHANTOM_ROW_ID" "listener"
+    else
+      delete_doc "$MAIN_BASE" "$ADMIN_TOKEN" "$PHANTOM_ROW_ID" "listener"
+    fi
   fi
   if [ -n "$SUPPORT_CREATED" ] && [ -z "$SUPPORT_REMOVED" ]; then
     say ""
@@ -355,9 +398,15 @@ cleanup() {
     say "cleanup: the box lives in the CP's provisioning project — remove it with the"
     say "cleanup: NAMED teardown credential:  bp cloud support remove $SUPPORT_NAME"
     if [ -n "$BP" ] && [ -x "$BP" ] && [ -n "$TEARDOWN_HC_TOKEN" ]; then
-      HCLOUD_TOKEN="$TEARDOWN_HC_TOKEN" BP_COLOR=none "$BP" cloud support remove "$SUPPORT_NAME" --dataset "$DATASET" \
+      # shellcheck disable=SC2015
+      HCLOUD_TOKEN="$TEARDOWN_HC_TOKEN" BP_COLOR=none "$BP" ${JMAIN_URL:+-s "$JMAIN_URL"} ${JMAIN_TOKEN:+--token "$JMAIN_TOKEN"} cloud support remove "$SUPPORT_NAME" --dataset "$DATASET" \
         && SUPPORT_REMOVED=1 \
         || say "cleanup: bp cloud support remove did not converge — remove $SUPPORT_NAME BY HAND (it is billing)"
+      if [ -n "$SUPPORT_ID" ] && [ -n "$JTEAM_TOKEN" ]; then
+        say "cleanup: deleting the CP support row (journey session)"
+        local cpo; cpo="$WORKDIR/cleanup-cp-row.json"
+        jcp_delete_code "/v1/fleet/supports/$SUPPORT_ID" "$cpo" >/dev/null 2>&1 || true
+      fi
     else
       say "cleanup: NO named teardown credential in scope — support $SUPPORT_NAME may be BILLING; remove it by hand"
     fi
@@ -365,7 +414,11 @@ cleanup() {
   if [ -n "$MAIN_CREATED" ] && [ -z "$MAIN_REMOVED" ] && [ -n "$MAIN_ID" ]; then
     say "cleanup: deprovisioning the R1 main $MAIN_NAME (DELETE /v1/barkparks/$MAIN_ID)"
     local out; out="$WORKDIR/cleanup-main-del.json"
-    cp_delete_code "/v1/barkparks/$MAIN_ID" "$out" >/dev/null 2>&1 || true
+    if [ -n "$JTEAM_TOKEN" ]; then
+      jcp_delete_code "/v1/barkparks/$MAIN_ID" "$out" >/dev/null 2>&1 || true
+    else
+      cp_delete_code "/v1/barkparks/$MAIN_ID" "$out" >/dev/null 2>&1 || true
+    fi
   fi
   [ -n "$WORKDIR" ] && rm -rf "$WORKDIR"
   return 0
@@ -422,8 +475,12 @@ if [ "$MODE" = "plan" ]; then
   say "       project — a CP-managed host (label $MANAGED_LABEL) listed through it must match a"
   say "       CP-managed barkpark's host. NEVER create a box you cannot tear down (server-side"
   say "       support remove is backlog pdf-bl-support-remove-serverside). No proof → ABORT, no spend."
-  say "  1  CREATE-MAIN — POST /v1/launch {name:$MAIN_NAME} → poll GET /v1/barkparks provision_steps"
-  say "     until the row reads live (host set, health up). A CP MAIN is CP-DEPROVISIONABLE."
+  say "  1  CREATE-MAIN — register the FRESH JOURNEY TEAM (POST /v1/auth/register — the brief's"
+  say "     'fresh journey team with auto-trial'; the trial auto-starts at go-live, dwb-13), then"
+  say "     POST /v1/launch {name:$MAIN_NAME} under THAT session → poll GET /v1/barkparks"
+  say "     provision_steps until the row reads live (host set, health up). A CP MAIN is"
+  say "     CP-DEPROVISIONABLE. The trial ceiling (1 main) then makes R2 prove PDF-D86 live"
+  say "     (supports are quota-exempt)."
   say "  2  ADD-SUPPORT — POST /v1/fleet/supports {name:$SUPPORT_NAME, barkpark_id:<main>, mode:provision}"
   say "     → 202 {barkpark, job_id} → poll the SUPPORT row's provision_steps (create→configure→"
   say "     content→verify→ready). ASSERT: the support roster row reads provisioning BEFORE the first"
@@ -850,10 +907,46 @@ pass 0 "bearers resolve; journey credential-empty (no HCLOUD_TOKEN); PR #$PR_603
 
 head_rung 1 "CREATE-MAIN — POST /v1/launch → the /new journey's calls → the main reads live"
 
+# 1a. THE FRESH JOURNEY TEAM (the brief's R0 pin): the stranger registers and
+# every journey leg below rides THAT session, never the operator's. The trial
+# auto-starts at go-live (dwb-13); its ceiling (1 main) is exactly what makes
+# add-support's quota exemption (PDF-D86) load-bearing — this run proves it.
+REG_EMAIL="bolla+$MAIN_NAME@jarl.no"
+REG_PASS="$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')"
+REG_OUT="$WORKDIR/register.json"
+say "  1a \$ POST $CP_BASE/v1/auth/register {email:$REG_EMAIL, team_name:$MAIN_NAME} (password random, never printed)"
+RCODE="$(curl -sS --max-time 30 -o "$REG_OUT" -w '%{http_code}' -X POST "$CP_BASE/v1/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$REG_EMAIL\",\"password\":\"$REG_PASS\",\"team_name\":\"$MAIN_NAME\"}" 2>/dev/null | tr -dc '0-9' | tail -c 3)"
+JTEAM_TOKEN="$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("token") or "")
+except Exception:
+    print("")' "$REG_OUT")"
+JTEAM_ID="$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("team_id") or "")
+except Exception:
+    print("")' "$REG_OUT")"
+info "register -> HTTP ${RCODE:-000}; journey team ${JTEAM_ID:-?} (session ${#JTEAM_TOKEN} bytes — never printed)"
+if [ "${RCODE:-000}" != "201" ] || [ -z "$JTEAM_TOKEN" ]; then
+  info "body: $(head -c 200 "$REG_OUT" | tr -d '\n')"
+  abort 1 "env:register-failed" "the fresh journey team could not be registered (HTTP ${RCODE:-000}) — the stranger journey cannot start. Nothing billable created."
+  exit 2
+fi
+
 LAUNCH_OUT="$WORKDIR/launch.json"
 MAIN_CREATED=1   # BEFORE the call — a half-dead launch must still be reaped
-say "  \$ POST $CP_BASE/v1/launch {name:$MAIN_NAME}"
-LCODE="$(cp_post_code "/v1/launch" "{\"name\":\"$MAIN_NAME\"}" "$LAUNCH_OUT")"
+# Template is REQUIRED for the journey: a template-less main has no
+# bootstrap_workspace, and the provision_support claim payload carries the
+# parent's bootstrap_workspace as the dataset-leg workspace — nil there fails
+# validateSupportSpec before anything is written (an honest job failure, but
+# not the journey under test).
+TEMPLATE="${PDFJP_TEMPLATE:-astro-search-starter}"
+say "  1b \$ POST $CP_BASE/v1/launch {name:$MAIN_NAME, template:$TEMPLATE}   (journey session; trial auto-starts, dwb-13)"
+LCODE="$(jcp_post_code "/v1/launch" "{\"name\":\"$MAIN_NAME\",\"template\":\"$TEMPLATE\"}" "$LAUNCH_OUT")"
 say "      receipt (HTTP ${LCODE:-000}):"
 sed 's/^/      | /' "$LAUNCH_OUT"
 case "${LCODE:-000}" in
@@ -880,7 +973,7 @@ info "main registered: id=$MAIN_ID (label $MANAGED_LABEL; CP-deprovisionable via
 DEADLINE_EPOCH="$(python3 -c "import time; print(int(time.time()) + $POLL_BUDGET)")"
 MAIN_LIVE=""
 while :; do
-  ROW="$(cp_get "/v1/barkparks?scope=all" | python3 -c '
+  ROW="$(jcp_get "/v1/barkparks?scope=all" | MID="$MAIN_ID" python3 -c '
 import json, sys, os
 mid = os.environ["MID"]
 try:
@@ -891,7 +984,7 @@ for r in rows:
     if r.get("id") == mid:
         print(json.dumps({"host": r.get("host"), "health": r.get("health_status"),
                           "url": r.get("url"), "steps": r.get("provision_steps")}))
-        break' MID="$MAIN_ID" 2>/dev/null || true)"
+        break' 2>/dev/null || true)"
   HOST="$(printf '%s' "$ROW" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print(d.get("host") or "")' 2>/dev/null || true)"
   HEALTH="$(printf '%s' "$ROW" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print(d.get("health") or "")' 2>/dev/null || true)"
   STEPS="$(printf '%s' "$ROW" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); s=d.get("steps"); print(",".join("%s:%s"%(x.get("step"),x.get("status")) for x in s) if isinstance(s,list) else "")' 2>/dev/null || true)"
@@ -908,7 +1001,33 @@ for r in rows:
   sleep 10
 done
 say "      LIVE MAIN: id=$MAIN_ID url=$MAIN_URL host=$HOST health=$HEALTH"
-rung_seal 1 "create-main via CP HTTP only: $MAIN_NAME launched → polled provision_steps → live (host set, health up) at $MAIN_URL"
+
+# The journey main's OWN admin token — the /new journey's credentials surface
+# (GET /v1/barkparks/:id/credentials, team-admin-gated). All journey-side roster
+# reads + the phantom row + the teardown legs run against THE JOURNEY MAIN with
+# this bearer (the support's roster row lives THERE, never on guerrilla).
+CRED_OUT="$WORKDIR/credentials.json"
+CCODE="$(curl -sS --max-time 25 -o "$CRED_OUT" -w '%{http_code}' \
+  -H "Authorization: Bearer $JTEAM_TOKEN" "$CP_BASE/v1/barkparks/$MAIN_ID/credentials" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
+JMAIN_TOKEN="$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("admin_token") or "")
+except Exception:
+    print("")' "$CRED_OUT")"
+JMAIN_URL="$(printf '%s' "$MAIN_URL" | sed 's:/*$::')"
+case "$JMAIN_URL" in http*) : ;; *) JMAIN_URL="https://$JMAIN_URL" ;; esac
+info "GET /v1/barkparks/:id/credentials -> HTTP ${CCODE:-000} (admin_token ${#JMAIN_TOKEN} bytes — never printed); journey main = $JMAIN_URL"
+if [ "${CCODE:-000}" != "200" ] || [ -z "$JMAIN_TOKEN" ]; then
+  fail 1 "the credentials surface did not reveal the journey main's admin token — the journey-side roster reads and teardown legs cannot run"
+  exit 1
+fi
+JR_PROBE="$(jroster | python3 -c 'import json,sys
+try: d=json.load(sys.stdin); print("yes" if isinstance(d.get("documents"),list) else "no")
+except Exception: print("no")' 2>/dev/null || echo no)"
+info "journey-main roster GET -> documents-envelope: $JR_PROBE"
+[ "$JR_PROBE" = "yes" ] || { fail 1 "the journey main does not serve /v1/fleet/roster to its own admin token — the instance build lacks the fleet routes"; exit 1; }
+rung_seal 1 "create-main via CP HTTP only: $MAIN_NAME launched (template $TEMPLATE) → polled provision_steps → live (host set, health up) at $MAIN_URL; credentials surface revealed the instance admin token; the journey main serves its roster"
 
 # ── RUNG 2 — ADD-SUPPORT (CP-provisioned; provisioning-before-beat) ──────────
 
@@ -917,7 +1036,7 @@ head_rung 2 "ADD-SUPPORT — POST /v1/fleet/supports mode=provision → the supp
 ADD_OUT="$WORKDIR/add-support.json"
 SUPPORT_CREATED=1   # BEFORE the call — a half-dead add must still be reaped
 say "  \$ POST $CP_BASE/v1/fleet/supports {name:$SUPPORT_NAME, barkpark_id:$MAIN_ID, mode:provision}"
-ACODE="$(cp_post_code "/v1/fleet/supports" "{\"name\":\"$SUPPORT_NAME\",\"barkpark_id\":\"$MAIN_ID\",\"mode\":\"provision\"}" "$ADD_OUT")"
+ACODE="$(jcp_post_code "/v1/fleet/supports" "{\"name\":\"$SUPPORT_NAME\",\"barkpark_id\":\"$MAIN_ID\",\"mode\":\"provision\"}" "$ADD_OUT")"
 say "      receipt (HTTP ${ACODE:-000}):"
 sed 's/^/      | /' "$ADD_OUT"
 case "${ACODE:-000}" in
@@ -947,21 +1066,63 @@ info "support registered host-nil: id=${SUPPORT_ID:-?} job_id=${JOB_ID:-?} (the 
 DEADLINE_EPOCH="$(python3 -c "import time; print(int(time.time()) + $POLL_BUDGET)")"
 SAW_PROVISIONING_BEFORE_BEAT=""; SAW_ONLINE=""; ONLINE_ROW=""
 while :; do
-  STEPS="$(cp_get "/v1/barkparks?scope=all" | python3 -c '
+  SNAP="$WORKDIR/support-row.json"
+  jcp_get "/v1/barkparks?scope=all" >"$SNAP" 2>/dev/null || true
+  STEPS="$(SID="$SUPPORT_ID" python3 -c '
 import json, sys, os
 sid = os.environ["SID"]
 try:
-    rows = (json.load(sys.stdin) or {}).get("barkparks") or []
+    rows = (json.load(open(sys.argv[1])) or {}).get("barkparks") or []
 except Exception:
     rows = []
 for r in rows:
     if r.get("id") == sid:
         s = r.get("provision_steps")
         print(",".join("%s:%s"%(x.get("step"),x.get("status")) for x in s) if isinstance(s,list) else "")
-        break' SID="$SUPPORT_ID" 2>/dev/null || true)"
-  SROW="$(curl_roster | row_of "$SUPPORT_NAME" || true)"
+        break' "$SNAP" 2>/dev/null || true)"
+  PSTATUS="$(SID="$SUPPORT_ID" python3 -c '
+import json, sys, os
+sid = os.environ["SID"]
+try:
+    rows = (json.load(open(sys.argv[1])) or {}).get("barkparks") or []
+except Exception:
+    rows = []
+for r in rows:
+    if r.get("id") == sid:
+        print(r.get("provision_status") or "")
+        break' "$SNAP" 2>/dev/null || true)"
+  SROW="$(jroster | row_of "$SUPPORT_NAME" || true)"
   SSTATUS="$(printf '%s' "$SROW" | field_of status)"
   printf '  support steps=[%s]  roster=%s\n' "${STEPS:-—}" "${SSTATUS:-ABSENT}"
+  # FAIL FAST on a failed chain — never burn the budget waiting on a job that
+  # already reported terminal. Quote the job's own error + console (the honest
+  # substrate evidence; the worker tears its half-built box down itself).
+  if [ "$PSTATUS" = "failed" ] || printf '%s' "$STEPS" | grep -q ':failed'; then
+    say "      SUPPORT JOB FAILED (provision_status=$PSTATUS; steps=[$STEPS]) — quoting the job's own evidence:"
+    SID="$SUPPORT_ID" python3 -c '
+import json, sys, os
+sid = os.environ["SID"]
+try:
+    rows = (json.load(open(sys.argv[1])) or {}).get("barkparks") or []
+except Exception:
+    rows = []
+for r in rows:
+    if r.get("id") == sid:
+        err = r.get("provision_error")
+        if err:
+            print("      provision_error: %s" % str(err)[:600])
+        con = r.get("provision_console")
+        if isinstance(con, list):
+            for line in con[-14:]:
+                if isinstance(line, dict):
+                    line = line.get("line") or line.get("text") or json.dumps(line)
+                print("      | %s" % str(line)[:220])
+        break' "$SNAP" 2>/dev/null || true
+    say "      the worker tears its half-built box down on chain failure (SupportProvisionWith.failStep);"
+    say "      the provisioning roster row ages to offline honestly (PDF-D10)"
+    fail 2 "the provision_support chain reported a FAILED step (steps=[$STEPS]) — a genuine substrate failure, quoted above"
+    exit 1
+  fi
   # The row exists and reads provisioning (or is still absent) BEFORE any beat.
   if [ -z "$SAW_ONLINE" ]; then
     if [ "$SSTATUS" = "provisioning" ]; then SAW_PROVISIONING_BEFORE_BEAT=1; fi
@@ -991,8 +1152,8 @@ head_rung 3 "NEGCTL — stuck-provisioning phantom (ttl_s=$TTL_S) never onlines;
 PH_STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 MUT_OUT="$WORKDIR/phantom-publish.json"
 PHANTOM_PUBLISHED=1
-CODE="$(mutate "$MAIN_BASE" "$ADMIN_TOKEN" "[{\"createOrReplace\":{\"_id\":\"$PHANTOM_ROW_ID\",\"_type\":\"listener\",\"_draft\":false,\"content\":{\"worker\":\"$PHANTOM_WORKER\",\"status\":\"provisioning\",\"last_seen\":\"$PH_STAMP\",\"ttl_s\":$TTL_S}}},{\"publish\":{\"id\":\"$PHANTOM_ROW_ID\",\"type\":\"listener\"}}]" "$MUT_OUT")"
-info "phantom publish (createOrReplace+publish, the stepRosterRow shape) -> HTTP ${CODE:-000}, ttl_s=$TTL_S (NEVER the production 1800)"
+CODE="$(mutate "$JMAIN_URL" "$JMAIN_TOKEN" "[{\"createOrReplace\":{\"_id\":\"$PHANTOM_ROW_ID\",\"_type\":\"listener\",\"_draft\":false,\"content\":{\"worker\":\"$PHANTOM_WORKER\",\"status\":\"provisioning\",\"last_seen\":\"$PH_STAMP\",\"ttl_s\":$TTL_S}}},{\"publish\":{\"id\":\"$PHANTOM_ROW_ID\",\"type\":\"listener\"}}]" "$MUT_OUT")"
+info "phantom publish on the JOURNEY main (createOrReplace+publish, the stepRosterRow shape) -> HTTP ${CODE:-000}, ttl_s=$TTL_S (NEVER the production 1800)"
 if [ "${CODE:-000}" -lt 200 ] || [ "${CODE:-000}" -ge 300 ]; then
   info "body: $(head -c 300 "$MUT_OUT" | tr -d '\n')"
   fail 3 "the phantom row publish did not land"
@@ -1008,7 +1169,7 @@ while :; do
   TNOW="$(now_epoch)"
   ELAPSED="$(fsub "$TNOW" "$ANCHOR_EPOCH")"
   POLL=$((POLL + 1))
-  ROSTER="$(curl_roster || true)"
+  ROSTER="$(jroster || true)"
   PROW="$(printf '%s' "$ROSTER" | row_of "$PHANTOM_WORKER")"
   SROW="$(printf '%s' "$ROSTER" | row_of "$SUPPORT_NAME")"
   PS="$(printf '%s' "$PROW" | field_of status)"
@@ -1052,10 +1213,10 @@ done
 [ -z "$PH_WENT_OFFLINE" ] && efail "the phantom never read offline by the ${CEILING}s ceiling — it must age to offline past its OWN ttl"
 
 # In-rung teardown.
-delete_doc "$MAIN_BASE" "$ADMIN_TOKEN" "$PHANTOM_ROW_ID" "listener"
+delete_doc "$JMAIN_URL" "$JMAIN_TOKEN" "$PHANTOM_ROW_ID" "listener"
 PHANTOM_DELETED=1
 sleep 1
-PROW="$(curl_roster | row_of "$PHANTOM_WORKER" || true)"
+PROW="$(jroster | row_of "$PHANTOM_WORKER" || true)"
 [ -z "$PROW" ] || efail "the phantom row survived its delete: $PROW"
 info "a withheld listener's row never onlines — provisioning while fresh, offline from"
 info "elapsed=${FIRST_OFFLINE_ELAPSED:-?}s (its OWN ttl_s=$TTL_S), never idle/working/blocked; the R2 support stayed online throughout."
@@ -1066,7 +1227,7 @@ rung_seal 3 "stuck-provisioning phantom: provisioning fresh → offline past its
 head_rung 4 "OFFLOAD — the NAMED key rung (PDF-D88), then an app-token-direct order claim→working→done"
 
 # The box IP for the key-seed leg + the parity target.
-SUP_IP="$(cp_get "/v1/barkparks?scope=all" | python3 -c '
+SUP_IP="$(jcp_get "/v1/barkparks?scope=all" | SID="$SUPPORT_ID" python3 -c '
 import json, sys, os
 sid = os.environ["SID"]
 try:
@@ -1076,7 +1237,7 @@ except Exception:
 for r in rows:
     if r.get("id") == sid:
         print(r.get("host") or "")
-        break' SID="$SUPPORT_ID" 2>/dev/null || true)"
+        break' 2>/dev/null || true)"
 info "support box host: ${SUP_IP:-unknown}"
 
 # 4a. THE NAMED KEY RUNG (PDF-D88) — OUTSIDE the credential-empty envelope BY
@@ -1107,7 +1268,7 @@ fi
 # exact call; the offload data plane is app-token-direct (PDF-D87).
 APP_OUT="$WORKDIR/app-token.json"
 say "  4b \$ POST $CP_BASE/v1/barkparks/$MAIN_ID/app-token   (mint the member token; talk straight to the main)"
-APCODE="$(cp_post_code "/v1/barkparks/$MAIN_ID/app-token" "{}" "$APP_OUT")"
+APCODE="$(jcp_post_code "/v1/barkparks/$MAIN_ID/app-token" "{}" "$APP_OUT")"
 APP_TOKEN="$(python3 -c '
 import json, sys
 try:
@@ -1180,11 +1341,12 @@ except Exception:
 doc = d.get("doc") or d
 c = doc.get("content") or {}
 print(doc.get("lifecycle_status") or c.get("lifecycle_status") or "")' 2>/dev/null || true)"
-  SROW="$(curl_roster | row_of "$SUPPORT_NAME" || true)"
+  SROW="$(jroster | row_of "$SUPPORT_NAME" || true)"
   SS="$(printf '%s' "$SROW" | field_of status)"
-  # MAIN-parity probe DURING execution: the main answers the roster read fresh.
+  # MAIN-parity probe DURING execution: the JOURNEY main answers its roster read
+  # fresh while the support works — offloading must not degrade the main.
   PARITY_N=$((PARITY_N + 1))
-  PCODE="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ADMIN_TOKEN" "$MAIN_BASE/v1/fleet/roster?dataset=$DATASET" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
+  PCODE="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $JMAIN_TOKEN" "$JMAIN_URL/v1/fleet/roster?dataset=$DATASET" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
   [ "${PCODE:-000}" = "200" ] || PARITY_OK=""
   # Derive the stage: task lifecycle is authoritative; roster adds live 'working'.
   case "$LC" in
@@ -1223,18 +1385,53 @@ rung_seal 4 "offload app-token-direct: member token minted, order filed on the M
 
 head_rung 5 "TEARDOWN — bp cloud support remove (NAMED credential) → four-surface census delta zero + main deprovision"
 
+# BEFORE the remove: arm the REAL 403→401 revocation probe. The CP-provisioned
+# chain never reports the support's minted token id back to the CP row
+# (fleet_token_id stays nil — a custody gap, filed as its own defect), so the
+# remove's own token leg can only say "no token id on record". The harness
+# therefore proves the D57 revocation MECHANISM live with a stand-in: mint a
+# support token on the JOURNEY main, hold its raw value in-process (never
+# printed), probe the admin-gated mint endpoint with it (want 403:
+# authenticated-but-not-admin), revoke it by id, re-probe (want 401). The
+# support's OWN ledger token dies with the main's deprovision below (the
+# instance IS its token store) — said plainly, never upgraded to "revoked".
+PROBE_NAME="mvp0proof-probe-$TS"
+PROBE_OUT="$WORKDIR/probe-mint.json"
+PMCODE="$(main_post_code "$JMAIN_URL/v1/fleet/support-tokens" "{\"name\":\"$PROBE_NAME\"}" "$PROBE_OUT" "$JMAIN_TOKEN")"
+PROBE_SECRET="$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("token") or "")
+except Exception:
+    print("")' "$PROBE_OUT")"
+PROBE_ID="$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("token_id") or "")
+except Exception:
+    print("")' "$PROBE_OUT")"
+PROBE_BEFORE=""
+if [ -n "$PROBE_SECRET" ]; then
+  PROBE_BEFORE="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST "$JMAIN_URL/v1/fleet/support-tokens" \
+    -H "Authorization: Bearer $PROBE_SECRET" -H 'Content-Type: application/json' -d '{"name":""}' 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
+  info "probe token minted on the journey main (HTTP ${PMCODE:-000}; ${#PROBE_SECRET} bytes, never printed); pre-revoke probe on the admin-gated mint endpoint -> HTTP ${PROBE_BEFORE:-000} (want 403)"
+else
+  info "probe-token mint answered ${PMCODE:-000} without a token — the 403→401 leg will degrade to the remove receipt, narrated"
+fi
+
 RM_OUT="$WORKDIR/remove-stdout.json"
 RM_ERR="$WORKDIR/remove-progress.log"
-say "  \$ HCLOUD_TOKEN=<named teardown credential> bp cloud support remove $SUPPORT_NAME --dataset $DATASET -o json"
+say "  \$ HCLOUD_TOKEN=<named teardown credential> bp -s $JMAIN_URL --token <journey admin> cloud support remove $SUPPORT_NAME --dataset $DATASET -o json"
 say "      (server-side support remove is backlog pdf-bl-support-remove-serverside; the box lives in"
 say "       the CP's provisioning project, so the box delete needs the NAMED fleet credential — a"
-say "       DELIBERATE, narrated exception to the credential-empty envelope)"
+say "       DELIBERATE, narrated exception to the credential-empty envelope. -s/--token point the"
+say "       roster/token legs at the JOURNEY main, whose roster the support actually lives on.)"
 RM_RC=0
 if [ -n "$TEARDOWN_HC_TOKEN" ]; then
-  HCLOUD_TOKEN="$TEARDOWN_HC_TOKEN" BP_COLOR=none "$BP" cloud support remove "$SUPPORT_NAME" --dataset "$DATASET" -o json \
+  HCLOUD_TOKEN="$TEARDOWN_HC_TOKEN" BP_COLOR=none "$BP" -s "$JMAIN_URL" --token "$JMAIN_TOKEN" cloud support remove "$SUPPORT_NAME" --dataset "$DATASET" -o json \
     >"$RM_OUT" 2>"$RM_ERR" || RM_RC=$?
 else
-  HCLOUD_CONTEXT="$TEARDOWN_HC_CTX" BP_COLOR=none "$BP" cloud support remove "$SUPPORT_NAME" --dataset "$DATASET" -o json \
+  HCLOUD_CONTEXT="$TEARDOWN_HC_CTX" BP_COLOR=none "$BP" -s "$JMAIN_URL" --token "$JMAIN_TOKEN" cloud support remove "$SUPPORT_NAME" --dataset "$DATASET" -o json \
     >"$RM_OUT" 2>"$RM_ERR" || RM_RC=$?
 fi
 sed 's/^/      | /' "$RM_ERR"
@@ -1248,20 +1445,26 @@ SUPPORT_REMOVED=1
 
 say "      FOUR-SURFACE CENSUS (this harness's own re-reads — delete receipts prove nothing):"
 
-# 1. TOKEN — the 403→401 revocation probe is emitted by `bp cloud support remove`
-#    itself (it captures the box's own token off the box when SSH is available,
-#    else degrades to the revoke receipt). Surface its verdict from the receipt.
-TOKEN_VERDICT="$(python3 -c '
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-except Exception:
-    d = {}
-res = d.get("residue") or []
-tok = [r for r in res if "token" in str(r).lower()]
-print("residue:" + "; ".join(tok) if tok else "clean")' "$RM_OUT" 2>/dev/null || echo "clean")"
-info "1. token 403→401 probe: $TOKEN_VERDICT (the admin-gated mint endpoint reads 403 while valid, 401 after revoke — PDF-D57)"
-printf '%s' "$TOKEN_VERDICT" | grep -q '^residue' && efail "token residue: $TOKEN_VERDICT"
+# 1. TOKEN — the REAL 403→401 revocation probe (PDF-D57/D63), on the stand-in
+#    minted above: revoke it by id on the JOURNEY main, then the SAME bearer
+#    that read 403 (authenticated-but-not-admin) must read 401. Narrated
+#    honestly: the SUPPORT's own ledger token id was never on the CP row
+#    (custody gap, filed) — it dies with the main's deprovision below.
+if [ -n "$PROBE_SECRET" ] && [ -n "$PROBE_ID" ]; then
+  RVOUT="$WORKDIR/probe-revoke.json"
+  RVCODE="$(curl -sS --max-time 20 -o "$RVOUT" -w '%{http_code}' -X DELETE "$JMAIN_URL/v1/fleet/support-tokens/$PROBE_ID" \
+    -H "Authorization: Bearer $JMAIN_TOKEN" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
+  PROBE_AFTER="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST "$JMAIN_URL/v1/fleet/support-tokens" \
+    -H "Authorization: Bearer $PROBE_SECRET" -H 'Content-Type: application/json' -d '{"name":""}' 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
+  info "1. token probe (admin-gated mint endpoint, journey main): ${PROBE_BEFORE:-?} before revoke, DELETE -> ${RVCODE:-000}, ${PROBE_AFTER:-000} after — want 403 → 401"
+  [ "${PROBE_BEFORE:-000}" = "403" ] || efail "the pre-revoke probe read ${PROBE_BEFORE:-000}, want 403 — the revocation probe proved nothing"
+  [ "${PROBE_AFTER:-000}" = "401" ] || efail "the probe token still authenticates after revoke: ${PROBE_AFTER:-000}, want 401"
+  info "   the support's OWN ledger token id was never recorded on the CP row (fleet_token_id nil — custody"
+  info "   gap, filed as a defect); it dies with the journey main's deprovision below — said plainly, not upgraded"
+else
+  info "1. token probe: DEGRADED — no stand-in token was minted; the remove receipt is the only token evidence"
+  efail "the 403→401 token probe could not be armed (mint answered ${PMCODE:-000})"
+fi
 
 # 2. BOX — the provider label scan through the NAMED teardown credential.
 if [ -n "$TEARDOWN_HC_TOKEN" ]; then
@@ -1278,14 +1481,21 @@ fi
 info "2. hcloud label scan $FLEET_LABEL=$SUPPORT_NAME: ${SRV_AFTER:-empty}"
 [ -z "$SRV_AFTER" ] || efail "box(es) still carry the label: $SRV_AFTER (BILLING)"
 
-# 3. ROSTER — the stepOnline read must return no support row.
-SROW="$(curl_roster | row_of "$SUPPORT_NAME" || true)"
+# 3. ROSTER — the stepOnline read (on the JOURNEY main) must return no support row.
+SROW="$(jroster | row_of "$SUPPORT_NAME" || true)"
 info "3. roster row for $SUPPORT_NAME: ${SROW:-none}"
 [ -z "$SROW" ] || efail "roster row still present: $SROW"
 
-# 4. CP SUPPORT ROW — the fleet_role=support row must be gone; the guerrilla
-#    parent + operator instances SURVIVE (delta zero, not scorched earth).
-CP_AFTER="$(cp_get "/v1/barkparks?scope=all" | python3 -c '
+# 4. CP SUPPORT ROW — deleted LAST among the support surfaces (PDF-D68), under
+#    the JOURNEY session: `bp cloud support remove`'s CP legs ride the bp-login
+#    (operator) session, which cannot see the journey team's row — so the row
+#    delete + re-read run here with the journey bearer.
+if [ -n "$SUPPORT_ID" ]; then
+  CPDEL_OUT="$WORKDIR/cp-row-delete.json"
+  CPDCODE="$(jcp_delete_code "/v1/fleet/supports/$SUPPORT_ID" "$CPDEL_OUT")"
+  info "DELETE /v1/fleet/supports/$SUPPORT_ID (journey session) -> HTTP ${CPDCODE:-000}: $(head -c 120 "$CPDEL_OUT" | tr -d '\n')"
+fi
+CP_AFTER="$(jcp_get "/v1/barkparks?scope=all" | python3 -c '
 import json, sys
 try:
     rows = (json.load(sys.stdin) or {}).get("barkparks") or []
@@ -1299,7 +1509,7 @@ info "4. CP support rows (fleet_role=support) with mvp0proof- names: $CP_AFTER"
 # Now deprovision the R1 main (CP-deprovisionable — the credential-empty half).
 say "      \$ DELETE $CP_BASE/v1/barkparks/$MAIN_ID   (deprovision the R1 main — CP-side, credential-empty)"
 MDEL_OUT="$WORKDIR/main-delete.json"
-MDCODE="$(cp_delete_code "/v1/barkparks/$MAIN_ID" "$MDEL_OUT")"
+MDCODE="$(jcp_delete_code "/v1/barkparks/$MAIN_ID" "$MDEL_OUT")"
 info "main deprovision -> HTTP ${MDCODE:-000}: $(head -c 160 "$MDEL_OUT" | tr -d '\n')"
 case "${MDCODE:-000}" in
   200|202) MAIN_REMOVED=1 ;;
