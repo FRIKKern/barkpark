@@ -4647,3 +4647,12 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--muted-text); border: 1px solid var(--border); border-radius: 999px;
   vertical-align: 1px;
 }
+
+/* MVP-0 offload: file an order to a support + watch it (pdf-mvp0-offload-spa).
+   The action + the live watch ladder (the SHARED .new-steps grammar) sit under
+   a live support's BYO-key step. Appended at the app.css tail only (OC9). */
+.offload-action { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 2px; }
+.offload-slot:empty { display: none; }
+.offload-watch { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.offload-watch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.offload-watch-title { font-weight: 600; font-size: 13px; color: var(--text); }

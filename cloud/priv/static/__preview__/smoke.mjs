@@ -2070,6 +2070,69 @@ const EXPECTATIONS = {
     includes: ["fleet-support-card", "No support servers yet", 'id="fleet-add-support-cta"'],
     excludes: ["fleet-support-row"],
   },
+  // ── MVP-0 OFFLOAD (pdf-mvp0-offload-spa): the order watch ladder ───────────
+  // The offload button renders on the ONLINE support row (static, observable in
+  // #instance-body). The watch panel itself mounts AFTER a click+submit, which
+  // this fake DOM can't drive, so the ladder is proven the fleet-support-online
+  // way: fold the SAME task + roster fixtures the poll consumes through the pure
+  // hooks and assert the rung + markup.
+  "offload-filing": {
+    what: "offload — the order is filed (open); the ladder folds to the FILED rung from the task + roster reads",
+    check(reg, hooks, ctx) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.includes("data-offload-support="), "the Offload button must render on a live support");
+      assert.ok(body.includes("Offload a task"), "the Offload action label renders");
+      assert.ok(body.includes("data-offload-slot="), "the watch slot mounts on the row");
+      assert.ok(ctx.calls.some((c) => c.method === "POST" && /\/app-token$/.test(c.path)),
+        "the member app token must be minted (in-memory only)");
+      const task = route("offload-filing", "GET", "/v1/tasks/" + "x");
+      const roster = route("offload-filing", "GET", "/v1/fleet/roster");
+      const watch = hooks.offloadWatchStage(task.body.doc, roster.body.documents, "muscle-2");
+      assert.equal(watch.stage, "filed");
+      assert.equal(watch.terminal, false);
+      const panel = hooks.offloadWatchPanelHtml({ id: "x", title: "Summarise the release notes" }, watch);
+      assert.ok(panel.includes("new-steps"), "the ladder renders through the SHARED step grammar");
+      assert.ok(panel.includes("waiting for the support to claim"), "the filed rung label");
+    },
+  },
+  "offload-working": {
+    what: "offload — claimed AND working; the ladder folds filed→claimed→working from the task (in_progress) + roster (working) reads",
+    check(reg, hooks) {
+      const task = route("offload-working", "GET", "/v1/tasks/" + "x");
+      const roster = route("offload-working", "GET", "/v1/fleet/roster");
+      const watch = hooks.offloadWatchStage(task.body.doc, roster.body.documents, "muscle-2");
+      assert.equal(watch.stage, "working");
+      assert.equal(watch.terminal, false);
+      const panel = hooks.offloadWatchPanelHtml({ id: "x", title: "Summarise the release notes" }, watch, 12000);
+      assert.ok(panel.includes("Working the order"), "the working rung label");
+      assert.ok(panel.includes('data-step="working"'), "the working rung renders in the ladder");
+    },
+  },
+  "offload-done": {
+    what: "offload — DONE terminal (the poll stops); the ladder paints every rung done + the success banner",
+    check(reg, hooks) {
+      const task = route("offload-done", "GET", "/v1/tasks/" + "x");
+      const roster = route("offload-done", "GET", "/v1/fleet/roster");
+      const watch = hooks.offloadWatchStage(task.body.doc, roster.body.documents, "muscle-2");
+      assert.equal(watch.stage, "done");
+      assert.equal(watch.terminal, true);
+      const panel = hooks.offloadWatchPanelHtml({ id: "x", title: "Summarise the release notes" }, watch);
+      assert.ok(panel.includes("notice-ok"), "the done terminal shows the success banner");
+    },
+  },
+  "offload-blocked": {
+    what: "offload — BLOCKED terminal; the ladder snaps and shows the honest blocked banner",
+    check(reg, hooks) {
+      const task = route("offload-blocked", "GET", "/v1/tasks/" + "x");
+      const roster = route("offload-blocked", "GET", "/v1/fleet/roster");
+      const watch = hooks.offloadWatchStage(task.body.doc, roster.body.documents, "muscle-2");
+      assert.equal(watch.stage, "blocked");
+      assert.equal(watch.terminal, true);
+      const panel = hooks.offloadWatchPanelHtml({ id: "x", title: "Summarise the release notes" }, watch);
+      assert.ok(panel.includes("notice-warn"), "the blocked terminal shows the honest banner");
+      assert.ok(panel.includes('class="new-step failed'), "the ladder snaps on the failed rung");
+    },
+  },
 };
 
 function countMatches(hay, needle) {
