@@ -7,7 +7,7 @@
 // The persisted config (MMKV) is the single source of truth; every
 // transition writes it first, then mirrors it into React state — reopening
 // the app lands exactly where the user left off (last-location memory).
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 
@@ -59,7 +59,12 @@ export default function App() {
     setTab('tasks')
   }, [])
 
-  const connection = connectionFromConfig(config)
+  // Memoized on the config object: connection identity must be STABLE across
+  // re-renders — every consumer keys effects on it (the Tasks tab's client +
+  // listen() stream, the chat session store, the rollup poll). A fresh object
+  // per render would resubscribe streams on every render, and the rollup
+  // poll's own setState would then feed that loop.
+  const connection = useMemo(() => connectionFromConfig(config), [config])
 
   // Needs-you badge (ratified R3): blocked sessions from GET /v1/chat/rollup.
   const rollup = useChatRollup(connection)
