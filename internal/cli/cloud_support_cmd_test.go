@@ -636,6 +636,11 @@ func TestCloudSupportAddHappyPath(t *testing.T) {
 	for _, want := range []string{
 		"BARKPARK_ALLOW_BUNDLE_IMPORT=1",
 		"install-cli.sh",
+		// task-2ba0270056e7da6e: the target workspace is ensured on the box
+		// BEFORE the merge-import (create tolerates already-exists), so a
+		// template-workspace bundle lands on the proven adopt branch.
+		"POST http://localhost:4000/api/workspaces",
+		`"slug":"default"`,
 		"--file /opt/barkpark-fleet/dataset.tar --yes --merge",
 		"http://localhost:4000",
 		"fleet-run.sh",
@@ -650,6 +655,21 @@ func TestCloudSupportAddHappyPath(t *testing.T) {
 		if !strings.Contains(scripts, want) {
 			t.Fatalf("no on-box step contains %q\nscripts:\n%s", want, scripts)
 		}
+	}
+
+	// Ordering: the workspace-ensure step runs BEFORE the merge-import.
+	ensureIdx, importIdx := -1, -1
+	for i, s := range runner.steps {
+		joined := strings.Join(s.Argv, " ")
+		if strings.Contains(joined, "POST http://localhost:4000/api/workspaces") {
+			ensureIdx = i
+		}
+		if strings.Contains(joined, "workspace import") {
+			importIdx = i
+		}
+	}
+	if ensureIdx == -1 || importIdx == -1 || ensureIdx > importIdx {
+		t.Fatalf("workspace-ensure must run before the merge-import (ensure=%d import=%d)", ensureIdx, importIdx)
 	}
 
 	// The minted ledger token rides ONLY inside the redacted env step — it is

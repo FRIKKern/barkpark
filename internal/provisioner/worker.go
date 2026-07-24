@@ -916,6 +916,30 @@ func (w *Worker) succeed(ctx context.Context, jobID, claimToken, ip, adminToken 
 	return w.postJSON(ctx, fmt.Sprintf(succeedPathFmt, jobID), claimBody(body, claimToken))
 }
 
+// succeedSupport reports a provisioned SUPPORT box's IP and, when the chain
+// minted one, the OPAQUE id of the support's ledger token as `token_id`
+// (task-5866ec745efcd7f7). The CP persists it as the row's fleet_token_id —
+// the SOLE durable token-id holder (PDF-D68), which `bp cloud support remove`
+// later revokes. ADDITIVE contract, tolerant both ways: the key is sent ONLY
+// when non-empty (the ip-only body is byte-identical to before for a mint
+// response that carried no id), and an OLD control plane simply ignores it.
+// The token VALUE never rides here — only its opaque, non-secret id.
+func (w *Worker) succeedSupport(ctx context.Context, jobID, claimToken, ip, tokenID string) error {
+	body := map[string]any{"ip": ip}
+	if tokenID != "" {
+		body["token_id"] = tokenID
+	}
+	return w.postJSON(ctx, fmt.Sprintf(succeedPathFmt, jobID), claimBody(body, claimToken))
+}
+
+// succeedSupportWithRetry is succeedSupport through the shared transient-retry
+// loop (mirrors succeedWithRetry: 5xx/transport retries, 4xx stops).
+func (w *Worker) succeedSupportWithRetry(ctx context.Context, jobID, claimToken, ip, tokenID string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error {
+		return w.succeedSupport(ctx, jobID, claimToken, ip, tokenID)
+	})
+}
+
 // fail reports a provision failure; the barkpark stays provisioning for retry.
 func (w *Worker) fail(ctx context.Context, jobID, claimToken, errMsg string) error {
 	return w.postJSON(ctx, fmt.Sprintf(failPathFmt, jobID), claimBody(map[string]any{"error": errMsg}, claimToken))
@@ -1468,7 +1492,7 @@ func (w *Worker) RunOnceSupport(ctx context.Context) (claimed bool, err error) {
 		pto = DefaultSupportProvisionTimeout
 	}
 	provCtx, cancel := context.WithTimeout(ctx, pto)
-	ip, teardown, provErr := w.SupportProvision(provCtx, spec)
+	ip, tokenID, teardown, provErr := w.SupportProvision(provCtx, spec)
 	cancel()
 
 	if provErr != nil {
@@ -1485,8 +1509,10 @@ func (w *Worker) RunOnceSupport(ctx context.Context) (claimed bool, err error) {
 	// Chain SUCCEEDED: a paid box is live but the control plane does not yet
 	// know (its succeed POST is the only signal). Retry transient report
 	// failures; on a report that never lands, tear the box down so no BILLED
-	// box is orphaned — the RunOnce money-edge, applied to a support.
-	if rerr := w.succeedWithRetry(ctx, spec.Job.ID, spec.Job.ClaimToken, ip, "", nil); rerr != nil {
+	// box is orphaned — the RunOnce money-edge, applied to a support. The
+	// minted ledger token's opaque id rides along (task-5866ec745efcd7f7) so
+	// the CP row's fleet_token_id is set and remove can revoke the token.
+	if rerr := w.succeedSupportWithRetry(ctx, spec.Job.ID, spec.Job.ClaimToken, ip, tokenID); rerr != nil {
 		if teardown != nil {
 			if cerr := teardown(ctx); cerr != nil {
 				return false, fmt.Errorf("report support succeed for job %s failed (%v) AND orphan teardown failed: %w", spec.Job.ID, rerr, cerr)

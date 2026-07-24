@@ -102,6 +102,7 @@ type supportHarness struct {
 	rosterLive   bool // true → roster returns the live row
 	rosterCalls  int
 	mintToken    string
+	mintTokenID  string // "" → the mint response carries NO token_id key
 	parentToken  string
 	exportedTars int
 
@@ -118,6 +119,7 @@ func newSupportHarness(t *testing.T) *supportHarness {
 	h := &supportHarness{
 		rosterLive:  true,
 		mintToken:   "sup-ledger-tok-abc123",
+		mintTokenID: "tid-1",
 		parentToken: "parent-admin-tok-hunter2-XYZ",
 		echoSecret:  "would-be-minted-tok-9f8e7d",
 	}
@@ -148,7 +150,11 @@ func newSupportHarness(t *testing.T) *supportHarness {
 				echoFail(w)
 				return
 			}
-			fmt.Fprintf(w, `{"token":%q,"token_id":"tid-1"}`, h.mintToken)
+			if h.mintTokenID != "" {
+				fmt.Fprintf(w, `{"token":%q,"token_id":%q}`, h.mintToken, h.mintTokenID)
+			} else {
+				fmt.Fprintf(w, `{"token":%q}`, h.mintToken)
+			}
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/workspaces/"):
 			h.add("export")
 			h.mu.Lock()
@@ -315,6 +321,15 @@ func TestRunSupportWith_ClaimsAndDispatchesHappyPath(t *testing.T) {
 	if ct, _ := sb["claim_token"].(string); ct != "ct-1" {
 		t.Fatalf("succeed did not echo the claim token, got %q", ct)
 	}
+	// task-5866ec745efcd7f7: the minted ledger token's OPAQUE id rides the
+	// succeed body so the CP row's fleet_token_id is set and `bp cloud support
+	// remove` can revoke the token. The token VALUE itself must never ride.
+	if tid, _ := sb["token_id"].(string); tid != "tid-1" {
+		t.Fatalf("succeed must carry the minted token_id, got %q in %s", tid, h.succeeds[0])
+	}
+	if strings.Contains(h.succeeds[0], h.mintToken) {
+		t.Fatal("CUSTODY VIOLATION: the succeed body carried the ledger token VALUE")
+	}
 
 	// PDF-D84: steps are reported ONLY as create/configure/content/verify/ready.
 	seen := map[string]bool{}
@@ -375,6 +390,105 @@ func TestRunSupportWith_ClaimsAndDispatchesHappyPath(t *testing.T) {
 	}
 	if len(deleted) != 0 {
 		t.Fatalf("no teardown expected on the happy path, deleted: %v", deleted)
+	}
+}
+
+// TestRunOnceSupport_NoMintTokenID_OmitsSucceedKey proves the additive succeed
+// contract stays byte-tolerant (task-5866ec745efcd7f7): a mint response that
+// carries NO token_id yields a succeed body WITHOUT the token_id key — the
+// pre-fix ip-only shape — so an old parent main degrades cleanly instead of
+// sending an empty-string id the CP would persist as garbage.
+func TestRunOnceSupport_NoMintTokenID_OmitsSucceedKey(t *testing.T) {
+	h := newSupportHarness(t)
+	h.mintTokenID = "" // the mint envelope has no id to report
+	runner := &supportFakeRunner{capacityJSON: `{"size_class":"standard"}`}
+	var deleted []string
+	w := h.worker(runner, &deleted)
+
+	if _, err := w.RunOnceSupport(context.Background()); err != nil {
+		t.Fatalf("RunOnceSupport: %v", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.succeeds) != 1 {
+		t.Fatalf("want one succeed, got %d (fails: %v)", len(h.succeeds), h.fails)
+	}
+	var sb map[string]any
+	if err := json.Unmarshal([]byte(h.succeeds[0]), &sb); err != nil {
+		t.Fatalf("succeed body not JSON: %v", err)
+	}
+	if _, present := sb["token_id"]; present {
+		t.Fatalf("token_id must be ABSENT when the mint carried no id, got: %s", h.succeeds[0])
+	}
+}
+
+// TestSupport_WorkspaceEnsureStep proves the content step's on-box ordering fix
+// (task-2ba0270056e7da6e): before the merge-import runs, a workspace-ensure
+// step POSTs /api/workspaces {name,slug} for the CLAIM's workspace with the
+// BOX's admin token (already-exists tolerated), so a template-launched parent's
+// bootstrap-workspace bundle always lands on the live-proven PDS-D9 adopt
+// branch instead of the fresh-box slug-absent branch that 500'd live.
+func TestSupport_WorkspaceEnsureStep(t *testing.T) {
+	h := newSupportHarness(t)
+	// A TEMPLATE-shaped claim: the parent's bootstrap workspace slug is the
+	// instance slug, which no fresh box has — the exact live-failure shape.
+	h.claimJSON = func() string {
+		return fmt.Sprintf(`{"job":{"id":"job-sup-tmpl","claim_token":"ct-t"},"barkpark":{"id":"bp-2","name":"helper","slug":"helper","region":"nbg1","server_type":"cx23"},"support":{"parent_url":%q,"parent_admin_token":%q,"dataset":"production","workspace":"mvp0proof-m-260724152727","name":"helper"}}`,
+			h.main.URL, h.parentToken)
+	}
+	runner := &supportFakeRunner{capacityJSON: `{"size_class":"standard"}`}
+	var deleted []string
+	w := h.worker(runner, &deleted)
+
+	if _, err := w.RunOnceSupport(context.Background()); err != nil {
+		t.Fatalf("RunOnceSupport: %v", err)
+	}
+
+	h.mu.Lock()
+	if len(h.succeeds) != 1 {
+		t.Fatalf("want one succeed, got %d (fails: %v)", len(h.succeeds), h.fails)
+	}
+	h.mu.Unlock()
+
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	ensureIdx, importIdx := -1, -1
+	for i, s := range runner.steps {
+		joined := strings.Join(s.Argv, " ")
+		switch {
+		case strings.Contains(joined, "POST http://localhost:4000/api/workspaces"):
+			ensureIdx = i
+			// The claim's workspace slug is threaded into BOTH the JSON body keys.
+			if !strings.Contains(joined, `"name":"mvp0proof-m-260724152727"`) ||
+				!strings.Contains(joined, `"slug":"mvp0proof-m-260724152727"`) {
+				t.Fatalf("the ensure step must carry the claim's workspace slug, got: %s", joined)
+			}
+			// The BOX admin token drives it (and is redacted) — never the parent's.
+			if !strings.Contains(joined, "bp_admin_boxtoken123") {
+				t.Fatal("the ensure step must authenticate with the box's own admin token")
+			}
+			if strings.Contains(joined, h.parentToken) {
+				t.Fatal("CUSTODY VIOLATION: the parent admin token reached the ensure script")
+			}
+			if len(s.Redact) == 0 {
+				t.Fatal("the workspace-ensure step must Redact the box admin token")
+			}
+		case strings.Contains(joined, "workspace import"):
+			importIdx = i
+			if !strings.Contains(joined, "workspace import 'mvp0proof-m-260724152727'") {
+				t.Fatalf("the import step must target the claim's workspace, got: %s", joined)
+			}
+		}
+	}
+	if ensureIdx == -1 {
+		t.Fatal("the workspace-ensure step never ran")
+	}
+	if importIdx == -1 {
+		t.Fatal("the merge-import step never ran")
+	}
+	if ensureIdx > importIdx {
+		t.Fatalf("the workspace-ensure step must run BEFORE the merge-import (ensure=%d import=%d)", ensureIdx, importIdx)
 	}
 }
 
