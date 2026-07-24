@@ -123,16 +123,21 @@ func (s GoLiveSpec) healthTarget() string {
 //     encryption key opens another's.
 //   - PreviewJWTSecret is PREVIEW_JWT_SECRET, the draft-preview JWT signing key. A
 //     shared value lets one tenant mint valid preview tokens for another.
+//   - ReleaseCaptureHMAC is BARKPARK_RELEASE_CAPTURE_HMAC_SECRET, the
+//     release-capture HMAC signing secret. runtime.exs REQUIRES at least 32 bytes
+//     of it in prod (migrate dies without it) — and a shared value lets one
+//     tenant forge another's release-capture signatures.
 //
 // AdminToken is the clean-profile admin bearer (reused from
 // setup.GenerateAdminToken). They are NEVER logged or returned to the caller in
 // the clear beyond the LiveServer hand-off.
 type Secrets struct {
-	SecretKeyBase    string
-	Kek              string
-	CloakKey         string
-	PreviewJWTSecret string
-	AdminToken       string
+	SecretKeyBase      string
+	Kek                string
+	CloakKey           string
+	PreviewJWTSecret   string
+	ReleaseCaptureHMAC string
+	AdminToken         string
 }
 
 // LiveServer is the verified, registered outcome of a go-live: the popped host,
@@ -649,7 +654,7 @@ func validateSecretKeyBase(secret string) error {
 	return nil
 }
 
-// validateSecrets guards ALL four per-instance secret VALUES the install step
+// validateSecrets guards ALL five per-instance secret VALUES the install step
 // single-quotes into its shell. It runs before secretsInstallStep so a malformed
 // draw fails the chain closed rather than shelling out a broken command.
 func validateSecrets(s Secrets) error {
@@ -658,10 +663,17 @@ func validateSecrets(s Secrets) error {
 		{"BARKPARK_KEK", s.Kek},
 		{"BARKPARK_CLOAK_KEY", s.CloakKey},
 		{"PREVIEW_JWT_SECRET", s.PreviewJWTSecret},
+		{"BARKPARK_RELEASE_CAPTURE_HMAC_SECRET", s.ReleaseCaptureHMAC},
 	} {
 		if err := validateSecretValue(kv.name, kv.val); err != nil {
 			return err
 		}
+	}
+	// runtime.exs raises in prod below 32 bytes (byte_size on the STRING) — a
+	// short draw must fail the provision chain closed HERE, not at migrate on
+	// the shipped box.
+	if len(s.ReleaseCaptureHMAC) < 32 {
+		return fmt.Errorf("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET is %d bytes; runtime.exs requires at least 32", len(s.ReleaseCaptureHMAC))
 	}
 	return nil
 }
@@ -740,11 +752,12 @@ func (m MailRelay) Validate() error {
 // signing/encryption key (cross-tenant session/token forgery + content
 // decryption) or dies at `mix ecto.migrate` when runtime.exs raises "BARKPARK_KEK
 // is not set". This step MUST run BEFORE migrate: migrate sources .env, and
-// runtime.exs REQUIRES the KEK (+ cloak key + preview secret + signing secret) in
-// prod. Each value rides in via its own BP_* env so it never lands in the step
-// Title/Cmd (which may be narrated/logged) — only in the Argv the SSH runner
-// base64-encodes and sends, mirroring adminTokenStep. The .env edit is idempotent:
-// one grep -v strips any existing line for ALL four keys, each minted value is
+// runtime.exs REQUIRES the KEK (+ cloak key + preview secret + release-capture
+// HMAC + signing secret) in prod. Each value rides in via its own BP_* env so it
+// never lands in the step Title/Cmd (which may be narrated/logged) — only in the
+// Argv the SSH runner base64-encodes and sends, mirroring adminTokenStep. The
+// .env edit is idempotent:
+// one grep -v strips any existing line for ALL five keys, each minted value is
 // appended from its $BP_* via printf "%s" (never interpolated into the script
 // TEXT), and the file is swapped in with mv — so re-running the chain never
 // duplicates a line. The single restart makes Phoenix re-read every key at boot (it
@@ -754,19 +767,21 @@ func secretsInstallStep(s Secrets, mail MailRelay) CaddyStep {
 	script := `export BP_SKB='` + s.SecretKeyBase + `'; ` +
 		`export BP_KEK='` + s.Kek + `'; ` +
 		`export BP_CLOAK='` + s.CloakKey + `'; ` +
-		`export BP_PREVIEW='` + s.PreviewJWTSecret + `'; `
+		`export BP_PREVIEW='` + s.PreviewJWTSecret + `'; ` +
+		`export BP_RCH='` + s.ReleaseCaptureHMAC + `'; `
 
 	// grep -v strip list (idempotency) + the append block, both grown when the
 	// shared mail relay is injected. The strip removes any prior line for a key
 	// so a re-run never duplicates.
-	strip := `-e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET='`
+	strip := `-e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET=' -e '^BARKPARK_RELEASE_CAPTURE_HMAC_SECRET='`
 	appends := `printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB" >> ` + envFile + `.bpnew; ` +
 		`printf 'BARKPARK_KEK=%s\n' "$BP_KEK" >> ` + envFile + `.bpnew; ` +
 		`printf 'BARKPARK_CLOAK_KEY=%s\n' "$BP_CLOAK" >> ` + envFile + `.bpnew; ` +
-		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW" >> ` + envFile + `.bpnew; `
+		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW" >> ` + envFile + `.bpnew; ` +
+		`printf 'BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=%s\n' "$BP_RCH" >> ` + envFile + `.bpnew; `
 
-	redact := []string{s.SecretKeyBase, s.Kek, s.CloakKey, s.PreviewJWTSecret}
-	cmd := "install per-instance SECRET_KEY_BASE + BARKPARK_KEK + BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET (values redacted)"
+	redact := []string{s.SecretKeyBase, s.Kek, s.CloakKey, s.PreviewJWTSecret, s.ReleaseCaptureHMAC}
+	cmd := "install per-instance SECRET_KEY_BASE + BARKPARK_KEK + BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET + BARKPARK_RELEASE_CAPTURE_HMAC_SECRET (values redacted)"
 
 	// Point the instance at the shared transactional-mail relay so magic-link /
 	// password-reset / verify-email actually deliver (else Barkpark.Mailer stays
@@ -825,8 +840,11 @@ func generateBase64Key() (string, error) {
 //     (Studio/login) on fresh instances while the stateless API stayed green.
 //     64 raw bytes ≈ 86 chars, matching deploy.sh's `mix phx.gen.secret`.
 //   - admin token: setup.GenerateAdminToken (base64url of 24 bytes + prefix).
-//   - BARKPARK_KEK / BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET: base64 of 32 random
-//     bytes each (generateBase64Key) — the KEK MUST Base.decode64 to 32 bytes.
+//   - BARKPARK_KEK / BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET /
+//     BARKPARK_RELEASE_CAPTURE_HMAC_SECRET: base64 of 32 random bytes each
+//     (generateBase64Key) — the KEK MUST Base.decode64 to 32 bytes, and the
+//     release-capture HMAC's 44-char encoding clears runtime.exs's 32-byte
+//     floor on the STRING.
 func defaultSecretGen() (Secrets, error) {
 	kb := make([]byte, 64)
 	if _, err := rand.Read(kb); err != nil {
@@ -845,16 +863,21 @@ func defaultSecretGen() (Secrets, error) {
 	if err != nil {
 		return Secrets{}, fmt.Errorf("generate PREVIEW_JWT_SECRET: %w", err)
 	}
+	releaseCapture, err := generateBase64Key()
+	if err != nil {
+		return Secrets{}, fmt.Errorf("generate BARKPARK_RELEASE_CAPTURE_HMAC_SECRET: %w", err)
+	}
 	tok, err := setup.GenerateAdminToken()
 	if err != nil {
 		return Secrets{}, fmt.Errorf("generate admin token: %w", err)
 	}
 	return Secrets{
-		SecretKeyBase:    skb,
-		Kek:              kek,
-		CloakKey:         cloak,
-		PreviewJWTSecret: preview,
-		AdminToken:       tok,
+		SecretKeyBase:      skb,
+		Kek:                kek,
+		CloakKey:           cloak,
+		PreviewJWTSecret:   preview,
+		ReleaseCaptureHMAC: releaseCapture,
+		AdminToken:         tok,
 	}, nil
 }
 
@@ -937,10 +960,11 @@ func (realStepRunner) Run(ctx context.Context, s CaddyStep) error {
 //
 //  1. assign      — pop a ready host from the warm pool (triggers a refill).
 //  2. secrets     — mint per-instance SECRET_KEY_BASE, BARKPARK_KEK,
-//     BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET + admin token.
+//     BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET,
+//     BARKPARK_RELEASE_CAPTURE_HMAC_SECRET + admin token.
 //  3. dns         — UpsertRecord an A record <name>.<zone> → the host IP.
 //  4. caddy       — run the Caddy/TLS steps (sets PHX_HOST/PHX_SCHEME).
-//  5. secrets-install — write the four per-instance secrets into .env + restart
+//  5. secrets-install — write the five per-instance secrets into .env + restart
 //     (BEFORE migrate — runtime.exs requires BARKPARK_KEK in prod).
 //  6. migrate     — run the mix ecto.migrate step.
 //  7. admin-token — install the minted admin token (after migrate).
