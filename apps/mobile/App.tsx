@@ -22,9 +22,11 @@ import {
   rememberAndSave,
   saveCloudSession,
 } from './src/state/appConfig'
+import { useChatRollup } from './src/chat/useChatRollup'
+import { ChatScreen } from './src/screens/ChatScreen'
 import { ConnectScreen } from './src/screens/ConnectScreen'
 import { LoginScreen, type CloudSession } from './src/screens/LoginScreen'
-import { ChatScreen, PapersScreen } from './src/screens/StubScreens'
+import { PapersScreen } from './src/screens/StubScreens'
 import { TasksScreen } from './src/screens/TasksScreen'
 import { TabBar, type TabKey } from './src/ui/TabBar'
 import { useTheme } from './src/ui/theme'
@@ -59,6 +61,10 @@ export default function App() {
 
   const connection = connectionFromConfig(config)
 
+  // Needs-you badge (ratified R3): blocked sessions from GET /v1/chat/rollup.
+  const rollup = useChatRollup(connection)
+  const chatBadge = rollup?.counts.blocked ?? 0
+
   let body
   if (!hasCloudSession(config)) {
     body = <LoginScreen onLoggedIn={onLoggedIn} />
@@ -69,10 +75,10 @@ export default function App() {
       <View style={styles.shell}>
         <View style={styles.content}>
           {tab === 'tasks' && <TasksScreen connection={connection} />}
-          {tab === 'chat' && <ChatScreen />}
+          {tab === 'chat' && <ChatScreen connection={connection} />}
           {tab === 'papers' && <PapersScreen />}
         </View>
-        <TabBar active={tab} onSelect={setTab} />
+        <TabBar active={tab} onSelect={setTab} badges={{ chat: chatBadge }} />
       </View>
     )
   }

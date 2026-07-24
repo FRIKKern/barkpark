@@ -1,6 +1,7 @@
-// Chat + Papers stubs (charter D14: three STUB tabs, NO paper reader — the
-// renderer bet is quarantined in mob-w1-webview-spike). Honest placeholders:
-// they say what's coming instead of pretending to be empty states.
+// Papers stub (charter D14: NO paper reader until the renderer spike's
+// verdict — the Chat stub graduated to the wave-2 full floor, ChatScreen.tsx).
+// Honest placeholder: it says what's coming instead of pretending to be an
+// empty state.
 import { StyleSheet, Text, View } from 'react-native'
 
 import { useTheme } from '../ui/theme'
@@ -12,15 +13,6 @@ function Stub({ title, body }: { title: string; body: string }) {
       <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
       <Text style={[styles.body, { color: theme.textMuted }]}>{body}</Text>
     </View>
-  )
-}
-
-export function ChatScreen() {
-  return (
-    <Stub
-      title="Chat"
-      body="The full chat floor — send, stream, interrupt, approve and deny — arrives in wave 2 as the third sibling client of /v1/chat."
-    />
   )
 }
 
