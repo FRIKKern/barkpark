@@ -154,6 +154,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/attach-domain-jobs/:id/succeed worker  mark an attach-domain done
       POST    /v1/internal/attach-domain-jobs/:id/fail worker  mark an attach-domain failed {error}
       POST    /v1/internal/resurrect-jobs/claim worker  claim oldest pending resurrect job
+      POST    /v1/internal/support-jobs/claim worker  claim oldest pending provision_support job (+pinned support map)
       GET     /v1/internal/barkparks worker  list registry rows for the provisioner
       POST    /v1/internal/barkparks worker  create a registry row (provisioner-side)
       POST    /v1/internal/barkparks/:id/deprovision worker  enqueue a deprovision for one box
@@ -1853,6 +1854,12 @@ defmodule BarkparkCloud.Web.Router do
       not (is_binary(conn.body_params["name"]) and conn.body_params["name"] != "") ->
         json(conn, 422, %{error: "invalid", details: %{name: ["can't be blank"]}})
 
+      # PDF-D83: mode:"provision" is the CP-provisioned add-support path — register
+      # a host-nil support row, then enqueue a provision_support job (202). The
+      # register-only mode (no `mode` param) falls through unchanged.
+      conn.body_params["mode"] == "provision" ->
+        fleet_provision_support(conn)
+
       not is_binary(conn.body_params["parent_id"]) ->
         json(conn, 422, %{error: "invalid", details: %{parent_id: ["can't be blank"]}})
 
@@ -1879,17 +1886,12 @@ defmodule BarkparkCloud.Web.Router do
               token_id: string_param_or_nil(conn.body_params["token_id"])
             }
 
+            # PDF-D86: register_support_barkpark/2 is quota-exempt — a support
+            # never returns :limit_reached, so a saturated ceiling can't 403 here.
             case Registry.register_support_barkpark(team, attrs) do
               {:ok, support} ->
                 push_event(team.id, "fleet")
                 json(conn, 201, %{barkpark: barkpark_json(support)})
-
-              {:error, :limit_reached} ->
-                json(conn, 403, %{
-                  error: "limit_reached",
-                  limit: Billing.barkpark_limit(team),
-                  upgrade_path: "/v1/billing/checkout"
-                })
 
               {:error, %Ecto.Changeset{} = cs} ->
                 json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -1899,6 +1901,88 @@ defmodule BarkparkCloud.Web.Router do
           _ ->
             json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # PDF-D83/D86 (Personal Dev Fleet MVP-0) — the mode:"provision" arm of POST
+  # /v1/fleet/supports. Body {name, barkpark_id: <parent main id>, mode:
+  # "provision", server_type?}. Sequence: resolve the parent main (team-scoped) →
+  # require its admin token (409 no_admin_token — the token is the credential
+  # spine of the claim payload, D93; mirrors the mint_app_token arm) → register a
+  # host-NIL support row FIRST (quota-exempt, D86) → enqueue the provision_support
+  # job → push a fleet tick → 202 {barkpark, job_id}. `barkpark_id` names the
+  # parent (a `parent_id` alias is accepted so the register-only body shape still
+  # works). Name validity + auth were already gated by the route's cond.
+  defp fleet_provision_support(conn) do
+    team = conn.assigns.current_team
+    parent_id = conn.body_params["barkpark_id"] || conn.body_params["parent_id"]
+
+    case Registry.get_barkpark(parent_id) do
+      # A support may never be a parent — two-tier is the whole shape (mirror the
+      # register-only refusal so an in-team support parent gets a clear 422).
+      %Barkpark{team_id: tid, fleet_role: "support"} when tid == team.id ->
+        json(conn, 422, %{
+          error: "invalid_parent",
+          detail: "a support cannot be a parent (fleets are two-tier: main -> supports)"
+        })
+
+      %Barkpark{team_id: tid} = parent when tid == team.id ->
+        case Registry.reveal_admin_token(parent) do
+          {:ok, admin_token} when is_binary(admin_token) and admin_token != "" ->
+            do_fleet_provision_support(conn, team, parent)
+
+          # The parent has no admin token → the provision_support claim payload
+          # would carry a null credential and the worker could never bind/roster
+          # the box. Refuse at ENQUEUE (409) so the job never exists in a broken
+          # state (PDF-D83), mirroring mint_app_token's no_admin_token arm.
+          {:ok, nil} ->
+            json(conn, 409, %{
+              error: "no_admin_token",
+              detail:
+                "the parent main has no admin token yet — it must be live before a support can be provisioned"
+            })
+
+          :error ->
+            json(conn, 500, %{error: "decrypt_failed"})
+        end
+
+      # Cross-team, unknown, or malformed parent id → 404 (no existence leak).
+      _ ->
+        json(conn, 404, %{error: "not_found"})
+    end
+  end
+
+  # Register the host-nil support row FIRST, then enqueue its provision_support
+  # job (PDF-D83 ordering — the row must exist before the worker can claim it).
+  defp do_fleet_provision_support(conn, team, parent) do
+    attrs = %{
+      name: conn.body_params["name"],
+      slug: slugify(conn.body_params["name"]),
+      # host NIL — the CP provisioner fills the box in.
+      host: nil,
+      parent_id: parent.id,
+      token_id: nil,
+      server_type: string_param_or_nil(conn.body_params["server_type"])
+    }
+
+    case Registry.register_support_barkpark(team, attrs) do
+      {:ok, support} ->
+        case Registry.enqueue_support_provision_job(support) do
+          {:ok, job} ->
+            push_event(team.id, "fleet")
+            json(conn, 202, %{barkpark: barkpark_json(support), job_id: job.id})
+
+          # A brand-new row can't already hold an active job, but stay honest
+          # rather than 500 if a race ever produces one.
+          {:error, :already_provisioning} ->
+            json(conn, 409, %{error: "already_provisioning", barkpark: barkpark_json(support)})
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        end
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        json(conn, 422, %{error: "invalid", details: errors(cs)})
     end
   end
 
@@ -5042,6 +5126,28 @@ defmodule BarkparkCloud.Web.Router do
 
         {job, barkpark} ->
           json(conn, 200, resurrect_claim_json(job, barkpark))
+      end
+    end
+  end
+
+  # POST /v1/internal/support-jobs/claim → claim the oldest pending
+  # `provision_support` job (FOR UPDATE SKIP LOCKED). 200 with the provision claim
+  # payload PLUS the PINNED `support` map (parent url + admin token, dataset,
+  # workspace, name — the credential spine the Go fleet provisioner binds the box
+  # with, PDF-D83/D89/D93), or 204 when none is pending. Kind-filtered so a
+  # support job is never handed to a main-provision worker.
+  post "/v1/internal/support-jobs/claim" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_next_support_provision_job(generate_claim_token()) do
+        nil ->
+          send_resp(conn, 204, "")
+
+        {job, barkpark} ->
+          json(conn, 200, support_provision_claim_json(job, barkpark))
       end
     end
   end
@@ -9108,6 +9214,46 @@ defmodule BarkparkCloud.Web.Router do
     claim_json(job, barkpark)
     |> Map.put(:bundle_ref, job.bundle_ref)
   end
+
+  # PDF-D83/D89/D93: the support provisioner's claim payload = the FULL provision
+  # claim (region/size off the support row, env/agent-token as usual) PLUS the
+  # PINNED `support` map. The Go slice binds the box + joins the fleet from these
+  # exact keys — DO NOT rename them:
+  #   parent_url         — the parent MAIN's public url (the box beats/rosters home)
+  #   parent_admin_token — the main's DECRYPTED admin token (roster is :token_root;
+  #                        the credential spine, minted-once server-to-box crossing)
+  #   dataset            — always "production" (the support serves the main's prod)
+  #   workspace          — the main's bootstrap_workspace (scope the support binds to)
+  #   name               — the support row's name
+  # The parent is resolved off the support's `fleet_parent_id`. A vanished parent
+  # or a stripped admin token degrades to nil (the enqueue-time 409 guard makes
+  # that path near-impossible; the worker then fails the job honestly rather than
+  # the CP crashing).
+  defp support_provision_claim_json(job, barkpark) do
+    claim_json(job, barkpark)
+    |> Map.put(:support, support_claim_map(barkpark))
+  end
+
+  defp support_claim_map(%Barkpark{fleet_parent_id: parent_id, name: name}) do
+    parent = parent_id && Registry.get_barkpark(parent_id)
+
+    %{
+      parent_url: parent && parent.url,
+      parent_admin_token: reveal_parent_admin_token(parent),
+      dataset: "production",
+      workspace: parent && parent.bootstrap_workspace,
+      name: name
+    }
+  end
+
+  defp reveal_parent_admin_token(%Barkpark{} = parent) do
+    case Registry.reveal_admin_token(parent) do
+      {:ok, token} -> token
+      :error -> nil
+    end
+  end
+
+  defp reveal_parent_admin_token(_), do: nil
 
   # Charter Decision 33 — the monitoring beat goes live. Mint a per-instance agent
   # token (scope "report") at CLAIM time and thread the PLAINTEXT into the claim

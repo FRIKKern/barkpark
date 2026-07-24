@@ -44,7 +44,16 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   # claimed by a kind-filtered query so no provision worker grabs it. Its one
   # extra payload is `bundle_ref` — the archive to restore from (required when
   # kind == "resurrect", NULL for every other kind).
-  @kinds ~w(provision deprovision attach_domain resurrect)
+  #
+  # PDF-D83 (Personal Dev Fleet MVP-0) — `provision_support` INVERTS support
+  # provisioning into a CP job: a fleet SUPPORT box is created server-side by the
+  # Go provisioner instead of from a local Hetzner token, so the browser journey
+  # (create-main → add-support → offload) never needs a laptop credential. It
+  # rides the SAME step machine as `provision` (@steps unchanged — a support job
+  # only ever emits create/configure/content/verify/ready, D84) and the SAME
+  # claim/stale-recovery machinery, but is claimed by a kind-filtered query
+  # (`POST /v1/internal/support-jobs/claim`) so no provision worker grabs it.
+  @kinds ~w(provision deprovision attach_domain resurrect provision_support)
 
   # dwb-14: the honest step vocabulary the Go worker reports as it walks the
   # create→live chain. Coarse-by-design (6 phases, not every SSH sub-step) so the

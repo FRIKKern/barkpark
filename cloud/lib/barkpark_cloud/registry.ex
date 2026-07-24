@@ -137,15 +137,23 @@ defmodule BarkparkCloud.Registry do
   Returns `{:ok, %Barkpark{}}` or `{:error, %Ecto.Changeset{}}` (e.g. the slug
   already exists in this team).
 
-  usage-limits-quotas: this is the SINGLE create path, so the per-plan instance
-  quota is enforced here — the un-bypassable backstop. A team already AT its plan
-  ceiling gets `{:error, :limit_reached}` (Coolify's `serverLimitReached`, the API
-  altitude the UI can't route around). The friendly HTTP 403 in the router's
-  `go_live/1` is the front door; this guard catches the agent/internal register
-  path too. `upsert_barkpark/2` routes EXISTING `(team_id, slug)` rows to update
-  before reaching here, so an idempotent re-register is never blocked — only a
-  genuine new instance. Only a team with an ACTIVE subscription is quota-gated;
-  an unsubscribed team is `false` here (the go-live 402 is what stops it).
+  usage-limits-quotas: this is the MAIN-instance create path, so the per-plan
+  instance quota is enforced here — the backstop for a MAIN (go-live / adopt /
+  agent register). A team already AT its plan ceiling gets `{:error,
+  :limit_reached}` (Coolify's `serverLimitReached`, the API altitude the UI can't
+  route around). The friendly HTTP 403 in the router's `go_live/1` is the front
+  door; this guard catches the agent/internal register path too.
+  `upsert_barkpark/2` routes EXISTING `(team_id, slug)` rows to update before
+  reaching here, so an idempotent re-register is never blocked — only a genuine
+  new instance. Only a team with an ACTIVE subscription is quota-gated; an
+  unsubscribed team is `false` here (the go-live 402 is what stops it).
+
+  PDF-D86 (the ONE documented exception): a fleet SUPPORT insert does NOT flow
+  through this guard — `register_support_barkpark/2` inserts via
+  `insert_barkpark/2` directly, so a support can be added to a main that already
+  saturates the ceiling. Supports are subordinate runners, not billable mains;
+  the exception is role-scoped to support inserts and lives in exactly one place
+  (that function), so a MAIN can never ride it.
   """
   @spec register_barkpark(Team.t() | binary(), map()) ::
           {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t() | :limit_reached}
@@ -153,10 +161,19 @@ defmodule BarkparkCloud.Registry do
     if Billing.barkpark_limit_reached?(team) do
       {:error, :limit_reached}
     else
-      %Barkpark{}
-      |> Barkpark.changeset(put_team_id(attrs, team))
-      |> Repo.insert()
+      insert_barkpark(team, attrs)
     end
+  end
+
+  # The bare create — changeset + insert, NO quota check. `register_barkpark/2`
+  # gates it behind `barkpark_limit_reached?/1` for every MAIN insert; the ONLY
+  # other caller is `register_support_barkpark/2`, which reaches it directly so a
+  # SUPPORT insert is quota-exempt (PDF-D86). Keep this private: a new caller that
+  # skips the quota must be a deliberate, documented exception, not an accident.
+  defp insert_barkpark(team, attrs) do
+    %Barkpark{}
+    |> Barkpark.changeset(put_team_id(attrs, team))
+    |> Repo.insert()
   end
 
   @doc """
@@ -302,19 +319,29 @@ defmodule BarkparkCloud.Registry do
   id, and the opaque `fleet_token_id` (the minted ledger token id for later
   revocation, NEVER the secret).
 
-  Rides `register_barkpark/2` FIRST so the single-create-path posture holds — the
-  per-plan instance quota and the slug/url unique constraints all apply — then
-  stamps the fleet fields via `fleet_changeset/2` in the SAME transaction, so a
-  support row can never exist half-bound (registered but role-less). Any error
-  (a changeset OR the `:limit_reached` quota atom) rolls the whole thing back and
-  is surfaced unchanged for the router to map.
+  QUOTA-EXEMPT (PDF-D86 — the ONE documented exception to the create-time
+  backstop): this inserts via `insert_barkpark/2` directly, NOT through
+  `register_barkpark/2`, so `Billing.barkpark_limit_reached?/1` is deliberately
+  skipped for support inserts. A trial team's ceiling (1) is saturated by its
+  main, so gating supports on it would make add-support impossible — yet a support
+  is a subordinate runner, not a billable main. The bypass is role-scoped by
+  construction: it lives only here, and only a `fleet_role: "support"` row is
+  written. A MAIN insert (go-live / adopt / agent register) still flows through
+  `register_barkpark/2` and is still blocked at the ceiling. The slug/url unique
+  constraints still apply. The fleet fields are stamped via `fleet_changeset/2`
+  in the SAME transaction, so a support row can never exist half-bound
+  (registered but role-less); any error rolls the whole thing back and is
+  surfaced unchanged for the router to map.
 
-  `attrs` is `%{name, slug, host, parent_id, token_id}`. The CALLER (router) has
-  already verified `parent_id` belongs to `team` — this is the write, not the
+  `attrs` is `%{name, slug, host, parent_id, token_id, server_type?}`. `host` is
+  NIL for a CP-provisioned support (the row is written FIRST, then the
+  `provision_support` job fills the box in — PDF-D83); a `server_type` folds the
+  chosen size onto the row so the claim payload carries it. The CALLER (router)
+  has already verified `parent_id` belongs to `team` — this is the write, not the
   authorization.
   """
   @spec register_support_barkpark(Team.t() | binary(), map()) ::
-          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t() | :limit_reached}
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
   def register_support_barkpark(team, attrs) do
     base =
       %{
@@ -322,6 +349,7 @@ defmodule BarkparkCloud.Registry do
         slug: Map.get(attrs, :slug)
       }
       |> maybe_put_launch_opt(:host, Map.get(attrs, :host))
+      |> maybe_put_launch_opt(:server_type, Map.get(attrs, :server_type))
 
     fleet = %{
       fleet_role: "support",
@@ -330,7 +358,9 @@ defmodule BarkparkCloud.Registry do
     }
 
     Repo.transaction(fn ->
-      with {:ok, bp} <- register_barkpark(team, base),
+      # insert_barkpark/2 (NOT register_barkpark/2) — the PDF-D86 quota bypass:
+      # support inserts skip barkpark_limit_reached?/1, mains do not.
+      with {:ok, bp} <- insert_barkpark(team, base),
            {:ok, support} <- bp |> Barkpark.fleet_changeset(fleet) |> Repo.update() do
         support
       else
@@ -971,6 +1001,37 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  PDF-D83 (Personal Dev Fleet MVP-0): enqueue a `pending` PROVISION_SUPPORT job
+  for `barkpark` — the CP-side inversion of add-support. The support row is
+  written FIRST (host nil), then this enqueues the job the Go provisioner drains
+  to stand up the box server-side (no local Hetzner token). The support's parent
+  main and the parent's admin token travel in the CLAIM payload, not on this row.
+
+  Same one-active-per-kind guard as provision/deprovision/resurrect: an ACTIVE
+  (pending/claimed) `provision_support` job already in flight for this barkpark
+  returns `{:error, :already_provisioning}` rather than enqueuing a second box
+  (the partial unique index is the atomic race backstop, as elsewhere).
+  """
+  @spec enqueue_support_provision_job(Barkpark.t() | binary()) ::
+          {:ok, ProvisionJob.t()} | {:error, :already_provisioning | Ecto.Changeset.t()}
+  def enqueue_support_provision_job(barkpark) do
+    bp_id = barkpark_id(barkpark)
+
+    if active_job_of_kind?(bp_id, "provision_support") do
+      {:error, :already_provisioning}
+    else
+      %ProvisionJob{}
+      |> ProvisionJob.changeset(%{
+        barkpark_id: bp_id,
+        kind: "provision_support",
+        status: "pending"
+      })
+      |> Repo.insert()
+      |> translate_active_job_conflict(:already_provisioning)
+    end
+  end
+
   # dwb-11: map a lost race on the one-active-job-per-barkpark-kind partial unique
   # index to a clean dedup atom. Any OTHER changeset error (or the {:ok, _} happy
   # path) passes through unchanged — only the money-path collision is rewritten.
@@ -1108,6 +1169,17 @@ defmodule BarkparkCloud.Registry do
   @spec claim_next_resurrect_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
   def claim_next_resurrect_job(claim_token) when is_binary(claim_token),
     do: claim_next_job(claim_token, "resurrect")
+
+  @doc """
+  PDF-D83: atomically claim the next claimable PROVISION_SUPPORT job — the fleet
+  support provisioner's pull. Same machinery as `claim_next_job/2`, filtered to
+  `kind: "provision_support"` (so a support job is never handed to a main-provision
+  worker and vice-versa). The router folds the pinned support map — parent url +
+  admin token, dataset, workspace, name — onto the claim payload.
+  """
+  @spec claim_next_support_provision_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
+  def claim_next_support_provision_job(claim_token) when is_binary(claim_token),
+    do: claim_next_job(claim_token, "provision_support")
 
   # Lock the oldest claimable row (pending, or claimed-but-stale); concurrent
   # claimers SKIP LOCKED past it. If a stale row has burned through its attempt
@@ -1877,7 +1949,12 @@ defmodule BarkparkCloud.Registry do
 
   def latest_provision_status_map(ids) when is_list(ids) do
     from(j in ProvisionJob,
-      where: j.barkpark_id in ^ids and j.kind == "provision",
+      # PDF-D85: a CP-provisioned SUPPORT box reports its create→live steps on a
+      # `provision_support` job, never a `provision` one — widen the filter so its
+      # steps/console/status surface on GET /v1/barkparks (a main carries only
+      # `provision`, a support only `provision_support`, so DISTINCT ON never
+      # cross-contaminates the two).
+      where: j.barkpark_id in ^ids and j.kind in ["provision", "provision_support"],
       order_by: [asc: j.barkpark_id, desc: j.inserted_at, desc: j.id],
       distinct: j.barkpark_id,
       # dwb-14: steps ride along so the /new progress screen renders SERVER-reported

@@ -185,10 +185,18 @@ defmodule BarkparkCloud.Billing do
 
   @doc """
   Whether `team` is AT or OVER its instance ceiling — the create-time QUOTA guard
-  (Coolify's `serverLimitReached`, inclusive `>=`). Counts ALL of the team's
-  instances, INCLUDING reconciler-suspended ones (a suspended overflow box is
-  still "held", re-enabled on re-upgrade), so a downgraded team can never create
-  around its own suspended overflow. `>=` because at-limit blocks the NEXT create.
+  for a MAIN (Coolify's `serverLimitReached`, inclusive `>=`). Counts ALL of the
+  team's instance rows, INCLUDING reconciler-suspended ones (a suspended overflow
+  box is still "held", re-enabled on re-upgrade) AND fleet supports, so a
+  downgraded team can never create around its own suspended overflow. `>=` because
+  at-limit blocks the NEXT create.
+
+  This guard fires on the MAIN create path (`Registry.register_barkpark/2`). It is
+  NOT consulted for fleet SUPPORT inserts: PDF-D86 makes supports quota-exempt, so
+  `Registry.register_support_barkpark/2` inserts directly and never calls this
+  function. A support therefore rides past a saturated ceiling, while a MAIN at
+  the ceiling is still blocked — the exception is role-scoped to support inserts
+  and lives in exactly one place (that function).
 
   The quota gate applies ONLY to a team with an ACTIVE subscription — it is the
   per-PLAN ceiling. A team with no active subscription is NOT "at a quota of 0";
