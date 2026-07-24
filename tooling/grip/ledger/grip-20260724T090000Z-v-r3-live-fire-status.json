@@ -1,0 +1,53 @@
+{
+  "grip_id": "v-r3-live-fire-status-2026-07-24",
+  "verifier": "v-r3-live-fire-status",
+  "wave": "personal-dev-fleet-wave-mvp0-2026-07-24",
+  "assignment": "Live state check: (a) task-2452b8d24005429e (HMAC/dooodo retry) closed/progressed, is dooodo live; (b) pdf-wc-support-proof claim state, reclaimed?; (c) hcloud census for pdfproof-/dooodo residue; (d) does stranded harness commit 6c24833a4 rebase cleanly onto origin/main, or must it fold into this wave's proof.",
+  "verdict": "(a) NOT CLOSED, in_progress, live and PROGRESSING under a foreign active claim (worker fable-r3-live-fire, epoch 5): PR #6036 (the HMAC secrets fix) MERGED as 3a7b0c6d5, but the SAME worker's own follow-on discovery shows that merge's deploy run (30076881535) built instance:success / control-plane:skipped -- the fixed provisioner binary never reached the CP because deploy.yml's cp-job path filter misses internal/+cmd/. A second task (task-d28779a3eeb39caf) is now in_progress fixing that filter via PR #6038, which is OPEN/unmerged at verify time (green except one advisory Format check). The dooodo retry (POST /v1/barkparks/75fbff57.../retry) has NOT been fired -- confirmed 401-anon (route exists, admin-gated, untouched). dooodo is NOT live: no hcloud server named dooodo or at IP 167.233.24.116 exists. (b) pdf-wc-support-proof's epoch-8 claim EXPIRED at 2026-07-24T01:15:00Z (worker now null, previous_worker fable-r3-live-fire); as of verify time (2026-07-24T08:26 UTC, 7h11m later) it sits open/unclaimed, 0/8 criteria met -- nobody has reclaimed it. (c) hcloud census is CLEAN: exactly 5 servers exist (barkpark-cms, polyflor-no, polyflor-se, shared-no, guerrilla), all pre-existing long-lived boxes created Apr-Jun 2026; zero pdfproof- prefixed servers, zero dooodo residue. (d) Git-mechanically the rebase is TRIVIAL: 6c24833a4 adds one brand-new file (scripts/pdf-support-proof.sh, 1590 insertions) absent from origin/main, merge-tree over the merge-base produces ZERO conflict markers, and the commit is a pure local artifact -- not an ancestor of origin/main, not on any remote branch, never pushed (git ls-remote empty), living only in the local worktree .claude/worktrees/agent-a0041121bbd62d76f. But 'land first' would not actually close anything: the harness is UNFIRED (0/8 acceptance criteria met, no transcript), its own PR recipe (Decide pin 8) requires content-copying the charter from commit 1741e7b7e which DOES NOT EXIST anywhere (git cat-file -t fails), and the charter landed on origin/main stops at Wave B round-2 (PDF-D54) with zero Wave C content (D55-D82) present -- confirmed by grep and by origin/main diff. Firing the harness live right now would also hit the SAME CP-provisioning secrets-chain defect task-2452b8d24005429e exists to fix, since PR #6038 (the redeploy-path fix) has not merged. CONCLUSION: mechanically mergeable, substantively NOT landable-and-done -- fold-into-this-wave's-proof is the only honest path; a bare merge of the script changes nothing about proof completion.",
+  "recipes": [
+    {
+      "claim": "task-2452b8d24005429e is in_progress (not closed), foreign-claimed by fable-r3-live-fire epoch 5, 'now' text describes watching deploy.yml redeploy then retrying dooodo (fleet row 75fbff57).",
+      "rerun": "bp task get task-2452b8d24005429e"
+    },
+    {
+      "claim": "PR #6036 (the HMAC secrets-chain fix) is MERGED as 3a7b0c6d51dfd0050cdf135e681a33bfe0aae9ac at 2026-07-24T07:51:44Z.",
+      "rerun": "gh pr view 6036 --repo FRIKKern/barkpark --json state,mergeCommit,mergedAt"
+    },
+    {
+      "claim": "The deploy run for that merge (30076881535) built instance:success but control-plane:skipped, because deploy.yml's cp-job changes filter only matches ^(cloud|deploy)/ and misses internal/+cmd/ where the provisioner's actual source lives -- the fixed provisioner binary never shipped to the CP.",
+      "rerun": "bp task get task-d28779a3eeb39caf"
+    },
+    {
+      "claim": "The follow-on filter fix (PR #6038, branch fix/deploy-cp-filter-provisioner, commit 60fbc6891) is still OPEN/unmerged at verify time -- checks green except one advisory Format failure.",
+      "rerun": "gh pr view 6038 --repo FRIKKern/barkpark --json state,mergedAt,statusCheckRollup"
+    },
+    {
+      "claim": "The dooodo retry has NOT been fired: POST /v1/barkparks/75fbff57-b64d-4bef-b24f-3bb0c6e1b40e/retry answers 401-anon (route exists, admin-gated, untouched by any authenticated call yet).",
+      "rerun": "curl -s -o /dev/null -w '%{http_code}\\n' -X POST https://api.barkpark.cloud/v1/barkparks/75fbff57-b64d-4bef-b24f-3bb0c6e1b40e/retry"
+    },
+    {
+      "claim": "pdf-wc-support-proof's claim (epoch 8) is EXPIRED (expired_at 2026-07-24T01:15:00Z, worker now null, previous_worker fable-r3-live-fire); lifecycle_status open; criteria_progress 0/8 -- nobody has reclaimed it since expiry.",
+      "rerun": "bp task get pdf-wc-support-proof"
+    },
+    {
+      "claim": "hcloud census at verify time: exactly 5 servers, none named pdfproof-* and none matching dooodo's name or IP (167.233.24.116) -- all 5 are pre-existing long-lived boxes created Apr-Jun 2026.",
+      "rerun": "hcloud server list -o columns=name,status,ipv4,created"
+    },
+    {
+      "claim": "6c24833a4 (scripts/pdf-support-proof.sh harness, 1590 insertions, brand-new file absent from origin/main) merge-tree's clean against origin/main -- zero '<<<<<<<' conflict markers -- because it is a pure file add with no overlapping history.",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark && git merge-tree $(git merge-base 6c24833a4 origin/main) 6c24833a4 origin/main | grep -c '<<<<<<<'"
+    },
+    {
+      "claim": "6c24833a4 is NOT an ancestor of origin/main, is on no remote branch, and was never pushed -- it lives only in the local worktree .claude/worktrees/agent-a0041121bbd62d76f on branch worktree-agent-a0041121bbd62d76f.",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark && git merge-base --is-ancestor 6c24833a4 origin/main; echo exit=$?; git branch -r --contains 6c24833a4; git ls-remote origin worktree-agent-a0041121bbd62d76f; git worktree list | grep agent-a0041121bbd62d76f"
+    },
+    {
+      "claim": "The D82 custody recipe cites commit 1741e7b7e for the charter content-copy; that commit does not exist in this repo at all (nor does a27aeed5e, a second cited commit) -- D82 custody is impossible verbatim.",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark && git cat-file -t 1741e7b7e; git cat-file -t a27aeed5e"
+    },
+    {
+      "claim": "The charter landed on origin/main (.claude/workflows/bp-personal-dev-fleet-charter.md, 616 lines, byte-identical to the local worktree copy) stops its Wave log at 'Wave B round-2 REVIEW (grade A)' -- zero Wave C content, zero PDF-D55..D82, present anywhere on origin/main.",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark && git show origin/main:.claude/workflows/bp-personal-dev-fleet-charter.md | wc -l; git show origin/main:.claude/workflows/bp-personal-dev-fleet-charter.md | grep -c 'PDF-D8[12]\\|Wave C'"
+    }
+  ]
+}
