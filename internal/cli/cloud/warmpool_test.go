@@ -1124,24 +1124,25 @@ func TestProvision_HealthPollToleratesColdWindow(t *testing.T) {
 	}
 }
 
-// ─── dwb-20: per-instance secrets install (SKB + KEK + CLOAK + PREVIEW) ───────
+// ─── dwb-20: per-instance secrets install (SKB + KEK + CLOAK + PREVIEW + RCH) ─
 
-// knownFourSecrets is a set of four DISTINCT, shell-safe fake secret values a test
+// knownFiveSecrets is a set of five DISTINCT, shell-safe fake secret values a test
 // mints so it can assert each was installed independently (no shared value, no
 // baked survivor). Each is alphabet-valid so validateSecrets passes.
-func knownFourSecrets() Secrets {
+func knownFiveSecrets() Secrets {
 	return Secrets{
-		SecretKeyBase:    "TESTskb-value_0123456789ABCDEFxyz0123456789abcdefghijklmnopqrstuvwx",
-		Kek:              "TESTkek+base64/value000000000000000000000000=",
-		CloakKey:         "TESTcloak+base64/value1111111111111111111111=",
-		PreviewJWTSecret: "TESTpreview+base64/value22222222222222222222=",
-		AdminToken:       "bp_admin_TESTtoken0123456789ABCDEF",
+		SecretKeyBase:      "TESTskb-value_0123456789ABCDEFxyz0123456789abcdefghijklmnopqrstuvwx",
+		Kek:                "TESTkek+base64/value000000000000000000000000=",
+		CloakKey:           "TESTcloak+base64/value1111111111111111111111=",
+		PreviewJWTSecret:   "TESTpreview+base64/value22222222222222222222=",
+		ReleaseCaptureHMAC: "TESTrch+base64/value333333333333333333333333=",
+		AdminToken:         "bp_admin_TESTtoken0123456789ABCDEF",
 	}
 }
 
 // TestSecretsInstallStep_ShapeAndRedaction asserts the secrets-install step writes
-// the .env idempotently for ALL four keys + restarts Barkpark ONCE, carries each
-// value ONLY via its BP_* env (never in Title/Cmd), and lists all four for output
+// the .env idempotently for ALL five keys + restarts Barkpark ONCE, carries each
+// value ONLY via its BP_* env (never in Title/Cmd), and lists all five for output
 // TestProvision_SingleAppRestart pins the single-restart contract end-to-end:
 // across the WHOLE go-live chain (Caddy/TLS steps + secrets-install + migrate +
 // admin-token) the app is restarted exactly ONCE — by secrets-install, which
@@ -1181,7 +1182,7 @@ func TestProvision_SingleAppRestart(t *testing.T) {
 
 // redaction.
 func TestSecretsInstallStep_ShapeAndRedaction(t *testing.T) {
-	sec := knownFourSecrets()
+	sec := knownFiveSecrets()
 	s := secretsInstallStep(sec, MailRelay{})
 
 	if len(s.Argv) != 3 || s.Argv[0] != "bash" || s.Argv[1] != "-lc" {
@@ -1193,12 +1194,14 @@ func TestSecretsInstallStep_ShapeAndRedaction(t *testing.T) {
 		"export BP_KEK='" + sec.Kek + "'",
 		"export BP_CLOAK='" + sec.CloakKey + "'",
 		"export BP_PREVIEW='" + sec.PreviewJWTSecret + "'",
-		// one grep -v strips any existing line for ALL four keys (idempotent)
-		"grep -v -e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET='",
+		"export BP_RCH='" + sec.ReleaseCaptureHMAC + "'",
+		// one grep -v strips any existing line for ALL five keys (idempotent)
+		"grep -v -e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET=' -e '^BARKPARK_RELEASE_CAPTURE_HMAC_SECRET='",
 		`printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB"`, // append each minted value from env
 		`printf 'BARKPARK_KEK=%s\n' "$BP_KEK"`,
 		`printf 'BARKPARK_CLOAK_KEY=%s\n' "$BP_CLOAK"`,
 		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW"`,
+		`printf 'BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=%s\n' "$BP_RCH"`,
 		"systemctl restart barkpark", // restart so Phoenix re-reads them
 	} {
 		if !strings.Contains(script, want) {
@@ -1210,13 +1213,13 @@ func TestSecretsInstallStep_ShapeAndRedaction(t *testing.T) {
 		t.Errorf("secrets step should restart Barkpark exactly once, got %d; script:\n%s", got, script)
 	}
 	// The narration (Title/Cmd, which may be logged) must NEVER carry any value.
-	for _, v := range []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret} {
+	for _, v := range []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret, sec.ReleaseCaptureHMAC} {
 		if strings.Contains(s.Title, v) || strings.Contains(s.Cmd, v) {
 			t.Errorf("a secret value leaked into Title/Cmd: title=%q cmd=%q", s.Title, s.Cmd)
 		}
 	}
-	// All four values are listed for redaction of any captured failure output.
-	for _, v := range []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret} {
+	// All five values are listed for redaction of any captured failure output.
+	for _, v := range []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret, sec.ReleaseCaptureHMAC} {
 		found := false
 		for _, r := range s.Redact {
 			if r == v {
@@ -1235,7 +1238,7 @@ func TestSecretsInstallStep_ShapeAndRedaction(t *testing.T) {
 // secrets: via $BP_SMTP_PASS in the Argv, never in Title/Cmd, and listed for
 // redaction. Host/port/username (non-secret) appear as plain printf values.
 func TestSecretsInstallStep_MailRelayInjection(t *testing.T) {
-	sec := knownFourSecrets()
+	sec := knownFiveSecrets()
 	mail := MailRelay{
 		Host:     "mail.barkpark.cloud",
 		Username: "barkpark-cloud",
@@ -1283,7 +1286,7 @@ func TestSecretsInstallStep_MailRelayInjection(t *testing.T) {
 // zero MailRelay injects NO SMTP lines, so an instance provisioned by a worker
 // without SMTP_RELAY_* is byte-identical to the pre-mail behavior.
 func TestSecretsInstallStep_NoMailWhenDisabled(t *testing.T) {
-	script := secretsInstallStep(knownFourSecrets(), MailRelay{}).Argv[2]
+	script := secretsInstallStep(knownFiveSecrets(), MailRelay{}).Argv[2]
 	for _, forbidden := range []string{"SMTP_HOST=", "SMTP_PASSWORD=", "BP_SMTP_PASS"} {
 		if strings.Contains(script, forbidden) {
 			t.Errorf("disabled mail relay still emitted %q; script:\n%s", forbidden, script)
@@ -1329,7 +1332,7 @@ func TestMailRelay_Validate(t *testing.T) {
 // logs/errors. It covers both the literal-Redact path and the shape-based env
 // scrubber (BARKPARK_KEK=<run>).
 func TestSecretsInstallStep_RedactsKEKOnFailure(t *testing.T) {
-	sec := knownFourSecrets()
+	sec := knownFiveSecrets()
 	r := &SSHStepRunner{
 		Host: "198.51.100.9",
 		Key:  "/dev/null",
@@ -1344,7 +1347,7 @@ func TestSecretsInstallStep_RedactsKEKOnFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("SSHStepRunner.Run: want an error for the failed secrets step, got nil")
 	}
-	for _, v := range []string{sec.Kek, sec.CloakKey, sec.SecretKeyBase, sec.PreviewJWTSecret} {
+	for _, v := range []string{sec.Kek, sec.CloakKey, sec.SecretKeyBase, sec.PreviewJWTSecret, sec.ReleaseCaptureHMAC} {
 		if strings.Contains(err.Error(), v) {
 			t.Errorf("secrets-step failure leaked a secret value; got:\n%s", err.Error())
 		}
@@ -1384,19 +1387,22 @@ func TestValidateSecretKeyBase(t *testing.T) {
 	}
 }
 
-// TestValidateSecrets asserts the whole-set guard rejects when ANY of the four
-// values is empty or shell-unsafe, and passes on a clean set.
+// TestValidateSecrets asserts the whole-set guard rejects when ANY of the five
+// values is empty or shell-unsafe (and the release-capture HMAC additionally
+// when it is under runtime.exs's 32-byte floor), and passes on a clean set.
 func TestValidateSecrets(t *testing.T) {
-	if err := validateSecrets(knownFourSecrets()); err != nil {
-		t.Errorf("a clean four-secret set should pass: %v", err)
+	if err := validateSecrets(knownFiveSecrets()); err != nil {
+		t.Errorf("a clean five-secret set should pass: %v", err)
 	}
 	for _, mut := range []func(s *Secrets){
 		func(s *Secrets) { s.SecretKeyBase = "" },
 		func(s *Secrets) { s.Kek = "" },
 		func(s *Secrets) { s.CloakKey = "bad value" },
 		func(s *Secrets) { s.PreviewJWTSecret = "has'quote" },
+		func(s *Secrets) { s.ReleaseCaptureHMAC = "" },
+		func(s *Secrets) { s.ReleaseCaptureHMAC = "short31bytes0000000000000000000" }, // runtime.exs needs >=32
 	} {
-		sec := knownFourSecrets()
+		sec := knownFiveSecrets()
 		mut(&sec)
 		if err := validateSecrets(sec); err == nil {
 			t.Errorf("validateSecrets should reject a malformed set: %+v", sec)
@@ -1551,11 +1557,13 @@ func runnerArgvJoined(r *recordingRunner) string {
 	return b.String()
 }
 
-// TestDefaultSecretGen_FourIndependentDraws asserts the default generator mints a
-// KEK/cloak/preview that are each base64 of EXACTLY 32 bytes (the KEK's hard
-// requirement — runtime.exs Base.decode64's it to 32 bytes) and that all four
-// secret values are DISTINCT (independent draws, no shared entropy).
-func TestDefaultSecretGen_FourIndependentDraws(t *testing.T) {
+// TestDefaultSecretGen_FiveIndependentDraws asserts the default generator mints a
+// KEK/cloak/preview/release-capture HMAC that are each base64 of EXACTLY 32 bytes
+// (the KEK's hard requirement — runtime.exs Base.decode64's it to 32 bytes; the
+// 44-char encoding also clears runtime.exs's 32-byte floor on the release-capture
+// HMAC STRING) and that all five secret values are DISTINCT (independent draws,
+// no shared entropy).
+func TestDefaultSecretGen_FiveIndependentDraws(t *testing.T) {
 	sec, err := defaultSecretGen()
 	if err != nil {
 		t.Fatalf("defaultSecretGen: %v", err)
@@ -1564,6 +1572,7 @@ func TestDefaultSecretGen_FourIndependentDraws(t *testing.T) {
 		{"BARKPARK_KEK", sec.Kek},
 		{"BARKPARK_CLOAK_KEY", sec.CloakKey},
 		{"PREVIEW_JWT_SECRET", sec.PreviewJWTSecret},
+		{"BARKPARK_RELEASE_CAPTURE_HMAC_SECRET", sec.ReleaseCaptureHMAC},
 	} {
 		raw, err := base64.StdEncoding.DecodeString(kv.val)
 		if err != nil {
@@ -1585,8 +1594,8 @@ func TestDefaultSecretGen_FourIndependentDraws(t *testing.T) {
 		t.Errorf("minted SECRET_KEY_BASE must pass its own validator: %v", err)
 	}
 
-	// All four values must be distinct — no shared entropy across keys.
-	vals := []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret}
+	// All five values must be distinct — no shared entropy across keys.
+	vals := []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret, sec.ReleaseCaptureHMAC}
 	seen := map[string]bool{}
 	for _, v := range vals {
 		if v == "" {
@@ -1599,13 +1608,14 @@ func TestDefaultSecretGen_FourIndependentDraws(t *testing.T) {
 	}
 }
 
-// TestProvision_InstallsAllFourSecretsBeforeMigrate is the dwb-20 end-to-end: the
-// go-live chain installs ALL four MINTED per-instance secrets on the box (each
+// TestProvision_InstallsAllFiveSecretsBeforeMigrate is the dwb-20 end-to-end: the
+// go-live chain installs ALL five MINTED per-instance secrets on the box (each
 // carried via its own BP_* env) BEFORE the migrate step — so `mix ecto.migrate`
-// sees BARKPARK_KEK when it sources .env — and every value reaches the install
-// script's Argv but NEVER a narrated Cmd.
-func TestProvision_InstallsAllFourSecretsBeforeMigrate(t *testing.T) {
-	sec := knownFourSecrets()
+// sees BARKPARK_KEK (and the release-capture HMAC runtime.exs raises without)
+// when it sources .env — and every value reaches the install script's Argv but
+// NEVER a narrated Cmd.
+func TestProvision_InstallsAllFiveSecretsBeforeMigrate(t *testing.T) {
+	sec := knownFiveSecrets()
 	spec := acmeSpec()
 	wp, _, _, runner, _ := newFakeWarmPool(t, greenGate(spec.healthTarget()))
 	// Mint KNOWN per-instance secrets so the test can assert they were installed.
@@ -1639,19 +1649,20 @@ func TestProvision_InstallsAllFourSecretsBeforeMigrate(t *testing.T) {
 	if secretsIdx >= migrateIdx {
 		t.Errorf("secrets-install ran at step %d, migrate at %d — secrets MUST precede migrate", secretsIdx, migrateIdx)
 	}
-	// All four minted values reach the install Argv, each via its own env export.
+	// All five minted values reach the install Argv, each via its own env export.
 	for _, want := range []string{
 		"export BP_SKB='" + sec.SecretKeyBase + "'",
 		"export BP_KEK='" + sec.Kek + "'",
 		"export BP_CLOAK='" + sec.CloakKey + "'",
 		"export BP_PREVIEW='" + sec.PreviewJWTSecret + "'",
+		"export BP_RCH='" + sec.ReleaseCaptureHMAC + "'",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("secrets step did not install %q; script:\n%s", want, script)
 		}
 	}
 	// The narrated Cmds must never carry any value (only the Argv installs them).
-	for _, v := range []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret} {
+	for _, v := range []string{sec.SecretKeyBase, sec.Kek, sec.CloakKey, sec.PreviewJWTSecret, sec.ReleaseCaptureHMAC} {
 		if strings.Contains(runner.joined(), v) {
 			t.Errorf("a minted secret leaked into a narrated Cmd:\n%s", runner.joined())
 		}
@@ -1662,11 +1673,11 @@ func TestProvision_InstallsAllFourSecretsBeforeMigrate(t *testing.T) {
 // the single grep -v strips the prior line for each key before the append, so
 // running the step twice over the same file yields exactly one line per key.
 func TestSecretsInstallStep_Idempotent(t *testing.T) {
-	sec := knownFourSecrets()
+	sec := knownFiveSecrets()
 	script := secretsInstallStep(sec, MailRelay{}).Argv[2]
-	// The grep -v must strip a prior line for EACH of the four keys (the anchored
+	// The grep -v must strip a prior line for EACH of the five keys (the anchored
 	// '^KEY=' patterns) — that is what makes append-then-swap idempotent.
-	for _, key := range []string{"SECRET_KEY_BASE", "BARKPARK_KEK", "BARKPARK_CLOAK_KEY", "PREVIEW_JWT_SECRET"} {
+	for _, key := range []string{"SECRET_KEY_BASE", "BARKPARK_KEK", "BARKPARK_CLOAK_KEY", "PREVIEW_JWT_SECRET", "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"} {
 		if !strings.Contains(script, "-e '^"+key+"='") {
 			t.Errorf("idempotent grep -v does not strip a prior %s= line; script:\n%s", key, script)
 		}
