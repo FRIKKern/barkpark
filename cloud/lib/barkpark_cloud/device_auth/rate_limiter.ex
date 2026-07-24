@@ -22,6 +22,13 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
       (`DELETE /v1/barkparks/:id/app-token`, mob-w2-app-token-revoke) — same
       physics (every hit is a server-side admin-authed instance call), its own
       bucket so a logout loop can't starve mints and vice versa.
+    * `"push_register:"<user_id>` — 10 / 60s. Caps device-push-token
+      registrations (`POST /v1/push/device-tokens`, mob-bl-push-hardening) per
+      authenticated USER, not per IP — the route is user-authed and mobile
+      clients share carrier-NAT IPs, so a per-IP bucket would let one user
+      starve strangers. The app registers once per launch; 10/min brakes a
+      runaway loop without touching real use. Pairs with the per-user
+      device-row cap in `Push.register_device_token/2`.
 
   The key is `{key_string, window}` where `window = div(now_ms, @window_ms)`, so
   elapsed windows are lazily swept on the next `check/1` for that key and the
@@ -38,7 +45,8 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
     "start" => 10,
     "approve" => 10,
     "app_token" => 10,
-    "app_token_revoke" => 10
+    "app_token_revoke" => 10,
+    "push_register" => 10
   }
 
   @doc false

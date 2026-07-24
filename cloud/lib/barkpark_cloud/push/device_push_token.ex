@@ -68,14 +68,22 @@ defmodule BarkparkCloud.Push.DevicePushToken do
   @doc """
   Changeset for a device registration. Requires an owner, a platform from the
   bounded vocabulary, and a non-empty token (APNs tokens are 64 hex bytes, FCM
-  tokens vary — we cap generously rather than encode either format).
+  tokens vary — real tokens are <= ~350 chars; the cap leaves headroom without
+  encoding either format).
+
+  The 1024-BYTE cap (counted in bytes, not graphemes — a multibyte token must
+  not sneak past) exists because `token` participates in the
+  UNIQUE(user_id, platform, token) btree index, and Postgres rejects index
+  rows over ~2704 bytes at INSERT time. A cap above that turns an oversize
+  token into a raw `Postgrex.Error` 500 instead of this changeset's 422
+  (wave-2 hardening, adversarial review of PR #6030).
   """
   def changeset(device_token, attrs) do
     device_token
     |> cast(attrs, [:platform, :token, :metadata, :revoked_at, :last_used_at, :user_id])
     |> validate_required([:platform, :token, :user_id])
     |> validate_inclusion(:platform, @platforms)
-    |> validate_length(:token, min: 8, max: 4096)
+    |> validate_length(:token, min: 8, max: 1024, count: :bytes)
     |> assoc_constraint(:user)
     |> unique_constraint([:user_id, :platform, :token])
   end

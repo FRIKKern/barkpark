@@ -9,8 +9,12 @@ defmodule BarkparkCloud.Push.PushRelayReceiverTest do
 
     * signature contract (the box's Webhooks.Dispatcher scheme —
       `t=<unix>,v1=<hex>` = HMAC-SHA256 over "<t>.<raw-body>", ±300s):
-      valid → 202; forged / stale / replayed-onto-tampered-body / missing → 401,
-      nothing enqueued;
+      valid → 202; forged / stale / tampered-body-under-valid-sig / missing →
+      401, nothing enqueued;
+    * TRUE replay dedupe (mob-bl-push-hardening): an identical signed re-send
+      inside the window still 202s but enqueues ZERO new jobs
+      (PushDeliveryWorker args-uniqueness); a fresh `blocked_since` — a
+      genuinely new event — is never deduped;
     * probe-proofing: unknown barkpark and no-relay-configured barkpark are the
       SAME 404;
     * fan-out mapping (D15c): owning team's members' unrevoked devices each get
@@ -156,7 +160,7 @@ defmodule BarkparkCloud.Push.PushRelayReceiverTest do
       refute_enqueued(worker: PushDeliveryWorker)
     end
 
-    test "a REPLAY (a valid signature over a different body) 401s" do
+    test "a TAMPER (a valid signature over a different body) 401s" do
       team = team_fixture()
       {bp, secret} = relay_barkpark(team)
       register_device(member_fixture(team))
@@ -169,6 +173,44 @@ defmodule BarkparkCloud.Push.PushRelayReceiverTest do
 
       assert conn.status == 401
       refute_enqueued(worker: PushDeliveryWorker)
+    end
+
+    test "a TRUE REPLAY (identical signed request twice) enqueues ZERO new jobs" do
+      # mob-bl-push-hardening: inside the ±300s HMAC window an identical
+      # re-send verifies fine (the signature IS valid) — dedupe happens at the
+      # Oban layer via PushDeliveryWorker's args-uniqueness window, and the
+      # receiver still answers 202 (a webhook sender must not retry-storm).
+      team = team_fixture()
+      {bp, secret} = relay_barkpark(team)
+      register_device(member_fixture(team))
+
+      body = Jason.encode!(@payload)
+      sig = sign(secret, System.system_time(:second), body)
+
+      first = deliver(bp.id, body, sig)
+      assert first.status == 202
+      assert json_body(first)["enqueued"] == 1
+
+      replay = deliver(bp.id, body, sig)
+      assert replay.status == 202
+      assert json_body(replay)["enqueued"] == 0
+
+      assert length(all_enqueued(worker: PushDeliveryWorker)) == 1
+    end
+
+    test "a genuinely NEW event for the same session (fresh blocked_since) is NOT deduped" do
+      team = team_fixture()
+      {bp, secret} = relay_barkpark(team)
+      register_device(member_fixture(team))
+
+      assert signed_deliver(bp, secret, @payload).status == 202
+
+      fresh = Map.put(@payload, "blocked_since", "2026-07-24T11:30:00Z")
+      conn = signed_deliver(bp, secret, fresh)
+
+      assert conn.status == 202
+      assert json_body(conn)["enqueued"] == 1
+      assert length(all_enqueued(worker: PushDeliveryWorker)) == 2
     end
 
     test "a missing signature header 401s" do
