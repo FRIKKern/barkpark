@@ -71,13 +71,32 @@ defmodule BarkparkCloud.Push do
   # dropped here (no payload widening; bound deep-link ruling above).
   @chat_blocked_fields ~w(session_id title workspace_id blocked_since ask_role)
 
+  # Per-user device-row cap (wave-2 hardening, adversarial review of PR #6030):
+  # without one, an authed member can accrete unlimited rows, bloating every
+  # webhook fan-out. 20 rows is far above any real household of devices while
+  # keeping the worst-case per-user fan-out bounded. Enforcement is
+  # EVICTION, not 422 — a 422 would reject the user's NEWEST real device in
+  # favor of stale rows, exactly backwards; evicting revoked-first, then
+  # stalest, silently self-heals accretion while the active device keeps
+  # working.
+  @max_devices_per_user 20
+
   ## Registration
+
+  @doc "The per-user device-row cap enforced by `register_device_token/2`."
+  def max_devices_per_user, do: @max_devices_per_user
 
   @doc """
   Register (or refresh) one device push token for `user` — the user-authed
   registration endpoint's core. Idempotent UPSERT on
   (user_id, platform, token): re-registering clears `revoked_at` (an app
   reinstall on the same device revives the row) and refreshes `metadata`.
+
+  Caps the user at #{@max_devices_per_user} rows: when a NEW registration
+  pushes past the cap, surplus rows are evicted — revoked tombstones first,
+  then the stalest by last-use (falling back to insertion age) — so the row
+  just registered always survives. Re-registering an existing row never
+  evicts (the count is unchanged).
 
   Returns `{:ok, %DevicePushToken{}}` or `{:error, %Ecto.Changeset{}}`.
   """
@@ -94,11 +113,46 @@ defmodule BarkparkCloud.Push do
         user_id: user_id
       })
 
-    Repo.insert(changeset,
-      on_conflict: [set: [revoked_at: nil, metadata: metadata, updated_at: DateTime.utc_now()]],
-      conflict_target: [:user_id, :platform, :token],
-      returning: true
-    )
+    result =
+      Repo.insert(changeset,
+        on_conflict: [set: [revoked_at: nil, metadata: metadata, updated_at: DateTime.utc_now()]],
+        conflict_target: [:user_id, :platform, :token],
+        returning: true
+      )
+
+    with {:ok, device} <- result do
+      enforce_device_cap(user_id, device.id)
+      {:ok, device}
+    end
+  end
+
+  # Trim the user back to the cap after an upsert. Two statements, no
+  # transaction on purpose: a crash between them leaves at most cap+1 rows and
+  # the next registration self-heals. Victim order: revoked tombstones first
+  # (dead weight — no delivery ever selects them), then least-recently-used
+  # (`last_used_at`, falling back to `inserted_at` for rows that never got a
+  # send). The just-registered row is always excluded.
+  defp enforce_device_cap(user_id, keep_id) do
+    count = Repo.aggregate(from(t in DevicePushToken, where: t.user_id == ^user_id), :count)
+    overflow = count - @max_devices_per_user
+
+    if overflow > 0 do
+      victim_ids =
+        from(t in DevicePushToken,
+          where: t.user_id == ^user_id and t.id != ^keep_id,
+          order_by: [
+            asc: fragment("? IS NULL", t.revoked_at),
+            asc: coalesce(t.last_used_at, t.inserted_at)
+          ],
+          limit: ^overflow,
+          select: t.id
+        )
+        |> Repo.all()
+
+      Repo.delete_all(from(t in DevicePushToken, where: t.id in ^victim_ids))
+    end
+
+    :ok
   end
 
   @doc """
@@ -127,6 +181,14 @@ defmodule BarkparkCloud.Push do
   device is registered (row-absence severability: the relay is inert), or
   `{:error, :invalid_payload}` when `session_id` is missing/blank (nothing to
   deep-link to).
+
+  Jobs are inserted ONE AT A TIME via `Oban.insert/2` — deliberately not
+  `Oban.insert_all/2`, which skips unique enforcement on the OSS engine — so
+  `PushDeliveryWorker`'s args-uniqueness window dedupes a REPLAYED webhook
+  (identical signed request re-sent inside the HMAC acceptance window, or an
+  instance-side at-least-once redelivery): the replay's jobs all conflict with
+  the originals and `enqueued_count` reports only NEW jobs. Fan-out sets are
+  small (one team's member devices), so per-row inserts cost nothing real.
   """
   @spec enqueue_chat_blocked_fanout(Barkpark.t(), map()) ::
           {:ok, non_neg_integer()} | {:error, :invalid_payload}
@@ -135,19 +197,25 @@ defmodule BarkparkCloud.Push do
       session_id when is_binary(session_id) and session_id != "" ->
         trimmed = Map.take(payload, @chat_blocked_fields)
 
-        jobs =
+        enqueued =
           barkpark
           |> active_device_tokens_for_barkpark()
-          |> Enum.map(fn device ->
-            PushDeliveryWorker.new(%{
+          |> Enum.count(fn device ->
+            %{
               "device_push_token_id" => device.id,
               "event" => "chat_blocked",
               "payload" => trimmed
-            })
+            }
+            |> PushDeliveryWorker.new()
+            |> Oban.insert()
+            |> case do
+              {:ok, %Oban.Job{conflict?: true}} -> false
+              {:ok, _job} -> true
+              {:error, _} -> false
+            end
           end)
 
-        Oban.insert_all(jobs)
-        {:ok, length(jobs)}
+        {:ok, enqueued}
 
       _ ->
         {:error, :invalid_payload}

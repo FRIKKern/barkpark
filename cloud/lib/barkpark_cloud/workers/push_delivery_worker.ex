@@ -11,6 +11,25 @@ defmodule BarkparkCloud.Workers.PushDeliveryWorker do
   never the device token itself (the worker reloads the row, so a token revoked
   between enqueue and perform is honored) and never message content.
 
+  ## Replay dedupe (wave-2 hardening, adversarial review of PR #6030)
+
+  `unique: [period: 600]` over the FULL args. Key choice: the D59h payload
+  carries no delivery id — its 5 fields `{session_id, title, workspace_id,
+  blocked_since, ask_role}` plus the target `device_push_token_id` ARE the
+  delivery's only identity, and `blocked_since` (the instance's block
+  timestamp) is the field that separates a REPLAY of one event from a
+  genuinely NEW blocking of the same session: a re-sent identical request has
+  the identical `blocked_since`, a fresh block carries a fresh one. So
+  identical-args-within-window is exactly "the same notification to the same
+  device" and nothing more. Window choice: the receiver's HMAC verifier
+  accepts |now − t| ≤ 300s, so a signature minted at `t` (possibly
+  future-dated) stays acceptable up to 600s after the earliest moment it
+  could first land — 600s covers the full replayable lifetime of one signed
+  request. Uniqueness spans Oban's default states (completed included, within
+  the period), so a replay arriving AFTER the original delivered still
+  dedupes. NOTE: enforcement relies on the fan-out using `Oban.insert/2`
+  per job — OSS `Oban.insert_all/2` skips unique checks.
+
   Verdicts (delegated to `Push.deliver/3`):
 
     * accepted (2xx)                       → `:ok`
@@ -21,7 +40,7 @@ defmodule BarkparkCloud.Workers.PushDeliveryWorker do
       backoff below, up to 4 attempts total
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 4
+  use Oban.Worker, queue: :default, max_attempts: 4, unique: [period: 600]
 
   alias BarkparkCloud.Push
 

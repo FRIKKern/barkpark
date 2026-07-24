@@ -2516,25 +2516,39 @@ defmodule BarkparkCloud.Web.Router do
   # (platform, token) upserts — clears revoked_at, refreshes metadata — so the
   # app can register on every launch. The registered token is NOT echoed back
   # (the client already holds it; keep responses minimal). 422 on an unknown
-  # platform / missing-short token. Registration rows are the relay's ONLY
-  # switch: zero rows → the chat_blocked receiver fans out to nothing.
+  # platform / missing-short-oversize token (token capped at 1024 bytes — the
+  # unique-index row cap would otherwise turn oversize into a raw 500).
+  # Rate-limited per USER (`push_register:<user_id>` bucket, 10/min — the
+  # approve:<user_id> idiom, not per-IP: mobile clients share carrier-NAT IPs)
+  # and capped at Push.max_devices_per_user/0 rows per user with
+  # revoked-first/stalest-next eviction (mob-bl-push-hardening). Registration
+  # rows are the relay's ONLY switch: zero rows → the chat_blocked receiver
+  # fans out to nothing.
   post "/v1/push/device-tokens" do
     conn = Auth.require_user(conn, [])
 
-    if conn.halted do
-      conn
-    else
-      case Push.register_device_token(conn.assigns.current_user, conn.body_params) do
-        {:ok, device} ->
-          json(conn, 201, %{
-            id: device.id,
-            platform: device.platform,
-            registered: true
-          })
+    cond do
+      conn.halted ->
+        conn
 
-        {:error, %Ecto.Changeset{}} ->
-          json(conn, 422, %{error: "invalid"})
-      end
+      match?(
+        {:error, :rate_limited},
+        DeviceAuthRateLimiter.check("push_register:" <> conn.assigns.current_user.id)
+      ) ->
+        json(conn, 429, %{error: "rate_limited"})
+
+      true ->
+        case Push.register_device_token(conn.assigns.current_user, conn.body_params) do
+          {:ok, device} ->
+            json(conn, 201, %{
+              id: device.id,
+              platform: device.platform,
+              registered: true
+            })
+
+          {:error, %Ecto.Changeset{}} ->
+            json(conn, 422, %{error: "invalid"})
+        end
     end
   end
 
