@@ -259,8 +259,24 @@ func renderErrorEnvelope(out *writer, code, msg, requestID, hint string) bool {
 // counterpart to run.go's manifest-path usage guard, giving both paths the same
 // machine-output parity. Always returns exitUsage.
 func usageErrf(out *writer, usageHelp func(), format string, args ...any) int {
+	return usageErrHintf(out, usageHelp, "", format, args...)
+}
+
+// usageErrHintf is usageErrf with an explicit envelope `hint` — the machine-mode
+// carrier for the did-you-mean suggestion. The dispatch sites that report an
+// unknown noun/verb already compute the nearest known token for the HUMAN usage
+// help block (usageSuggestNouns / usageSuggestVerb print it to stderr), but
+// usageErrf hardcodes hint="" so that suggestion never reached the `-o json`
+// error envelope — the exact surface agents (always piped) read. This threads
+// the same suggestion into error.hint. usageErrf delegates here with hint="" so
+// its ~60 no-op call sites stay byte-identical; only the four suggestion sites
+// pass a real hint (via nounHint/verbHint). Table/minimal output is unaffected —
+// renderErrorEnvelope emits nothing on stdout there, and the hint never appears
+// on the human stderr line (the usageHelp block already shows it). Always
+// returns exitUsage.
+func usageErrHintf(out *writer, usageHelp func(), hint, format string, args ...any) int {
 	msg := fmt.Sprintf(format, args...)
-	if !renderErrorEnvelope(out, "usage", msg, "", "") {
+	if !renderErrorEnvelope(out, "usage", msg, "", hint) {
 		out.userErr("%s", msg)
 		if usageHelp != nil {
 			usageHelp()

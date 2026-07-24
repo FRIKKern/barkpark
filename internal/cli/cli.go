@@ -39,6 +39,16 @@ const (
 	exitServer     = 8 // server-side 5xx / internal_error
 )
 
+// taskVerbAliases maps the two common muscle-memory `bp task` verbs the manifest
+// does not declare to their canonical spellings. Applied at the top of
+// `case "task"` in Execute, before any verb-specific intercept or manifest
+// dispatch. Task-noun-only by design (charter decision 12) — the census named
+// `task show`/`task list` specifically; no other noun gets these aliases.
+var taskVerbAliases = map[string]string{
+	"show": "get",
+	"list": "ls",
+}
+
 // Execute is the CLI entry point. args is os.Args[1:]. It returns the process
 // exit code; main() passes it straight to os.Exit. Execute never calls os.Exit
 // itself so it stays unit-testable.
@@ -150,6 +160,19 @@ func Execute(args []string) int {
 		// JSON verb.
 		return runChat(out, g, ctx, rest[1:])
 	case "task":
+		// Task-noun verb aliases (charter decision 12; census: 2,428 `task show`
+		// + 329 `task list` typed errors — 1.19 MB of pure context waste). The
+		// manifest declares `get`/`ls`, not the `show`/`list` spellings muscle
+		// memory reaches for; `show` is not even Levenshtein-reachable from `get`,
+		// so a bare did-you-mean cannot cover it. Rewrite the local verb IN PLACE,
+		// note the rewrite on stderr ONLY (proven invisible to `-o json` stdout,
+		// so machine output stays byte-identical to the canonical verb), and FALL
+		// THROUGH to the normal manifest dispatch — the same shape as the `server
+		// ls`→`servers` and `task tui` precedents. Task-noun-only by design.
+		if alias, ok := taskVerbAliases[verb]; ok {
+			out.errf("note: `task %s` is not a verb — running `barkpark task %s`", verb, alias)
+			verb = alias
+		}
 		// `bp task tui` is the discoverable singular-noun spelling of the same
 		// full-screen reader as `bp tasks`. Keep one implementation and one
 		// renderer; this alias exists so a user already navigating `bp task …`
@@ -495,7 +518,7 @@ func Execute(args []string) int {
 				usageNoun(out, tree, verb)
 				return exitOK
 			}
-			return usageErrf(out, func() { usageSuggestNouns(out, tree, verb) }, "unknown command %q", verb)
+			return usageErrHintf(out, func() { usageSuggestNouns(out, tree, verb) }, nounHint(tree, verb), "unknown command %q", verb)
 		}
 		usageTreeTop(out, m, tree)
 		return exitOK
@@ -504,7 +527,7 @@ func Execute(args []string) int {
 	if verb == "" || g.help {
 		// `barkpark <noun>` or `barkpark <noun> -h` → list the noun's verbs.
 		if _, ok := lookupNoun(tree, noun); !ok {
-			return usageErrf(out, func() { usageSuggestNouns(out, tree, noun) }, "unknown command %q", noun)
+			return usageErrHintf(out, func() { usageSuggestNouns(out, tree, noun) }, nounHint(tree, noun), "unknown command %q", noun)
 		}
 		// `barkpark <noun> <verb> -h` → that command's own arg/flag help
 		// (like git/gh/stripe), not the whole noun overview.
@@ -566,13 +589,13 @@ func Execute(args []string) int {
 				out.errf("note: `%s` has one verb — running `barkpark %s %s`", noun, noun, sole.Verb)
 				return runCommand(out, g, ctx, m, *sole, append([]string{verb}, tail...))
 			}
-			return usageErrf(out, func() {
+			return usageErrHintf(out, func() {
 				usageSuggestVerb(out, tree, noun, verb)
-			}, "%s", noVerbMsg(n, noun, verb))
+			}, verbHint(tree, noun, verb), "%s", noVerbMsg(n, noun, verb))
 		}
-		return usageErrf(out, func() {
+		return usageErrHintf(out, func() {
 			usageSuggestNouns(out, tree, noun)
-		}, "unknown command %q", noun)
+		}, nounHint(tree, noun), "unknown command %q", noun)
 	}
 
 	// `bp task stamp` — client-side ergonomic wrapper: echo the 0-based
