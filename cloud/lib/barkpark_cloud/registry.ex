@@ -2887,6 +2887,89 @@ defmodule BarkparkCloud.Registry do
   def mint_app_token(_, _), do: {:error, :not_live}
 
   @doc """
+  Revoke app token(s) on a live instance using the STORED admin credential —
+  `mint_app_token/2`'s lifecycle twin (mobile wave 2, mob-w2-app-token-revoke).
+
+  `mode` is either `{:token, raw}` — the phone presents the exact token it
+  wants dead (relayed ONCE to the instance, never persisted, never logged) —
+  or `{:email, email}` — logout-everywhere: the instance revokes every live
+  `app:<email>`-labelled token. The DELETE goes to `/v1/auth/app-tokens` with
+  the decrypted admin token as bearer; the admin credential never leaves this
+  process.
+
+  Instance-side 404s are split by BODY (the charter-D8 capability-vs-absence
+  lesson): the canonical `{"error":{"code":"not_found"}}` envelope is a real
+  token-not-found from the live revoke route; any other 404 shape is a
+  pre-revoke instance with no such route yet → `:revoke_unsupported`.
+  """
+  @spec revoke_app_token(Barkpark.t(), {:token, String.t()} | {:email, String.t()}) ::
+          {:ok, map()}
+          | {:error,
+             :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :not_found
+             | :revoke_unsupported
+             | :instance_error}
+  def revoke_app_token(%Barkpark{url: url} = bp, {kind, value} = mode)
+      when is_binary(url) and url != "" and kind in [:token, :email] and is_binary(value) and
+             value != "" do
+    case reveal_admin_token(bp) do
+      {:ok, nil} ->
+        {:error, :no_admin_token}
+
+      :error ->
+        {:error, :decrypt_failed}
+
+      {:ok, admin_token} ->
+        base = String.trim_trailing(url, "/")
+
+        body =
+          case mode do
+            {:token, raw} -> Jason.encode!(%{token: raw})
+            {:email, email} -> Jason.encode!(%{email: email})
+          end
+
+        request = %{
+          method: :delete,
+          url: base <> "/v1/auth/app-tokens",
+          headers: [
+            {"Authorization", "Bearer " <> admin_token},
+            {"Accept", "application/json"},
+            {"Content-Type", "application/json"}
+          ],
+          body: body
+        }
+
+        case studio_link_http_client().request(request) do
+          {:ok, %{status: 200, body: resp}} ->
+            case Jason.decode(resp) do
+              {:ok, decoded} when is_map(decoded) ->
+                {:ok, Map.take(decoded, ["revoked", "revoked_count"])}
+
+              _ ->
+                {:error, :instance_error}
+            end
+
+          {:ok, %{status: 404, body: resp}} ->
+            case Jason.decode(resp) do
+              # The live revoke route's canonical envelope → the token really
+              # does not exist (or is out of this surface's reach).
+              {:ok, %{"error" => %{"code" => "not_found"}}} -> {:error, :not_found}
+              # Anything else 404-shaped (Phoenix no-route body) → the instance
+              # predates the revoke route: capability absence, not an outage.
+              _ -> {:error, :revoke_unsupported}
+            end
+
+          _ ->
+            {:error, :instance_error}
+        end
+    end
+  end
+
+  def revoke_app_token(_, _), do: {:error, :not_live}
+
+  @doc """
   Decrypt a Barkpark's stored content-bootstrap outputs (dwb-4) back to the map
   the dashboard/deploy step consumes:
 

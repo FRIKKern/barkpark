@@ -32,15 +32,26 @@ defmodule BarkparkWeb.AppTokenController do
   The plaintext token is returned ONCE in the 201 body and is never recoverable
   after (only its SHA256 hash is persisted). The raw token is NEVER logged and
   never audited — the audit event records THAT a mint happened.
+
+  Wave 2 (mob-w2-app-token-revoke) adds the lifecycle twin: `delete/2`
+  (admin-bearer revoke by presented token or logout-everywhere by email) and
+  `delete_current/2` (self-revoke — the bearer kills itself). Both only ever
+  SET `revoked_at`; `Auth.verify_token/1` already rejects revoked rows in its
+  WHERE clause, so revocation is fail-closed with zero read-path changes.
   """
   use BarkparkWeb, :controller
 
-  alias Barkpark.{Audit, Auth, Sso, Tenancy}
+  alias Barkpark.{Audit, Auth, RateLimiter, Sso, Tenancy}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.ErrorResponse
 
   @app_token_permissions ~w(read write chat)
   @app_token_prefix "bpapp_"
+
+  # D7 sibling bucket on the instance side: `{:app_token_revoke, ip}`, 10/min —
+  # the same budget as the Cloud proxy's `app_token_revoke:<ip>` window, so a
+  # runaway logout loop is braked at both layers.
+  @revoke_bucket_capacity 10
 
   @doc """
   Mint an app token bound to a workspace, as `email`'s JIT-provisioned identity.
@@ -68,6 +79,113 @@ defmodule BarkparkWeb.AppTokenController do
       # mint_login_ticket idiom: a non-admin bearer gets the same generic
       # unauthorized as a bad token — this route never confirms tiers.
       ErrorResponse.emit(conn, {:error, :unauthorized})
+    end
+  end
+
+  @doc """
+  DELETE /v1/auth/app-tokens — admin-bearer-gated revoke, the mint's lifecycle
+  twin (mob-w2-app-token-revoke). Sets `revoked_at` only; `Auth.verify_token/1`
+  already filters revoked rows in its WHERE clause, so a revoked token fails
+  closed on its next use with ZERO read-path changes.
+
+  Body, exactly one of:
+
+    * `{"token": raw}` — revoke exactly that token. Unknown raw → the same
+      canonical 404 whatever the reason (nonexistent and foreign join one
+      not-found oracle). Idempotent: re-revoking an already-revoked token is
+      another 200.
+    * `{"email": email}` — logout-everywhere: revoke every LIVE
+      `app:<email>`-labelled token. 200 `{"revoked_count": n}` (0 included).
+
+  Tokens carrying `admin` are never revocable through this path (422) — the
+  stored custody credential cannot be killed by a label collision or a smuggled
+  body. Rate-bucketed per IP (D7 idiom). Non-admin bearers get the same generic
+  unauthorized as an invalid token (the mint's oracle discipline).
+  """
+  def delete(conn, params) do
+    bearer = conn.assigns.api_token
+
+    cond do
+      revoke_rate_limited?(conn) ->
+        ErrorResponse.emit(conn, {:error, :rate_limited})
+
+      not Auth.has_permission?(bearer, "admin") ->
+        ErrorResponse.emit(conn, {:error, :unauthorized})
+
+      true ->
+        revoke(conn, params)
+    end
+  end
+
+  @doc """
+  DELETE /v1/auth/app-tokens/current — self-revoke: the bearer kills ITSELF
+  (possession is the authorization; no admin required). The phone's
+  cloud-independent logout. Admin bearers are refused (422) so the stored
+  custody credential can never self-destruct through a member-shaped path.
+  After the 200, the same bearer is rejected by `:require_token` — a repeat
+  call is the HTTP-level proof of fail-closed.
+  """
+  def delete_current(conn, _params) do
+    token = conn.assigns.api_token
+
+    cond do
+      revoke_rate_limited?(conn) ->
+        ErrorResponse.emit(conn, {:error, :rate_limited})
+
+      Auth.has_permission?(token, "admin") ->
+        unprocessable(conn, "admin tokens cannot self-revoke through the app-token path")
+
+      true ->
+        case Auth.revoke_token(token) do
+          {:ok, _} -> json(conn, %{revoked: true})
+          _ -> unprocessable(conn, "could not revoke token")
+        end
+    end
+  end
+
+  defp revoke(conn, %{"token" => raw}) when is_binary(raw) and raw != "" do
+    case Auth.get_api_token_by_raw(raw) do
+      nil ->
+        ErrorResponse.emit(conn, {:error, :not_found})
+
+      %{permissions: perms} = token ->
+        if "admin" in (perms || []) do
+          unprocessable(conn, "admin tokens cannot be revoked through the app-token path")
+        else
+          case Auth.revoke_token(token) do
+            {:ok, _} -> json(conn, %{revoked: true})
+            _ -> unprocessable(conn, "could not revoke token")
+          end
+        end
+    end
+  end
+
+  defp revoke(conn, %{"email" => email}) when is_binary(email) do
+    case String.trim(email) do
+      "" ->
+        unprocessable(conn, "email must be a non-empty string")
+
+      trimmed ->
+        json(conn, %{revoked_count: Auth.revoke_app_tokens_for_email(trimmed)})
+    end
+  end
+
+  defp revoke(conn, _params) do
+    unprocessable(conn, ~s(body must carry "token" or "email"))
+  end
+
+  defp revoke_rate_limited?(conn) do
+    RateLimiter.check(
+      {:app_token_revoke, client_ip(conn)},
+      capacity: @revoke_bucket_capacity,
+      refill_per_sec: @revoke_bucket_capacity / 60
+    ) == :rate_limited
+  end
+
+  defp client_ip(conn) do
+    case get_req_header(conn, "x-forwarded-for") do
+      [forwarded | _] -> forwarded |> String.split(",") |> hd() |> String.trim()
+      [] -> conn.remote_ip |> :inet.ntoa() |> to_string()
     end
   end
 

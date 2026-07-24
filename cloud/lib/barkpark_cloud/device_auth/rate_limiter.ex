@@ -18,6 +18,10 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
       (`POST /v1/barkparks/:id/app-token`) — each hit costs the instance a
       server-side admin-authed mint call, so a runaway client must be braked
       here, before the proxy fans out.
+    * `"app_token_revoke:"<peer_ip>` — 10 / 60s. The mint bucket's revoke twin
+      (`DELETE /v1/barkparks/:id/app-token`, mob-w2-app-token-revoke) — same
+      physics (every hit is a server-side admin-authed instance call), its own
+      bucket so a logout loop can't starve mints and vice versa.
 
   The key is `{key_string, window}` where `window = div(now_ms, @window_ms)`, so
   elapsed windows are lazily swept on the next `check/1` for that key and the
@@ -29,7 +33,13 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
   @table __MODULE__
   @window_ms 60_000
   @default_limit 10
-  @limits %{"poll" => 20, "start" => 10, "approve" => 10, "app_token" => 10}
+  @limits %{
+    "poll" => 20,
+    "start" => 10,
+    "approve" => 10,
+    "app_token" => 10,
+    "app_token_revoke" => 10
+  }
 
   @doc false
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
