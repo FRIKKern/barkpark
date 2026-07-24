@@ -9224,7 +9224,9 @@ defmodule BarkparkCloud.Web.Router do
   #                        the credential spine, minted-once server-to-box crossing)
   #   dataset            — always "production" (the support serves the main's prod)
   #   workspace          — the main's bootstrap_workspace (scope the support binds to)
-  #   name               — the support row's name
+  #   name               — the support row's SLUG (task-314de6aa36248bea: the Go
+  #                        worker uses it as its DNS-shaped worker identity — the
+  #                        free-form display name ("My Helper") is never sent)
   # The parent is resolved off the support's `fleet_parent_id`. A vanished parent
   # or a stripped admin token degrades to nil (the enqueue-time 409 guard makes
   # that path near-impossible; the worker then fails the job honestly rather than
@@ -9234,7 +9236,7 @@ defmodule BarkparkCloud.Web.Router do
     |> Map.put(:support, support_claim_map(barkpark))
   end
 
-  defp support_claim_map(%Barkpark{fleet_parent_id: parent_id, name: name}) do
+  defp support_claim_map(%Barkpark{fleet_parent_id: parent_id, slug: slug}) do
     parent = parent_id && Registry.get_barkpark(parent_id)
 
     %{
@@ -9242,7 +9244,10 @@ defmodule BarkparkCloud.Web.Router do
       parent_admin_token: reveal_parent_admin_token(parent),
       dataset: "production",
       workspace: parent && parent.bootstrap_workspace,
-      name: name
+      # The SLUG, deliberately under the pinned `name` key (the Go slice binds
+      # against these exact keys) — DNS-shaped worker identity, never the
+      # display name.
+      name: slug
     }
   end
 

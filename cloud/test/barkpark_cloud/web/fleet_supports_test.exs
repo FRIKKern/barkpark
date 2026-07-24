@@ -626,7 +626,7 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
         call(
           :post,
           "/v1/fleet/supports",
-          %{name: "Helper", barkpark_id: main.id, mode: "provision"},
+          %{name: "Helper Box", barkpark_id: main.id, mode: "provision"},
           token
         )
 
@@ -638,7 +638,7 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
 
       # The generic provision claim fields ride along (reused claim_json).
       assert body["job_id"] == job_id
-      assert body["name"] == "Helper"
+      assert body["name"] == "Helper Box"
 
       # The PINNED support map — the Go slice binds against these exact keys.
       {:ok, expected_admin_token} = Vault.decrypt(main.admin_token_encrypted)
@@ -647,7 +647,12 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       assert support["parent_admin_token"] == expected_admin_token
       assert support["dataset"] == "production"
       assert support["workspace"] == "acme"
-      assert support["name"] == "Helper"
+
+      # task-314de6aa36248bea: support.name carries the SLUG, never the display
+      # name — the Go worker uses it as its DNS-shaped worker identity, and
+      # "Helper Box" (space, uppercase) would break it.
+      assert support["name"] == "helper-box"
+      refute support["name"] == "Helper Box"
     end
 
     test "204 when no provision_support job is pending" do

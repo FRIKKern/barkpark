@@ -65,6 +65,19 @@ defmodule BarkparkCloud.Registry do
   # non-default worker ProvisionTimeout). Default: 12 minutes.
   @default_stale_after_seconds 12 * 60
 
+  # Support-provision stale-claim recovery (task-314de6aa36248bea). The
+  # `provision_support` chain legitimately runs far past the generic threshold:
+  # the Go worker's DefaultSupportProvisionTimeout is 30 minutes (the roster-verify
+  # budget alone is 10, and the CLI's provisioning roster row carries the matching
+  # ttl_s=1800 — internal/cli/cloud_support_cmd.go). Threshold = that 30-minute
+  # worker budget + 5 minutes margin for teardown + the report round-trip, so a
+  # HEALTHY support chain is never re-pended mid-flight (a re-pend double-claims:
+  # two billed boxes for one add). Every OTHER kind keeps
+  # @default_stale_after_seconds exactly. Overridable via
+  # `config :barkpark_cloud, :support_provision_stale_after_seconds`.
+  # Default: 35 minutes.
+  @default_support_stale_after_seconds 35 * 60
+
   # The attempt budget: claim_next_job bumps `attempts` on every (re)claim, and a
   # stale job whose attempts have already reached this cap is transitioned to
   # "failed" ("exceeded max provision attempts") instead of being handed out
@@ -1110,7 +1123,9 @@ defmodule BarkparkCloud.Registry do
 
     * `pending` — never claimed, OR
     * `claimed` but STALE — `claimed_at` older than the staleness threshold
-      (`stale_after_seconds/0`, default the worker's provision timeout + margin).
+      (`stale_after_seconds/1` — PER-KIND: `provision_support` uses the
+      35-minute support budget, every other kind the generic worker provision
+      timeout + margin).
       A stale claim means the worker crashed or its succeed/fail report failed in
       transit and — per the worker contract — it tore down its box and LEFT the
       row "claimed"; re-claiming it runs a fresh attempt. A FRESH `claimed` row
@@ -1129,7 +1144,7 @@ defmodule BarkparkCloud.Registry do
   def claim_next_job(claim_token, kind \\ "provision")
       when is_binary(claim_token) and is_binary(kind) do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
-    stale_before = DateTime.add(now, -stale_after_seconds(), :second)
+    stale_before = DateTime.add(now, -stale_after_seconds(kind), :second)
     max_attempts = max_provision_attempts()
 
     result =
@@ -1751,9 +1766,10 @@ defmodule BarkparkCloud.Registry do
   only when the next claim happens to arrive.
 
   Outcomes are IDENTICAL to the lazy path (`claim_loop/5`), reusing the same
-  `stale_after_seconds/0` threshold and `max_provision_attempts/0` budget so the
-  two can never diverge — kind-agnostic (sweeps stale `provision` AND
-  `deprovision` claims):
+  `stale_after_seconds/1` per-kind threshold and `max_provision_attempts/0`
+  budget so the two can never diverge — it sweeps EVERY kind, but each row is
+  measured against ITS kind's threshold (`provision_support` gets the 35-minute
+  support budget, task-314de6aa36248bea; everything else the generic threshold):
 
     * a stale `claimed` job still UNDER its attempt budget is flipped back to
       `pending` (claim_token / claimed_at cleared) so a fresh worker re-claims it.
@@ -1772,12 +1788,20 @@ defmodule BarkparkCloud.Registry do
   @spec reap_stale_provision_jobs() :: %{reaped: non_neg_integer(), failed: non_neg_integer()}
   def reap_stale_provision_jobs do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+    # Per-kind staleness (task-314de6aa36248bea): a healthy provision_support
+    # chain runs to the Go worker's 30-minute budget — measuring it against the
+    # generic ~12-minute threshold re-pended it mid-flight (double-claim, two
+    # billed boxes). Same thresholds as stale_after_seconds/1.
     stale_before = DateTime.add(now, -stale_after_seconds(), :second)
+    support_stale_before = DateTime.add(now, -support_stale_after_seconds(), :second)
     max_attempts = max_provision_attempts()
 
     stale =
       from(j in ProvisionJob,
-        where: j.status == "claimed" and j.claimed_at < ^stale_before
+        where:
+          j.status == "claimed" and
+            ((j.kind == "provision_support" and j.claimed_at < ^support_stale_before) or
+               (j.kind != "provision_support" and j.claimed_at < ^stale_before))
       )
       |> Repo.all()
 
@@ -2066,6 +2090,34 @@ defmodule BarkparkCloud.Registry do
       :barkpark_cloud,
       :provision_stale_after_seconds,
       @default_stale_after_seconds
+    )
+  end
+
+  @doc """
+  The per-KIND staleness threshold (task-314de6aa36248bea): `provision_support`
+  claims get the longer support budget (`support_stale_after_seconds/0`); every
+  other kind keeps `stale_after_seconds/0` exactly. Used by both staleness paths
+  (`claim_next_job/2` and `reap_stale_provision_jobs/0`) so they can never
+  diverge per kind.
+  """
+  @spec stale_after_seconds(String.t()) :: pos_integer()
+  def stale_after_seconds("provision_support"), do: support_stale_after_seconds()
+  def stale_after_seconds(_kind), do: stale_after_seconds()
+
+  @doc """
+  Seconds a claimed `provision_support` job may sit before it is treated as
+  abandoned. Sized as the Go worker's DefaultSupportProvisionTimeout (30m —
+  roster-verify budget alone is 10m) + 5m margin for teardown + the report
+  round-trip (#{@default_support_stale_after_seconds}s), so a healthy support
+  chain is never re-pended mid-flight and double-claimed. Overridable via
+  `config :barkpark_cloud, :support_provision_stale_after_seconds`.
+  """
+  @spec support_stale_after_seconds() :: pos_integer()
+  def support_stale_after_seconds do
+    Application.get_env(
+      :barkpark_cloud,
+      :support_provision_stale_after_seconds,
+      @default_support_stale_after_seconds
     )
   end
 
