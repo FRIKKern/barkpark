@@ -26,7 +26,7 @@ import { useChatRollup } from './src/chat/useChatRollup'
 import { ChatScreen } from './src/screens/ChatScreen'
 import { ConnectScreen } from './src/screens/ConnectScreen'
 import { LoginScreen, type CloudSession } from './src/screens/LoginScreen'
-import { PapersScreen } from './src/screens/StubScreens'
+import { PapersScreen } from './src/screens/PapersScreen'
 import { TasksScreen } from './src/screens/TasksScreen'
 import { TabBar, type TabKey } from './src/ui/TabBar'
 import { useTheme } from './src/ui/theme'
@@ -81,7 +81,7 @@ export default function App() {
         <View style={styles.content}>
           {tab === 'tasks' && <TasksScreen connection={connection} />}
           {tab === 'chat' && <ChatScreen connection={connection} />}
-          {tab === 'papers' && <PapersScreen />}
+          {tab === 'papers' && <PapersScreen connection={connection} />}
         </View>
         <TabBar active={tab} onSelect={setTab} badges={{ chat: chatBadge }} />
       </View>
