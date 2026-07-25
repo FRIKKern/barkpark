@@ -1,7 +1,15 @@
 // Hand-rolled bottom tab bar — three tabs (Tasks · Chat · Papers, ratified
 // R3). Deliberately dependency-free (no react-navigation) to keep the
-// Metro/pnpm surface minimal in the skeleton; the needs-you badge slot is
-// wired now so the wave-2 rollup only has to feed it a number.
+// Metro/pnpm surface minimal.
+//
+// BADGES, HONESTLY: this component renders whatever number the app shell
+// hands it, per tab. Today the shell feeds exactly ONE — `chat`, from
+// `counts.blocked` on GET /v1/chat/rollup (useChatRollup, 60s poll). The
+// `tasks` and `papers` slots render the moment a number arrives and are fed by
+// nothing: there is no tasks needs-you source wired. `/v1/tasks/prime` is the
+// obvious candidate (its `counts` already ride every Tasks-tab load), but the
+// map is assembled in the app shell, not here — so wiring it is a shell
+// change, not a TabBar one. Until then this comment is the whole truth.
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { useTheme } from './theme'
@@ -21,7 +29,8 @@ export function TabBar({
 }: {
   active: TabKey
   onSelect: (tab: TabKey) => void
-  /** needs-you counts per tab (wave 2 feeds this from /v1/chat/rollup). */
+  /** needs-you counts per tab, assembled by the app shell. Only `chat` is fed
+   * today (blocked sessions from /v1/chat/rollup); see the file header. */
   badges?: Partial<Record<TabKey, number>>
 }) {
   const theme = useTheme()
