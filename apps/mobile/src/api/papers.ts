@@ -20,7 +20,10 @@ export interface PaperDoc extends PaperListItem {
 
 interface QueryEnvelope {
   result?: {
+    /** returned-page row count — NOT a corpus total */
     count?: number
+    /** corpus total, present only with `count=true` */
+    total?: number
     documents?: Record<string, unknown>[]
   }
 }
@@ -37,9 +40,17 @@ export const PAPER_PAGE_SIZE = 100
 
 export interface PaperPage {
   items: PaperListItem[]
-  /** The server's total match count — the pager's stop condition (F3: the
-   * live corpus is 537 papers today; a fixed limit silently hid 337). */
-  total: number
+  /** RAW server page length — the next-offset advance. Kept separate from
+   * items.length (docs without an _id are dropped) and from any post-dedupe
+   * length, so paging never stalls or skips. */
+  pageLen: number
+  /** The reliable stop condition (review F3 verify-round): a short page means
+   * end-of-corpus. The envelope's `count` is the RETURNED-PAGE row count —
+   * NOT a corpus total (probed live: limit=5 → count:5 against 537 papers). */
+  hasMore: boolean
+  /** Corpus total from `count=true` (docs/api-v1.md §4: "adds result.total";
+   * probed live: total:537). Display-only — hasMore never depends on it. */
+  total?: number
 }
 
 /** One page of the papers list, newest-updated first. `fields=` projects the
@@ -53,7 +64,7 @@ export async function fetchPaperPage(
   const path =
     `/v1/data/query/${encodeURIComponent(dataset)}/paper` +
     `?fields=title,description,main_tag&order=_updatedAt:desc` +
-    `&limit=${PAPER_PAGE_SIZE}&offset=${Math.max(0, Math.floor(offset))}`
+    `&limit=${PAPER_PAGE_SIZE}&offset=${Math.max(0, Math.floor(offset))}&count=true`
   const response = await client.fetchRaw<Response>(path)
   if (!response.ok) throw new Error(`paper list failed: HTTP ${response.status}`)
   const body = (await response.json()) as QueryEnvelope
@@ -71,9 +82,14 @@ export async function fetchPaperPage(
       _createdAt: asStr(doc._createdAt),
     })
   }
-  const totalRaw = body.result?.count
-  const total = typeof totalRaw === 'number' && totalRaw >= 0 ? totalRaw : items.length
-  return { items, total }
+  const totalRaw = body.result?.total
+  const page: PaperPage = {
+    items,
+    pageLen: docs.length,
+    hasMore: docs.length === PAPER_PAGE_SIZE,
+  }
+  if (typeof totalRaw === 'number' && totalRaw >= 0) page.total = totalRaw
+  return page
 }
 
 /** Fetch one paper's full document (blocks included) for the reader. */

@@ -1,11 +1,13 @@
 // Papers tab — the list screen, live on the minted token via
 // GET /v1/data/query/:dataset/paper (fields-projected light; newest-updated
-// first). PAGED (review F3): the live corpus is 537 papers and growing — the
-// list loads 100 at a time and fetches the next page as the scroll nears the
-// end, until the server's total is reached. Selecting a row opens the native
-// reader. Honest states: loading, error-with-retry, empty, ready with
-// pull-to-refresh (refresh restarts from page one), and a footer spinner
-// while a page is in flight. Read-only against production by construction.
+// first). PAGED (review F3 + verify-round): the live corpus is 537 papers
+// and growing — 100 at a time via the pure paperPager accumulator. The stop
+// condition is the pager's hasMore (short page = end of corpus, jest-pinned);
+// the corpus total from `count=true` feeds the honest "N of M" footer only.
+// Selecting a row opens the native reader. Honest states: loading,
+// error-with-retry, empty, ready with pull-to-refresh (refresh restarts from
+// page one), footer spinner / "Load more" / all-loaded end label. Read-only
+// against production by construction.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -18,7 +20,8 @@ import {
 } from 'react-native'
 
 import { makeInstanceClient, type InstanceConnection } from '../api/instance'
-import { fetchPaperPage, type PaperListItem } from '../api/papers'
+import { fetchPaperPage, PAPER_PAGE_SIZE, type PaperListItem } from '../api/papers'
+import { EMPTY_PAGER, appendPage, shouldLoadMore, type PagerState } from '../papers/paperPager'
 import { relativeTime } from './ChatScreen'
 import { PaperReaderScreen } from './PaperReaderScreen'
 import { useTheme, type Theme } from '../ui/theme'
@@ -28,9 +31,7 @@ type ListState =
   | { phase: 'error'; message: string }
   | {
       phase: 'ready'
-      papers: PaperListItem[]
-      /** the server's total match count — papers.length < total means more pages */
-      total: number
+      pager: PagerState
       refreshing: boolean
       loadingMore: boolean
       loadedAtMs: number
@@ -53,8 +54,7 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
         if (alive)
           setState({
             phase: 'ready',
-            papers: page.items,
-            total: page.total,
+            pager: appendPage(EMPTY_PAGER, page),
             refreshing: false,
             loadingMore: false,
             loadedAtMs: Date.now(),
@@ -84,24 +84,15 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
     if (pageInFlight.current) return
     setState((prev) => {
       if (prev.phase !== 'ready' || prev.loadingMore || prev.refreshing) return prev
-      if (prev.papers.length >= prev.total) return prev
+      if (!shouldLoadMore(prev.pager)) return prev
       pageInFlight.current = true
-      const offset = prev.papers.length
+      const offset = prev.pager.offset
       ;(async () => {
         try {
           const page = await fetchPaperPage(client, connection.dataset, offset)
           setState((cur) => {
             if (cur.phase !== 'ready') return cur
-            // Dedupe on _id: a paper updated between page fetches can shift
-            // pages under order=_updatedAt:desc.
-            const seen = new Set(cur.papers.map((p) => p._id))
-            const fresh = page.items.filter((p) => !seen.has(p._id))
-            return {
-              ...cur,
-              papers: [...cur.papers, ...fresh],
-              total: page.total,
-              loadingMore: false,
-            }
+            return { ...cur, pager: appendPage(cur.pager, page), loadingMore: false }
           })
         } catch {
           // Honest degrade: stop the spinner; the next end-reach retries.
@@ -145,7 +136,7 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
     )
   }
 
-  if (state.papers.length === 0) {
+  if (state.pager.papers.length === 0) {
     return (
       <View style={[styles.center, { backgroundColor: theme.bg }]}>
         <Text style={[styles.body, { color: theme.text }]}>No papers yet.</Text>
@@ -163,7 +154,7 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
     <FlatList
       style={{ backgroundColor: theme.bg }}
       contentContainerStyle={styles.listContent}
-      data={state.papers}
+      data={state.pager.papers}
       keyExtractor={(paper) => paper._id}
       refreshControl={
         <RefreshControl
@@ -179,12 +170,20 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
           <View style={styles.footer}>
             <ActivityIndicator color={theme.accent} />
           </View>
-        ) : state.papers.length < state.total ? (
+        ) : shouldLoadMore(state.pager) ? (
           <Pressable accessibilityRole="button" onPress={loadMore} style={styles.footer}>
             <Text style={[styles.link, { color: theme.accent }]}>
-              Load more ({state.papers.length} of {state.total})
+              {state.pager.total !== undefined
+                ? `Load more (${state.pager.papers.length} of ${state.pager.total})`
+                : `Load more (${state.pager.papers.length} loaded)`}
             </Text>
           </Pressable>
+        ) : state.pager.papers.length > PAPER_PAGE_SIZE ? (
+          <View style={styles.footer}>
+            <Text style={[styles.muted, { color: theme.textMuted }]}>
+              All {state.pager.papers.length} papers loaded.
+            </Text>
+          </View>
         ) : null
       }
       renderItem={({ item }) => (

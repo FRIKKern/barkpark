@@ -274,7 +274,7 @@ const image: Render = (b, ctx, key) => {
           marginVertical: 8,
         }}
       >
-        <Text style={{ fontSize: 12, color: ctx.theme.textMuted, fontStyle: 'italic' }}>
+        <Text numberOfLines={3} style={{ fontSize: 12, color: ctx.theme.textMuted, fontStyle: 'italic' }}>
           Image unavailable: {src}
         </Text>
       </View>
