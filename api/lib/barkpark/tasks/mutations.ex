@@ -1,9 +1,11 @@
 defmodule Barkpark.Tasks.Mutations do
   @moduledoc false
   # Single-task content mutations that ride the same advisory-lock + CAS-on-rev
-  # pattern: `labels` (relabel) and `papers` (paper-refs). Extracted from the
-  # `Barkpark.Tasks` facade, which delegates to these. The two functions are
-  # twins — identical CAS shape, differing only in the content key + event kind.
+  # pattern: `labels` (relabel), `papers` and `sessions` (ref-list mutations).
+  # Extracted from the `Barkpark.Tasks` facade, which delegates to these.
+  # `update_paper_refs_by_id/4` and `update_session_refs_by_id/4` are thin
+  # wrappers over the shared `update_ref_list_by_id/5` core — twins,
+  # differing only in the content key + event kind.
 
   import Ecto.Query, only: [from: 2]
 
@@ -63,6 +65,7 @@ defmodule Barkpark.Tasks.Mutations do
             case rows do
               1 ->
                 updated = %{doc | content: new_content, rev: new_rev}
+
                 ev =
                   insert_mutation_event!(
                     updated,
@@ -94,16 +97,41 @@ defmodule Barkpark.Tasks.Mutations do
   end
 
   @doc """
-  Phase A: add/remove `content.papers` entries (paper slugs) on a single task,
-  advisory-lock + CAS-on-rev guarded, emitting a `task.referenced`
-  mutation_event. Mirrors `relabel_by_id/3` — the only difference is the content
-  key (`"papers"`) and the event kind. Returns `{:ok, doc}`,
-  `{:error, :not_found}`, or `{:error, :stale_claim}`.
+  Phase A: add/remove `content.papers` entries (paper slugs) on a single task.
+  Thin wrapper over `update_ref_list_by_id/5` — see its doc for the shared
+  advisory-lock + CAS-on-rev + `task.referenced` mutation_event contract.
   """
   @spec update_paper_refs_by_id(binary(), [binary()], [binary()], binary() | nil) ::
           {:ok, Document.t()} | {:error, term()}
-  def update_paper_refs_by_id(task_id, add_slugs, remove_slugs, caller_token_id \\ nil)
-      when is_binary(task_id) and is_list(add_slugs) and is_list(remove_slugs) do
+  def update_paper_refs_by_id(task_id, add_slugs, remove_slugs, caller_token_id \\ nil),
+    do: update_ref_list_by_id(task_id, "papers", add_slugs, remove_slugs, caller_token_id)
+
+  @doc """
+  Task 5 (session-handoff): add/remove `content.sessions` entries (session
+  doc-ids) on a single task. Thin wrapper over `update_ref_list_by_id/5` — see
+  its doc for the shared advisory-lock + CAS-on-rev + `task.referenced`
+  mutation_event contract. Sessions are referenced by slug string only; no FK.
+  """
+  @spec update_session_refs_by_id(binary(), [binary()], [binary()], binary() | nil) ::
+          {:ok, Document.t()} | {:error, term()}
+  def update_session_refs_by_id(task_id, add_ids, remove_ids, caller_token_id \\ nil),
+    do: update_ref_list_by_id(task_id, "sessions", add_ids, remove_ids, caller_token_id)
+
+  @doc """
+  Shared core for `update_paper_refs_by_id/4` and `update_session_refs_by_id/4`
+  (and any future ref-list field): add/remove entries in `content[field]` on a
+  single task, advisory-lock + CAS-on-rev guarded, emitting a
+  `task.referenced` mutation_event. Mirrors `relabel_by_id/3` — the only
+  difference is the content key (parameterized here as `field`) and the event
+  kind (`task.referenced` for every ref-list field, vs `task.relabeled` for
+  labels). Returns `{:ok, doc}`, `{:error, :not_found}`, or
+  `{:error, :stale_claim}`.
+  """
+  @spec update_ref_list_by_id(binary(), binary(), [binary()], [binary()], binary() | nil) ::
+          {:ok, Document.t()} | {:error, term()}
+  defp update_ref_list_by_id(task_id, field, add_ids, remove_ids, caller_token_id)
+       when is_binary(task_id) and is_binary(field) and is_list(add_ids) and
+              is_list(remove_ids) do
     result =
       Repo.transaction(fn ->
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
@@ -114,16 +142,16 @@ defmodule Barkpark.Tasks.Mutations do
 
           %Document{} = doc ->
             observed_rev = doc.rev
-            current = papers_of(doc.content)
-            add = Enum.filter(add_slugs, &is_binary/1)
-            remove = MapSet.new(Enum.filter(remove_slugs, &is_binary/1))
+            current = refs_of(doc.content, field)
+            add = Enum.filter(add_ids, &is_binary/1)
+            remove = MapSet.new(Enum.filter(remove_ids, &is_binary/1))
 
             next =
               (current ++ add)
               |> Enum.uniq()
               |> Enum.reject(&MapSet.member?(remove, &1))
 
-            new_content = Map.put(doc.content, "papers", next)
+            new_content = Map.put(doc.content, field, next)
             new_rev = generate_rev()
 
             {rows, _} =
@@ -135,6 +163,7 @@ defmodule Barkpark.Tasks.Mutations do
             case rows do
               1 ->
                 updated = %{doc | content: new_content, rev: new_rev}
+
                 ev =
                   insert_mutation_event!(
                     updated,
@@ -166,11 +195,15 @@ defmodule Barkpark.Tasks.Mutations do
     end
   end
 
-  # content.labels is a free-form JSON array; content.papers is a slug array.
-  # Defensive: coerce non-list / missing to [].
+  # content.labels is a free-form JSON array; content.papers / content.sessions
+  # are slug/doc-id arrays. Defensive: coerce non-list / missing to [].
   defp labels_of(%{"labels" => labels}) when is_list(labels), do: labels
   defp labels_of(_), do: []
 
-  defp papers_of(%{"papers" => papers}) when is_list(papers), do: papers
-  defp papers_of(_), do: []
+  defp refs_of(content, field) do
+    case Map.get(content, field) do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
 end
