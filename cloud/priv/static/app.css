@@ -774,6 +774,17 @@ select.form-input {
   z-index: var(--z-topbar);
 }
 .topbar-left, .topbar-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
+/* GR116: .topbar itself never overflows (right edge 753 at a 768 viewport) —
+   its CHILDREN do. They are flex items at the default min-width:auto, floored
+   at min-content, so when past-due injects the billing chip the topbar's
+   children escape to 775-780. The broken band reaches ~782 — ABOVE the 768
+   breakpoint (769px still measured 775.22 light / 776.92 dark) — so NO
+   max-width media rule can close it; the fix must be breakpoint-free. Letting
+   every topbar-right child shrink (the chip clips via its own overflow:hidden
+   below) measured 0/44 overflowing across 721-1440 x 2 themes x 2 past-due
+   scenarios. Width-independent by construction: it cannot regress when chip
+   text or locale changes. */
+.topbar-right > * { min-width: 0; }
 .crumb-sep { color: var(--border); font-size: 16px; flex: 0 0 auto; }
 
 .org-chip {
@@ -1031,7 +1042,6 @@ select.form-input {
    does not stop a wheel, so reaching the bottom of a tall modal would start
    scrolling the page underneath. `overscroll-behavior: contain` closes that;
    it is inert on every modal that fits. */
-   the block below is the modal primitive and positions its own root */
 .modal-root { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; justify-items: center; align-items: start; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-6); }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
 .modal-card {
@@ -1946,10 +1956,12 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    hostname (mixed-fleet), `.detail-grid` stays two-column and clips its right
    column off-screen in BOTH consumers (panel-overview's Host row, rollback's
    DETAILS card), and `.attention-row` hides instance names behind the View
-   instance / Open Studio buttons (fleet-usage). Only those three move up:
-   .topbar / .crumbs / .toast-stack / .detail-head / .site-row--global and the
-   webhooks + sites panels were shot at 768 and render cleanly, so they keep
-   the 720px phone threshold rather than going phone-shaped on a tablet. */
+   instance / Open Studio buttons (fleet-usage). Those three moved up, and
+   GR116 later moved the topbar tighten + live-chip fold up too (the past-due
+   billing chip needs the space at tablet widths). .crumbs / .toast-stack /
+   .detail-head / .site-row--global and the webhooks + sites panels were shot
+   at 768 and render cleanly, so they keep the 720px phone threshold rather
+   than going phone-shaped on a tablet. */
 @media (max-width: 768px) {
   .fleet-row { flex-direction: column; align-items: stretch; }
   .fleet-badges { justify-content: flex-start; }
@@ -1960,20 +1972,21 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      572.5px, panel right edge 828.5 (viewport 768); minmax(0,1fr) → track 473px,
      right edge 729. */
   .detail-grid { grid-template-columns: minmax(0, 1fr); }
-  /* STACK, don't just wrap. `.attention-main` is flex:1 min-width:0, so a mere
-     flex-wrap lets it collapse instead of pushing the buttons to a new line:
-     measured at 768, the Staging row's .attention-name box shrank to 3px and its
-     text painted straight through the View instance / Open Studio buttons.
-     Stacking gives every name the full 435px row. (This supersedes the old
-     flex-wrap at 620 — the stack applies from 768 down.) */
-  .attention-row { flex-direction: column; align-items: flex-start; }
-  /* …but the name/reason column still takes the full row, or it re-collapses. */
-  .attention-row .attention-main { align-self: stretch; }
+  /* .attention-row's tablet stack lives NEXT TO ITS BASE in the attention-card
+     section now (GR109): authored here, it sat ~700 lines BEFORE the base rule,
+     whose later align-items:center silently killed the flex-start half at equal
+     (0,0,1,0) specificity — the row stacked but stayed centred. */
+  /* GR116 cosmetic half — ships WITH the unconditional `.topbar-right > *
+     { min-width: 0 }` pair, never instead of it. The pair alone clips the
+     past-due chip to 154.61px of its 169.78px label at 768; tightening the
+     topbar here (was 720-only) buys the full money message back at tablet
+     widths. Three declarations: topbar padding/gap, topbar-right gap, and the
+     live-chip label fold (in the liveness-chip section, moved 720 -> 768). */
+  .topbar { padding: 0 14px; gap: 10px; }
+  .topbar-right { gap: 8px; }
 }
 
 @media (max-width: 720px) {
-  .topbar { padding: 0 14px; gap: 10px; }
-  .topbar-right { gap: 8px; }
   .topbar-link, .crumb-sep { display: none; }
   .content { padding: 24px 16px; }
   .site-row--global { flex-direction: column; align-items: stretch; }
@@ -2402,9 +2415,64 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* dwb-16: connection-lost banner in the progress screen. */
 .new-conn-lost { margin: 0 0 14px; }
 
+/* The C3 timeline's expandable console — the --console-* twin of .new-console.
+   It renders inside .bp-timeline (instance detail), but its BASES are authored
+   here, beside its twin and ABOVE the shared theater/phone block below (GR115):
+   authored after that block in the C3 section, the base rules' identical
+   (0,0,1,0) specificity plus later source position silently discarded the
+   block's 40vh cap and 13px legibility floor for the whole .bp-console family
+   — one declaration list, two console families, opposite computed outcomes
+   (320px/13px vs 260px/12px at 700x800), varying only on source order. Keep
+   these bases above that media block. */
+.bp-console {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.bp-console-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--muted-surface);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-text);
+  font: 600 12px var(--font);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.bp-console.is-collapsed .bp-console-toggle { border-bottom: none; }
+.bp-console-caret {
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid currentColor;
+  transition: transform var(--t);
+}
+.bp-console.is-collapsed .bp-console-caret { transform: rotate(-90deg); }
+.bp-console-body {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--console-bg);
+  color: var(--console-fg);
+  font: 12px/1.55 var(--mono);
+  scroll-behavior: smooth;
+}
+.bp-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+.bp-console-empty { color: var(--console-dim); }
+.bp-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.bp-console-text { flex: 1 1 auto; }
+
 /* Theater/phone (styleguide contract 10): the stage stacks — rail above the
    console (DOM order is already rail-first) — the console caps at 40vh, the
-   done-banner buttons go full-width, and no theater text falls below 13px. */
+   done-banner buttons go full-width, and no theater text falls below 13px.
+   BOTH console families' bases sit ABOVE this block (GR115) — order is load-
+   bearing here, not style. */
 @media (max-width: 720px) {
   .new-theater-grid { grid-template-columns: 1fr; gap: 16px; }
   .new-console-body, .bp-console-body { max-height: 40vh; }
@@ -2485,50 +2553,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .bp-tl-fail b { color: var(--danger); }
 .bp-tl-retry { margin-top: 12px; }
 
-/* The timeline's expandable console — the --console-* twin of .new-console. */
-.bp-console {
-  margin-top: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.bp-console-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 9px 12px;
-  background: var(--muted-surface);
-  border: none;
-  border-bottom: 1px solid var(--border);
-  color: var(--muted-text);
-  font: 600 12px var(--font);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-.bp-console.is-collapsed .bp-console-toggle { border-bottom: none; }
-.bp-console-caret {
-  width: 0; height: 0;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 6px solid currentColor;
-  transition: transform var(--t);
-}
-.bp-console.is-collapsed .bp-console-caret { transform: rotate(-90deg); }
-.bp-console-body {
-  max-height: 260px;
-  overflow-y: auto;
-  padding: 10px 12px;
-  background: var(--console-bg);
-  color: var(--console-fg);
-  font: 12px/1.55 var(--mono);
-  scroll-behavior: smooth;
-}
-.bp-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
-.bp-console-empty { color: var(--console-dim); }
-.bp-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-.bp-console-text { flex: 1 1 auto; }
+/* The timeline's expandable console (.bp-console-*) is authored NEXT TO its
+   .new-console twin, ABOVE the shared theater/phone media block — see GR115:
+   authored here, after that block, its base rules silently discarded the
+   40vh cap and the 13px legibility floor at equal specificity. */
 
 /* ============================================================ STATUS PILL
    The single semantic status affordance (charter decision 6): one dot + label
@@ -2667,6 +2695,23 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .attention-name:hover { color: var(--primary); }
 .attention-reason { font-size: 13px; color: var(--muted-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attention-acts { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+
+/* GR65 tablet stack, revived by GR109. STACK, don't just wrap: `.attention-main`
+   is flex:1 min-width:0, so a mere flex-wrap lets it collapse instead of
+   pushing the buttons to a new line — measured at 768, the Staging row's
+   .attention-name box shrank to 3px and its text painted straight through the
+   View instance / Open Studio buttons. Stacking gives every name the full row.
+   THIS BLOCK SITS AFTER THE .attention-row BASE ON PURPOSE (GR109): it used to
+   live in the shared 768 block ~700 lines ABOVE the base, where the base's
+   later `align-items: center` killed the flex-start half at equal (0,0,1,0)
+   specificity — media queries add no specificity, source order decides — so
+   the row stacked but stayed CENTRED (acts left edge 441.28, not 275). Source
+   order is the fix; keep this below the base rules, and no !important. */
+@media (max-width: 768px) {
+  .attention-row { flex-direction: column; align-items: flex-start; }
+  /* …but the name/reason column still takes the full row, or it re-collapses. */
+  .attention-row .attention-main { align-self: stretch; }
+}
 
 /* v4 instances grid — auto-fill cards. */
 .overview-instances { margin-top: 4px; }
@@ -3188,6 +3233,16 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .invite-ico--ok { background: var(--ok-soft); color: var(--ok); }
 .invite-ico--info { background: var(--info-soft); color: var(--info); }
 .invite-ico--warn { background: var(--warn-soft); color: var(--warn-strong); }
+/* gr-blk-invite-ico-danger-variant. The two failure-shaped landings both wore
+   ICO_WARN's "!" and were distinguishable only by reading the copy. The split
+   is by RECOVERABILITY, not by severity-vibe: warn = "this link is fine, come
+   back" (expired, and the retryable error — nothing changed, try again);
+   danger = "this link is dead" (revoked or already used), which no amount of
+   retrying fixes. --danger on --danger-soft over --surface is already an
+   AA-gated pairing in __css_check's CONTRAST_PAIRS, so this needs no new
+   token — and --danger-hsl stays hue 0 in both themes (per-accent separation
+   is gr-blk-ok-danger-hue-separation, deliberately not this slice). */
+.invite-ico--danger { background: var(--danger-soft); color: var(--danger); }
 .invite-title { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
 .invite-copy { font-size: 14px; color: var(--muted-text); margin: 0 0 20px; line-height: 1.55; }
 .invite-copy b { color: var(--text); font-weight: 600; }
@@ -3453,8 +3508,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 
 /* On a narrow topbar the label/ago fold away (same rule as .topbar-link); the
-   dot alone still carries the health signal. */
-@media (max-width: 720px) {
+   dot alone still carries the health signal. 720 -> 768 with GR116: the fold is
+   the third cosmetic declaration that buys the past-due billing chip its full
+   169.78px label back at tablet widths. */
+@media (max-width: 768px) {
   .live-chip-label, .live-chip-ago { display: none; }
   .live-chip { padding: 0 7px; gap: 0; }
 }
@@ -3489,12 +3546,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .archives-note p { margin: 0; }
 .archives-note--warn { color: var(--text); }
-/* storage-unconfigured: a distinct, non-transient state (amber dot + docs +
-   Retry), not a red outage. The server owns the copy verbatim. */
+/* storage-unconfigured: a distinct, non-transient state (amber dot + what an
+   archive is + Retry), not a red outage. The server owns the headline copy
+   verbatim. */
 .archives-note--unconfigured { color: var(--text); }
 .archives-note-dot { width: 8px; height: 8px; border-radius: var(--pill); background: var(--warn); flex: 0 0 auto; }
-.archives-docs-link { font-size: 13px; color: var(--primary); text-decoration: none; }
-.archives-docs-link:hover { text-decoration: underline; }
+/* The in-place explanation that replaced the dead "How archives work" link
+   (gr-blk-archives-doc-link). `.archives-note` is a wrapping flex ROW, so the
+   sub-copy claims a full line of its own rather than being squeezed beside the
+   dot and the headline. Secondary voice — the headline stays --text. */
+.archives-note-sub {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--muted-text);
+  line-height: 1.5;
+  max-width: 62ch;
+}
 
 .archive-list {
   display: flex;
@@ -4093,7 +4160,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* GR20 topbar billing chip — sits AHEAD of the SSE liveness chip; trial rides
    the info blue, past-due the danger red. It is a link to #billing. */
 .billing-chip {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   height: 26px;
   padding: 0 10px;
@@ -4103,6 +4170,23 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   white-space: nowrap;
   user-select: none;
   text-decoration: none;
+  /* GR116 correctness half: the chip is the widest topbar-right child and the
+     one that must absorb the squeeze in the 721-782 band. Clipping here (with
+     min-width:0 from `.topbar-right > *`) is what turns a page-level
+     horizontal scrollbar into a truncated chip; the 768-block cosmetic trio
+     then buys the full label back at tablet widths.
+     HONEST NAMING (review): `text-overflow: ellipsis` is INERT on this element
+     — it is a flex container, and Chrome does not ellipsize a flex container's
+     anonymous items. In the 769-782 band the chip CLIPS; it does not paint a
+     literal "…". `overflow: hidden` is the declaration doing the work (it also
+     zeroes the chip's automatic minimum size, which is why the guard's GR108
+     mutation only flips when the WHOLE pair is reverted — each half alone
+     measures clean at today's label widths, verified both directions at
+     review). The ellipsis is kept as charter-authored intent and as correct
+     behaviour the day the chip stops being a flex container; it is documented
+     here rather than described as polish it does not deliver. */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .billing-chip:hover { text-decoration: none; }
 .billing-chip--trial {
