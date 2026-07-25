@@ -212,6 +212,11 @@ defmodule Barkpark.Plugins.Bulldocs do
        auth: :ingest},
       {:post, "/bulldocs/sessions/:slug/ops", BarkparkWeb.BulldocsIngestController,
        :apply_session_op, auth: :ingest},
+      # Session-handoff (task-4): append-only server-stamped event trail
+      # (`Barkpark.Content.Sessions.append_event/5`) — kinds whitelist,
+      # advisory-lock + CAS-on-rev, never an update/delete.
+      {:post, "/bulldocs/sessions/:slug/events", BarkparkWeb.BulldocsIngestController,
+       :append_session_event, auth: :ingest},
       # lvw-t4 — the AI-proposes loop: insert-only draft edits with provenance.
       {:post, "/bulldocs/papers/:slug/proposals", BarkparkWeb.BulldocsIngestController, :propose,
        auth: :ingest},

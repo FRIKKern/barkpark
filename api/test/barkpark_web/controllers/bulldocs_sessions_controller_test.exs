@@ -251,4 +251,97 @@ defmodule BarkparkWeb.BulldocsSessionsControllerTest do
       end
     end
   end
+
+  # Session-handoff Task 4: the append-only, server-stamped event trail.
+  describe "session events append (task-4)" do
+    test "appends an event and returns the trail count", %{conn: conn} do
+      slug = "session-events-happy-path"
+      create = conn |> authed() |> post(@path, body(slug))
+      assert json_response(create, 200)["ok"] == true
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          @path <> "/" <> slug <> "/events",
+          Jason.encode!(%{"kind" => "note", "note" => "hi"})
+        )
+
+      payload = json_response(resp, 200)
+      assert payload["ok"] == true
+      assert payload["slug"] == slug
+      assert payload["count"] == 1
+
+      resp2 =
+        conn
+        |> authed()
+        |> post(
+          @path <> "/" <> slug <> "/events",
+          Jason.encode!(%{"kind" => "task-closed", "ref" => "task-abc"})
+        )
+
+      assert json_response(resp2, 200)["count"] == 2
+
+      doc = Content.get_blocks_doc(slug, "session", "production")
+
+      assert [
+               %{"kind" => "note", "note" => "hi"},
+               %{"kind" => "task-closed", "ref" => "task-abc"}
+             ] =
+               doc.content["events"]
+    end
+
+    test "422 with the allowed kinds list for an unknown kind", %{conn: conn} do
+      slug = "session-events-bad-kind"
+      create = conn |> authed() |> post(@path, body(slug))
+      assert json_response(create, 200)["ok"] == true
+
+      resp =
+        conn
+        |> authed()
+        |> post(@path <> "/" <> slug <> "/events", Jason.encode!(%{"kind" => "deployed"}))
+
+      payload = json_response(resp, 422)
+      assert payload["error"]["code"] == "invalid_kind"
+      assert is_list(payload["error"]["allowed"])
+      assert "note" in payload["error"]["allowed"]
+      refute "deployed" in payload["error"]["allowed"]
+    end
+
+    test "404 for an unknown slug", %{conn: conn} do
+      resp =
+        conn
+        |> authed()
+        |> post(@path <> "/session-events-nope/events", Jason.encode!(%{"kind" => "note"}))
+
+      assert json_response(resp, 404)
+    end
+
+    # Mirrors the workspace-scoped-reads describe block above: two workspaces
+    # holding their own row at the same slug must each append to their OWN
+    # trail, not collide.
+    test "two workspaces at the same slug append to their own trail", %{conn: conn} do
+      {:ok, ws_a} = Tenancy.create_workspace(%{slug: "sess-ev-scope-a", name: "sess-ev-scope-a"})
+      {:ok, ws_b} = Tenancy.create_workspace(%{slug: "sess-ev-scope-b", name: "sess-ev-scope-b"})
+      slug = "session-events-scoped"
+
+      for ws <- [ws_a, ws_b] do
+        resp = conn |> authed() |> post(@path, body(slug, %{"workspace_id" => ws.id}))
+        assert json_response(resp, 200)["ok"] == true
+      end
+
+      resp_a =
+        conn
+        |> authed()
+        |> post(
+          @path <> "/" <> slug <> "/events",
+          Jason.encode!(%{"kind" => "note", "note" => "a", "workspace_id" => ws_a.id})
+        )
+
+      assert json_response(resp_a, 200)["count"] == 1
+
+      show_b = conn |> authed() |> get(@path <> "/" <> slug, %{"workspace_id" => ws_b.id})
+      assert json_response(show_b, 200)["events"] in [nil, []]
+    end
+  end
 end

@@ -437,6 +437,53 @@ defmodule BarkparkWeb.BulldocsIngestController do
   end
 
   @doc """
+  Append one server-stamped event to a session's trail (session-handoff
+  Task 4), via `Barkpark.Content.Sessions.append_event/5`. `params` may carry
+  `"ref"` and/or `"note"`; `ts` is always server-minted. Scoped by the SAME
+  `session_scope_opts/2` the read/op actions above thread, so two workspaces
+  holding their own row at the same slug each append to their OWN trail.
+  """
+  def append_session_event(conn, %{"slug" => slug} = params) do
+    dataset = params["dataset"] || Content.paper_default_dataset()
+
+    case Barkpark.Content.Sessions.append_event(
+           slug,
+           params["kind"],
+           params,
+           dataset,
+           session_scope_opts(conn, params)
+         ) do
+      {:ok, %{count: count}} ->
+        conn
+        |> put_status(:ok)
+        |> json(%{ok: true, slug: slug, count: count})
+
+      {:error, :invalid_kind} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{
+            code: "invalid_kind",
+            message: "kind must be one of the allowed session event kinds",
+            allowed: Barkpark.Content.Sessions.event_kinds()
+          }
+        })
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+
+      {:error, :stale} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{
+          error: %{code: "conflict_retry", message: "session was updated concurrently; retry"}
+        })
+    end
+  end
+
+  @doc """
   Apply ops to the paper at `:slug`. The endpoint accepts EITHER shape on the
   same route — the request body discriminates them:
 
