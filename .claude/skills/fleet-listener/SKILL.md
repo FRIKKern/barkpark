@@ -98,8 +98,8 @@ For each new task id, run this sequence exactly:
 5. **Stamp evidence.** Re-read the current epoch (`bp task get <id>` → `claim.epoch`), then:
    `bp task stamp <id> <WORKER> <epoch> --criterion 0 --met --evidence "<what you did + artifact path>" --criterion-text "<criterion VERBATIM>" --yes`.
 6. **Close.** Re-read the epoch (it may have bumped), then `bp task close <id> <WORKER> <epoch> --yes`.
-   If a session is open, log the close: `bp session log <slug> --kind task-closed --ref <id>` — a
-   failed log never blocks the close.
+   If a Barkpark session record is open, log the close: `bp session log <slug> --kind task-closed
+   --ref <id>` — a failed log never blocks the close.
 7. Report one line: `COMPLETED <id> — <artifact>` and end your turn. You are **still listening**
    (the monitor is persistent).
 
