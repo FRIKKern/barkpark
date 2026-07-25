@@ -151,20 +151,28 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 	// lives here (and in the timeline's life story) only.
 	b.add(detailMetaLine(d, width, now))
 
-	// (3) Hybrid timestamps — one line when they fit, stacked when narrow.
+	// (3) The executable contract leads every substantive section.
+	b.emitCriteria(d, width, now)
+
+	// (4) Purpose and proof explain placement, impact, and endgame before the
+	// reader reaches chronology or narrative. Missing authored values are
+	// explicitly labeled derived by taskPurposeView.
+	b.emitPurpose(d, children, width)
+
+	// (5) Hybrid timestamps — one line when they fit, stacked when narrow.
 	if stamps := detailStampLines(d, width, now); len(stamps) > 0 {
 		b.blank()
 		b.lines = append(b.lines, stamps...)
 	}
 
-	// (4) Derived status timeline (D13f) — the task's life story in one dim
+	// (6) Derived status timeline (D13f) — the task's life story in one dim
 	// horizontal strip, wrapping gracefully at narrow widths.
 	if segs := timelineSegments(d, now); len(segs) > 0 {
 		b.blank()
 		b.lines = append(b.lines, timelineLines(segs, width)...)
 	}
 
-	// (5) Canonical PortableDoc brief, with the legacy Markdown description as
+	// (7) Canonical PortableDoc brief, with the legacy Markdown description as
 	// a compatibility fallback. Both paths converge on the paper renderer.
 	if prose := portableDocLines(d.BriefRaw, width); len(prose) > 0 {
 		b.blank()
@@ -179,10 +187,7 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 		b.lines = append(b.lines, prose...)
 	}
 
-	// (6) Acceptance-criteria checklist.
-	b.emitCriteria(d, width, now)
-
-	// (7)+(8) Labels + deps — flat dim facts, one line each.
+	// (8)+(9) Labels + deps — flat dim facts, one line each.
 	b.emitFacts(d, width)
 
 	// (9) Claim block.
@@ -208,6 +213,73 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 	b.emitPapersRail(d.PaperRefs(), cursor, width)
 
 	return b.lines, b.stops
+}
+
+func (b *detailBuilder) emitPurpose(d TaskDetail, children []Task, width int) {
+	v := taskPurposeView(d, children)
+	b.blank()
+	heading := "purpose"
+	headingLine := infoStyle.Bold(true).Render(heading)
+	if !v.Authored {
+		headingLine += dimStyle.Render(" · derived")
+	}
+	b.add(headingLine)
+	b.emitPurposeFact("part of", v.PartOf, width)
+	b.emitPurposeFact("impact", v.Impact, width)
+	b.emitPurposeFact("does", v.Statement, width)
+	b.emitPurposeFact("why", v.Why, width)
+	b.emitPurposeFact("endgame", v.Endgame, width)
+	b.emitPurposeFact("important", fmt.Sprintf("%d/100 — %s", v.Importance.Score, v.Importance.Reason), width)
+	b.emitPurposeFact("relevant", fmt.Sprintf("%d/100 — %s", v.Relevance.Score, v.Relevance.Reason), width)
+	for _, p := range v.Proof {
+		text := strings.TrimSpace(strings.Join(nonEmptyStrings(p.Claim, p.Evidence, p.Source), " — "))
+		b.emitPurposeFact("proof", text, width)
+	}
+	if !v.Authored {
+		b.add(dimStyle.Render(truncate("  derived from recorded task facts · add authored purpose to override", width)))
+	}
+}
+
+func (b *detailBuilder) emitPurposeFact(label, value string, width int) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	prefix := fmt.Sprintf("  %-9s ", label)
+	continuation := strings.Repeat(" ", disp(prefix))
+	labelStyle, valueStyle := purposeFactStyles(label)
+	for i, line := range detailWrap(value, width-disp(prefix)) {
+		if i == 0 {
+			b.add(labelStyle.Render(prefix) + valueStyle.Render(line))
+		} else {
+			b.add(continuation + valueStyle.Render(line))
+		}
+	}
+}
+
+func purposeFactStyles(label string) (lipgloss.Style, lipgloss.Style) {
+	switch label {
+	case "impact", "important":
+		return warnStyle.Bold(true), neutralStyle
+	case "proof":
+		return doneStyle.Bold(true), neutralStyle
+	case "part of", "endgame", "relevant":
+		return infoStyle.Bold(true), neutralStyle
+	case "does":
+		return titleStyle, titleStyle
+	default:
+		return readyStyle.Bold(true), neutralStyle
+	}
+}
+
+func nonEmptyStrings(values ...string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 // detailMetaLine is section (2): glyph + dim `lifecycle · P<n> · kind · worker`.
@@ -418,7 +490,7 @@ func portableDocLines(raw []byte, width int) []string {
 	return out
 }
 
-// emitCriteria is section (6): a `criteria met/total` header plus a ✓/○
+// emitCriteria is the leading contract section: a `criteria met/total` header plus a ✓/○
 // checklist with per-item evidence and the ordered honest-miss attempts trail.
 // When only the {met,total} counter survived decoding (no items), the header
 // alone renders — never emptier than the wire was honest about.
@@ -426,17 +498,20 @@ func (b *detailBuilder) emitCriteria(d TaskDetail, width int, now time.Time) {
 	items := d.CriteriaItems
 	hasCounter := d.Criteria != nil && d.Criteria.Total > 0
 	if len(items) == 0 && !hasCounter {
+		b.blank()
+		b.add(warnStyle.Bold(true).Render("criteria · missing"))
+		b.add(warnStyle.Render(truncate("  ! No acceptance criteria recorded — completion cannot be verified.", width)))
 		return
 	}
 	met, total := detailCriteriaFraction(d)
 	b.blank()
-	b.add(dimStyle.Render(fmt.Sprintf("criteria %d/%d", met, total)))
+	b.add(doneStyle.Bold(true).Render(fmt.Sprintf("criteria %d/%d", met, total)))
 	for i, it := range items {
 		glyph, gStyle := "○", dimStyle
 		tStyle := lipgloss.NewStyle()
 		if it.Met {
 			glyph, gStyle = "✓", doneStyle // teal check — the spec's completion hue
-			tStyle = dimStyle              // landed work recedes; the ✓ already said it
+			tStyle = neutralStyle          // landed work recedes slightly, but remains readable
 		}
 		if it.Criterion == "" {
 			// Malformed entry: keep its slot as a bare glyph — honest that an

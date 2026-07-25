@@ -483,6 +483,9 @@ func richRowMeta(t Task, now time.Time, frame int) (drop []metaToken, sticky met
 	}
 	if t.Lifecycle == lifeInProgress && t.Claim != nil && t.Claim.Worker != "" {
 		drop = append(drop, metaToken{plain: t.Claim.Worker, styled: infoStyle.Render(t.Claim.Worker)})
+		if age := AgeBadge(t.Claim.ClaimedAt, now); age != "" {
+			drop = append(drop, metaToken{plain: age, styled: dimStyle.Render(age)})
+		}
 	}
 	if terminal {
 		if age := AgeBadge(t.UpdatedAt, now); age != "" {
@@ -545,6 +548,53 @@ func fitRowMeta(drop []metaToken, sticky metaToken, titleBudget int) (metaStyled
 	}
 }
 
+// fitMetaStrip gives an active task's second line to operational metadata only.
+// It first degrades rich tokens (criteria ladder → fraction), then sheds from
+// the right until the strip fits. The title above receives the whole first row
+// instead of competing with these facts.
+func fitMetaStrip(tokens []metaToken, width int) string {
+	if width < 1 {
+		return ""
+	}
+	join := func(ts []metaToken) (plain, styled string) {
+		pp := make([]string, 0, len(ts))
+		ss := make([]string, 0, len(ts))
+		for _, tk := range ts {
+			pp = append(pp, tk.plain)
+			ss = append(ss, tk.styled)
+		}
+		return strings.Join(pp, " · "), strings.Join(ss, dimStyle.Render(" · "))
+	}
+	if plain, styled := join(tokens); disp(plain) <= width {
+		return styled
+	}
+	narrowed := make([]metaToken, len(tokens))
+	for i, tk := range tokens {
+		if tk.narrowPlain != "" {
+			tk.plain, tk.styled = tk.narrowPlain, tk.narrowStyled
+		}
+		narrowed[i] = tk
+	}
+	for keep := len(narrowed); keep > 0; keep-- {
+		if plain, styled := join(narrowed[:keep]); disp(plain) <= width {
+			return styled
+		}
+	}
+	return dimStyle.Render(truncate("in progress", width))
+}
+
+// outlineContinuation keeps the tree leg honest across an active task's second
+// line: a branch with later siblings continues vertically; a final branch ends.
+func outlineContinuation(outline string) string {
+	if strings.HasSuffix(outline, "├─") {
+		return strings.TrimSuffix(outline, "├─") + "│ "
+	}
+	if strings.HasSuffix(outline, "└─") {
+		return strings.TrimSuffix(outline, "└─") + "  "
+	}
+	return strings.Repeat(" ", disp(outline))
+}
+
 // staleBadge returns the day-scale age token (plain, styled) for a non-terminal
 // task that has gone stale — an amber `4d` past 3 days, a red `8d` past a week —
 // so an outdated open/ready/blocked row wears its neglect. Fresh (or terminal)
@@ -565,10 +615,12 @@ func staleBadge(t Task, now time.Time) (plain, styled string) {
 // only the glyph + title (the graceful sub-60-col degrade).
 const dropMetaBelow = 52
 
-// TaskRow renders one task as a single rich line (design-language spec §3,
-// charter D39):
+// TaskRow renders ordinary tasks as one rich line and active in_progress tasks
+// as a compact two-line card (design-language spec §3, charter D39):
 //
 //	indent [↳] ▎glyph  title  ……………  PRIORITY N/M worker
+//	indent [↳] ▎glyph  full active title
+//	                    PRIORITY · criteria · worker · age
 //
 // The lifecycle glyph carries state by the brightness+meaning ladder (open ○
 // dim-white / ready ○ full-foreground / in_progress the blue Braille spinner at
@@ -583,28 +635,55 @@ const dropMetaBelow = 52
 // cols), and below dropMetaBelow the row is glyph + title only.
 //
 // `opened` marks the task the user has ENTERED (a FrameTask on the navigation
-// stack — UIState.OpenTasks): its glyph column renders the checked radio ●
-// (ASCII '*') in the SAME lifecycle color, the picker vocabulary — enter checks
-// the row, esc reverts it to the lifecycle glyph. Shape yields, color (= state)
-// stays.
+// stack — UIState.OpenTasks): its glyph column renders the reader-open diamond
+// ◆ (ASCII '@') in the SAME lifecycle color — enter opens it, esc reverts it to
+// the lifecycle glyph. Shape yields, color (= state) stays.
 func TaskRow(t Task, selected, opened bool, depth int, guide bool, width, frame int, now time.Time) []string {
+	indent := childIndent + depth*2
+	guideStr, pad := "", indent
+	if guide {
+		guideStr, pad = "↳ ", indent-2
+	}
+	outline := strings.Repeat(" ", pad) + guideStr
+	return taskRowWithOutline(t, selected, opened, outline, width, frame, now)
+}
+
+func taskRowWithOutline(t Task, selected, opened bool, outline string, width, frame int, now time.Time) []string {
 	marker := SelectionMarker(selected)
 	glyphRune := boardGlyph(t.Lifecycle, frame)
 	if opened {
 		glyphRune = checkedGlyph()
 	}
 	glyph := glyphStyleFor(t, now).Render(glyphRune)
-	indent := childIndent + depth*2
-	guideStr, pad := "", indent
-	if guide {
-		guideStr, pad = "↳ ", indent-2 // the ↳ guide occupies the deepest 2 indent cols
-	}
-	lead := strings.Repeat(" ", pad) + dimStyle.Render(guideStr) + marker + glyph + " "
-	leadW := indent + 3 // pad + guide(2 or 0) + marker + glyph + space
+	lead := dimStyle.Render(outline) + marker + glyph + " "
+	leadW := disp(outline) + 3
 	titleText, placeholder := rowTitle(t)
 	tStyle := titleStyleFor(t.Lifecycle)
 	if placeholder {
 		tStyle = dimStyle // an empty title reads as an absence, never a real title
+	}
+	if t.Lifecycle == lifeInProgress {
+		// Active work earns one extra row: title and telemetry no longer fight for
+		// horizontal space. flattenSpine assigns both lines the same hit target.
+		title := lead + tStyle.Render(truncate(titleText, width-leadW))
+		drop, sticky := richRowMeta(t, now, frame)
+		if t.DependentCount > 0 {
+			label := fmt.Sprintf("blocks %d", t.DependentCount)
+			drop = append(drop, metaToken{plain: label, styled: warnStyle.Render(label)})
+		}
+		if t.DependencyCount > 0 {
+			label := fmt.Sprintf("blocked by %d", t.DependencyCount)
+			drop = append(drop, metaToken{plain: label, styled: warnStyle.Render(label)})
+		}
+		if sticky.plain != "" {
+			drop = append(drop, sticky)
+		}
+		detail := fitMetaStrip(drop, width-leadW)
+		if detail == "" {
+			detail = dimStyle.Render(truncate("in progress", width-leadW))
+		}
+		detailLead := dimStyle.Render(outlineContinuation(outline)) + "   "
+		return []string{title, detailLead + detail}
 	}
 
 	if width < dropMetaBelow {

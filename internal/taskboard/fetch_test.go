@@ -205,6 +205,27 @@ func TestFetchSnapshot_PrimeError(t *testing.T) {
 	}
 }
 
+// The live corpus crossed the capabilities manifest's unrelated 8 MiB ceiling
+// in July 2026. Pin the taskboard seam itself so it cannot silently drift back
+// to Client.GetConditional and reproduce the permanent offline state.
+func TestGetJSONAcceptsTaskSnapshotAboveManifestLimit(t *testing.T) {
+	const payloadBytes = (8 << 20) + 1
+	body := strings.Repeat(" ", payloadBytes)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	got, err := getJSON(newClient(srv.URL), "/v1/tasks?limit=1000")
+	if err != nil {
+		t.Fatalf("task snapshot above 8 MiB was rejected: %v", err)
+	}
+	if len(got) != payloadBytes {
+		t.Fatalf("task snapshot bytes = %d, want %d", len(got), payloadBytes)
+	}
+}
+
 // TestComposeSnapshot_ReadyOverlay — the overlay upgrades ONLY stored
 // open|blocked tasks named by prime's ready queue. A row that moved between
 // the two fetches (claimed -> in_progress, closed -> done) keeps its stored

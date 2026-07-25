@@ -1,8 +1,8 @@
 barkpark · tasks                                                            ⇄ guerrilla  ● live · 2m
   Cloud GUI epic ·············································································· 7/10
-   ○ Reconcile the #979 role seam                                                          P2 ✓! 1/2
-   ○ Add empty-state goldens                                                                      P3
-  ▎! Cut over the canvas default                                                          P2 blocked
+├─ ○ Reconcile the #979 role seam                                                          P2 ✓! 1/2
+├─ ○ Add empty-state goldens                                                                      P3
+└─▎! Cut over the canvas default                                                          P2 blocked
   +7 done
 
   Search & Media epic ·········································································· 8/8
@@ -40,9 +40,9 @@ barkpark · tasks                                                            ⇄
 
 
 
+
+
+
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 ⠋ 3 in flight · ○ 7 ready · ✓ 41 done · 3/5 criteria · 2 stale                                   85%
-█████████████████████████████████████████████████████████████████████████████████████░░░░░░░░░░░░░░░
-────────────────────────────────────────────────────────────────────────────────────────────────────
-⠋ opus-3 · wiring the SSE reconnect backoff · 2m
-✓ closed 'sse-reconnect' · 2m
 jk move · enter open · esc back · c claim · x close · o studio · opt/shift-click selects · M mouse

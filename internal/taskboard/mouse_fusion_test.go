@@ -19,10 +19,9 @@ func motionAt(x, y int) tea.MouseMsg {
 	return tea.MouseMsg{Action: tea.MouseActionMotion, X: x, Y: y}
 }
 
-// TestMouseMotionHoversBoardRow drives a Motion through the FULL reducer
-// (Update → handleMouse → mouseMotion) and asserts the ttm-s3 hover state is
-// wired: the pointer over a task row stores that row's Ref, and the pointer
-// over chrome (the identity strip) clears it.
+// TestMouseMotionHoversBoardRow drives Motion through the full reducer and pins
+// the trailing hover debounce: motion queues a target without repainting it,
+// then the single settle message commits the latest target.
 func TestMouseMotionHoversBoardRow(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	m.width, m.height = 80, 40
@@ -36,9 +35,13 @@ func TestMouseMotionHoversBoardRow(t2 *testing.T) {
 	}
 	wantRef := m.visibleRows()[target].docID
 
-	m2, _ := step(t2, m, motionAt(5, y))
+	m2, cmd := step(t2, m, motionAt(5, y))
+	if m2.ui.HoverTarget != "" || m2.hoverPendingTarget != wantRef || cmd == nil {
+		t2.Fatalf("motion did not debounce row %d: visible=%q pending=%q cmd=%v", target, m2.ui.HoverTarget, m2.hoverPendingTarget, cmd)
+	}
+	m2, _ = step(t2, m2, hoverDebounceMsg{gen: m2.hoverGen})
 	if m2.ui.HoverTarget != wantRef {
-		t2.Fatalf("motion over row %d set HoverTarget %q, want %q", target, m2.ui.HoverTarget, wantRef)
+		t2.Fatalf("settled hover = %q, want %q", m2.ui.HoverTarget, wantRef)
 	}
 	// The hover must not have moved the cursor or descended.
 	if m2.ui.Cursor != 0 || len(m2.stack) != 1 {
@@ -49,6 +52,52 @@ func TestMouseMotionHoversBoardRow(t2 *testing.T) {
 	m3, _ := step(t2, m2, motionAt(5, 0))
 	if m3.ui.HoverTarget != "" {
 		t2.Fatalf("motion onto chrome kept HoverTarget %q, want cleared", m3.ui.HoverTarget)
+	}
+}
+
+func TestMouseMotionBurstCoalescesToLatestTarget(t2 *testing.T) {
+	m := testModel(sampleBoard())
+	m.width, m.height = 80, 40
+	syncScroll(&m)
+
+	y4 := firstLineFor(m.ComposeHitMap(), 4)
+	y5 := firstLineFor(m.ComposeHitMap(), 5)
+	if y4 < 0 || y5 < 0 {
+		t2.Fatal("fixture rows are not both visible")
+	}
+	m2, firstCmd := step(t2, m, motionAt(5, y4))
+	m3, secondCmd := step(t2, m2, motionAt(5, y5))
+	if firstCmd == nil || secondCmd != nil {
+		t2.Fatalf("hover burst scheduled %v then %v, want one bounded timer", firstCmd, secondCmd)
+	}
+	if m3.ui.HoverTarget != "" {
+		t2.Fatalf("burst repainted an intermediate target: %q", m3.ui.HoverTarget)
+	}
+	want := m3.visibleRows()[5].docID
+	m4, _ := step(t2, m3, hoverDebounceMsg{gen: m3.hoverGen})
+	if m4.ui.HoverTarget != want {
+		t2.Fatalf("debounce committed %q, want latest %q", m4.ui.HoverTarget, want)
+	}
+}
+
+func TestPendingHoverCannotReappearAfterKeyboardInput(t2 *testing.T) {
+	m := testModel(sampleBoard())
+	m.width, m.height = 80, 40
+	syncScroll(&m)
+	y := firstLineFor(m.ComposeHitMap(), 4)
+	if y < 0 {
+		t2.Fatal("fixture row is not visible")
+	}
+
+	m2, _ := step(t2, m, motionAt(5, y))
+	staleGen := m2.hoverGen
+	m3, _ := step(t2, m2, runes("j"))
+	if m3.hoverTimerOn || m3.ui.HoverTarget != "" {
+		t2.Fatalf("keyboard input left hover armed: timer=%v target=%q", m3.hoverTimerOn, m3.ui.HoverTarget)
+	}
+	m4, _ := step(t2, m3, hoverDebounceMsg{gen: staleGen})
+	if m4.ui.HoverTarget != "" {
+		t2.Fatalf("stale hover timer repainted %q after keyboard input", m4.ui.HoverTarget)
 	}
 }
 
@@ -87,9 +136,13 @@ func TestWideMotionHoversBoardPaneRow(t *testing.T) {
 		t.Fatal("subject row not painted in the board pane")
 	}
 	// composeAt (x=20, y=pl+1) → screen (+gl, +1 blank row) = (21, pl+2).
-	m2, _ := step(t, m, motionAt(21, pl+2))
+	m2, cmd := step(t, m, motionAt(21, pl+2))
+	if m2.ui.HoverTarget != "" || m2.hoverPendingTarget != composeSubjectID || cmd == nil {
+		t.Fatalf("wide motion did not debounce subject: visible=%q pending=%q", m2.ui.HoverTarget, m2.hoverPendingTarget)
+	}
+	m2, _ = step(t, m2, hoverDebounceMsg{gen: m2.hoverGen})
 	if m2.ui.HoverTarget != composeSubjectID {
-		t.Fatalf("wide motion over the subject row set HoverTarget %q, want %q", m2.ui.HoverTarget, composeSubjectID)
+		t.Fatalf("wide settled hover = %q, want %q", m2.ui.HoverTarget, composeSubjectID)
 	}
 	// The dead inter-pane gutter (composeAt x=46) clears the tint.
 	m3, _ := step(t, m2, motionAt(47, pl+2))

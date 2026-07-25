@@ -52,16 +52,15 @@ func boardGlyph(lifecycle string, frame int) string {
 	return StatusGlyph(lifecycle)
 }
 
-// checkedGlyph is the OPEN-task radio (picker vocabulary): the row the user
-// entered wears a filled ● in place of its lifecycle glyph while its FrameTask
-// is on the navigation stack — enter checks, esc unchecks. ● is already board
-// vocabulary (the live connection dot, glyph_budget_test.go); ASCII mode
-// collapses to '*' so the 1-column gutter never shifts.
+// checkedGlyph is the OPEN-task marker: the row shown in the reader wears ◆ in
+// place of its lifecycle glyph while its FrameTask is on the navigation stack.
+// The distinct diamond avoids conflating reader state with the header's ● live
+// connection dot. ASCII mode collapses to '@' without shifting the gutter.
 func checkedGlyph() string {
 	if asciiMode() {
-		return "*"
+		return "@"
 	}
-	return "●"
+	return "◆"
 }
 
 // asciiGlyph maps a lifecycle to its 1-column ASCII glyph for the escape hatch

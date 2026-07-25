@@ -336,7 +336,11 @@ func TestMouseHoverTintsAndClears(t *testing.T) {
 
 	plain := renderFooter(m.ui, inner) // hover 0
 
-	m, _ = step(t, m, tea.MouseMsg{X: cx, Y: m.height - 1, Action: tea.MouseActionMotion})
+	m, cmd := step(t, m, tea.MouseMsg{X: cx, Y: m.height - 1, Action: tea.MouseActionMotion})
+	if cmd == nil || m.ui.HoverFooterVerb != 0 || m.hoverPendingVerb != 'c' {
+		t.Fatalf("footer hover was not debounced: visible=%q pending=%q", string(m.ui.HoverFooterVerb), string(m.hoverPendingVerb))
+	}
+	m, _ = step(t, m, hoverDebounceMsg{gen: m.hoverGen})
 	if m.ui.HoverFooterVerb != 'c' {
 		t.Fatalf("hover over claim = %q, want 'c'", string(m.ui.HoverFooterVerb))
 	}

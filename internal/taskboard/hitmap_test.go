@@ -183,9 +183,9 @@ func TestHitMapWheelParityReading(t2 *testing.T) {
 	}
 }
 
-// TestHitMapClickSelectsBoardRow: a left press on a non-selected spine row selects
-// it (cursor moves, no descend).
-func TestHitMapClickSelectsBoardRow(t2 *testing.T) {
+// TestHitMapClickActivatesBoardRow: a left press on any task row moves the
+// cursor there and performs the same activation as Enter in one gesture.
+func TestHitMapClickActivatesBoardRow(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	m.now = func() time.Time { return time.Unix(2, 0) }
 	m.width, m.height = 80, 40
@@ -201,8 +201,8 @@ func TestHitMapClickSelectsBoardRow(t2 *testing.T) {
 	if m2.ui.Cursor != target {
 		t2.Fatalf("click selected cursor %d, want %d", m2.ui.Cursor, target)
 	}
-	if len(m2.stack) != 1 {
-		t2.Fatalf("selecting a row must not descend: stack depth %d, want 1", len(m2.stack))
+	if len(m2.stack) != 2 || m2.topFrame().Kind != FrameTask || m2.topFrame().Ref != "cx" {
+		t2.Fatalf("single click did not match Enter: stack=%d top={%v %q}", len(m2.stack), m2.topFrame().Kind, m2.topFrame().Ref)
 	}
 }
 
@@ -247,8 +247,8 @@ func TestHitMapClickFoldsSelectedHeader(t2 *testing.T) {
 	}
 }
 
-// TestHitMapClickReadingRail: a click on a reading-frame rail stop selects it;
-// a second click on the now-selected stop descends onto it.
+// TestHitMapClickReadingRail: a click on a reading-frame rail stop selects and
+// descends in one gesture, exactly as moving the cursor there and pressing Enter.
 func TestHitMapClickReadingRail(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	m.now = func() time.Time { return time.Unix(2, 0) }
@@ -263,26 +263,14 @@ func TestHitMapClickReadingRail(t2 *testing.T) {
 	if m.frameStopCount() < 2 {
 		t2.Fatalf("reading frame has %d stops, want >=2 (the CHILDREN rail)", m.frameStopCount())
 	}
-	// Cursor starts at stop 0; click stop 1 → select it (no descend).
+	// Cursor starts at stop 0; clicking stop 1 activates stop 1 immediately.
 	y := firstLineFor(m.ComposeHitMap(), 1)
 	if y < 0 {
 		t2.Fatal("no hit-map line for rail stop 1")
 	}
 	m2, _ := step(t2, m, leftClick(y))
-	if m2.topFrame().Cursor != 1 {
-		t2.Fatalf("rail click selected stop %d, want 1", m2.topFrame().Cursor)
-	}
-	if len(m2.stack) != 2 {
-		t2.Fatalf("rail select must not descend: stack depth %d", len(m2.stack))
-	}
-	// Click the now-selected stop 1 → descend onto ch2.
-	y2 := firstLineFor(m2.ComposeHitMap(), 1)
-	if y2 < 0 {
-		t2.Fatal("no hit-map line for the selected rail stop")
-	}
-	m3, _ := step(t2, m2, leftClick(y2))
-	if len(m3.stack) != 3 || m3.topFrame().Ref != "ch2" {
-		t2.Fatalf("rail click-on-selected did not descend: stack=%d top=%q", len(m3.stack), m3.topFrame().Ref)
+	if len(m2.stack) != 3 || m2.topFrame().Ref != "ch2" {
+		t2.Fatalf("single rail click did not match Enter: stack=%d top=%q", len(m2.stack), m2.topFrame().Ref)
 	}
 }
 
@@ -402,13 +390,23 @@ func TestNarrowRailHoverParityUnderScroll(t2 *testing.T) {
 
 	m := narrowReadingFixture(15)
 	m.width, m.height = 44, 14
-	m.stack[len(m.stack)-1].Scroll = 8 // absolute free-scroll offset > 0 (windowed, scrolled)
 
+	// Scroll into the STOP region rather than a fixed offset: the criteria-first
+	// detail layout leads with prose (purpose, criteria), so a hard-coded offset
+	// can land the whole window on stop-less lines and green vacuously. Anchoring
+	// on the third stop keeps the window scrolled (>0) AND stop-bearing.
 	width, height := m.composeInner()
-	body, _ := m.frameContent(m.topFrame(), width, m.now())
+	body, stops := m.frameContent(m.topFrame(), width, m.now())
 	if len(body) <= height-2 {
 		t2.Fatalf("fixture must WINDOW to prove scroll parity: body %d, avail %d", len(body), height-2)
 	}
+	if len(stops) < 4 {
+		t2.Fatalf("fixture must carry >=4 rail stops, got %d", len(stops))
+	}
+	if stops[2].Line == 0 {
+		t2.Fatal("anchor stop sits at line 0 — the window would not be scrolled")
+	}
+	m.stack[len(m.stack)-1].Scroll = stops[2].Line // absolute free-scroll offset > 0 (windowed, scrolled)
 
 	hits := m.ComposeHitMap()
 	base := m

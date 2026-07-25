@@ -450,11 +450,57 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	d.CodeRefs = flattenCodeRefs(m["code_refs"])
 	d.Assignee = strField(m, "assignee")
 	d.LastWorkedAt = timeField(m, "last_worked_at")
+	d.Purpose = decodeTaskPurpose(m["purpose"])
 	if w.Claim != nil {
 		d.PreviousWorker = rawString(w.Claim.PreviousWorker)
 		d.ClaimExpiredAt = rawTime(w.Claim.ExpiredAt)
 	}
 	return d
+}
+
+func decodeTaskPurpose(v any) TaskPurpose {
+	m, _ := v.(map[string]any)
+	if m == nil {
+		return TaskPurpose{}
+	}
+	return TaskPurpose{
+		PartOf:     strField(m, "part_of"),
+		Impact:     strField(m, "impact"),
+		Statement:  strField(m, "statement"),
+		Why:        strField(m, "why"),
+		Endgame:    strField(m, "endgame"),
+		Importance: decodePurposeScore(m["importance"]),
+		Relevance:  decodePurposeScore(m["relevance"]),
+		Proof:      decodePurposeProof(m["proof"]),
+	}
+}
+
+func decodePurposeScore(v any) PurposeScore {
+	m, _ := v.(map[string]any)
+	if m == nil {
+		return PurposeScore{}
+	}
+	score, set := 0, false
+	if n, ok := m["score"].(float64); ok && n >= 0 && n <= 100 {
+		score, set = int(n), true
+	}
+	return PurposeScore{Score: score, Reason: strField(m, "reason"), Set: set}
+}
+
+func decodePurposeProof(v any) []PurposeProof {
+	rows, _ := v.([]any)
+	out := make([]PurposeProof, 0, len(rows))
+	for _, row := range rows {
+		m, _ := row.(map[string]any)
+		if m == nil {
+			continue
+		}
+		p := PurposeProof{Claim: strField(m, "claim"), Evidence: strField(m, "evidence"), Source: strField(m, "source")}
+		if p.Claim != "" || p.Evidence != "" || p.Source != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // rawPortableDoc preserves a task's inline PortableDoc value for pdrender.
