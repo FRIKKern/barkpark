@@ -23,6 +23,7 @@ import {
   saveCloudSession,
 } from './src/state/appConfig'
 import { useChatRollup } from './src/chat/useChatRollup'
+import { usePushRegistration } from './src/push'
 import { ChatScreen } from './src/screens/ChatScreen'
 import { ConnectScreen } from './src/screens/ConnectScreen'
 import { LoginScreen, type CloudSession } from './src/screens/LoginScreen'
@@ -69,6 +70,28 @@ export default function App() {
   // Needs-you badge (ratified R3): blocked sessions from GET /v1/chat/rollup.
   const rollup = useChatRollup(connection)
   const chatBadge = rollup?.counts.blocked ?? 0
+
+  // Needs-you PUSH (charter D15) — the app's one registration call site.
+  //
+  // Keyed on the CLOUD session, not the instance connection: a device belongs
+  // to the user, and the relay fans out to a team's members regardless of which
+  // instance they are currently looking at. Memoized for the same reason
+  // `connection` is — a fresh object per render would re-key the hook's effect.
+  //
+  // Today this resolves to `{status: 'unavailable', reason: 'module-missing'}`
+  // on every launch and writes nothing: `expo-notifications`, the platform
+  // entitlements and the APNs/FCM credentials are one human gate, documented in
+  // cloud/lib/barkpark_cloud/push/adapters/not_configured.ex. That is the
+  // severable state working as designed — no row, nothing fires, nothing to
+  // flip off. When the gate opens, this line already registers.
+  const cloudSession = useMemo(
+    () =>
+      config.cloudUrl && config.cloudToken
+        ? { url: config.cloudUrl, token: config.cloudToken }
+        : undefined,
+    [config.cloudUrl, config.cloudToken],
+  )
+  usePushRegistration(cloudSession)
 
   let body
   if (!hasCloudSession(config)) {

@@ -59,6 +59,7 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
     barkpark.site_url_set barkpark.self_update_triggered barkpark.rollback_triggered
     barkpark.autoupdate_changed barkpark.domain_attached
     barkpark.vercel_deploy_triggered barkpark.resurrected
+    barkpark.push_relay_provisioned
     env_var.created env_var.deleted
     provider.connected provider.disconnected
     github.installation_connected github.installation_disconnected github.repo_pushed

@@ -1,10 +1,21 @@
-defmodule BarkparkCloud.Sites.ContentPublishVerifier do
+defmodule BarkparkCloud.Webhooks.InboundSignature do
   @moduledoc """
-  site-spawner W5 (charter D46): verify an inbound content-publish webhook the box
-  signs off a document publish on a site's bound dataset.
+  The ONE verifier for every INBOUND instance-signed webhook Cloud receives.
 
-  The box (`Barkpark.Webhooks.Dispatcher`) signs every delivery with
-  `x-barkpark-signature: t=<unix>,v1=<hex>`, where the hex is
+  Born as `Sites.ContentPublishVerifier` (site-spawner W5, charter D46) for a
+  single receiver; PROMOTED here in the wave-2 push-relay build because it now
+  serves two, and a `Sites.*` name on the push relay's auth was a decoy waiting
+  to be copy-pasted into a third:
+
+    * `POST /v1/sites/webhooks/content-publish/:site_id` — a document publish on
+      a site's bound dataset (verified against the SITE's stored secret).
+    * `POST /v1/relay/chat-blocked/:barkpark_id` — the mobile push relay's
+      chat_blocked delivery (verified against the BARKPARK's stored relay
+      secret, mobile charter D15b).
+
+  Both are signed by the SAME box-side signer, so they share one verifier by
+  construction, not by coincidence: `Barkpark.Webhooks.Dispatcher` signs every
+  delivery with `x-barkpark-signature: t=<unix>,v1=<hex>`, where the hex is
   `HMAC-SHA256(secret, "<timestamp>.<raw-body>")`, lowercase, with a ±300s replay
   window. This module is a byte-for-byte PORT of `StripeGateway.check_signatures`
   (same `"t.payload"` material, same lower-hex `t=`/`v1=` grammar, same 300s
@@ -19,6 +30,12 @@ defmodule BarkparkCloud.Sites.ContentPublishVerifier do
 
   Every malformed input returns `{:error, reason}` rather than raising — the
   webhook route stays a clean 401.
+
+  NOTE the tolerance here is only HALF of replay defence: it bounds how long a
+  captured signature stays acceptable. Dedupe of a replay INSIDE that window is
+  the receiver's job (`Workers.PushDeliveryWorker`'s `unique: [period: 600]`
+  covers the push relay; the content-publish receiver is idempotent by
+  debounce).
   """
 
   # Replay-protection window (seconds): reject a delivery whose signed `t=<unix>`
