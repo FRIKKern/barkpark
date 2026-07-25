@@ -39,9 +39,14 @@ SLUG="session-$(date +%Y-%m-%d)-<short-topic-slug>"   # e.g. session-2026-07-26-
 Best-effort transcript session id (Claude Code only — do not block on this, it's advisory):
 
 ```bash
-CWD_SLUG=$(pwd | sed 's#/#-#g')
+CWD_SLUG=$(pwd | sed -e 's#[/.]#-#g')
 CANDIDATE_UUID=$(ls -t "$HOME/.claude/projects/$CWD_SLUG"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
 ```
+
+If `$HOME/.claude/projects/$CWD_SLUG` doesn't exist, the computed slug is wrong (harness
+versions vary in exactly what they fold) — fall back to listing the directory and
+grepping for the repo name instead of giving up: `ls "$HOME/.claude/projects/" | grep
+<repo-name>`.
 
 Build the metadata payload. `description` and `tags` put this session on the Barkpark
 **publish wall** (same rule as papers/tasks): `description` must be non-trivial (≥20
@@ -132,8 +137,11 @@ JSON
 Then attach a scrubbed transcript, if one exists:
 
 ```bash
-# Claude Code: <cwd-slug> = cwd with every "/" replaced by "-"
+# Claude Code: <cwd-slug> = cwd with every "/" AND "." replaced by "-" (reuses $CWD_SLUG
+# computed in step 1 — recompute the same way if this is a fresh shell).
 TRANSCRIPT=$(ls -t "$HOME/.claude/projects/$CWD_SLUG"/*.jsonl 2>/dev/null | head -1)
+# If that's empty but you expect a transcript, the slug fold is probably still off — try
+# ls "$HOME/.claude/projects/" | grep <repo-name> to find the real directory by hand.
 # Codex: check ~/.codex/sessions/ for the equivalent transcript file; if this harness's
 # transcript location isn't one of the above, locate it per that harness's own docs.
 
