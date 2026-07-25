@@ -326,18 +326,28 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  def ingest_session(conn, _params),
-    do: conn |> put_status(:unprocessable_entity) |> json(%{ok: false, error: "slug required"})
+  def ingest_session(conn, _params) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: %{code: "missing_slug", message: "slug required"}})
+  end
 
   @doc """
   Read a session by slug — the same visibility tier as the writes
   (`auth: :ingest`; the doc is also readable via the public paper routes once
   published). 404 when the slug doesn't resolve to a "session" row in scope.
+
+  Scoped by the SAME workspace/project resolution `ingest_session/2` threads
+  via `put_scope/3` (`resolve_scope/2` below) — two workspaces can each hold
+  their own row at the SAME slug (`upsert_blocks_doc/3` disambiguates writes
+  by scope), so an unscoped read here would either return the wrong tenant's
+  session or blow up `Repo.one()` with `Ecto.MultipleResultsError` once more
+  than one workspace has written the slug.
   """
   def show_session(conn, %{"slug" => slug} = params) do
     dataset = params["dataset"] || Content.paper_default_dataset()
 
-    case Content.get_blocks_doc(slug, "session", dataset) do
+    case Content.get_blocks_doc(slug, "session", dataset, session_scope_opts(conn, params)) do
       nil ->
         conn
         |> put_status(:not_found)
@@ -374,7 +384,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
       true ->
         dataset = params["dataset"] || Content.paper_default_dataset()
 
-        case Content.apply_document_block_op(slug, "session", op, dataset) do
+        case Content.apply_document_block_op(
+               slug,
+               "session",
+               op,
+               dataset,
+               session_scope_opts(conn, params)
+             ) do
           {:ok, %{block_id: block_id, op_kind: op_kind, position: position}} ->
             conn
             |> put_status(:ok)
@@ -831,6 +847,22 @@ defmodule BarkparkWeb.BulldocsIngestController do
       true ->
         ws_slug = scope_value(conn, params, "workspace", "x-barkpark-workspace")
         resolve_from_slug(ws_slug, scope_value(conn, params, "project", "x-barkpark-project"))
+    end
+  end
+
+  # Read-side twin of `put_scope/3`: the SAME `resolve_scope/2` resolution
+  # (explicit `workspace_id`/`project_id`, else a `workspace`/`project` slug
+  # from the body or the `x-barkpark-workspace`/`x-barkpark-project` header),
+  # reshaped into the `Content.get_blocks_doc/4` / `apply_document_block_op/5`
+  # opts keyword list. `{nil, nil}` (no scope given at all) yields `[]`, which
+  # `Content.Scope.scope_to_workspace_or_global/3` treats as an EXPLICIT
+  # global read — matching the write side's own Default-workspace fallback
+  # posture (a scope-less write still stamps a real workspace_id; a
+  # scope-less read here just doesn't narrow by one).
+  defp session_scope_opts(conn, params) do
+    case resolve_scope(conn, params) do
+      {nil, nil} -> []
+      {ws_id, project_id} -> [workspace_id: ws_id, project_id: project_id]
     end
   end
 

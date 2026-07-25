@@ -1,6 +1,7 @@
 defmodule BarkparkWeb.BulldocsSessionsControllerTest do
   use BarkparkWeb.ConnCase, async: false
   alias Barkpark.Content
+  alias Barkpark.Tenancy
 
   @token "barkpark-test-ingest-token"
   @path "/v1/plugins/bulldocs/sessions"
@@ -79,5 +80,175 @@ defmodule BarkparkWeb.BulldocsSessionsControllerTest do
 
     resp = conn |> authed() |> post(@path <> "/session-2026-07-25-c/ops", Jason.encode!(op))
     assert json_response(resp, 200)["ok"] == true
+  end
+
+  # Review fix #4 (minor): the no-slug fallback must carry the same
+  # `%{error: %{code:, message:}}` envelope every other branch uses, not the
+  # ad hoc `%{ok: false, error: "..."}` shape.
+  test "missing slug is a structured error envelope, not the ad hoc ok:false shape", %{
+    conn: conn
+  } do
+    resp = conn |> authed() |> post(@path, Jason.encode!(%{"title" => "no slug here"}))
+    payload = json_response(resp, 422)
+    assert payload["error"]["code"] == "missing_slug"
+    assert payload["error"]["message"]
+    refute Map.has_key?(payload, "ok")
+  end
+
+  # Review fix #2: pins the CENTRAL deviation from the brief's controller
+  # sketch — ingest_session/2 must NOT pre-seed attrs["blocks"] = [] before
+  # calling Content.upsert_blocks_doc/3, or a metadata-only update (no
+  # "blocks" key in the request body at all) would wipe the session's
+  # previously-stored blocks to []. Re-adding Map.put_new("blocks", []) in
+  # the controller passes every OTHER test in this file but fails this one.
+  test "a metadata-only POST (no blocks key) preserves a prior session's blocks via the HTTP path",
+       %{conn: conn} do
+    slug = "session-2026-07-25-preserve"
+
+    create =
+      conn
+      |> authed()
+      |> post(
+        @path,
+        body(slug, %{
+          "blocks" => [%{"id" => "b1", "type" => "paragraph", "content" => ["kept"]}]
+        })
+      )
+
+    assert json_response(create, 200)["ok"] == true
+
+    # A bare status-change POST — the request body carries no "blocks" key
+    # whatsoever, not even an empty list.
+    update =
+      conn
+      |> authed()
+      |> post(@path, Jason.encode!(%{"slug" => slug, "status" => "closed"}))
+
+    assert json_response(update, 200)["ok"] == true
+
+    show = conn |> authed() |> get(@path <> "/" <> slug)
+    payload = json_response(show, 200)
+
+    assert payload["status"] == "closed"
+    assert [%{"type" => "paragraph", "content" => ["kept"]} | _] = payload["blocks"]
+  end
+
+  # Review fix #1: show_session/2 and apply_session_op/2 previously called
+  # Content.get_blocks_doc/apply_document_block_op with NO scope opts, so the
+  # read ran unscoped (Content.Scope.scope_to_workspace_or_global/3 with a nil
+  # workspace_id falls back to a GLOBAL read) even though ingest_session/2
+  # threads workspace/project scope on WRITE and upsert_blocks_doc/3 keeps
+  # same-slug rows distinct per workspace. Two workspaces writing the SAME
+  # slug would then make an unscoped GET either return the wrong tenant's row
+  # or raise Ecto.MultipleResultsError. Both GETs below pass their own
+  # workspace_id and must resolve deterministically to their own session.
+  describe "workspace-scoped reads (review fix #1)" do
+    setup do
+      {:ok, ws_a} = Tenancy.create_workspace(%{slug: "sess-scope-a", name: "sess-scope-a"})
+      {:ok, ws_b} = Tenancy.create_workspace(%{slug: "sess-scope-b", name: "sess-scope-b"})
+      %{ws_a: ws_a, ws_b: ws_b}
+    end
+
+    test "same slug in two workspaces stays isolated; GET is deterministic per workspace", %{
+      conn: conn,
+      ws_a: ws_a,
+      ws_b: ws_b
+    } do
+      slug = "shared-slug-scoped"
+
+      create_a =
+        conn
+        |> authed()
+        |> post(@path, body(slug, %{"title" => "A's session", "workspace_id" => ws_a.id}))
+
+      assert json_response(create_a, 200)["ok"] == true
+
+      create_b =
+        conn
+        |> authed()
+        |> post(@path, body(slug, %{"title" => "B's session", "workspace_id" => ws_b.id}))
+
+      assert json_response(create_b, 200)["ok"] == true
+
+      show_a =
+        conn |> authed() |> get(@path <> "/" <> slug, %{"workspace_id" => ws_a.id})
+
+      show_b =
+        conn |> authed() |> get(@path <> "/" <> slug, %{"workspace_id" => ws_b.id})
+
+      assert json_response(show_a, 200)["title"] == "A's session"
+      assert json_response(show_b, 200)["title"] == "B's session"
+
+      # Deterministic across repeats — no flaky Repo.one() collision.
+      show_a_again =
+        conn |> authed() |> get(@path <> "/" <> slug, %{"workspace_id" => ws_a.id})
+
+      assert json_response(show_a_again, 200)["title"] == "A's session"
+    end
+
+    # Content.apply_document_block_op/5 (the generic non-paper write path,
+    # block_ops.ex:907 moduledoc) always writes its patched content to the
+    # `drafts.<slug>` twin, never the published row directly — so this reads
+    # the draft back via Content.get_document/4 (scoped, mirroring the
+    # controller's own opts) rather than through show_session (which reads
+    # the plain published slug and would never see an applied op either way
+    # — that draft/published split is pre-existing, out of this fix's scope).
+    # The point under test is narrower: applying an op against slug S under
+    # workspace A's scope must resolve + patch A's OWN row, not collide with
+    # or leak into workspace B's same-slug row.
+    test "apply_session_op resolves + patches the correct workspace's row, not the other one", %{
+      conn: conn,
+      ws_a: ws_a,
+      ws_b: ws_b
+    } do
+      slug = "shared-slug-scoped-ops"
+
+      block = fn text ->
+        %{
+          "id" => "b1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => text}]
+        }
+      end
+
+      for {ws, text} <- [{ws_a, "a-body"}, {ws_b, "b-body"}] do
+        resp =
+          conn
+          |> authed()
+          |> post(@path, body(slug, %{"blocks" => [block.(text)], "workspace_id" => ws.id}))
+
+        assert json_response(resp, 200)["ok"] == true
+      end
+
+      op = %{
+        "op" => "replace-block",
+        "id" => "b1",
+        "block" => block.("a-body-v2"),
+        "workspace_id" => ws_a.id
+      }
+
+      op_resp = conn |> authed() |> post(@path <> "/" <> slug <> "/ops", Jason.encode!(op))
+      assert json_response(op_resp, 200)["ok"] == true
+
+      draft_a =
+        Content.get_document("drafts." <> slug, "session", "production", workspace_id: ws_a.id)
+
+      draft_b =
+        Content.get_document("drafts." <> slug, "session", "production", workspace_id: ws_b.id)
+
+      assert {:ok, %{content: %{"blocks" => [%{"content" => [%{"value" => "a-body-v2"}]}]}}} =
+               draft_a
+
+      # Workspace B's row was never touched by an op scoped to A: either no
+      # draft exists for B at all, or (if one somehow did) it must not carry
+      # A's patched value.
+      case draft_b do
+        {:ok, %{content: %{"blocks" => [%{"content" => [%{"value" => value}]}]}}} ->
+          refute value == "a-body-v2"
+
+        {:error, :not_found} ->
+          :ok
+      end
+    end
   end
 end
