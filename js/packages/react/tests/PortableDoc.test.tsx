@@ -625,6 +625,135 @@ describe('PortableDoc — the type-keyed renderer', () => {
       expect(html).not.toContain('<h2></h2>')
     })
 
+    // ── the {content:[…]} shape, pinned per emitter ────────────────────────
+    // The heading emitter had this defect (289b46b1a / PR #6009). A live-corpus
+    // census on 2026-07-25 (537 published papers, guerrilla production) found
+    // the SAME defect in the list emitter — 2,033 of 10,455 published list items
+    // rendering as an empty `<li><span></span></li>` — plus three more emitters.
+    // These tests exist so the shape cannot come back a third time.
+    describe('the {content:[…]} shape renders, per emitter', () => {
+      it('list items authored as {content:[…]} maps render their inlines, never an empty <li>', () => {
+        // THE dominant live shape: 2,033 of 10,455 published list items.
+        const html = renderPortableDocument([
+          {
+            type: 'list',
+            items: [
+              {
+                content: [
+                  { type: 'text', value: 'claim ' },
+                  { type: 'text', value: 'atomically', marks: ['strong'] },
+                ],
+              },
+            ],
+          },
+        ])
+        expect(html).toBe(
+          '<ul><li><span>claim <span style="font-weight:bold">atomically</span></span></li></ul>',
+        )
+        expect(html).not.toContain('<li><span></span></li>')
+      })
+
+      it('a {text:…} map list item falls back to its bare text (the content||text law)', () => {
+        const html = renderPortableDocument([
+          { type: 'list', items: [{ text: 'plain & simple' }] },
+        ])
+        expect(html).toBe('<ul><li><span>plain &amp; simple</span></li></ul>')
+      })
+
+      it('numbered_list carries the same map-shape normalization into an <ol>', () => {
+        const html = renderPortableDocument([
+          { type: 'numbered_list', items: [{ content: [{ type: 'text', value: 'first' }] }] },
+        ])
+        expect(html).toBe('<ol><li><span>first</span></li></ol>')
+      })
+
+      it('the array / JSON-string / plain-string item shapes are unchanged by the map arm', () => {
+        const html = renderPortableDocument([
+          {
+            type: 'list',
+            items: [
+              [{ type: 'text', value: 'array' }],
+              '[{"type":"text","value":"json"}]',
+              'plain',
+            ],
+          },
+        ])
+        expect(html).toBe(
+          '<ul><li><span>array</span></li><li><span>json</span></li><li><span>plain</span></li></ul>',
+        )
+      })
+
+      it('eyebrow composes a content[] inline array, not just bare text', () => {
+        const html = renderPortableDocument([
+          { type: 'eyebrow', content: [{ type: 'text', value: 'Wire / implementation contract' }] },
+        ])
+        expect(html).toContain('<p class="bp-role-eyebrow">Wire / implementation contract</p>')
+        expect(html).not.toContain('<p class="bp-role-eyebrow"></p>')
+      })
+
+      it('note composes a content[] inline array in its body, not just bare text', () => {
+        const html = renderPortableDocument([
+          { type: 'note', label: 'Ledger', content: [{ type: 'text', value: 'epic promoted' }] },
+        ])
+        expect(html).toContain('<div class="bp-note__d">epic promoted</div>')
+        expect(html).not.toContain('<div class="bp-note__d"></div>')
+      })
+
+      it('a nested inline array renders as a <span>, matching inline.ex compose_inline(is_list)', () => {
+        // `content: [[{…}]]` — flattened one level too shallow. Elixir wraps it
+        // in a PdText (walk.ex text/3 → a bare <span>); js dropped it to ''.
+        const html = renderPortableDocument([
+          { type: 'paragraph', content: [[{ type: 'text', value: 'one level too shallow' }]] },
+        ])
+        expect(html).toBe('<p><span>one level too shallow</span></p>')
+        expect(html).not.toBe('<p></p>')
+      })
+
+      it('a list block whose items are nested inline arrays keeps its text', () => {
+        const html = renderPortableDocument([
+          { type: 'list', items: [[[{ type: 'text', value: 'nested' }]]] },
+        ])
+        expect(html).toBe('<ul><li><span><span>nested</span></span></li></ul>')
+      })
+
+      it('an inline code node authored with children[] renders its text, never <code></code>', () => {
+        const html = renderPortableDocument([
+          {
+            type: 'paragraph',
+            content: [{ type: 'code', children: [{ type: 'text', value: 'POST /v1/tasks' }] }],
+          },
+        ])
+        expect(html).toBe('<p><code>POST /v1/tasks</code></p>')
+        expect(html).not.toContain('<code></code>')
+      })
+
+      it('an inline code node still prefers a flat value when both are present', () => {
+        const html = renderPortableDocument([
+          {
+            type: 'paragraph',
+            content: [{ type: 'code', value: 'flat', children: [{ type: 'text', value: 'kids' }] }],
+          },
+        ])
+        expect(html).toBe('<p><code>flat</code></p>')
+      })
+
+      it('inline code children are folded to ESCAPED text, never nested markup', () => {
+        const html = renderPortableDocument([
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'code',
+                children: [{ type: 'text', value: '<a & b>', marks: ['strong'] }],
+              },
+            ],
+          },
+        ])
+        expect(html).toBe('<p><code>&lt;a &amp; b&gt;</code></p>')
+        expect(html).not.toContain('font-weight:bold')
+      })
+    })
+
     it('asciicast figcaption uses a plain color, not the var() the figure caption uses', () => {
       const html = renderPortableDocument([
         { type: 'asciicast', src: 'https://ex.com/c.cast', caption: 'rec' },
