@@ -440,8 +440,9 @@ defmodule BarkparkWeb.WorkspaceController do
   # The Postgres error classes an import can hit against RESIDENT target
   # content: the merge arbiter is each member's primary key ONLY, so a bundle
   # row colliding with a different-id resident row on any OTHER unique index
-  # (and, under `session_replication_role = replica`, any check/not-null the
-  # replica role does NOT disable) raises straight through the engine.
+  # (and any check/not-null — the import's FK-drop + DISABLE TRIGGER USER
+  # window, task-7889645a51769a36, suppresses neither of those) raises straight
+  # through the engine.
   @import_constraint_pg_codes ~w(
     unique_violation exclusion_violation check_violation
     not_null_violation foreign_key_violation

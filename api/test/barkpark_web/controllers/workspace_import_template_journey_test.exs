@@ -55,6 +55,81 @@ defmodule BarkparkWeb.WorkspaceImportTemplateJourneyTest do
 
   defp authed(conn, raw), do: put_req_header(conn, "authorization", "Bearer " <> raw)
 
+  # ── Privilege parity (task-7889645a51769a36) ───────────────────────────────
+  #
+  # Managed boxes run the app's DB role as the table OWNER but WITHOUT
+  # superuser (`deploy.sh`: `CREATE USER … CREATEDB`; `createdb -O`). CI's
+  # `postgres` role IS superuser — which is exactly how three CI exonerations
+  # stayed green while every on-box merge-import 500'd on
+  # `ERROR 42501 (insufficient_privilege) permission denied to set parameter
+  # "session_replication_role"`. This helper reproduces the production
+  # privilege model on the sandbox connection: a NOSUPERUSER role that INHERITs
+  # table-owner rights through membership in the suite's DB role (superuser
+  # membership does NOT confer the superuser attribute — SUSET parameters check
+  # the CURRENT user's own rolsuper), switched in via `SET ROLE`. `role` is a
+  # GUC, so the sandbox rollback reverts it; the role/grant DDL is transactional
+  # and rolls back with the test.
+  #
+  # RESIDUAL, stated honestly: creating the role needs CREATEROLE (or
+  # superuser). CI's role always has it, so under CI this guard is
+  # UNCONDITIONAL — `flunk` if the role cannot be built. A local dev role
+  # without CREATEROLE degrades to running the journey unswitched (logged), so
+  # the suite stays runnable everywhere while the merge gate itself can never
+  # pass a superuser-only import path again.
+  @nosuper_role "bp_import_nosuper"
+
+  defp switch_to_nosuper_role_or_degrade! do
+    ensure = fn ->
+      %{rows: [[me]]} = Repo.query!("SELECT current_user", [])
+
+      with {:ok, _} <-
+             Repo.query(
+               "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = " <>
+                 "'#{@nosuper_role}') THEN CREATE ROLE #{@nosuper_role} NOSUPERUSER " <>
+                 "NOLOGIN INHERIT; END IF; END $$",
+               []
+             ),
+           {:ok, _} <- Repo.query(~s(GRANT "#{me}" TO #{@nosuper_role}), []) do
+        :ok
+      end
+    end
+
+    case ensure.() do
+      :ok ->
+        Repo.query!("SET ROLE #{@nosuper_role}", [])
+
+        # THE CANARY: the switched-in role must genuinely lack the
+        # superuser-only capability the old import path depended on — the
+        # exact statement + SQLSTATE of the fourth live fire. An import that
+        # succeeds after this assertion cannot be leaning on it; anyone who
+        # reintroduces a superuser-only statement into the import path turns
+        # this test into the live failure instead of a silent CI pass.
+        assert {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} =
+                 Repo.query("SET session_replication_role = replica", []),
+               "expected #{@nosuper_role} to be denied SET session_replication_role " <>
+                 "(superuser-only) — the privilege-parity model is broken"
+
+        :switched
+
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege = code}}} ->
+        if System.get_env("CI") do
+          flunk(
+            "CI could not build the non-superuser parity role (#{inspect(code)}) — " <>
+              "the privilege-parity guard MUST run in CI; fix the CI DB role instead " <>
+              "of skipping"
+          )
+        else
+          IO.puts(
+            "workspace_import_template_journey_test: local DB role lacks CREATEROLE — " <>
+              "running the merge-import WITHOUT the non-superuser parity switch " <>
+              "(CI enforces it unconditionally)"
+          )
+
+          :degraded
+        end
+    end
+  end
+
   defp scoped_count(sql, ws_id) do
     {:ok, ws_bin} = Ecto.UUID.dump(ws_id)
     %{rows: [[cnt]]} = Repo.query!(sql, [ws_bin])
@@ -169,17 +244,28 @@ defmodule BarkparkWeb.WorkspaceImportTemplateJourneyTest do
     refute shell_id == parent_id
 
     # ── 4. THE IMPORT the chain runs (bp cloud workspace import --merge) ─────
+    # Under the managed-box privilege model: the request's whole DB work —
+    # auth lookup, adopt-shell delete, the import's trigger/constraint DDL and
+    # COPY/upsert loop — executes as a NON-superuser table owner, exactly like
+    # the box role that 42501'd on round 4 (task-7889645a51769a36). The shared
+    # sandbox routes the HTTP request onto this very connection, so SET ROLE
+    # here governs the import itself.
+    parity = switch_to_nosuper_role_or_degrade!()
+
     resp =
       conn
       |> authed(raw_admin)
       |> put_req_header("content-type", "application/x-tar")
       |> post("/api/workspaces/#{slug}/import?mode=merge", bundle)
 
+    if parity == :switched, do: Repo.query!("RESET ROLE", [])
+
     body = Jason.decode!(resp.resp_body)
 
     assert resp.status == 200,
-           "merge import answered #{resp.status} (the live box died here with a silent " <>
-             "internal_error): #{resp.resp_body}"
+           "merge import answered #{resp.status} under a NON-superuser owner role (the " <>
+             "live box died here with 42501 insufficient_privilege on " <>
+             "session_replication_role): #{resp.resp_body}"
 
     assert body["mode"] == "merge"
     assert body["total_rows"] > 0
