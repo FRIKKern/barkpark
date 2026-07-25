@@ -29,7 +29,7 @@ const childIndent = 2
 // Render draws the whole portrait frame for a 60–100col × 100+row pane
 // (charter Amendment 6 / D83): a one-line identity strip pinned at the very top,
 // then the scrolling epic spine (a window around st.Cursor) filling the top
-// region, then the momentum line + progress bar + ticker + footer as fixed
+// region, then the slim progress bar + momentum line + keyboard footer as fixed
 // bottom status chrome. The spine IS the whole cursor space (Amendment 7: the
 // pinned NEXT/NOW band is retired — claims already render in place as spinner
 // rows per D56, and intent is the ready rows themselves, so the band only
@@ -71,23 +71,17 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 	return strings.Join(all, "\n")
 }
 
-// bottomChrome is the FIXED bottom status block (always rendered, never
-// sheddable): the relocated header block (momentum line + progress bar +
-// optional "showing N of M" note, charter D83), then the ticker rule + last
-// event, an optional action strip, and the footer hint. Shared by Render and
-// SpineTopFor so the shell's persisted scroll is computed against exactly the
-// viewport Render paints.
-func bottomChrome(b Board, st UIState, width int, now time.Time) []string {
-	var chrome []string
-	chrome = append(chrome, renderStatusFooter(b, st, width)...)
-	chrome = append(chrome, renderTicker(b, st, width, now)...)
-	// The action strip sits directly above the footer, and only when there is
-	// something to say — an empty strip costs no line.
+// bottomChrome is deliberately only THREE lines: one slim progress bar, the
+// status totals the operator values most, then keyboard help. A transient action message
+// replaces (rather than expands) the keyboard line, so feedback never steals
+// another row from the task list. Shared by Render and SpineTopFor so scrolling
+// and paint use identical geometry.
+func bottomChrome(b Board, st UIState, width int, _ time.Time) []string {
+	chrome := renderStatusFooter(b, st, width)
 	if strip := renderActionStrip(st.Strip, width); strip != "" {
-		chrome = append(chrome, strip)
+		return append(chrome, strip)
 	}
-	chrome = append(chrome, renderFooter(st, width))
-	return chrome
+	return append(chrome, renderFooter(st, width))
 }
 
 // SpineTopFor reports the spine viewport top Render will paint for this state
@@ -172,22 +166,14 @@ func renderIdentityTop(st UIState, width int, now time.Time) []string {
 	return []string{headerLine1(st, width, now)}
 }
 
-// renderStatusFooter is the relocated header block (charter D83): the MOMENTUM
-// line (spec §0, D40 — spinner + in-flight/ready/done counts + right-aligned %),
-// the proportional progress BAR beneath it, and the honest "showing N of M" note
-// — now FIXED bottom chrome directly under the NOW rows and above the ticker
-// ("momentum nearest the footer like a status bar", charter D84). These are the
-// live progress readouts, so they live at the bottom with the ticker/footer, not
-// up top with the orienting title. Never sheddable (D87).
+// renderStatusFooter is the relocated header block (charter D83): the
+// proportional one-line progress BAR followed by the MOMENTUM line (spec §0,
+// D40 — spinner + in-flight/ready/done counts + right-aligned %). Corpus truncation and
+// activity prose are intentionally omitted here: the status totals already use
+// authoritative counts, and the task list benefits more from those recovered
+// rows. Never sheddable (D87).
 func renderStatusFooter(b Board, st UIState, width int) []string {
-	lines := []string{momentumLine(b, st, width), progressBar(b, width)}
-
-	// Only when the 1000-row list clamp truncated the corpus: an honest
-	// "showing N of M" note, so a partial board never masquerades as the whole.
-	if note := truncationNote(b); note != "" {
-		lines = append(lines, dimStyle.Render(truncate(note, width)))
-	}
-	return lines
+	return []string{progressBar(b, width), momentumLine(b, st, width)}
 }
 
 // headerLine1 is the identity strip (wish Amendment 3): `barkpark · tasks` on the
@@ -205,6 +191,9 @@ func renderStatusFooter(b Board, st UIState, width int) []string {
 //     LEFT, so a long FQDN chewed "tasks" down to "tas…".
 func headerLine1(st UIState, width int, now time.Time) string {
 	glyph, word := connGlyphWord(st.Conn)
+	if st.ConnProblem != "" {
+		word = st.ConnProblem
+	}
 	if isSyncing(st) {
 		// Before the very first snapshot lands we are not "polling" (which implies
 		// we already hold data and are re-checking) — we are doing the first fetch.
@@ -337,10 +326,10 @@ func progressPct(b Board) int {
 	return pct
 }
 
-// progressBar is the spec §0 proportional bar (charter D40): a full-width track
-// filled to progressPct — teal fill (completion), dim track. "Things grow, not
-// jump": the fill widens as done climbs. ANSI-stripped it reads █████░░░░░, an
-// honest at-a-glance needle.
+// progressBar is the spec §0 proportional bar (charter D40): a full-width,
+// bottom-aligned half-height fill over a thin track. The unused upper half of
+// the row gives the task list breathing room without consuming another line.
+// "Things grow, not jump": the teal fill widens as done climbs.
 func progressBar(b Board, width int) string {
 	if width < 1 {
 		return ""
@@ -352,7 +341,7 @@ func progressBar(b Board, width int) string {
 	if filled < 0 {
 		filled = 0
 	}
-	return doneStyle.Render(strings.Repeat("█", filled)) + dimStyle.Render(strings.Repeat("░", width-filled))
+	return doneStyle.Render(strings.Repeat("▄", filled)) + dimStyle.Render(strings.Repeat("▁", width-filled))
 }
 
 // readyCountLabel counts every ready task the board holds — epic roots, epic
@@ -393,21 +382,6 @@ func readyCountLabel(b Board) string {
 		s += "+"
 	}
 	return s
-}
-
-// truncationNote reports "showing N of M" when the list fetch returned fewer
-// task envelopes (TaskCount) than the summed lifecycle counts say exist — i.e.
-// the 1000-row clamp dropped rows. Empty when the board is whole (or has no
-// counts to compare against), so it never fires on a small fixture.
-func truncationNote(b Board) string {
-	total := 0
-	for _, v := range b.Counts {
-		total += v
-	}
-	if b.TaskCount > 0 && total > b.TaskCount {
-		return fmt.Sprintf("showing %d of %d tasks", b.TaskCount, total)
-	}
-	return ""
 }
 
 func connGlyphWord(c ConnState) (string, string) {
@@ -524,7 +498,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		case spineTask:
 			selected, idx := markSel()
 			tgt := LineTarget{Kind: LineSpineRow, CursorIndex: idx}
-			for _, ln := range TaskRow(flashTitle(sr.task, st, now), selected, st.OpenTasks[sr.Ref], sr.Depth, sr.Guide, width, st.Frame, now) {
+			for _, ln := range taskRowWithOutline(flashTitle(sr.task, st, now), selected, st.OpenTasks[sr.Ref], sr.Outline, width, st.Frame, now) {
 				emit(paint(ln), tgt)
 			}
 		case spineMore:
@@ -662,45 +636,6 @@ func windowSpine(lines []string, top, avail, width int) []string {
 
 // ── Ticker + footer (pinned bottom) ──────────────────────────────────────────
 
-// renderTicker draws the fixed activity tail: a rule, then the NOW-LINE (the
-// freshest live claim's now-pulse, charter D9 — present only when a claim
-// carries one), then ONE dim last-event line (the calm-board subtraction,
-// charter D14 — the three-line verb-cycling ticker stays retired; the
-// now-line is a worker's own words, not a personality line). At rest with no
-// events it reads the honest quiet "no recent activity"; otherwise it shows
-// the single freshest event. Two lines tall at rest, three while a pulse
-// exists — an absent pulse costs no line.
-func renderTicker(b Board, st UIState, width int, now time.Time) []string {
-	lines := []string{dimStyle.Render(strings.Repeat("─", width))}
-	if t, p := freshestPulse(b); p != nil {
-		lines = append(lines, pulseLine(t, p, st.Frame, width, now))
-	}
-	if len(b.Events) == 0 {
-		return append(lines, dimStyle.Render("no recent activity"))
-	}
-	return append(lines, dimStyle.Render(truncate(eventSentence(b.Events[0], now), width)))
-}
-
-// freshestPulse picks the newest claim.now pulse across the NOW band's live
-// claims — the board's ONE now-line (many agents may pulse; the line shows
-// whoever spoke last, and the per-row ladders carry the rest). Nil when no
-// live claim carries a pulse. Board.Now is the honest source: a swept lease
-// clears the worker and the task falls out of NOW, taking its dead pulse with
-// it.
-func freshestPulse(b Board) (Task, *ClaimPulse) {
-	var best *ClaimPulse
-	var bt Task
-	for _, t := range b.Now {
-		if t.Claim == nil || t.Claim.Now == nil || strings.TrimSpace(t.Claim.Now.Text) == "" {
-			continue
-		}
-		if best == nil || t.Claim.Now.At.After(best.At) {
-			best, bt = t.Claim.Now, t
-		}
-	}
-	return bt, best
-}
-
 // pulseLine renders the now-line — `⠹ worker · pulse text · 30s` — with the
 // TTL decay visibly honest (charter D9: stale never lies fresh):
 //
@@ -748,36 +683,6 @@ func pulseLine(t Task, p *ClaimPulse, frame, width int, now time.Time) string {
 		line += dimStyle.Render(" · " + age)
 	}
 	return truncate(line, width)
-}
-
-func eventSentence(e Event, now time.Time) string {
-	verb := strings.TrimPrefix(e.Mutation, "task.")
-	// The ticker glyph borrows the RESULTING lifecycle's StatusGlyph, so the tail
-	// reads in the same board-wide status grammar as the spine: closed→done ✓,
-	// created→open ○, blocked→◐, claimed→in_progress ●.
-	glyph := StatusGlyph(eventLifecycle(verb))
-	s := fmt.Sprintf("%s %s '%s'", glyph, verb, e.DocID)
-	if age := AgeBadge(e.At, now); age != "" {
-		s += " · " + age
-	}
-	return s
-}
-
-// eventLifecycle maps a task.% mutation verb to the lifecycle whose StatusGlyph
-// the ticker borrows. An unknown verb maps to "" → the neutral "·" glyph.
-func eventLifecycle(verb string) string {
-	switch verb {
-	case "closed":
-		return "closed"
-	case "claimed":
-		return "in_progress"
-	case "created":
-		return "open"
-	case "blocked":
-		return "blocked"
-	default:
-		return ""
-	}
 }
 
 // renderFooter is the BOARD frame's one hint line (charter D18: one line per

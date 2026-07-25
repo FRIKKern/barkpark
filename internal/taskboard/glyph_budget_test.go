@@ -18,8 +18,8 @@ import (
 //	status glyphs   ⠋…⠏ in_progress spinner (10 frames) · ⠿ frozen (reduced-motion)
 //	                ! blocked (ASCII) · ○ ready/open · ✓ done · ✕ cancelled
 //	connection dot  ● live · ◐ polling · ✗ offline (the honest degraded state)
-//	momentum        ✓ done tally · █ progress fill · ░ progress track
-//	structure       ─ rule · ▎ selection bar · · dotted leader/separator · ↳ subtask guide
+//	momentum        ✓ done tally · ▄ half-height fill · ▁ thin progress track
+//	structure       ─ rule · ▎ selection bar · · dotted leader · ├─└ tree rails · ◆ reader-open task
 //	header identity ⇄ server
 //	honest overflow … truncation · ↑ ↓ scroll affordances
 //
@@ -39,7 +39,8 @@ var glyphAllowlist = map[rune]string{
 	'⠇': "in_progress spinner frame 8",
 	'⠏': "in_progress spinner frame 9",
 	'⠿': "in_progress spinner frozen frame (reduced-motion / NO_MOTION)",
-	'●': "live connection dot / checked radio on an entered (open) task row",
+	'●': "live connection dot",
+	'◆': "reader-open task marker",
 	'◐': "polling connection dot",
 	'○': "ready/open status glyph",
 	'◌': "considering status glyph (dotted circle — a candidate the strategizer just named; task-lifecycle-visibility epic)",
@@ -47,18 +48,22 @@ var glyphAllowlist = map[rune]string{
 	'✓': "done status glyph / met criterion / momentum done tally",
 	'✕': "cancelled status glyph",
 	'✗': "offline connection dot",
-	'█': "progress-bar fill (momentum)",
-	'░': "progress-bar track (momentum)",
+	'▄': "half-height progress-bar fill (momentum)",
+	'▁': "thin progress-bar track (momentum)",
 	'─': "section rule",
 	'▎': "selection bar",
 	'·': "dotted leader / meta separator",
 	'–': "en-dash in a phase-band W-code range (W3–4) — charter wave-10 W10-A",
 	'↩': "resume-dropped-work marker in the NEXT intent strip — charter wave-12 D60",
-	'↳': "nested-subtask guide",
+	'↳': "legacy component subtask guide",
 	'⇄': "server marker",
 	'…': "honest truncation ellipsis",
 	'↑': "scroll-up affordance",
 	'↓': "scroll-down affordance",
+	'│': "wide-pane focus and resize divider",
+	'├': "tree branch with following sibling",
+	'└': "tree final branch",
+	'↔': "wide-pane drag handle",
 }
 
 // readingGlyphAllowlist is the SECOND closed set, for the reading frames only

@@ -3,6 +3,30 @@ Wire the SSE live bridge to the task board pane so every claim tick paints
 honestly
 ⠋ in_progress · P1 · task · fable-3
 
+criteria 2/3
+  ✓ SSE dirty-bit triggers a debounced full snapshot refetch within 750ms
+    ↳ internal/taskboard/live.go:42
+  ✓ Connection dot renders live/polling/offline honestly
+  ○ A stuck reconnect can never keep reading ConnLive
+    ↳ proxy held the socket open · 35m ago (Jul 04, 16:55) · fable-2
+    ↳ backoff fixture still races · 20m ago (Jul 04, 17:10) · fable-3
+
+purpose · derived
+  part of   task-tui-epic
+  impact    blocks 2 · blocked by 1
+  does      Wire the SSE live bridge to the task board pane so every claim tick
+            paints honestly
+  why       Why this task is necessary within task-tui-epic is not recorded.
+  endgame   Advance task-tui-epic by completing this task.
+  important 90/100 — Derived from P1 queue priority.
+  relevant  90/100 — Derived from active in-progress status.
+  proof     Recorded task intent — Wire the SSE live bridge to the task board
+            pane so every claim tick paints honestly — document.title
+  proof     Mission placement — task-tui-epic — content.parent_id
+  proof     Acceptance contract — 3 recorded criteria —
+            content.acceptance_criteria
+  derived from recorded task facts · add authored purpose to override
+
 created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
 
 ○ created (Jul 02) → ⠋ claimed by opus-2 → ⠋ reclaimed by fable-3 (Jul 04) →
@@ -31,14 +55,6 @@ design
   One dirty bit, one debounce, one snapshot. The poll fallback must fire
   the same code path as real SSE so the two modes cannot drift apart.
 
-criteria 2/3
-  ✓ SSE dirty-bit triggers a debounced full snapshot refetch within 750ms
-    ↳ internal/taskboard/live.go:42
-  ✓ Connection dot renders live/polling/offline honestly
-  ○ A stuck reconnect can never keep reading ConnLive
-    ↳ proxy held the socket open · 35m ago (Jul 04, 16:55) · fable-2
-    ↳ backoff fixture still races · 20m ago (Jul 04, 17:10) · fable-3
-
 labels  proj:task-tui · area:live · wave:5
 blocks 2 tasks · blocked by 1
 
@@ -66,9 +82,39 @@ papers
 Sketch the paper rail interaction
 ○ open
 
+criteria · missing
+  ! No acceptance criteria recorded — completion cannot be verified.
+
+purpose · derived
+  part of   standalone task
+  impact    blocks 0 · blocked by 0
+  does      Sketch the paper rail interaction
+  why       Why this task is worth doing is not recorded.
+  endgame   Define acceptance criteria, then complete the task.
+  important 50/100 — Default score; no priority is recorded.
+  relevant  50/100 — Default score; task is present on this board.
+  proof     Recorded task intent — Sketch the paper rail interaction —
+            document.title
+  derived from recorded task facts · add authored purpose to override
+
 ═══ blocked @ 80 ═══
 Reconcile the #979 statusRole seam
 ! blocked · P2 · task
+
+criteria · missing
+  ! No acceptance criteria recorded — completion cannot be verified.
+
+purpose · derived
+  part of   standalone task
+  impact    blocks 0 · blocked by 1
+  does      Reconcile the #979 statusRole seam
+  why       Why this task is worth doing is not recorded.
+  endgame   Define acceptance criteria, then complete the task.
+  important 75/100 — Derived from P2 queue priority.
+  relevant  65/100 — Derived from an explicit design-paper link.
+  proof     Recorded task intent — Reconcile the #979 statusRole seam —
+            document.title
+  derived from recorded task facts · add authored purpose to override
 
 created 4d ago (Jun 30, 08:00) · updated 3d ago (Jul 01, 09:00)
 

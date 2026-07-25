@@ -94,6 +94,16 @@ defmodule Barkpark.TasksSchemaDossierTest do
       content =
         Map.merge(legacy_engine_content(), %{
           "description" => "Why this task exists.",
+          "purpose" => %{
+            "statement" => "Ship the dossier",
+            "why" => "Readers need operational context",
+            "endgame" => "Every task is self-explanatory",
+            "importance" => %{"score" => 95, "reason" => "core workflow"},
+            "relevance" => %{"score" => 90, "reason" => "active work"},
+            "proof" => [
+              %{"claim" => "Validated", "evidence" => "schema test", "source" => "ExUnit"}
+            ]
+          },
           "design" => "Approach sketch.",
           "design_doc" => "unified-task-model",
           "due_at" => "2026-06-20T12:00:00",
@@ -204,6 +214,26 @@ defmodule Barkpark.TasksSchemaDossierTest do
       field = Enum.find(Tasks.task_schema().fields, &(&1["name"] == "design_doc"))
       assert field["type"] == "reference"
       assert field["refType"] == "paper"
+    end
+
+    test "purpose is a structured, editable dossier rather than an opaque prose blob" do
+      field = Enum.find(Tasks.task_schema().fields, &(&1["name"] == "purpose"))
+      assert field["type"] == "composite"
+      names = MapSet.new(field["fields"], & &1["name"])
+
+      assert MapSet.new(~w(part_of impact statement why endgame importance relevance proof)) ==
+               names
+    end
+
+    test "purpose why asks for causal mission rationale, not a criteria paraphrase" do
+      purpose = Enum.find(Tasks.task_schema().fields, &(&1["name"] == "purpose"))
+      why = Enum.find(purpose["fields"], &(&1["name"] == "why"))
+
+      assert why["title"] == "Why this matters"
+      assert why["description"] =~ "causal reason"
+      assert why["description"] =~ "parent mission"
+      assert why["description"] =~ "Do not restate"
+      assert why["description"] =~ "acceptance criteria"
     end
 
     test "initial_values stays ABSENT (validate-before-merge; priority floor would re-rank ready)" do

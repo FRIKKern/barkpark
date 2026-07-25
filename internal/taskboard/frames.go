@@ -25,6 +25,33 @@ type TaskDetail struct {
 	PreviousWorker string    // claim.previous_worker ("" when absent)
 	ClaimExpiredAt time.Time // claim.expired_at (zero when absent)
 	LastWorkedAt   time.Time // content.last_worked_at (zero when absent)
+	Purpose        TaskPurpose
+}
+
+type PurposeScore struct {
+	Score  int
+	Reason string
+	Set    bool
+}
+
+type PurposeProof struct {
+	Claim    string
+	Evidence string
+	Source   string
+}
+
+// TaskPurpose is the authored explanation for why a task exists. Readers may
+// derive a labeled fallback from ordinary task facts, but never present that
+// fallback as authored truth.
+type TaskPurpose struct {
+	PartOf     string
+	Impact     string
+	Statement  string
+	Why        string
+	Endgame    string
+	Importance PurposeScore
+	Relevance  PurposeScore
+	Proof      []PurposeProof
 }
 
 // DetailIndex maps doc_id -> TaskDetail for every task in the snapshot.

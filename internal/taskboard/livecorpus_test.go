@@ -209,8 +209,8 @@ func TestLiveCorpusGolden(t *testing.T) {
 var bareBandRe = regexp.MustCompile(`^\s+W\d+(?:[.\-–]\d+)?\s*$`)
 
 // blankRowRe matches a row that is a glyph + selection marker but no title — the
-// D-C blank-row defect ("○ ", "↳ ✓").
-var blankRowRe = regexp.MustCompile(`^\s*(?:↳\s*)?[▎ ]?[○✓!✕⠋⠿]\s*$`)
+// D-C blank-row defect ("○ ", "└─✓").
+var blankRowRe = regexp.MustCompile(`^\s*(?:(?:[│ ] )*(?:├─|└─)|↳\s*)?[▎ ]?[○✓!✕⠋⠿◆]\s*$`)
 
 // countDoneRowsPerSection counts the teal ✓ done ROWS between each section header
 // and the next, so the ≤doneCueMax invariant can be checked per section.
