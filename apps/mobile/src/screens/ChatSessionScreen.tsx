@@ -136,23 +136,19 @@ export function ChatSessionScreen({
       style={[styles.root, { backgroundColor: theme.bg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={[styles.header, { borderBottomColor: theme.border, backgroundColor: theme.surface }]}>
+      <View style={[styles.header, { backgroundColor: theme.bg }]}>
         <Pressable accessibilityRole="button" onPress={onBack} hitSlop={12}>
-          <Text style={[styles.back, { color: theme.accent }]}>‹ Sessions</Text>
+          <Text style={[styles.back, { color: theme.text }]}>‹</Text>
         </Pressable>
         <Text numberOfLines={1} style={[styles.headerTitle, { color: theme.text }]}>
           {title}
         </Text>
         <View style={styles.headerMeta}>
           {state.mode !== '' && (
-            <Text style={[styles.metaBadge, { color: theme.textMuted, borderColor: theme.border }]}>
-              {state.mode}
-            </Text>
+            <Text style={[styles.metaBadge, { color: theme.textMuted }]}>{state.mode}</Text>
           )}
           {streamStatus !== 'open' && (
-            <Text style={[styles.metaBadge, { color: theme.textMuted, borderColor: theme.border }]}>
-              {streamStatus}
-            </Text>
+            <Text style={[styles.metaBadge, { color: theme.textMuted }]}>{streamStatus}</Text>
           )}
         </View>
       </View>
@@ -160,14 +156,15 @@ export function ChatSessionScreen({
       <View style={styles.transcript}>{body}</View>
 
       {notice !== undefined && (
-        <Text style={[styles.notice, { color: theme.textMuted, backgroundColor: theme.surface }]}>
-          {notice}
-        </Text>
+        <Text style={[styles.notice, { color: theme.textMuted }]}>{notice}</Text>
       )}
 
-      <View style={[styles.composer, { borderTopColor: theme.border, backgroundColor: theme.surface }]}>
+      <View style={[styles.composer, { backgroundColor: theme.bg }]}>
         <TextInput
-          style={[styles.input, { color: theme.text, borderColor: theme.border }]}
+          style={[
+            styles.input,
+            { color: theme.text, backgroundColor: theme.surface, borderColor: theme.border },
+          ]}
           placeholder={state.exited ? 'Send to relaunch…' : 'Message…'}
           placeholderTextColor={theme.textMuted}
           value={draft}
@@ -180,9 +177,9 @@ export function ChatSessionScreen({
             accessibilityRole="button"
             accessibilityLabel="Stop the running turn"
             onPress={interrupt}
-            style={[styles.actionBtn, { backgroundColor: theme.danger }]}
+            style={[styles.roundBtn, { backgroundColor: theme.surface, borderColor: theme.border, borderWidth: StyleSheet.hairlineWidth }]}
           >
-            <Text style={[styles.actionText, { color: theme.accentText }]}>Stop</Text>
+            <Text style={[styles.stopGlyph, { color: theme.danger }]}>■</Text>
           </Pressable>
         ) : null}
         <Pressable
@@ -191,11 +188,11 @@ export function ChatSessionScreen({
           onPress={onSend}
           disabled={draft.trim() === '' || loading || loadError !== undefined}
           style={[
-            styles.actionBtn,
+            styles.roundBtn,
             { backgroundColor: draft.trim() === '' ? theme.border : theme.accent },
           ]}
         >
-          <Text style={[styles.actionText, { color: theme.accentText }]}>Send</Text>
+          <Text style={[styles.sendGlyph, { color: theme.accentText }]}>↑</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -215,20 +212,22 @@ function TranscriptRow({
 }) {
   if (row.kind === 'local') {
     return (
-      <View style={[styles.bubble, styles.userBubble, { backgroundColor: theme.accent }]}>
-        <Text style={[styles.bubbleText, { color: theme.accentText }]}>{row.content}</Text>
+      <View style={[styles.userBubble, { backgroundColor: theme.bubble }]}>
+        <Text style={[styles.userText, { color: theme.text }]}>{row.content}</Text>
         {row.queued && (
-          <Text style={[styles.queuedBadge, { color: theme.accentText }]}>⧗ queued</Text>
+          <Text style={[styles.queuedBadge, { color: theme.textMuted }]}>⧗ queued</Text>
         )}
       </View>
     )
   }
   if (row.kind === 'tail') {
+    // The streaming tail is an assistant turn in progress: the same unbubbled
+    // document text, with a quiet inline cursor as the only liveness mark.
     return (
-      <View style={[styles.bubble, styles.assistantBubble, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Text style={[styles.bubbleText, { color: theme.text }]}>{row.text}</Text>
-        <Text style={[styles.streamingMark, { color: theme.textMuted }]}>▍streaming</Text>
-      </View>
+      <Text style={[styles.assistantText, { color: theme.text }]}>
+        {row.text}
+        <Text style={{ color: theme.textMuted }}> ▍</Text>
+      </Text>
     )
   }
 
@@ -237,18 +236,17 @@ function TranscriptRow({
 
   const text = (m.source_markdown ?? '').trim()
   if (m.role === 'user') {
+    // The one structural law: the user speaks in a soft rounded bubble…
     return (
-      <View style={[styles.bubble, styles.userBubble, { backgroundColor: theme.accent }]}>
-        <Text style={[styles.bubbleText, { color: theme.accentText }]}>{text}</Text>
+      <View style={[styles.userBubble, { backgroundColor: theme.bubble }]}>
+        <Text style={[styles.userText, { color: theme.text }]}>{text}</Text>
       </View>
     )
   }
   if (m.role === 'assistant') {
-    return (
-      <View style={[styles.bubble, styles.assistantBubble, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Text style={[styles.bubbleText, { color: theme.text }]}>{text}</Text>
-      </View>
-    )
+    // …and the answer is a document: full-width flowing text directly on the
+    // background — no bubble, no border, no chrome.
+    return <Text style={[styles.assistantText, { color: theme.text }]}>{text}</Text>
   }
   // Non-text rows (tool / todo / thinking / system): one honest muted line —
   // the typed-block richness stays a TUI/Studio surface this wave.
@@ -276,11 +274,11 @@ function CardRow({
   const pendingDecision = inFlight[rid]
   const canAnswer = answerable(m) && pendingDecision === undefined
   return (
-    <View style={[styles.card, { borderColor: theme.accent, backgroundColor: theme.surface }]}>
-      <Text style={[styles.cardTitle, { color: theme.accent }]}>
+    <View style={[styles.card, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+      <Text style={[styles.cardTitle, { color: theme.textMuted }]}>
         {CARD_TITLES[m.role] ?? m.role}
       </Text>
-      <Text style={[styles.bubbleText, { color: theme.text }]}>
+      <Text style={[styles.cardBody, { color: theme.text }]}>
         {(m.source_markdown ?? '').trim()}
       </Text>
       {pendingDecision !== undefined ? (
@@ -298,16 +296,19 @@ function CardRow({
           <Pressable
             accessibilityRole="button"
             onPress={() => onAnswer(rid, 'allow')}
-            style={[styles.actionBtn, { backgroundColor: theme.success }]}
+            style={[styles.pillBtn, { backgroundColor: theme.accent }]}
           >
-            <Text style={[styles.actionText, { color: theme.accentText }]}>Allow</Text>
+            <Text style={[styles.pillBtnText, { color: theme.accentText }]}>Allow</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
             onPress={() => onAnswer(rid, 'deny')}
-            style={[styles.actionBtn, { backgroundColor: theme.danger }]}
+            style={[
+              styles.pillBtn,
+              { borderColor: theme.border, borderWidth: StyleSheet.hairlineWidth },
+            ]}
           >
-            <Text style={[styles.actionText, { color: theme.accentText }]}>Deny</Text>
+            <Text style={[styles.pillBtnText, { color: theme.danger }]}>Deny</Text>
           </Pressable>
         </View>
       ) : (
@@ -319,65 +320,86 @@ function CardRow({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  // The header sits on the background — no surface slab, no border. The
+  // title and whitespace carry it (the ChatGPT/Claude register).
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
+    gap: 12,
+    paddingHorizontal: 18,
     paddingTop: 54,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
+    paddingBottom: 12,
   },
-  back: { fontSize: 15, fontWeight: '600' },
-  headerTitle: { flex: 1, fontSize: 15, fontWeight: '700' },
-  headerMeta: { flexDirection: 'row', gap: 6 },
-  metaBadge: {
-    fontSize: 11,
-    borderWidth: 1,
-    borderRadius: 5,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    overflow: 'hidden',
-  },
+  back: { fontSize: 26, fontWeight: '400', lineHeight: 28, marginTop: -2 },
+  headerTitle: { flex: 1, fontSize: 16, fontWeight: '600' },
+  headerMeta: { flexDirection: 'row', gap: 8 },
+  metaBadge: { fontSize: 12 },
   transcript: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
-  listContent: { padding: 14, gap: 8, flexGrow: 1 },
-  bubble: { borderRadius: 14, padding: 10, maxWidth: '86%', marginBottom: 2 },
-  userBubble: { alignSelf: 'flex-end' },
-  assistantBubble: { alignSelf: 'flex-start', borderWidth: 1 },
-  bubbleText: { fontSize: 15, lineHeight: 21 },
-  queuedBadge: { fontSize: 11, marginTop: 4, opacity: 0.9 },
-  streamingMark: { fontSize: 11, marginTop: 4 },
-  systemLine: { fontSize: 12, fontStyle: 'italic', paddingHorizontal: 4, marginBottom: 2 },
-  card: { borderWidth: 1.5, borderRadius: 12, padding: 12, gap: 8, alignSelf: 'stretch' },
-  cardTitle: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  cardStatus: { fontSize: 13, fontWeight: '600' },
-  cardActions: { flexDirection: 'row', gap: 10 },
-  actionBtn: {
-    borderRadius: 10,
+  // Generous vertical rhythm between turns — whitespace is the hierarchy.
+  listContent: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 20, gap: 18, flexGrow: 1 },
+  // User turns: a soft rounded neutral bubble, right-aligned.
+  userBubble: {
+    alignSelf: 'flex-end',
+    borderRadius: 22,
     paddingHorizontal: 16,
+    paddingVertical: 10,
+    maxWidth: '80%',
+  },
+  userText: { fontSize: 16, lineHeight: 23 },
+  // Assistant turns: full-width document text on the background.
+  assistantText: { fontSize: 16, lineHeight: 26, alignSelf: 'stretch' },
+  queuedBadge: { fontSize: 11, marginTop: 4 },
+  systemLine: { fontSize: 13, lineHeight: 18, fontStyle: 'italic' },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    padding: 16,
+    gap: 10,
+    alignSelf: 'stretch',
+  },
+  cardTitle: { fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
+  cardBody: { fontSize: 15, lineHeight: 22 },
+  cardStatus: { fontSize: 13, fontWeight: '600' },
+  cardActions: { flexDirection: 'row', gap: 10, marginTop: 2 },
+  pillBtn: {
+    borderRadius: 999,
+    paddingHorizontal: 20,
     paddingVertical: 9,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionText: { fontSize: 14, fontWeight: '700' },
-  notice: { fontSize: 12, paddingHorizontal: 14, paddingVertical: 6 },
+  pillBtnText: { fontSize: 14, fontWeight: '600' },
+  notice: { fontSize: 12, textAlign: 'center', paddingHorizontal: 18, paddingVertical: 4 },
+  // The composer floats on the background: a pill input + a round send.
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
-    padding: 10,
-    borderTopWidth: 1,
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 14,
   },
   input: {
     flex: 1,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 15,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingTop: 11,
+    paddingBottom: 11,
+    fontSize: 16,
+    lineHeight: 21,
     maxHeight: 120,
   },
+  roundBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendGlyph: { fontSize: 20, fontWeight: '700', lineHeight: 24 },
+  stopGlyph: { fontSize: 14, lineHeight: 16 },
   body: { fontSize: 15, textAlign: 'center' },
   muted: { fontSize: 13, textAlign: 'center' },
   link: { fontSize: 14, textDecorationLine: 'underline' },
