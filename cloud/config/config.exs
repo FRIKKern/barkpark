@@ -178,13 +178,24 @@ config :barkpark_cloud, BarkparkCloud.ArchiveStore,
   bucket: nil,
   location: "fsn1"
 
-# push-relay spike (mobile charter D15): the swappable transport for one push
-# notification send (BarkparkCloud.Push.Adapter). NotConfigured is the honest
-# default — no APNs/FCM credentials exist in any environment yet, so every
-# delivery cancels terminally (never retried, never faked). Wave 2 lands real
-# adapters + creds (human-gate steps in the NotConfigured moduledoc); tests wire
-# BarkparkCloud.PushFakeAdapter in config/test.exs.
-config :barkpark_cloud, :push_adapter, BarkparkCloud.Push.Adapters.NotConfigured
+# push relay (mobile charter D15): how one notification's adapter is chosen.
+#
+# `:auto` = resolve PER PLATFORM at send time (BarkparkCloud.Push.adapter_for/1):
+# apns → Adapters.APNS iff its credentials are configured, fcm → Adapters.FCM
+# iff its service-account key is, otherwise Adapters.NotConfigured (honest
+# terminal cancel — never retried, never faked). No APNs/FCM credentials exist
+# in any environment yet, so today every send still cancels; the relay turns
+# itself on when a credential appears, with no flag to flip. The exact
+# credentials a human must supply are in the Adapters.NotConfigured moduledoc.
+#
+# Setting a MODULE here instead overrides the resolution for every platform —
+# that is how config/test.exs pins BarkparkCloud.PushFakeAdapter.
+config :barkpark_cloud, :push_adapter, :auto
+
+# The push relay's HTTP boundary (BarkparkCloud.Push.HTTP) — the one seam the
+# real APNs/FCM adapters put bytes through, and the one the adapter tests fake.
+# Mint, not :httpc, because the APNs provider API is HTTP/2-only.
+config :barkpark_cloud, :push_http_client, BarkparkCloud.Push.HTTP.Mint
 
 # oban-substrate: the cloud control plane's job + cron engine. Postgres-backed
 # on BarkparkCloud.Repo (no Redis). A near-verbatim port of the proven api/ Oban

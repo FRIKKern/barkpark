@@ -2684,6 +2684,174 @@ defmodule BarkparkCloud.Registry do
   def reveal_push_relay_secret(%Barkpark{push_relay_secret_encrypted: ciphertext}),
     do: Vault.decrypt(ciphertext)
 
+  # The public URL the INSTANCE posts a chat_blocked delivery to — the exact
+  # sibling of `content_receiver_url/1`, per-barkpark instead of per-site
+  # (mobile charter D15b: the ROUTE names the instance, the payload cannot).
+  defp push_relay_receiver_url(%Barkpark{id: id}) do
+    base =
+      Application.get_env(:barkpark_cloud, :public_url, "https://api.barkpark.cloud")
+      |> to_string()
+      |> String.trim_trailing("/")
+
+    base <> "/v1/relay/chat-blocked/#{id}"
+  end
+
+  @doc """
+  Provision (or re-converge) the INSTANCE-side `chat_blocked` webhook row that
+  drives Cloud's `/v1/relay/chat-blocked/:barkpark_id` receiver — the wave-2
+  relay build's missing half. Until this runs, the receiver is a door nobody
+  knocks on: Cloud holds a secret, the box has no row, and no notification can
+  ever originate.
+
+  Uses the stored admin token SERVER-SIDE (`relay_admin/4`, the
+  `mint_public_read_token/5` prior art) against the box's **workspace-SCOPED**
+  webhook route:
+
+      POST /w/<workspace>/p/<project>/v1/webhooks/<dataset>
+      {name, url: <cloud>/v1/relay/chat-blocked/<id>, secret, blocked_threshold_s}
+
+  ## The scoped route is LOAD-BEARING, not stylistic
+
+  A chat_blocked subscription is matched by `Webhooks.chat_blocked_webhooks_for/1`,
+  which requires `w.workspace_id == ^workspace_id`. `Webhooks.create_webhook/2`
+  stamps `workspace_id` from the SERVER-RESOLVED request scope and drops any
+  client-supplied one. The FLAT `/v1/webhooks/:dataset` route carries no
+  workspace in its path, so a row created there gets `workspace_id: nil` and can
+  never match — the webhook would exist, look correct in Studio, and silently
+  never fire. Hence the `/w/:ws/p/:proj` prefix.
+
+  ## `blocked_threshold_s` IS the subscription
+
+  A non-NULL `blocked_threshold_s` is simultaneously the "this is a chat_blocked
+  hook" flag and the per-workspace debounce threshold (instance charter D59h).
+  Omitting it produces an ordinary CONTENT webhook that fires on document
+  publishes — the wrong events at the right URL.
+
+  ## Convergence
+
+  Idempotent by URL. If a row already points at this barkpark's receiver, it is
+  RE-ENABLED (clearing any auto-disable stamped by consecutive delivery
+  failures) and its secret is ROTATED box-side; the box returns the new
+  plaintext and we adopt it, so Cloud and instance converge on a shared secret
+  from ANY prior state — including "Cloud lost its copy". Otherwise a fresh
+  secret is minted here and a new row is created.
+
+  KNOWN LIMIT, stated rather than hidden: re-provisioning does NOT change an
+  existing row's `blocked_threshold_s` (the update would need a PUT through the
+  admin relay, which today accepts only :get/:post — widening a
+  privilege-bearing helper is not worth one field). To change the threshold,
+  delete the row in Studio and re-provision.
+
+  Returns `{:ok, %{status: "created" | "converged", webhook_id: id, url: url,
+  workspace: ws, project: proj, dataset: ds}}`, or `{:error, reason}` where
+  reason is `:not_live` / `:no_admin_token` / `:decrypt_failed` /
+  `:instance_error` (the relay's own vocabulary), `{:instance, status, body}`
+  for a refusal the box explained, or an `Ecto.Changeset` if the secret could
+  not be stored. The plaintext secret is never returned, logged or audited.
+
+  Options: `:workspace`, `:project`, `:dataset` (default to the barkpark's
+  `bootstrap_*`, then `"default"`/`"default"`/`"production"`) and
+  `:blocked_threshold_s` (default 300 — five minutes of a human not answering).
+  """
+  @spec provision_push_relay_webhook(Barkpark.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def provision_push_relay_webhook(%Barkpark{} = bp, opts \\ []) do
+    workspace = Keyword.get(opts, :workspace) || bp.bootstrap_workspace || "default"
+    project = Keyword.get(opts, :project) || bp.bootstrap_project || "default"
+    dataset = Keyword.get(opts, :dataset) || bp.bootstrap_dataset || "production"
+    threshold = Keyword.get(opts, :blocked_threshold_s, 300)
+    receiver_url = push_relay_receiver_url(bp)
+
+    scoped =
+      "/w/#{URI.encode(workspace)}/p/#{URI.encode(project)}/v1/webhooks/#{URI.encode(dataset)}"
+
+    case find_push_relay_webhook(bp, scoped, receiver_url) do
+      {:ok, nil} ->
+        create_push_relay_webhook(bp, scoped, receiver_url, threshold, %{
+          workspace: workspace,
+          project: project,
+          dataset: dataset
+        })
+
+      {:ok, existing_id} ->
+        converge_push_relay_webhook(bp, scoped, existing_id, receiver_url, %{
+          workspace: workspace,
+          project: project,
+          dataset: dataset
+        })
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # GET the scoped webhook list and return the id of the row already pointed at
+  # THIS barkpark's relay receiver, if any. URL equality is the identity: the
+  # receiver path embeds the barkpark id, so it cannot collide with another
+  # instance's row or with a content webhook.
+  defp find_push_relay_webhook(bp, scoped, receiver_url) do
+    case relay_admin(bp, :get, scoped, nil) do
+      {:ok, status, %{"webhooks" => hooks}} when status in 200..299 and is_list(hooks) ->
+        match = Enum.find(hooks, fn hook -> is_map(hook) and hook["url"] == receiver_url end)
+        {:ok, match && match["id"]}
+
+      {:ok, status, body} ->
+        {:error, {:instance, status, body}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp create_push_relay_webhook(bp, scoped, receiver_url, threshold, scope) do
+    with {:ok, secret, bp} <- mint_push_relay_secret(bp) do
+      body = %{
+        name: "push-relay-#{bp.id}",
+        url: receiver_url,
+        secret: secret,
+        blocked_threshold_s: threshold,
+        # Explicitly EMPTY: content lifecycle events are the other channel.
+        # `blocked_threshold_s` above is what makes this a chat_blocked row.
+        events: []
+      }
+
+      case relay_admin(bp, :post, scoped, body) do
+        {:ok, status, %{"webhook" => %{"id" => id}}} when status in 200..299 ->
+          {:ok, Map.merge(scope, %{status: "created", webhook_id: id, url: receiver_url})}
+
+        {:ok, status, decoded} ->
+          {:error, {:instance, status, decoded}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  # An existing row: clear any auto-disable, then rotate box-side and ADOPT the
+  # secret the box generated. Adoption (rather than pushing ours) is what makes
+  # this converge from a Cloud that lost its copy — `secret` is immutable on the
+  # box's update path by design, so rotate is the only way to re-agree.
+  defp converge_push_relay_webhook(bp, scoped, id, receiver_url, scope) do
+    _ = relay_admin(bp, :post, "#{scoped}/#{id}/reenable", %{})
+
+    case relay_admin(bp, :post, "#{scoped}/#{id}/rotate", %{}) do
+      {:ok, status, %{"secret" => secret}} when status in 200..299 and is_binary(secret) ->
+        with {:ok, _bp} <-
+               bp
+               |> Ecto.Changeset.change(push_relay_secret_encrypted: Vault.encrypt(secret))
+               |> Repo.update() do
+          {:ok, Map.merge(scope, %{status: "converged", webhook_id: id, url: receiver_url})}
+        end
+
+      {:ok, status, decoded} ->
+        {:error, {:instance, status, decoded}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   @doc """
   Mint a one-click Studio login URL for a live instance (dwb-7 "Studio
   one-click entry").

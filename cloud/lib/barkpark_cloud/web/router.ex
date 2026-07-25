@@ -72,6 +72,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
       DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, empty for logout-everywhere (wave 2; admin token stays server-side)
       POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
+      POST    /v1/barkparks/:id/push-relay admin  provision the instance chat_blocked webhook that drives the push relay (D15; idempotent, converges)
       POST    /v1/fleet/supports   user      register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
       DELETE  /v1/fleet/supports/:id user    unbind + delete a SUPPORT fleet row (PDF-D61; mains refused 409)
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
@@ -235,7 +236,8 @@ defmodule BarkparkCloud.Web.Router do
     Telemetry,
     Usage,
     Vercel,
-    Verify
+    Verify,
+    Webhooks
   }
 
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
@@ -2548,6 +2550,110 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, %Ecto.Changeset{}} ->
             json(conn, 422, %{error: "invalid"})
+        end
+    end
+  end
+
+  # POST /v1/barkparks/:id/push-relay → 200 {status, webhook_id, url, workspace,
+  # project, dataset} — turn ON needs-you push for this instance (mobile charter
+  # D15). The ONE operator action that closes the relay's loop: it provisions the
+  # box's workspace-scoped `chat_blocked` webhook row pointed at Cloud's
+  # /v1/relay/chat-blocked/:id receiver, and agrees a shared signing secret.
+  # Until it runs, Cloud's receiver is a door nobody knocks on.
+  #
+  # TEAM-ADMIN gated (`/credentials`' RBAC, not `/site-url`'s member gate): it
+  # spends the stored admin token to WRITE instance config and ROTATES a signing
+  # secret. Team-scoped fail-closed — a wrong-team / nonexistent / malformed id
+  # is the SAME 404 (no existence leak). Idempotent: re-running converges an
+  # existing row (re-enable + rotate + adopt) instead of duplicating it.
+  #
+  # NOTE this route is orthogonal to the CREDENTIAL gate: with the row
+  # provisioned and no APNs/FCM credentials, deliveries enqueue and cancel
+  # terminally at the adapter — honest, inert, zero dead code. See
+  # BarkparkCloud.Push.Adapters.NotConfigured for exactly what a human must
+  # supply to open that half.
+  #
+  # Body (all optional): {workspace, project, dataset, blocked_threshold_s}.
+  # Defaults come from the barkpark's bootstrap_* triple.
+  post "/v1/barkparks/:id/push-relay" do
+    conn = Auth.require_team_admin(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            opts = push_relay_opts(conn.body_params)
+
+            # OC24: the audit row commits with the success verdict and never
+            # lands on a failed wire. Metadata carries the receiver URL and the
+            # scope — public facts. NEVER the secret and never the admin token.
+            audit_attrs = %{
+              team_id: team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "barkpark.push_relay_provisioned",
+              target_type: "barkpark",
+              target_id: bp.id
+            }
+
+            result =
+              Accounts.audit(
+                audit_attrs,
+                fn -> Registry.provision_push_relay_webhook(bp, opts) end,
+                fn payload ->
+                  %{
+                    metadata: %{
+                      status: payload.status,
+                      webhook_id: payload.webhook_id,
+                      receiver_url: payload.url,
+                      workspace: payload.workspace,
+                      dataset: payload.dataset
+                    }
+                  }
+                end
+              )
+
+            case result do
+              {:ok, payload} ->
+                push_event(team.id, "audit")
+                json(conn, 200, payload)
+
+              {:error, :not_live} ->
+                json(conn, 409, %{error: "not_live"})
+
+              {:error, :no_admin_token} ->
+                json(conn, 404, %{error: "no_admin_token"})
+
+              {:error, :decrypt_failed} ->
+                json(conn, 500, %{error: "decrypt_failed"})
+
+              {:error, :instance_error} ->
+                json(conn, 502, %{error: "instance_unreachable"})
+
+              {:error, {:instance, status, _body}} ->
+                # The box answered and refused. 404 there means this instance is
+                # too old to carry the scoped webhook route — the same
+                # capability-detection shape as the app-token exchange's D8
+                # `app_token_unsupported`, so a client can branch on it.
+                if status == 404 do
+                  json(conn, 409, %{error: "push_relay_unsupported"})
+                else
+                  json(conn, 502, %{error: "instance_refused", status: status})
+                end
+
+              {:error, _other} ->
+                json(conn, 500, %{error: "provision_failed"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
         end
     end
   end
@@ -6458,7 +6564,7 @@ defmodule BarkparkCloud.Web.Router do
             raw = raw_request_body(conn)
             sig = get_first_header(conn, "x-barkpark-signature")
 
-            case Sites.ContentPublishVerifier.verify(raw, sig, [secret]) do
+            case Webhooks.InboundSignature.verify(raw, sig, [secret]) do
               :ok ->
                 # Debounced (charter D44): N publishes in the window = ONE rebuild.
                 _ = Sites.AutoDeployWorker.enqueue(site.id)
@@ -6477,7 +6583,7 @@ defmodule BarkparkCloud.Web.Router do
   # INSTANCE-originated chat_blocked webhook — the box's Webhooks.Dispatcher
   # signs every delivery `x-barkpark-signature: t=<unix>,v1=<hex>` (HMAC-SHA256
   # over "<t>.<raw-body>", ±300s replay window); verification reuses
-  # Sites.ContentPublishVerifier, the byte-for-byte CP-side twin of that signing
+  # Webhooks.InboundSignature, the byte-for-byte CP-side twin of that signing
   # (same scheme, same tolerance, constant-time compare).
   #
   # Per-BARKPARK route on purpose: the D59h payload identifies no user and its
@@ -6514,7 +6620,7 @@ defmodule BarkparkCloud.Web.Router do
             raw = raw_request_body(conn)
             sig = get_first_header(conn, "x-barkpark-signature")
 
-            case Sites.ContentPublishVerifier.verify(raw, sig, [secret]) do
+            case Webhooks.InboundSignature.verify(raw, sig, [secret]) do
               :ok ->
                 case Push.enqueue_chat_blocked_fanout(bp, conn.body_params) do
                   {:ok, enqueued} ->
@@ -10341,6 +10447,28 @@ defmodule BarkparkCloud.Web.Router do
     |> put_resp_header("location", location)
     |> send_resp(302, "")
   end
+
+  # Narrow the push-relay provisioning body to the four options
+  # Registry.provision_push_relay_webhook/2 accepts. An ALLOWLIST, not a
+  # pass-through: the keyword list reaches a function that talks to the
+  # instance with the admin token, so an unrecognised key must never ride
+  # along. Absent/blank values are dropped so the barkpark's bootstrap_*
+  # defaults win, and a non-integer threshold is ignored rather than crashing
+  # the box's changeset.
+  defp push_relay_opts(params) when is_map(params) do
+    slugs =
+      for key <- [:workspace, :project, :dataset],
+          value = params[Atom.to_string(key)],
+          is_binary(value) and value != "",
+          do: {key, value}
+
+    case params["blocked_threshold_s"] do
+      n when is_integer(n) and n > 0 -> [{:blocked_threshold_s, n} | slugs]
+      _ -> slugs
+    end
+  end
+
+  defp push_relay_opts(_params), do: []
 
   ## Live events (SSE) helpers
 
