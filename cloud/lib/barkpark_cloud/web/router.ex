@@ -70,6 +70,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
+      DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, empty for logout-everywhere (wave 2; admin token stays server-side)
       POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
       POST    /v1/fleet/supports   user      register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
       DELETE  /v1/fleet/supports/:id user    unbind + delete a SUPPORT fleet row (PDF-D61; mains refused 409)
@@ -2423,6 +2424,91 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # DELETE /v1/barkparks/:id/app-token → 200 — the revoke half of the
+  # member-reachable app-token exchange (wave 2, mob-w2-app-token-revoke).
+  # Body {"token": raw} kills exactly that token (logout on THIS device — the
+  # phone presents the credential it wants dead; relayed once, never stored);
+  # an EMPTY body means logout-everywhere: the instance revokes every live
+  # app:<email> token for the CALLING user, email derived SERVER-SIDE from the
+  # session — a caller can never aim this at another user's tokens. Same
+  # custody physics as the mint above: the stored admin token is decrypted and
+  # used server-side only, never serialized into any response. USER-authed +
+  # TEAM-SCOPED fail-closed: wrong-team / nonexistent / malformed id is the
+  # SAME 404. Rate-limited per IP (`app_token_revoke:<ip>` bucket, 10/min, D7).
+  # 404 not_found when the instance knows no such token; 409 revoke_unsupported
+  # when the instance predates the revoke route (D8 capability-vs-absence);
+  # the rest mirror the mint arm. Audited as "barkpark.app_token_revoked" —
+  # the mode and count, NEVER a token value.
+  delete "/v1/barkparks/:id/app-token" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      match?(
+        {:error, :rate_limited},
+        DeviceAuthRateLimiter.check("app_token_revoke:" <> (peer_ip(conn) || "unknown"))
+      ) ->
+        json(conn, 429, %{error: "rate_limited"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            mode =
+              case conn.body_params do
+                %{"token" => raw} when is_binary(raw) and raw != "" ->
+                  {:token, raw}
+
+                _ ->
+                  {:email, conn.assigns.current_user.email}
+              end
+
+            case Registry.revoke_app_token(bp, mode) do
+              {:ok, payload} ->
+                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.app_token_revoked", %{
+                  name: bp.name,
+                  mode: elem(mode, 0),
+                  revoked_count: payload["revoked_count"]
+                })
+
+                json(conn, 200, payload)
+
+              {:error, :not_found} ->
+                json(conn, 404, %{error: "not_found"})
+
+              {:error, :not_live} ->
+                json(conn, 409, %{error: "not_live"})
+
+              {:error, :revoke_unsupported} ->
+                json(conn, 409, %{error: "revoke_unsupported"})
+
+              {:error, :no_admin_token} ->
+                json(conn, 404, %{
+                  error: "no_admin_token",
+                  detail:
+                    "No admin token is stored for this instance yet. It is captured at " <>
+                      "provision time — a pre-existing instance may need a re-provision."
+                })
+
+              {:error, :decrypt_failed} ->
+                json(conn, 500, %{error: "decrypt_failed"})
+
+              {:error, :instance_error} ->
+                json(conn, 502, %{error: "instance_unreachable"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   # POST /v1/push/device-tokens {platform, token, metadata?} → 201 — register
   # THIS device for needs-you push (push-relay spike, mobile charter D15a).
   # USER-authed: the row binds to the calling user; per-user × per-device rows
@@ -2430,25 +2516,39 @@ defmodule BarkparkCloud.Web.Router do
   # (platform, token) upserts — clears revoked_at, refreshes metadata — so the
   # app can register on every launch. The registered token is NOT echoed back
   # (the client already holds it; keep responses minimal). 422 on an unknown
-  # platform / missing-short token. Registration rows are the relay's ONLY
-  # switch: zero rows → the chat_blocked receiver fans out to nothing.
+  # platform / missing-short-oversize token (token capped at 1024 bytes — the
+  # unique-index row cap would otherwise turn oversize into a raw 500).
+  # Rate-limited per USER (`push_register:<user_id>` bucket, 10/min — the
+  # approve:<user_id> idiom, not per-IP: mobile clients share carrier-NAT IPs)
+  # and capped at Push.max_devices_per_user/0 rows per user with
+  # revoked-first/stalest-next eviction (mob-bl-push-hardening). Registration
+  # rows are the relay's ONLY switch: zero rows → the chat_blocked receiver
+  # fans out to nothing.
   post "/v1/push/device-tokens" do
     conn = Auth.require_user(conn, [])
 
-    if conn.halted do
-      conn
-    else
-      case Push.register_device_token(conn.assigns.current_user, conn.body_params) do
-        {:ok, device} ->
-          json(conn, 201, %{
-            id: device.id,
-            platform: device.platform,
-            registered: true
-          })
+    cond do
+      conn.halted ->
+        conn
 
-        {:error, %Ecto.Changeset{}} ->
-          json(conn, 422, %{error: "invalid"})
-      end
+      match?(
+        {:error, :rate_limited},
+        DeviceAuthRateLimiter.check("push_register:" <> conn.assigns.current_user.id)
+      ) ->
+        json(conn, 429, %{error: "rate_limited"})
+
+      true ->
+        case Push.register_device_token(conn.assigns.current_user, conn.body_params) do
+          {:ok, device} ->
+            json(conn, 201, %{
+              id: device.id,
+              platform: device.platform,
+              registered: true
+            })
+
+          {:error, %Ecto.Changeset{}} ->
+            json(conn, 422, %{error: "invalid"})
+        end
     end
   end
 
@@ -4801,11 +4901,18 @@ defmodule BarkparkCloud.Web.Router do
         # absent is fine (back-compat — the ip-only succeed path is unchanged).
         # dwb-4: the worker MAY also report the content-bootstrap outputs
         # alongside — stored (secrets Vault-encrypted) in the same transaction.
+        # task-5866ec745efcd7f7: a provision_support worker MAY report the OPAQUE
+        # id of the ledger token it minted on the parent main as `token_id`; the
+        # Registry persists it as the SUPPORT row's fleet_token_id (the sole
+        # durable token-id holder, PDF-D68 — what `bp cloud support remove`
+        # revokes). Additive + tolerant both ways: absent → the ip-only path is
+        # byte-unchanged (older workers), and a non-support row never takes it.
         # claim-fence (bp-c55): the worker MAY echo the claim_token it holds; when
         # present the Registry fences a stale re-claim, when absent behavior is
         # unchanged (the deployed Go fleet doesn't echo it yet — Stage 1 compat).
         opts =
           succeed_opts(conn.body_params["admin_token"], conn.body_params["bootstrap"]) ++
+            fleet_token_id_opts(conn.body_params["token_id"]) ++
             claim_token_opts(conn)
 
         case Registry.succeed_job(conn.path_params["id"], conn.body_params["ip"], opts) do
@@ -7734,6 +7841,15 @@ defmodule BarkparkCloud.Web.Router do
   # malformed/absent field preserves the pre-bootstrap succeed path.
   defp succeed_opts(token, %{} = bootstrap), do: succeed_opts(token) ++ [bootstrap: bootstrap]
   defp succeed_opts(token, _bootstrap), do: succeed_opts(token)
+
+  # task-5866ec745efcd7f7: build the succeed_job opts from the (optional)
+  # reported ledger-token id. A non-empty binary becomes `[token_id: t]`;
+  # anything else (missing/blank/non-string — every pre-fix worker) yields `[]`,
+  # preserving the ip-only succeed path byte-for-byte.
+  defp fleet_token_id_opts(token_id) when is_binary(token_id) and token_id != "",
+    do: [token_id: token_id]
+
+  defp fleet_token_id_opts(_), do: []
 
   # dwb-4 launch validation: nil/blank means "no template" (valid — the
   # pre-template path); a non-empty string must be in the known catalog; any

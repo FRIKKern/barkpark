@@ -55,7 +55,7 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
     webhook.test_sent
     barkpark.go_live barkpark.deleted
     barkpark.retry_requested barkpark.verify_requested barkpark.studio_link_minted
-    barkpark.app_token_minted
+    barkpark.app_token_minted barkpark.app_token_revoked
     barkpark.site_url_set barkpark.self_update_triggered barkpark.rollback_triggered
     barkpark.autoupdate_changed barkpark.domain_attached
     barkpark.vercel_deploy_triggered barkpark.resurrected

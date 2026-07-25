@@ -96,10 +96,60 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   `dataset_slugs_for/1` and INTERSECT it with the target slug — a shared slug
   therefore yields the empty set, fail-closed.
 
-  ## Import (charter D7 · PDS-D8/D9)
+  ## Import (charter D7 · PDS-D8/D9 · task-7889645a51769a36)
 
-  Re-imported under `SET session_replication_role = replica` (FK triggers off,
-  any insert order). Two modes:
+  The import needs NO superuser privilege. It used to run under
+  `SET session_replication_role = replica` — a superuser-only parameter, which
+  500'd (Postgrex 42501 insufficient_privilege) on every managed box, where the
+  app's DB role is the table OWNER but not superuser (`deploy.sh`:
+  `CREATE USER … CREATEDB` + `createdb -O`). CI never caught it because CI's
+  `postgres` role IS superuser — privilege parity, not state, was the missing
+  model. What the replica role was actually buying, and its owner-privilege
+  replacement:
+
+    * **FK suppression** — the manifest lists members root → E1 → E2 → E3,
+      each partition ALPHABETICAL (`Catalog.live_e*` `ORDER BY table_name`),
+      which is not a dependency order (`documents` (E1) precedes its FK
+      parents `projects` (E1, later alphabetically) and `datasets` (E2, later
+      partition)) — and, more fundamentally, the FORMAT deliberately permits
+      rows whose FK target travels in no bundle at all: a dataset-grained
+      pull ships Group-C tables (`content_edges` / `task_edges` /
+      `plugin_doc_state`, no dataset grain) workspace-WHOLE while `documents`
+      is narrowed, so an edge into another dataset lands as a recoverable
+      orphan by design (PDS-D7); and five boundary FKs point at tables no
+      bundle carries (`workspaces.organization_id` → `organizations`;
+      `api_tokens.owner_user_id` → `users`; `chat_execution_leases` /
+      `chat_runtime_usage_receipts` / `epic_assignment_runtime_attempts`
+      `.session_id` → `chat_sessions`). Ordering therefore cannot save FK
+      enforcement — dangling is contractual. So every FK constraint whose
+      CHILD is a member table (derived live from `pg_constraint`) is DROPPED
+      at the start of the transaction and re-added `NOT VALID` at the end —
+      owner-privilege DDL, fully rolled back on failure. `NOT VALID` is the
+      honest state: imported rows may dangle (they always could — the replica
+      role merely skipped the check while leaving the constraint marked
+      valid), future writes stay enforced, and an operator can
+      `VALIDATE CONSTRAINT` any of them after cleaning orphans.
+    * **User triggers** — the ledger tables carry immutability triggers
+      (`*_no_update_delete`, `revisions_immutable`, release-gate `*_immutable`:
+      BEFORE UPDATE OR DELETE, raise) that would abort the merge upsert's
+      `DO UPDATE` on any resident row, BEFORE INSERT/UPDATE validation triggers
+      that re-judge already-validated source rows against target-local state,
+      and DEFERRABLE CONSTRAINT triggers (release-gate validation) that would
+      fire at commit. `ALTER TABLE … DISABLE TRIGGER USER` (ownership, not
+      superuser) suppresses exactly the same set the replica role did (no
+      trigger in this schema is `ENABLE ALWAYS`/`ENABLE REPLICA`); internally
+      generated FK triggers are outside `USER` by definition — those are
+      handled by the constraint drop above. Constraint-trigger events are
+      queued at statement time, so re-enabling before commit resurrects
+      nothing.
+
+  All of this DDL lives INSIDE the import transaction: on any member failure
+  the rollback restores every constraint and trigger state, and the original
+  exception propagates untouched (the old `after`-clause role reset used to
+  swallow it as a 25P02 — that blindfold class is gone with the `after` clause,
+  task-63a199c0a0ce2a06).
+
+  Two modes:
 
     * `:clean` (default) — byte-identical restore into a CLEAN target. E1/E2/
       root members re-import via `COPY … FROM STDIN`; the string-keyed E3 +
@@ -126,7 +176,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   alias Barkpark.Content.Scope
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.{Dataset, Project, Workspace}
-  alias Barkpark.Tenancy.WorkspaceBundle.{Archive, Catalog, ExportScopeError}
+  alias Barkpark.Tenancy.WorkspaceBundle.{Archive, Catalog, ExportScopeError, InvalidBundleError}
 
   @type stats :: %{
           tables: %{optional(String.t()) => non_neg_integer()},
@@ -247,19 +297,70 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
     {manifest, dumps} = Archive.unpack(bundle)
 
+    # A readable tar whose manifest names a DIFFERENT format is a caller
+    # mistake, not an engine fault — InvalidBundleError so the HTTP edge
+    # answers 422 invalid_bundle instead of the opaque 500 the old
+    # ArgumentError produced (task-96d8ab2b582818a4).
     if manifest["format"] != Archive.format() do
-      raise ArgumentError, "not a #{Archive.format()} bundle: #{inspect(manifest["format"])}"
+      raise InvalidBundleError,
+        code: "invalid_bundle",
+        message: "not a #{Archive.format()} bundle: format=#{inspect(manifest["format"])}"
     end
 
+    # Test-only fault seam (mirrors :export_copy_fault): when configured, the
+    # import RETURNS the given {:error, term} after the real unpack + format
+    # check, so the HTTP edge's unmatched-term contract (named, logged 500
+    # import_failed — task-96d8ab2b582818a4) is provable over the wire without
+    # mocking the engine. `nil` in every non-test env.
+    case Application.get_env(:barkpark, :import_fault) do
+      {:error, _term} = fault -> fault
+      nil -> run_import(manifest, dumps, mode)
+    end
+  end
+
+  defp run_import(manifest, dumps, mode) do
     Repo.transaction(
       fn ->
-        # PDS-D9 pre-flight runs BEFORE the replica-role flip so the empty-shell
-        # delete's FK cascades still fire (replica role disables FK triggers).
+        # FIRST: drain the deferred-trigger queue, or the DDL below cannot run.
+        # The epic-ledger FKs into `documents` are DEFERRABLE INITIALLY
+        # DEFERRED (20260715001200/1300), so any earlier delete of documents in
+        # THIS transaction (the ExUnit sandbox wraps a whole test in one — its
+        # seeding/teardown queues exactly this; live-proven by CI as
+        # `ERROR 55006 (object_in_use) cannot ALTER TABLE "documents" because
+        # it has pending trigger events`, and in prod the adopt-shell delete
+        # below can queue the same class) leaves referenced-side RI events
+        # pending until COMMIT, and Postgres refuses ALTER TABLE on any table
+        # with pending events. Forcing IMMEDIATE fires them NOW — outcome-
+        # equivalent (they would have fired at commit; a violation surfaces
+        # earlier, never differently) — and makes events queued later in this
+        # transaction fire at their own statement's end, so the queue is empty
+        # at every DDL point. Transaction-scoped; no privilege required.
+        Repo.query!("SET CONSTRAINTS ALL IMMEDIATE", [])
+
+        # PDS-D9 pre-flight runs FIRST among the import's own writes, before
+        # any trigger/constraint DDL, so the empty-shell delete's FK cascades
+        # AND teardown triggers (workspaces_teardown_cycle_ledger) fire with
+        # everything live.
         if mode == :merge, do: adopt_or_refuse_root_slug!(manifest)
 
-        set_replication_role!("replica")
+        # Only tables that exist on the target participate in the DDL passes;
+        # a manifest member the target schema lacks behaves as before — a
+        # 0-row member is skipped silently, a row-carrying one fails on its
+        # own COPY (cross-version bundles).
+        live =
+          manifest["tables"]
+          |> Enum.map(& &1["name"])
+          |> Enum.filter(&table_exists?/1)
 
-        try do
+        # No try/after: every statement below runs inside THIS transaction, so
+        # a member failure rolls back the DDL together with the data and the
+        # ORIGINAL exception propagates untouched (no after-clause exists to
+        # replace it with a 25P02 — the blindfold class of
+        # task-63a199c0a0ce2a06 cannot recur).
+        member_fks = drop_member_fks!(live)
+        alter_user_triggers!(live, "DISABLE")
+
+        stats =
           manifest["tables"]
           |> Enum.reduce({%{}, 0}, fn entry, {acc, total} ->
             n = import_member(entry, Map.get(dumps, entry["name"], ""), mode)
@@ -270,12 +371,97 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             # provenance without unpacking (and re-inflating) the tar twice.
             %{tables: tables, total_rows: total, manifest: manifest}
           end)
-        after
-          set_replication_role!("DEFAULT")
-        end
+
+        alter_user_triggers!(live, "ENABLE")
+        restore_member_fks!(member_fks)
+
+        stats
       end,
       timeout: :infinity
     )
+  end
+
+  # ── Owner-privilege import mechanics (task-7889645a51769a36) ─────────────────
+  #
+  # See the moduledoc §Import for why each of these exists. Everything here is
+  # owner-privilege DDL/catalog reads — nothing requires superuser, which is
+  # the entire point: managed boxes run the app role as table owner WITHOUT
+  # superuser, and `SET session_replication_role` 42501'd there on every
+  # merge-import while superuser-role CI stayed green.
+
+  # Every FK constraint whose CHILD is a member table, derived live from
+  # pg_constraint (like the catalog's E2 walk). Dropped for the transaction and
+  # re-added NOT VALID by restore_member_fks!/1: the bundle format contractually
+  # permits rows whose FK target is absent on the target (PDS-D7 dataset-grain
+  # orphans; boundary references into organizations/users/chat_sessions), so
+  # enforcement during the load — in ANY member order — would abort legitimate
+  # bundles. Byte-fidelity is preserved (no row is scrubbed or skipped), future
+  # writes stay enforced, and the constraint's validity flag stops overstating
+  # what the data guarantees. FKs pointing INTO member tables from outside are
+  # untouched — the import never deletes parents nor updates arbiter keys, so
+  # they cannot fire. Returns what to restore.
+  #
+  # Interpolated identifiers: `table`/`conname` come from pg_constraint for
+  # tables named by an admin-gated bundle manifest, quoted via qi/1;
+  # `defn` is pg_get_constraintdef output. No request-shaped input reaches
+  # the SQL string — same posture as copy_into/merge_upsert below.
+  # sobelow_skip ["SQL.Query"]
+  defp drop_member_fks!(names) do
+    member_fks =
+      Repo.query!(
+        """
+        SELECT cl.relname, c.conname, pg_get_constraintdef(c.oid)
+        FROM pg_constraint c
+        JOIN pg_class cl ON cl.oid = c.conrelid
+        JOIN pg_namespace cn ON cn.oid = cl.relnamespace
+        WHERE c.contype = 'f'
+          AND cn.nspname = 'public'
+          AND cl.relname = ANY($1)
+        ORDER BY cl.relname, c.conname
+        """,
+        [names]
+      ).rows
+
+    Enum.each(member_fks, fn [table, conname, _defn] ->
+      Repo.query!("ALTER TABLE public.#{qi(table)} DROP CONSTRAINT #{qi(conname)}", [])
+    end)
+
+    member_fks
+  end
+
+  # Identifiers/defn straight from pg_constraint / pg_get_constraintdef (see
+  # drop_member_fks! above) — never request input.
+  # sobelow_skip ["SQL.Query"]
+  defp restore_member_fks!(member_fks) do
+    Enum.each(member_fks, fn [table, conname, defn] ->
+      # An already-NOT VALID definition must not double the suffix.
+      base = String.replace_suffix(defn, " NOT VALID", "")
+
+      Repo.query!(
+        "ALTER TABLE public.#{qi(table)} ADD CONSTRAINT #{qi(conname)} #{base} NOT VALID",
+        []
+      )
+    end)
+  end
+
+  # DISABLE/ENABLE TRIGGER USER on every member table — ownership-privilege,
+  # and USER cannot touch internally generated FK triggers (those are handled
+  # by the constraint drop above). Alphabetical for a deterministic
+  # lock-acquisition order. `table` is manifest-named + existence-checked and
+  # qi/1-quoted; `action` is guard-pinned to two literals — no request input.
+  # sobelow_skip ["SQL.Query"]
+  defp alter_user_triggers!(names, action) when action in ["DISABLE", "ENABLE"] do
+    Enum.each(Enum.sort(names), fn table ->
+      Repo.query!("ALTER TABLE public.#{qi(table)} #{action} TRIGGER USER", [])
+    end)
+  end
+
+  defp table_exists?(table) do
+    Repo.query!(
+      "SELECT 1 FROM pg_class cl JOIN pg_namespace n ON n.oid = cl.relnamespace " <>
+        "WHERE n.nspname = 'public' AND cl.relname = $1 AND cl.relkind = 'r'",
+      [table]
+    ).rows != []
   end
 
   # ── Export ───────────────────────────────────────────────────────────────────
@@ -779,8 +965,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # bundle's root slug exists on the target under a different id AND that
   # workspace is provably EMPTY (0 documents, 0 media_files), delete the shell
   # inside the import transaction (via `Tenancy.delete_workspace/1`, whose FK
-  # cascades need the DEFAULT replication role — hence pre-flight runs before
-  # the replica flip) and proceed; otherwise refuse with a clear named error.
+  # cascades and teardown triggers must all fire — hence pre-flight runs
+  # before any trigger/constraint DDL) and proceed; otherwise refuse with a
+  # clear named error.
   defp adopt_or_refuse_root_slug!(manifest) do
     bundle_id = manifest["workspace_id"]
     slug = manifest["workspace_slug"]
@@ -921,14 +1108,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     Repo.query!("DROP TABLE #{qi(tmp)}", [])
   end
 
+  # A manifest member without an order_columns arbiter is a STALE BUNDLE the
+  # caller can fix by re-exporting — InvalidBundleError (422 invalid_bundle at
+  # the HTTP edge), never an opaque ArgumentError 500 (task-96d8ab2b582818a4).
   defp merge_upsert(table, _cols, order_cols, _dump) do
-    raise ArgumentError,
-          "merge import needs a non-empty order_columns arbiter for #{inspect(table)}, " <>
-            "got #{inspect(order_cols)} — re-export the bundle with a current manifest"
-  end
-
-  defp set_replication_role!(role) do
-    Repo.query!("SET session_replication_role = #{role}", [])
+    raise InvalidBundleError,
+      code: "invalid_bundle",
+      message:
+        "merge import needs a non-empty order_columns arbiter for #{inspect(table)}, " <>
+          "got #{inspect(order_cols)} — re-export the bundle with a current manifest"
   end
 
   defp scalar!(sql, params), do: Repo.query!(sql, params).rows |> hd() |> hd()

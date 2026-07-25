@@ -131,6 +131,16 @@ defmodule Barkpark.Content.Errors do
                          "bundle_import_disabled",
                          "invalid_mode",
                          "workspace_slug_conflict",
+                         # A bundle row colliding with resident target content on
+                         # a constraint the merge arbiter does not cover (any
+                         # non-PK unique index) — 409 naming constraint + table
+                         # (task-63a199c0a0ce2a06; used to escape as a blind 500).
+                         "import_constraint_violation",
+                         # The import engine returned an {:error, term} no
+                         # clause names — a logged, NAMED 500 whose message
+                         # carries the term, replacing the silent internal_error
+                         # the round-3 live fire died on (task-96d8ab2b582818a4).
+                         "import_failed",
                          # Workspace bundle EXPORT (PDS W3) — v1/workspace_controller.ex:
                          # the export stream failed or timed out before the tar completed.
                          "export_failed"

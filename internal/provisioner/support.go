@@ -146,12 +146,16 @@ type SupportBindSpec struct {
 }
 
 // SupportProvisionFunc runs the whole support chain for one claimed job and
-// returns the live box IP plus a Teardown that deletes that box. Non-nil error
-// is the fail signal (the worker reports it to /fail). The Teardown is non-nil
-// ONLY on success — the worker's lever for the money edge (succeed-report never
-// lands → the box is deleted rather than orphaned, mirroring RunOnce). On a
-// chain FAILURE the implementation has already torn its half-built box down.
-type SupportProvisionFunc func(ctx context.Context, spec SupportJobSpec) (ip string, teardown Teardown, err error)
+// returns the live box IP, the OPAQUE id of the ledger token the chain minted
+// on the parent main (task-5866ec745efcd7f7: the worker's succeed report
+// carries it so the CP row's fleet_token_id is set and `bp cloud support
+// remove` can later revoke the token — "" when the mint response carried no
+// id), plus a Teardown that deletes that box. Non-nil error is the fail signal
+// (the worker reports it to /fail). The Teardown is non-nil ONLY on success —
+// the worker's lever for the money edge (succeed-report never lands → the box
+// is deleted rather than orphaned, mirroring RunOnce). On a chain FAILURE the
+// implementation has already torn its half-built box down.
+type SupportProvisionFunc func(ctx context.Context, spec SupportJobSpec) (ip, tokenID string, teardown Teardown, err error)
 
 // SupportSeams bundles the injectables one support chain needs. Production
 // (main()) sets Provider + the two reporters and leaves the rest nil for the
@@ -207,7 +211,7 @@ var supportAgentPackages = map[string]struct{ pkg, bin, keyVar string }{
 // value the Worker's support drain calls per job. Tests bind it to fakes;
 // main() binds it to the real provider + SSH runner factory.
 func DefaultSupportProvision(seams SupportSeams) SupportProvisionFunc {
-	return func(ctx context.Context, spec SupportJobSpec) (string, Teardown, error) {
+	return func(ctx context.Context, spec SupportJobSpec) (string, string, Teardown, error) {
 		return SupportProvisionWith(ctx, seams, spec)
 	}
 }
@@ -218,13 +222,13 @@ func DefaultSupportProvision(seams SupportSeams) SupportProvisionFunc {
 // no-orphan ethos as ProvisionWith); a create/placement failure writes NOTHING
 // (PDF-D58). On success the returned Teardown deletes the box — held by the
 // worker for the succeed-report money edge.
-func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJobSpec) (string, Teardown, error) {
+func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJobSpec) (string, string, Teardown, error) {
 	seams = seams.withSupportDefaults()
 
 	// Fence the claim payload BEFORE any side effect — a malformed claim is an
 	// honest job failure that writes nothing.
 	if err := validateSupportSpec(spec); err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	name := spec.Support.Name
 	parentURL := strings.TrimRight(strings.TrimSpace(spec.Support.ParentURL), "/")
@@ -241,7 +245,19 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 		// (the ledger token and the box admin token register mid-chain).
 		detail = console.redact(detail)
 		if detail != "" {
-			console.logf("%s: %s — %s", step, status, detail)
+			// A failed on-box step's detail can be MULTI-LINE (the sshrunner embeds
+			// the remote command's full captured output — bp's error body, the
+			// barkpark journal tail). The CP caps a single console line at 2000
+			// chars, so shipping the blob as one line would truncate exactly the
+			// evidence it exists to carry (task-63a199c0a0ce2a06 fired blind this
+			// way). Split: first line inline with the step header, each subsequent
+			// non-blank line as its own console entry. The step-detail sink below
+			// still receives the FULL multi-line text (it is uncapped server-side).
+			lines := reportDetailLines(detail)
+			console.logf("%s: %s — %s", step, status, lines[0])
+			for _, l := range lines[1:] {
+				console.logf("  · %s", l)
+			}
 		} else {
 			console.logf("%s: %s", step, status)
 		}
@@ -262,7 +278,7 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 		// PDF-D58: a placement failure writes NOTHING — no box, no roster row,
 		// no token. Honest terminal report, job released for retry.
 		report("create", "failed", err.Error())
-		return "", nil, fmt.Errorf("create support box for %q: %w", name, err)
+		return "", "", nil, fmt.Errorf("create support box for %q: %w", name, err)
 	}
 	r.host = host
 	r.runner = seams.RunnerFor(host.IP)
@@ -325,7 +341,7 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 	teardown := func(tctx context.Context) error {
 		return seams.DeleteServer(tctx, host.Name)
 	}
-	return host.IP, teardown, nil
+	return host.IP, r.tokenID, teardown, nil
 }
 
 // supportRun carries one chain invocation's accumulated truth so each step
@@ -346,11 +362,27 @@ type supportRun struct {
 	tokenID     string
 }
 
+// reportDetailLines splits a step detail into the console lines that carry it:
+// CR-stripped, blank interior lines dropped, always at least one element (the
+// first line, even when blank) so the caller's header line renders. Pure so the
+// multi-line console contract is testable without a harness.
+func reportDetailLines(detail string) []string {
+	raw := strings.Split(strings.ReplaceAll(detail, "\r\n", "\n"), "\n")
+	lines := []string{strings.TrimRight(strings.ReplaceAll(raw[0], "\r", ""), " ")}
+	for _, l := range raw[1:] {
+		l = strings.TrimRight(strings.ReplaceAll(l, "\r", ""), " ")
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
 // failStep reports the honest terminal state for a failed step and tears the
 // half-built box down (best-effort) so no billed box is orphaned from the
 // control plane. The teardown runs on a FRESH bounded context — the chain ctx
 // may already be cancelled/expired. Returns the (nil-teardown) fail triple.
-func (r *supportRun) failStep(_ context.Context, step string, cause error) (string, Teardown, error) {
+func (r *supportRun) failStep(_ context.Context, step string, cause error) (string, string, Teardown, error) {
 	// The returned error IS the /fail POST body (and the drain's stderr) — build
 	// it from scrubbed text so both inherit console redaction. %s, never %w:
 	// nothing unwraps these, and a wrapped cause would resurface unscrubbed text.
@@ -360,9 +392,9 @@ func (r *supportRun) failStep(_ context.Context, step string, cause error) (stri
 	tctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if derr := r.seams.DeleteServer(tctx, r.host.Name); derr != nil {
-		return "", nil, fmt.Errorf("support %s: %s: %s (AND box %s teardown failed: %s — reclaim it manually)", r.name, step, causeText, r.host.Name, r.console.redact(derr.Error()))
+		return "", "", nil, fmt.Errorf("support %s: %s: %s (AND box %s teardown failed: %s — reclaim it manually)", r.name, step, causeText, r.host.Name, r.console.redact(derr.Error()))
 	}
-	return "", nil, fmt.Errorf("support %s: %s: %s (box torn down; the roster row ages to offline honestly)", r.name, step, causeText)
+	return "", "", nil, fmt.Errorf("support %s: %s: %s (box torn down; the roster row ages to offline honestly)", r.name, step, causeText)
 }
 
 // ── content sub-steps ────────────────────────────────────────────────────────
@@ -450,6 +482,9 @@ func (r *supportRun) contentDataset(ctx context.Context) error {
 	}
 	if err := r.runner.Run(ctx, supportEnsureBpStep()); err != nil {
 		return fmt.Errorf("bp install on box: %w", err)
+	}
+	if err := r.runner.Run(ctx, supportEnsureWorkspaceStep(r.spec.Support.Workspace, r.boxSecrets.AdminToken)); err != nil {
+		return fmt.Errorf("ensure workspace on box: %w", err)
 	}
 	if err := r.runner.Run(ctx, supportImportStep(r.spec.Support.Workspace, r.boxSecrets.AdminToken)); err != nil {
 		return fmt.Errorf("on-box merge-import: %w", err)
@@ -741,18 +776,46 @@ sh /opt/barkpark/scripts/install-cli.sh`
 	}
 }
 
-// supportImportStep merge-imports the staged bundle into the box's OWN
-// localhost API with the BOX's minted admin token (BP_TOK env — Argv only,
-// redacted; never the parent's token).
-func supportImportStep(ws, boxAdminToken string) cloud.CaddyStep {
-	script := `set -e; export BP_TOK='` + boxAdminToken + `'; export PATH=/usr/local/bin:/usr/bin:$PATH
-bp -s http://localhost:4000 --token "$BP_TOK" cloud workspace import '` + ws + `' --file /opt/barkpark-fleet/dataset.tar --yes --merge`
+// supportEnsureWorkspaceStep creates the import's target workspace on the box
+// when it does not exist yet (task-2ba0270056e7da6e). A TEMPLATE-launched
+// parent's bootstrap workspace slug (= the instance slug) exists on NO fresh
+// box — the box only ships the migrate-seeded "default" — and importing that
+// bundle live-failed twice with a box-side 5xx (exit 8). The r3-era CLI chain
+// only ever imported guerrilla's "default" workspace, so its imports ALWAYS
+// took the live-proven PDS-D9 branch of the merge engine (same-slug empty
+// shell → adopt-delete → import); this step routes every import — any slug —
+// through that same proven branch: POST /api/workspaces {name,slug} with the
+// BOX's own admin token, tolerating 409/422 (already exists) exactly like the
+// template bootstrap's ensureWorkspace, so a re-run converges and ws="default"
+// is byte-neutral. The created shell is empty, so the engine's empty-shell
+// adopt replaces it with the bundle's own workspace row in-transaction.
+func supportEnsureWorkspaceStep(ws, boxAdminToken string) cloud.CaddyStep {
+	// ws is fenced by supportSlugRe ([A-Za-z0-9_-]+) before any step builds, so
+	// it is safe inside both the single-quoted shell string and the JSON body.
+	script := `set -e; export BP_TOK='` + boxAdminToken + `'
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://localhost:4000/api/workspaces \
+  -H "Authorization: Bearer $BP_TOK" -H 'Content-Type: application/json' \
+  --data '{"name":"` + ws + `","slug":"` + ws + `"}')
+case "$code" in
+  2*|409|422) exit 0 ;;
+  *) echo "workspace ensure: POST /api/workspaces answered HTTP $code" >&2; exit 1 ;;
+esac`
 	return cloud.CaddyStep{
-		Title:  "merge-import the scrubbed dataset bundle into the box (bp cloud workspace import --merge)",
-		Cmd:    "bp cloud workspace import " + ws + " --file /opt/barkpark-fleet/dataset.tar --yes --merge (token redacted)",
+		Title:  "ensure the target workspace '" + ws + "' exists on the box (POST /api/workspaces — already-exists is fine)",
+		Cmd:    "curl -X POST http://localhost:4000/api/workspaces {name/slug: " + ws + "} (token redacted)",
 		Argv:   []string{"bash", "-lc", script},
 		Redact: []string{boxAdminToken},
 	}
+}
+
+// supportImportStep merge-imports the staged bundle into the box's OWN
+// localhost API with the BOX's minted admin token (BP_TOK env — Argv only,
+// redacted; never the parent's token). Delegates to the ONE shared builder
+// (cloud.SupportMergeImportStep) so this chain and the CLI chain cannot drift,
+// and so the on-box failure carries its evidence (bp's error body + the box's
+// barkpark journal tail — task-63a199c0a0ce2a06 fired blind without them).
+func supportImportStep(ws, boxAdminToken string) cloud.CaddyStep {
+	return cloud.SupportMergeImportStep(ws, boxAdminToken)
 }
 
 // supportFleetFilesStep writes the fleet runtime from origin/main CONTENT

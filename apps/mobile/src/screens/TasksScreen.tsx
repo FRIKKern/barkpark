@@ -1,9 +1,14 @@
 // Tasks tab — live GET /v1/tasks/prime?view=brief through @barkpark/core
 // (charter D14: the SDK's RN maiden voyage, expoFetch injected via
-// config.fetch). Read-only in the skeleton; fence-free triage lands with
-// wave 2. Honest states: loading, error-with-retry, empty, and the two
-// prime sections (in progress / ready) with pull-to-refresh.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// config.fetch). Read-only; fence-free triage lands later in wave 2. Honest
+// states: loading, error-with-retry, empty, and the two prime sections
+// (in progress / ready) with pull-to-refresh.
+//
+// Live refresh rides the SDK's listen() SSE stream (/v1/data/listen/:dataset,
+// types=task) — the D14 expoFetch streaming seam doing its load-bearing job
+// on device: the welcome frame is logged as the connect proof, and every task
+// mutation event triggers a silent re-prime.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Pressable,
@@ -45,6 +50,41 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
       alive = false
     }
   }, [client, attempt])
+
+  // Live refresh: hold ONE listen() stream while the tab is mounted. The
+  // welcome frame proves the streaming connect (the skeleton's criterion-3
+  // gap — expoFetch's streaming response.body working on device); mutation
+  // events for type:task re-prime silently (no spinner — the board just
+  // updates). Mutations are debounced a beat so a burst of task events costs
+  // one re-fetch.
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => {
+    const handle = client.listen('task')
+    let alive = true
+    ;(async () => {
+      try {
+        for await (const ev of handle) {
+          if (!alive) break
+          if (ev.type === 'welcome') {
+            console.log('[barkpark-mobile] listen welcome frame:', JSON.stringify(ev))
+          } else if (ev.type === 'mutation') {
+            if (refetchTimer.current !== undefined) clearTimeout(refetchTimer.current)
+            refetchTimer.current = setTimeout(() => {
+              if (alive) setAttempt((a) => a + 1)
+            }, 400)
+          }
+        }
+      } catch (err) {
+        // Honest degrade: the board still works on pull-to-refresh.
+        if (alive) console.log('[barkpark-mobile] listen stream ended:', String(err))
+      }
+    })()
+    return () => {
+      alive = false
+      if (refetchTimer.current !== undefined) clearTimeout(refetchTimer.current)
+      handle.unsubscribe()
+    }
+  }, [client])
 
   const retry = useCallback(() => {
     setState({ phase: 'loading' })

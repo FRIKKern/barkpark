@@ -734,6 +734,107 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert scoped_row_count("documents", target.id) > 0
     end
 
+    test "409 import_constraint_violation names the constraint on a non-arbiter unique collision — never a blind 500 (task-63a199c0a0ce2a06)",
+         %{conn: conn} do
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+
+      raw_admin = "ws-merge-conflict-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      # SOURCE workspace carrying a NULL-dataset_id schema row — the slot the
+      # partial unique index (name, dataset) WHERE dataset_id IS NULL guards.
+      {:ok, source} =
+        Tenancy.create_workspace_with_owner(%{name: "Conflict Src WS"}, admin_token(raw_admin))
+
+      clash = "clash#{System.unique_integer([:positive])}"
+      insert_null_dsid_schema!(source.id, clash)
+
+      {:ok, bundle} = WorkspaceBundle.export(source.id)
+
+      # The source leaves (a different box); a SIBLING workspace on the target
+      # holds a different-id row in the SAME (name, dataset) NULL slot. The
+      # merge arbiter is the primary key only, so the bundle row must collide
+      # on the partial index — the exact raise class that used to escape as an
+      # opaque internal_error 500 (bp exit 8, body never captured).
+      {:ok, _} = Tenancy.delete_workspace(source)
+      {:ok, ws_bin} = Ecto.UUID.dump(source.id)
+      purge_fkless_audit!(ws_bin)
+
+      {:ok, sibling} =
+        Tenancy.create_workspace_with_owner(%{name: "Conflict Sib WS"}, admin_token(raw_admin))
+
+      insert_null_dsid_schema!(sibling.id, clash)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{source.slug}/import?mode=merge", bundle)
+
+      assert resp.status == 409
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "import_constraint_violation"
+      assert err["details"]["pg_code"] == "unique_violation"
+
+      assert err["details"]["constraint"] ==
+               "schema_definitions_name_dataset_null_dataset_id_index"
+
+      # The whole import rolled back: the source workspace did NOT land, and the
+      # sibling's resident row is untouched.
+      refute Tenancy.get_workspace_by_slug(source.slug)
+
+      assert Repo.query!(
+               "SELECT count(*) FROM schema_definitions WHERE workspace_id = $1::text::uuid AND name = $2",
+               [sibling.id, clash]
+             ).rows == [[1]]
+    end
+
+    test "unmatched engine {:error, term} → NAMED, LOGGED 500 import_failed — never the silent internal_error (task-96d8ab2b582818a4)",
+         %{conn: conn} do
+      # The round-3 live fire: 500 internal_error, zero log lines — an
+      # `{:error, term}` no controller clause matched fell through to the
+      # FallbackController's unlogged catch-all (Ecto's Repo.transaction can
+      # legitimately return {:error, :rollback} on a nested-rollback commit
+      # downgrade). The :import_fault seam forces exactly that term through the
+      # REAL unpack + HTTP path; the wire must answer a named import_failed
+      # carrying the term, and the log must name it BEFORE the response.
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      Application.put_env(:barkpark, :import_fault, {:error, :rollback})
+
+      on_exit(fn ->
+        Application.delete_env(:barkpark, :allow_bundle_import)
+        Application.delete_env(:barkpark, :import_fault)
+      end)
+
+      raw_admin = "ws-merge-fault-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Fault RT WS"}, admin_token(raw_admin))
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+
+      {resp, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          conn
+          |> authed(raw_admin)
+          |> put_req_header("content-type", "application/x-tar")
+          |> post("/api/workspaces/#{target.slug}/import?mode=merge", bundle)
+        end)
+
+      assert resp.status == 500
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "import_failed"
+      assert err["message"] =~ ":rollback"
+      # request_id stamped by the shared emitter — the operator can grep for it.
+      assert is_binary(err["request_id"])
+
+      # NEVER SILENT: the term is logged at error level before the response.
+      assert log =~ "unhandled error"
+      assert log =~ ":rollback"
+    end
+
     test "unknown mode → 422 invalid_mode (never silently treated as clean)",
          %{conn: conn, member_ws: member_ws} do
       raw_admin = "ws-merge-bad-#{System.unique_integer([:positive])}"
@@ -748,6 +849,17 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert resp.status == 422
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_mode"
     end
+  end
+
+  # A schema row in the NULL-dataset_id slot (the flat-deployment shape the
+  # partial unique index `(name, dataset) WHERE dataset_id IS NULL` guards) —
+  # inserted directly so the write path cannot helpfully stamp a dataset_id.
+  defp insert_null_dsid_schema!(ws_id, name) do
+    Repo.query!(
+      "INSERT INTO schema_definitions (id, name, title, dataset, workspace_id, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), $1, $1, 'test', $2::text::uuid, now(), now())",
+      [name, ws_id]
+    )
   end
 
   # Clear the two FK-less audit tables for a workspace so a bundle re-import into

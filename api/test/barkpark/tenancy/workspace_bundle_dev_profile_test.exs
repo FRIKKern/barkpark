@@ -222,8 +222,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleDevProfileTest do
       refute dumps["datasets"] =~ f.beta
 
       # Group-C has no dataset grain to narrow on and travels workspace-whole —
-      # deliberate (PDS-D7): import runs under session_replication_role=replica,
-      # so a dangling child lands as a recoverable orphan rather than aborting.
+      # deliberate (PDS-D7): the import loads with member FK constraints
+      # dropped (re-added NOT VALID — task-7889645a51769a36), so a dangling
+      # child lands as a recoverable orphan rather than aborting.
       assert dumps["content_edges"] =~ f.beta_edge_id
     end
 

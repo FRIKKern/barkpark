@@ -1302,6 +1302,15 @@ defmodule BarkparkCloud.Registry do
   "read_token" => …, "env" => %{…}}`). The plain slugs land as columns; the read
   token and the env map (which contains the read token) are Vault-encrypted in
   the SAME transaction. Absent → the columns stay nil.
+
+  `opts` may also carry `:token_id` (task-5866ec745efcd7f7) — the OPAQUE id of
+  the ledger token a provision_support worker minted on the parent main. It
+  persists as `fleet_token_id` on the SUPPORT row (mirroring how the CLI
+  register path sets it via `register_support_barkpark/2`) so `bp cloud support
+  remove` can later revoke the token — the CP row is the sole durable token-id
+  holder (PDF-D68). Persisted ONLY when the owning row is `fleet_role:
+  "support"`; on any other row the value is ignored (a main never carries a
+  token id). Absent → the column stays nil (older workers, back-compat).
   """
   @spec succeed_job(binary(), String.t(), keyword()) ::
           {:ok, ProvisionJob.t()}
@@ -1309,6 +1318,7 @@ defmodule BarkparkCloud.Registry do
   def succeed_job(id, ip, opts \\ []) when is_binary(id) and is_binary(ip) and is_list(opts) do
     admin_token = Keyword.get(opts, :admin_token)
     bootstrap = Keyword.get(opts, :bootstrap)
+    token_id = Keyword.get(opts, :token_id)
     claim_token = Keyword.get(opts, :claim_token)
 
     case uuid_or_nil(id) do
@@ -1357,7 +1367,7 @@ defmodule BarkparkCloud.Registry do
                          |> ProvisionJob.changeset(%{status: "succeeded", result_ip: ip})
                          |> Repo.update(),
                        {:ok, _barkpark} <-
-                         upsert_succeeded_barkpark(job, ip, admin_token, bootstrap) do
+                         upsert_succeeded_barkpark(job, ip, admin_token, bootstrap, token_id) do
                     job
                   else
                     {:error, reason} -> Repo.rollback(reason)
@@ -1393,7 +1403,8 @@ defmodule BarkparkCloud.Registry do
          %ProvisionJob{barkpark_id: barkpark_id},
          ip,
          admin_token,
-         bootstrap
+         bootstrap,
+         token_id
        ) do
     case Repo.get(Barkpark, barkpark_id) do
       nil ->
@@ -1403,6 +1414,7 @@ defmodule BarkparkCloud.Registry do
         %{health_status: "up", host: ip, agent_status: "offline"}
         |> maybe_put_admin_token(admin_token)
         |> maybe_put_bootstrap(bootstrap)
+        |> maybe_put_fleet_token_id(barkpark, token_id)
         |> then(&upsert_health(barkpark, &1))
     end
   end
@@ -1447,6 +1459,19 @@ defmodule BarkparkCloud.Registry do
   end
 
   defp put_bootstrap_env(attrs, _), do: attrs
+
+  # task-5866ec745efcd7f7: fold the provision_support worker's reported ledger
+  # token id into the provision-success write — but ONLY onto a SUPPORT row
+  # (mirroring register_support_barkpark/2's custody: a main never carries a
+  # token id, and the value is an OPAQUE revocation handle, never a secret).
+  # A missing/blank id, or a non-support row, leaves the attrs untouched so the
+  # ip-only succeed path is unchanged (back-compat with pre-fix workers).
+  defp maybe_put_fleet_token_id(attrs, %Barkpark{fleet_role: "support"}, token_id)
+       when is_binary(token_id) and token_id != "" do
+    Map.put(attrs, :fleet_token_id, token_id)
+  end
+
+  defp maybe_put_fleet_token_id(attrs, _barkpark, _token_id), do: attrs
 
   @doc """
   Mark provision job `id` failed with `error`. The owning Barkpark stays in its
@@ -2860,6 +2885,89 @@ defmodule BarkparkCloud.Registry do
   end
 
   def mint_app_token(_, _), do: {:error, :not_live}
+
+  @doc """
+  Revoke app token(s) on a live instance using the STORED admin credential —
+  `mint_app_token/2`'s lifecycle twin (mobile wave 2, mob-w2-app-token-revoke).
+
+  `mode` is either `{:token, raw}` — the phone presents the exact token it
+  wants dead (relayed ONCE to the instance, never persisted, never logged) —
+  or `{:email, email}` — logout-everywhere: the instance revokes every live
+  `app:<email>`-labelled token. The DELETE goes to `/v1/auth/app-tokens` with
+  the decrypted admin token as bearer; the admin credential never leaves this
+  process.
+
+  Instance-side 404s are split by BODY (the charter-D8 capability-vs-absence
+  lesson): the canonical `{"error":{"code":"not_found"}}` envelope is a real
+  token-not-found from the live revoke route; any other 404 shape is a
+  pre-revoke instance with no such route yet → `:revoke_unsupported`.
+  """
+  @spec revoke_app_token(Barkpark.t(), {:token, String.t()} | {:email, String.t()}) ::
+          {:ok, map()}
+          | {:error,
+             :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :not_found
+             | :revoke_unsupported
+             | :instance_error}
+  def revoke_app_token(%Barkpark{url: url} = bp, {kind, value} = mode)
+      when is_binary(url) and url != "" and kind in [:token, :email] and is_binary(value) and
+             value != "" do
+    case reveal_admin_token(bp) do
+      {:ok, nil} ->
+        {:error, :no_admin_token}
+
+      :error ->
+        {:error, :decrypt_failed}
+
+      {:ok, admin_token} ->
+        base = String.trim_trailing(url, "/")
+
+        body =
+          case mode do
+            {:token, raw} -> Jason.encode!(%{token: raw})
+            {:email, email} -> Jason.encode!(%{email: email})
+          end
+
+        request = %{
+          method: :delete,
+          url: base <> "/v1/auth/app-tokens",
+          headers: [
+            {"Authorization", "Bearer " <> admin_token},
+            {"Accept", "application/json"},
+            {"Content-Type", "application/json"}
+          ],
+          body: body
+        }
+
+        case studio_link_http_client().request(request) do
+          {:ok, %{status: 200, body: resp}} ->
+            case Jason.decode(resp) do
+              {:ok, decoded} when is_map(decoded) ->
+                {:ok, Map.take(decoded, ["revoked", "revoked_count"])}
+
+              _ ->
+                {:error, :instance_error}
+            end
+
+          {:ok, %{status: 404, body: resp}} ->
+            case Jason.decode(resp) do
+              # The live revoke route's canonical envelope → the token really
+              # does not exist (or is out of this surface's reach).
+              {:ok, %{"error" => %{"code" => "not_found"}}} -> {:error, :not_found}
+              # Anything else 404-shaped (Phoenix no-route body) → the instance
+              # predates the revoke route: capability absence, not an outage.
+              _ -> {:error, :revoke_unsupported}
+            end
+
+          _ ->
+            {:error, :instance_error}
+        end
+    end
+  end
+
+  def revoke_app_token(_, _), do: {:error, :not_live}
 
   @doc """
   Decrypt a Barkpark's stored content-bootstrap outputs (dwb-4) back to the map

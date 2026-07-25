@@ -241,6 +241,53 @@ defmodule Barkpark.Auth do
   end
 
   @doc """
+  Resolve a RAW bearer to its `%ApiToken{}` row regardless of revocation or
+  expiry — `verify_token/1`'s administrative sibling (mob-w2-app-token-revoke).
+  `verify_token/1` is the fail-closed auth choke point and filters
+  revoked/expired rows in its WHERE clause; this lookup exists so a lifecycle
+  surface (the app-token revoke route) can act on an already-dead row — an
+  idempotent re-revoke must find the row it already killed. Same
+  `kind == "api"` boundary: a low-trust ticket key stays invisible here too.
+  """
+  @spec get_api_token_by_raw(binary()) :: ApiToken.t() | nil
+  def get_api_token_by_raw(raw_token) when is_binary(raw_token) do
+    hash = ApiToken.hash_token(raw_token)
+
+    ApiToken
+    |> where([t], t.token_hash == ^hash)
+    |> where([t], t.kind == "api")
+    |> Repo.one()
+  end
+
+  @doc """
+  Revoke every LIVE `app:<email>`-labelled api token — the "logout everywhere"
+  half of the app-token revoke path (mob-w2-app-token-revoke). Instance-wide by
+  label on purpose: the app-token mint labels every phone token `app:<email>`
+  whatever workspace it is bound to, and a logout must kill them all. Tokens
+  carrying `admin` are excluded fail-safe — a label collision must never let a
+  member-reachable proxy revoke the stored custody credential. Returns the
+  revoke count (0 is a fine, idempotent answer); each revoke goes through
+  `revoke_token/1`, so every one is individually audited.
+  """
+  @spec revoke_app_tokens_for_email(String.t()) :: non_neg_integer()
+  def revoke_app_tokens_for_email(email) when is_binary(email) do
+    label = "app:" <> email
+
+    ApiToken
+    |> where([t], t.label == ^label)
+    |> where([t], t.kind == "api")
+    |> where([t], is_nil(t.revoked_at))
+    |> Repo.all()
+    |> Enum.reject(&("admin" in (&1.permissions || [])))
+    |> Enum.reduce(0, fn token, acc ->
+      case revoke_token(token) do
+        {:ok, _} -> acc + 1
+        _ -> acc
+      end
+    end)
+  end
+
+  @doc """
   Mint an API token. When `workspace_id` is given (the tenancy-aware path),
   the token is bound to that workspace AND a `Barkpark.Tenancy.Membership`
   row is created in the same transaction — role derived from permissions
