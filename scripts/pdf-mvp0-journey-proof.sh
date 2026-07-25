@@ -500,7 +500,7 @@ if [ "$MODE" = "plan" ]; then
   say "  the never-onlines assert must FIRE AS A FAILURE (the row DOES online) => NEGCTL OK, exit 0."
   say ""
   say "  --scan-transcript <file>: grep for the guerrilla admin bearer, the cloud_token, the named"
-  say "  teardown token, and the sk-ant prefix — ZERO hits or no commit."
+  say "  teardown token, and the Anthropic key prefix — ZERO hits or no commit."
   rule
   say "Run it:  $0            (the proof — LIVE, provisions + tears down a main + a support)"
   say "         $0 --negctl   (the control that must fire — free)"
@@ -1309,7 +1309,8 @@ import json, sys
 i, t, w, d = sys.argv[1:5]
 doc = {"_id": i, "_type": "task", "kind": "task", "lifecycle_status": "open",
        "title": t, "description": d, "assignee": w, "priority": 2,
-       "tags": [{"tag": "order", "strength": 80, "rationale": "fleet order"}]}
+       "tags": [{"tag": "order", "strength": 80,
+                "rationale": "fleet order routed to the support listener by the MVP-0 journey proof"}]}
 print(json.dumps([{"createOrReplace": doc}, {"publish": {"id": i, "type": "task"}}]))
 PY
 )"
