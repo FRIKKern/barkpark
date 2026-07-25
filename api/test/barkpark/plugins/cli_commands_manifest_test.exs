@@ -24,7 +24,16 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                      "/v1/plugins/bulldocs/papers/:slug/ops",
                      "/v1/plugins/bulldocs/papers/:slug/proposals",
                      "/v1/plugins/bulldocs/intents",
-                     "/v1/plugins/bulldocs/intents/:id/processed"
+                     "/v1/plugins/bulldocs/intents/:id/processed",
+                     # Task 6 (session-handoff): the `session` verb group's routes —
+                     # four on the bulldocs ingest surface (tasks 3-4), plus
+                     # `session.link-task`'s route on the Tasks plugin's own mount
+                     # (task 5) — declared here too since all five verb maps live
+                     # in Bulldocs.cli_commands/0 (per the task-6 brief).
+                     "/v1/plugins/bulldocs/sessions",
+                     "/v1/plugins/bulldocs/sessions/:slug",
+                     "/v1/plugins/bulldocs/sessions/:slug/events",
+                     "/v1/tasks/:doc_id/sessions"
                    ])
 
   @onixedit_routes MapSet.new(["/v1/plugins/onixedit/export/:dataset/:id"])
@@ -78,7 +87,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Bulldocs.cli_commands/0" do
-    test "declares six verbs, all ingest-tier, all grounded in a real route" do
+    test "declares five paper verbs, all ingest-tier, all grounded in a real route" do
       cmds = Bulldocs.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -88,8 +97,12 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "bulldocs.intents" in ids
       assert "bulldocs.intent-processed" in ids
 
-      # Every bulldocs command sits behind the ingest highway bucket.
-      assert Enum.all?(cmds, &(&1.auth_tier == "ingest"))
+      # The five `bulldocs.*` paper verbs all sit behind the ingest highway
+      # bucket (the `session.*` group added in task 6 is NOT all-ingest —
+      # see the dedicated describe block below).
+      paper_cmds = Enum.filter(cmds, &(&1.noun == "bulldocs"))
+      assert length(paper_cmds) == 5
+      assert Enum.all?(paper_cmds, &(&1.auth_tier == "ingest"))
 
       # Every path_template is a route the plugin actually mounts — no invented
       # endpoints.
@@ -102,6 +115,75 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert patch.batch
       assert patch.writes
       assert Enum.any?(patch.flags, &(&1.name == "if-rev"))
+    end
+
+    test "declares the five session.* verbs (task 6), grounded in real routes" do
+      cmds = Bulldocs.cli_commands()
+      by_id = Map.new(cmds, &{&1.id, &1})
+
+      for id <- ~w(session.open session.log session.publish session.view session.link-task) do
+        assert Map.has_key?(by_id, id), "missing #{id}"
+      end
+
+      session_cmds = Enum.filter(cmds, &(&1.noun == "session"))
+      assert length(session_cmds) == 5
+      assert Enum.all?(session_cmds, &(&1.verb in ~w(open log publish view link-task)))
+
+      # Every session verb is grounded in a route the plugin (or, for
+      # link-task, the Tasks plugin's own /v1/tasks mount, task 5) actually
+      # registers.
+      assert Enum.all?(session_cmds, fn c ->
+               MapSet.member?(@bulldocs_routes, c.http.path_template)
+             end)
+
+      # session.open/publish/view/log are ingest-tier (the bulldocs ingest
+      # token bucket); session.link-task is read-tier (the /v1/tasks bearer
+      # scope) — the ONE exception to "all bulldocs commands are ingest".
+      open = by_id["session.open"]
+      log = by_id["session.log"]
+      publish = by_id["session.publish"]
+      view = by_id["session.view"]
+      link_task = by_id["session.link-task"]
+
+      assert open.auth_tier == "ingest"
+      assert log.auth_tier == "ingest"
+      assert publish.auth_tier == "ingest"
+      assert view.auth_tier == "ingest"
+      assert link_task.auth_tier == "read"
+
+      assert open.http == %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions"}
+      assert publish.http == %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions"}
+
+      assert log.http == %{
+               method: "POST",
+               path_template: "/v1/plugins/bulldocs/sessions/:slug/events"
+             }
+
+      assert view.http == %{method: "GET", path_template: "/v1/plugins/bulldocs/sessions/:slug"}
+
+      assert link_task.http == %{method: "POST", path_template: "/v1/tasks/:doc_id/sessions"}
+
+      # session.log carries the three event-shape flags (kind/ref/note) — the
+      # server reads them off conn.params, which Phoenix merges from the query
+      # string for a non-batch write (commandFlagBelongsInBody only routes
+      # BATCH writes to the JSON body; see internal/cli/run.go), exactly like
+      # the existing task.stamp precedent.
+      log_flags = Map.new(log.flags, &{&1.name, &1})
+      assert log_flags["kind"].type == "string"
+      assert log_flags["ref"].type == "string"
+      assert log_flags["note"].type == "string"
+      refute log.batch
+
+      # session.link-task's --add flag reaches TasksController.sessions/2's
+      # Params.string_list(params["add"]) — which accepts a bare string OR a
+      # list, so a single --add value (landing as a scalar query param) works.
+      add_flag = Enum.find(link_task.flags, &(&1.name == "add"))
+      assert add_flag.type == "string"
+      refute link_task.batch
+
+      # view is a read (GET), the rest write.
+      refute view.writes
+      assert Enum.all?([open, log, publish, link_task], & &1.writes)
     end
   end
 

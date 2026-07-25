@@ -264,6 +264,15 @@ defmodule Barkpark.Plugins.Bulldocs do
   No `get`/`ls` paper verb is declared: the paper reader at `/papers/:slug` is a
   LiveView (`:public_root`), not a JSON API route, so there is no honest flat
   `http.path_template` for it — declaring one would invent an endpoint.
+
+  Task 6 (session-handoff) adds the `session` verb group — `bp session
+  {open,log,publish,view,link-task}` — riding the session routes registered
+  ABOVE (tasks 3-4) plus `POST /v1/tasks/:doc_id/sessions` (Tasks plugin,
+  task 5). `session.open`/`publish`/`view` are `ingest`-tier over
+  `/v1/plugins/bulldocs/sessions*`, same as the paper verbs; `session.log`
+  is the ingest-tier event-append; `session.link-task` sits at `read`-tier
+  (it rides the `/v1/tasks` bearer scope, not the ingest token) — so, unlike
+  the paper verbs above, NOT every command in this list is ingest-tier.
   """
   @impl Barkpark.Plugin
   def cli_commands do
@@ -375,6 +384,130 @@ defmodule Barkpark.Plugins.Bulldocs do
           %{name: "id", required: true, type: "string", summary: "Intent (paper_event) id."}
         ],
         flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.open",
+        noun: "session",
+        verb: "open",
+        summary:
+          "Open a living session document at session start (status: open, metadata seeded).",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions"},
+        auth_tier: "ingest",
+        args: [
+          %{
+            name: "slug",
+            required: true,
+            type: "slug",
+            summary: "Session slug (session-YYYY-MM-DD-<topic>)."
+          }
+        ],
+        flags: [
+          %{
+            name: "file",
+            type: "file",
+            summary: "Metadata payload (fields, tags, description; blocks optional)."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.log",
+        noun: "session",
+        verb: "log",
+        summary: "Append one milestone event to an open session (server stamps ts).",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions/:slug/events"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Session slug."}
+        ],
+        flags: [
+          %{
+            name: "kind",
+            type: "string",
+            summary:
+              "Event kind: paper-published | task-closed | epic-wave-complete | push | note."
+          },
+          %{
+            name: "ref",
+            type: "string",
+            summary: "Related doc id (task id, paper slug, commit SHA)."
+          },
+          %{name: "note", type: "string", summary: "Short free-text note."}
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.publish",
+        noun: "session",
+        verb: "publish",
+        summary: "Upsert session synthesis blocks + metadata (checkpoint or close).",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Session slug."}
+        ],
+        flags: [
+          %{
+            name: "file",
+            type: "file",
+            summary: "Payload: blocks + fields (status: closed on final close)."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.view",
+        noun: "session",
+        verb: "view",
+        summary: "Read a session back: metadata + event trail + synthesis blocks.",
+        http: %{method: "GET", path_template: "/v1/plugins/bulldocs/sessions/:slug"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Session slug."}
+        ],
+        flags: [],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "json",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.link-task",
+        noun: "session",
+        verb: "link-task",
+        summary:
+          "Stamp a task with the session it was worked in (appends to the task's sessions[]).",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/sessions"},
+        auth_tier: "read",
+        args: [
+          %{name: "doc_id", required: true, type: "string", summary: "Task doc id."}
+        ],
+        flags: [
+          %{name: "add", type: "string", summary: "Session slug to add."}
+        ],
         writes: true,
         batch: false,
         paginated: false,
