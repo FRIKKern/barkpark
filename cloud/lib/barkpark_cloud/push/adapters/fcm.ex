@@ -33,6 +33,7 @@ defmodule BarkparkCloud.Push.Adapters.FCM do
   |---------------------------------------|--------------------------------------|
   | 200                                    | `{:ok, message_name}`               |
   | 404 `UNREGISTERED`                     | `{:error, :unregistered}` — row REVOKED |
+  | 404 anything else (`NOT_FOUND` — e.g. a deleted/renamed Firebase project) | `{:error, ...}` — retried; a project outage must not self-revoke the fleet |
   | 400 `INVALID_ARGUMENT`                 | `{:error, :invalid_token}` — row REVOKED |
   | 403 `SENDER_ID_MISMATCH`               | `{:error, :invalid_token}` — row REVOKED (the token belongs to another Firebase sender; it can never work for us) |
   | 401                                    | `{:error, ...}` + access-token cache dropped so the retry re-exchanges |
@@ -147,7 +148,14 @@ defmodule BarkparkCloud.Push.Adapters.FCM do
     end)
   end
 
-  defp classify(404, _), do: {:error, :unregistered}
+  # 404 alone is NOT proof of a dead device: FCM answers 404 `UNREGISTERED` for
+  # a stale token, but ALSO plain 404 `NOT_FOUND` when the URL path is wrong —
+  # e.g. a deleted or renamed Firebase project. Classifying every 404 as
+  # `:unregistered` would let a project-level outage silently self-revoke the
+  # entire Android fleet, one row per delivery (PR #6122 review finding). Only
+  # the explicit `UNREGISTERED` status is terminal; any other 404 falls through
+  # to the retryable catch-all and stays loud.
+  defp classify(404, "UNREGISTERED"), do: {:error, :unregistered}
   defp classify(400, "INVALID_ARGUMENT"), do: {:error, :invalid_token}
   defp classify(403, "SENDER_ID_MISMATCH"), do: {:error, :invalid_token}
 

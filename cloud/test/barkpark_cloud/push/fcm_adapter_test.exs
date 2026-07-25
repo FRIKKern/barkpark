@@ -230,8 +230,21 @@ defmodule BarkparkCloud.Push.FCMAdapterTest do
     end
 
     test "404 UNREGISTERED → :unregistered (the worker REVOKES the row)" do
-      PushFakeHttpClient.program([oauth_ok(), send_refusal(404, "NOT_FOUND")])
+      PushFakeHttpClient.program([oauth_ok(), send_refusal(404, "UNREGISTERED")])
       assert FCM.send_push(@device, @notification) == {:error, :unregistered}
+    end
+
+    test "a BARE 404 (deleted/renamed Firebase project) is retryable, NEVER :unregistered" do
+      # The PR #6122 review finding: FCM also 404s with NOT_FOUND when the URL
+      # path itself is wrong — a project-level condition that says nothing about
+      # any device. Classifying it :unregistered would let one project outage
+      # silently self-revoke the entire Android fleet, one row per delivery.
+      PushFakeHttpClient.program([oauth_ok(), send_refusal(404, "NOT_FOUND")])
+      assert {:error, {:fcm, 404, "NOT_FOUND"}} = FCM.send_push(@device, @notification)
+
+      # …including a 404 with no parseable status at all.
+      PushFakeHttpClient.program([send_refusal(404, nil)])
+      assert {:error, {:fcm, 404, nil}} = FCM.send_push(@device, @notification)
     end
 
     test "400 INVALID_ARGUMENT → :invalid_token" do
