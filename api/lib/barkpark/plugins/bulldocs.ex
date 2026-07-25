@@ -202,6 +202,16 @@ defmodule Barkpark.Plugins.Bulldocs do
       {:post, "/bulldocs/papers", BarkparkWeb.BulldocsIngestController, :ingest, auth: :ingest},
       {:post, "/bulldocs/papers/:slug/ops", BarkparkWeb.BulldocsIngestController, :apply_op,
        auth: :ingest},
+      # Session-handoff (task-3): a `session` is a blocks-doc twin of a paper
+      # (Content.blocks_type?/1 whitelist), same ingest token tier. GET is
+      # `:ingest`-gated for symmetry with the writes — the doc is also
+      # readable via the public paper routes once published.
+      {:post, "/bulldocs/sessions", BarkparkWeb.BulldocsIngestController, :ingest_session,
+       auth: :ingest},
+      {:get, "/bulldocs/sessions/:slug", BarkparkWeb.BulldocsIngestController, :show_session,
+       auth: :ingest},
+      {:post, "/bulldocs/sessions/:slug/ops", BarkparkWeb.BulldocsIngestController,
+       :apply_session_op, auth: :ingest},
       # lvw-t4 — the AI-proposes loop: insert-only draft edits with provenance.
       {:post, "/bulldocs/papers/:slug/proposals", BarkparkWeb.BulldocsIngestController, :propose,
        auth: :ingest},

@@ -267,6 +267,159 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
+  # ── Sessions (session-handoff Task 3) ──────────────────────────────────────
+  # A "session" is the second member of the blocks-doc whitelist
+  # (`Content.blocks_type?/1` — `["paper", "session"]`), so its ingest/show/ops
+  # actions mirror the paper leg above but call the GENERALIZED
+  # `Content.upsert_blocks_doc/3`, `get_blocks_doc/4`, `apply_document_block_op/5`
+  # instead of the paper-only functions. Unlike a paper, a session write is
+  # NEVER walled (`AuthoringWall`'s `@walled_types` is `~w(paper task)`), so the
+  # {:label_spine,_}/{:unknown_tag,_}/{:duplicate_of,_}/{:halted,_} tuples
+  # below are dead code for "session" today — kept for shape-parity with the
+  # paper leg so a future walled non-paper type costs nothing here.
+  #
+  # ONLY these keys are ever taken from the request body (never raw params) —
+  # this whitelist is the mitigation for the fact that `@blocks_doc_reserved_attrs`
+  # (block_ops.ex) does not itself reserve derived keys (`body_html`,
+  # `body_html_sv`, `preview`, `main_tag`); none of those appear here.
+  @session_keys ~w(slug title blocks style tags description harness session_uuid cwd
+                    machine git_head git_branch started_at ended_at transcript status)
+
+  @doc """
+  Upsert (create or update) a session — the metadata-only-allowed blocks-doc
+  twin of `ingest/2`. `blocks` is OPTIONAL: on create a missing `blocks` key
+  defaults to `[]` inside `Content.upsert_blocks_doc/3`; on update a missing
+  key preserves the existing blocks/body_html (session-handoff Task 2's
+  contract) — this controller must NOT pre-seed a `"blocks"` default itself,
+  or every metadata-only update would wipe the stored blocks to `[]`.
+  """
+  def ingest_session(conn, %{"slug" => slug} = params) when is_binary(slug) and slug != "" do
+    attrs =
+      params
+      |> Map.take(@session_keys)
+      |> put_scope(conn, params)
+
+    Warnings.reset()
+
+    case Content.upsert_blocks_doc("session", attrs) do
+      {:ok, doc} ->
+        conn
+        |> put_status(:ok)
+        |> json(with_warnings(%{ok: true, slug: doc.doc_id}))
+
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: %{code: "halted", message: reason}})
+
+      {:error, {:label_spine, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:unknown_tag, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:duplicate_of, _}} = err ->
+        render_error(conn, err)
+
+      {:error, changeset} ->
+        invalid_paper_error(conn, changeset)
+    end
+  end
+
+  def ingest_session(conn, _params),
+    do: conn |> put_status(:unprocessable_entity) |> json(%{ok: false, error: "slug required"})
+
+  @doc """
+  Read a session by slug — the same visibility tier as the writes
+  (`auth: :ingest`; the doc is also readable via the public paper routes once
+  published). 404 when the slug doesn't resolve to a "session" row in scope.
+  """
+  def show_session(conn, %{"slug" => slug} = params) do
+    dataset = params["dataset"] || Content.paper_default_dataset()
+
+    case Content.get_blocks_doc(slug, "session", dataset) do
+      nil ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+
+      doc ->
+        json(
+          conn,
+          Map.merge(
+            Map.take(doc.content || %{}, @session_keys ++ ["events"]),
+            %{"slug" => slug, "rev" => doc.rev}
+          )
+        )
+    end
+  end
+
+  @doc """
+  Apply a single block op to a session's block list, via the GENERALIZED
+  `Content.apply_document_block_op/5` (block_ops.ex — the pre-existing
+  document-editor write path Task 2 reused rather than duplicating). Unlike
+  the paper-only `apply_paper_block_op/3`, this returns NO `rev`/
+  `fragment_html` in its `{:ok, %{block, block_id, op_kind, position}}`
+  result — the receipt below reflects that shape exactly.
+  """
+  def apply_session_op(conn, %{"slug" => slug} = params) do
+    op = Map.delete(params, "slug")
+
+    cond do
+      not valid_op_shape?(op) ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
+
+      true ->
+        dataset = params["dataset"] || Content.paper_default_dataset()
+
+        case Content.apply_document_block_op(slug, "session", op, dataset) do
+          {:ok, %{block_id: block_id, op_kind: op_kind, position: position}} ->
+            conn
+            |> put_status(:ok)
+            |> json(%{ok: true, slug: slug, op: op_kind, block_id: block_id, position: position})
+
+          {:error, :not_found} ->
+            conn
+            |> put_status(:not_found)
+            |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+
+          {:error, {:constraint, message, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+
+          {:error, {code, target, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: to_string(code),
+                message: "#{op_kind} failed on #{inspect(target)}",
+                op: op_kind,
+                target: target
+              }
+            })
+
+          {:error, {:invalid_op, _}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+
+          {:error, {:halted, reason}} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{error: %{code: "halted", message: reason}})
+
+          {:error, _other} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+        end
+    end
+  end
+
   @doc """
   Apply ops to the paper at `:slug`. The endpoint accepts EITHER shape on the
   same route — the request body discriminates them:

@@ -199,8 +199,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # row-click would. rebuild_panes then dispatches on editor[:view].
   def walk_path(["open", type, id | _], _depth, _current, panes, _editor, dataset, opts) do
     editor =
-      if type == "paper" do
-        case Content.get_paper(id, dataset, scope(opts)) do
+      if Content.blocks_type?(type) do
+        case Content.get_blocks_doc(id, type, dataset, scope(opts)) do
           nil ->
             nil
 
@@ -411,12 +411,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           kind_filter: desk_kind_filter(active_group)
         }
 
-      # `Content.paper_type/0` is the canonical accessor for the paper type
-      # name; "sheet"/"graph" are fixed plugin schema names with no accessor.
-      type_name == Content.paper_type() ->
+      # Blocks-doc whitelist (`Content.blocks_type?/1` — `["paper", "session"]`,
+      # session-handoff Task 3): a session opens in the SAME paper pane by
+      # design (`view: :paper`), fetched by its actual type rather than the
+      # hardcoded "paper" equality this replaced. "sheet"/"graph" are fixed
+      # plugin schema names with no accessor.
+      Content.blocks_type?(type_name) ->
         case rest do
           [slug | _] ->
-            case Content.get_paper(slug, dataset, scope_kw) do
+            case Content.get_blocks_doc(slug, type_name, dataset, scope_kw) do
               nil ->
                 nil
 
