@@ -68,7 +68,12 @@ export function PaperReaderScreen({
     setAttempt((a) => a + 1)
   }, [])
 
-  const ctx: BlockCtx = useMemo(() => ({ theme }), [theme])
+  // serverBase resolves root-relative media srcs (/media/files/…) against the
+  // connected instance — the dominant live image shape (review F2).
+  const ctx: BlockCtx = useMemo(
+    () => ({ theme, serverBase: connection.projectUrl }),
+    [theme, connection.projectUrl],
+  )
 
   const header = (
     <View style={[styles.header, { borderBottomColor: theme.border, backgroundColor: theme.bg }]}>

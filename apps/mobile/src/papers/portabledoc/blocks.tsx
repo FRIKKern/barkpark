@@ -31,6 +31,11 @@ import {
 
 export interface BlockCtx extends InlineCtx {
   theme: Theme
+  /** The connected instance's base URL (connection.projectUrl). Root-relative
+   * media srcs — 39 of 40 live image blocks use `/media/files/…` (review
+   * census F2) — resolve against it, mirroring how the web surfaces serve
+   * the same paths same-origin. */
+  serverBase?: string
 }
 
 type Render = (b: Block, ctx: BlockCtx, key: number) => ReactNode
@@ -236,11 +241,45 @@ const divider: Render = (_b, ctx, key) => (
   </View>
 )
 
+/** Resolve an image src to a fetchable absolute URL: absolute http(s) passes
+ * the openableUrl gate; root-relative `/…` (the DOMINANT live shape, F2)
+ * resolves against ctx.serverBase; protocol-relative `//host` and every other
+ * scheme are rejected (mirrors the reference safeUrl's `//` rejection). */
+function resolveImageSrc(src: string, ctx: BlockCtx): string | undefined {
+  const absolute = openableUrl(src)
+  if (absolute !== undefined && /^https?:/i.test(absolute)) return absolute
+  if (src.startsWith('/') && !/^\/[/\\]/.test(src)) {
+    const base = (ctx.serverBase ?? '').trim().replace(/\/+$/, '')
+    if (base !== '' && /^https?:\/\//i.test(base)) return base + src
+  }
+  return undefined
+}
+
 const image: Render = (b, ctx, key) => {
   const src = str(b.src).trim()
   if (src === '') return null // asset-less image = editor scaffolding, skip on read
-  const uri = openableUrl(src)
-  if (uri === undefined) return null
+  const uri = resolveImageSrc(src, ctx)
+  if (uri === undefined) {
+    // Unresolvable (no server base, or unsafe scheme): labeled placeholder,
+    // never null — the image must not silently vanish (F2).
+    return (
+      <View
+        key={key}
+        style={{
+          borderWidth: 1,
+          borderStyle: 'dashed',
+          borderColor: ctx.theme.border,
+          borderRadius: 6,
+          padding: 10,
+          marginVertical: 8,
+        }}
+      >
+        <Text style={{ fontSize: 12, color: ctx.theme.textMuted, fontStyle: 'italic' }}>
+          Image unavailable: {src}
+        </Text>
+      </View>
+    )
+  }
   const w = num(b.width)
   const h = num(b.height)
   const ratio = w !== undefined && h !== undefined ? w / h : 16 / 9

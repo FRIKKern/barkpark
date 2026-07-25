@@ -1,9 +1,12 @@
 // Papers tab — the list screen, live on the minted token via
 // GET /v1/data/query/:dataset/paper (fields-projected light; newest-updated
-// first). Selecting a row opens the native reader. Honest states: loading,
-// error-with-retry, empty, ready with pull-to-refresh — the same idiom as
-// the Tasks and Chat tabs. Read-only against production by construction.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// first). PAGED (review F3): the live corpus is 537 papers and growing — the
+// list loads 100 at a time and fetches the next page as the scroll nears the
+// end, until the server's total is reached. Selecting a row opens the native
+// reader. Honest states: loading, error-with-retry, empty, ready with
+// pull-to-refresh (refresh restarts from page one), and a footer spinner
+// while a page is in flight. Read-only against production by construction.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
@@ -15,7 +18,7 @@ import {
 } from 'react-native'
 
 import { makeInstanceClient, type InstanceConnection } from '../api/instance'
-import { fetchPaperList, type PaperListItem } from '../api/papers'
+import { fetchPaperPage, type PaperListItem } from '../api/papers'
 import { relativeTime } from './ChatScreen'
 import { PaperReaderScreen } from './PaperReaderScreen'
 import { useTheme, type Theme } from '../ui/theme'
@@ -23,7 +26,15 @@ import { useTheme, type Theme } from '../ui/theme'
 type ListState =
   | { phase: 'loading' }
   | { phase: 'error'; message: string }
-  | { phase: 'ready'; papers: PaperListItem[]; refreshing: boolean; loadedAtMs: number }
+  | {
+      phase: 'ready'
+      papers: PaperListItem[]
+      /** the server's total match count — papers.length < total means more pages */
+      total: number
+      refreshing: boolean
+      loadingMore: boolean
+      loadedAtMs: number
+    }
 
 export function PapersScreen({ connection }: { connection: InstanceConnection }) {
   const theme = useTheme()
@@ -31,13 +42,23 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
   const [attempt, setAttempt] = useState(0)
   const [openPaper, setOpenPaper] = useState<{ id: string; title?: string } | undefined>(undefined)
   const client = useMemo(() => makeInstanceClient(connection), [connection])
+  // One page-fetch in flight at a time; onEndReached can fire in bursts.
+  const pageInFlight = useRef(false)
 
   useEffect(() => {
     let alive = true
     ;(async () => {
       try {
-        const papers = await fetchPaperList(client, connection.dataset)
-        if (alive) setState({ phase: 'ready', papers, refreshing: false, loadedAtMs: Date.now() })
+        const page = await fetchPaperPage(client, connection.dataset, 0)
+        if (alive)
+          setState({
+            phase: 'ready',
+            papers: page.items,
+            total: page.total,
+            refreshing: false,
+            loadingMore: false,
+            loadedAtMs: Date.now(),
+          })
       } catch {
         if (alive) setState({ phase: 'error', message: 'Could not load papers from your Barkpark.' })
       }
@@ -58,6 +79,40 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
     )
     setAttempt((a) => a + 1)
   }, [])
+
+  const loadMore = useCallback(() => {
+    if (pageInFlight.current) return
+    setState((prev) => {
+      if (prev.phase !== 'ready' || prev.loadingMore || prev.refreshing) return prev
+      if (prev.papers.length >= prev.total) return prev
+      pageInFlight.current = true
+      const offset = prev.papers.length
+      ;(async () => {
+        try {
+          const page = await fetchPaperPage(client, connection.dataset, offset)
+          setState((cur) => {
+            if (cur.phase !== 'ready') return cur
+            // Dedupe on _id: a paper updated between page fetches can shift
+            // pages under order=_updatedAt:desc.
+            const seen = new Set(cur.papers.map((p) => p._id))
+            const fresh = page.items.filter((p) => !seen.has(p._id))
+            return {
+              ...cur,
+              papers: [...cur.papers, ...fresh],
+              total: page.total,
+              loadingMore: false,
+            }
+          })
+        } catch {
+          // Honest degrade: stop the spinner; the next end-reach retries.
+          setState((cur) => (cur.phase === 'ready' ? { ...cur, loadingMore: false } : cur))
+        } finally {
+          pageInFlight.current = false
+        }
+      })()
+      return { ...prev, loadingMore: true }
+    })
+  }, [client, connection.dataset])
 
   if (openPaper !== undefined) {
     return (
@@ -117,6 +172,21 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
           tintColor={theme.accent}
         />
       }
+      onEndReached={loadMore}
+      onEndReachedThreshold={0.6}
+      ListFooterComponent={
+        state.loadingMore ? (
+          <View style={styles.footer}>
+            <ActivityIndicator color={theme.accent} />
+          </View>
+        ) : state.papers.length < state.total ? (
+          <Pressable accessibilityRole="button" onPress={loadMore} style={styles.footer}>
+            <Text style={[styles.link, { color: theme.accent }]}>
+              Load more ({state.papers.length} of {state.total})
+            </Text>
+          </Pressable>
+        ) : null
+      }
       renderItem={({ item }) => (
         <PaperRow
           paper={item}
@@ -173,6 +243,7 @@ function PaperRow({
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
   listContent: { padding: 16, gap: 10 },
+  footer: { paddingVertical: 16, alignItems: 'center' },
   row: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 6, marginBottom: 8 },
   title: { fontSize: 15, fontWeight: '600', lineHeight: 20 },
   description: { fontSize: 13, lineHeight: 18 },

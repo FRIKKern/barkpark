@@ -14,7 +14,7 @@
 // element type + props).
 import type { ReactElement, ReactNode } from 'react'
 
-import { MermaidIsland } from '../src/papers/portabledoc/MermaidIsland'
+import { MermaidIsland, islandHtml, scriptStringLiteral } from '../src/papers/portabledoc/MermaidIsland'
 import {
   BLOCK_RENDERERS,
   renderBlockNative,
@@ -351,6 +351,81 @@ describe('unknown blocks', () => {
     }
     expect(render(poisoned).text).toContain('Unsupported block: toc')
     warn.mockRestore()
+  })
+})
+
+/* ── mermaid island HTML: author content stays inside the script string (F1) ── */
+
+describe('mermaid island script injection (F1)', () => {
+  it('escapes "<" so a </script> in the source cannot terminate the script', () => {
+    const hostile = 'flowchart TD\n  A["</script><img src=x onerror=alert(1)>"] --> B'
+    const literal = scriptStringLiteral(hostile)
+    expect(literal).not.toContain('<')
+    expect(literal).toContain('\\u003c')
+    // Round-trips: the browser's JS engine reads back the exact author bytes.
+    expect(JSON.parse(literal)).toBe(hostile)
+  })
+
+  it('the island HTML carries no raw author "<" — only the two known tags', () => {
+    const hostile = 'A --> B\n</script><script>alert(1)</script>'
+    const html = islandHtml(hostile, theme)
+    // The ONLY </script> occurrences are the document's own two closers
+    // (CDN include + inline bootstrap) — none from author content.
+    expect(html.match(/<\/script>/g)).toHaveLength(2)
+    expect(html).not.toContain('alert(1)</script>')
+    expect(html).toContain('\\u003c')
+    // CSP meta is present and locked to the CDN.
+    expect(html).toContain('Content-Security-Policy')
+    expect(html).toContain("script-src https://cdn.jsdelivr.net 'unsafe-inline'")
+  })
+})
+
+/* ── image src resolution (F2): root-relative is the dominant live shape ────── */
+
+describe('image src resolution (F2)', () => {
+  const withBase: BlockCtx = { theme, serverBase: 'https://guerrilla.barkpark.cloud/' }
+
+  function renderWith(block: unknown, c: BlockCtx): Walk {
+    return walk(renderBlockNative(block, c, 0))
+  }
+
+  it('root-relative /media src resolves against the server base', () => {
+    const el = renderBlockNative(
+      { type: 'image', src: '/media/files/abc.png', alt: 'a chart' },
+      withBase,
+      0,
+    )
+    // The Image element's uri carries the joined absolute URL.
+    const props = (el as { props: { source: { uri: string } } }).props
+    expect(props.source.uri).toBe('https://guerrilla.barkpark.cloud/media/files/abc.png')
+  })
+
+  it('absolute https src passes through untouched', () => {
+    const el = renderBlockNative(
+      { type: 'image', src: 'https://example.com/x.png' },
+      withBase,
+      0,
+    )
+    const props = (el as { props: { source: { uri: string } } }).props
+    expect(props.source.uri).toBe('https://example.com/x.png')
+  })
+
+  it('unresolvable src renders a labeled placeholder, never null', () => {
+    // No serverBase in ctx → the root-relative src cannot resolve.
+    const w = renderWith({ type: 'image', src: '/media/files/abc.png' }, { theme })
+    expect(w.text).toContain('Image unavailable')
+    expect(w.text).toContain('/media/files/abc.png')
+    // Protocol-relative and hostile schemes also land on the placeholder.
+    expect(renderWith({ type: 'image', src: '//evil.example/x.png' }, withBase).text).toContain(
+      'Image unavailable',
+    )
+    expect(
+      renderWith({ type: 'image', src: 'javascript' + ':alert(1)' }, withBase).text,
+    ).toContain('Image unavailable')
+  })
+
+  it('asset-less image (empty src) still renders nothing — editor scaffolding', () => {
+    expect(renderBlockNative({ type: 'image', src: '' }, withBase, 0)).toBeNull()
   })
 })
 
