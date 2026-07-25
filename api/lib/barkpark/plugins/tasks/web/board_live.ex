@@ -683,7 +683,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         # hardening, not a behavior change.
         schema = peek_schema()
         readable? = fn field -> peek_field_readable?(schema, field) end
-        criteria = if(readable?.("acceptance_criteria"), do: peek_criteria(content), else: [])
+        # nil = SEALED (schema-private field — the section never renders, no
+        # empty shell hints it exists); [] = authored-empty (the criteria-first
+        # reader shows its honest empty state).
+        criteria = if(readable?.("acceptance_criteria"), do: peek_criteria(content), else: nil)
         blockers = peek_blockers(doc.id)
         blocks = peek_blocks(doc.id)
         # The purpose dossier hand-picks content fields itself (purpose, priority,
@@ -709,7 +712,15 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           subtree: subtree,
           tree: peek_tree(board, lid, ancestors, subtree),
           purpose:
-            peek_purpose(sealed_content, doc.title, card, ancestors, criteria, blockers, blocks),
+            peek_purpose(
+              sealed_content,
+              doc.title,
+              card,
+              ancestors,
+              criteria || [],
+              blockers,
+              blocks
+            ),
           blockers: blockers,
           blocks: blocks,
           events: if(readable?.("events"), do: peek_events(lid), else: []),
@@ -2821,7 +2832,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       </header>
 
       <div class="bp-peek-body">
-        <section class="bp-peek-sec" data-role="peek-criteria">
+        <section :if={@peek.criteria} class="bp-peek-sec" data-role="peek-criteria">
           <h3 class="bp-controls-label">
             Criteria
             <span class="bp-peek-count">
