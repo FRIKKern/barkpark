@@ -142,7 +142,7 @@ defmodule Barkpark.Plugins.Bulldocs do
     # paper (public reader artifact) + form_response (PRIVATE — anonymous form
     # submissions land here; visibility "private" keeps every response off the
     # public read API while bp/Studio token reads see them normally).
-    for file <- ["paper.json", "form_response.json"] do
+    for file <- ["paper.json", "form_response.json", "session.json"] do
       raw =
         @schemas_dir
         |> Path.join(file)
