@@ -1,13 +1,20 @@
 // Tasks tab — live GET /v1/tasks/prime?view=brief through @barkpark/core
 // (charter D14: the SDK's RN maiden voyage, expoFetch injected via
-// config.fetch). Read-only; fence-free triage lands later in wave 2. Honest
-// states: loading, error-with-retry, empty, and the two prime sections
-// (in progress / ready) with pull-to-refresh.
+// config.fetch). Honest states: loading, error-with-retry, empty, and the two
+// prime sections (in progress / ready) with pull-to-refresh.
+//
+// Tapping a row opens TaskDetailScreen — the full dossier plus FENCE-FREE
+// triage (claim · pulse · criterion stamp · release, all via /v1/tasks, all
+// refusing anything the claim-epoch law says is not ours to take). This
+// screen owns that one-level stack itself, the same way ChatScreen owns the
+// session stack; the app shell stays a three-tab switch.
 //
 // Live refresh rides the SDK's listen() SSE stream (/v1/data/listen/:dataset,
 // types=task) — the D14 expoFetch streaming seam doing its load-bearing job
 // on device: the welcome frame is logged as the connect proof, and every task
-// mutation event triggers a silent re-prime.
+// mutation event triggers a silent re-prime. That includes OUR OWN triage
+// writes: a stamp or pulse emits task.criterion / task.pulse, so the list
+// behind the detail screen is already fresh when you navigate back.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -20,6 +27,7 @@ import {
 } from 'react-native'
 
 import { fetchPrimeBrief, makeInstanceClient, type BriefTaskCard, type InstanceConnection, type PrimeBrief } from '../api/instance'
+import { TaskDetailScreen } from './TaskDetailScreen'
 import { useTheme, type Theme } from '../ui/theme'
 
 type TasksState =
@@ -31,6 +39,7 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
   const theme = useTheme()
   const [state, setState] = useState<TasksState>({ phase: 'loading' })
   const [attempt, setAttempt] = useState(0)
+  const [openTask, setOpenTask] = useState<{ docId: string; title?: string } | undefined>(undefined)
   const client = useMemo(() => makeInstanceClient(connection), [connection])
 
   // The fetch lives in the effect; every setState happens AFTER an await so
@@ -96,6 +105,23 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
     setAttempt((a) => a + 1)
   }, [])
 
+  // Detail is a one-level stack over the list: back always returns here, and
+  // opening a parent/child REPLACES the open task rather than growing a stack
+  // this screen would then have to unwind honestly.
+  if (openTask !== undefined) {
+    return (
+      <TaskDetailScreen
+        connection={connection}
+        docId={openTask.docId}
+        {...(openTask.title !== undefined ? { fallbackTitle: openTask.title } : {})}
+        onBack={() => setOpenTask(undefined)}
+        onOpenTask={(docId, title) =>
+          setOpenTask(title !== undefined ? { docId, title } : { docId })
+        }
+      />
+    )
+  }
+
   if (state.phase === 'loading') {
     return (
       <View style={[styles.center, { backgroundColor: theme.bg }]}>
@@ -150,17 +176,35 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
       renderSectionHeader={({ section }) => (
         <Text style={[styles.sectionHeader, { color: theme.textMuted }]}>{section.title}</Text>
       )}
-      renderItem={({ item }) => <TaskRow card={item} theme={theme} />}
+      renderItem={({ item }) => (
+        <TaskRow
+          card={item}
+          theme={theme}
+          onOpen={() => setOpenTask({ docId: item.doc_id, title: item.title })}
+        />
+      )}
     />
   )
 }
 
-function TaskRow({ card, theme }: { card: BriefTaskCard; theme: Theme }) {
+function TaskRow({
+  card,
+  theme,
+  onOpen,
+}: {
+  card: BriefTaskCard
+  theme: Theme
+  onOpen: () => void
+}) {
   const nowText = card.claim?.now?.text
   const criteria =
     card.criteria_total !== undefined ? `${card.criteria_met ?? 0}/${card.criteria_total}` : undefined
   return (
-    <View style={[styles.row, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onOpen}
+      style={[styles.row, { backgroundColor: theme.surface, borderColor: theme.border }]}
+    >
       <View style={styles.rowTop}>
         {card.priority !== undefined && (
           <Text style={[styles.priority, { color: theme.accent, borderColor: theme.accent }]}>P{card.priority}</Text>
@@ -184,7 +228,7 @@ function TaskRow({ card, theme }: { card: BriefTaskCard; theme: Theme }) {
           {nowText}
         </Text>
       )}
-    </View>
+    </Pressable>
   )
 }
 
