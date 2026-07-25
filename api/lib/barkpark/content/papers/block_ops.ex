@@ -36,6 +36,19 @@ defmodule Barkpark.Content.Papers.BlockOps do
   @paper_default_dataset "production"
   @html_conversion_message "HTML-only papers are read-only until an explicit revision-fenced conversion preserves the authored HTML preimage."
 
+  # The closed blocks-type whitelist — the SOLE copy (compile-time module
+  # attribute, required so `upsert_blocks_doc/3`'s guard clause can pattern
+  # against it). `Barkpark.Content.Papers.blocks_types/0` /
+  # `Barkpark.Content.blocks_types/0` both delegate here rather than keeping
+  # an independent literal, so there is exactly one place to widen the list.
+  @blocks_types ["paper", "session"]
+
+  @doc "The closed whitelist of document types that ride the blocks-doc write path."
+  def blocks_types, do: @blocks_types
+
+  @doc "Whether `type` is in the blocks-doc whitelist (`blocks_types/0`)."
+  def blocks_type?(type), do: type in @blocks_types
+
   @doc """
   Upsert a blocks-doc keyed by `{dataset, slug}` — `type` must be in the
   closed whitelist `["paper", "session"]` (`Content.blocks_types/0`), else
@@ -84,7 +97,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   """
   def upsert_blocks_doc(type, attrs, opts \\ [])
 
-  def upsert_blocks_doc(type, _attrs, _opts) when type not in ["paper", "session"],
+  def upsert_blocks_doc(type, _attrs, _opts) when type not in @blocks_types,
     do: {:error, :not_a_blocks_type}
 
   def upsert_blocks_doc(type, attrs, opts) when is_map(attrs) and is_list(opts) do
@@ -148,13 +161,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # ingest, BEFORE the body_html render below — a paper embedding an
     # EXISTING sheet shows its values on the first read.
     #
-    # Sessions (session-handoff Task 2) carry no legacy HTML-only leg: a
-    # missing "blocks" key is metadata-only content, never the paper's opaque
-    # body_html leg, so it defaults to `[]` and rides the SAME normalization
-    # pipeline every paper block list gets. Papers keep the historical `nil`
-    # passthrough (the `other -> other` branch below) so an HTML-only paper
-    # write stays untouched.
-    raw_blocks = if type == "session", do: attrs["blocks"] || [], else: attrs["blocks"]
+    # A non-paper type (session, …) carries no legacy HTML-only leg, so a
+    # missing "blocks" key on a BRAND-NEW doc is metadata-only content, not an
+    # opaque body_html write — it defaults to `[]` and rides the SAME
+    # normalization pipeline every paper block list gets. But that default
+    # must NOT fire on an UPDATE: a metadata-only upsert against an EXISTING
+    # session (e.g. a bare status change) supplies no "blocks" key meaning
+    # "leave the blocks alone", not "wipe them to []" — defaulting
+    # unconditionally would re-render body_html to "" and blank the stored
+    # blocks on every metadata-only save. So the `[]` default is scoped to
+    # `existing == nil` only; on an update the missing key stays `nil` and
+    # falls through to the `other -> other` branch below, whose carry-over
+    # legs (see `write_encrypted_blocks_doc/8`) preserve the existing
+    # blocks/body_html byte-for-byte. Papers keep the historical `nil`
+    # passthrough unconditionally (their `other -> other` branch is the
+    # legacy HTML-only leg, not a session-style carry-over).
+    raw_blocks =
+      if type != @paper_type and existing == nil,
+        do: attrs["blocks"] || [],
+        else: attrs["blocks"]
 
     blocks =
       case raw_blocks do
@@ -1473,8 +1498,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # explicitly (as an upsert attr, a paper-only allowlisted content field, or a
   # pipeline control opt) — excluded from the generic session-metadata
   # passthrough below so it can never double-write or clobber a derived key.
+  # NOTE: "title" is deliberately NOT reserved here. For a paper, `title`
+  # never reaches `content` through this path at all (a paper clause below is
+  # a full no-op) — its row title instead comes from a PROJECTED bound title
+  # field-block or the first heading (see `paper_title/2`). For a non-paper
+  # type there is no such projection, so `content["title"]` — and therefore
+  # the Document row's `title` (`paper_title/2` reads `content["title"]`
+  # first) — has NO OTHER writer; reserving "title" here would silently drop
+  # every session's title on every write.
   @blocks_doc_reserved_attrs ~w(
-    slug dataset blocks title workspace_id project_id template style
+    slug dataset blocks workspace_id project_id template style
     source_doc goal_id event_type tags description body_html payload_html
     branch bypass_wall
   )
@@ -1649,45 +1682,27 @@ defmodule Barkpark.Content.Papers.BlockOps do
     ]
   end
 
-  # Field-encryption CHOKEPOINT for the paper write path. Encrypt the bound
+  # Field-encryption CHOKEPOINT, `type`-generalized (session-handoff Task 2)
+  # off the original paper-only `encrypt_paper_blocks/3`. Encrypt the bound
   # block values of any schema field marked `encrypted: true` by routing the
-  # block list through `Encryption.encrypt_marked/3` (its `encrypt_bound_blocks`
-  # half). This is the SAME chokepoint Writer uses; running it on the block list
-  # BEFORE render+projection means: (a) the body_html cache and delta fragments
-  # redact the encrypted field (Render redacts envelope values) instead of
-  # leaking plaintext, and (b) Projection copies the resulting envelope into
-  # content[fieldName], so content is ciphertext-at-rest by the changeset.
-  # Idempotent (re-encrypting an envelope is a no-op) and a byte-identical no-op
-  # when the "paper" schema marks nothing encrypted or this is an HTML-only
-  # (block-less) write.
+  # block list through `Encryption.encrypt_marked/4` (its `encrypt_bound_blocks`
+  # half), against `type`'s OWN schema — a session write checks the SESSION
+  # schema's `encrypted: true` fields (today: none — a byte-identical no-op),
+  # never silently checking the paper schema. This is the SAME chokepoint
+  # Writer uses; running it on the block list BEFORE render+projection means:
+  # (a) the body_html cache and delta fragments redact the encrypted field
+  # (Render redacts envelope values) instead of leaking plaintext, and (b)
+  # Projection copies the resulting envelope into content[fieldName], so
+  # content is ciphertext-at-rest by the changeset. Idempotent (re-encrypting
+  # an envelope is a no-op) and a byte-identical no-op when `type`'s schema
+  # marks nothing encrypted or this is an HTML-only (block-less) write.
   # Returns `{:ok, blocks}` (the encrypted block list) or `{:error, reason}` when
   # a marked-encrypted bound block cannot be sealed (HIGH-3, fail closed) — the
-  # paper write paths surface the error instead of persisting plaintext-at-rest.
-  # `workspace_id` attributes the DEK (charter D51-D54): it MUST be the paper
-  # row's workspace so a later `reveal_fields` resolves the same
+  # blocks-doc write paths surface the error instead of persisting
+  # plaintext-at-rest. `workspace_id` attributes the DEK (charter D51-D54): it
+  # MUST be the row's workspace so a later `reveal_fields` resolves the same
   # (workspace_id, scope) DEK that sealed the bound block. `nil` (an unscoped
   # write) → the NULL-workspace DEK.
-  defp encrypt_paper_blocks(blocks, dataset, workspace_id)
-       when is_list(blocks) and is_binary(dataset) do
-    case Encryption.encrypt_marked(%{"blocks" => blocks}, @paper_type, dataset, workspace_id) do
-      {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
-      {:ok, _} -> {:ok, blocks}
-      {:error, _} = err -> err
-    end
-  end
-
-  defp encrypt_paper_blocks(blocks, _dataset, _workspace_id), do: {:ok, blocks}
-
-  # `type`-generalized twin of `encrypt_paper_blocks/3` for the
-  # `upsert_blocks_doc/3` write path (session-handoff Task 2): the ONLY change
-  # is passing `type` instead of the hardcoded `@paper_type` into
-  # `Encryption.encrypt_marked/4`'s schema lookup, so a session write encrypts
-  # against the SESSION schema's `encrypted: true` fields (today: none — a
-  # byte-identical no-op) instead of silently checking the paper schema.
-  # `encrypt_paper_blocks/3` (above) stays untouched — it is still the
-  # streaming block-op paths' (`apply_paper_block_op/4`,
-  # `apply_paper_block_ops/4`) chokepoint, both paper-only and out of this
-  # task's scope.
   defp encrypt_blocks_for_type(type, blocks, dataset, workspace_id)
        when is_list(blocks) and is_binary(dataset) do
     case Encryption.encrypt_marked(%{"blocks" => blocks}, type, dataset, workspace_id) do
@@ -1698,6 +1713,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp encrypt_blocks_for_type(_type, blocks, _dataset, _workspace_id), do: {:ok, blocks}
+
+  # Paper-only alias, kept for the streaming block-op paths
+  # (`apply_paper_block_op/4`, `apply_paper_block_ops/4` — both out of this
+  # task's scope) that still call it by its original name/arity.
+  defp encrypt_paper_blocks(blocks, dataset, workspace_id),
+    do: encrypt_blocks_for_type(@paper_type, blocks, dataset, workspace_id)
 
   # Next monotonic streaming rev for a paper. Starts at 1 for a fresh paper;
   # increments the stored integer otherwise.

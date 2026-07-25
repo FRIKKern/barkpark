@@ -60,13 +60,16 @@ defmodule Barkpark.Content.Papers do
   # `BlockOps.upsert_blocks_doc/3` machinery (blocks body + metadata fields).
   # Deliberately closed and hand-maintained, mirroring `AuthoringWall`'s
   # `@walled_types` pattern — widening it is a reviewed one-line decision.
-  @blocks_types ["paper", "session"]
-
+  #
+  # SOLE SOURCE OF TRUTH lives in `BlockOps` (a compile-time module attribute
+  # there, required so its `upsert_blocks_doc/3` guard clause can pattern
+  # against it) — both delegates below defer to it rather than keeping an
+  # independent literal, so there is exactly one list to widen.
   @doc "The closed whitelist of document types that ride the blocks-doc write path."
-  def blocks_types, do: @blocks_types
+  defdelegate blocks_types(), to: BlockOps
 
   @doc "Whether `type` is in the blocks-doc whitelist (`blocks_types/0`)."
-  def blocks_type?(type), do: type in @blocks_types
+  defdelegate blocks_type?(type), to: BlockOps
 
   @doc """
   Fetch a blocks-doc (a document whose type rides `upsert_blocks_doc/3`) by
