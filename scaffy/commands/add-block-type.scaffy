@@ -243,14 +243,21 @@ MARK "go-registry-{{.block-name}}"
 
 # ── Surface 2: JS (js/packages/react) — FAIL-CLOSED, all four edits ─────────
 
-# Edit 1/4: the emitter function. Anchor is the eyebrow emitter (core.ts:46,
-# unique) — the canonical one-line exemplar this starter mirrors. escapeHtml
-# and str are already in scope in core.ts. Guard derives from the MARK line.
+# Edit 1/4: the emitter function. Anchor is the eyebrow emitter (unique) — the
+# canonical one-line exemplar this starter mirrors. escapeHtml and str are
+# already in scope in core.ts. Guard derives from the MARK line.
+#
+# NOTE (mob-bl-react-list-emitter): eyebrow itself now composes the D12
+# content||text law (`renderInlines(paragraphInline(b))`) — it was blanking the
+# live `{content:[…]}` shape. The GENERATED starter below deliberately stays on
+# the simpler `escapeHtml(str(b.text))` form: a brand-new block type has no
+# authored `content[]` shape in the wild yet, and the author adds the fallback
+# when it does. Only the ANCHOR was re-synced to the current bytes.
 IN "js/packages/react/src/blocks/core.ts"
 ### Add the {{.block-name}} emitter beside the eyebrow exemplar
 INSERT AFTER FIRST
 ::: eyebrow emitter anchor :::
-const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
+const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${renderInlines(paragraphInline(b))}</p>`
 ::: eyebrow emitter anchor :::
 WITH
 ::: {{.block-name}} emitter :::
