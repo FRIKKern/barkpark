@@ -31,7 +31,11 @@ import type { Theme } from '../../ui/theme'
 
 const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js'
 const INITIAL_HEIGHT = 220
-const MAX_HEIGHT = 1200
+// The cap only guards against a runaway height REPORT (malformed postMessage),
+// not against honest tall diagrams: the capstone's login flowchart alone is
+// ~2000 dp, and clipping it would silently swallow its tail nodes — the exact
+// "never silently vanish" law this renderer lives by. Emulator-proven at 4000.
+const MAX_HEIGHT = 4000
 
 function islandHtml(source: string, theme: Theme): string {
   // The diagram source is embedded as a JSON string literal (never innerHTML)
