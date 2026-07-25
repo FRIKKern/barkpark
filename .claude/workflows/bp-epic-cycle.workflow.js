@@ -2,14 +2,14 @@ export const meta = {
   name: 'bp-epic-cycle',
   description: 'One epic wave: strategize → survey → digest → verify → decide → build → review, with the bp task ledger + wave Paper as the live spine.',
   whenToUse:
-    'Run one wave of a Barkpark epic. INVOKE: Workflow({name: "bp-epic-cycle", args: {wish: "<the user\'s request, verbatim — REQUIRED, the run refuses to start without it (charter D68)>", charter_path: "<.claude/workflows/<epic>-charter.md — REQUIRED for any epic with a charter; default is the cloud charter>", charter_exists: true|false, epic_task_id: "<task-… slug, when the epic task exists>"}}). Shape: 1 Fable strategizes + OPENS the wave Paper → 5-20 Sonnets survey (coverage-accounted) → 1 Fable digests + designs the verify fleet → Sonnet/Opus verifiers PROVE claims with run output → 1 Fable decides + files/perfects bp tasks → Fable/Opus builders claim their task, build in worktrees, stamp evidence, gate, commit → 1 Fable reviews everything, fixes in place, grades, closes the Paper as the debrief.',
+    'Run one wave of a Barkpark epic. INVOKE: Workflow({name: "bp-epic-cycle", args: {wish: "<the user\'s request, verbatim — REQUIRED, the run refuses to start without it (charter D68)>", charter_path: "<.claude/workflows/<epic>-charter.md — REQUIRED for any epic with a charter; default is the cloud charter>", charter_exists: true|false, epic_task_id: "<task-… slug, when the epic task exists>"}}). Shape: 1 Fable strategizes + OPENS the wave Paper → 5-20 Opus surveyors sweep at medium effort (coverage-accounted) → 1 Fable digests + designs the verify fleet → Opus verifiers PROVE claims with run output → 1 Fable decides + files/perfects bp tasks → Fable/Opus builders claim their task, build in worktrees at xhigh effort, stamp evidence, gate, commit → 1 Fable reviews everything, fixes in place, grades, closes the Paper as the debrief.',
   phases: [
     { title: 'Strategize', detail: '1 Fable, whatever time it needs — the highest-leverage thinking in the wave: reads until reading stops changing its mind, weighs rival directions and commits to one, stress-tests it, sets 5-20 broad survey questions, OPENS the wave strategy Paper', model: 'fable' },
-    { title: 'Survey', detail: '5-20 Sonnet surveyors, read-only, ~5 min each: wide cheap sweep — bp search first, then the repo; report COVERAGE (every file checked, what for, found/not-found)', model: 'sonnet' },
-    { title: 'Digest', detail: '1 Fable, ~10 min: synthesize, fold the survey digest into the Paper, design the LAST explore round — per assignment pick Sonnet or Opus and what must be PROVEN by running tests; Paper states the verify plan BEFORE the fleet flies', model: 'fable' },
-    { title: 'Verify', detail: 'Fable-chosen fleet of Sonnet/Opus verifiers: targeted deep answers with coverage accounting; claims that need proof get tests/gates actually RUN, output quoted' },
+    { title: 'Survey', detail: '5-20 Opus surveyors at MEDIUM effort, read-only, ~5 min each: wide sweep — bp search first, then the repo; report COVERAGE (every file checked, what for, found/not-found)', model: 'opus' },
+    { title: 'Digest', detail: '1 Fable, ~10 min: synthesize, fold the survey digest into the Paper, design the LAST explore round — per assignment pick the verifier EFFORT and what must be PROVEN by running tests; Paper states the verify plan BEFORE the fleet flies', model: 'fable' },
+    { title: 'Verify', detail: 'Fable-designed fleet of Opus verifiers at medium/high effort: targeted deep answers with coverage accounting; claims that need proof get tests/gates actually RUN, output quoted', model: 'opus' },
     { title: 'Decide', detail: '1 Fable, whatever time it needs: finalize choices, update Paper + charter, cut the wave (≤8 slices, builder model per slice), file + publish + PERFECT a bp task per slice (each linked to the Paper), seed the backlog', model: 'fable' },
-    { title: 'Build', detail: 'Fable or Opus builders per slice complexity, worktree-isolated: CLAIM the bp task first, stamp evidence as each criterion is proven, gate, honest self-review, commit. Round-1 slices only — round ≥2 slices are deferred to the lead (sequenced-rounds law)' },
+    { title: 'Build', detail: 'Fable or Opus builders per slice (Opus default; Fable for hard OR visually-designed slices), xhigh effort, worktree-isolated: CLAIM the bp task first, stamp evidence as each criterion is proven, gate, honest self-review, commit. Round-1 slices only — round ≥2 slices are deferred to the lead (sequenced-rounds law)' },
     { title: 'Review', detail: '1 Fable, whatever time it needs: review every green slice + the ledger, FIX issues in place, re-gate, Cody-grade verdict, append wave log, CLOSE the wave Paper as the debrief, hand off', model: 'fable' },
   ],
 }
@@ -37,14 +37,52 @@ const EPIC_TASK_ID = A.epic_task_id || null
 // has no such doubt. A survey fan-out below 5 is a bug in the plan, not a plan.
 const SURVEY_FLOOR = 5
 const VERIFY_FLOOR = 3
-// Phase↔model doctrine (lead mandate 2026-07-10, rev 2): every THINKING phase
-// is ONE Fable agent (strategize, digest, decide, review). The broad survey is
-// Sonnet — cheap width. The verify fleet and the build fleet are MIXED: the
-// digest/decide Fable picks Sonnet vs Opus per verification and Opus vs Fable
-// per slice. Never Haiku anywhere. Overrides exist only for Fable exhaustion.
+// Phase↔model doctrine (lead mandate 2026-07-10, rev 3 — 2026-07-25).
+//
+// FABLE AT THE JOINTS, OPUS AT THE FAN-OUT. Model tier tracks FAN-IN — how much
+// rides on one agent's judgment — and EFFORT tracks task depth. The four
+// single-agent joints (strategize, digest, decide, review) are Fable; every
+// phase that spreads across many agents is Opus at a tuned effort.
+//
+// Sonnet is GONE from this workflow (rev 3). It did not survive as a tier once
+// effort became a per-agent knob: Sonnet-5 defaults to HIGH effort and its
+// tokenizer emits ~30% more tokens for the same text, so its per-token price
+// edge over Opus mostly evaporates in practice — and the survey's real failure
+// mode is not a weak finding (coverage accounting + the provenance gate + the
+// whole Verify phase catch those) but a FALSE not_found: "no existing rate
+// limiter in api/" when there is one. Nothing downstream re-checks an absence;
+// it goes straight into Decide and the wave rebuilds prior art. Absence claims
+// are where model quality actually pays, so the surveyor is Opus.
+//
+// EFFORT, and why the top of the ladder is mostly absent:
+//   survey  = medium  — NOT low. Low explicitly consolidates tool calls, and
+//                       fewer greps is exactly how a false not_found is made.
+//   verify  = medium|high, digest's pick — Opus stays accurate at lower effort
+//                       on review-shaped work, which is the verifier's job.
+//   build   = xhigh   — the one deliberate spend. Documented best for coding/
+//                       agentic work and Claude Code's own default; on agentic
+//                       work it tends to REDUCE turn count, not raise spend.
+//   joints  = high    — the API default, written explicitly so the workflow
+//                       does not silently change behavior with session effort.
+//   max     = nowhere. It is documented as prone to overthinking with
+//                       diminishing returns. At Decide it is actively harmful:
+//                       an overthinking wave-cut does not produce a BETTER cut,
+//                       it produces a BIGGER one — more slices, more scope —
+//                       and that lands on eight builders.
+// Never Haiku anywhere. Overrides exist only for Fable exhaustion.
 const STRAT_MODEL = A.strategist_model || 'fable'
-const SURVEY_MODEL = A.survey_model || 'sonnet'
+const SURVEY_MODEL = A.survey_model || 'opus'
 const REVIEW_MODEL = A.review_model || 'fable'
+const JOINT_EFFORT = 'high'
+// The joints are Fable, but NOT USING FABLE IS NEVER A REASON TO STOP. Every
+// joint falls back to Opus 5 after repeated dispatch failures and the wave keeps
+// going on it. Fable carries the tighter constraints of the two — it runs
+// classifiers aimed at bio/most-cyber content it is explicitly not intended for,
+// and it is unavailable to orgs below 30-day data retention — so the direction
+// of this fallback is deliberate: Opus 5 is the documented refusal-fallback
+// target, not a consolation prize. A wave finished by Opus 5 at every joint is
+// a fine wave.
+const JOINT_FALLBACK = 'opus'
 const CHARTER_EXISTS = !!A.charter_exists
 const LEAD_NOTES = A.lead_notes ? `\n\nLEAD NOTES THIS WAVE:\n${A.lead_notes}` : ''
 
@@ -105,7 +143,7 @@ const STRATEGY_SCHEMA = {
     paper_created: { type: 'boolean', description: 'true only after you created AND published the Paper and read it back from the server' },
     survey: {
       type: 'array',
-      description: '5-20 broad survey assignments; each becomes one Sonnet surveyor. Cast a WIDE net — cheap width now buys precise depth later',
+      description: '5-20 broad survey assignments; each becomes one Opus surveyor at medium effort. Cast a WIDE net — width now buys precise depth later',
       items: {
         type: 'object', additionalProperties: false,
         required: ['key', 'question', 'why'],
@@ -180,15 +218,15 @@ const AIM_SCHEMA = {
     paper_updated: { type: 'boolean', description: 'true only after you appended the survey digest (incl. coverage map + not-founds) AND the verify plan to the wave Paper and re-published it' },
     verification: {
       type: 'array',
-      description: 'the LAST explore round: 1-15 targeted assignments. YOU pick the fleet — model per assignment, and which claims must be PROVEN by actually running tests/gates rather than read',
+      description: 'the LAST explore round: 1-15 targeted assignments. YOU pick the fleet — effort per assignment, and which claims must be PROVEN by actually running tests/gates rather than read. Every verifier is Opus; effort is the knob, not model',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['key', 'question', 'why', 'model', 'verify_commands', 'needs_worktree'],
+        required: ['key', 'question', 'why', 'effort', 'verify_commands', 'needs_worktree'],
         properties: {
           key: { type: 'string' },
           question: { type: 'string', description: 'sharp and targeted — this round closes unknowns, it does not browse' },
           why: { type: 'string' },
-          model: { type: 'string', enum: ['sonnet', 'opus'], description: 'sonnet for mapping/breadth follow-ups; opus for subtle correctness, cross-surface reasoning, or judgment-heavy verification' },
+          effort: { type: 'string', enum: ['medium', 'high'], description: "medium for mapping/breadth follow-ups; high for subtle correctness, cross-surface reasoning, or judgment-heavy verification. There is no xhigh tier here on purpose — Opus stays accurate at lower effort on review-shaped work, which is what a verifier does; spend the extra depth on the assignment where being wrong is expensive, not on all of them" },
           verify_commands: { type: 'string', description: 'shell command(s) the verifier must RUN to prove/refute the claim (tests, gates, curl against localhost) — empty string when reading suffices' },
           needs_worktree: { type: 'boolean', description: 'true only if verification requires a throwaway probe edit or an isolated build dir. An assignment that will write ledger rows under tooling/grip/ledger/ must NOT set it — Decide commits from the shared checkout and never sees a throwaway worktree, so those rows would be stranded' },
         },
@@ -279,6 +317,67 @@ for (const [name, schema] of [['SURVEY_SCHEMA', SURVEY_SCHEMA], ['VERIFY_SCHEMA'
 // DEMOTE, NEVER DROP. A dropped fact is a silent loss — the same defect class as
 // a silent promotion. Length in === length out, always. The demotion and its
 // reason ride ON the fact so the next Fable SEES both.
+// ── A DEAD AGENT MUST NEVER KILL A WAVE (lead mandate 2026-07-25) ──
+//
+// `agent()` resolves to null when a subagent is skipped or dies on a terminal
+// API error after the harness's own retries. A refusal is one way that happens:
+// both Opus and Fable run safety classifiers that can decline a request
+// outright, and benign work adjacent to security or life-sciences trips them
+// occasionally. We CANNOT see why a given agent came back null — the harness
+// surfaces absence, not cause — so this does not try to diagnose. It just
+// refuses to accept the first no.
+//
+// WHAT THIS IS NOT: the Messages-API `fallbacks` parameter (server-side refusal
+// routing, `server-side-fallback-2026-07-01`) is not reachable from a workflow
+// script — we do not construct those requests. This is the agent-level analogue
+// and the only lever we actually have: re-dispatch, then re-dispatch on another
+// model, then carry the gap forward as data.
+//
+// THE LADDER, and an honest caveat about its last rung:
+//   1. same model again — most deaths are transient (overload, 429, a dropped
+//      connection), and a fresh dispatch is cheap next to losing the wave.
+//   2. same model again — a second transient in a row is uncommon but not rare
+//      at 20-way fan-out.
+//   3. the other model — this is a HEDGE, not a cure. If the death was
+//      capability- or schema-shaped, a different model genuinely helps. If it
+//      was a refusal, it may not: Fable's classifiers are at least as tight as
+//      Opus 5's (it is explicitly not intended for bio/most-cyber work), so
+//      escalating Opus→Fable on a refusal can fail the same way. We take the
+//      swing anyway because we cannot tell the cases apart and the attempt is
+//      cheaper than the gap.
+//   4. proceed WITHOUT it. Never throw.
+//
+// Rung 4 is the whole point, and it is not "proceed silently" — that was the
+// original defect. The gap becomes a FACT that rides into Digest, Decide, and
+// the wave Paper, so the wave cuts a plan knowing exactly which questions went
+// unanswered instead of quietly believing it has coverage it never got.
+const RECOVERY_ATTEMPTS = ['same', 'same', 'other']
+async function neverLose(dispatch, { label, model, other }) {
+  let result = await dispatch(model)
+  if (result) return result
+  for (let i = 0; i < RECOVERY_ATTEMPTS.length; i++) {
+    const useModel = RECOVERY_ATTEMPTS[i] === 'other' ? other : model
+    log(`RECOVER ${label}: no report after attempt ${i + 1} — re-dispatching on ${useModel}`)
+    result = await dispatch(useModel)
+    if (result) {
+      if (useModel !== model) result.recovered_on = useModel
+      log(`RECOVER ${label}: recovered on attempt ${i + 2} (${useModel})`)
+      return result
+    }
+  }
+  log(`LOST ${label}: no report after ${RECOVERY_ATTEMPTS.length + 1} dispatches — the wave CONTINUES and carries this assignment forward as unanswered`)
+  return null
+}
+
+// Renders the lost assignments as a block every downstream thinking phase must
+// read. An empty deficit renders as an explicit all-clear rather than nothing,
+// so a Fable reading this can tell "no gaps" apart from "nobody told me".
+function deficitBlock(kind, lost) {
+  if (!lost || lost.length === 0) return `\nCOVERAGE DEFICIT (${kind}): none — every dispatched agent reported.`
+  return `\n⚠ COVERAGE DEFICIT (${kind}): ${lost.length} assignment(s) were dispatched and NEVER REPORTED, after four attempts each including a cross-model retry. These questions are UNANSWERED — not "answered thinly", not "found nothing". Treat each as an open unknown you are deciding around, say so explicitly in the Paper, and if one is load-bearing for the wish, either re-ask it in a round you control or narrow the wave so it does not depend on the answer:
+${lost.map((q) => `  - [${q.key}] ${q.question}\n    WHY IT MATTERED: ${q.why}`).join('\n')}`
+}
+
 function gateFactProvenance(reports) {
   let total = 0
   let demoted = 0
@@ -325,7 +424,7 @@ const PLAN_SCHEMA = {
           instructions: { type: 'string', description: 'complete enough to build without more context; name the key choices it must respect' },
           gate: { type: 'string', description: 'exact shell command(s) that prove it' },
           size: { type: 'string', enum: ['small', 'medium', 'large'] },
-          builder_model: { type: 'string', enum: ['opus', 'fable'], description: 'opus for well-specified slices; fable for the genuinely hard ones — subtle design, cross-surface coupling, high blast radius' },
+          builder_model: { type: 'string', enum: ['opus', 'fable'], description: 'TWO INDEPENDENT AXES, either one is sufficient for fable. (1) DIFFICULTY: opus is the default and now covers more than it used to — reserve fable for slices that are genuinely hard, not merely large: subtle design judgment, cross-surface coupling, high blast radius. (2) SURFACE: a VISUALLY DESIGNED slice goes to fable regardless of size — palette, layout, typography, CSS, LiveView/SPA chrome, anything judged against the Kinsta/Vercel bar. A small fully-specified CSS slice is easy on axis 1 and would fall to opus; that is the wrong call. System/architecture design is NOT this axis — that judgment already happened in Strategize/Decide' },
           round: { type: 'integer', minimum: 1, description: 'dispatch round. 1 = dependency-free, builds THIS run. ≥2 = depends on a lower-round slice being MERGED first — the run does NOT build it; it is returned as a deferral the lead dispatches after merging its deps (sequenced-rounds law: a slice never dispatches beside its unmerged dependency)' },
           after: { type: 'array', items: { type: 'string' }, description: 'for round ≥2: the same-wave task_ids that must MERGE before this slice dispatches (put the same fact in the task brief as an "AFTER <task_id> merges" line)' },
         },
@@ -386,7 +485,7 @@ const REVIEW_SCHEMA = {
 
 // ── Phase 1: Strategize — one Fable mind, unhurried; the direction sets the wave's ceiling ──
 phase('Strategize')
-const strategist = await agent(
+const strategist = await neverLose((m) => agent(
   `You are the STRATEGIST of a Barkpark epic wave — one Fable mind whose direction sets the CEILING for everything downstream. Take whatever time this needs: surveyors, verifiers, and builders can execute a great direction well, but nothing after you can rescue a mediocre one. Two exploration rounds of rigor follow, so you never need to PROVE claims — but read as much as sharpens your judgment. Bold is still the mandate; unhurried bold, not hedged.
 
 ${USER_WISH_BLOCK}
@@ -403,14 +502,15 @@ WORK THE PROBLEM PROPERLY, in whatever order serves you:
 Your output:
 1. direction — the bold strategic direction for this wave: what the finished experience looks/feels like, the key choices you lean toward (tentatively; Decide finalizes after two explore rounds), what to prioritize.
 2. direction_debate — the rivals you weighed, why the winner won, the sharpest attack on it and how the wave absorbs it.
-3. survey — 5-20 BROAD assignments for cheap Sonnet surveyors. Cast a wide net: suspected files, prior art (in the repo AND in bp papers/tasks), claims to check, seams to map, adjacent systems that might constrain the design, and every load-bearing assumption your stress-test surfaced. Width is cheap here — ask everything you'd want a scout report on. The Digest phase distills; you do not need to be precise yet.
+3. survey — 5-20 BROAD assignments for the Opus surveyor fleet. Cast a wide net: suspected files, prior art (in the repo AND in bp papers/tasks), claims to check, seams to map, adjacent systems that might constrain the design, and every load-bearing assumption your stress-test surfaced. Width is cheap here — ask everything you'd want a scout report on. The Digest phase distills; you do not need to be precise yet.
 4. OPEN THE WAVE PAPER: create + publish the wave strategy Paper (slug like <epic>-wave-<YYYY-MM-DD>, style=article): the wish, your direction, the direction debate (candidates weighed, why the winner won), the survey plan (every question + why). This Paper is the wave's living story — every later phase appends to it; someone opening it mid-wave sees exactly where the wave stands. Read it back before setting paper_created=true.
 5. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}: flat wave_status ("wave: surveying — <one-line direction>") + flat wave_paper (the Paper's id), then re-publish.` : 'if a published epic parent task already exists for this epic, stamp its wave_status + wave_paper; if none exists yet, skip (Decide creates it).'}
 ${PREMISE_SMOKE_BLOCK}
 ${PAPER_BLOCK}
 ${LEAD_NOTES}`,
-  { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: STRAT_MODEL }
-)
+  { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: m, effort: JOINT_EFFORT }
+), { label: 'strategist', model: STRAT_MODEL, other: JOINT_FALLBACK })
+if (!strategist) throw new Error(`Strategize returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK}. There is no partial wave to salvage — nothing has been surveyed, decided, or written. Resume the run rather than restarting.`)
 const surveyAssignments = (strategist.survey || []).slice(0, 20)
 if (surveyAssignments.length < SURVEY_FLOOR) {
   throw new Error(`Survey fan-out floor: the strategist returned ${surveyAssignments.length} survey assignment(s), below the floor of ${SURVEY_FLOOR}. Width is the cheapest part of a wave and a narrow survey is how a wave misses prior art it then rebuilds. Re-run Strategize with a wider net (5-20 assignments) rather than proceeding.`)
@@ -418,11 +518,11 @@ if (surveyAssignments.length < SURVEY_FLOOR) {
 const WAVE_PAPER = strategist.paper_id
 log(`Strategist set direction; wave paper ${WAVE_PAPER} (created=${strategist.paper_created}); ${surveyAssignments.length} survey assignments`)
 
-// ── Phase 2: Survey — wide cheap Sonnet sweep, ~5 minutes each ──
+// ── Phase 2: Survey — wide Opus sweep at medium effort, ~5 minutes each ──
 phase('Survey')
-const surveys = surveyAssignments.length === 0 ? [] : (await parallel(
+const surveyResults = surveyAssignments.length === 0 ? [] : (await parallel(
   surveyAssignments.map((q) => () =>
-    agent(
+    neverLose((m) => agent(
       `You are a SURVEYOR on a Barkpark epic wave — one of up to 20 scouts in a fast, wide sweep. READ-ONLY: no edits, no commits, no bp mutations. Budget: ~5 minutes — breadth over depth. A fast honest answer with real file:line anchors beats a deep dive; park what you can't settle in open_questions (a targeted verify round runs after you).
 
 ${USER_WISH_BLOCK}
@@ -436,20 +536,26 @@ WHY IT MATTERS: ${q.why}
 Search Barkpark FIRST (\`bp search query "<terms>"\` — the \`query\` sub-verb is REQUIRED; dropping it exits 2 with \`unknown command "search"\`, and that failure reads exactly like a real absence of prior art, so check the exit code — papers and tasks carry prior art the tree doesn't), then grep/read the repo${CHARTER_EXISTS ? `; the charter at ${CHARTER_PATH} is a fair source` : ''}. Answer honestly — "the premise is wrong" is a valid and valuable answer. Every load-bearing fact needs evidence you actually derived, and its \`rerun\` command.
 
 COVERAGE ACCOUNTING (your report is only trustworthy if its edges are visible): list EVERY file/paper/task you checked in coverage[] — the path, what you checked it for, and found / not_found / partial. NOT-FOUND IS A FINDING ("no existing rate limiter in api/" changes the plan as much as finding one). Anything you did not list is treated as unchecked — do not imply coverage you don't have. The wave Paper (${WAVE_PAPER}) will carry your coverage map; you do NOT write the Paper yourself.`,
-      { label: `survey:${q.key}`, phase: 'Survey', schema: SURVEY_SCHEMA, model: SURVEY_MODEL }
-    )
+      { label: `survey:${q.key}`, phase: 'Survey', schema: SURVEY_SCHEMA, model: m, effort: 'medium' }
+    ), { label: `survey:${q.key}`, model: SURVEY_MODEL, other: 'fable' })
   )
 )).filter(Boolean)
 // ONE interception, in place, right at the resolve — `surveys` is serialised
 // TWICE downstream (in full into Digest, projected into Decide), and gating each
 // serialisation site separately would be the copies-that-must-agree defect in
 // miniature. Mutating here means every downstream reader sees the gated array.
+const surveys = surveyResults.filter(Boolean)
+// Index-aligned: parallel() preserves order, so a null at position i is exactly
+// assignment i going unanswered. This is the ONLY place that mapping exists —
+// downstream phases see the rendered deficit, never the raw nulls.
+const surveyLost = surveyAssignments.filter((q, i) => !surveyResults[i])
+const SURVEY_DEFICIT = deficitBlock('survey', surveyLost)
 const surveyGrip = gateFactProvenance(surveys)
-log(`${surveys.length}/${surveyAssignments.length} surveyors reported; provenance gate: ${surveyGrip.demoted}/${surveyGrip.total} fact(s) DEMOTED (no rerun command)`)
+log(`${surveys.length}/${surveyAssignments.length} surveyors reported${surveyLost.length ? ` — ${surveyLost.length} LOST after full recovery (${surveyLost.map((q) => q.key).join(', ')}); the wave continues and carries them as unanswered` : ''}; ${surveys.filter((s) => s.recovered_on).length} recovered cross-model; provenance gate: ${surveyGrip.demoted}/${surveyGrip.total} fact(s) DEMOTED (no rerun command)`)
 
 // ── Phase 3: Digest — one Fable mind, ~10 minutes, designs the verify fleet ──
 phase('Digest')
-const aim = await agent(
+const aim = await neverLose((m) => agent(
   `You are the DIGEST strategist of a Barkpark epic wave — the same Fable judgment that set the direction, now holding ${surveys.length} survey reports. Budget: ~10 minutes. Your output designs the LAST exploration round before the plan is cut — after it, there is no more looking.
 
 ${USER_WISH_BLOCK}
@@ -462,11 +568,12 @@ ${strategist.direction_debate}
 
 SURVEY REPORTS (wide but shallow — trust file:line evidence over prose; treat unanchored claims as rumors):
 ${JSON.stringify(surveys, null, 2)}
+${SURVEY_DEFICIT}
 
 Your job:
 1. SYNTHESIZE: what is now established, where reports contradict each other or the direction, which open_questions actually matter for the wish, and what the Decide phase cannot live without knowing.
 2. DESIGN THE VERIFY FLEET (1-15 assignments) — you choose, per assignment:
-   - model: 'sonnet' for mapping/breadth follow-ups; 'opus' for subtle correctness, cross-surface reasoning, judgment-heavy digs. Spend Opus where being wrong is expensive.
+   - effort: 'medium' for mapping/breadth follow-ups; 'high' for subtle correctness, cross-surface reasoning, judgment-heavy digs. Every verifier is Opus — effort is the only knob, and there is deliberately no tier above 'high' here. Spend 'high' where being wrong is expensive, not on the whole fleet.
    - verify_commands: where a survey claim (or your own assumption) is load-bearing, the verifier must PROVE it by RUNNING something — the surface's tests/gates, a targeted mix/go test, curl against localhost. Reading is not proof for claims like "the gate passes", "this endpoint returns X", "these tests pin that behavior" (distrust vacuous green — a pass only counts if the RIGHT thing produced it). Empty string when reading genuinely suffices.
    - needs_worktree: true only for probe edits or isolated build dirs. An assignment that will write ledger rows under tooling/grip/ledger/ must NOT set it — Decide commits from the shared checkout and never sees a throwaway worktree, so those rows would be stranded.
    Do not re-ask what the survey settled with evidence. This round closes unknowns; it does not browse.
@@ -479,14 +586,14 @@ ${PREMISE_SMOKE_BLOCK}
 ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
-  { label: 'digest', phase: 'Digest', schema: AIM_SCHEMA, model: STRAT_MODEL }
-)
-if (!aim) throw new Error('Digest phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
+  { label: 'digest', phase: 'Digest', schema: AIM_SCHEMA, model: m, effort: JOINT_EFFORT }
+), { label: 'digest', model: STRAT_MODEL, other: JOINT_FALLBACK })
+if (!aim) throw new Error(`Digest returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). The survey reports are intact; resume the run rather than restarting so they are not re-bought.`)
 const verifyAssignments = (aim.verification || []).slice(0, 15)
 if (verifyAssignments.length < VERIFY_FLOOR) {
   throw new Error(`Verify fan-out floor: the digest returned ${verifyAssignments.length} verify assignment(s), below the floor of ${VERIFY_FLOOR}. Verify is the LAST round before the plan is cut — nobody checks after it. A wave that surveyed wide and then verified nothing is deciding on unproven claims. Re-run Digest with a real verify fleet (1-15 assignments, floor ${VERIFY_FLOOR}) rather than proceeding.`)
 }
-log(`Digest done; verify fleet: ${verifyAssignments.length} (${verifyAssignments.filter((v) => v.model === 'opus').length} opus, ${verifyAssignments.filter((v) => v.verify_commands).length} with live proofs)`)
+log(`Digest done; verify fleet: ${verifyAssignments.length} opus (${verifyAssignments.filter((v) => v.effort === 'high').length} at high effort, ${verifyAssignments.filter((v) => v.verify_commands).length} with live proofs)`)
 
 // ── Phase 4: Verify — the Fable-designed fleet closes the unknowns ──
 //
@@ -511,9 +618,9 @@ log(`Digest done; verify fleet: ${verifyAssignments.length} (${verifyAssignments
 // commit is worded — is closed differently, by DENYING the carve-out on that
 // branch of the prompt below rather than by trying to recover from it.
 phase('Verify')
-const verifications = verifyAssignments.length === 0 ? [] : (await parallel(
+const verifyResults = verifyAssignments.length === 0 ? [] : (await parallel(
   verifyAssignments.map((q) => () =>
-    agent(
+    neverLose((m) => agent(
       `You are a VERIFIER on a Barkpark epic wave — the LAST explorer before the plan is cut; nobody checks after you. No commits, no bp mutations, never touch main${q.needs_worktree ? ' (you are in your OWN throwaway worktree — probe edits are fine, but commit nothing; and the ledger carve-out below is DENIED to you: a row written here would be stranded, because your worktree is a distinct filesystem path that Decide — which commits from the shared checkout — never sees)' : ', and exactly ONE repo-write carve-out: you may WRITE re-derivation recipe rows under tooling/grip/ledger/ (one new file per write, never opening an existing one), and nothing else, anywhere. You never commit them — Decide commits them one phase later, this same run. No other repo edits'}.
 
 ${USER_WISH_BLOCK}
@@ -532,20 +639,27 @@ Run it (plus whatever else proves/refutes the claim), and QUOTE the decisive out
 Investigate sharply — grep/read${CHARTER_EXISTS ? `, the charter at ${CHARTER_PATH},` : ''} \`bp search query "<terms>"\` for prior art (the \`query\` sub-verb is REQUIRED — without it the command exits 2 and the empty result is indistinguishable from genuine absence). "The premise is wrong" remains a valid answer. Every fact needs evidence you actually derived plus its \`rerun\` command; every proof needs real output.
 
 COVERAGE ACCOUNTING: list EVERY file/paper/task you checked in coverage[] — path, what you checked it for, found / not_found / partial. Not-found is a finding. Unlisted = unchecked. The wave Paper (${WAVE_PAPER}) will carry your coverage; you do NOT write the Paper yourself.`,
-      { label: `verify:${q.key}`, phase: 'Verify', schema: VERIFY_SCHEMA, model: q.model === 'opus' ? 'opus' : 'sonnet', ...(q.needs_worktree ? { isolation: 'worktree' } : {}) }
-    )
+      { label: `verify:${q.key}`, phase: 'Verify', schema: VERIFY_SCHEMA, model: m, effort: q.effort === 'high' ? 'high' : 'medium', ...(q.needs_worktree ? { isolation: 'worktree' } : {}) }
+    ), { label: `verify:${q.key}`, model: 'opus', other: 'fable' })
   )
 )).filter(Boolean)
 // Same single interception for the verify round, at its own resolve.
+const verifications = verifyResults.filter(Boolean)
+// Same index-alignment as Survey. A lost verifier costs more than a lost
+// surveyor — nobody checks after Verify — which is an argument for making the
+// gap LOUDER to Decide, not for throwing and losing the verifications that did
+// come back with real proof output attached.
+const verifyLost = verifyAssignments.filter((q, i) => !verifyResults[i])
+const VERIFY_DEFICIT = deficitBlock('verify — NOTHING RUNS AFTER THIS ROUND, so these stay open for the whole wave', verifyLost)
 const verifyGrip = gateFactProvenance(verifications)
-log(`${verifications.length}/${verifyAssignments.length} verifiers reported; ${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs; provenance gate: ${verifyGrip.demoted}/${verifyGrip.total} fact(s) DEMOTED (no rerun command)`)
+log(`${verifications.length}/${verifyAssignments.length} verifiers reported${verifyLost.length ? ` — ${verifyLost.length} LOST after full recovery (${verifyLost.map((q) => q.key).join(', ')}); these unknowns stay OPEN and Decide is told so` : ''}; ${verifications.filter((v) => v.recovered_on).length} recovered cross-model; ${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs; provenance gate: ${verifyGrip.demoted}/${verifyGrip.total} fact(s) DEMOTED (no rerun command)`)
 
 // ── Phase 5: Decide — one Fable mind finalizes charter + wave + tasks ──
 phase('Decide')
 const EPIC_TASK_LINE = EPIC_TASK_ID
   ? `The epic parent task is ${EPIC_TASK_ID} — verify it exists and is published; file this wave's slice tasks as its children (parent_id=${EPIC_TASK_ID}).`
   : `Ensure ONE published epic parent task exists for this epic (create it if missing — slug it from the charter name); file this wave's slice tasks as its children via parent_id.`
-const architect = await agent(
+const architect = await neverLose((m) => agent(
   `You are the STRATEGIST-ARCHITECT of a Barkpark epic — the same Fable judgment that set direction and digested exploration, now DECIDING with two rounds of ground truth in hand. Take whatever time this needs; the IMPORTANT CHOICES get made here.
 
 ${USER_WISH_BLOCK}
@@ -564,6 +678,9 @@ ${JSON.stringify(verifications, null, 2)}
 
 SURVEY REPORTS (the wide round, already distilled by the synthesis — consult for detail, not direction):
 ${JSON.stringify(surveys.map((s) => ({ key: s.key, findings: s.findings, facts: s.facts })), null, 2)}
+${SURVEY_DEFICIT}
+${VERIFY_DEFICIT}
+If either deficit above is non-empty, the wave did NOT get the coverage it planned for. That is a fact about this wave, not an excuse: record it in the Paper's decision section by name, and let it shape the cut — a slice whose correctness rests on an unanswered question is either re-scoped, moved to a later round with the question re-asked, or filed to the backlog with the gap stated. Do not cut a confident slice on top of a hole and let the Paper imply it was verified.
 
 Any survey fact carrying provenance DEMOTED-NO-RERUN has no command that re-derives it: treat it as an unverified belief at the level of agent memory, never as a settled measurement, and do not build a slice on one without first giving it a rerun command.
 
@@ -576,7 +693,7 @@ Your job:
 3. FILE THE TASKS: ${EPIC_TASK_LINE} Every slice gets a published bp task with rubric-quality acceptance criteria (include a merge-gated criterion the lead closes) and the wave Paper's id on it (flat wave_paper field) so task → story is one hop. A slice without a published task does not exist — wave[].task_id is required.
 4. SEED THE BACKLOG: everything exploration surfaced that is real but NOT this wave gets filed now as a published child task (honest description, sane priority) — record the ids in backlog_filed. The ledger must show the future, not just the present.
 5. PERFECT THE TASKS (you are also the task reviewer — there is no one behind you): after filing, re-read every wave task back from the server and verify it is published (not a stranded draft), parented under the epic task, linked to the wave Paper, and reads to the rubric — outcome-shaped title, description a cold builder could start from, concrete evidence-bearing criteria, sane priority. Fix every defect via bp (patch, publish, re-parent, dedup stranded drafts). Set tasks_verified=true only after this read-back pass is clean.
-6. CUT THE WAVE: up to 8 slices, buildable in parallel by isolated builders (minimize file overlap; if two slices must touch the same region of a file, merge or sequence them). ROUNDS ARE LAW (three waves proved briefs alone don't stop the dispatcher): stamp every slice with \`round\`. round 1 = dependency-free, builds this run. A slice that needs another slice's code ON MAIN (imports its package, calls its seam, seeds its schema) is round ≥2 with \`after: [<dep task_ids>]\` — it will NOT build this run; the lead dispatches it after merging its deps (this exact manual-rounds recipe went 7-for-7 across two epics). Never mark a slice round 1 "optimistically" — a round-1 slice whose dep is unmerged burns a builder to produce a BLOCKED report. Write the same dependency as an "AFTER <task_id> merges" line at the TOP of the deferred task's brief so a manually-dispatched builder sees it first. Per slice pick builder_model: 'opus' for well-specified work; 'fable' for the genuinely hard slices — subtle design judgment, cross-surface coupling, high blast radius. ${CHARTER_EXISTS ? 'Weight FINISHING what exists (quality, coherence, the Kinsta/Vercel bar) alongside net-new capability; prefer finishing journeys over starting new ones.' : 'Bold slices are fine.'} Each needs instructions complete enough to build without more context and exact local gate command(s) — DRY-RUN each gate command yourself before filing it (a gate that cannot run, or references paths/globs that don't exist, forces the builder to interpret instead of prove).
+6. CUT THE WAVE: up to 8 slices, buildable in parallel by isolated builders (minimize file overlap; if two slices must touch the same region of a file, merge or sequence them). ROUNDS ARE LAW (three waves proved briefs alone don't stop the dispatcher): stamp every slice with \`round\`. round 1 = dependency-free, builds this run. A slice that needs another slice's code ON MAIN (imports its package, calls its seam, seeds its schema) is round ≥2 with \`after: [<dep task_ids>]\` — it will NOT build this run; the lead dispatches it after merging its deps (this exact manual-rounds recipe went 7-for-7 across two epics). Never mark a slice round 1 "optimistically" — a round-1 slice whose dep is unmerged burns a builder to produce a BLOCKED report. Write the same dependency as an "AFTER <task_id> merges" line at the TOP of the deferred task's brief so a manually-dispatched builder sees it first. Per slice pick builder_model on TWO INDEPENDENT AXES — either one alone is enough to warrant fable. DIFFICULTY: 'opus' is the default and covers more than it used to; reserve 'fable' for slices that are genuinely hard rather than merely large — subtle design judgment, cross-surface coupling, high blast radius. SURFACE: a VISUALLY DESIGNED slice gets 'fable' regardless of size — palette, layout, typography, CSS, LiveView/SPA chrome, anything judged against the Kinsta/Vercel bar; a small fully-specified CSS slice is easy on the difficulty axis and would wrongly fall to opus. (System/architecture design is not this axis — you already did that judgment here.) ${CHARTER_EXISTS ? 'Weight FINISHING what exists (quality, coherence, the Kinsta/Vercel bar) alongside net-new capability; prefer finishing journeys over starting new ones.' : 'Bold slices are fine.'} Each needs instructions complete enough to build without more context and exact local gate command(s) — DRY-RUN each gate command yourself before filing it (a gate that cannot run, or references paths/globs that don't exist, forces the builder to interpret instead of prove).
 7. UPDATE THE WAVE PAPER (${WAVE_PAPER}) — append, then re-publish, BEFORE the builders fly:
    - Verification results: per assignment what was proven/refuted (quote the decisive proof lines), plus the verifiers' coverage — including not-founds.
    - Decisions: each with its one-line why (mirror the charter, don't fork it — the charter is the epic's memory, the Paper is this wave's story).
@@ -589,10 +706,10 @@ ${FLIP_RISK_BLOCK}
 ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
-  { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: STRAT_MODEL }
-)
+  { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: m, effort: JOINT_EFFORT }
+), { label: 'architect', model: STRAT_MODEL, other: JOINT_FALLBACK })
 
-if (!architect) throw new Error('Decide phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
+if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; resume the run rather than restarting so neither round is re-bought.`)
 const wave = (architect.wave || []).slice(0, 8)
 log(`Architect cut ${wave.length} slices (${wave.filter((w) => w.builder_model === 'fable').length} fable); charter_written=${architect.charter_written}; tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}; backlog=${architect.backlog_filed}`)
 if (wave.length === 0) {
@@ -642,9 +759,11 @@ Steps — task first, code second, and the ledger stays LIVE throughout:
 8. Final ledger state: every criterion you proved carries concrete evidence (gate output, test names, branch); merge-gated criteria stay open and lifecycle stays in_progress — the LEAD closes on merge. Your branch is named in the evidence.
 ${TASKS_BLOCK}
 ${LIVENESS_BLOCK}
+SCOPE DISCIPLINE — your slice is the deliverable, at the scope it was cut. Other builders are working other slices of this same wave RIGHT NOW, and the wave's whole parallel design rests on your slice staying inside its FILES list; widening it is how two builders collide and one of them loses work. Deliver what the brief asks: make routine judgment calls yourself, but do not quietly widen, narrow, or transform the slice. Don't refactor around your change, don't add abstractions or error handling for cases that can't happen, don't tidy neighbouring code — a bug fix does not need surrounding cleanup. If you conclude the brief is wrong or a better approach exists, say so in a sentence in your self-review and BUILD IT AS BRIEFED anyway; rescoping is the lead's call, not yours. Finish the WHOLE slice, not the easy part — report ok:true only when every criterion is actually met, and if something genuinely can't be done, do the rest and say plainly what is missing and why.
+DELEGATION — do the work yourself. A slice this size does not need subagents: each one re-establishes context, re-explores, and reports back, and you then re-read its report, which costs more than the work. Verification in particular belongs in YOUR loop — never spawn an agent to check your own work or re-run your gate. If you genuinely need one for an independent wide investigation, one is the ceiling.
 Constraints: curl localhost only; never mix compile against prod; don't touch other worktrees' WIP.
 Catalog-first (measured law, /papers/scaffy-benchmark): before hand-editing a repeated shape (block types, workers, error shapes, CLI verbs/nouns, migrations, plugins, routes/buckets, schema types, SDK methods, docs cards, canonical markers, imports, console helpers), check \`ls scaffy/commands/\` — if a command covers the chore, run \`bp scaffy run scaffy/commands/<name>.scaffy --var …\` instead of editing by hand (validate-first, receipts make it reversible; told agents produce engine-identical bytes, untold agents drift and lose reversibility).`,
-      { label: `build:${slug(item.title)}`, phase: 'Build', schema: BUILD_SCHEMA, model: item.builder_model === 'fable' ? 'fable' : 'opus', isolation: 'worktree' }
+      { label: `build:${slug(item.title)}`, phase: 'Build', schema: BUILD_SCHEMA, model: item.builder_model === 'fable' ? 'fable' : 'opus', effort: 'xhigh', isolation: 'worktree' }
     )
   )
 )).filter(Boolean)
@@ -656,7 +775,7 @@ log(`Build: ${greenBuilt.length}/${built.length} slices green`)
 phase('Review')
 let review = null
 if (built.length > 0) {
-  review = await agent(
+  review = await neverLose((m) => agent(
     `You are the REVIEWER for a just-built Barkpark epic wave — one Fable agent, the LAST hands before merge, taking whatever time this needs. You review EVERYTHING (code of every green slice + the task ledger), FIX issues yourself instead of reporting them, grade the wave honestly, write the Paper debrief, and hand off. You are in your OWN git worktree.
 
 ${USER_WISH_BLOCK}
@@ -694,8 +813,14 @@ ${TASKS_BLOCK}
 ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${FLIP_RISK_BLOCK}`,
-    { label: 'review', phase: 'Review', schema: REVIEW_SCHEMA, model: REVIEW_MODEL, isolation: 'worktree' }
-  )
+    { label: 'review', phase: 'Review', schema: REVIEW_SCHEMA, model: m, effort: JOINT_EFFORT, isolation: 'worktree' }
+  ), { label: 'review', model: REVIEW_MODEL, other: JOINT_FALLBACK })
+  // No throw here, and that is deliberate: by this point green branches EXIST on
+  // disk. A lost Review costs the grade, the debrief, and the PR push — real
+  // losses the lead must pick up (the downstream `review ? … : null` reads
+  // already handle it) — but throwing would abandon built, gated work in a
+  // shared checkout, which is the one failure this wave log has recorded most.
+  if (!review) log('LOST review: the wave built work that is NOT reviewed, NOT graded, and NOT pushed — the lead must review the branches and open the PRs by hand')
 }
 
 const reviewedByTask = {}
