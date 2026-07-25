@@ -246,7 +246,12 @@ func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			// idempotent reduceTailFetched) so the map the operator just opened is as
 			// fresh as a turn boundary. Edge-gated by !wfExpanded — the drill and
 			// collapse edges never refetch, and no polling/cadence exists (D13 holds).
-			cmd := m.execEffect(FetchTailEffect{SinceSeq: m.st.LastSeq})
+			// Gen -1: this is a HYDRATION refetch, never a settle boundary — the
+			// sentinel can never equal TailGen (>= 0), so its landing never clears
+			// a live tail (charter D77). Carrying st.Gen here would wipe the live
+			// streamed text on a mid-stream expand; the zero value would clear it
+			// in the attach-mid-turn case (no init observed yet, Gen==TailGen==0).
+			cmd := m.execEffect(FetchTailEffect{SinceSeq: m.st.LastSeq, Gen: -1})
 			j := journeyOf(m.st.Workflow)
 			if len(j.Phases) == 0 {
 				// nothing to expand — an honest no-op (the refetch may hydrate the
