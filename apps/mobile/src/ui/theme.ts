@@ -14,6 +14,10 @@ export interface Theme {
   accentText: string
   danger: string
   success: string
+  /** The user chat bubble — a soft neutral one step off the background
+   * (the ChatGPT/Claude register: quiet gray, NOT the accent), read with
+   * the normal text color. */
+  bubble: string
 }
 
 const light: Theme = {
@@ -26,6 +30,7 @@ const light: Theme = {
   accentText: '#ffffff',
   danger: '#b3372e',
   success: '#1f6f4a',
+  bubble: '#e9ede9',
 }
 
 const dark: Theme = {
@@ -38,6 +43,7 @@ const dark: Theme = {
   accentText: '#0c110e',
   danger: '#e06c5f',
   success: '#3fa374',
+  bubble: '#242d27',
 }
 
 export function useTheme(): Theme {

@@ -193,11 +193,7 @@ function SessionRow({
   const pill = stateColors(theme, session.agent_state ?? '')
   const pending = session.pending_approvals ?? 0
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={[styles.row, { backgroundColor: theme.surface, borderColor: theme.border }]}
-    >
+    <Pressable accessibilityRole="button" onPress={onPress} style={styles.row}>
       <View style={styles.rowTop}>
         <Text numberOfLines={2} style={[styles.title, { color: theme.text }]}>
           {session.title !== undefined && session.title !== '' ? session.title : session.id}
@@ -209,12 +205,8 @@ function SessionRow({
         )}
       </View>
       <View style={styles.rowMeta}>
-        <Text style={[styles.pill, { color: pill.fg, borderColor: pill.fg }]}>{pill.label}</Text>
-        {stalled && (
-          <Text style={[styles.pill, { color: theme.danger, borderColor: theme.danger }]}>
-            stalled
-          </Text>
-        )}
+        <Text style={[styles.stateLabel, { color: pill.fg }]}>{pill.label}</Text>
+        {stalled && <Text style={[styles.stateLabel, { color: theme.danger }]}>stalled</Text>}
         {session.message_count !== undefined && session.message_count > 0 && (
           <Text style={[styles.metaText, { color: theme.textMuted }]}>
             {session.message_count} messages
@@ -248,10 +240,14 @@ export function relativeTime(iso: string, nowMs: number): string {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
-  listContent: { padding: 16, gap: 10 },
-  row: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 6, marginBottom: 8 },
+  // paddingTop clears the status bar — this tab draws edge-to-edge with no
+  // header slab of its own.
+  listContent: { paddingHorizontal: 20, paddingTop: 58, paddingBottom: 12 },
+  // Borderless rows on the background — whitespace separates sessions, the
+  // way the ChatGPT/Claude session lists do it.
+  row: { paddingVertical: 14, gap: 5 },
   rowTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  title: { flex: 1, fontSize: 15, fontWeight: '600', lineHeight: 20 },
+  title: { flex: 1, fontSize: 16, fontWeight: '600', lineHeight: 22 },
   pendingBadge: {
     minWidth: 20,
     height: 20,
@@ -262,17 +258,9 @@ const styles = StyleSheet.create({
   },
   pendingText: { color: '#ffffff', fontSize: 11, fontWeight: '700' },
   rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  pill: {
-    fontSize: 11,
-    fontWeight: '700',
-    borderWidth: 1,
-    borderRadius: 5,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    overflow: 'hidden',
-  },
+  stateLabel: { fontSize: 12, fontWeight: '600' },
   metaText: { fontSize: 12 },
-  summary: { fontSize: 13, lineHeight: 18 },
+  summary: { fontSize: 14, lineHeight: 20 },
   body: { fontSize: 15, textAlign: 'center' },
   muted: { fontSize: 13, textAlign: 'center' },
   link: { fontSize: 14, textDecorationLine: 'underline' },
