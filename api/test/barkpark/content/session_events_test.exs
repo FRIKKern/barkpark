@@ -37,4 +37,26 @@ defmodule Barkpark.Content.SessionEventsTest do
   test "unknown slug" do
     assert {:error, :not_found} = Sessions.append_event("session-nope", "note", %{})
   end
+
+  # Review fix #1: append_event only ever reads "ref"/"note" out of `attrs` —
+  # a caller-supplied "ts" (or any other stray key, e.g. an echoed prior
+  # read payload) must never reach the stored event. Pins that the literal
+  # `%{"ts" => DateTime.utc_now() |> ..., "kind" => kind}` base map is built
+  # BEFORE any maybe_put, so a bogus "ts" in attrs has nowhere to land.
+  test "a caller-supplied ts in attrs is ignored — ts is always server-minted" do
+    bogus_ts = "1999-01-01T00:00:00Z"
+
+    assert {:ok, %{count: 1}} =
+             Sessions.append_event("session-ev-test", "note", %{
+               "note" => "hi",
+               "ts" => bogus_ts
+             })
+
+    doc = Content.get_blocks_doc("session-ev-test", "session", "production")
+    [event] = doc.content["events"]
+
+    refute event["ts"] == bogus_ts
+    assert {:ok, stored_ts, _} = DateTime.from_iso8601(event["ts"])
+    assert DateTime.diff(DateTime.utc_now(), stored_ts, :second) < 5
+  end
 end

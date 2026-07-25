@@ -158,6 +158,35 @@ defmodule Barkpark.Content.SessionBlocksDocTest do
     assert paper_reread.content["blocks"] == paper_doc.content["blocks"]
   end
 
+  # Review fold-in (session-handoff Task 4 fix #3): "events" is reserved in
+  # BlockOps's generic metadata passthrough (block_ops.ex:1509) so an
+  # in-process `upsert_blocks_doc("session", %{"events" => ...})` — e.g. a
+  # caller echoing a session's own read payload back as an update body —
+  # can never wipe the append-only trail Sessions.append_event/5 owns.
+  test "upsert_blocks_doc ignores an \"events\" attr — the append-only trail is never wiped" do
+    slug = "session-events-reserved-attr"
+
+    assert {:ok, _} =
+             Content.upsert_blocks_doc("session", %{
+               "slug" => slug,
+               "title" => "E",
+               "status" => "open"
+             })
+
+    assert {:ok, %{count: 1}} = Barkpark.Content.Sessions.append_event(slug, "note", %{})
+
+    assert {:ok, _} =
+             Content.upsert_blocks_doc("session", %{
+               "slug" => slug,
+               "status" => "closed",
+               "events" => []
+             })
+
+    doc = Content.get_blocks_doc(slug, "session", @dataset)
+    assert doc.content["status"] == "closed"
+    assert length(doc.content["events"]) == 1
+  end
+
   test "upsert_paper still works unchanged" do
     # AuthoringWall (D26) walls fresh "paper" publishes on the label spine —
     # every OTHER upsert_paper test in this suite goes through this same

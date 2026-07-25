@@ -291,6 +291,35 @@ defmodule BarkparkWeb.BulldocsSessionsControllerTest do
                doc.content["events"]
     end
 
+    # Review fix #2: the regression net against the drafts-path pitfall. The
+    # happy-path test above reads back via Content.get_blocks_doc directly,
+    # which bypasses the controller's own GET action entirely — it would
+    # still pass even if the append landed on the wrong row (e.g. a
+    # drafts.<slug> twin) as long as get_blocks_doc/4 in the TEST happened to
+    # resolve the same row. This test instead round-trips through the real
+    # HTTP GET action (`show_session/2`), proving an appended event is
+    # actually visible to a client reading the session the normal way.
+    test "an appended event is visible through GET /sessions/:slug", %{conn: conn} do
+      slug = "session-events-http-roundtrip"
+      create = conn |> authed() |> post(@path, body(slug))
+      assert json_response(create, 200)["ok"] == true
+
+      post_resp =
+        conn
+        |> authed()
+        |> post(
+          @path <> "/" <> slug <> "/events",
+          Jason.encode!(%{"kind" => "task-closed", "ref" => "task-xyz"})
+        )
+
+      assert json_response(post_resp, 200)["count"] == 1
+
+      show = conn |> authed() |> get(@path <> "/" <> slug)
+      payload = json_response(show, 200)
+
+      assert [%{"kind" => "task-closed", "ref" => "task-xyz"}] = payload["events"]
+    end
+
     test "422 with the allowed kinds list for an unknown kind", %{conn: conn} do
       slug = "session-events-bad-kind"
       create = conn |> authed() |> post(@path, body(slug))

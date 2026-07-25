@@ -1506,10 +1506,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # the Document row's `title` (`paper_title/2` reads `content["title"]`
   # first) — has NO OTHER writer; reserving "title" here would silently drop
   # every session's title on every write.
+  # "events" is reserved too (session-handoff Task 4 fix): a session's
+  # `content["events"]` trail is written ONLY through
+  # `Barkpark.Content.Sessions.append_event/5`'s advisory-lock + CAS path —
+  # never through this generic metadata passthrough. Without this reservation
+  # an in-process `upsert_blocks_doc("session", %{"events" => [...]})` (or a
+  # caller merely echoing a session's own read payload back as an update body)
+  # would silently overwrite the append-only trail via the same merge this
+  # function performs for every other unreserved key.
   @blocks_doc_reserved_attrs ~w(
     slug dataset blocks workspace_id project_id template style
     source_doc goal_id event_type tags description body_html payload_html
-    branch bypass_wall
+    branch bypass_wall events
   )
 
   # Session-handoff Task 2 ("generalized upsert"): `write_encrypted_blocks_doc`'s

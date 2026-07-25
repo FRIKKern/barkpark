@@ -19,6 +19,16 @@ defmodule Barkpark.Content.Sessions do
   winner rather than racing it — the same "extremely rare" CAS-loss posture
   `Barkpark.Tasks` docs for its own mutations — so there is no retry loop
   here, matching `update_paper_refs_by_id/4`'s own (retry-free) shape.
+
+  No test here exercises the advisory lock's actual cross-process
+  serialization (two concurrent `append_event/5` calls racing on the same
+  slug): `Barkpark.DataCase`'s Ecto SQL sandbox gives each test ONE
+  checked-out connection (or an `Ecto.Adapters.SQL.Sandbox.allow/3`-shared
+  one), so a real concurrency test would need two independent DB
+  connections/processes outside the sandbox's ownership model — impractical
+  in this suite. Correctness here rests on `pg_advisory_xact_lock/1` being a
+  real Postgres primitive (proven by its existing use in
+  `Barkpark.Tasks.Mutations`), not on a test racing it.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -45,7 +55,7 @@ defmodule Barkpark.Content.Sessions do
   `{:error, :invalid_kind}`, or `{:error, :stale}` (CAS lost — see the
   moduledoc on why that's not retried here).
   """
-  @spec append_event(binary(), binary(), map(), binary(), keyword()) ::
+  @spec append_event(binary(), binary() | nil, map(), binary(), keyword()) ::
           {:ok, %{count: non_neg_integer()}}
           | {:error, :not_found | :invalid_kind | :stale}
   def append_event(slug, kind, attrs \\ %{}, dataset \\ "production", opts \\ [])
