@@ -20,20 +20,19 @@ type Transport interface {
 	// CreateSession POSTs /v1/chat/sessions and returns the created session.
 	CreateSession() (Session, error)
 	// ListSessions GETs /v1/chat/sessions (non-archived).
+	//
+	// There is deliberately NO ListArchivedSessions / Unarchive here: the TUI has
+	// no shelf screen, so those two rode the interface unread — a seam that looks
+	// like a capability the pane has and does not. The shelf's read and its way
+	// back live where they are actually reachable (`bp chat ls --archived` and
+	// `bp chat unarchive`, both straight over apiclient); when a TUI shelf screen
+	// is built, it adds its members back with a caller attached.
 	ListSessions() ([]SessionSummary, error)
-	// ListArchivedSessions GETs /v1/chat/sessions?archived=true — the shelf.
-	// A SEPARATE method rather than a bool parameter because the two lists are
-	// two different questions at every call site, and a bare `false` at a call
-	// site reads like an accident.
-	ListArchivedSessions() ([]SessionSummary, error)
 	// Archive POSTs /v1/chat/sessions/:id/archive — DISMISSAL, orthogonal to
 	// both status (liveness) and agent_state (attention). The server emits no
 	// fleet frame for the flip, so the client removes the row optimistically
 	// and reconciles on the next list read.
 	Archive(id string) error
-	// Unarchive POSTs /v1/chat/sessions/:id/unarchive. Never navigates
-	// anywhere on its own — it puts a row back, and nothing has to move.
-	Unarchive(id string) error
 	// GetSession GETs /v1/chat/sessions/:id — the FULL struct (rail + continuity
 	// + metrics). sinceSeq > 0 appends ?since= so only newer message rows return
 	// (the turn-boundary tail refetch, charter D8/D15).
@@ -96,19 +95,10 @@ func (t *clientTransport) ListSessions() ([]SessionSummary, error) {
 	return t.c.ListChatSessions(false)
 }
 
-func (t *clientTransport) ListArchivedSessions() ([]SessionSummary, error) {
-	return t.c.ListChatSessions(true)
-}
-
 func (t *clientTransport) Archive(id string) error {
 	// The returned session is discarded: the row is leaving this shelf, so its
 	// refreshed fields have no reader. The 200 is the whole signal.
 	_, err := t.c.ArchiveChatSession(id)
-	return err
-}
-
-func (t *clientTransport) Unarchive(id string) error {
-	_, err := t.c.UnarchiveChatSession(id)
 	return err
 }
 

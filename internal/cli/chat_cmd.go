@@ -44,6 +44,14 @@ func runChat(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if len(args) > 0 && args[0] == "ls" {
 		return runChatLs(out, g, ctx, args[1:])
 	}
+	// `unarchive` is the OTHER non-TTY verb, and it exists because the shelf door
+	// was one-way: the TUI's `a` archives and `bp chat ls --archived` shows the
+	// shelf, but nothing outside a terminal could put a row BACK — a dismissal
+	// was effectively permanent for any script, pipe, or CI pane. Peeled here for
+	// the same reason as `ls`: before the stray-arg reject and the TTY gate.
+	if len(args) > 0 && args[0] == "unarchive" {
+		return runChatUnarchive(out, g, ctx, args[1:])
+	}
 	if g.help {
 		printChatHelp(out)
 		return exitOK
@@ -76,7 +84,7 @@ func runChat(out *writer, g globals, ctx manifest.Context, args []string) int {
 	// args so a typo fails loudly instead of being silently ignored.
 	if len(args) > 0 {
 		return usageErrf(out, func() { printChatHelp(out) },
-			"bp chat takes no arguments besides `ls` (got %q)", args[0])
+			"bp chat takes no arguments besides `ls` and `unarchive` (got %q)", args[0])
 	}
 
 	// Resolve the skin identity by precedence and validate it. An UNKNOWN id is
@@ -205,6 +213,60 @@ func runChatLs(out *writer, g globals, ctx manifest.Context, args []string) int 
 	return exitOK
 }
 
+// runChatUnarchive is `bp chat unarchive <id>` — the shelf's way BACK, and the
+// half that made archiving reversible outside the TUI.
+//
+// Idempotent by the server's contract (unarchiving a live session still 200s),
+// so a re-run is safe; a missing or foreign id is the 404 NOT-FOUND ORACLE and
+// is reported as exactly that — "no chat session <id>" — because the wire
+// deliberately cannot tell the two apart, and a message like "not yours" would
+// be inventing a fact.
+func runChatUnarchive(out *writer, g globals, ctx manifest.Context, args []string) int {
+	if g.help {
+		printChatUnarchiveHelp(out)
+		return exitOK
+	}
+	var ids []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			return usageErrf(out, func() { printChatUnarchiveHelp(out) },
+				"unknown chat unarchive argument %q (bp chat unarchive takes one session id)", a)
+		}
+		ids = append(ids, a)
+	}
+	if len(ids) != 1 {
+		// One id, never a list: this is a lifecycle write, and a partial failure
+		// halfway through a batch leaves the caller guessing which rows moved.
+		return usageErrf(out, func() { printChatUnarchiveHelp(out) },
+			"bp chat unarchive needs exactly one session id (got %d)", len(ids))
+	}
+
+	client := apiclient.New(apiclient.Config{BaseURL: ctx.Server, Token: ctx.Token})
+	session, err := client.UnarchiveChatSession(ids[0])
+	if err != nil {
+		out.errf("bp chat unarchive: %v", err)
+		return exitGeneric
+	}
+	if out.machineOut() {
+		raw, merr := json.Marshal(session)
+		if merr != nil {
+			out.errf("bp chat unarchive: %v", merr)
+			return exitGeneric
+		}
+		var generic any
+		_ = json.Unmarshal(raw, &generic)
+		if out.emitStructured(map[string]any{"session": generic}) {
+			return exitOK
+		}
+	}
+	title := strings.TrimSpace(session.Title)
+	if title == "" {
+		title = "untitled session"
+	}
+	out.outf("unarchived %s  %s", session.ID, title)
+	return exitOK
+}
+
 // runChatLsWatch holds the fleet stream synchronously (the runListen
 // precedent): one printed line per state flip, Ctrl-C cancels the context and
 // exits 0. The transport owns reconnect/backoff; only its terminal give-up is
@@ -293,6 +355,7 @@ func printChatHelp(out *writer) {
 	out.outf("usage: bp chat [--theme <skin>]   open the herd (interactive TUI)")
 	out.outf("       bp chat ls [--watch]       list the herd without a TTY")
 	out.outf("       bp chat ls --archived      list the archived shelf")
+	out.outf("       bp chat unarchive <id>     put a shelved session back on the herd")
 	out.outf("")
 	out.outf("  --theme <skin>   design-system palette: evergreen (default), charple,")
 	out.outf("                   ember, fjord, iris — the SKIN IDENTITY (mode stays dark;")
@@ -322,6 +385,20 @@ func printChatHelp(out *writer) {
 	out.outf("    ↑ / ↓, wheel   scroll the transcript · End follows the live tail")
 	out.outf("    ctrl-b         back to the herd (your draft is saved)")
 	out.outf("    ctrl-c         quit (your draft is saved)")
+}
+
+// printChatUnarchiveHelp prints the short help block for `bp chat unarchive`.
+func printChatUnarchiveHelp(out *writer) {
+	out.outf("usage: bp chat unarchive <session-id>")
+	out.outf("")
+	out.outf("Put an archived session back on the active herd — the way BACK from the shelf")
+	out.outf("`bp chat ls --archived` lists. Archiving is DISMISSAL: nothing about the")
+	out.outf("session's liveness or its agent state changed, so nothing is being restarted")
+	out.outf("here — only which list the row appears in.")
+	out.outf("")
+	out.outf("Idempotent (unarchiving a session that is already active still succeeds).")
+	out.outf("`-o json` emits the refreshed session. A missing session and one you cannot")
+	out.outf("see are reported the same way, by design.")
 }
 
 // printChatLsHelp prints the short help block for `bp chat ls`.

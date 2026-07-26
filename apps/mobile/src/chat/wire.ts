@@ -65,6 +65,15 @@ export interface ChatSessionSummary {
   agent_state?: string
   agent_state_at?: string
   last_active_at?: string
+  /** The DISMISSAL stamp the wire really carries (chat_controller.ex
+   * sidebar_json → `archived_at`), projected here because discarding a key the
+   * server sends is how a client ends up guessing at it. `null` on the active
+   * shelf, an ISO8601 timestamp on the archived one.
+   *
+   * It is a FACT about the row, NOT the screen's archived truth: which shelf you
+   * asked for still decides what is archived (charter D28), because a row that
+   * went stale in either direction would otherwise claim the wrong shelf. */
+  archived_at?: string | null
   inserted_at?: string
   updated_at?: string
 }

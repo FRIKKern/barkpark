@@ -47,10 +47,11 @@ async function chatSend(
  * the DB by the token (D10: the workspace's sessions ARE the floor, by
  * design).
  *
- * `archived` selects WHICH SHELF, and that is the ONLY archived truth the
- * client has: the sidebar row carries no archived flag, so "is this session
- * archived" is answered by which list you asked for, never by a per-row
- * boolean (charter D28). The flag is always sent explicitly — the same
+ * `archived` selects WHICH SHELF, and the shelf — not the row — is how the
+ * client answers "is this session archived" (charter D28). The row's own
+ * `archived_at` is projected (the server does send it) but never overrules the
+ * shelf: a row can go stale, the question you asked cannot. The flag is always
+ * sent explicitly — the same
  * discipline as the Go client's ListChatSessions — so the server never has to
  * guess a default. */
 export async function listChatSessions(
@@ -140,7 +141,8 @@ export async function patchChatSession(
   await chatSend(connection, 'PATCH', `/sessions/${encodeURIComponent(id)}`, fields, [200])
 }
 
-/** POST /v1/chat/sessions/:id/archive — stamp archived_at (200 {session}),
+/** POST /v1/chat/sessions/:id/archive — stamp archived_at (200, body = the
+ * refreshed session at the top level, which this caller has no use for),
  * idempotent. A foreign-tenant or missing id joins the not-found oracle (404),
  * so a failure here is indistinguishable from "never existed" BY DESIGN.
  *
