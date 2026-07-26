@@ -508,6 +508,14 @@ export function SwipeToArchive({
             Animated.spring(dx, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start()
             return
           }
+          // The dismissal-weight buzz (D43 archiveCommit) fires HERE — at the
+          // release that decides the commit — and not from onCommit() below,
+          // which the two-stage animation reaches 280ms later. A buzz that late
+          // reads as the app confirming something back at you; the finger has
+          // long since left the glass. Both shelves share this gesture (the
+          // archived shelf's swipe is labelled Unarchive) and both are the same
+          // felt moment: a row you swiped away, going away.
+          haptic('archiveCommit')
           collapse.setValue(measured ?? 0)
           setDismissing(true)
           Animated.timing(dx, {

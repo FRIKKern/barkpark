@@ -1,5 +1,6 @@
-// Haptic vocabulary — the ten-event semantic registry (t3code wave, lane 5;
-// charter D33). Call sites say haptic('turnSettle'), NEVER raw impact styles.
+// Haptic vocabulary — the thirteen-event semantic registry (t3code wave, lane 5;
+// charter D33, amended ONCE by D43). Call sites say haptic('turnSettle'), NEVER
+// raw impact styles.
 //
 // RESTRAINT LAW (t3code's measured restraint, verbatim):
 //   • no Heavy impact — anywhere, ever;
@@ -17,6 +18,16 @@
 // D33 rename: t3code's refresh-"settle" event is `refreshDone` here —
 // 'settle' is reserved for D77 turn settlement, and pull-to-refresh
 // completion is not one (turnSettle IS D77-legit and keeps its name).
+//
+// THE ONE LICENSED AMENDMENT (charter D43, closing wave round 2): t3w2-s7
+// shipped swipe-to-archive and the picker sheet with no honest event for either
+// moment, and the motion slice left the jump pill on `disclosureToggle`. Three
+// events join — archiveCommit, optionPick, jumpToLatest — and D33 otherwise
+// stands verbatim. Note what the amendment deliberately does NOT do: it adds no
+// new FEEDBACK, only new NAMES for feedback the palette already had. The impact
+// palette stays exactly {Light, Medium} — no Heavy (law), and no Soft or Rigid
+// either, because a fourth and fifth weight nobody can tell apart in a pocket
+// is vocabulary inflation dressed as nuance. 'settle' remains reserved.
 import * as Haptics from 'expo-haptics'
 
 const registry = {
@@ -40,6 +51,25 @@ const registry = {
   copy: () => Haptics.selectionAsync(),
   /** Request refused (auth/permission terminal failure). */
   refused: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error),
+  /** The archive swipe committed — a DISMISSAL commitment (D43).
+   *
+   * Medium, like every other commitment, and that is the point: the four
+   * existing Medium events (send/approve/deny/claim) are all things you say TO
+   * the fleet, so borrowing one of them for "make this row go away" would
+   * mislabel the moment in the code even though the buzz would be identical.
+   * The weight is right; only the name was missing. It fires at the moment the
+   * gesture is DECIDED (release past the threshold), never when the request
+   * lands — the phone reports your commitment, not the server's answer, which
+   * is what `refused` is for. */
+  archiveCommit: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium),
+  /** A picker chip chosen — mode/model/effort — a selection tick (D43).
+   * s7 honestly used `disclosureToggle` for the sheet OPENING (a sheet IS a
+   * disclosure) and then had nothing left for the choice inside it. */
+  optionPick: () => Haptics.selectionAsync(),
+  /** The jump-to-latest pill pressed — a selection tick (D43).
+   * Re-engaging follow mode is a position choice, not a disclosure: the same
+   * tick the pill already emitted, finally under its own name. */
+  jumpToLatest: () => Haptics.selectionAsync(),
 } as const
 
 export type HapticEvent = keyof typeof registry

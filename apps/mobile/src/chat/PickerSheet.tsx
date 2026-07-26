@@ -260,7 +260,9 @@ function PickerRow({
               accessibilityState={{ selected: on }}
               accessibilityLabel={`${label}: ${option}`}
               onPress={() => {
-                haptic('disclosureToggle')
+                // The chip's own event (D43): the SHEET opening is the
+                // disclosure, the choice inside it is a selection tick.
+                haptic('optionPick')
                 onPick(kind, option)
               }}
               style={[
