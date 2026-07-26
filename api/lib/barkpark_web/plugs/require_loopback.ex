@@ -10,7 +10,7 @@ defmodule BarkparkWeb.Plugs.RequireLoopback do
   `localhost`, so `conn.remote_ip` is ALWAYS loopback and gating on it admits
   the entire open internet. The client is therefore resolved through
   `Barkpark.RateLimiter.client_ip/1` — the one trust boundary for
-  `x-forwarded-for` (`@canonical capability:rate-limit-client-ip`): the header
+  `x-forwarded-for` (canonical capability `rate-limit-client-ip`): the header
   is ignored unless the peer is loopback or listed in `BARKPARK_TRUSTED_PROXIES`
   (`config :barkpark, :trusted_proxies`), and a trusted chain is walked
   right-to-left past trusted hops, so a forged `x-forwarded-for: 127.0.0.1`
