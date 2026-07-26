@@ -32,6 +32,93 @@ const TICK_MS = 500
 // don't have to reach into the api layer for the type.
 export type { StreamFailure, StreamStatus } from '../api/chat'
 
+// ── the notify coalescer (lane 2 M4) ─────────────────────────────────────────
+
+/** How a coalesced notify is deferred. Injectable ONLY so jest can drive the
+ * seam on a queue it controls; production always uses the microtask. */
+export type NotifyScheduler = (run: () => void) => void
+
+export const microtask: NotifyScheduler = (run) => {
+  void Promise.resolve().then(run)
+}
+
+export interface NotifyCoalescer {
+  /** Announce eventually — N schedules inside one tick collapse to ONE notify. */
+  schedule(): void
+  /** Announce NOW, and swallow any coalesced notify already in flight. */
+  flush(): void
+  /** Drop a pending notify without announcing (the store's stop()). */
+  cancel(): void
+}
+
+/** THE BATCHING SEAM — and it sits here, at set()/notify, deliberately NOT in
+ * the reducer. reduce() keeps running once per SSE frame, so the D77
+ * gen/tailGen fence sees exactly the frame sequence it was proven against; all
+ * that is batched is how often listeners are TOLD. Pure apart from the
+ * injected scheduler, so the whole law is jest-drivable.
+ *
+ * `dirty` is what makes flush() honest: it cancels the pending announcement
+ * rather than racing it, so an immediate event can never be followed by a
+ * duplicate coalesced notify for state that was already delivered. */
+export function createNotifyCoalescer(
+  notify: () => void,
+  schedule: NotifyScheduler = microtask,
+): NotifyCoalescer {
+  let scheduled = false
+  let dirty = false
+  return {
+    schedule(): void {
+      dirty = true
+      if (scheduled) return
+      scheduled = true
+      schedule(() => {
+        scheduled = false
+        if (!dirty) return
+        dirty = false
+        notify()
+      })
+    },
+    flush(): void {
+      dirty = false
+      notify()
+    },
+    cancel(): void {
+      dirty = false
+    },
+  }
+}
+
+/** The ONE delta safe to coalesce: the streaming tail grew and NOTHING else
+ * moved. Every other transition — an init frame, a turn settling, a card
+ * arriving, a phase or notice change — flushes immediately, because those are
+ * the moments the user is waiting on and a microtask of latency on them buys
+ * nothing.
+ *
+ * Written as an exhaustive field comparison rather than a role guess on the
+ * event: a future reducer field that a delta starts touching then falls out of
+ * the coalesced path automatically (it stops looking tail-only), which fails
+ * SAFE — toward more notifies, never toward a swallowed one. */
+export function tailOnlyGrowth(prev: ChatState, next: ChatState): boolean {
+  if (next === prev || next.tail === prev.tail) return false
+  return (
+    next.messages === prev.messages &&
+    next.local === prev.local &&
+    next.answerInFlight === prev.answerInFlight &&
+    next.sessionId === prev.sessionId &&
+    next.title === prev.title &&
+    next.lastSeq === prev.lastSeq &&
+    next.model === prev.model &&
+    next.mode === prev.mode &&
+    next.phase === prev.phase &&
+    next.settling === prev.settling &&
+    next.wedgeAtMs === prev.wedgeAtMs &&
+    next.gen === prev.gen &&
+    next.tailGen === prev.tailGen &&
+    next.notice === prev.notice &&
+    next.exited === prev.exited
+  )
+}
+
 export interface SessionSnapshot {
   state: ChatState
   /** true until the initial full GET resolves (or fails). */
@@ -60,11 +147,18 @@ export class ChatSessionStore {
    * unconditional terminal 'closed', a late seed GET — must never clobber the
    * live start's state. */
   private startGen = 0
+  /** Tail deltas announce through here (lane 2 M4). Constructed per store so
+   * two live sessions never share a pending notify. */
+  private readonly notifier: NotifyCoalescer
 
   constructor(
     private readonly connection: InstanceConnection,
     private readonly sessionId: string,
+    schedule: NotifyScheduler = microtask,
   ) {
+    this.notifier = createNotifyCoalescer(() => {
+      for (const listener of this.listeners) listener()
+    }, schedule)
     this.snapshot = {
       state: initialChatState(sessionId),
       loading: true,
@@ -133,6 +227,9 @@ export class ChatSessionStore {
 
   stop(): void {
     this.stopped = true
+    // A coalesced tail notify must not land after teardown — the listeners are
+    // already gone, and firing into them is noise the store can simply not make.
+    this.notifier.cancel()
     if (this.tick !== undefined) {
       clearInterval(this.tick)
       this.tick = undefined // start()'s running marker — stop() must null it (D25)
@@ -155,8 +252,11 @@ export class ChatSessionStore {
 
   private dispatch(ev: ChatEvent): void {
     if (this.stopped) return
-    const { state, effects } = reduce(this.snapshot.state, ev, Date.now())
-    if (state !== this.snapshot.state) this.set({ state })
+    const prev = this.snapshot.state
+    const { state, effects } = reduce(prev, ev, Date.now())
+    // The reducer ran per-frame, exactly as before. The only judgment made
+    // here is how urgently listeners hear about it (lane 2 M4).
+    if (state !== prev) this.set({ state }, tailOnlyGrowth(prev, state))
     for (const eff of effects) this.run(eff)
   }
 
@@ -194,9 +294,13 @@ export class ChatSessionStore {
     }
   }
 
-  private set(patch: Partial<SessionSnapshot>): void {
+  /** The snapshot is committed SYNCHRONOUSLY either way — getSnapshot always
+   * returns the newest truth, so a coalesced notify can delay an announcement
+   * but can never serve stale state to a listener that reads in between. */
+  private set(patch: Partial<SessionSnapshot>, coalesce = false): void {
     this.snapshot = { ...this.snapshot, ...patch }
-    for (const listener of this.listeners) listener()
+    if (coalesce) this.notifier.schedule()
+    else this.notifier.flush()
   }
 }
 
