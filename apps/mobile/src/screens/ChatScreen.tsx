@@ -55,6 +55,7 @@ import type { ChatSessionSummary } from '../chat/wire'
 import { ChatSessionScreen } from './ChatSessionScreen'
 import { haptic } from '../ui/haptics'
 import { useTheme, type Theme } from '../ui/theme'
+import { roles, scale } from '../ui/typography'
 
 /** Which shelf the list is showing. This is the ONLY archived truth the client
  * holds (charter D28): the wire's sidebar row has no archived field, so "is it
@@ -551,8 +552,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingBottom: 6,
   },
-  shelfTitle: { fontSize: 22, fontWeight: '700' },
-  capNote: { fontSize: 12, paddingTop: 14, paddingBottom: 4 },
+  shelfTitle: { ...roles.sectionTitle, fontWeight: '700' },
+  capNote: { ...scale.xs, paddingTop: 14, paddingBottom: 4 },
   // Borderless rows on the background — whitespace separates sessions, the
   // way the ChatGPT/Claude session lists do it.
   row: { paddingVertical: 14, gap: 5 },
@@ -567,9 +568,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
-  swipeLabel: { fontSize: 13, fontWeight: '700', letterSpacing: 0.4 },
+  swipeLabel: { ...scale.sm, fontWeight: '700', letterSpacing: 0.4 },
   rowTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  title: { flex: 1, fontSize: 16, fontWeight: '600', lineHeight: 22 },
+  title: { flex: 1, ...scale.lg, fontWeight: '600' },
   pendingBadge: {
     minWidth: 20,
     height: 20,
@@ -578,12 +579,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 5,
   },
-  pendingText: { color: '#ffffff', fontSize: 11, fontWeight: '700' },
+  pendingText: { ...scale.micro, color: '#ffffff', fontWeight: '700' },
   rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  stateLabel: { fontSize: 12, fontWeight: '600' },
-  metaText: { fontSize: 12 },
-  summary: { fontSize: 14, lineHeight: 20 },
-  body: { fontSize: 15, textAlign: 'center' },
-  muted: { fontSize: 13, textAlign: 'center' },
-  link: { fontSize: 14, textDecorationLine: 'underline' },
+  stateLabel: { ...scale.xs, fontWeight: '600' },
+  metaText: { ...scale.xs },
+  summary: { ...scale.base },
+  body: { ...scale.md, textAlign: 'center' },
+  muted: { ...scale.sm, textAlign: 'center' },
+  link: { ...scale.base, textDecorationLine: 'underline' },
 })

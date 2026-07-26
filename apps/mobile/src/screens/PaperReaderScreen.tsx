@@ -26,6 +26,7 @@ import { fetchPaper, type PaperDoc } from '../api/papers'
 import { renderBlockNative, type BlockCtx } from '../papers/portabledoc/blocks'
 import { isMap, str } from '../papers/portabledoc/model'
 import { useTheme } from '../ui/theme'
+import { scale } from '../ui/typography'
 
 type ReaderState =
   | { phase: 'loading' }
@@ -158,11 +159,11 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     borderBottomWidth: 1,
   },
-  back: { fontSize: 15, fontWeight: '600' },
-  headerTitle: { flex: 1, fontSize: 15, fontWeight: '700' },
+  back: { ...scale.md, fontWeight: '600' },
+  headerTitle: { flex: 1, ...scale.md, fontWeight: '700' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
   listContent: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 40 },
-  body: { fontSize: 15, textAlign: 'center' },
-  muted: { fontSize: 13, textAlign: 'center' },
-  link: { fontSize: 14, textDecorationLine: 'underline' },
+  body: { ...scale.md, textAlign: 'center' },
+  muted: { ...scale.sm, textAlign: 'center' },
+  link: { ...scale.base, textDecorationLine: 'underline' },
 })

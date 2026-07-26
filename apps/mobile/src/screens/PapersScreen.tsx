@@ -25,6 +25,7 @@ import { EMPTY_PAGER, appendPage, shouldLoadMore, type PagerState } from '../pap
 import { relativeTime } from './ChatScreen'
 import { PaperReaderScreen } from './PaperReaderScreen'
 import { useTheme, type Theme } from '../ui/theme'
+import { scale } from '../ui/typography'
 
 type ListState =
   | { phase: 'loading' }
@@ -244,11 +245,11 @@ const styles = StyleSheet.create({
   listContent: { padding: 16, gap: 10 },
   footer: { paddingVertical: 16, alignItems: 'center' },
   row: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 6, marginBottom: 8 },
-  title: { fontSize: 15, fontWeight: '600', lineHeight: 20 },
-  description: { fontSize: 13, lineHeight: 18 },
+  title: { ...scale.md, fontWeight: '600' },
+  description: { ...scale.sm },
   rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   pill: {
-    fontSize: 11,
+    ...scale.micro,
     fontWeight: '700',
     borderWidth: 1,
     borderRadius: 5,
@@ -256,8 +257,8 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     overflow: 'hidden',
   },
-  metaText: { fontSize: 12 },
-  body: { fontSize: 15, textAlign: 'center' },
-  muted: { fontSize: 13, textAlign: 'center' },
-  link: { fontSize: 14, textDecorationLine: 'underline' },
+  metaText: { ...scale.xs },
+  body: { ...scale.md, textAlign: 'center' },
+  muted: { ...scale.sm, textAlign: 'center' },
+  link: { ...scale.base, textDecorationLine: 'underline' },
 })

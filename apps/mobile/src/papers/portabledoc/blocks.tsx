@@ -15,6 +15,7 @@ import type { ReactNode } from 'react'
 import { Text, View, Image, ScrollView } from 'react-native'
 
 import type { Theme } from '../../ui/theme'
+import { roles, scale, type TypeStep } from '../../ui/typography'
 import { CHAT_RENDERERS } from './chat'
 import { MermaidIsland } from './MermaidIsland'
 import { renderInlineNodes, type BlockRegister, type InlineCtx } from './inlines'
@@ -59,28 +60,28 @@ export type Render = (b: Block, ctx: BlockCtx, key: number) => ReactNode
 
 /* ── registers ──────────────────────────────────────────────────────────────── */
 
-const SERIF = 'serif'
+// The serif face is no longer named here: it rides the token that needs it
+// (roles.readingBody / paperIngress / paperPullquote all carry fontFamily).
 const MONO = 'monospace'
 
 interface RegisterSpec {
-  /** undefined = the platform's system sans (RN's default face). */
-  bodyFace: string | undefined
-  bodySize: number
-  bodyLine: number
-  /** lineHeight stays the shared ×1.3 formula — only size and lead move. */
-  heading: Record<1 | 2 | 3, { fontSize: number; marginTop: number }>
+  /** The body measure. The paper token carries the serif face on itself; the
+   * chat token omits fontFamily, which IS the platform's system sans. */
+  body: TypeStep & { readonly fontFamily?: string }
+  /** Each heading step carries its own lead. The ×1.3 law that used to be
+   * computed here now lives in the token module (roles.paperH1/H2/H3 and
+   * roles.chatH1/H2/H3 are that formula, rounded) — one owner for the value. */
+  heading: Record<1 | 2 | 3, { step: TypeStep; marginTop: number }>
 }
 
 const REGISTERS: Record<BlockRegister, RegisterSpec> = {
   // The reader: serif measure, display headings, generous lead.
   paper: {
-    bodyFace: SERIF,
-    bodySize: 16,
-    bodyLine: 26,
+    body: roles.readingBody,
     heading: {
-      1: { fontSize: 26, marginTop: 24 },
-      2: { fontSize: 22, marginTop: 20 },
-      3: { fontSize: 18, marginTop: 16 },
+      1: { step: roles.paperH1, marginTop: 24 },
+      2: { step: roles.paperH2, marginTop: 20 },
+      3: { step: roles.paperH3, marginTop: 16 },
     },
   },
   // The transcript: the same 16/26 measure the #6126 assistant turn already
@@ -88,13 +89,11 @@ const REGISTERS: Record<BlockRegister, RegisterSpec> = {
   // Headings compress hard: an assistant turn is a few hundred words, so a
   // 26 pt display head would out-shout the whole screen.
   chat: {
-    bodyFace: undefined,
-    bodySize: 16,
-    bodyLine: 26,
+    body: roles.chatBody,
     heading: {
-      1: { fontSize: 20, marginTop: 16 },
-      2: { fontSize: 18, marginTop: 14 },
-      3: { fontSize: 16, marginTop: 12 },
+      1: { step: roles.chatH1, marginTop: 16 },
+      2: { step: roles.chatH2, marginTop: 14 },
+      3: { step: roles.chatH3, marginTop: 12 },
     },
   },
 }
@@ -104,13 +103,7 @@ function spec(ctx: BlockCtx): RegisterSpec {
 }
 
 function bodyText(ctx: BlockCtx) {
-  const s = spec(ctx)
-  return {
-    fontFamily: s.bodyFace,
-    fontSize: s.bodySize,
-    lineHeight: s.bodyLine,
-    color: ctx.theme.text,
-  }
+  return { ...spec(ctx).body, color: ctx.theme.text }
 }
 
 /* ── prose core ─────────────────────────────────────────────────────────────── */
@@ -124,10 +117,9 @@ const heading: Render = (b, ctx, key) => {
       accessibilityRole="header"
       style={{
         fontWeight: '700',
-        fontSize: s.fontSize,
+        ...s.step,
         marginTop: s.marginTop,
         marginBottom: 6,
-        lineHeight: s.fontSize * 1.3,
         color: ctx.theme.text,
       }}
     >
@@ -146,7 +138,7 @@ const eyebrow: Render = (b, ctx, key) => (
   <Text
     key={key}
     style={{
-      fontSize: 12,
+      ...scale.xs,
       fontWeight: '700',
       letterSpacing: 1.2,
       textTransform: 'uppercase',
@@ -163,7 +155,7 @@ const byline: Render = (b, ctx, key) => {
   const items = b.items
   const text = Array.isArray(items) ? items.map((i) => str(i)).join(' · ') : str(b.text)
   return (
-    <Text key={key} style={{ fontSize: 13, color: ctx.theme.textMuted, marginVertical: 4 }}>
+    <Text key={key} style={{ ...scale.sm, color: ctx.theme.textMuted, marginVertical: 4 }}>
       {text}
     </Text>
   )
@@ -173,9 +165,7 @@ const ingress: Render = (b, ctx, key) => (
   <Text
     key={key}
     style={{
-      fontFamily: SERIF,
-      fontSize: 19,
-      lineHeight: 30,
+      ...roles.paperIngress,
       color: ctx.theme.text,
       marginVertical: 8,
     }}
@@ -188,10 +178,8 @@ const pullquote: Render = (b, ctx, key) => (
   <Text
     key={key}
     style={{
-      fontFamily: SERIF,
+      ...roles.paperPullquote,
       fontStyle: 'italic',
-      fontSize: 20,
-      lineHeight: 30,
       color: ctx.theme.text,
       marginVertical: 14,
       paddingHorizontal: 12,
@@ -257,11 +245,11 @@ const callout: Render = (b, ctx, key) => {
       }}
     >
       {title !== '' && (
-        <Text style={{ fontWeight: '700', color: ctx.theme.text, marginBottom: 4, fontSize: 14 }}>
+        <Text style={{ ...scale.base, fontWeight: '700', color: ctx.theme.text, marginBottom: 4 }}>
           {title}
         </Text>
       )}
-      <Text style={[bodyText(ctx), { fontSize: 15, lineHeight: 23 }]}>
+      <Text style={[bodyText(ctx), roles.calloutBody]}>
         {renderInlineNodes(paragraphInline(b), ctx)}
       </Text>
     </View>
@@ -289,9 +277,8 @@ const code: Render = (b, ctx, key) => {
     <ScrollView key={key} horizontal style={frame} contentContainerStyle={{ padding: 12 }}>
       <Text
         style={{
+          ...roles.codeBlock,
           fontFamily: MONO,
-          fontSize: 13,
-          lineHeight: 20,
           color: chat ? ctx.theme.codeFg : ctx.theme.text,
         }}
       >
@@ -343,7 +330,7 @@ const image: Render = (b, ctx, key) => {
           marginVertical: 8,
         }}
       >
-        <Text numberOfLines={3} style={{ fontSize: 12, color: ctx.theme.textMuted, fontStyle: 'italic' }}>
+        <Text numberOfLines={3} style={{ ...scale.xs, color: ctx.theme.textMuted, fontStyle: 'italic' }}>
           Image unavailable: {src}
         </Text>
       </View>
@@ -369,7 +356,7 @@ function figcaption(caption: string, theme: Theme, key: string | number): ReactN
   if (caption === '') return null
   const m = /^(Figure\s+\S+?\.)\s*([\s\S]*)$/.exec(caption)
   return (
-    <Text key={key} style={{ fontSize: 13, lineHeight: 19, fontStyle: 'italic', color: theme.textMuted, marginTop: 6 }}>
+    <Text key={key} style={{ ...scale.sm, fontStyle: 'italic', color: theme.textMuted, marginTop: 6 }}>
       {m ? (
         <>
           <Text style={{ fontWeight: '700' }}>{m[1]}</Text>
@@ -413,7 +400,7 @@ const table: Render = (b, ctx, key) => {
           <View style={{ flexDirection: 'row', backgroundColor: ctx.theme.surface }}>
             {head.map((cell, i) => (
               <View key={i} style={{ minWidth: cellMin, maxWidth: 220, padding: 8 }}>
-                <Text style={{ fontWeight: '700', fontSize: 13, color: ctx.theme.text }}>
+                <Text style={{ ...scale.sm, fontWeight: '700', color: ctx.theme.text }}>
                   {renderInlineNodes(Array.isArray(cell) ? cell : [cell], ctx)}
                 </Text>
               </View>
@@ -427,7 +414,7 @@ const table: Render = (b, ctx, key) => {
           >
             {asList(row).map((cell, ci) => (
               <View key={ci} style={{ minWidth: cellMin, maxWidth: 220, padding: 8 }}>
-                <Text style={{ fontSize: 13, lineHeight: 19, color: ctx.theme.text }}>
+                <Text style={{ ...scale.sm, color: ctx.theme.text }}>
                   {renderInlineNodes(Array.isArray(cell) ? cell : [cell], ctx)}
                 </Text>
               </View>
@@ -477,8 +464,7 @@ const toc: Render = (b, ctx, key) => {
       <Text
         key={idx}
         style={{
-          fontSize: 14,
-          lineHeight: 24,
+          ...roles.tocRow,
           color: ctx.theme.accent,
           paddingLeft: (rel - 1) * 16,
         }}
@@ -540,12 +526,16 @@ function statCard(item: Record<string, unknown>, ctx: BlockCtx, key: number): Re
           />
         </View>
       )}
-      <Text style={{ fontSize: 24, fontWeight: '700', color: ctx.theme.text }}>
+      <Text style={{ ...roles.statValue, fontWeight: '700', color: ctx.theme.text }}>
         {value}
-        {denom !== '' && <Text style={{ fontSize: 15, color: ctx.theme.textMuted }}>/{denom}</Text>}
+        {/* NESTED Text: size only. A lineHeight on a nested run fights the
+            parent's line box, so nested runs take `<token>.fontSize`. */}
+        {denom !== '' && (
+          <Text style={{ fontSize: scale.md.fontSize, color: ctx.theme.textMuted }}>/{denom}</Text>
+        )}
       </Text>
       {label !== '' && (
-        <Text style={{ fontSize: 12, lineHeight: 17, color: ctx.theme.textMuted }}>{label}</Text>
+        <Text style={{ ...scale.xs, color: ctx.theme.textMuted }}>{label}</Text>
       )}
     </View>
   )
@@ -561,7 +551,7 @@ const stats: Render = (b, ctx, key) => {
 
 function emptyDataviz(kind: string, ctx: BlockCtx, key: number): ReactNode {
   return (
-    <Text key={key} style={{ fontSize: 13, fontStyle: 'italic', color: ctx.theme.textMuted, marginVertical: 6 }}>
+    <Text key={key} style={{ ...scale.sm, fontStyle: 'italic', color: ctx.theme.textMuted, marginVertical: 6 }}>
       {kind} — no data
     </Text>
   )
@@ -579,7 +569,7 @@ function noteRow(item: unknown, ctx: BlockCtx, key: number): ReactNode {
       {label !== '' && (
         <Text
           style={{
-            fontSize: 12,
+            ...scale.xs,
             fontWeight: '700',
             color: ctx.theme.accent,
             minWidth: 44,
@@ -589,7 +579,7 @@ function noteRow(item: unknown, ctx: BlockCtx, key: number): ReactNode {
           {label}
         </Text>
       )}
-      <Text style={{ flex: 1, fontSize: 14, lineHeight: 21, color: ctx.theme.text }}>
+      <Text style={{ flex: 1, ...scale.base, color: ctx.theme.text }}>
         {lead !== '' && <Text style={{ fontWeight: '700' }}>{lead + ' '}</Text>}
         {text}
       </Text>
@@ -628,8 +618,8 @@ const cards: Render = (b, ctx, key) => {
               gap: 4,
             }}
           >
-            {title !== '' && <Text style={{ fontWeight: '700', fontSize: 14, color: ctx.theme.text }}>{title}</Text>}
-            {text !== '' && <Text style={{ fontSize: 13, lineHeight: 19, color: ctx.theme.textMuted }}>{text}</Text>}
+            {title !== '' && <Text style={{ ...scale.base, fontWeight: '700', color: ctx.theme.text }}>{title}</Text>}
+            {text !== '' && <Text style={{ ...scale.sm, color: ctx.theme.textMuted }}>{text}</Text>}
           </View>
         )
       })}
@@ -650,12 +640,12 @@ const steps: Render = (b, ctx, key) => {
         if (title === '' && blocks.length === 0) return null
         return (
           <View key={i} style={{ flexDirection: 'row', gap: 10 }}>
-            <Text style={{ fontWeight: '700', fontSize: 15, color: ctx.theme.accent, minWidth: 22 }}>
+            <Text style={{ ...scale.md, fontWeight: '700', color: ctx.theme.accent, minWidth: 22 }}>
               {i + 1}.
             </Text>
             <View style={{ flex: 1 }}>
               {title !== '' && (
-                <Text style={{ fontWeight: '700', fontSize: 15, color: ctx.theme.text }}>{title}</Text>
+                <Text style={{ ...scale.md, fontWeight: '700', color: ctx.theme.text }}>{title}</Text>
               )}
               {blocks.map((child, ci) => renderBlockNative(child, ctx, ci))}
             </View>
@@ -686,7 +676,7 @@ const expandable: Render = (b, ctx, key) => {
       }}
     >
       {summary !== '' && (
-        <Text style={{ fontWeight: '700', fontSize: 14, color: ctx.theme.text, marginBottom: 4 }}>
+        <Text style={{ ...scale.base, fontWeight: '700', color: ctx.theme.text, marginBottom: 4 }}>
           {summary}
         </Text>
       )}
@@ -713,7 +703,7 @@ const blockquote: Render = (b, ctx, key) => {
         {renderInlineNodes(paragraphInline(b), ctx)}
       </Text>
       {cite !== '' && (
-        <Text style={{ fontSize: 13, color: ctx.theme.textMuted, marginTop: 4 }}>— {cite}</Text>
+        <Text style={{ ...scale.sm, color: ctx.theme.textMuted, marginTop: 4 }}>— {cite}</Text>
       )}
     </View>
   )
@@ -730,8 +720,8 @@ const footnote: Render = (b, ctx, key) => {
     <View key={key} style={{ marginVertical: 8, gap: 4 }}>
       {rows.map((n, i) => (
         <View key={i} style={{ flexDirection: 'row', gap: 8 }}>
-          <Text style={{ fontSize: 12, color: ctx.theme.textMuted, marginTop: 2 }}>{i + 1}.</Text>
-          <Text style={{ flex: 1, fontSize: 13, lineHeight: 19, color: ctx.theme.textMuted }}>
+          <Text style={{ ...scale.xs, color: ctx.theme.textMuted, marginTop: 2 }}>{i + 1}.</Text>
+          <Text style={{ flex: 1, ...scale.sm, color: ctx.theme.textMuted }}>
             {str(n.text)}
           </Text>
         </View>
@@ -749,7 +739,7 @@ const section: Render = (b, ctx, key) => {
     <View key={key} style={{ marginVertical: 10 }}>
       <View style={{ height: 1, backgroundColor: ctx.theme.border, marginBottom: 8 }} />
       {title !== '' && (
-        <Text style={{ fontWeight: '700', fontSize: 15, color: ctx.theme.text, marginBottom: 4 }}>
+        <Text style={{ ...scale.md, fontWeight: '700', color: ctx.theme.text, marginBottom: 4 }}>
           {title}
         </Text>
       )}
@@ -780,8 +770,13 @@ const terminal: Render = (b, ctx, key) => {
   return (
     <View key={key} style={{ borderRadius: 8, overflow: 'hidden', marginVertical: 10, backgroundColor: '#15211d' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', padding: 8, gap: 8, backgroundColor: '#0c1512' }}>
-        <Text style={{ color: '#55635e', fontSize: 12 }}>●●●</Text>
-        {title !== '' && <Text style={{ color: '#93a198', fontSize: 12, fontFamily: MONO }}>{title}</Text>}
+        {/* The terminal frame is ALWAYS dark, in both app themes — the hexes
+            below are that constant, not theme drift. They stay hand-written:
+            S1 minted no theme role for an always-dark chrome, so routing them
+            through `theme.*` would make them follow the app theme and break
+            the frame. Only the type moves onto tokens here. */}
+        <Text style={{ ...scale.xs, color: '#55635e' }}>●●●</Text>
+        {title !== '' && <Text style={{ ...scale.xs, color: '#93a198', fontFamily: MONO }}>{title}</Text>}
       </View>
       <View style={{ padding: 10 }}>
         {kids.map((child, i) =>
@@ -789,7 +784,7 @@ const terminal: Render = (b, ctx, key) => {
         )}
       </View>
       {footer !== '' && (
-        <Text style={{ color: '#93a198', fontSize: 11, padding: 8, paddingTop: 0 }}>{footer}</Text>
+        <Text style={{ ...scale.micro, color: '#93a198', padding: 8, paddingTop: 0 }}>{footer}</Text>
       )}
     </View>
   )
@@ -815,7 +810,7 @@ const taskList: Render = (b, ctx, key) => {
   const rows = asList(b.snapshot).filter(isMap)
   if (rows.length === 0) {
     return (
-      <Text key={key} style={{ fontSize: 13, fontStyle: 'italic', color: ctx.theme.textMuted, marginVertical: 8 }}>
+      <Text key={key} style={{ ...scale.sm, fontStyle: 'italic', color: ctx.theme.textMuted, marginVertical: 8 }}>
         No tasks yet.
       </Text>
     )
@@ -834,7 +829,7 @@ const taskList: Render = (b, ctx, key) => {
       }}
     >
       {title !== '' && (
-        <Text style={{ fontWeight: '700', fontSize: 14, color: ctx.theme.text, marginBottom: 6 }}>{title}</Text>
+        <Text style={{ ...scale.base, fontWeight: '700', color: ctx.theme.text, marginBottom: 6 }}>{title}</Text>
       )}
       {rows.map((r, i) => {
         const status = str(r.status)
@@ -842,8 +837,8 @@ const taskList: Render = (b, ctx, key) => {
         const done = status === 'done' || status === 'closed'
         return (
           <View key={i} style={{ flexDirection: 'row', gap: 8, marginVertical: 2 }}>
-            <Text style={{ color: done ? ctx.theme.success : ctx.theme.textMuted, fontSize: 14 }}>{glyph}</Text>
-            <Text style={{ flex: 1, fontSize: 14, lineHeight: 20, color: ctx.theme.text }}>{str(r.title)}</Text>
+            <Text style={{ ...scale.base, color: done ? ctx.theme.success : ctx.theme.textMuted }}>{glyph}</Text>
+            <Text style={{ flex: 1, ...scale.base, color: ctx.theme.text }}>{str(r.title)}</Text>
           </View>
         )
       })}
@@ -860,9 +855,9 @@ const action: Render = (b, ctx, key) => {
     <Text
       key={key}
       style={{
+        ...scale.md,
         color: ctx.theme.accent,
         fontWeight: '700',
-        fontSize: 15,
         textDecorationLine: 'underline',
         marginVertical: 6,
       }}
@@ -899,7 +894,7 @@ function unknownBlock(type: string, ctx: BlockCtx, key: number): ReactNode {
         marginVertical: 6,
       }}
     >
-      <Text style={{ fontSize: 12, color: ctx.theme.textMuted, fontStyle: 'italic' }}>
+      <Text style={{ ...scale.xs, color: ctx.theme.textMuted, fontStyle: 'italic' }}>
         Unsupported block: {label}
       </Text>
     </View>

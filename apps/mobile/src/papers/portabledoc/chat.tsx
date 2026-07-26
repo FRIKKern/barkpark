@@ -28,6 +28,7 @@ import type { ReactNode } from 'react'
 import { ScrollView, Text, View } from 'react-native'
 
 import type { Theme } from '../../ui/theme'
+import { roles, scale } from '../../ui/typography'
 // TYPE-ONLY, so the blocks.tsx ↔ chat.tsx edge is one-directional at RUNTIME:
 // blocks.tsx imports CHAT_RENDERERS, this side imports nothing but erased types.
 import type { Render } from './blocks'
@@ -35,9 +36,11 @@ import { asList, isMap, str, type Block } from './model'
 
 const MONO = 'monospace'
 /** The mono measure every chat row speaks — one step under the 16/26 prose
- * register so a tool row reads as apparatus, not as the answer. */
-const ROW_SIZE = 13
-const ROW_LINE = 19
+ * register so a tool row reads as apparatus, not as the answer. It IS the
+ * chrome scale's `sm` step: S8 folded the hand-typed 13/19 onto the token,
+ * which tightens the lead by 1px and makes the transcript's rows agree with
+ * the reader's captions instead of missing them by one. */
+const ROW = scale.sm
 
 /**
  * Lines drawn before a diff folds behind an honest overflow footnote. THE
@@ -127,9 +130,8 @@ const chatToolDiff: Render = (b, ctx, key) => {
       <Text
         key={i}
         style={{
+          ...roles.chatApparatus,
           fontFamily: MONO,
-          fontSize: 12,
-          lineHeight: 18,
           color: s.color,
           backgroundColor: s.bg,
         }}
@@ -157,12 +159,12 @@ const chatToolDiff: Render = (b, ctx, key) => {
         {path !== '' && (
           <Text
             numberOfLines={1}
-            style={{ flexShrink: 1, fontFamily: MONO, fontSize: 12, fontWeight: '700', color: theme.text }}
+            style={{ ...scale.xs, flexShrink: 1, fontFamily: MONO, fontWeight: '700', color: theme.text }}
           >
             {path}
           </Text>
         )}
-        <Text style={{ fontFamily: MONO, fontSize: 12, color: theme.success }}>
+        <Text style={{ ...scale.xs, fontFamily: MONO, color: theme.success }}>
           {'+' + added}
           <Text style={{ color: theme.textMuted }}>{' '}</Text>
           <Text style={{ color: theme.danger }}>{'−' + removed}</Text>
@@ -174,7 +176,7 @@ const chatToolDiff: Render = (b, ctx, key) => {
         <View>{rows}</View>
       </ScrollView>
       {overflow > 0 && (
-        <Text style={{ fontFamily: MONO, fontSize: 11, color: theme.textMuted, marginTop: 2 }}>
+        <Text style={{ ...scale.micro, fontFamily: MONO, color: theme.textMuted, marginTop: 2 }}>
           {`… +${overflow} more lines`}
         </Text>
       )}
@@ -215,7 +217,7 @@ const chatTodo: Render = (b, ctx, key) => {
   const todos = asList(b.todos)
   return (
     <View key={key} style={{ marginVertical: 4, gap: 2 }}>
-      <Text style={{ fontFamily: MONO, fontSize: ROW_SIZE, lineHeight: ROW_LINE, color: theme.text }}>
+      <Text style={{ fontFamily: MONO, ...ROW, color: theme.text }}>
         <Text style={{ color: theme.accent }}>●</Text>
         {' Update todos'}
         {todos.length > 0 && (
@@ -226,8 +228,7 @@ const chatTodo: Render = (b, ctx, key) => {
         <Text
           style={{
             fontFamily: MONO,
-            fontSize: ROW_SIZE,
-            lineHeight: ROW_LINE,
+            ...ROW,
             color: theme.textMuted,
             paddingLeft: 14,
           }}
@@ -258,19 +259,18 @@ function todoRow(t: unknown, theme: Theme, key: number): ReactNode {
   return (
     <View key={key} style={{ paddingLeft: 14 }}>
       <View style={{ flexDirection: 'row', gap: 6 }}>
-        <Text style={{ fontFamily: MONO, fontSize: ROW_SIZE, lineHeight: ROW_LINE, color: glyphColor }}>
+        <Text style={{ fontFamily: MONO, ...ROW, color: glyphColor }}>
           {TODO_GLYPH[status]}
         </Text>
-        <Text style={[{ flex: 1, fontFamily: MONO, fontSize: ROW_SIZE, lineHeight: ROW_LINE }, textStyle]}>
+        <Text style={[{ flex: 1, fontFamily: MONO, ...ROW }, textStyle]}>
           {content}
         </Text>
       </View>
       {status === 'in_progress' && activeForm !== '' && (
         <Text
           style={{
+            ...roles.chatApparatus,
             fontFamily: MONO,
-            fontSize: 12,
-            lineHeight: 18,
             color: theme.textMuted,
             paddingLeft: 20,
           }}
@@ -301,9 +301,8 @@ const chatThinking: Render = (b, ctx, key) => (
   <Text
     key={key}
     style={{
+      ...roles.chatApparatus,
       fontFamily: MONO,
-      fontSize: 12,
-      lineHeight: 18,
       color: ctx.theme.textMuted,
       marginVertical: 4,
     }}
@@ -347,10 +346,10 @@ function attrOr(v: unknown, fallback: string): string {
 function cardHeader(title: string, status: string, theme: Theme): ReactNode {
   return (
     <View key="h" style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
-      <Text style={{ flexShrink: 1, fontSize: ROW_SIZE, lineHeight: ROW_LINE, fontWeight: '700', color: theme.text }}>
+      <Text style={{ flexShrink: 1, ...ROW, fontWeight: '700', color: theme.text }}>
         {title}
       </Text>
-      <Text style={{ marginLeft: 'auto', fontSize: 12, color: theme.textMuted }}>
+      <Text style={{ ...scale.xs, marginLeft: 'auto', color: theme.textMuted }}>
         {chatStatusLabel(status)}
       </Text>
     </View>
@@ -361,7 +360,7 @@ function cardBody(text: unknown, theme: Theme): ReactNode {
   const trimmed = str(text).trim()
   if (trimmed === '') return null
   return (
-    <Text key="b" style={{ fontSize: ROW_SIZE, lineHeight: ROW_LINE, color: theme.textMuted, marginTop: 2 }}>
+    <Text key="b" style={{ ...ROW, color: theme.textMuted, marginTop: 2 }}>
       {trimmed}
     </Text>
   )
@@ -389,7 +388,7 @@ const chatQuestion: Render = (b, ctx, key) => {
     <View key={key} style={{ gap: 2 }}>
       {cardHeader('Question', status, theme)}
       {questions.length === 0 ? (
-        <Text key="e" style={{ fontSize: ROW_SIZE, lineHeight: ROW_LINE, color: theme.textMuted, paddingLeft: 12 }}>
+        <Text key="e" style={{ ...ROW, color: theme.textMuted, paddingLeft: 12 }}>
           ⎿ no question
         </Text>
       ) : (
@@ -406,15 +405,14 @@ function questionRow(q: unknown, theme: Theme, key: number): ReactNode {
   const options = asList(m.options).filter((o): o is string => typeof o === 'string' && o !== '')
   return (
     <View key={key} style={{ marginTop: 4, gap: 2 }}>
-      <Text style={{ fontSize: ROW_SIZE, lineHeight: ROW_LINE, color: theme.text }}>{str(m.question)}</Text>
+      <Text style={{ ...ROW, color: theme.text }}>{str(m.question)}</Text>
       {options.length > 0 && (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingLeft: 12 }}>
           {options.map((opt, i) => (
             <Text
               key={i}
               style={{
-                fontSize: 12,
-                lineHeight: 18,
+                ...roles.chatApparatus,
                 color: theme.text,
                 borderWidth: 1,
                 borderColor: theme.border,

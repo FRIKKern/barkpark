@@ -28,6 +28,7 @@ import { messageBlocks, type ChatMessage } from '../src/chat/wire'
 import { MermaidIsland, islandHtml } from '../src/papers/portabledoc/MermaidIsland'
 import { BLOCK_RENDERERS, renderBlockNative, type BlockCtx } from '../src/papers/portabledoc/blocks'
 import { dark, light, type Theme } from '../src/ui/theme'
+import { roles } from '../src/ui/typography'
 
 jest.mock('react-native-webview', () => ({ WebView: () => null }))
 
@@ -123,16 +124,21 @@ describe('register default (charter D22 — an optional field, never a 4th arg)'
   })
 
   it('paper headings keep their display scale and lead', () => {
-    for (const [level, size, marginTop] of [
-      [1, 26, 24],
-      [2, 22, 20],
-      [3, 18, 16],
+    // The lead is asserted against the TOKEN, not re-derived from the ×1.3
+    // formula: S8 moved that law into typography.ts (paperH1/H2/H3 are the
+    // formula, rounded), so re-deriving it here would let the render and the
+    // token module drift apart by up to half a pixel and still pass.
+    for (const [level, step, marginTop] of [
+      [1, roles.paperH1, 24],
+      [2, roles.paperH2, 20],
+      [3, roles.paperH3, 16],
     ] as const) {
       expect(rootStyle(render({ type: 'heading', level, text: 'h' }, paperDefault))).toMatchObject({
-        fontSize: size,
+        fontSize: step.fontSize,
         marginTop,
-        lineHeight: size * 1.3,
+        lineHeight: step.lineHeight,
       })
+      expect(step.lineHeight).toBe(Math.round(step.fontSize * 1.3))
     }
   })
 
@@ -161,16 +167,17 @@ describe('chat register', () => {
   })
 
   it('compresses headings — a turn is not a printed page', () => {
-    for (const [level, size, marginTop] of [
-      [1, 20, 16],
-      [2, 18, 14],
-      [3, 16, 12],
+    for (const [level, step, marginTop] of [
+      [1, roles.chatH1, 16],
+      [2, roles.chatH2, 14],
+      [3, roles.chatH3, 12],
     ] as const) {
       const s = rootStyle(render({ type: 'heading', level, text: 'h' }, chat))
-      expect(s).toMatchObject({ fontSize: size, marginTop, lineHeight: size * 1.3 })
+      expect(s).toMatchObject({ fontSize: step.fontSize, marginTop, lineHeight: step.lineHeight })
+      expect(step.lineHeight).toBe(Math.round(step.fontSize * 1.3))
       // Strictly tighter than the paper register at every level.
       const paper = rootStyle(render({ type: 'heading', level, text: 'h' }, paperDefault))
-      expect(size).toBeLessThan(paper.fontSize as number)
+      expect(step.fontSize).toBeLessThan(paper.fontSize as number)
       expect(marginTop).toBeLessThan(paper.marginTop as number)
     }
   })

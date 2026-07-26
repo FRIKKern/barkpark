@@ -17,6 +17,7 @@ import type { ReactNode } from 'react'
 import { Linking, Text, type StyleProp, type TextStyle } from 'react-native'
 
 import type { Theme } from '../../ui/theme'
+import { scale } from '../../ui/typography'
 import { asList, isMap, markAttr, markName, openableUrl, str, type Inline } from './model'
 
 /** Which typographic voice the same tree speaks in. `paper` is the reader's
@@ -50,7 +51,11 @@ export function inlineCodeStyle(ctx: InlineCtx): TextStyle {
   const theme = ctx.theme
   return {
     fontFamily: MONO_FONT,
-    fontSize: 13,
+    // NESTED RUN: size only, no lead. An inline code span lives inside a
+    // paragraph — giving it its own lineHeight would fight the paragraph's
+    // line box and make prose containing code jump. `sm.fontSize` is the
+    // token; the lead stays the parent's.
+    fontSize: scale.sm.fontSize,
     backgroundColor: chat ? theme.codeBg : theme.surface,
     color: chat ? theme.codeFg : theme.text,
   }
