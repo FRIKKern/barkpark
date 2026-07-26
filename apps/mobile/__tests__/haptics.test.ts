@@ -1,11 +1,16 @@
-// Haptic vocabulary pins (t3w2-s1-tokens-stage1, charter D33):
+// Haptic vocabulary pins (t3w2-s1-tokens-stage1, charter D33; the one licensed
+// D43 amendment added the three closing-wave events):
 //
 //   • the needsYou rising-edge helper fires on prev<next ONLY — never on
 //     initial (unknown prev), equal polls, or decreases,
-//   • the registry is exactly the ten ratified events, with the D33 rename
-//     (refreshDone present, refreshSettle gone),
+//   • the registry is exactly the thirteen ratified events — the ten of D33
+//     with its rename (refreshDone present, refreshSettle gone) plus the three
+//     D43 events (archiveCommit, optionPick, jumpToLatest),
 //   • needsYou = notification Warning (the single ratified deviation),
-//   • the restraint law is structural: no event ever emits a Heavy impact,
+//   • the restraint law is structural: no event ever emits a Heavy impact, and
+//     the impact palette stays {Light, Medium} — the D43 amendment added names,
+//     not new feedback,
+//   • 'settle' stays reserved: turnSettle is the only event carrying it,
 //   • haptic() is fire-and-forget: a rejecting engine never throws.
 import * as Haptics from 'expo-haptics'
 
@@ -48,7 +53,7 @@ describe('needsYouRisingEdge (the App.tsx blocked-badge edge)', () => {
   })
 })
 
-describe('the ten-event registry (charter D33)', () => {
+describe('the thirteen-event registry (charter D33 + the one D43 amendment)', () => {
   it('is exactly the ratified vocabulary', () => {
     expect([...HAPTIC_EVENTS].sort()).toEqual(
       [
@@ -62,6 +67,10 @@ describe('the ten-event registry (charter D33)', () => {
         'claim',
         'copy',
         'refused',
+        // The three D43 events — the one licensed amendment.
+        'archiveCommit',
+        'optionPick',
+        'jumpToLatest',
       ].sort(),
     )
   })
@@ -69,6 +78,10 @@ describe('the ten-event registry (charter D33)', () => {
   it('carries the D33 rename: refreshDone in, refreshSettle out', () => {
     expect(HAPTIC_EVENTS).toContain('refreshDone')
     expect(HAPTIC_EVENTS).not.toContain('refreshSettle')
+  })
+
+  it("keeps 'settle' reserved for D77 turn settlement", () => {
+    expect(HAPTIC_EVENTS.filter((e) => e.toLowerCase().includes('settle'))).toEqual(['turnSettle'])
   })
 
   it('needsYou is notification Warning — the single ratified deviation', () => {
@@ -84,6 +97,31 @@ describe('the ten-event registry (charter D33)', () => {
     for (const call of impactAsync.mock.calls) {
       expect(call[0]).not.toBe('heavy')
     }
+  })
+
+  it('the impact palette is exactly {light, medium} — D43 added names, not feedback', () => {
+    for (const event of HAPTIC_EVENTS) haptic(event)
+    const styles = new Set(impactAsync.mock.calls.map((call) => call[0]))
+    expect([...styles].sort()).toEqual(['light', 'medium'])
+  })
+
+  it('the D43 three land in the right feedback class', () => {
+    // archiveCommit is a commitment: Medium impact, like every other commitment
+    // — a dismissal is something you COMMIT to, not a tick and not an outcome.
+    haptic('archiveCommit')
+    expect(impactAsync).toHaveBeenCalledTimes(1)
+    expect(impactAsync).toHaveBeenCalledWith('medium')
+    expect(notificationAsync).not.toHaveBeenCalled()
+    expect(selectionAsync).not.toHaveBeenCalled()
+
+    // optionPick and jumpToLatest are selection ticks and nothing else — a
+    // notification here would report an outcome that never happened.
+    jest.clearAllMocks()
+    haptic('optionPick')
+    haptic('jumpToLatest')
+    expect(selectionAsync).toHaveBeenCalledTimes(2)
+    expect(impactAsync).not.toHaveBeenCalled()
+    expect(notificationAsync).not.toHaveBeenCalled()
   })
 })
 

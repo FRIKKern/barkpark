@@ -499,7 +499,9 @@ export function ChatSessionScreen({
   }, [])
 
   const onJump = useCallback(() => {
-    haptic('disclosureToggle')
+    // D43: the pill's tick under its own name. Re-engaging follow is a position
+    // choice, not a disclosure — same feedback, honest label.
+    haptic('jumpToLatest')
     reFollow('jumped')
   }, [reFollow])
 
