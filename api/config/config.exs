@@ -70,6 +70,22 @@ config :barkpark, :rate_limits,
   write_per_minute: 60,
   datasets: %{}
 
+# Trust boundary for x-forwarded-for on every IP-keyed rate bucket
+# (Barkpark.RateLimiter.client_ip/1). Loopback is trusted UNCONDITIONALLY and is
+# not listed here — Caddy is co-located and dials localhost:4000, which is the
+# whole self-host/instance topology. This list ADDS non-loopback fronts whose
+# relayed chain may be believed: in practice the Barkpark Cloud control plane's
+# egress address, which relays the caller's IP on the revoke DELETE. Empty by
+# default: a self-hosted box has no second front, and an unlisted relay is
+# disbelieved (its own address becomes the bucket key) rather than trusted.
+#
+# Entries are :inet address tuples, INDIVIDUAL ADDRESSES ONLY — never a CIDR
+# range. A range re-opens the forgery hole this exists to close: an attacker
+# whose real (appended) address falls inside it has that hop SKIPPED, and the
+# forged hop to its left is believed instead. Overridden at runtime from
+# BARKPARK_TRUSTED_PROXIES (runtime.exs), which raises on a malformed entry.
+config :barkpark, :trusted_proxies, []
+
 # Per-key abuse rails for the low-trust ticket-key WRITE surface (Barkpark
 # Tickets, charter Decision 9). Per-HOUR budgets, billed per {key_id, class};
 # reads (the poll-with-key loop) are exempt. See
