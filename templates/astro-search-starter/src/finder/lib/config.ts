@@ -11,6 +11,17 @@
  *   BARKPARK_WORKSPACE  — workspace slug         (default "default")
  *   BARKPARK_PROJECT    — project slug           (default "default")
  *
+ * BROWSER REACH (charter D52): these three constants are read by CLIENT code
+ * too — `use-live-search` builds the channel topic `search:<ws>:<proj>:<dataset>`
+ * from them. A bare `BARKPARK_*` name is not inlined into the client bundle, so
+ * the browser would silently fall back to the defaults above and join
+ * `search:default:default:docs` — a topic that JOINS GREEN and then returns
+ * count=0 forever, which reads as "live search is broken" with no error anywhere.
+ * `next.config.mjs` therefore DERIVES `NEXT_PUBLIC_BARKPARK_{DATASET,WORKSPACE,
+ * PROJECT}` from the server vars (no deploy-allowlist change, charter D47), and
+ * each constant below reads the browser-visible name FIRST, falling back to the
+ * bare server name so server-only builds and local `.env` files keep working.
+ *
  * Why plain `.ts` constants and not `server-only`: these are NAMES (no secret),
  * and a couple of importers are shared between server libs and route handlers.
  * The token + base URL still live behind `server-only` modules (bp-fetch,
@@ -23,13 +34,16 @@
  */
 
 /** Dataset name the finder, reader, and graph landing all read from. */
-export const DATASET = process.env.BARKPARK_DATASET || "docs";
+export const DATASET =
+  process.env.NEXT_PUBLIC_BARKPARK_DATASET || process.env.BARKPARK_DATASET || "docs";
 
 /** Workspace slug — the tenancy the token-scoped search route resolves under. */
-export const WORKSPACE = process.env.BARKPARK_WORKSPACE || "default";
+export const WORKSPACE =
+  process.env.NEXT_PUBLIC_BARKPARK_WORKSPACE || process.env.BARKPARK_WORKSPACE || "default";
 
 /** Project slug — the tenancy the token-scoped search route resolves under. */
-export const PROJECT = process.env.BARKPARK_PROJECT || "default";
+export const PROJECT =
+  process.env.NEXT_PUBLIC_BARKPARK_PROJECT || process.env.BARKPARK_PROJECT || "default";
 
 /**
  * The `/w/:ws/p/:proj` path prefix for the token-scoped (Indx) search route.
