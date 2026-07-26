@@ -17,7 +17,15 @@ defmodule BarkparkWeb.SearchChannel do
   already pattern-matches `%Phoenix.Socket{}`) threads the exact same
   `workspace_id` / `dataset` filter every other read path uses. A token that
   isn't authorized for the workspace fails the join closed — it never reaches
-  `handle_in`.
+  `handle_in`. The dataset leaf is validated the same way (`get_dataset/2`,
+  scoped to the resolved project) and refused with `"unknown_dataset"`: a topic
+  naming a dataset that does not exist used to join green and return count=0
+  forever, which reads as "the search is broken" instead of "your topic is
+  wrong".
+
+  The `perspective` is PINNED to `:published` in `handle_in` and is never read
+  from the client frame — a socket holding a read token must not be able to
+  ask for drafts. `search_channel_test.exs` guards that with a regression test.
 
   ## Stale-reply ordering
 
@@ -57,7 +65,16 @@ defmodule BarkparkWeb.SearchChannel do
     with [ws_slug, proj_slug, dataset] <- String.split(scope, ":"),
          %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
          :ok <- TenancyAuth.authorize(socket.assigns.api_token, ws.id, :read),
-         %Tenancy.Project{} = proj <- Tenancy.get_project(ws_slug, proj_slug) do
+         %Tenancy.Project{} = proj <- Tenancy.get_project(ws_slug, proj_slug),
+         # The dataset leaf of the topic used to be trusted as a free string:
+         # an unknown dataset joined GREEN and then matched zero rows forever,
+         # because the read path degrades to a legacy string filter with no
+         # error anywhere (charter D52). Validate it against THIS project —
+         # `get_dataset/2` scopes by project_id, so a `production` under another
+         # project never satisfies this. The tuple tag is load-bearing: a bare
+         # `%Tenancy.Dataset{} <- …` would fall into the `_` catch-all below and
+         # report a dataset typo as "unauthorized".
+         {:dataset, %Tenancy.Dataset{}} <- {:dataset, Tenancy.get_dataset(proj, dataset)} do
       # P5 live-push: subscribe to the workspace-scoped document mutation topic
       # so any create/update/delete in this (workspace, dataset) wakes the
       # channel to re-run its cached query. The workspace-scoped topic mirrors
@@ -76,6 +93,7 @@ defmodule BarkparkWeb.SearchChannel do
       {:ok, socket}
     else
       [_ | _] -> {:error, %{reason: "bad_topic"}}
+      {:dataset, _} -> {:error, %{reason: "unknown_dataset"}}
       _ -> {:error, %{reason: "unauthorized"}}
     end
   end
@@ -99,6 +117,7 @@ defmodule BarkparkWeb.SearchChannel do
         opts_base = [
           type: params["type"],
           types: parse_types(params["types"]),
+          # PINNED — never read from `params`. See the moduledoc.
           perspective: :published,
           limit: clamp_limit(params["limit"]),
           offset: parse_int(params["offset"], 0),
