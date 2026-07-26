@@ -37,10 +37,11 @@ interface GraphController {
   /** Focus the node whose `doc_id` matches (same hop-cascade as a real hover);
    * `null` clears it. Drives the list→graph half of the hover bridge. */
   setHovered: (docId: string | null) => void;
-  /** Live re-skin the canvas to a new mode without destroy/recreate. Optional:
-   * present once the vendored `bp-graph.js` snapshot gains `setTheme` (the
-   * graph-theme-parity slice); guarded at every call so an older snapshot that
-   * lacks it degrades gracefully (the theme still lands correctly at init). */
+  /** Live re-skin the canvas + overlay chrome to a new mode without
+   * destroy/recreate. The vendored `bp-graph.js` snapshot carries this (the
+   * 4-copy byte-identity pact includes it); still typed optional and guarded
+   * at every call so a stale snapshot degrades gracefully (the theme then
+   * lands correctly at init only). */
   setTheme?: (theme: "dark" | "light") => void;
   destroy: () => void;
 }
@@ -75,6 +76,12 @@ export interface GraphViewProps {
   /** Doc-id currently hovered elsewhere (a finder result row). The graph focuses
    * the matching node with the same cascade as an in-canvas hover. `null` = none. */
   hoveredId?: string | null;
+  /** Per-type node hues (the renderer's TYPE_HEX palette) instead of the
+   * monochrome Obsidian resting look. Default TRUE for this host: the landing
+   * graph is the product's first impression and the corpus is genuinely
+   * multi-type, so color IS information here. The in-legend "Full color"
+   * toggle still lets a viewer opt back to monochrome. */
+  fullColor?: boolean;
   /** Extra classes on the host div. It is always `relative` + full-size. */
   className?: string;
 }
@@ -95,6 +102,16 @@ export interface GraphViewProps {
  *     constructs.
  * Either way init runs exactly once per mount; the prop-change effect only
  * `update()`s an existing controller.
+ *
+ * PANEL-THEME CONTRACT (the one contract — hosts must not add a second):
+ * the graph panel is THEME-AWARE. This wrapper resolves the site's real mode
+ * from `document.documentElement.dataset.theme` at init and forwards every
+ * `bp:themechange` to the controller's `setTheme`, and the renderer owns ALL
+ * painting of the graph surface for both modes — canvas bed AND overlay
+ * chrome (legend/zoom/search). The host panel must never paint a
+ * theme-invariant background of its own (the old always-dark
+ * `bg-graph-canvas` claim is retired); anything it overlays should ride the
+ * site's theme tokens so the whole pane flips as one.
  */
 export function GraphView({
   nodes,
@@ -104,6 +121,7 @@ export function GraphView({
   onNodeHover,
   matches = null,
   hoveredId = null,
+  fullColor = true,
   className,
 }: GraphViewProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -150,7 +168,7 @@ export function GraphView({
         { nodes, edges },
         {
           theme: currentMode(),
-          fullColor: false,
+          fullColor,
           rootId,
           externalSearch: true,
           onNodeClick: (node) => clickRef.current?.(node),
@@ -191,6 +209,8 @@ export function GraphView({
     };
     // Construct ONCE per mount. Data + root changes are handled by the update
     // effect below (re-running this would tear down and re-layout the graph).
+    // `fullColor` is a mount-time option by design — runtime flips belong to
+    // the renderer's own in-legend "Full color" toggle, not a prop churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

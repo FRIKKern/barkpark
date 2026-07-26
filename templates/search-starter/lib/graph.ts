@@ -63,6 +63,15 @@ export interface CorpusGraph {
   edges: GraphEdge[];
   /** Highest-degree node id (PREFERRED_ROOT wins when present), or null. */
   rootId: string | null;
+  /** The server cut the node list at its graph budget — the graph shown is a
+   * PREFIX of the corpus, and any caption must say so. HONESTY LIMIT: the
+   * upstream flag covers only the whole-graph node budget (2000); the server
+   * ALSO lists at most 1000 documents per type and stays `truncated: false`
+   * when that per-type cap bites, so `false` here is "not budget-truncated",
+   * not "complete" (server-side fix: stw9-backlog-graph-server-honesty). */
+  truncated: boolean;
+  /** Upstream truncation cause (e.g. "node_budget"), null when not truncated. */
+  truncationReason: string | null;
 }
 
 /* ── upstream parsing ───────────────────────────────────────────────────── */
@@ -70,6 +79,8 @@ export interface CorpusGraph {
 interface UpstreamGraph {
   nodes?: unknown[];
   edges?: unknown[];
+  truncated?: unknown;
+  truncation_reason?: unknown;
 }
 
 function str(v: unknown): string | undefined {
@@ -176,7 +187,12 @@ async function rawCorpusGraph(): Promise<CorpusGraph> {
     .map(normalizeEdge)
     .filter((e): e is GraphEdge => e !== null && ids.has(e.from_id) && ids.has(e.to_id));
 
-  return { nodes, edges, rootId: computeRootId(nodes, edges) };
+  // Truncation truth, passed through verbatim-but-typed. Strictly `=== true`
+  // so a drifted/absent field degrades to the safe "no claim" state.
+  const truncated = json.truncated === true;
+  const truncationReason = truncated ? (str(json.truncation_reason) ?? null) : null;
+
+  return { nodes, edges, rootId: computeRootId(nodes, edges), truncated, truncationReason };
 }
 
 /** Cached variant — 5-min revalidate, tagged GRAPH_TAG + the dataset `_all`
@@ -202,6 +218,6 @@ export async function fetchCorpusGraph(): Promise<CorpusGraph> {
     // revalidation re-populates from the live API once it's healthy.
     return await rawCorpusGraph();
   } catch {
-    return { nodes: [], edges: [], rootId: null };
+    return { nodes: [], edges: [], rootId: null, truncated: false, truncationReason: null };
   }
 }
