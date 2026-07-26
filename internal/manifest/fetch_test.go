@@ -75,6 +75,27 @@ func TestFetchSendsViewsOptIn(t *testing.T) {
 	}
 }
 
+// Fetch opts into the additive root chat block with ?chat=1 (charter D27, the
+// same opt-in discipline as ?views=1). The param ships in the SAME commit as
+// Manifest.Chat — no bp ever asks for a key it cannot strict-decode.
+func TestFetchSendsChatOptIn(t *testing.T) {
+	var chat string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chat = r.URL.Query().Get("chat")
+		w.Header().Set("ETag", "e1")
+		_, _ = w.Write([]byte(minimalManifest))
+	}))
+	defer srv.Close()
+
+	c := apiclient.New(apiclient.Config{BaseURL: srv.URL})
+	if _, err := Fetch(c, nil); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if chat != "1" {
+		t.Errorf("GET /v1/capabilities chat param = %q, want \"1\"", chat)
+	}
+}
+
 // A nil cache disables caching — Fetch does an unconditional GET (no
 // If-None-Match) and parses fresh every time.
 func TestFetchNilCacheUnconditional(t *testing.T) {

@@ -107,6 +107,8 @@
                   "batch_too_large",
                   "build_id_mismatch",
                   "bundle_import_disabled",
+                  "chat_create_failed",
+                  "chat_unsupported",
                   "conflict",
                   "constraint",
                   "cors_forbidden",
@@ -146,6 +148,8 @@
                   "quota_exceeded",
                   "rate_limited",
                   "rev_mismatch",
+                  "runtime_capacity",
+                  "runtime_unavailable",
                   "schema_has_documents",
                   "schema_unknown",
                   "session_unavailable",
@@ -8093,6 +8097,75 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/chat/sessions/{id}/archive": {
+      "post": {
+        "operationId": "chat.archive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Archive a chat session — it leaves the active sidebar for the archived shelf (idempotent; liveness untouched).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/webhooks/{dataset}": {
       "get": {
         "operationId": "webhook.ls",
@@ -11804,6 +11877,75 @@
         ],
         "x-barkpark-scope": "read"
       }
+    },
+    "/v1/chat/sessions/{id}/unarchive": {
+      "post": {
+        "operationId": "chat.unarchive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unarchive a chat session — it returns from the archived shelf to the active sidebar (idempotent).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
     }
   },
   "servers": [
@@ -11877,7 +12019,7 @@
       "name": "cycle"
     },
     {
-      "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve. Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",
+      "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve, archive/unarchive. Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",
       "name": "chat"
     },
     {

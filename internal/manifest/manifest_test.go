@@ -171,6 +171,75 @@ func TestParseAcceptsComment(t *testing.T) {
 	}
 }
 
+// The root `chat` discovery block is a dormant additive field (charter D27,
+// the views/build precedent): a chat-PRESENT manifest parses with every nested
+// key typed (providers → modes/models/efforts), and a chat-ABSENT manifest
+// (every server today, and every server not asked with ?chat=1) parses with
+// Chat nil — the honest "discover nothing, degrade" signal. codex's all-empty
+// caps decode as empty slices, never an error.
+func TestParseChatPresentAndAbsent(t *testing.T) {
+	withChat := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"admin","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[],"chat":{"providers":{"claude":{"modes":["plan","auto"],"models":["sonnet","opus"],"efforts":["low","high"]},"codex":{"modes":[],"models":[],"efforts":[]}}}}`)
+	m, err := Parse(withChat)
+	if err != nil {
+		t.Fatalf("Parse rejected a chat-present manifest: %v", err)
+	}
+	if m.Chat == nil {
+		t.Fatal("chat-present manifest decoded with Chat nil")
+	}
+	claude, ok := m.Chat.Providers["claude"]
+	if !ok {
+		t.Fatal("chat.providers is missing claude")
+	}
+	if !reflect.DeepEqual(claude.Modes, []string{"plan", "auto"}) {
+		t.Errorf("claude.modes = %v, want [plan auto]", claude.Modes)
+	}
+	if !reflect.DeepEqual(claude.Models, []string{"sonnet", "opus"}) {
+		t.Errorf("claude.models = %v, want [sonnet opus]", claude.Models)
+	}
+	if !reflect.DeepEqual(claude.Efforts, []string{"low", "high"}) {
+		t.Errorf("claude.efforts = %v, want [low high]", claude.Efforts)
+	}
+	codex, ok := m.Chat.Providers["codex"]
+	if !ok {
+		t.Fatal("chat.providers is missing codex")
+	}
+	if len(codex.Modes) != 0 || len(codex.Models) != 0 || len(codex.Efforts) != 0 {
+		t.Errorf("codex caps = %+v, want all-empty (the degrade signal)", codex)
+	}
+
+	withoutChat := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[]}`)
+	m2, err := Parse(withoutChat)
+	if err != nil {
+		t.Fatalf("Parse rejected a chat-absent manifest: %v", err)
+	}
+	if m2.Chat != nil {
+		t.Errorf("chat-absent manifest decoded with Chat = %+v, want nil (dormant)", m2.Chat)
+	}
+
+	// The pre-chat fixtures must stay parseable untouched.
+	if parseFixture(t, "core-manifest.json").Chat != nil {
+		t.Error("core fixture unexpectedly carries a chat block")
+	}
+}
+
+// Strict decode recurses into the chat block: an unknown key inside it (or
+// inside one provider's caps) fails Parse. This is ALSO the mutation proof for
+// the D27 atomicity invariant: DisallowUnknownFields means a build whose
+// Manifest struct lacked the Chat field would reject a chat-bearing body
+// outright — so the field and fetch's ?chat=1 opt-in must ship together, and
+// this test pins the recursing strictness that makes that invariant bite.
+func TestParseRejectsUnknownChatKey(t *testing.T) {
+	badInChat := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"admin","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[],"chat":{"providers":{},"bogus":true}}`)
+	if _, err := Parse(badInChat); err == nil {
+		t.Fatal("Parse accepted an unknown key inside chat; want error")
+	}
+
+	badInCaps := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"admin","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[],"chat":{"providers":{"claude":{"modes":[],"models":[],"efforts":[],"bogus":true}}}}`)
+	if _, err := Parse(badInCaps); err == nil {
+		t.Fatal("Parse accepted an unknown key inside a provider's chat caps; want error")
+	}
+}
+
 // (b) Tree() from core-manifest.json yields the eight canonical core nouns plus
 // the plugin-contributed `task` noun, with their commands; the anon fixture
 // yields its read-only subset. The old `rail` noun is gone, and `task` carries

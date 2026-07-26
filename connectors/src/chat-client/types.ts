@@ -133,7 +133,8 @@ export interface ClaudeResultFrame {
 
 /**
  * A structured error from the /v1/chat transport. `code` is the canonical
- * envelope code (`forbidden`, `invalid_request`, `chat_unavailable`, …) or a
+ * envelope code (`forbidden`, `invalid_request`, `runtime_capacity`,
+ * `runtime_unavailable`, `chat_unsupported`, `chat_create_failed`, …) or a
  * synthetic `network_error` for a transport-level failure. Retry decisions key
  * off `code`, NEVER the raw status; 401/403 are terminal.
  */
