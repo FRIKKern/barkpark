@@ -16,7 +16,9 @@
 //     (out-of-order responses), and the screens replace cache + UI when the
 //     network returns a paper at all — so a newer _updatedAt lands on the
 //     next open. schema_version bump = blanket wipe at store init.
-//     Per-instance clear (`clearInstance`) covers logout/server switch.
+//     Per-instance clear (`clearInstance`) covers logout/server switch — its
+//     CALL SITE is appConfig.ts's clearDepartingInstanceCache, reached from
+//     clearConfig() (sign-out) and rememberAndSave() (connect/switch).
 //   • IMAGES ARE HONESTLY EXCLUDED from this policy: no image bytes are
 //     cached. Offline behavior is the existing labeled placeholder — an
 //     unreachable/unresolvable src renders "Image unavailable", never null
