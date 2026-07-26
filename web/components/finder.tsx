@@ -1274,9 +1274,14 @@ export function Finder({
 
       {/* banners — total failure is HUMAN copy (the server already folds the
           upstream error through humanUpstreamMessage), never a raw upstream
-          dump; the honest recovery hint is that the next keystroke retries. */}
+          dump; the honest recovery hint is that the next keystroke retries.
+          `data-search-error` is a STRUCTURAL oracle for the journey-smoke
+          harness (tooling/search-smoke) — keep it when editing the copy. */}
       {data?.error ? (
-        <section className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+        <section
+          data-search-error
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200"
+        >
           <strong className="font-medium">Search is unavailable right now.</strong>{" "}
           The search service didn&apos;t answer — it may be restarting. Searching
           again retries automatically.
