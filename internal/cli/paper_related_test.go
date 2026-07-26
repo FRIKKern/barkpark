@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // A related payload mirroring GET /v1/data/related — a strong tag match, a
@@ -44,7 +45,7 @@ func TestFormatRelatedSection(t *testing.T) {
 		{DocID: "post-c", Type: "note", Title: "A Backlinker", Score: 0.40,
 			Sources: []string{"references"}},
 	}
-	got := formatRelatedSection(entries)
+	got := formatRelatedSection(entries, 80)
 
 	// Heading present, separated by a leading blank line.
 	if !strings.HasPrefix(got, "\nRelated\n") {
@@ -77,7 +78,7 @@ func TestFormatRelatedSection(t *testing.T) {
 }
 
 func TestFormatRelatedSectionEmpty(t *testing.T) {
-	if got := formatRelatedSection(nil); got != "" {
+	if got := formatRelatedSection(nil, 80); got != "" {
 		t.Errorf("empty entries must yield empty section, got %q", got)
 	}
 }
@@ -87,11 +88,37 @@ func TestFormatRelatedSectionCapsAtTopN(t *testing.T) {
 	for i := range entries {
 		entries[i] = paperRelatedEntry{DocID: "d", Type: "post", Score: 1.0, Sources: []string{"tags"}}
 	}
-	got := formatRelatedSection(entries)
+	got := formatRelatedSection(entries, 80)
 	// One line per entry (no shared tags here) + heading + leading blank line.
 	if n := strings.Count(got, "\n"); n != paperRelatedTopN+1 {
 		t.Errorf("expected %d entry lines capped at TopN, got %d newlines:\n%s",
 			paperRelatedTopN, n, got)
+	}
+}
+
+func TestFormatRelatedSectionWrapsLongTitlesAndTags(t *testing.T) {
+	entries := []paperRelatedEntry{{
+		DocID:   "paper-long",
+		Type:    "paper",
+		Title:   "Authoring Excellence — Wave 7: finish the backlog, make every trgm predicate index-reachable without hiding the decision",
+		Score:   2.15,
+		Sources: []string{"tags"},
+		SharedTags: []paperRelatedSharedTag{
+			{Tag: "authoring-excellence-with-a-deliberately-long-name", SrcStrength: 100, CandStrength: 95},
+			{Tag: "wave-paper", SrcStrength: 70, CandStrength: 80},
+		},
+	}}
+	got := formatRelatedSection(entries, 80)
+	for i, line := range strings.Split(got, "\n") {
+		if width := ansi.StringWidth(line); width > 80 {
+			t.Fatalf("line %d width = %d, want <= 80:\n%s", i, width, got)
+		}
+	}
+	if !strings.Contains(got, "\n        predicate index-reachable") {
+		t.Fatalf("long title continuation did not align under title content:\n%s", got)
+	}
+	if !strings.Contains(got, "\n              paper (70·80)") {
+		t.Fatalf("long tag continuation did not align under tag content:\n%s", got)
 	}
 }
 
@@ -115,7 +142,7 @@ func TestPaperRenderRelatedHappyPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	section := paperRenderRelated(relatedTestClient(srv.URL), "production", "post-source", paperRelatedTopN)
+	section := paperRenderRelated(relatedTestClient(srv.URL), "production", "post-source", paperRelatedTopN, 80)
 
 	// Threaded through the workspace/project-scoped related route with the bearer.
 	if want := "/w/acme/p/site/v1/data/related/production/post-source"; gotPath != want {
@@ -138,7 +165,7 @@ func TestPaperRenderRelatedFailsOpen(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer err500.Close()
-	if got := paperRenderRelated(relatedTestClient(err500.URL), "production", "id", 5); got != "" {
+	if got := paperRenderRelated(relatedTestClient(err500.URL), "production", "id", 5, 80); got != "" {
 		t.Errorf("non-2xx must fail open to empty section, got %q", got)
 	}
 
@@ -147,7 +174,7 @@ func TestPaperRenderRelatedFailsOpen(t *testing.T) {
 		_, _ = w.Write([]byte("not json"))
 	}))
 	defer garbage.Close()
-	if got := paperRenderRelated(relatedTestClient(garbage.URL), "production", "id", 5); got != "" {
+	if got := paperRenderRelated(relatedTestClient(garbage.URL), "production", "id", 5, 80); got != "" {
 		t.Errorf("undecodable body must fail open, got %q", got)
 	}
 
@@ -156,15 +183,15 @@ func TestPaperRenderRelatedFailsOpen(t *testing.T) {
 		_, _ = w.Write([]byte(`{"result":{"related":[],"count":0}}`))
 	}))
 	defer empty.Close()
-	if got := paperRenderRelated(relatedTestClient(empty.URL), "production", "id", 5); got != "" {
+	if got := paperRenderRelated(relatedTestClient(empty.URL), "production", "id", 5, 80); got != "" {
 		t.Errorf("empty related list must yield no section, got %q", got)
 	}
 
 	// Guard rails: nil client / empty id never touch the network.
-	if got := paperRenderRelated(nil, "production", "id", 5); got != "" {
+	if got := paperRenderRelated(nil, "production", "id", 5, 80); got != "" {
 		t.Errorf("nil client must fail open, got %q", got)
 	}
-	if got := paperRenderRelated(relatedTestClient(err500.URL), "production", "  ", 5); got != "" {
+	if got := paperRenderRelated(relatedTestClient(err500.URL), "production", "  ", 5, 80); got != "" {
 		t.Errorf("blank id must fail open, got %q", got)
 	}
 }
