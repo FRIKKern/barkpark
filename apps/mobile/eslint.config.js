@@ -7,58 +7,89 @@ module.exports = defineConfig([
   {
     ignores: ['dist/*', '.expo/*', 'android/*', 'ios/*'],
   },
-  // THE TYPE LITERAL BAN (t3w2-s8, charter D32).
+  // THE TYPE VALUE BAN (t3w2-s8, charter D32; widened by
+  // mob-bl-token-guard-residuals).
   //
   // S8 moved 189 raw fontSize/lineHeight literals across 14 files onto
   // src/ui/typography.ts. This rule is what keeps them there: without it the
   // next screen quietly hand-types a 15 and the scale is decorative again.
   //
-  // The selector is deliberately narrow. It flags a NUMERIC LITERAL sitting
-  // directly on a fontSize/lineHeight property — including a fractional one
-  // like 16.5, which is how a half-pixel drift usually arrives. It does NOT
-  // flag a token member access (`fontSize: scale.sm.fontSize`), a spread
-  // (`...scale.sm` is a SpreadElement, so there is no Property to match), a
-  // computed value (`fontSize: s.fontSize * 1.3`), or any other numeric style
-  // prop — padding, borderRadius, gap and letterSpacing are untouched,
-  // because those are layout, not type, and the token module does not own
-  // them.
+  // S8 shipped this as a LITERAL ban — a numeric literal sitting on a
+  // fontSize/lineHeight property — and disclosed two evasions it could not
+  // reach: const laundering (`const S = 15; { fontSize: S }`, the exact idiom
+  // chat.tsx used until that wave, which hid 16 of its 28 hand-typed values
+  // from the census) and string keys (`{'fontSize': 12}`). Widening the
+  // literal selector to `key.value` made its `> Literal` child match the KEY
+  // as well as the value and double-reported every site, so both gaps were
+  // left open and named.
   //
-  // TWO KNOWN EVASIONS, both left open deliberately — a syntactic rule bans a
-  // SHAPE, not an intent, and pretending otherwise is worse than saying so:
+  // THE RESIDUAL SLICE CLOSES BOTH BY INVERTING THE RULE. Instead of
+  // blacklisting the bad value shapes one at a time — literal, then
+  // identifier, then cast, then call, forever — the rule now WHITELISTS the
+  // one shape that is allowed:
   //
-  //   1. CONST LAUNDERING. `const S = 15; ... { fontSize: S }` passes, because
-  //      the value is an Identifier by the time it reaches the property. This
-  //      is not hypothetical: it is the exact idiom chat.tsx used until this
-  //      wave (`const ROW_SIZE = 13; const ROW_LINE = 19`). Measured at the
-  //      base sha, chat.tsx carried 28 hand-typed type values in property
-  //      position and this rule saw 12 of them: the other 16 were laundered
-  //      through those two bindings. Closing it needs constant folding or a
-  //      type-aware rule that resolves the binding — a different instrument,
-  //      filed as a follow-up rather than bolted on here.
-  //   2. STRING KEYS. `{'fontSize': 12}` escapes, since the selector reads
-  //      `key.name`. Widening to `key.value` makes the `> Literal` child match
-  //      the KEY as well as the value and double-reports every site.
+  //     on a fontSize/lineHeight property, the only legal value is a member
+  //     access into the token module: `scale.<step>.fontSize` or
+  //     `roles.<role>.lineHeight`.
   //
-  // Neither form appears at any call site in the app today. A narrow rule that
-  // never lies beats a broad one that cries twice — but the gaps are named
-  // here so the next reader knows a green run means "no raw literal in a style
-  // property", not "no hand-typed type value anywhere".
+  // Everything else on those two keys reds, in one report per site, whether
+  // the key is written bare or quoted: `fontSize: 15`, the fractional
+  // `fontSize: 16.5` (how a half-pixel drift usually arrives), the laundered
+  // `fontSize: ROW_SIZE`, the cast `fontSize: S as number`, the computed
+  // `fontSize: s.fontSize * 1.3`, and the foreign member `fontSize: T.size`.
+  // Spreads are untouched by construction — `...scale.sm` is a SpreadElement,
+  // there is no Property to match — and so is every other numeric style prop:
+  // padding, borderRadius, gap, letterSpacing and width are layout, not type,
+  // and the token module does not own them.
   //
-  // typography.ts is exempt for the obvious reason: it is where the numbers
-  // are supposed to live — dropping that ignore reds the token module itself
-  // with 64 errors. Tests are out of scope too (this block only covers
-  // src/**): a test that pins the 16/23 bubble law must be allowed to write
-  // 16 and 23, or the pin would have to read the value it is pinning.
+  // Two behaviour changes came with the inversion, both deliberate:
+  //   · a COMPUTED lead is now an error where S8 allowed it. A lead derived at
+  //     the call site is precisely how a rounding drift enters; if a register
+  //     needs `size × 1.3`, that belongs in typography.ts, where the heading
+  //     roles already are.
+  //   · the report lands on the PROPERTY, not on the literal — one report per
+  //     site regardless of key form, which is what made the string-key gap
+  //     unfixable before.
+  //
+  // WHAT IS STILL OUT OF REACH, named rather than papered over: a value that
+  // reaches the property through something ESLint cannot see without types —
+  // `fontSize: px(15)` (a call), or a spread of a non-token object literal
+  // defined in an unscanned file. Both are wider than "type geometry" and want
+  // a type-aware rule; within this repo the geometry ledger
+  // (__tests__/typeGeometry.test.ts) is the second net — it resolves every
+  // call site through the real token table and pins the resulting numbers, so
+  // a value that sneaks past the linter still has to survive a diff on the
+  // app's rendered geometry.
+  //
+  // SCOPE is now the whole package, not just src/** — App.tsx, index.ts and
+  // any future root-level module are inside the fence (S8 shipped them
+  // outside it; App.tsx happens to set no type today, which is exactly the
+  // kind of accident a guard should not depend on).
+  //
+  // TWO EXEMPTIONS, both load-bearing:
+  //   · typography.ts is where the numbers are supposed to live. Dropping
+  //     that ignore reds the token module itself with 64 errors.
+  //   · __tests__/** is exempt because a test that pins the 16/23 bubble law
+  //     has to be allowed to WRITE 16 and 23 — otherwise the pin would read
+  //     the value it is pinning, which is exactly the hole reviewer mutant M4
+  //     found in the heading assertions.
   {
-    files: ['src/**/*.ts', 'src/**/*.tsx'],
-    ignores: ['src/ui/typography.ts'],
+    files: ['**/*.ts', '**/*.tsx'],
+    ignores: ['src/ui/typography.ts', '__tests__/**'],
     rules: {
       'no-restricted-syntax': [
         'error',
         {
-          selector: 'Property[key.name=/^(fontSize|lineHeight)$/] > Literal',
+          selector:
+            "Property[key.name=/^(fontSize|lineHeight)$/]:not([value.object.object.name='scale']):not([value.object.object.name='roles'])",
           message:
-            'Raw fontSize/lineHeight literal. Use a token from src/ui/typography.ts — `...scale.base` for a chrome step, `...roles.userBubble` for a named outlier, or `scale.sm.fontSize` alone for a run nested inside another Text.',
+            'Hand-typed fontSize/lineHeight. Use a token from src/ui/typography.ts — `...scale.base` for a chrome step, `...roles.userBubble` for a named outlier, or `scale.sm.fontSize` alone for a run nested inside another Text. A computed or laundered value belongs in typography.ts, not here.',
+        },
+        {
+          selector:
+            "Property[key.value=/^(fontSize|lineHeight)$/]:not([value.object.object.name='scale']):not([value.object.object.name='roles'])",
+          message:
+            "Hand-typed fontSize/lineHeight behind a quoted key. A string key is not an escape hatch — use a token from src/ui/typography.ts, and write the key bare while you are there.",
         },
       ],
     },

@@ -65,6 +65,33 @@ export const roles = {
    * (a glyph in a fixed hit target, a text input). Naming them is the point:
    * a deliberate outlier belongs in this file, not hand-typed at the call
    * site. The rule for adding more: prove the chrome step moves geometry.
+   *
+   * THE INTERACTIVE SITES — the rationale, narrowed (S8 review residual,
+   * mob-bl-token-guard-residuals AC3). Read literally, "the element's height
+   * IS its line box" would cover EVERY glyph and EVERY text input in the app,
+   * and three sites do not follow it. They were snapped onto the chrome scale
+   * and so gained a lead where RN's platform default had shipped:
+   *
+   *   ConnectScreen#input       15/21   (single-line paste field)
+   *   TaskDetailScreen#input    14/20   (multiline, maxHeight 96)
+   *   TabBar#badgeText          11/15   (glyph in an 18pt round badge)
+   *
+   * So the licence is NOT "interactive elements get roles". It is narrower and
+   * it is about EVIDENCE: a preserving role was minted where the wave had a
+   * SETTLED, screenshot-reviewed rendering to preserve — the #6126 chat
+   * register and the transcript's own chrome (composerInput, the four *Glyph
+   * roles). The three sites above were never in that register, so there was
+   * no measured pair to preserve and no honest number to invent; snapping them
+   * was the conservative move, and their new leads are a real, unverified
+   * change. RN's own default lead is device- and OS-dependent, which is why
+   * this cannot be settled from a simulator or an AST.
+   *
+   * The arbiter is the physical-device pass (`mob-hg-device-boot` Part A,
+   * Class-B reflow sites). Both outcomes are one line: if a site reflows
+   * badly, mint a preserving role here from the MEASURED pair; if it reads
+   * fine, the snap stands and this paragraph loses its three rows. Until then
+   * the three pairs are pinned by name in __tests__/typeGeometry.test.ts, so
+   * neither outcome can arrive by accident.
    */
 
   /** The transcript's answer measure — readingBody's 16/26 in the system
