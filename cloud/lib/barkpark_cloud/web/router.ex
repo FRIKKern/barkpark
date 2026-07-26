@@ -9618,6 +9618,10 @@ defmodule BarkparkCloud.Web.Router do
       # search-template W2/W6/W8: the starter + palette this site deploys with.
       template: s.template,
       theme: s.theme,
+      # search-template W10: the featured content type the shipped site reads
+      # (injected as BARKPARK_DOC_TYPE at deploy). Writable at create and via
+      # PATCH since W8 — serialized here so every surface can read it back.
+      doc_type: s.doc_type,
       domains: s.domains,
       scale_mode: s.scale_mode,
       port: s.port,
