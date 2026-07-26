@@ -122,6 +122,19 @@ defmodule Barkpark.Search.QueryPipelineTest do
     proj = create_project!(ws)
     scope = [workspace_id: ws.id, project_id: proj.id]
 
+    # These searches carry NO caller_context (anonymous), and the W10
+    # schema-visibility gate (stw10-search-visibility-leak) restricts anonymous
+    # hits to PUBLIC schema types IN THE CALLER'S TENANT SCOPE — the setup's
+    # nil-scope "post" row is invisible here. Seed the scoped public row every
+    # live searchable type has, keeping the gate active through the recovery
+    # assertions below.
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+        "pipeline",
+        scope
+      )
+
     {:ok, _} =
       Content.create_document(
         "post",
