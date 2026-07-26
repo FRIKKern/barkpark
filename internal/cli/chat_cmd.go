@@ -129,14 +129,24 @@ func runChatLs(out *writer, g globals, ctx manifest.Context, args []string) int 
 		return exitOK
 	}
 	watch := false
+	archived := false
 	for _, a := range args {
 		switch a {
 		case "--watch":
 			watch = true
+		case "--archived":
+			archived = true
 		default:
 			return usageErrf(out, func() { printChatLsHelp(out) },
-				"unknown chat ls argument %q (bp chat ls takes only --watch)", a)
+				"unknown chat ls argument %q (bp chat ls takes --watch and --archived)", a)
 		}
+	}
+	if watch && archived {
+		// The fleet stream carries state FLIPS for the live fleet; there is no
+		// archived-shelf stream and an archived session emits no flips. Silently
+		// watching an empty stream would look like a hang.
+		return usageErrf(out, func() { printChatLsHelp(out) },
+			"bp chat ls --archived cannot be combined with --watch (the shelf has no live stream)")
 	}
 
 	// The chat routes are data-plane-token scoped (charter D3/D21) — no
@@ -147,7 +157,7 @@ func runChatLs(out *writer, g globals, ctx manifest.Context, args []string) int 
 		return runChatLsWatch(out, ctx, client)
 	}
 
-	sessions, err := client.ListChatSessions(false)
+	sessions, err := client.ListChatSessions(archived)
 	if err != nil {
 		out.errf("bp chat ls: %v", err)
 		return exitGeneric
@@ -166,7 +176,11 @@ func runChatLs(out *writer, g globals, ctx manifest.Context, args []string) int 
 		}
 	}
 	if len(sessions) == 0 {
-		out.outf("no chat sessions")
+		if archived {
+			out.outf("no archived chat sessions")
+		} else {
+			out.outf("no chat sessions")
+		}
 		return exitOK
 	}
 	now := time.Now()
@@ -278,6 +292,7 @@ func chatLsAge(agentStateAt, lastActiveAt string, now time.Time) string {
 func printChatHelp(out *writer) {
 	out.outf("usage: bp chat [--theme <skin>]   open the herd (interactive TUI)")
 	out.outf("       bp chat ls [--watch]       list the herd without a TTY")
+	out.outf("       bp chat ls --archived      list the archived shelf")
 	out.outf("")
 	out.outf("  --theme <skin>   design-system palette: evergreen (default), charple,")
 	out.outf("                   ember, fjord, iris — the SKIN IDENTITY (mode stays dark;")
@@ -297,6 +312,7 @@ func printChatHelp(out *writer) {
 	out.outf("    ↑ / ↓          move between sessions")
 	out.outf("    enter          attach to the session (or start a new one on the top row)")
 	out.outf("    n              start a new session")
+	out.outf("    a              archive the row (dismiss it — the session keeps running)")
 	out.outf("    r              refresh the list")
 	out.outf("    q, ctrl-c      quit")
 	out.outf("  conversation")
@@ -310,12 +326,17 @@ func printChatHelp(out *writer) {
 
 // printChatLsHelp prints the short help block for `bp chat ls`.
 func printChatLsHelp(out *writer) {
-	out.outf("usage: bp chat ls [--watch]")
+	out.outf("usage: bp chat ls [--watch | --archived]")
 	out.outf("")
 	out.outf("List the chat herd without a TTY: one row per session — id, agent state")
 	out.outf("(working/blocked/idle/unknown), title, messages, cost, and age.")
 	out.outf("`-o json` emits the raw sidebar rows.")
 	out.outf("")
-	out.outf("  --watch    hold the fleet stream and print one line per state flip")
-	out.outf("             (session id, state, title) until Ctrl-C (exits 0)")
+	out.outf("  --watch      hold the fleet stream and print one line per state flip")
+	out.outf("               (session id, state, title) until Ctrl-C (exits 0)")
+	out.outf("  --archived   list the archived SHELF instead of the active herd.")
+	out.outf("               Archiving is DISMISSAL — orthogonal to liveness and to")
+	out.outf("               attention: a shelved session keeps running and keeps its")
+	out.outf("               agent state. Not combinable with --watch (no live stream")
+	out.outf("               exists for the shelf).")
 }

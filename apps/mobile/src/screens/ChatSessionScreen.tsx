@@ -4,7 +4,7 @@
 // local echoes (queued-badged mid-turn, D12), and the live streaming tail
 // (D9). Cards (approval / plan / question) answer through the same
 // allow/deny-only contract as the TUI and Studio — one row, one truth.
-import { memo, useCallback, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import {
   ActivityIndicator,
@@ -23,7 +23,13 @@ import {
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native'
 
 import type { InstanceConnection } from '../api/instance'
-import type { StreamFailure, StreamStatus } from '../api/chat'
+import {
+  fetchChatCapabilities,
+  type ChatCapabilities,
+  type StreamFailure,
+  type StreamStatus,
+} from '../api/chat'
+import { PickerSheet, type PickerKind } from '../chat/PickerSheet'
 import {
   contentMark,
   distanceFromEnd,
@@ -265,17 +271,23 @@ export function ChatSessionScreen({
   connection,
   sessionId,
   sessionTitle,
+  onArchive,
   onBack,
 }: {
   connection: InstanceConnection
   sessionId: string
   /** the list row's title — painted until the full GET lands its own. */
   sessionTitle?: string
+  /** Dismiss this session (charter D28). The OWNER does the navigating: it
+   * pops out of the session it just archived (nextOpenAfterArchive), which is
+   * why this screen only reports the intent and never routes. */
+  onArchive?: (id: string) => void
   onBack: () => void
 }) {
   const theme = useTheme()
   const {
     state,
+    choices,
     loading,
     loadError,
     transportError,
@@ -284,9 +296,51 @@ export function ChatSessionScreen({
     send,
     interrupt,
     answer,
+    setChoice,
     retry,
   } = useChatSession(connection, sessionId)
   const [draft, setDraft] = useState('')
+  const [pickersOpen, setPickersOpen] = useState(false)
+  // The picker vocabulary, discovered once per connection (charter D27). A
+  // server that does not advertise the block, or refuses the read, lands
+  // `undefined` — which the sheet renders as an honest "nothing advertised",
+  // never as a hardcoded claude-shaped guess.
+  const [capabilities, setCapabilities] = useState<ChatCapabilities | undefined>(undefined)
+  useEffect(() => {
+    let alive = true
+    fetchChatCapabilities(connection)
+      .then((caps) => {
+        if (alive) setCapabilities(caps)
+      })
+      .catch(() => {
+        if (alive) setCapabilities(undefined)
+      })
+    return () => {
+      alive = false
+    }
+  }, [connection])
+  const openPickers = useCallback(() => {
+    haptic('disclosureToggle')
+    setPickersOpen(true)
+  }, [])
+  const closePickers = useCallback(() => setPickersOpen(false), [])
+  const onPick = useCallback(
+    (kind: PickerKind, value: string) => setChoice(kind, value),
+    [setChoice],
+  )
+  // Archiving is a DISMISSAL, so the sheet closes and the owner pops us out —
+  // staying inside a session you just dismissed is the incoherent state D28
+  // exists to prevent.
+  const onArchiveSession = useMemo(
+    () =>
+      onArchive === undefined
+        ? undefined
+        : () => {
+            setPickersOpen(false)
+            onArchive(sessionId)
+          },
+    [onArchive, sessionId],
+  )
   const listRef = useRef<LegendListRef>(null)
   const [follow, setFollow] = useState<FollowState>(initialFollowState)
   const [fold, setFold] = useState(initialWorkLogFold)
@@ -497,9 +551,19 @@ export function ChatSessionScreen({
           {title}
         </Text>
         <View style={styles.headerMeta}>
-          {state.mode !== '' && (
-            <Text style={[styles.metaBadge, { color: theme.textMuted }]}>{state.mode}</Text>
-          )}
+          {/* The mode badge IS the picker affordance — the one thing already
+              in the header that names a session choice, so opening the sheet
+              from it adds an interaction, not a control. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Session options"
+            hitSlop={8}
+            onPress={openPickers}
+          >
+            <Text style={[styles.metaBadge, { color: theme.textMuted }]}>
+              {state.mode !== '' ? state.mode : 'options'}
+            </Text>
+          </Pressable>
           {connLabel !== undefined &&
             (connLabel.action !== undefined ? (
               <Pressable
@@ -583,6 +647,8 @@ export function ChatSessionScreen({
           <Text style={[styles.sendGlyph, { color: theme.accentText }]}>↑</Text>
         </Pressable>
       </View>
+
+      <PickerSheet visible={pickersOpen} onClose={closePickers} theme={theme} capabilities={capabilities} choices={choices} observedModel={state.model} onPick={onPick} onArchive={onArchiveSession} />
     </KeyboardAvoidingView>
   )
 }

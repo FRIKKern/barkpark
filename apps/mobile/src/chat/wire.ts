@@ -26,8 +26,22 @@ export interface ChatSession {
   id: string
   title?: string
   status?: string
+  /** Which engine answers ("claude" | "codex" | …) — the key the picker
+   * vocabulary is looked up under (charter D27). */
+  provider?: string
   mode?: string
+  /** The OBSERVED model the server last recorded answering. Distinct from
+   * model_choice below, and the distinction is load-bearing (ratified call
+   * #5): this is FACT, that is a REQUEST. */
   model?: string
+  /** The user's persisted model REQUEST. May legitimately differ from
+   * `model` — an alias resolving to a concrete id, or a choice that has not
+   * taken effect yet. */
+  model_choice?: string
+  /** The user's persisted effort REQUEST. There is no observed counterpart:
+   * no wire frame reports effort back, and there is no set_effort control
+   * verb — so it is persist-only and applies from the next resume. */
+  effort_choice?: string
   summary?: string
   message_count?: number
   pending_approvals?: number

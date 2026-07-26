@@ -32,6 +32,11 @@ type fakeTransport struct {
 	approveErr  error
 	listErr     error
 	getErr      error
+
+	archived     []string
+	unarchived   []string
+	archiveErr   error
+	archivedList []SessionSummary
 }
 
 type approvalCall struct {
@@ -46,6 +51,17 @@ type getCall struct {
 func (f *fakeTransport) CreateSession() (Session, error) { return f.created, nil }
 func (f *fakeTransport) ListSessions() ([]SessionSummary, error) {
 	return f.summaries, f.listErr
+}
+func (f *fakeTransport) ListArchivedSessions() ([]SessionSummary, error) {
+	return f.archivedList, f.listErr
+}
+func (f *fakeTransport) Archive(id string) error {
+	f.archived = append(f.archived, id)
+	return f.archiveErr
+}
+func (f *fakeTransport) Unarchive(id string) error {
+	f.unarchived = append(f.unarchived, id)
+	return f.archiveErr
 }
 func (f *fakeTransport) GetSession(id string, since int) (Session, error) {
 	f.getCalls = append(f.getCalls, getCall{id: id, since: since})

@@ -43,12 +43,27 @@ async function chatSend(
   return { status: response.status, body }
 }
 
-/** GET /v1/chat/sessions — the sidebar list, workspace-scoped at the DB by
- * the token (D10: the workspace's sessions ARE the floor, by design). */
+/** GET /v1/chat/sessions[?archived=] — the sidebar list, workspace-scoped at
+ * the DB by the token (D10: the workspace's sessions ARE the floor, by
+ * design).
+ *
+ * `archived` selects WHICH SHELF, and that is the ONLY archived truth the
+ * client has: the sidebar row carries no archived flag, so "is this session
+ * archived" is answered by which list you asked for, never by a per-row
+ * boolean (charter D28). The flag is always sent explicitly — the same
+ * discipline as the Go client's ListChatSessions — so the server never has to
+ * guess a default. */
 export async function listChatSessions(
   connection: InstanceConnection,
+  archived = false,
 ): Promise<ChatSessionSummary[]> {
-  const { body } = await chatSend(connection, 'GET', '/sessions', undefined, [200])
+  const { body } = await chatSend(
+    connection,
+    'GET',
+    `/sessions?archived=${archived ? 'true' : 'false'}`,
+    undefined,
+    [200],
+  )
   const parsed = JSON.parse(body) as { sessions?: ChatSessionSummary[] }
   return parsed.sessions ?? []
 }
@@ -105,6 +120,100 @@ export async function respondChatApproval(
 export async function fetchChatRollup(connection: InstanceConnection): Promise<ChatRollup> {
   const { body } = await chatSend(connection, 'GET', '/rollup', undefined, [200])
   return JSON.parse(body) as ChatRollup
+}
+
+/** PATCH /v1/chat/sessions/:id — the writable continuity keys (mode /
+ * model_choice / effort_choice / title / draft). `archived` is deliberately
+ * NOT one of them (charter D28: archive is a lifecycle ACTION with its own
+ * POST verbs, not a continuity field) — the server's allowlist rejects it and
+ * this client never offers it.
+ *
+ * PATCH mode and model_choice also LIVE-STEER a running session server-side
+ * (the S5 steer parity); effort_choice persists only — there is no set_effort
+ * control verb, so the honest client-side line is "applies from the next
+ * resume". */
+export async function patchChatSession(
+  connection: InstanceConnection,
+  id: string,
+  fields: Record<string, string>,
+): Promise<void> {
+  await chatSend(connection, 'PATCH', `/sessions/${encodeURIComponent(id)}`, fields, [200])
+}
+
+/** POST /v1/chat/sessions/:id/archive — stamp archived_at (200 {session}),
+ * idempotent. A foreign-tenant or missing id joins the not-found oracle (404),
+ * so a failure here is indistinguishable from "never existed" BY DESIGN.
+ *
+ * The server emits NO fleet frame for an archive (charter D28 — no broadcast
+ * path exists): callers remove the row OPTIMISTICALLY on the 200 and reconcile
+ * on the next list poll. */
+export async function archiveChatSession(
+  connection: InstanceConnection,
+  id: string,
+): Promise<void> {
+  await chatSend(connection, 'POST', `/sessions/${encodeURIComponent(id)}/archive`, undefined, [200])
+}
+
+/** POST /v1/chat/sessions/:id/unarchive — clear archived_at. Same oracle, same
+ * idempotency, same no-fleet-frame optimism as archive. */
+export async function unarchiveChatSession(
+  connection: InstanceConnection,
+  id: string,
+): Promise<void> {
+  await chatSend(
+    connection,
+    'POST',
+    `/sessions/${encodeURIComponent(id)}/unarchive`,
+    undefined,
+    [200],
+  )
+}
+
+// ── picker discovery (charter D27) ───────────────────────────────────────────
+
+/** One provider's picker vocabulary. Empty arrays are the HONEST degrade
+ * signal (codex ships all-empty today): offer no picker rather than invent
+ * values. */
+export interface ChatProviderCaps {
+  modes: string[]
+  models: string[]
+  efforts: string[]
+}
+
+/** The root `chat` discovery block, keyed by provider id. */
+export interface ChatCapabilities {
+  providers: Record<string, ChatProviderCaps>
+}
+
+/** GET /v1/capabilities?chat=1 — the picker vocabulary (charter D27).
+ *
+ * NOT a /v1/chat route, so it does not ride chatUrl. The `?chat=1` opt-in
+ * mirrors ?build=1/?views=1: the server emits the root `chat` key only to
+ * callers that ask (and never at auth tier "none"), because bp strict-decodes
+ * the manifest and an unconditional new top-level key would brick every
+ * deployed binary at parse time.
+ *
+ * Returns undefined when the server does not advertise the block at all (an
+ * older instance, or a tier that never gets it). undefined and an empty
+ * provider are DIFFERENT facts and the sheet renders them differently:
+ * undefined = "this server tells us nothing", empty = "this provider has no
+ * vocabulary". */
+export async function fetchChatCapabilities(
+  connection: InstanceConnection,
+): Promise<ChatCapabilities | undefined> {
+  const url = connection.projectUrl.replace(/\/+$/, '') + '/v1/capabilities?chat=1'
+  const response = await expoFetch(url, {
+    method: 'GET',
+    headers: { Accept: 'application/json', Authorization: `Bearer ${connection.token}` },
+  })
+  const body = await response.text()
+  if (response.status !== 200) {
+    throw new ChatHttpError(response.status, `chat capabilities: HTTP ${response.status}`)
+  }
+  const parsed = JSON.parse(body) as { chat?: { providers?: Record<string, ChatProviderCaps> } }
+  const providers = parsed.chat?.providers
+  if (providers === undefined || providers === null) return undefined
+  return { providers }
 }
 
 // ── SSE ──────────────────────────────────────────────────────────────────────
@@ -262,6 +371,36 @@ export async function streamChatEvents(
   sessionId: string,
   opts: ChatStreamOptions,
 ): Promise<void> {
+  return pumpSse(connection, `/sessions/${encodeURIComponent(sessionId)}/events`, opts)
+}
+
+/** Opens GET /v1/chat/events — the ONE herd fleet stream (snapshot-then-live
+ * four-state frames for the whole in-scope fleet, herd charter D45h/D54h).
+ *
+ * A SECOND CALL SITE OF pumpSse, NEVER A FORK: same SseSplitter, same
+ * classifier, same jittered ladder, same abort contract as the per-session
+ * stream. The only difference is the URL — which is exactly why this is four
+ * lines and not four hundred. Frames arrive as event `snapshot` / `state` /
+ * `heartbeat` and go straight into herd.ts's applyFleetFrame.
+ *
+ * The opaque cursor is threaded verbatim through `lastEventId`; the herd
+ * resets off the next event:snapshot, never on reconnect (D49h), so there is
+ * no onReconnect hook here either. */
+export async function streamFleetEvents(
+  connection: InstanceConnection,
+  opts: ChatStreamOptions,
+): Promise<void> {
+  return pumpSse(connection, '/events', opts)
+}
+
+/** The ONE SSE pump: connect → read → split → dispatch, with the D24 status
+ * vocabulary and the counted jittered ladder. Both chat streams are this
+ * function at a different suffix. */
+async function pumpSse(
+  connection: InstanceConnection,
+  suffix: string,
+  opts: ChatStreamOptions,
+): Promise<void> {
   let lastEventId = opts.lastEventId
   // ONE counter feeds the backoff ladder: transient failures AND clean closes
   // both count (the old flat uncounted 1s clean-close loop hammered a dead
@@ -276,10 +415,11 @@ export async function streamChatEvents(
         Authorization: `Bearer ${connection.token}`,
       }
       if (lastEventId !== undefined) headers['Last-Event-ID'] = lastEventId
-      const response = await expoFetch(
-        chatUrl(connection, `/sessions/${encodeURIComponent(sessionId)}/events`),
-        { method: 'GET', headers, signal: opts.signal },
-      )
+      const response = await expoFetch(chatUrl(connection, suffix), {
+        method: 'GET',
+        headers,
+        signal: opts.signal,
+      })
       if (!response.ok || response.body === null) {
         throw new ChatHttpError(response.status, `chat events: HTTP ${response.status}`)
       }

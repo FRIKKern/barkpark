@@ -21,6 +21,19 @@ type Transport interface {
 	CreateSession() (Session, error)
 	// ListSessions GETs /v1/chat/sessions (non-archived).
 	ListSessions() ([]SessionSummary, error)
+	// ListArchivedSessions GETs /v1/chat/sessions?archived=true — the shelf.
+	// A SEPARATE method rather than a bool parameter because the two lists are
+	// two different questions at every call site, and a bare `false` at a call
+	// site reads like an accident.
+	ListArchivedSessions() ([]SessionSummary, error)
+	// Archive POSTs /v1/chat/sessions/:id/archive — DISMISSAL, orthogonal to
+	// both status (liveness) and agent_state (attention). The server emits no
+	// fleet frame for the flip, so the client removes the row optimistically
+	// and reconciles on the next list read.
+	Archive(id string) error
+	// Unarchive POSTs /v1/chat/sessions/:id/unarchive. Never navigates
+	// anywhere on its own — it puts a row back, and nothing has to move.
+	Unarchive(id string) error
 	// GetSession GETs /v1/chat/sessions/:id — the FULL struct (rail + continuity
 	// + metrics). sinceSeq > 0 appends ?since= so only newer message rows return
 	// (the turn-boundary tail refetch, charter D8/D15).
@@ -81,6 +94,22 @@ func (t *clientTransport) CreateSession() (Session, error) {
 
 func (t *clientTransport) ListSessions() ([]SessionSummary, error) {
 	return t.c.ListChatSessions(false)
+}
+
+func (t *clientTransport) ListArchivedSessions() ([]SessionSummary, error) {
+	return t.c.ListChatSessions(true)
+}
+
+func (t *clientTransport) Archive(id string) error {
+	// The returned session is discarded: the row is leaving this shelf, so its
+	// refreshed fields have no reader. The 200 is the whole signal.
+	_, err := t.c.ArchiveChatSession(id)
+	return err
+}
+
+func (t *clientTransport) Unarchive(id string) error {
+	_, err := t.c.UnarchiveChatSession(id)
+	return err
 }
 
 func (t *clientTransport) GetSession(id string, sinceSeq int) (Session, error) {
