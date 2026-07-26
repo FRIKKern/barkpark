@@ -960,7 +960,7 @@ defmodule BarkparkWeb.ChatController do
 
     with %StudioChat.Session{mode: mode, provider: provider} when mode != value <- prior,
          recorder when is_pid(recorder) <- Recorder.whereis(id),
-         {:ok, session} <- Recorder.session_pid(recorder) do
+         {:ok, session} when is_pid(session) <- Recorder.session_pid(recorder) do
       Runtime.steer(provider, session, %{mode: value})
     else
       _ -> :ok
@@ -981,7 +981,7 @@ defmodule BarkparkWeb.ChatController do
     with %StudioChat.Session{model_choice: choice, provider: provider} when choice != value <-
            prior,
          recorder when is_pid(recorder) <- Recorder.whereis(id),
-         {:ok, session} <- Recorder.session_pid(recorder) do
+         {:ok, session} when is_pid(session) <- Recorder.session_pid(recorder) do
       Runtime.steer(provider, session, %{model: value})
     else
       _ -> :ok
@@ -995,7 +995,7 @@ defmodule BarkparkWeb.ChatController do
     with %StudioChat.Session{effort_choice: choice, provider: provider} when choice != value <-
            prior,
          recorder when is_pid(recorder) <- Recorder.whereis(id),
-         {:ok, session} <- Recorder.session_pid(recorder) do
+         {:ok, session} when is_pid(session) <- Recorder.session_pid(recorder) do
       Runtime.steer(provider, session, %{effort: value})
     else
       _ -> :ok

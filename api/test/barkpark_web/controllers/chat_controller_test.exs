@@ -1359,6 +1359,31 @@ defmodule BarkparkWeb.ChatControllerTest do
       GenServer.stop(stub)
     end
 
+    test "PATCH steer nil-session guard: a runtime-gone Recorder is fail-soft persist-only, never 500",
+         %{admin: a1, sid: sid} do
+      # Same runtime-gone shape as above, but on the PATCH steer path: the
+      # three steer blocks (mode/model_choice/effort_choice) must treat
+      # {:ok, nil} from session_pid/1 like an absent Recorder — persist the
+      # choice, skip the steer. Unguarded, nil flowed into the is_pid-guarded
+      # adapter (ClaudeChat.set_model/set_permission_mode) → FunctionClauseError
+      # → 500 while the persisted value had ALREADY landed.
+      {:ok, stub} = NilSessionRecorderStub.start_link(sid)
+
+      body =
+        json_conn(a1)
+        |> patch(
+          "/v1/chat/sessions/#{sid}",
+          Jason.encode!(%{mode: "acceptEdits", model_choice: "opus", effort_choice: "low"})
+        )
+        |> json_response(200)
+
+      assert body["mode"] == "acceptEdits"
+      assert body["model_choice"] == "opus"
+      assert body["effort_choice"] == "low"
+
+      GenServer.stop(stub)
+    end
+
     test "create-failure code is distinct: chat_unavailable is fully retired from the wire" do
       # The two legacy chat_unavailable emitters are gone (grep-proven in the
       # slice evidence): the create branch now answers chat_create_failed and
