@@ -7,7 +7,7 @@
 // The persisted config (MMKV) is the single source of truth; every
 // transition writes it first, then mirrors it into React state — reopening
 // the app lands exactly where the user left off (last-location memory).
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 
@@ -30,6 +30,7 @@ import { LoginScreen, type CloudSession } from './src/screens/LoginScreen'
 import { PapersScreen } from './src/screens/PapersScreen'
 import { TasksScreen } from './src/screens/TasksScreen'
 import { TabBar, type TabKey } from './src/ui/TabBar'
+import { haptic, needsYouRisingEdge } from './src/ui/haptics'
 import { useTheme } from './src/ui/theme'
 
 export default function App() {
@@ -70,6 +71,24 @@ export default function App() {
   // Needs-you badge (ratified R3): blocked sessions from GET /v1/chat/rollup.
   const rollup = useChatRollup(connection)
   const chatBadge = rollup?.counts.blocked ?? 0
+
+  // needsYou haptic (charter D33) — the app's ONE stage-1 haptic call site.
+  // The shell owns badge derivation, so the shell owns the edge; TabBar stays
+  // pure-render. Fires only on the RISING edge of counts.blocked (the pure,
+  // jest-pinned needsYouRisingEdge): initial load, equal polls, decreases and
+  // a server switch (prev resets below) are all silent — reopening the app
+  // onto an already-blocked board must not buzz.
+  const prevBlocked = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    // A new connection is a fresh board: its first rollup reads as initial.
+    prevBlocked.current = undefined
+  }, [connection])
+  useEffect(() => {
+    if (rollup === undefined) return // unknown is not 0 — no edge to judge yet
+    const next = rollup.counts.blocked
+    if (needsYouRisingEdge(prevBlocked.current, next)) haptic('needsYou')
+    prevBlocked.current = next
+  }, [rollup])
 
   // Needs-you PUSH (charter D15) — the app's one registration call site.
   //
