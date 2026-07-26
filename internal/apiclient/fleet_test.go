@@ -217,6 +217,175 @@ func TestFleetEventsWithCursorObservesAdvances(t *testing.T) {
 	}
 }
 
+// Ctrl-C mid-stream is INSTANT, and it tears the server side down with it. Herd
+// charter D76h claims ctx cancellation exits sub-millisecond "on both paths";
+// this is the first of the two paths — cancelled while a 200 stream is open and
+// being read. FleetEvents must return nil promptly (bound generously at 500ms so
+// the assertion is about promptness, not about a machine's scheduler), and the
+// httptest handler must observe its OWN request context close: the cancel
+// propagates through the in-flight HTTP request, so a long-poll handler blocked
+// on <-r.Context().Done() wakes up rather than leaking until keepalive timeout.
+//
+// The backoff floor is pinned at 30s so any accidental reconnect-then-sleep path
+// would blow the bound instead of hiding inside a millisecond retry.
+func TestFleetEventsCancelMidStreamReturnsPromptlyAndClosesServerCtx(t *testing.T) {
+	var closeOnce sync.Once
+	handlerCtxClosed := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		_, _ = io.WriteString(w, "id: 1700:0\nevent: snapshot\ndata: {\"sessions\":[]}\n\n")
+		if fl != nil {
+			fl.Flush()
+		}
+		select {
+		case <-r.Context().Done(): // the client's cancel must wake this
+			closeOnce.Do(func() { close(handlerCtxClosed) })
+		case <-time.After(10 * time.Second):
+			// Escape hatch: if the cancel never arrives the assertions below have
+			// already failed — don't also wedge srv.Close() on this handler.
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := newChatClient(srv.URL)
+	c.listenBackoffFloor = 30 * time.Second // a reconnect+sleep would be unmissable
+
+	var (
+		mu       sync.Mutex
+		cancelAt time.Time
+	)
+	done := make(chan error, 1)
+	go func() {
+		done <- c.FleetEvents(ctx, "", func(event, data string) error {
+			mu.Lock()
+			cancelAt = time.Now()
+			mu.Unlock()
+			cancel() // Ctrl-C, mid-stream, with the connection live
+			return nil
+		}, nil)
+	}()
+
+	select {
+	case err := <-done:
+		returnedAt := time.Now()
+		if err != nil {
+			t.Fatalf("FleetEvents after mid-stream ctx cancel = %v, want nil (cancellation is a clean exit)", err)
+		}
+		mu.Lock()
+		elapsed := returnedAt.Sub(cancelAt)
+		mu.Unlock()
+		if elapsed > 500*time.Millisecond {
+			t.Fatalf("returned %s after mid-stream cancel, want < 500ms", elapsed)
+		}
+		t.Logf("mid-stream cancel → return in %s", elapsed)
+	case <-time.After(5 * time.Second):
+		t.Fatal("FleetEvents never returned within 5s of a mid-stream ctx cancel")
+	}
+
+	select {
+	case <-handlerCtxClosed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server handler's request context never closed — the cancel did not reach the in-flight request")
+	}
+}
+
+// The SECOND path of herd charter D76h's cancellation claim, and the one that
+// used to have no committed proof: cancelled while PARKED IN THE BACKOFF SLEEP
+// between reconnects. The handler serves one frame and returns (EOF), so the
+// client falls into sleepBackoff with a 30s floor — a sleep that ignored ctx
+// would hold the process for half a minute after Ctrl-C. The cancel must break
+// it in well under a second, and `attempts` must still be 1: the return came out
+// of the sleep, not out of a reconnect that raced ahead of the assertion.
+func TestFleetEventsCancelDuringBackoffSleepReturnsImmediately(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		attempts int
+	)
+	dropped := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		_, _ = io.WriteString(w, "id: 1700:0\nevent: snapshot\ndata: {\"sessions\":[]}\n\n")
+		if fl != nil {
+			fl.Flush()
+		}
+		// Return → EOF while ctx is still alive: the client enters the backoff
+		// sleep before its next connect attempt.
+		select {
+		case dropped <- struct{}{}:
+		default:
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := newChatClient(srv.URL)
+	c.listenBackoffFloor = 30 * time.Second // the sleep we must be able to break
+
+	delivered := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- c.FleetEvents(ctx, "", func(event, data string) error {
+			select {
+			case delivered <- struct{}{}:
+			default:
+			}
+			return nil
+		}, nil)
+	}()
+
+	select {
+	case <-delivered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no frame delivered — never reached a live stream")
+	}
+	select {
+	case <-dropped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler never returned — no EOF, so no backoff sleep to cancel")
+	}
+	// Let the client notice the EOF and settle INTO the 30s sleep.
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	settled := attempts
+	mu.Unlock()
+	if settled != 1 {
+		t.Fatalf("attempts = %d before the cancel, want 1 (a 30s floor must not have reconnected yet)", settled)
+	}
+
+	cancelAt := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		elapsed := time.Since(cancelAt)
+		if err != nil {
+			t.Fatalf("FleetEvents after ctx cancel in the backoff sleep = %v, want nil", err)
+		}
+		if elapsed > time.Second {
+			t.Fatalf("returned %s after cancelling during a 30s backoff sleep, want < 1s", elapsed)
+		}
+		t.Logf("backoff-sleep cancel → return in %s (floor was 30s)", elapsed)
+	case <-time.After(5 * time.Second):
+		t.Fatal("FleetEvents did not return within 5s of a ctx cancel during the 30s backoff sleep — the sleep is not ctx-aware")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 — the cancel must break the sleep, never wait it out into another connect", attempts)
+	}
+}
+
 // A first-attempt non-200 fails fast (bad creds don't retry forever).
 func TestFleetEventsInitialErrorFailsFast(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
