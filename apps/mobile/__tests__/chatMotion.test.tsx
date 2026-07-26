@@ -513,7 +513,11 @@ function wouldRender(prev: TranscriptRowProps, next: TranscriptRowProps): boolea
 describe('memo(TranscriptRow) is not decoration', () => {
   const messages = [msg(1, 'user'), msg(2, 'assistant'), msg(3, 'tool')]
 
-  it('a tail tick mints exactly ONE new row — every settled row keeps its identity', () => {
+  // SCOPE, stated in the name: this is assembleRows IN ISOLATION. The list the
+  // screen renders goes through foldWorkLog too, which re-mints one header per
+  // work-log group per frame — chatScreenWiring PROBE D measures that real
+  // end-to-end number (3 of 8 rows). Do not quote this test as the whole cost.
+  it('assembleRows alone: a tail tick mints exactly ONE new row — settled rows keep identity', () => {
     // The screen memoizes these two halves on state.messages / state.local,
     // which a delta frame never re-mints (reducer.ts spreads the state, not
     // the arrays). assembleRows is where that survives into the list.

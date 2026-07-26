@@ -314,6 +314,22 @@ export function ChatSessionScreen({
   // a live bug: re-running observeGroups against the un-persisted fold would
   // re-stamp every group with the CURRENT gen on every render, so a group's
   // birth gen chased the clock and nothing ever folded.
+  // The clock can go BACKWARDS, and only one path does it: retry() (the
+  // "signed out — sign in again" wall) rebuilds the store inside
+  // useChatSession, so state restarts at gen 0 — but this screen does NOT
+  // remount, so `fold` survives with births stamped against the OLD clock.
+  // Every born >= 0, so every collapsed work log would spring open the instant
+  // the user re-authenticated. A regression means a different session's
+  // history: drop the stamps rather than reinterpret them under a clock they
+  // were never taken on.
+  const [seenGen, setSeenGen] = useState(state.gen)
+  if (state.gen < seenGen) {
+    setSeenGen(state.gen)
+    setFold(initialWorkLogFold)
+  } else if (state.gen > seenGen) {
+    setSeenGen(state.gen)
+  }
+
   const observed = observeGroups(fold, groups, state.gen)
   if (observed !== fold) setFold(observed)
   const isOpen = useCallback(
