@@ -24,7 +24,10 @@
 //	           slug = the reserved url's first label, supportNameRe-fenced)
 //	configure  cloud.ConfigureSupportHost — the reduced go-live subset — THEN
 //	           the bounded PUBLIC health poll against https://<slug>.<zone>
-//	           with the box's own minted admin token (fail closed, like mains)
+//	           with the box's own minted admin token (fail closed, like mains);
+//	           the gate DIALS the box IP directly (cloud.PinnedHealthGate) so
+//	           the CP resolver's negative/stale cache of the slug never fails
+//	           a healthy box — hostname/SNI/cert checks stay on the fqdn
 //	content    roster row (provisioning) + ledger-token mint on the PARENT MAIN
 //	           + scrubbed dataset export streamed over SSH + on-box merge-import
 //	verify     listener runtime install (LEDGER token only — provider keys are
@@ -76,13 +79,24 @@ const DefaultSupportRosterPollBudget = 10 * time.Minute
 const DefaultSupportRosterPollInterval = 5 * time.Second
 
 // supportHealthPollInterval / supportHealthPollDeadline bound the configure
-// step's PUBLIC health poll, mirroring the go-live chain's F2 knobs: a cold
-// box's DNS has not propagated to the public resolver and Caddy has not yet
-// obtained the ACME cert, so the first https://<slug>.<zone> probe almost
-// always fails — poll on an interval up to a deadline, fail closed only past
-// it. Tests override both via SupportSeams so no real sleeps run.
+// step's PUBLIC health poll, mirroring the go-live chain's F2 knobs. The gate
+// DIALS the box IP directly (SupportSeams.HealthFor → cloud.PinnedHealthGate),
+// so worker-side DNS propagation is OUT of this window — the poll now
+// tolerates only cold ACME issuance: Caddy obtaining the cert, which needs
+// the fresh A record visible to the CA's resolvers (not this box's), plus
+// its retry backoff. That still takes tens of seconds to minutes on a cold
+// name, so the deadline stays at 4 minutes — do NOT shorten it. Tests
+// override both via SupportSeams so no real sleeps run.
 const supportHealthPollInterval = 10 * time.Second
 const supportHealthPollDeadline = 4 * time.Minute
+
+// supportRecordTTLSeconds is the TTL the secure step pins on the support's A
+// record. The zone default (300s positive; SOA minimum 3600s for negative
+// answers) burned two live chains on 2026-07-26: a failed chain's deleted
+// record left NXDOMAIN cached for up to an hour, and a repointed slug served
+// the OLD box IP for 5 minutes. 60s bounds what any resolver may cache about
+// a record this chain creates, deletes, and repoints freely.
+const supportRecordTTLSeconds = 60
 
 // supportProvisioningTTL is the provisioning roster row's honest freshness
 // budget (PDF-D56): the whole bring-up fits inside 30 min, after which an
@@ -200,9 +214,19 @@ type SupportSeams struct {
 	// secrets-install restart picks the PHX_HOST/PHX_SCHEME pair up).
 	Caddy cloud.CaddyStepper
 	// Health runs the configure step's PUBLIC health gate against
-	// https://<slug>.<zone> with the box's minted admin token. nil → the real
-	// gate (cloud.DefaultHealthGate); tests inject a green/red func.
+	// https://<slug>.<zone> with the box's minted admin token. Kept as the
+	// simple back-compat seam: when set (and HealthFor is not), it is used
+	// as-is, ignoring the box IP. nil → HealthFor decides.
 	Health cloud.HealthChecker
+	// HealthFor builds the gate for the KNOWN box IP and is PREFERRED over
+	// Health when set. nil → wrap Health when injected, else
+	// cloud.PinnedHealthGate: production MUST dial the created box's IP
+	// directly instead of resolving <slug>.<zone> through the CP box's
+	// resolver, whose negative cache (SOA minimum 3600s after a failed chain
+	// deleted the A record) or stale positive cache (a repointed name) failed
+	// the whole 4-minute gate twice live against a healthy box. Tests inject a
+	// recorder to assert the pin.
+	HealthFor func(ip string) cloud.HealthChecker
 	// HealthPollInterval / HealthPollDeadline tune the bounded public-health
 	// poll (F2 — DNS propagation + cold ACME issuance take tens of seconds).
 	// 0 → the support defaults above. Tests set tiny values.
@@ -351,7 +375,10 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 	fqdn := label + "." + Zone
 	report("secure", "started", "")
 	report("secure", "progress", fmt.Sprintf("pointing %s at %s", fqdn, host.IP))
-	if err := seams.DNS.UpsertRecord(ctx, cloud.Record{Zone: Zone, Name: label, Type: "A", Value: host.IP}); err != nil {
+	// TTL pinned low (supportRecordTTLSeconds) so a failed-then-retried or
+	// repointed slug is never hostage to a resolver's cache of this record;
+	// CloudDNS issues the follow-up change-ttl (set-records has no --ttl flag).
+	if err := seams.DNS.UpsertRecord(ctx, cloud.Record{Zone: Zone, Name: label, Type: "A", Value: host.IP, TTL: supportRecordTTLSeconds}); err != nil {
 		return r.failStep(ctx, "secure", fmt.Errorf("dns: upsert %s: %w", fqdn, err))
 	}
 	report("secure", "progress", "requesting the TLS certificate")
@@ -507,13 +534,16 @@ func (r *supportRun) dnsTeardownBestEffort(ctx context.Context) {
 // support-chain port of WarmPool.pollHealth (F2): probe immediately, treat any
 // error or non-OK report as not-ready-yet, retry every HealthPollInterval
 // until HealthPollDeadline, fail closed only past the deadline. ctx
-// cancellation aborts the wait between probes.
+// cancellation aborts the wait between probes. The gate is built PINNED to
+// the created box's IP (HealthFor), so a probe's failure means the box itself
+// is not answering as its public identity — never a resolver-cache mirage.
 func (r *supportRun) pollPublicHealth(ctx context.Context, target, token string) error {
 	deadline := time.Now().Add(r.seams.HealthPollDeadline)
+	probe := r.seams.HealthFor(r.host.IP)
 	var lastReport setup.HealthReport
 	var lastErr error
 	for {
-		report, err := r.seams.Health(ctx, target, token)
+		report, err := probe(ctx, target, token)
 		if err == nil && report.OK {
 			return nil
 		}
@@ -837,8 +867,19 @@ func (s SupportSeams) withSupportDefaults() SupportSeams {
 	if s.Caddy == nil {
 		s.Caddy = cloud.DefaultCaddyStepper()
 	}
-	if s.Health == nil {
-		s.Health = cloud.DefaultHealthGate
+	if s.HealthFor == nil {
+		if s.Health != nil {
+			// Back-compat: an injected plain Health gate is honored verbatim —
+			// the caller opted out of caring which address the gate dials.
+			health := s.Health
+			s.HealthFor = func(string) cloud.HealthChecker { return health }
+		} else {
+			// Production default: the gate DIALS the created box's IP directly
+			// (cloud.PinnedHealthGate) — never DefaultHealthGate here, because the
+			// CP box's resolver poisons a retried slug for up to the SOA-minimum
+			// hour after a failed chain deleted the record (see HealthFor's doc).
+			s.HealthFor = cloud.PinnedHealthGate
+		}
 	}
 	if s.HealthPollInterval <= 0 {
 		s.HealthPollInterval = supportHealthPollInterval

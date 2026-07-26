@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -125,9 +126,9 @@ type supportHarness struct {
 
 	// The public-identity seams (full-public-identity slice): the secure step's
 	// DNS zone + Caddy recorder, and the configure step's public health gate.
-	dns          *cloud.FakeDNS
+	dns          *supportRecordingDNS
 	caddy        *supportFakeCaddy
-	healthProbes []string // "target|token" per gate probe
+	healthProbes []string // "ip|target|token" per gate probe (ip = the pin)
 	healthOK     bool     // false → the gate never passes (deadline path)
 
 	// failEchoLeg, when set to "mutate" or "mint", makes that parent-main leg
@@ -146,7 +147,7 @@ func newSupportHarness(t *testing.T) *supportHarness {
 		mintTokenID: "tid-1",
 		parentToken: "parent-admin-tok-hunter2-XYZ",
 		echoSecret:  "would-be-minted-tok-9f8e7d",
-		dns:         cloud.NewFakeDNS(),
+		dns:         &supportRecordingDNS{FakeDNS: cloud.NewFakeDNS()},
 		caddy:       &supportFakeCaddy{},
 		healthOK:    true,
 	}
@@ -285,12 +286,17 @@ func (h *supportHarness) worker(runner *supportFakeRunner, deleted *[]string) *W
 		},
 		DNS:   h.dns,
 		Caddy: h.caddy,
-		Health: func(_ context.Context, base, token string) (setup.HealthReport, error) {
-			h.mu.Lock()
-			h.healthProbes = append(h.healthProbes, base+"|"+token)
-			ok := h.healthOK
-			h.mu.Unlock()
-			return setup.HealthReport{OK: ok}, nil
+		// HealthFor (not Health): the harness records WHICH IP the gate was
+		// pinned to, proving the chain builds the gate from the created box's
+		// IP instead of trusting the CP resolver (the 2026-07-26 live failure).
+		HealthFor: func(ip string) cloud.HealthChecker {
+			return func(_ context.Context, base, token string) (setup.HealthReport, error) {
+				h.mu.Lock()
+				h.healthProbes = append(h.healthProbes, ip+"|"+base+"|"+token)
+				ok := h.healthOK
+				h.mu.Unlock()
+				return setup.HealthReport{OK: ok}, nil
+			}
 		},
 		HealthPollInterval: 2 * time.Millisecond,
 		HealthPollDeadline: 20 * time.Millisecond,
@@ -414,6 +420,12 @@ func TestRunSupportWith_ClaimsAndDispatchesHappyPath(t *testing.T) {
 	if vals, _ := h.dns.Resolve(context.Background(), "helper.barkpark.cloud"); len(vals) != 1 || vals[0] != "203.0.113.9" {
 		t.Fatalf("secure must upsert helper.barkpark.cloud → 203.0.113.9, resolved %v", vals)
 	}
+	// …carrying TTL 60 (the zone default — 300s positive / SOA-minimum 3600s
+	// negative — let a failed chain poison a retry's name for up to an hour and
+	// a repointed name serve the old box for 5 min; 60 bounds both)…
+	if ups := h.dns.upserted(); len(ups) != 1 || ups[0].TTL != 60 {
+		t.Fatalf("the support A record must be upserted with TTL 60, got upserts %+v", ups)
+	}
 	// …the Caddy/TLS steps invoked with (label, zone, app port)…
 	h.caddy.mu.Lock()
 	caddyCalls := append([]string{}, h.caddy.calls...)
@@ -422,9 +434,11 @@ func TestRunSupportWith_ClaimsAndDispatchesHappyPath(t *testing.T) {
 		t.Fatalf("caddy steps must be built for helper|barkpark.cloud|4000, got %v", caddyCalls)
 	}
 	// …and configure gated on the PUBLIC health poll over the fqdn with the
-	// box's own minted admin token (never the parent's).
-	if len(h.healthProbes) == 0 || h.healthProbes[0] != "https://helper.barkpark.cloud|bp_admin_boxtoken123" {
-		t.Fatalf("the public health gate must probe https://helper.barkpark.cloud with the box admin token, got %v", h.healthProbes)
+	// box's own minted admin token (never the parent's), PINNED to the created
+	// box's IP — the gate must never depend on the CP resolver's view of the
+	// fresh/negative-cached name.
+	if len(h.healthProbes) == 0 || h.healthProbes[0] != "203.0.113.9|https://helper.barkpark.cloud|bp_admin_boxtoken123" {
+		t.Fatalf("the public health gate must be pinned to 203.0.113.9 and probe https://helper.barkpark.cloud with the box admin token, got %v", h.healthProbes)
 	}
 
 	// PDF-D89: succeed is reported only AFTER a live roster read.
@@ -1019,4 +1033,60 @@ func TestSupportImportStep_SharedBuilderEvidence(t *testing.T) {
 	if len(s.Redact) == 0 || s.Redact[0] != "bp_admin_tok987" {
 		t.Fatalf("worker import step must Redact the box admin token, got %v", s.Redact)
 	}
+}
+
+// supportRecordingDNS wraps FakeDNS and captures every upserted Record, so a
+// test can assert fields Resolve never surfaces (the TTL the secure step pins).
+type supportRecordingDNS struct {
+	*cloud.FakeDNS
+	mu      sync.Mutex
+	upserts []cloud.Record
+}
+
+func (d *supportRecordingDNS) UpsertRecord(ctx context.Context, rec cloud.Record) error {
+	d.mu.Lock()
+	d.upserts = append(d.upserts, rec)
+	d.mu.Unlock()
+	return d.FakeDNS.UpsertRecord(ctx, rec)
+}
+
+func (d *supportRecordingDNS) upserted() []cloud.Record {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]cloud.Record{}, d.upserts...)
+}
+
+// TestSupportSeams_HealthDefaults pins the seam-resolution contract for the
+// configure step's public gate (the 2026-07-26 DNS-cache fix):
+//   - neither seam set → HealthFor IS cloud.PinnedHealthGate (production pins
+//     by default — the CP resolver's negative/stale cache is never trusted);
+//   - only Health set (legacy tests/callers) → HealthFor wraps it verbatim,
+//     ignoring the IP, so the simple seam keeps working.
+func TestSupportSeams_HealthDefaults(t *testing.T) {
+	t.Run("production default is the PINNED gate", func(t *testing.T) {
+		s := SupportSeams{}.withSupportDefaults()
+		if s.HealthFor == nil {
+			t.Fatal("withSupportDefaults must fill HealthFor")
+		}
+		// Function identity, not behavior: probing the real pinned gate would
+		// hit the network. The default MUST be the pinned constructor itself.
+		if reflect.ValueOf(s.HealthFor).Pointer() != reflect.ValueOf(cloud.PinnedHealthGate).Pointer() {
+			t.Fatal("the default HealthFor must be cloud.PinnedHealthGate — production must pin the gate's dialing to the box IP")
+		}
+	})
+
+	t.Run("an injected plain Health seam is honored as-is", func(t *testing.T) {
+		probes := 0
+		s := SupportSeams{Health: func(context.Context, string, string) (setup.HealthReport, error) {
+			probes++
+			return setup.HealthReport{OK: true}, nil
+		}}.withSupportDefaults()
+		rep, err := s.HealthFor("198.51.100.7")(context.Background(), "https://x.barkpark.cloud", "tok")
+		if err != nil || !rep.OK {
+			t.Fatalf("the wrapped Health seam must answer: rep=%+v err=%v", rep, err)
+		}
+		if probes != 1 {
+			t.Fatalf("the injected Health func must be the one probing, got %d calls", probes)
+		}
+	})
 }

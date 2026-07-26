@@ -919,6 +919,23 @@ func DefaultCaddyStepper() CaddyStepper { return defaultCaddySteps{} }
 
 var DefaultHealthGate HealthChecker = defaultHealthChecker
 
+// PinnedHealthGate is DefaultHealthGate with the gate's dialing pinned to a
+// KNOWN box IP (setup.HealthGate.PinnedIP): every probe against base's
+// hostname connects straight to ip:<port> instead of resolving the name,
+// while Host header, TLS SNI, and cert verification keep using the public
+// hostname. The support chain's configure-step gate uses it because it runs
+// on the CP box, whose resolver negative-caches a failed chain's deleted A
+// record for up to the barkpark.cloud SOA minimum (3600s) — a retry reusing
+// the slug then fails the WHOLE gate deadline against a perfectly healthy
+// box (live-reproduced twice, 2026-07-26) — and serves a repointed name's
+// old IP for the positive TTL. The mains/warm-pool go-live keeps
+// DefaultHealthGate's resolver-based dialing for now.
+func PinnedHealthGate(ip string) HealthChecker {
+	return func(_ context.Context, base, token string) (setup.HealthReport, error) {
+		return setup.RunHealthGate(base, token, setup.HealthGate{StubsOptional: true, PinnedIP: ip})
+	}
+}
+
 // withDefaults fills any nil injected seam with its default. The Pool, DNS, and
 // Registry have no zero-value default (the caller MUST inject a provider-backed
 // pool, a DNS provider, and a registry client) and are validated in Provision.
