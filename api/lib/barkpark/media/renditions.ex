@@ -8,7 +8,7 @@ defmodule Barkpark.Media.Renditions do
   """
 
   alias Barkpark.Media
-  alias Barkpark.Media.ImageBackend
+  alias Barkpark.Media.{Blobstore, ImageBackend}
   alias Barkpark.Media.Storage.MediaFile
 
   # MIME types the rendition backend can actually decode. This mirrors the
@@ -109,23 +109,36 @@ defmodule Barkpark.Media.Renditions do
   end
 
   defp generate(%MediaFile{} = file, preset, spec, dest, rel, profile) do
-    src = Media.file_path(file.path)
-    File.mkdir_p!(Path.dirname(dest))
+    # The SOURCE original comes via the blobstore (a local path join today; a
+    # one-time cache download under an object-storage backend). The rendition
+    # OUTPUT stays a plain local write regardless of backend — renditions are
+    # a regenerable cache, never routed through remote storage.
+    case Blobstore.ensure_local(file.path) do
+      {:ok, src} ->
+        File.mkdir_p!(Path.dirname(dest))
 
-    # libvips on macOS/Linux/Docker; ImageMagick CLI on Windows. See ImageBackend.
-    case ImageBackend.impl().render(src, dest, spec, normalize_profile(profile)) do
-      :ok ->
-        {:ok, rel}
+        # libvips on macOS/Linux/Docker; ImageMagick CLI on Windows. See ImageBackend.
+        case ImageBackend.impl().render(src, dest, spec, normalize_profile(profile)) do
+          :ok ->
+            {:ok, rel}
+
+          {:error, reason} ->
+            log_generate_failure(preset, file, reason)
+            {:error, reason}
+        end
 
       {:error, reason} ->
-        require Logger
-
-        Logger.warning(
-          "Barkpark.Media.Renditions.generate #{preset} for #{file.id}: #{inspect(reason)}"
-        )
-
+        log_generate_failure(preset, file, reason)
         {:error, reason}
     end
+  end
+
+  defp log_generate_failure(preset, file, reason) do
+    require Logger
+
+    Logger.warning(
+      "Barkpark.Media.Renditions.generate #{preset} for #{file.id}: #{inspect(reason)}"
+    )
   end
 
   # Collapse the "no watermark" sentinels to nil for the backend contract.
