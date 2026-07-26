@@ -9465,7 +9465,9 @@ defmodule BarkparkCloud.Web.Router do
       parent_url: parent && parent.url,
       parent_admin_token: reveal_parent_admin_token(parent),
       dataset: "production",
-      workspace: parent && parent.bootstrap_workspace,
+      # Template-less mains never get bootstrap_workspace written; "" would die
+      # at the Go slug fence, so default like every other consumer of the column.
+      workspace: parent && (parent.bootstrap_workspace || "default"),
       # The SLUG, deliberately under the pinned `name` key (the Go slice binds
       # against these exact keys) — DNS-shaped worker identity, never the
       # display name.

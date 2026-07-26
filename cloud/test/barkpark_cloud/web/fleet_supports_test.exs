@@ -655,6 +655,32 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       refute support["name"] == "Helper Box"
     end
 
+    test "a template-less parent (nil bootstrap_workspace) claims workspace \"default\"" do
+      {_u, team, token} = user_with_role("owner")
+
+      main =
+        live_main_fixture(team)
+        |> Ecto.Changeset.change(bootstrap_workspace: nil)
+        |> Repo.update!()
+
+      created =
+        call(
+          :post,
+          "/v1/fleet/supports",
+          %{name: "Bare Helper", barkpark_id: main.id, mode: "provision"},
+          token
+        )
+
+      assert created.status == 202
+
+      conn = call(:post, "/v1/internal/support-jobs/claim", %{}, @worker_token)
+      assert conn.status == 200
+
+      # A nil bootstrap_workspace must never reach the Go slug fence as "" —
+      # every other consumer of the column defaults it (Registry, bp CLI).
+      assert decode(conn)["support"]["workspace"] == "default"
+    end
+
     test "204 when no provision_support job is pending" do
       conn = call(:post, "/v1/internal/support-jobs/claim", %{}, @worker_token)
       assert conn.status == 204
