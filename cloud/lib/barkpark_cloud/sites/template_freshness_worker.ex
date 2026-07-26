@@ -8,7 +8,7 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
   Once an hour, for every deployed content-bound site (`static` | `node` with a
   bootstrap dataset and at least one deployment — `Registry.list_deployed_content_sites/0`):
 
-      Deploy.enqueue(site, bp, false, "template-auto")
+      Deploy.enqueue(site, bp, false, "template-auto", probed_content_rev)
 
   and, only when that actually minted a NEW row, `Deploy.start/1`. Nothing else.
 
@@ -27,7 +27,8 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
 
   ## The content_rev SKIP (the build-storm tripwire)
 
-  `Deploy.enqueue/4` computes `content_rev` FAIL-OPEN: an unreadable revision
+  `Deploy.enqueue/5` computes `content_rev` FAIL-OPEN when it is not handed one:
+  an unreadable revision
   degrades to a fresh random `"u…"` marker so a human-triggered deploy never
   serves stale content. On a schedule that fail-open inverts into a weapon — a
   box whose analytics read is failing would produce a DIFFERENT content_rev, and
@@ -76,6 +77,28 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
   sweep for the rest of the fleet. `perform/1` returns `{:ok, summary}` with the
   counts (`enqueued`, `duplicate`, `skipped`, `failed`, `deferred`) so a run
   reads honestly in the Oban job record.
+
+  ## The INERT-SWEEP counter (`code_rev_unknown`)
+
+  `build_id` hashes the box's `code_rev`, and `Deploy.code_rev/1` falls back to
+  the CONSTANT `"unknown"` when a box has reported neither `git_commit` nor
+  `version`. A frozen `code_rev` means a code roll can never change `build_id`,
+  so this sweep returns `:duplicate` for that site every tick, forever — a
+  summary key-for-key IDENTICAL to a healthy quiet fleet's. It is latent today
+  (all deployed sites ride a box reporting a moving `git_commit`) and lethal to
+  observability the day it isn't.
+
+  So the summary carries a SIXTH KEY, `code_rev_unknown`, plus a `Logger.warning`.
+  It is a KEY, never a sixth OUTCOME atom: the reduce is `Map.update!(acc,
+  outcome, …)` over a seeded map, so an unseeded atom raises `KeyError` at
+  runtime. It is incremented ALONGSIDE the real outcome, not instead of it.
+
+  ## One analytics read per site per tick
+
+  The sweep probes with `Deploy.content_rev_probe/2` to decide whether to enqueue
+  at all; it then hands that rev straight to `Deploy.enqueue/5` rather than
+  letting it re-read the same endpoint. Two identical reads per site per tick,
+  on BOTH tick kinds, collapse to one.
   """
 
   use Oban.Worker,
@@ -102,7 +125,20 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
-    zero = %{enqueued: 0, duplicate: 0, skipped: 0, failed: 0, deferred: 0}
+    # FIVE OUTCOME KEYS plus ONE OBSERVABILITY KEY. `code_rev_unknown` is
+    # deliberately NOT a sixth outcome: the reduce below is `Map.update!(acc,
+    # outcome, …)`, so a sixth ATOM returned from `sweep_site/1` would raise
+    # KeyError at runtime. It is a key seeded here and incremented ALONGSIDE the
+    # real outcome — a site is counted once as enqueued/duplicate/… and, when
+    # its box has no code revision, once again here.
+    zero = %{
+      enqueued: 0,
+      duplicate: 0,
+      skipped: 0,
+      failed: 0,
+      deferred: 0,
+      code_rev_unknown: 0
+    }
 
     {summary, _starts_per_box} =
       Registry.list_deployed_content_sites()
@@ -112,14 +148,21 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
         if Map.get(starts, site.barkpark_id, 0) >= @max_starts_per_box do
           {Map.update!(acc, :deferred, &(&1 + 1)), starts}
         else
-          outcome = sweep_site(site)
+          {outcome, code_rev_known?} = sweep_site(site)
 
           starts =
             if outcome == :enqueued,
               do: Map.update(starts, site.barkpark_id, 1, &(&1 + 1)),
               else: starts
 
-          {Map.update!(acc, outcome, &(&1 + 1)), starts}
+          acc = Map.update!(acc, outcome, &(&1 + 1))
+
+          acc =
+            if code_rev_known?,
+              do: acc,
+              else: Map.update!(acc, :code_rev_unknown, &(&1 + 1))
+
+          {acc, starts}
         end
       end)
 
@@ -130,25 +173,41 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
       )
     end
 
+    if summary.code_rev_unknown > 0 do
+      Logger.warning(
+        "template-freshness: #{summary.code_rev_unknown} site(s) ride a box reporting NO " <>
+          "code revision (no git_commit, no version) — build_id's code half is frozen on the " <>
+          "\"unknown\" constant, so this sweep can never mint a build for a code roll on those " <>
+          "boxes and will report duplicate forever. Register the instance's git_commit/version."
+      )
+    end
+
     {:ok, summary}
   end
 
-  # One site's sweep. Returns the summary key its outcome counts under.
+  # One site's sweep. Returns `{summary key its outcome counts under,
+  # code_rev_known?}` — the second element is the observability half (residue 1)
+  # and never replaces the outcome.
   defp sweep_site(%Site{} = site) do
     with %Barkpark{} = bp <- Registry.get_barkpark(site.barkpark_id),
-         {:ok, _rev} <- Deploy.content_rev_probe(site, bp) do
-      enqueue_unforced(site, bp)
+         {:ok, rev} <- Deploy.content_rev_probe(site, bp) do
+      # Hand the ALREADY-PROBED rev to enqueue (residue 2a). Without it
+      # `Deploy.enqueue/4` re-reads the box's analytics endpoint, costing a
+      # second identical read per site per tick — on both tick kinds.
+      {enqueue_unforced(site, bp, rev), Deploy.code_rev_known?(bp)}
     else
       # The box is gone, or its content revision is unreadable. Skipping is the
       # POINT (see the moduledoc): enqueueing here would ride the fail-open and
       # mint a fresh build_id every hour for a box that cannot build anyway.
-      _ -> :skipped
+      # A box we could not even read is not ALSO reported as code-rev-unknown —
+      # that would double-count one sick box as two distinct diagnoses.
+      _ -> {:skipped, true}
     end
   end
 
-  defp enqueue_unforced(%Site{} = site, %Barkpark{} = bp) do
+  defp enqueue_unforced(%Site{} = site, %Barkpark{} = bp, content_rev) do
     # force: FALSE — the whole design. See the moduledoc.
-    case Deploy.enqueue(site, bp, false, "template-auto") do
+    case Deploy.enqueue(site, bp, false, "template-auto", content_rev) do
       {:ok, deployment} ->
         :ok = Deploy.start(deployment)
         :enqueued
