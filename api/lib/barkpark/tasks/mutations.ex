@@ -117,16 +117,14 @@ defmodule Barkpark.Tasks.Mutations do
   def update_session_refs_by_id(task_id, add_ids, remove_ids, caller_token_id \\ nil),
     do: update_ref_list_by_id(task_id, "sessions", add_ids, remove_ids, caller_token_id)
 
-  @doc """
-  Shared core for `update_paper_refs_by_id/4` and `update_session_refs_by_id/4`
-  (and any future ref-list field): add/remove entries in `content[field]` on a
-  single task, advisory-lock + CAS-on-rev guarded, emitting a
-  `task.referenced` mutation_event. Mirrors `relabel_by_id/3` — the only
-  difference is the content key (parameterized here as `field`) and the event
-  kind (`task.referenced` for every ref-list field, vs `task.relabeled` for
-  labels). Returns `{:ok, doc}`, `{:error, :not_found}`, or
-  `{:error, :stale_claim}`.
-  """
+  # Shared core for `update_paper_refs_by_id/4` and `update_session_refs_by_id/4`
+  # (and any future ref-list field): add/remove entries in `content[field]` on a
+  # single task, advisory-lock + CAS-on-rev guarded, emitting a
+  # `task.referenced` mutation_event. Mirrors `relabel_by_id/3` — the only
+  # difference is the content key (parameterized here as `field`) and the event
+  # kind (`task.referenced` for every ref-list field, vs `task.relabeled` for
+  # labels). Returns `{:ok, doc}`, `{:error, :not_found}`, or
+  # `{:error, :stale_claim}`.
   @spec update_ref_list_by_id(binary(), binary(), [binary()], [binary()], binary() | nil) ::
           {:ok, Document.t()} | {:error, term()}
   defp update_ref_list_by_id(task_id, field, add_ids, remove_ids, caller_token_id)
