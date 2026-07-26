@@ -12,16 +12,15 @@ import { DocumentDetail } from "@/components/document-detail";
 export const revalidate = 300;
 
 /** The doc types the unified `/d/[type]/[slug]` route knows how to render —
- * derived from the config-driven `DOC_TYPES` (so a single-type seed site scopes
- * to its type), PLUS the media types (graph nodes are navigable too — a media
- * node opens a MetaCard summary instead of a 404 dead-end). Anything else is a
- * real 404: both engines scope browse to the DOC_TYPES set, so an unknown type
- * can only arrive via a hand-typed URL. */
-const KNOWN_TYPES = new Set<string>([
-  ...DOC_TYPES.map((t) => t.type),
-  "mediaAsset",
-  "mediaCollection",
-]);
+ * exactly the config-driven `DOC_TYPES` (so a single-type seed site scopes to
+ * its type). Media types are deliberately NOT here: `mediaAsset` /
+ * `mediaCollection` are not queryable document types upstream
+ * (`/v1/data/query/<ds>/mediaAsset` is a 404, and the list-op throws on it),
+ * so admitting them turned every media graph-node click into a guaranteed red
+ * failure panel. They 404 honestly instead. Anything else is a real 404 too:
+ * both engines scope browse to the DOC_TYPES set, so an unknown type can only
+ * arrive via a hand-typed URL. */
+const KNOWN_TYPES = new Set<string>(DOC_TYPES.map((t) => t.type));
 
 type Params = Promise<{ type: string; slug: string }>;
 
@@ -34,9 +33,14 @@ export async function generateMetadata({
   if (!KNOWN_TYPES.has(type)) notFound();
 
   const { doc, error } = await getDocument(type, slug);
-  // 404 here — metadata resolves before the response status commits, so a
-  // missing doc yields a real HTTP 404 rather than a 200 from the page throwing
-  // notFound() after headers are already sent.
+  // Missing doc → notFound(). This yields a REAL HTTP 404 only because the
+  // detail segment deliberately ships NO loading.tsx: on Next 16.x a
+  // segment-level Suspense boundary under the force-dynamic (finder) layout
+  // streams the fallback shell — committing HTTP 200 — before this resolves,
+  // turning every notFound() into a soft 404 (200 + embedded
+  // NEXT_HTTP_ERROR_FALLBACK;404). Proven live; the old claim that metadata
+  // alone beats the status commit was falsified. Do NOT re-add loading.tsx
+  // here without re-proving the 404 status via next build + start + curl.
   if (!doc && !error) notFound();
   if (!doc) return { title: "Document unavailable · Barkpark" };
 
