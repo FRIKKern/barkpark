@@ -45,6 +45,18 @@
 // is transient truth that settles into a golden-covered assistant body at the
 // result boundary. One projection, one parity contract.
 //
+// # The archived shelf — a two-way door (charter D28)
+//
+// Archiving is DISMISSAL: orthogonal to status (liveness) and to agent_state
+// (attention), and the server emits no fleet frame for the flip in EITHER
+// direction. `a` on the herd home shelves the cursor row; `s` opens the SHELF
+// screen (its own roster, its own cursor — GET /v1/chat/sessions?archived=true),
+// where `enter`/`u` restores a row (POST …/unarchive) and `esc` returns to the
+// herd. Both flips are optimistic because nothing else will ever tell the list
+// the row moved; a refused flip surfaces honestly and RE-READS the list it came
+// from rather than guessing the row back in. `bp chat ls --archived` and `bp
+// chat unarchive <id>` are the same two verbs for scripts.
+//
 // # Interactive cards + the agents rail (charter D27/D28, Law-1/Law-2)
 //
 // approval/question/plan cards are answerable in-canvas: the focused pending

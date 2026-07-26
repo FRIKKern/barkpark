@@ -485,6 +485,194 @@ func TestHelpAdvertisesArchiveKey(t *testing.T) {
 	}
 }
 
+// ── the archived shelf screen (charter D28, mob-bl-tui-shelf-screen) ─────────
+
+// shelfModel is a Model parked ON the shelf with the given archived roster —
+// the state every shelf-key proof starts from.
+func shelfModel(tr *fakeTransport, ids ...string) Model {
+	m := newTestModel(tr)
+	m.screen = screenShelf
+	for _, id := range ids {
+		m.shelf = append(m.shelf, SessionSummary{ID: id, Title: id})
+	}
+	return m
+}
+
+// TestShelfKeyOpensTheShelfAndReadsIt: `s` on the herd home foregrounds the
+// shelf screen and fires the ARCHIVED read — the door `a` puts rows through,
+// finally readable from inside the pane.
+func TestShelfKeyOpensTheShelfAndReadsIt(t *testing.T) {
+	tr := &fakeTransport{archivedList: []SessionSummary{{ID: "old", Title: "shelved one"}}}
+	m := newTestModel(tr)
+	m.sessions = []SessionSummary{{ID: "a"}}
+
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	nm := next.(Model)
+	if nm.screen != screenShelf {
+		t.Fatalf("`s` must foreground the shelf, got screen %v", nm.screen)
+	}
+	if !nm.shelfLoading {
+		t.Error("opening the shelf must show the honest loading state")
+	}
+	if cmd == nil {
+		t.Fatal("`s` must issue the archived read")
+	}
+	msg, ok := cmd().(shelfLoadedMsg)
+	if !ok {
+		t.Fatalf("want shelfLoadedMsg, got %T", msg)
+	}
+	if len(msg.sessions) != 1 || msg.sessions[0].ID != "old" {
+		t.Fatalf("the shelf read must be the ARCHIVED list, got %+v", msg.sessions)
+	}
+	// The read lands on the shelf roster ONLY — the herd roster the fleet stream
+	// folds into must never be overwritten by a shelf browse.
+	loaded := mustModel(nm.Update(msg))
+	if len(loaded.shelf) != 1 || len(loaded.sessions) != 1 || loaded.sessions[0].ID != "a" {
+		t.Fatalf("the shelf read must not touch the herd roster, got shelf=%v sessions=%v",
+			loaded.shelf, loaded.sessions)
+	}
+}
+
+// TestShelfRestoreKeyUnarchivesTheRow is the RESTORE KEY pin: `enter` AND `u`
+// both put the cursor row back, through Transport.Unarchive (the member that
+// only belongs on the interface because THIS caller exists). The removal is
+// optimistic for the same reason archive's is — no fleet frame is emitted for an
+// archived_at flip in either direction.
+func TestShelfRestoreKeyUnarchivesTheRow(t *testing.T) {
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyEnter},
+		{Type: tea.KeyRunes, Runes: []rune{'u'}},
+	} {
+		tr := &fakeTransport{}
+		m := shelfModel(tr, "one", "two", "three")
+		m.shelfCursor = 1
+
+		next, cmd := m.handleKey(key)
+		nm := next.(Model)
+		if len(nm.shelf) != 2 {
+			t.Fatalf("%s: the row must leave the shelf on the keypress, got %d rows", key, len(nm.shelf))
+		}
+		for _, s := range nm.shelf {
+			if s.ID == "two" {
+				t.Fatalf("%s: session two must be gone from the shelf", key)
+			}
+		}
+		if cmd == nil {
+			t.Fatalf("%s: the restore key must issue the unarchive command", key)
+		}
+		um, ok := cmd().(unarchivedMsg)
+		if !ok {
+			t.Fatalf("%s: want unarchivedMsg, got %T", key, um)
+		}
+		if um.id != "two" || len(tr.unarchived) != 1 || tr.unarchived[0] != "two" {
+			t.Fatalf("%s: unarchive must target \"two\", got msg=%+v transport=%v", key, um, tr.unarchived)
+		}
+	}
+}
+
+// TestShelfRestoreOnEmptyShelfIsANoOp: nothing to restore means nothing
+// happens — never a negative index, never a restore of whatever sorts first.
+func TestShelfRestoreOnEmptyShelfIsANoOp(t *testing.T) {
+	tr := &fakeTransport{}
+	next, cmd := shelfModel(tr).handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("enter on an empty shelf must issue no command")
+	}
+	if got := next.(Model).shelfCursor; got != 0 {
+		t.Errorf("the cursor must stay at 0 on an empty shelf, got %d", got)
+	}
+	if len(tr.unarchived) != 0 {
+		t.Errorf("nothing may be unarchived from an empty shelf, got %v", tr.unarchived)
+	}
+}
+
+// TestShelfCursorStaysInsideTheShelf: the shelf cursor indexes rows DIRECTLY
+// (there is no "+ new session" row here), and every movement key clamps.
+func TestShelfCursorStaysInsideTheShelf(t *testing.T) {
+	m := shelfModel(&fakeTransport{}, "one", "two")
+	for _, key := range []string{"down", "down", "down", "G", "pgdown"} {
+		m = mustModel(m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}))
+	}
+	m = mustModel(m.handleKey(tea.KeyMsg{Type: tea.KeyDown}))
+	if m.shelfCursor > len(m.shelf)-1 {
+		t.Fatalf("the cursor must clamp to the last row, got %d of %d", m.shelfCursor, len(m.shelf))
+	}
+	m = mustModel(m.handleKey(tea.KeyMsg{Type: tea.KeyUp}))
+	m = mustModel(m.handleKey(tea.KeyMsg{Type: tea.KeyUp}))
+	m = mustModel(m.handleKey(tea.KeyMsg{Type: tea.KeyUp}))
+	if m.shelfCursor != 0 {
+		t.Fatalf("the cursor must clamp at the top, got %d", m.shelfCursor)
+	}
+}
+
+// TestShelfEscReturnsToTheHerd: esc (and `s` again) closes the shelf and
+// re-reads the roster, so a row restored during the visit is already on the
+// herd home when it paints.
+func TestShelfEscReturnsToTheHerd(t *testing.T) {
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyEsc},
+		{Type: tea.KeyRunes, Runes: []rune{'s'}},
+	} {
+		next, cmd := shelfModel(&fakeTransport{}, "one").handleKey(key)
+		if got := next.(Model).screen; got != screenPicker {
+			t.Fatalf("%s must return to the herd, got screen %v", key, got)
+		}
+		if cmd == nil {
+			t.Fatalf("%s must re-read the roster on the way out", key)
+		}
+		if _, ok := cmd().(sessionsLoadedMsg); !ok {
+			t.Errorf("%s: the exit command must be the roster re-read", key)
+		}
+	}
+}
+
+// TestShelfRestoreSuccessRereadsTheRoster: the restored row has to APPEAR on the
+// herd home, and no fleet frame is emitted for the flip — so success is NOT
+// silent here (unlike archive's), it re-reads the active roster.
+func TestShelfRestoreSuccessRereadsTheRoster(t *testing.T) {
+	m := shelfModel(&fakeTransport{})
+	next, cmd := m.Update(unarchivedMsg{id: "one"})
+	if got := next.(Model).shelfErr; got != "" {
+		t.Errorf("a successful restore must say nothing, got %q", got)
+	}
+	if cmd == nil {
+		t.Fatal("a successful restore must re-read the ACTIVE roster")
+	}
+	if _, ok := cmd().(sessionsLoadedMsg); !ok {
+		t.Error("the follow-up command must be the roster re-read")
+	}
+}
+
+// TestShelfRestoreFailureSurfacesAndRereadsTheShelf: a REFUSED restore says so
+// and re-reads the SHELF — which is what puts the row back. Re-inserting the
+// remembered row at a guessed position would paint a state the server never
+// confirmed (the archive path's law, mirrored).
+func TestShelfRestoreFailureSurfacesAndRereadsTheShelf(t *testing.T) {
+	m := shelfModel(&fakeTransport{})
+	next, cmd := m.Update(unarchivedMsg{id: "one", err: errArchiveTest})
+	if got := next.(Model).shelfErr; !strings.Contains(got, "unarchive failed") {
+		t.Errorf("a refused restore must surface honestly, got %q", got)
+	}
+	if cmd == nil {
+		t.Fatal("a refused restore must re-read the shelf")
+	}
+	if _, ok := cmd().(shelfLoadedMsg); !ok {
+		t.Error("the recovery command must be the SHELF re-read, not the roster's")
+	}
+}
+
+// TestHelpAdvertisesTheShelf spot-pins the shelf rows in the key reference: the
+// overlay is the canonical key map, so a screen it does not document is a screen
+// nobody can find.
+func TestHelpAdvertisesTheShelf(t *testing.T) {
+	joined := strings.Join(helpLines(), "\n")
+	for _, want := range []string{"open the archived shelf", "restore the row to the herd", "bp chat unarchive"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the help overlay must document %q:\n%s", want, joined)
+		}
+	}
+}
+
 var errArchiveTest = errors.New("boom")
 
 // mustModel unwraps a handleKey result. Written to take the handler's two

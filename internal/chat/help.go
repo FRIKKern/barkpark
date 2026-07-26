@@ -59,9 +59,18 @@ var helpSections = []helpSection{
 		{"enter", "attach the row · new session (top row)"},
 		{"n", "new session"},
 		{"a", "archive the row (dismiss — it keeps running)"},
+		{"s", "open the archived shelf"},
 		{"r", "refresh the roster"},
 		{"?", "toggle this help"},
 		{"q", "quit"},
+	}},
+	{"Archived shelf (s)", [][2]string{
+		{"enter / u", "restore the row to the herd (unarchive)"},
+		{"j / k · ↓ / ↑", "move down / up the shelf"},
+		{"g / G · pgdn / pgup", "ends · page"},
+		{"esc / s", "back to the herd"},
+		{"r", "re-read the shelf"},
+		{"", "`bp chat unarchive <id>` does the same from a script"},
 	}},
 	{"Conversation", [][2]string{
 		{"enter", "send the composer"},

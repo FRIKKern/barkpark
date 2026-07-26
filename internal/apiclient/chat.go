@@ -176,6 +176,12 @@ type ChatSessionSummary struct {
 	LastActiveAt     string `json:"last_active_at,omitempty"`
 	InsertedAt       string `json:"inserted_at,omitempty"`
 	UpdatedAt        string `json:"updated_at,omitempty"`
+	// ArchivedAt is the DISMISSAL stamp (charter D28) — sidebar_json has always
+	// emitted it; only this client type discarded it. Its reader is the TUI shelf
+	// screen's "shelved <age>" tail. It is NOT the answer to "is this archived":
+	// that is answered by WHICH list you asked for (?archived=), the same law the
+	// mobile client's shelf follows — a stale row can contradict its own stamp.
+	ArchivedAt string `json:"archived_at,omitempty"`
 
 	// AgentState/AgentStateAt are the herd cold-mount fields (herd charter
 	// D50h): the four-state autopilot truth (working|blocked|idle|unknown) the
