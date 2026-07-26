@@ -10,6 +10,12 @@ import type { InstanceConnection } from '../src/api/instance'
 import { headerStatus } from '../src/screens/ChatSessionScreen'
 import { staleBoardNotice } from '../src/screens/TasksScreen'
 
+// ChatSessionScreen now renders assistant turns through the PortableDoc block
+// registry, which reaches MermaidIsland → react-native-webview: a native
+// TurboModule with no jest mock of its own. This suite only exercises pure
+// functions, so the null stub is honest (the same one paperRenderer uses).
+jest.mock('react-native-webview', () => ({ WebView: () => null }))
+
 const ALL_STATUSES: StreamStatus[] = ['connecting', 'open', 'degraded', 'refused', 'closed']
 
 test('the header label map covers all five states and never leaks the raw enum', () => {
