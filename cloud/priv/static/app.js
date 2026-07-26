@@ -9318,6 +9318,10 @@
           railRowHtml("Theme",
             '<select class="rail-select" id="site-theme-select" aria-label="Deploy theme">' +
               siteThemeOptionsHtml(site.theme || "") + "</select>") +
+          // W10: the featured content type the build reads. The create form has
+          // always WRITTEN doc_type and no surface read it back — "—" when the
+          // control plane predates the field, never an invented default.
+          railRow("Content type", site.doc_type || "—") +
           railRowHtml("Repository", repo) +
           // E-03: the env editor affordance. Write-only truth (POST …/env is a
           // full-blob replace; reveal_site_env has zero route callers) means the

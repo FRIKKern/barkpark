@@ -689,6 +689,11 @@ func runCloudSiteSettings(out *writer, g globals, args []string) int {
 	if site.Template != "" {
 		out.outf("  starter: %s", hzCell(site.Template))
 	}
+	// W10: echo the doc_type you just set — this narration confirmed theme and
+	// starter and stayed silent about the one field `--doc-type` changes.
+	if site.DocType != "" {
+		out.outf("  content: %s", hzCell(site.DocType))
+	}
 	out.outf("  (applies on the next deploy — run `bp cloud site deploy %s`)", ref)
 	return exitOK
 }
@@ -917,6 +922,9 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 		"framework": s.Framework,
 		"template":  s.Template,
 		"theme":     s.Theme,
+		// W10: always echoed like template/theme — an empty string honestly means
+		// the control plane predates the field, never that the site has no type.
+		"doc_type":  s.DocType,
 		"workspace": s.Workspace,
 		"project":   s.Project,
 		"dataset":   s.Dataset,
@@ -956,6 +964,12 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep *cloudclient.SiteDeployment
 		"kind":      hzCell(s.Kind),
 		"framework": hzCell(s.Framework),
 		"dataset":   siteDatasetLabel(s, "", "", ""),
+	}
+	// W10: the featured content type this site's build reads. Guarded like every
+	// other optional row here — a pre-W10 control plane sends nothing and the
+	// header stays exactly as it was.
+	if dt := strings.TrimSpace(s.DocType); dt != "" {
+		m["doc type"] = hzCell(dt)
 	}
 	// Runtime target + slot port (charter D62): a node site advertises the node-slot
 	// SSR runtime and the port its live process is bound to, so a user reading

@@ -9276,6 +9276,19 @@ test("gr-p3: siteDetailHtml — domains mount present, Scale stays read-only, re
   assert.match(html, /dep-pill dep-live/);
 });
 
+test("stw9: siteDetailHtml — the rail reads doc_type back, and a site without one shows an em dash, never an invented default", () => {
+  const base = {
+    id: "s1", framework: "astro", theme: "ember", scale_mode: "always_on",
+    inserted_at: "2026-07-01T10:00:00Z",
+  };
+  const withType = hooks.siteDetailHtml({ ...base, doc_type: "paper" }, null, [], "", []);
+  assert.match(withType, /Content type<\/span><span class="v">paper/);
+  // A pre-W10 control plane sends no doc_type: the row is honest, not "post".
+  const without = hooks.siteDetailHtml(base, null, [], "", []);
+  assert.match(without, /Content type<\/span><span class="v">—/);
+  assert.doesNotMatch(without, /Content type<\/span><span class="v">post/);
+});
+
 test("gr-p3: siteStatusChip — Deploying while in flight, Live only when the pointer names a live row, else nothing", () => {
   const site = { current_deployment_id: "d1" };
   const live = [{ id: "d1", status: "live" }];

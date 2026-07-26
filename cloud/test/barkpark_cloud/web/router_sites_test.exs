@@ -1142,6 +1142,10 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert conn.status == 200
       body = json_body(conn)
       assert body["site"]["theme"] == "ember"
+      # W10: the RESPONSE BODY carries doc_type. Asserting the DB reload alone
+      # (below) routed around the missing echo — every reader downstream (the Go
+      # CLI, the console rail) sees this body, not the row.
+      assert body["site"]["doc_type"] == "paper"
       assert body["note"] =~ "next deploy"
 
       reloaded = Registry.get_site(site.id)
