@@ -4,13 +4,17 @@
 // FIVE law families are pinned here, each because a plausible future edit
 // breaks it SILENTLY — the suite is the only thing that would notice:
 //
-//   1. FOLLOW IS THE USER'S. Scrolling up disengages; returning re-engages;
-//      send and the pill are the ONLY things that scroll the transcript. The
-//      removed behaviour (a 50 ms timer + onContentSizeChange yanking to the
-//      end unconditionally) left no trace a type error would catch.
-//   2. THE FOLD RUNS ON THE D77 CLOCK. A work-log group folds because `gen`
-//      advanced, not because a second turn-boundary detector was invented.
-//      reducer.ts is a read-only source here and its diff is empty.
+//   1. FOLLOW IS THE USER'S. Scrolling up disengages; a DRAG back to the bottom
+//      re-engages and nothing else geometric does (band geometry alone arrives
+//      from keyboard dismissals and rotations too); send and the pill are the
+//      ONLY things that scroll the transcript. The removed behaviour (a 50 ms
+//      timer + onContentSizeChange yanking to the end unconditionally) left no
+//      trace a type error would catch.
+//   2. THE FOLD RUNS ON THE D77 CLOCK — and that clock is PINNED while the
+//      reader is away from the end, because an auto-fold removes height from
+//      under them. A group folds because `gen` advanced, not because a second
+//      turn-boundary detector was invented. reducer.ts is a read-only source
+//      here and its diff is empty.
 //   3. THE COALESCER BATCHES ONLY TAIL GROWTH — and it is pinned through the
 //      REAL store, driving real SSE frames into the real set()/notify seam,
 //      because a pure-helper-only pin would stay green if the store stopped
@@ -43,15 +47,21 @@ import {
 } from '../src/chat/sessionStore'
 import { initialChatState, type ChatState } from '../src/chat/reducer'
 import {
+  foldGen,
   foldWorkLog,
+  freezeFold,
+  headerSignature,
   initialWorkLogFold,
   isWorkLogRole,
   observeGroups,
   toggleWorkLog,
   workLogExpanded,
   workLogGroups,
+  workLogHeaderCache,
   workLogSummary,
   WORK_LOG_ROLES,
+  type CachedHeader,
+  type WorkLogGroup,
   type WorkLogRow,
 } from '../src/chat/workLog'
 import type { ChatMessage, ChatSession } from '../src/chat/wire'
@@ -125,7 +135,7 @@ describe('follow mode is a state the user owns', () => {
     expect(Object.keys(TRANSCRIPT_FOLLOW)).not.toContain('on')
   })
 
-  it('scrolling up disengages and returning to the bottom re-engages', () => {
+  it('scrolling up disengages and dragging back to the bottom re-engages', () => {
     const up = reduceFollow(initialFollowState, {
       type: 'scrolled',
       distanceFromEnd: 600,
@@ -134,14 +144,61 @@ describe('follow mode is a state the user owns', () => {
     })
     expect(up.following).toBe(false)
     expect(up.mark).toBe('3:10') // frozen at the moment follow was lost
+    expect(up.intent).toBe(false) // the latch is spent by the disengage
 
-    const back = reduceFollow(up, {
+    const dragging = reduceFollow(up, { type: 'dragged' })
+    const back = reduceFollow(dragging, {
       type: 'scrolled',
       distanceFromEnd: 12,
       viewportHeight: VIEWPORT,
       mark: '9:400',
     })
     expect(back).toEqual(initialFollowState)
+  })
+
+  it('RE-ENGAGE NEEDS OBSERVED INTENT — band geometry alone can never do it', () => {
+    // The bug: a disengaged reader dismisses the keyboard (or rotates). The
+    // viewport GROWS, the content does not, and the very next scroll event
+    // reports a distance inside the band — byte-identical to having scrolled
+    // back down. Follow re-engaged on it and the next token yanked them to the
+    // bottom of a turn they had deliberately scrolled away from. Geometry
+    // cannot tell a finger from a layout pass; only onScrollBeginDrag can.
+    const away = reduceFollow(initialFollowState, {
+      type: 'scrolled',
+      distanceFromEnd: 4200,
+      viewportHeight: VIEWPORT,
+      mark: '3:10',
+    })
+    const layoutEvent = { type: 'scrolled' as const, distanceFromEnd: 0, viewportHeight: VIEWPORT, mark: '9:0' }
+
+    // No drag was observed: the state does not move AT ALL — not even a new
+    // object, because the memoized rows depend on this identity.
+    expect(reduceFollow(away, layoutEvent)).toBe(away)
+    // Pre-layout geometry (viewportHeight 0, which nearEnd reads as "at the
+    // end") is the same story: it is not a finger either.
+    expect(reduceFollow(away, { ...layoutEvent, viewportHeight: 0 })).toBe(away)
+
+    // …and with the latch set, the identical event re-engages.
+    expect(reduceFollow(reduceFollow(away, { type: 'dragged' }), layoutEvent)).toEqual(
+      initialFollowState,
+    )
+  })
+
+  it('the drag latch is idempotent, and says nothing while following', () => {
+    const away = reduceFollow(initialFollowState, {
+      type: 'scrolled',
+      distanceFromEnd: 900,
+      viewportHeight: VIEWPORT,
+      mark: '1:0',
+    })
+    // Following already: a drag has nothing to license.
+    expect(reduceFollow(initialFollowState, { type: 'dragged' })).toBe(initialFollowState)
+    const latched = reduceFollow(away, { type: 'dragged' })
+    expect(latched.intent).toBe(true)
+    expect(latched.following).toBe(false)
+    expect(latched.mark).toBe('1:0') // the pill's promise is untouched by a drag
+    // A momentum scroll can begin many drags — none may re-mint the state.
+    expect(reduceFollow(latched, { type: 'dragged' })).toBe(latched)
   })
 
   it('the pill appears ONLY when disengaged AND content arrived since', () => {
@@ -295,6 +352,105 @@ describe('the fold runs on the D77 gen clock', () => {
     // Same head key, so the run is the same run — its birth gen is untouched.
     expect(second.born['m-2']).toBe(4)
     expect(second).toBe(first) // nothing new to stamp → same object
+  })
+})
+
+describe('the fold clock FREEZES under a disengaged reader', () => {
+  const rows = [wl('m-1', 'user'), wl('m-2', 'tool'), wl('m-3', 'todo')]
+  const groups = workLogGroups(rows)
+  const born = observeGroups(initialWorkLogFold, groups, 4)
+
+  it('a turn boundary while the reader is away folds NOTHING', () => {
+    // Height leaving the transcript is only harmless if you are looking at the
+    // bottom of it. A reader up in the history gets the line under their thumb
+    // slid away by a turn they cannot see — so the CLOCK is pinned, not the
+    // rows.
+    const frozen = freezeFold(born, 4, false)
+    expect(frozen.frozenGen).toBe(4)
+    expect(foldGen(frozen, 9)).toBe(4)
+    expect(workLogExpanded(frozen, 'm-2', 5)).toBe(true)
+    expect(workLogExpanded(frozen, 'm-2', 99)).toBe(true)
+  })
+
+  it('re-engaging lifts the pin and folds every settled group in one step', () => {
+    const frozen = freezeFold(born, 4, false)
+    const live = freezeFold(frozen, 9, true)
+    expect(live.frozenGen).toBeUndefined()
+    expect(workLogExpanded(live, 'm-2', 9)).toBe(false) // the fold they were spared
+    expect(live.born).toEqual(born.born) // the pin is the only thing that moved
+  })
+
+  it('a HAND is never frozen out — overrides and taps work while pinned', () => {
+    const frozen = freezeFold(born, 4, false)
+    const opened = toggleWorkLog(frozen, 'm-2', 9)
+    expect(opened.frozenGen).toBe(4) // the toggle preserves the pin
+    expect(workLogExpanded(opened, 'm-2', 9)).toBe(false) // it read OPEN, so the tap shuts it
+    expect(workLogExpanded(freezeFold(opened, 9, true), 'm-2', 9)).toBe(false)
+  })
+
+  it('observeGroups carries the pin — a new group mid-freeze must not drop it', () => {
+    const frozen = freezeFold(born, 4, false)
+    const grown = workLogGroups([...rows, wl('m-4', 'assistant'), wl('m-5', 'tool')])
+    const stamped = observeGroups(frozen, grown, 7)
+    expect(stamped.frozenGen).toBe(4)
+    expect(stamped.born['m-5']).toBe(7) // stamped on the LIVE clock, as it was born
+  })
+
+  it('the pin does not move while nothing changed — identity is the render budget', () => {
+    const frozen = freezeFold(born, 4, false)
+    expect(freezeFold(frozen, 9, false)).toBe(frozen) // still away: the FIRST reading holds
+    expect(freezeFold(born, 4, true)).toBe(born) // never pinned, still following
+  })
+})
+
+describe('workLogHeaderCache — the last per-token allocation', () => {
+  const group = (key: string, members: string[]): WorkLogGroup => ({
+    key,
+    members,
+    roles: members.map(() => 'tool'),
+  })
+  const mint = (g: WorkLogGroup, open: boolean) => ({ key: `log-${g.key}`, group: g, open })
+  type Header = ReturnType<typeof mint>
+  const table = () => new Map<string, CachedHeader<Header>>()
+
+  it('an unchanged header comes back by IDENTITY across frames', () => {
+    const t = table()
+    const g = group('m-2', ['m-2', 'm-3'])
+    const rowA = workLogHeaderCache(t, [g], mint)(g, false)
+    // The next frame re-derives `groups`, so this is a DIFFERENT group object
+    // with the same content — exactly what a token frame hands over.
+    const next = group('m-2', ['m-2', 'm-3'])
+    expect(workLogHeaderCache(t, [next], mint)(next, false)).toBe(rowA)
+    // And idempotently within one frame, which is what makes deriving the list
+    // rows through this table safe under a repeated render pass.
+    expect(workLogHeaderCache(t, [next], mint)(next, false)).toBe(rowA)
+  })
+
+  it('the disclosure state and the member list are the whole signature', () => {
+    const g = group('m-2', ['m-2', 'm-3'])
+    const t = table()
+    const rowA = workLogHeaderCache(t, [g], mint)(g, false)
+    // Opened → a new row (the chevron and the label both change).
+    expect(workLogHeaderCache(t, [g], mint)(g, true)).not.toBe(rowA)
+    // Grown mid-turn → a new row (the collapsed line counts members).
+    const grown = group('m-2', ['m-2', 'm-3', 'm-4'])
+    expect(workLogHeaderCache(t, [grown], mint)(grown, false)).not.toBe(rowA)
+    expect(headerSignature(g, false)).not.toBe(headerSignature(g, true))
+  })
+
+  it('a group that leaves the transcript is swept — the table is bounded', () => {
+    const t = table()
+    const a = group('m-2', ['m-2'])
+    const b = group('m-5', ['m-5'])
+    const header = workLogHeaderCache(t, [a, b], mint)
+    header(a, false)
+    header(b, false)
+    expect(t.size).toBe(2)
+
+    // The next frame only has one group (the other's rows scrolled out of the
+    // fetched window, or a retry re-seeded the transcript).
+    workLogHeaderCache(t, [b], mint)
+    expect([...t.keys()]).toEqual(['m-5'])
   })
 })
 
@@ -514,9 +670,10 @@ describe('memo(TranscriptRow) is not decoration', () => {
   const messages = [msg(1, 'user'), msg(2, 'assistant'), msg(3, 'tool')]
 
   // SCOPE, stated in the name: this is assembleRows IN ISOLATION. The list the
-  // screen renders goes through foldWorkLog too, which re-mints one header per
-  // work-log group per frame — chatScreenWiring PROBE D measures that real
-  // end-to-end number (3 of 8 rows). Do not quote this test as the whole cost.
+  // screen renders goes through foldWorkLog too, which used to re-mint one
+  // header per work-log group per frame (3 of 8 rows) until workLogHeaderCache
+  // closed it — chatScreenWiring PROBE D measures the real end-to-end number
+  // (now 1 of 8). Do not quote this test as the whole cost.
   it('assembleRows alone: a tail tick mints exactly ONE new row — settled rows keep identity', () => {
     // The screen memoizes these two halves on state.messages / state.local,
     // which a delta frame never re-mints (reducer.ts spreads the state, not

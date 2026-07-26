@@ -40,15 +40,28 @@ export const FOLLOW_THRESHOLD = 0.1
  * the mark it left against the mark now. That is not a stylistic preference:
  * an accumulator has to be fed from somewhere, and the only place to feed it
  * from is an effect that fires on every token frame. Deriving instead makes
- * the pill's condition a comparison React already has the inputs for. */
+ * the pill's condition a comparison React already has the inputs for.
+ *
+ * `intent` is the OBSERVED-INTENT LATCH, and it exists because
+ * `distanceFromEnd` alone cannot tell a finger from a layout event. A
+ * disengaged reader who dismisses the keyboard — or rotates the device — gets a
+ * scroll event whose geometry sits inside the band (the viewport grew, the
+ * content did not), and that geometry alone used to re-engage follow and yank
+ * them back down to the live turn. So re-engaging now needs a drag the user
+ * actually performed: `dragged` latches, the latch is spent the moment follow
+ * comes back, and no layout event can forge it. Disengagement stays
+ * ungated — being left where you are is never the destructive direction. */
 export interface FollowState {
   following: boolean
   mark: string
+  /** A drag has been observed since follow was lost — the only thing that
+   * licenses a geometric re-engage. Meaningless while following. */
+  intent: boolean
 }
 
 /** Boot state: following. A session opens pinned to the newest turn (the list
  * boots with initialScrollAtEnd for the same reason). */
-export const initialFollowState: FollowState = { following: true, mark: '' }
+export const initialFollowState: FollowState = { following: true, mark: '', intent: false }
 
 /** "How much content is below", cheaply: the row count and the live tail's
  * length. Either moving means something new arrived — and both are already in
@@ -62,12 +75,18 @@ export function contentMark(rowCount: number, tailLength: number): string {
  *   scrolled — the only STRUCTURAL disengage. Follow is left because the user
  *              moved the viewport, never because a timer fired. Carries the
  *              content mark to freeze at.
+ *   dragged  — a finger began dragging the transcript. THE ONLY observed-intent
+ *              signal a scroll view gives us (onScrollBeginDrag fires from
+ *              touch alone — never from a keyboard dismissal, a rotation, a
+ *              programmatic scrollToEnd or a maintainScrollAtEnd re-pin), so it
+ *              is what licenses a later geometric re-engage.
  *   sent     — the user submitted a message: send always re-follows, because
  *              they are now waiting on an answer they asked for.
  *   jumped   — the scroll-to-bottom pill was tapped.
  */
 export type FollowEvent =
   | { type: 'scrolled'; distanceFromEnd: number; viewportHeight: number; mark: string }
+  | { type: 'dragged' }
   | { type: 'sent' }
   | { type: 'jumped' }
 
@@ -95,11 +114,21 @@ export function reduceFollow(st: FollowState, ev: FollowEvent): FollowState {
     case 'scrolled': {
       const at = nearEnd(ev.distanceFromEnd, ev.viewportHeight)
       if (at === st.following) return st
-      // Crossing the band DOWNWARD is catching up — follow, and the mark stops
-      // meaning anything. Crossing it upward freezes the mark: everything that
-      // arrives from here on is what the pill is offering to show.
-      return at ? initialFollowState : { following: false, mark: ev.mark }
+      // Crossing the band DOWNWARD is catching up — but ONLY a drag proves the
+      // user did the catching up. Without the latch the geometry came from a
+      // layout event (keyboard dismissal, rotation, a late row measuring), and
+      // re-engaging on it would yank a reader to the live turn they never asked
+      // for; the pill stays up and one drag or one tap still gets them there.
+      // Crossing upward freezes the mark: everything that arrives from here on
+      // is what the pill is offering to show.
+      if (at) return st.intent ? initialFollowState : st
+      return { following: false, mark: ev.mark, intent: false }
     }
+    // The latch. Idempotent and identity-stable: a drag while following says
+    // nothing (follow is already the state), and a second drag while disengaged
+    // must not re-mint the object the memoized rows depend on.
+    case 'dragged':
+      return st.following || st.intent ? st : { ...st, intent: true }
     case 'sent':
     case 'jumped':
       return st.following ? st : initialFollowState

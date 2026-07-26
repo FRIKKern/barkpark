@@ -238,13 +238,19 @@ test('PROBE B2 — the clock going BACKWARDS (retry) does not resurrect stamps f
 
 /* ── Probe D: what a token frame ACTUALLY costs, end to end ─────────────────── */
 
-test('PROBE D — a token frame re-mints the tail and one header per group; settled rows keep identity', async () => {
-  // This exists because the first version of this slice's PR claimed "a tail
-  // tick mints exactly ONE new row". That is true of assembleRows in
-  // isolation, and FALSE of the list the screen actually renders: foldWorkLog
-  // recomputes per frame and its header constructor mints a fresh object each
-  // time. Measuring the real number here is what keeps the claim honest, and
-  // is what a header-object cache (filed as a follow-up) would move.
+test('PROBE D — a token frame mints exactly ONE new row through the real list; headers are cached', async () => {
+  // THE HISTORY THIS PIN CARRIES. The first version of the motion slice claimed
+  // "a tail tick mints exactly ONE new row". That was true of assembleRows in
+  // isolation and FALSE of the list the screen renders: foldWorkLog recomputes
+  // per frame and its header constructor minted a fresh object each time, so
+  // this probe honestly measured THREE fresh rows out of eight (log-m-2,
+  // log-m-5, tail) and the claim was corrected rather than quietly kept.
+  //
+  // workLogHeaderCache is the follow-up that closes it: a header row whose
+  // (open, members) signature is unchanged is handed back by identity, so the
+  // original claim is now TRUE of the real list — and this probe is the
+  // measurement that says so. It is also the mutation tripwire: drop the cache
+  // (or key it on the per-frame group object) and the count goes back to three.
   mockGet.mockResolvedValue({
     id: 's1',
     messages: [msg(1, 'user'), msg(2, 'tool'), msg(3, 'tool'), msg(4, 'assistant'), msg(5, 'tool')],
@@ -265,12 +271,17 @@ test('PROBE D — a token frame re-mints the tail and one header per group; sett
     ])
 
     const fresh = after.filter((row, i) => row !== before[i])
-    // Two apparatus groups + the tail. The five settled MESSAGE rows — the
-    // ones carrying rendered blocks, and the expensive ones — keep identity,
-    // which is the whole point of the split row memos.
-    expect(fresh.map((r) => r.key)).toEqual(['log-m-2', 'log-m-5', 'tail'])
-    expect(fresh).toHaveLength(3)
+    // ONE row out of eight. The five settled MESSAGE rows (the expensive ones,
+    // carrying rendered blocks) keep identity through the split row memos, and
+    // the two work-log headers keep it through the header cache.
+    expect(fresh.map((r) => r.key)).toEqual(['tail'])
+    expect(fresh).toHaveLength(1)
     expect(after).toHaveLength(8)
+
+    // The cached headers are the SAME OBJECTS, not equal look-alikes — identity
+    // is the only thing the transcript's memo comparator reads.
+    expect(after[1]).toBe(before[1])
+    expect(after[5]).toBe(before[5])
   } finally {
     await act(async () => tree.unmount())
   }
@@ -305,6 +316,97 @@ test('PROBE C — a disengaging scroll alone raises no pill; one delta below rai
       event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'x' } },
     })
     expect(pillCount(tree)).toBe(1)
+  } finally {
+    await act(async () => tree.unmount())
+  }
+})
+
+/* ── Probe E: re-engage needs an OBSERVED drag, not just geometry ────────────── */
+
+/** A scroll event with the geometry the argument is about. */
+function scrollTo(tree: ReactTestRenderer, distance: number): Promise<void> {
+  return act(async () => {
+    list(tree).props.onScroll({
+      nativeEvent: {
+        contentOffset: { y: 5000 - 800 - distance },
+        contentSize: { height: 5000 },
+        layoutMeasurement: { height: 800 },
+      },
+    })
+  })
+}
+
+test('PROBE E — geometry alone cannot re-engage follow; a real drag can', async () => {
+  // THE BUG. A disengaged reader dismisses the keyboard (or rotates): the
+  // viewport grows, the content does not, and the scroll event that follows
+  // reports a distance INSIDE the 10% band — geometry indistinguishable from
+  // the user having scrolled back down. Follow re-engaged on it, and the next
+  // token yanked them to the bottom of a turn they had scrolled away from.
+  //
+  // The pill is the visible proof either way: it is up exactly while the reader
+  // is disengaged with content below, so its presence IS the follow state.
+  mockGet.mockResolvedValue({ id: 's1', messages: [msg(1, 'user'), msg(2, 'assistant')] })
+  const tree = await mount()
+  const tokenBelow = () =>
+    frame('chat', {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'x' } },
+    })
+  try {
+    // The user drags up and away — 4200px below the viewport.
+    await act(async () => list(tree).props.onScrollBeginDrag())
+    await scrollTo(tree, 4200)
+    await tokenBelow()
+    expect(pillCount(tree)).toBe(1) // disengaged, content below
+
+    // THE DISCRIMINATOR: a scroll event at the end that NO drag preceded — the
+    // keyboard-dismissal / rotation / late-measurement shape. Without the
+    // intent latch this re-engages and the pill disappears.
+    await scrollTo(tree, 0)
+    await tokenBelow()
+    expect(pillCount(tree)).toBe(1)
+
+    // A finger, and the same geometry: now it re-engages.
+    await act(async () => list(tree).props.onScrollBeginDrag())
+    await scrollTo(tree, 0)
+    expect(pillCount(tree)).toBe(0)
+    await tokenBelow()
+    expect(pillCount(tree)).toBe(0) // following — a token raises nothing
+  } finally {
+    await act(async () => tree.unmount())
+  }
+})
+
+/* ── Probe F: the auto-fold is frozen while the reader is away ───────────────── */
+
+test('PROBE F — a turn finishing under a disengaged reader folds NOTHING; re-engaging folds it', async () => {
+  // The auto-fold takes height OUT of the transcript, so running it under a
+  // reader who is up in the history slides the line they are reading away —
+  // caused by a turn happening somewhere they cannot even see. PROBE B is the
+  // same stack with a FOLLOWING reader, where folding is the right thing; the
+  // two probes together are the whole rule.
+  mockGet.mockResolvedValue({
+    id: 's1',
+    messages: [msg(1, 'user'), msg(2, 'tool'), msg(3, 'tool')],
+  })
+  const tree = await mount()
+  try {
+    expect(rowKeys(tree)).toEqual(['m-1', 'log-m-2', 'm-2', 'm-3'])
+
+    // The reader drags up into the history.
+    await act(async () => list(tree).props.onScrollBeginDrag())
+    await scrollTo(tree, 4200)
+
+    // A turn boundary lands. The clock advanced (PROBE B proves the fold rides
+    // it) — but the fold is pinned, so not one row moves.
+    await frame('chat', INIT)
+    expect(rowKeys(tree)).toEqual(['m-1', 'log-m-2', 'm-2', 'm-3'])
+
+    // Coming back to the end lifts the pin, and the settled group folds in one
+    // step — the fold the reader was spared, applied when it costs them nothing.
+    await act(async () => list(tree).props.onScrollBeginDrag())
+    await scrollTo(tree, 0)
+    expect(rowKeys(tree)).toEqual(['m-1', 'log-m-2'])
   } finally {
     await act(async () => tree.unmount())
   }

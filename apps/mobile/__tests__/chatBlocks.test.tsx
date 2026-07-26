@@ -7,7 +7,7 @@
 //      `undefined` IS `'paper'`. The paper reader builds its ctx without the
 //      field (PaperReaderScreen.tsx), so this is the non-regression pin for
 //      the whole 36-case paperRenderer suite: byte-identical output.
-//   2. THE TWO-PHASE FLOOR (charter D8/D9) — the live streaming tail is
+//   2. THE TWO-PHASE FLOOR (chat-TUI charter D8/D9) — the live streaming tail is
 //      always plain text; blocks appear only when the turn settles. There is
 //      no third state, so a half-written `**bold` cannot flash as markup.
 //   3. THE ISLAND'S SECURITY RINGS hold under the chat register exactly as
@@ -19,7 +19,9 @@
 import type { ReactElement, ReactNode } from 'react'
 
 import {
+  anyRenderableBlocks,
   bodyRender,
+  CardRow,
   chatBlockCtx,
   TranscriptRow,
   type Row,
@@ -288,7 +290,7 @@ describe('screen wiring (the register actually reaches the transcript)', () => {
   })
 })
 
-/* ── 3. the two-phase floor (charter D8/D9) ─────────────────────────────────── */
+/* ── 3. the two-phase floor (chat-TUI charter D8/D9) ────────────────────────── */
 
 function assistantRow(m: Partial<ChatMessage>): Row {
   return { key: 'm-1', kind: 'message', message: { seq: 1, role: 'assistant', ...m } }
@@ -330,6 +332,92 @@ describe('two-phase floor: plain tail, blocks at settle', () => {
       })
       expect(bodyRender(row)).toEqual({ kind: 'text', text: 'plain text' })
     }
+  })
+
+  // THE ZERO-RENDERABLE-BLOCKS TURN. Per BLOCK, an unknown type degrading to a
+  // labeled dashed box is right — a mixed turn shows what it has and is honest
+  // about the one thing this client is too old to draw. Per TURN it is a
+  // failure: a turn whose blocks are ALL unknown paints a stack of dashed boxes
+  // and no answer, while the full text of that answer sits unused in
+  // source_markdown on the very same row. So the turn-level decision is made
+  // screen-side, against the registry renderBlockNative itself dispatches on —
+  // blocks.tsx, reducer.ts and wire.ts are untouched.
+  it('a turn whose blocks are ALL unrenderable falls back to source_markdown', () => {
+    const bogus = [
+      { type: 'chat-hologram', frames: 3 },
+      { type: 'quantum-callout', text: 'from a newer server' },
+    ]
+    expect(anyRenderableBlocks(bogus)).toBe(false)
+    expect(bodyRender(assistantRow({ blocks: bogus, source_markdown: '  the answer  ' }))).toEqual({
+      kind: 'text',
+      text: 'the answer',
+    })
+  })
+
+  it('ONE renderable block keeps the whole turn on the document path', () => {
+    // The mixed turn: the paragraph paints and the stray block keeps its own
+    // per-block dashed fallback. Falling the whole turn back to markdown here
+    // would throw away a turn the client can very nearly draw.
+    const mixed = [{ type: 'paragraph', text: 'settled' }, { type: 'chat-hologram', frames: 3 }]
+    expect(anyRenderableBlocks(mixed)).toBe(true)
+    expect(bodyRender(assistantRow({ blocks: mixed, source_markdown: 'raw' }))).toEqual({
+      kind: 'blocks',
+      blocks: mixed,
+    })
+  })
+
+  it('the renderable test IS the dispatcher’s own registry — it cannot disagree', () => {
+    // Not a hand-kept list: every key renderBlockNative would dispatch counts,
+    // including the six typed chat-* rows spread into the same registry.
+    for (const type of ['paragraph', 'heading', 'diagram', 'chat-tool-diff'])
+      expect(anyRenderableBlocks([{ type }])).toBe(BLOCK_RENDERERS[type] !== undefined)
+    expect(anyRenderableBlocks([])).toBe(false)
+  })
+
+  it('the rendered row PAINTS the answer text, not a stack of dashed boxes', () => {
+    // One level above bodyRender, where a regression would actually land: a row
+    // that resolves to text and then renders blocks anyway passes the pins above.
+    const row = assistantRow({
+      blocks: [{ type: 'chat-hologram', frames: 3 }],
+      source_markdown: 'The migration is done.',
+    })
+    const w = walk(
+      TranscriptRow({
+        row,
+        theme,
+        blockCtx: chatBlockCtx(theme),
+        inFlight: {},
+        onAnswer: () => {},
+      }),
+    )
+    expect(w.text).toBe('The migration is done.')
+    expect(w.text).not.toContain('chat-hologram') // no dashed provenance box
+  })
+
+  it('an all-unrenderable CARD keeps its shell and shows the markdown body', () => {
+    // A card asks for a decision. Presenting that decision as a dashed box is
+    // the one place the per-block degrade becomes unanswerable — the frame and
+    // the Allow/Deny footer are the envelope's either way (D35).
+    // CardRow directly: TranscriptRow delegates to it as an ELEMENT, and this
+    // walk reads returned trees rather than mounting them.
+    const w = walk(
+      CardRow({
+        m: {
+          seq: 9,
+          role: 'approval',
+          blocks: [{ type: 'quantum-callout', text: 'x' }],
+          source_markdown: 'Run `rm -rf build`?',
+          metadata: { request_id: 'req-1', approval_status: 'pending' },
+        },
+        theme,
+        blockCtx: chatBlockCtx(theme),
+        inFlight: {},
+        onAnswer: () => {},
+      }),
+    )
+    expect(w.text).toContain('Run `rm -rf build`?')
+    expect(w.text).toContain('Allow')
+    expect(w.text).toContain('Deny')
   })
 
   it('messageBlocks is the runtime gate the declared type cannot enforce', () => {
