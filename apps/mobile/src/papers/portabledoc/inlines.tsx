@@ -19,18 +19,40 @@ import { Linking, Text, type StyleProp, type TextStyle } from 'react-native'
 import type { Theme } from '../../ui/theme'
 import { asList, isMap, markAttr, markName, openableUrl, str, type Inline } from './model'
 
+/** Which typographic voice the same tree speaks in. `paper` is the reader's
+ * serif document register; `chat` is the transcript's sans register (charter
+ * D22). Declared HERE rather than in blocks.tsx so inline styling can be
+ * register-aware without a module cycle; blocks.tsx re-exports it, so every
+ * existing `import { BlockRegister } from './blocks'` still resolves. */
+export type BlockRegister = 'paper' | 'chat'
+
 export interface InlineCtx {
   theme: Theme
+  /** Defaults to 'paper'. */
+  register?: BlockRegister
 }
 
 const MONO_FONT = 'monospace' // Android; the reader is Android-first (bpspike)
 
-function codeStyle(theme: Theme): TextStyle {
+/**
+ * Inline `code` runs. The register matters: on the PAPER surface a code span
+ * sits on the reader's page and `surface` (#ffffff on the light page) reads as
+ * a raised chip. In a CHAT turn the same #ffffff lands on the transcript
+ * background and the span goes near-invisible — while fenced code two lines
+ * below paints on `codeBg` (#eef1ef). Threading the register makes the inline
+ * span agree with the fence: ONE code surface per register, not two.
+ *
+ * Exported so the register binding is REACHABLE by jest — inlined in the mark
+ * folder it would be unpinnable.
+ */
+export function inlineCodeStyle(ctx: InlineCtx): TextStyle {
+  const chat = (ctx.register ?? 'paper') === 'chat'
+  const theme = ctx.theme
   return {
     fontFamily: MONO_FONT,
     fontSize: 13,
-    backgroundColor: theme.surface,
-    color: theme.text,
+    backgroundColor: chat ? theme.codeBg : theme.surface,
+    color: chat ? theme.codeFg : theme.text,
   }
 }
 
@@ -60,7 +82,8 @@ function linkText(key: number | string, href: string, label: ReactNode, theme: T
 
 /** Fold a mark list around a rendered leaf, right-to-left so the FIRST mark
  * ends up outermost — mirrors inline.tsx applyMarks. */
-function applyMarks(key: number, leaf: ReactNode, marks: unknown[], theme: Theme): ReactNode {
+function applyMarks(key: number, leaf: ReactNode, marks: unknown[], ctx: InlineCtx): ReactNode {
+  const theme = ctx.theme
   let acc = leaf
   let bare = true // code is leaf-only, per the reference apply_mark
   for (let i = marks.length - 1; i >= 0; i--) {
@@ -105,7 +128,7 @@ function applyMarks(key: number, leaf: ReactNode, marks: unknown[], theme: Theme
       case 'code':
         if (bare) {
           acc = (
-            <Text key={key} style={codeStyle(theme)}>
+            <Text key={key} style={inlineCodeStyle(ctx)}>
               {acc}
             </Text>
           )
@@ -135,7 +158,7 @@ export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number): Rea
     case 'text': {
       const value = str(node.value)
       const marks = asList(node.marks)
-      return marks.length ? applyMarks(key, value, marks, theme) : value
+      return marks.length ? applyMarks(key, value, marks, ctx) : value
     }
     case 'strong':
     case 'bold':
@@ -167,7 +190,7 @@ export function renderInlineNode(node: Inline, ctx: InlineCtx, key: number): Rea
       )
     case 'code':
       return (
-        <Text key={key} style={codeStyle(theme)}>
+        <Text key={key} style={inlineCodeStyle(ctx)}>
           {str(node.value)}
         </Text>
       )

@@ -15,8 +15,9 @@ import type { ReactNode } from 'react'
 import { Text, View, Image, ScrollView } from 'react-native'
 
 import type { Theme } from '../../ui/theme'
+import { CHAT_RENDERERS } from './chat'
 import { MermaidIsland } from './MermaidIsland'
-import { renderInlineNodes, type InlineCtx } from './inlines'
+import { renderInlineNodes, type BlockRegister, type InlineCtx } from './inlines'
 import {
   asList,
   headingLevel,
@@ -34,8 +35,11 @@ import {
  * (charter D22). An OPTIONAL FIELD, never a positional argument: every
  * container recursion already forwards `ctx` wholesale, so the register
  * reaches nested blocks for free, and `undefined` IS `'paper'` — the paper
- * reader's call sites stay byte-unchanged. */
-export type BlockRegister = 'paper' | 'chat'
+ * reader's call sites stay byte-unchanged.
+ *
+ * DECLARED in inlines.tsx (so inline code styling can read it without a module
+ * cycle) and re-exported here, where every caller already imports it. */
+export type { BlockRegister }
 
 export interface BlockCtx extends InlineCtx {
   theme: Theme
@@ -48,7 +52,10 @@ export interface BlockCtx extends InlineCtx {
   register?: BlockRegister
 }
 
-type Render = (b: Block, ctx: BlockCtx, key: number) => ReactNode
+/** One block renderer. Exported so the chat.tsx sibling types its own six
+ * against the SAME signature the dispatcher calls — a spread that drifted from
+ * this shape would not compile. */
+export type Render = (b: Block, ctx: BlockCtx, key: number) => ReactNode
 
 /* ── registers ──────────────────────────────────────────────────────────────── */
 
@@ -940,6 +947,11 @@ export const BLOCK_RENDERERS: Record<string, Render> = {
   tasks: taskList,
   'task-list': taskList,
   action,
+  // The six typed chat-* rows (charter D25/D35). Spread rather than dispatched
+  // separately so they inherit ONE dispatcher: the unknown-block degrade, the
+  // per-type render guard, and the registry tripwire all cover them for free —
+  // an unregistered chat-x still hits unknownBlock like any other stray type.
+  ...CHAT_RENDERERS,
 }
 
 /** Render one type-keyed block to a ReactNode. Unknown/malformed blocks

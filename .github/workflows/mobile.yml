@@ -5,6 +5,13 @@ name: mobile
 # file it is a member of, and this workflow — hundesteder is the live
 # zero-CI silent-skip precedent this paths block prevents.
 #
+# internal/pdrender/testdata/** is in scope because the mobile jest suite is the
+# THIRD CONSUMER of the generator-owned chat toolrows fixture (it imports the Go
+# testdata mirror directly — apps/mobile/__tests__/chatRenderers.test.tsx). A
+# `mix barkpark.chat.gen_golden_toolrows` regen touches no apps/mobile file, so
+# without this path a regen that breaks mobile would go invisible here and land
+# MISATTRIBUTED on whatever mobile PR ran next.
+#
 # NO EAS job (charter D3: explicit no for wave 1 — zero EXPO_TOKEN secrets
 # exist; revisit when store distribution is scoped).
 
@@ -13,11 +20,13 @@ on:
     branches: [main]
     paths:
       - "apps/mobile/**"
+      - "internal/pdrender/testdata/**"
       - "pnpm-workspace.yaml"
       - ".github/workflows/mobile.yml"
   pull_request:
     paths:
       - "apps/mobile/**"
+      - "internal/pdrender/testdata/**"
       - "pnpm-workspace.yaml"
       - ".github/workflows/mobile.yml"
 

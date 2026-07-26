@@ -343,12 +343,16 @@ describe('two-phase floor: plain tail, blocks at settle', () => {
     expect(bodyRender(row)).toEqual({ kind: 'text', text: 'what I typed' })
   })
 
-  it('tool / todo / thinking rows keep their provenance line this slice (S3 owns them)', () => {
+  // S3 flipped this: tool / todo / thinking rows now render their typed
+  // chat-* block. The two-phase law is unchanged — a row WITHOUT usable blocks
+  // still degrades to its provenance text. The blocks leg lives in
+  // chatRenderers.test.tsx alongside the renderers it exercises.
+  it('a blockless tool / todo / thinking row still degrades to its source line', () => {
     for (const role of ['tool', 'todo', 'thinking']) {
       const row: Row = {
         key: 'm-3',
         kind: 'message',
-        message: { seq: 3, role, blocks, source_markdown: 'Read(app.js)' },
+        message: { seq: 3, role, source_markdown: 'Read(app.js)' },
       }
       expect(bodyRender(row)).toEqual({ kind: 'text', text: 'Read(app.js)' })
     }
