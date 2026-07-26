@@ -35,6 +35,29 @@ type Manifest struct {
 	ETag        string            `json:"etag"`
 	Nouns       []Noun            `json:"nouns"`
 	Commands    []Command         `json:"commands"`
+	// Chat is the root chat capability-discovery block (charter D27): the
+	// per-provider picker vocabulary. The server emits it only to callers that
+	// opt in with ?chat=1 (fetch.go sends the param in the SAME commit that
+	// models this field — intra-Go atomicity: no bp ever sends chat=1 without
+	// being able to strict-decode the answer). Absent on older servers and on
+	// tier "none" — nil means "discover nothing, degrade".
+	Chat *ManifestChat `json:"chat,omitempty"`
+}
+
+// ManifestChat is the root "chat" discovery block: a flat map keyed by provider
+// id ("claude", "codex", …). Every nested key is modelled — Parse's
+// DisallowUnknownFields recurses, so an unmodelled server addition fails fast.
+type ManifestChat struct {
+	Providers map[string]ChatProviderCaps `json:"providers"`
+}
+
+// ChatProviderCaps is one provider's picker vocabulary. Empty slices are the
+// honest degrade signal (codex ships all-empty today): offer no picker rather
+// than inventing values.
+type ChatProviderCaps struct {
+	Modes   []string `json:"modes"`
+	Models  []string `json:"models"`
+	Efforts []string `json:"efforts"`
 }
 
 // Server identifies the responding Barkpark instance. APIVersion and MinCLI are

@@ -34,6 +34,12 @@ defmodule BarkparkWeb.CapabilitiesController do
     # pre-views contract (maybe_gate_views strips the declared key).
     include_views = params["views"] in ["1", "true"]
 
+    # ?chat=1 opts in to the root "chat" capability-discovery key (charter D27):
+    # per-provider modes/models/efforts for the chat pickers. Same opt-in
+    # discipline as ?build=1 — a stale bp strict-decodes the root, so the key is
+    # emitted only to callers that ask (and never to tier "none").
+    include_chat = params["chat"] in ["1", "true"]
+
     # base_url must be the host the caller ACTUALLY dialed, not the frozen
     # boot-time PHX_HOST scalar — a custom instance hostname and the canonical
     # FQDN each get their own host back (D4 server-side: one instance, many
@@ -47,6 +53,7 @@ defmodule BarkparkWeb.CapabilitiesController do
       Capabilities.manifest(caller_tier,
         include_build: include_build,
         include_views: include_views,
+        include_chat: include_chat,
         server: server
       )
 

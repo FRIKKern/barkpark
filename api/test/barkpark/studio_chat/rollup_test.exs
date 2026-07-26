@@ -175,4 +175,29 @@ defmodule Barkpark.StudioChat.RollupTest do
       assert StudioChat.rollup(ws.id) == StudioChat.rollup({:workspace, ws.id})
     end
   end
+
+  describe "archived sessions leave the rollup (charter D28 — the swipe-to-archive aftermath)" do
+    test "an archived blocked session stops counting and stops lighting precedence" do
+      # The exact mobile gesture's aftermath: a session goes blocked (real
+      # pending ask + set_agent_state, the same funnel the sweeper corroborates),
+      # then the operator archives it. rollup/1 is a read funnel like
+      # list_sessions/fleet_snapshot — an archived row must NOT keep the
+      # needs-you badge lit forever (TabBar reads counts.blocked).
+      ws = create_workspace!()
+      blocked = session!(ws.id, "blocked")
+
+      assert %{counts: %{blocked: 1}, precedence: :blocked} =
+               StudioChat.rollup({:workspace, ws.id})
+
+      {:ok, _} = StudioChat.archive_session(blocked.id, ws.id)
+
+      assert StudioChat.rollup({:workspace, ws.id}) == %{counts: @zero, precedence: :unknown}
+
+      # Unarchive restores it — the shelf flip is symmetric, not a delete.
+      {:ok, _} = StudioChat.unarchive_session(blocked.id, ws.id)
+
+      assert %{counts: %{blocked: 1}, precedence: :blocked} =
+               StudioChat.rollup({:workspace, ws.id})
+    end
+  end
 end
