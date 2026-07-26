@@ -13,10 +13,11 @@
 //   • archived_at — DISMISSAL, and nothing else. Archiving never touches
 //     liveness and never touches attention.
 //
-// Archive is expressed as WHICH SHELF YOU ASKED FOR, never as a per-row flag:
-// the sidebar row carries no archived boolean, so `shelf` below is the only
-// archived truth this screen has. That is not a shortcut — it is the reason a
-// stale row can never claim the wrong shelf.
+// Archive is expressed as WHICH SHELF YOU ASKED FOR, never as a per-row flag —
+// and that is a CHOICE, not a limitation of the wire: the sidebar row does carry
+// `archived_at` (sidebar_json emits it, and ChatSessionSummary now projects it),
+// but `shelf` below stays the screen's archived truth. That is the reason a row
+// that went stale in either direction can never claim the wrong shelf.
 //
 // The herd is PERSISTENT here (it used to be a throwaway per-render seed): one
 // HerdState folds the cold list AND the live fleet stream, so a session's pill
@@ -41,6 +42,7 @@ import {
   listChatSessions,
   streamFleetEvents,
   unarchiveChatSession,
+  type StreamStatus,
 } from '../api/chat'
 import {
   applyFleetFrame,
@@ -57,9 +59,10 @@ import { haptic } from '../ui/haptics'
 import { useTheme, type Theme } from '../ui/theme'
 import { roles, scale } from '../ui/typography'
 
-/** Which shelf the list is showing. This is the ONLY archived truth the client
- * holds (charter D28): the wire's sidebar row has no archived field, so "is it
- * archived" is answered by which list you asked for. */
+/** Which shelf the list is showing — the archived truth this screen renders by
+ * (charter D28): "is it archived" is answered by which list you asked for, not
+ * by the row's own `archived_at` (which the wire does send, and which a stale
+ * row could contradict). */
 export type Shelf = 'active' | 'archived'
 
 /** The server's sidebar cap (@sidebar_cap 50) with no pagination behind it, so
@@ -75,6 +78,35 @@ export const STALL_TICK_MS = 15_000
 /** The swipe distance that commits an archive. Deliberately generous: an
  * accidental dismissal costs a trip to the shelf, and there is no undo toast. */
 export const SWIPE_COMMIT_PX = 96
+
+/** The transient line a REFUSED lifecycle write paints (TUI parity: model.go's
+ * `archive failed — …` picker error). PURE so the copy is pinnable, and phrased
+ * as "still" because the row is coming BACK — the failure text and the restored
+ * row are one message, not two.
+ *
+ * There is no undo toast and no retry button here on purpose: the recovery is
+ * the shelf re-read that puts the row back, and the honest line's whole job is
+ * to explain why a row the user just dismissed reappeared. */
+export function lifecycleFailureLine(shelf: Shelf): string {
+  return shelf === 'active'
+    ? 'Archive failed — the session is still on this shelf.'
+    : 'Unarchive failed — the session is still archived.'
+}
+
+/** Whether the stall badge may be trusted, given the fleet stream's own state
+ * (PURE).
+ *
+ * The badge means "a working session has gone quiet". A 'refused' fleet stream
+ * (any 4xx — signed out, chat unsupported) means NO frame will ever arrive
+ * again, so lastFrameAtMs can only age and every working row would slowly wear
+ * "stalled" — the badge reporting OUR dead stream as the fleet's silence. That
+ * is the every-row-stalled lie, and transport truth outranks it: with the live
+ * layer refused the screen says the live layer is down and shows no stall
+ * badges. 'degraded' keeps them — that stream is still retrying and frames do
+ * still land between blips. */
+export function stallClockTrusted(status: StreamStatus): boolean {
+  return status !== 'refused'
+}
 
 /** Whether a released horizontal drag commits the archive (PURE).
  *
@@ -130,6 +162,13 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
   // The stall clock. `nowMs` is state so a tick re-renders; the badge itself is
   // still computed fresh from lastFrameAtMs, never stored (D53h).
   const [nowMs, setNowMs] = useState(() => Date.now())
+  // The fleet stream's OWN state (the D24 five-state vocabulary), which the
+  // stall badge is only meaningful against — see stallClockTrusted.
+  const [liveStatus, setLiveStatus] = useState<StreamStatus>('connecting')
+  // A transient line for a REFUSED lifecycle write. Cleared when the user asks
+  // for anything new (a fresh archive, a shelf flip, a refresh) — never by the
+  // list load itself, since the failure path is what triggered that load.
+  const [failureLine, setFailureLine] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), STALL_TICK_MS)
@@ -161,8 +200,18 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
   // stops the live layer and leaves the cold list fully usable.
   useEffect(() => {
     const controller = new AbortController()
+    // The pump reports 'closed' AFTER the abort, so the status sink is fenced
+    // the same way the list load is — a torn-down tab must not write state.
+    let alive = true
     void streamFleetEvents(connection, {
       signal: controller.signal,
+      // The pump has always emitted this vocabulary; the screen simply never
+      // listened, which is what let a dead live layer masquerade as a silent
+      // fleet. Nothing here restarts or retries — the transport owns the ladder;
+      // this is only the truth the badge is read against.
+      onStatus: (status) => {
+        if (alive) setLiveStatus(status)
+      },
       onFrame: (f) => {
         setHerd((h) => {
           const { state: next, ok } = applyFleetFrame(h, f.event, f.data)
@@ -170,15 +219,20 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
         })
       },
     })
-    return () => controller.abort()
+    return () => {
+      alive = false
+      controller.abort()
+    }
   }, [connection])
 
   const retry = useCallback(() => {
+    setFailureLine(undefined)
     setState({ phase: 'loading' })
     setAttempt((a) => a + 1)
   }, [])
 
   const refresh = useCallback(() => {
+    setFailureLine(undefined)
     setState((prev) =>
       prev.phase === 'ready' ? { ...prev, refreshing: true } : { phase: 'loading' },
     )
@@ -199,10 +253,15 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
 
   const archive = useCallback(
     (id: string) => {
+      setFailureLine(undefined)
       dropRow(id)
       setOpenSession((open) => nextOpenAfterArchive(open, id))
       archiveChatSession(connection, id).catch(() => {
+        // The refused haptic is a NUDGE, not a message — a phone in a pocket or
+        // on silent swallows it, and a row reappearing with no explanation reads
+        // as a bug. So the failure is SAID as well as felt (TUI parity).
         haptic('refused')
+        setFailureLine(lifecycleFailureLine('active'))
         // Put it back by re-reading the shelf — never by re-inserting a
         // guessed row at a guessed position.
         setAttempt((a) => a + 1)
@@ -215,9 +274,11 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
     (id: string) => {
       // Unarchive NEVER navigates (D28): the row leaves the archived shelf and
       // that is the whole of it.
+      setFailureLine(undefined)
       dropRow(id)
       unarchiveChatSession(connection, id).catch(() => {
         haptic('refused')
+        setFailureLine(lifecycleFailureLine('archived'))
         setAttempt((a) => a + 1)
       })
     },
@@ -229,20 +290,25 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
   // the stall clock, so a session crossing 150s re-sorts itself.
   const ordered = useMemo(() => {
     if (state.phase !== 'ready') return []
+    // The stall clock, switched OFF (0 — "no live clock") when the fleet stream
+    // is refused. It feeds the SORT as well as the badge: promoting every
+    // working row into the stalled band would be the same lie, just told
+    // through the order instead of the label.
+    const stallNowMs = stallClockTrusted(liveStatus) ? nowMs : 0
     const byId = new Map(state.sessions.map((s) => [s.id, s]))
     return herdOrder(
       herd,
       state.sessions.map((s) => s.id),
-      nowMs,
+      stallNowMs,
     ).map((id) => ({
       session: byId.get(id) as ChatSessionSummary,
-      stalled: herdStalled(herdRowFor(herd, id), nowMs),
+      stalled: herdStalled(herdRowFor(herd, id), stallNowMs),
       /** LIVE state wins over the list's point-in-time read — this is what the
        * fleet connection buys, and reading the summary here instead would make
        * the whole stream invisible. */
       agentState: herdRowFor(herd, id).agentState,
     }))
-  }, [state, herd, nowMs])
+  }, [state, herd, nowMs, liveStatus])
 
   if (openSession !== undefined) {
     return (
@@ -264,6 +330,7 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
       accessibilityRole="button"
       accessibilityLabel={shelf === 'active' ? 'Show archived sessions' : 'Show active sessions'}
       onPress={() => {
+        setFailureLine(undefined)
         setState({ phase: 'loading' })
         setShelf((s) => (s === 'active' ? 'archived' : 'active'))
       }}
@@ -273,6 +340,24 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
       </Text>
     </Pressable>
   )
+
+  // The two honest transient lines, rendered wherever the list is: a refused
+  // lifecycle write (danger — the user's action did not happen) and a refused
+  // live layer (muted — the cold list is still entirely usable, only the live
+  // flips are gone, which is exactly why the stall badges went with them).
+  const transientLines =
+    failureLine !== undefined || !stallClockTrusted(liveStatus) ? (
+      <View style={styles.notices}>
+        {failureLine !== undefined && (
+          <Text style={[styles.notice, { color: theme.danger }]}>{failureLine}</Text>
+        )}
+        {!stallClockTrusted(liveStatus) && (
+          <Text style={[styles.notice, { color: theme.textMuted }]}>
+            Live updates are off — pull to refresh for the latest.
+          </Text>
+        )}
+      </View>
+    ) : null
 
   if (state.phase === 'loading') {
     return (
@@ -305,6 +390,7 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
             ? 'Sessions on this workspace show up here.'
             : 'Swipe a session left on the list to archive it.'}
         </Text>
+        {transientLines}
         <Pressable accessibilityRole="button" onPress={retry}>
           <Text style={[styles.link, { color: theme.accent }]}>Refresh</Text>
         </Pressable>
@@ -323,11 +409,14 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
         <RefreshControl refreshing={state.refreshing} onRefresh={refresh} tintColor={theme.accent} />
       }
       ListHeaderComponent={
-        <View style={styles.shelfBar}>
-          <Text style={[styles.shelfTitle, { color: theme.text }]}>
-            {shelf === 'active' ? 'Sessions' : 'Archived'}
-          </Text>
-          {shelfToggle}
+        <View>
+          <View style={styles.shelfBar}>
+            <Text style={[styles.shelfTitle, { color: theme.text }]}>
+              {shelf === 'active' ? 'Sessions' : 'Archived'}
+            </Text>
+            {shelfToggle}
+          </View>
+          {transientLines}
         </View>
       }
       ListFooterComponent={
@@ -553,6 +642,8 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   shelfTitle: { ...roles.sectionTitle, fontWeight: '700' },
+  notices: { gap: 3, paddingBottom: 8 },
+  notice: { ...scale.xs, fontWeight: '600' },
   capNote: { ...scale.xs, paddingTop: 14, paddingBottom: 4 },
   // Borderless rows on the background — whitespace separates sessions, the
   // way the ChatGPT/Claude session lists do it.

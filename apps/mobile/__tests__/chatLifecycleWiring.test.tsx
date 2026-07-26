@@ -147,6 +147,14 @@ function renderedOrder(tree: ReactTestRenderer): string[] {
     .map((w) => textOf(w).replace(/^(Unarchive|Archive)/, ''))
 }
 
+/** Every Text the screen painted — the surface the honest-state lines live on. */
+function allText(tree: ReactTestRenderer): string {
+  return tree.root
+    .findAll((n) => (n.type as unknown) === 'Text')
+    .map(textOf)
+    .join(' | ')
+}
+
 function byLabel(tree: ReactTestRenderer, label: string): ReactTestInstance | undefined {
   return tree.root.findAll((n: ReactTestInstance) => n.props.accessibilityLabel === label)[0]
 }
@@ -273,6 +281,94 @@ test('PROBE F2 — a REFUSED archive re-reads the shelf instead of guessing the 
     // attention sort owns the order and a client-invented row would sit in the
     // wrong place with a stale state.
     expect(mockList.mock.calls.length).toBeGreaterThan(listCalls)
+  } finally {
+    await act(async () => tree.unmount())
+  }
+})
+
+test('PROBE F3 — a refused archive SAYS so and the row comes back', async () => {
+  mockList.mockResolvedValue([summary('a')])
+  mockArchive.mockRejectedValue(new Error('chat POST failed: HTTP 404'))
+  const tree = await mount()
+  try {
+    const row = tree.root.findAllByType(SwipeToArchive)[0]!
+    await act(async () => (row.props.onCommit as () => void)())
+    await act(async () => {}) // the rejection lands
+    await act(async () => {}) // the re-read lands
+
+    // MUTANT KILLED (two): drop the failure line and a dismissed row silently
+    // reappears with nothing but a haptic nobody feels on silent; drop the
+    // shelf re-read and the row stays gone even though the server never
+    // archived it. Both halves are ONE message — said and restored.
+    const painted = allText(tree)
+    expect(painted).toContain('Archive failed')
+    expect(renderedOrder(tree).join(' ')).toContain('a')
+
+    // Asking for something new clears the transient line — a stale failure
+    // would keep accusing a write it no longer has anything to do with.
+    await press(byLabel(tree, 'Show archived sessions')!)
+    await act(async () => {})
+    expect(allText(tree)).not.toContain('Archive failed')
+  } finally {
+    await act(async () => tree.unmount())
+  }
+})
+
+/* ── Probe K: the fleet stream's OWN state reaches the screen ─────────────── */
+
+test('PROBE K — a REFUSED fleet stream kills the every-row-stalled lie', async () => {
+  // A working session whose last frame is ancient — exactly the shape that made
+  // every row wear "stalled" once the live layer was gone.
+  mockList.mockResolvedValue([
+    summary('a', {
+      agent_state: 'working',
+      agent_state_at: new Date(Date.now() - 400_000).toISOString(),
+    }),
+  ])
+  const tree = await mount()
+  try {
+    // RED FIRST, on the SAME mount: with the stream believed alive the badge is
+    // the honest reading of a genuinely quiet session.
+    expect(renderedOrder(tree)[0]).toContain('stalled')
+
+    const live = fleets[fleets.length - 1]!
+    if (live.onStatus === undefined) {
+      throw new Error('ChatScreen never passes onStatus — the fleet stream state is dark')
+    }
+    await act(async () => {
+      live.onStatus!('refused', { class: 'refused', httpStatus: 401, message: 'HTTP 401' })
+    })
+
+    // MUTANT KILLED: leave onStatus unwired (the shipped state before this
+    // slice) and the badge survives a stream that will never deliver another
+    // frame — the app reporting its own dead socket as the fleet's silence.
+    expect(renderedOrder(tree)[0]).not.toContain('stalled')
+    expect(renderedOrder(tree)[0]).toContain('working')
+    // …and it says WHY the live layer went quiet rather than just dropping the
+    // badge, which on its own would be a different lie.
+    expect(allText(tree)).toContain('Live updates are off')
+  } finally {
+    await act(async () => tree.unmount())
+  }
+})
+
+test('PROBE K2 — a DEGRADED stream keeps the badge (it is still retrying)', async () => {
+  mockList.mockResolvedValue([
+    summary('a', {
+      agent_state: 'working',
+      agent_state_at: new Date(Date.now() - 400_000).toISOString(),
+    }),
+  ])
+  const tree = await mount()
+  try {
+    const live = fleets[fleets.length - 1]!
+    await act(async () => {
+      live.onStatus!('degraded', { class: 'transient', message: 'socket closed' })
+    })
+    // MUTANT KILLED: suppressing on any non-'open' status would blind the badge
+    // during every ordinary reconnect blip — frames DO still land between them.
+    expect(renderedOrder(tree)[0]).toContain('stalled')
+    expect(allText(tree)).not.toContain('Live updates are off')
   } finally {
     await act(async () => tree.unmount())
   }
