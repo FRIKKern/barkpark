@@ -34,6 +34,7 @@
       "kind": "tool-diff",
       "name": "edit_diff",
       "projection": {
+        "overflow": 0,
         "text": "def greet do   \"hello there\"   \"hi\" end",
         "type": "chat-tool-diff"
       },
@@ -70,6 +71,7 @@
       "kind": "tool-diff",
       "name": "write_diff",
       "projection": {
+        "overflow": 0,
         "text": "defmodule NewMod do   def run, do: :ok end",
         "type": "chat-tool-diff"
       },
@@ -122,6 +124,7 @@
       "kind": "tool-diff",
       "name": "multi_edit_diff",
       "projection": {
+        "overflow": 0,
         "text": "alpha_renamed alpha beta_renamed beta",
         "type": "chat-tool-diff"
       },
@@ -137,6 +140,160 @@
           }
         ],
         "file_path": "lib/barkpark/multi.ex"
+      }
+    },
+    {
+      "block": {
+        "added": 24,
+        "input": {
+          "edits": [
+            {
+              "new_string": "hunkalpha1\nhunkalpha2\nhunkalpha3\nhunkalpha4\nhunkalpha5\nhunkalpha6\nhunkalpha7\nhunkalpha8",
+              "old_string": ""
+            },
+            {
+              "new_string": "hunkbravo1\nhunkbravo2\nhunkbravo3\nhunkbravo4\nhunkbravo5\nhunkbravo6\nhunkbravo7\nhunkbravo8",
+              "old_string": ""
+            },
+            {
+              "new_string": "hunkcharlie1\nhunkcharlie2\nhunkcharlie3\nhunkcharlie4\nhunkcharlie5\nhunkcharlie6\nhunkcharlie7\nhunkcharlie8",
+              "old_string": ""
+            }
+          ],
+          "file_path": "lib/barkpark/budget.ex"
+        },
+        "lines": [
+          {
+            "op": "+",
+            "text": "hunkalpha1"
+          },
+          {
+            "op": "+",
+            "text": "hunkalpha2"
+          },
+          {
+            "op": "+",
+            "text": "hunkalpha3"
+          },
+          {
+            "op": "+",
+            "text": "hunkalpha4"
+          },
+          {
+            "op": "+",
+            "text": "hunkalpha5"
+          },
+          {
+            "op": "+",
+            "text": "hunkalpha6"
+          },
+          {
+            "op": "+",
+            "text": "hunkalpha7"
+          },
+          {
+            "op": "+",
+            "text": "hunkalpha8"
+          },
+          {
+            "op": "gap",
+            "text": ""
+          },
+          {
+            "op": "+",
+            "text": "hunkbravo1"
+          },
+          {
+            "op": "+",
+            "text": "hunkbravo2"
+          },
+          {
+            "op": "+",
+            "text": "hunkbravo3"
+          },
+          {
+            "op": "+",
+            "text": "hunkbravo4"
+          },
+          {
+            "op": "+",
+            "text": "hunkbravo5"
+          },
+          {
+            "op": "+",
+            "text": "hunkbravo6"
+          },
+          {
+            "op": "+",
+            "text": "hunkbravo7"
+          },
+          {
+            "op": "+",
+            "text": "hunkbravo8"
+          },
+          {
+            "op": "gap",
+            "text": ""
+          },
+          {
+            "op": "+",
+            "text": "hunkcharlie1"
+          },
+          {
+            "op": "+",
+            "text": "hunkcharlie2"
+          },
+          {
+            "op": "+",
+            "text": "hunkcharlie3"
+          },
+          {
+            "op": "+",
+            "text": "hunkcharlie4"
+          },
+          {
+            "op": "+",
+            "text": "hunkcharlie5"
+          },
+          {
+            "op": "+",
+            "text": "hunkcharlie6"
+          },
+          {
+            "op": "+",
+            "text": "hunkcharlie7"
+          },
+          {
+            "op": "+",
+            "text": "hunkcharlie8"
+          }
+        ],
+        "removed": 0,
+        "type": "chat-tool-diff"
+      },
+      "kind": "tool-diff",
+      "name": "multi_edit_budget_diff",
+      "projection": {
+        "overflow": 4,
+        "text": "hunkalpha1 hunkalpha2 hunkalpha3 hunkalpha4 hunkalpha5 hunkalpha6 hunkalpha7 hunkalpha8 hunkbravo1 hunkbravo2 hunkbravo3 hunkbravo4 hunkbravo5 hunkbravo6 hunkbravo7 hunkbravo8 hunkcharlie1 hunkcharlie2 hunkcharlie3 hunkcharlie4",
+        "type": "chat-tool-diff"
+      },
+      "source": {
+        "edits": [
+          {
+            "new_string": "hunkalpha1\nhunkalpha2\nhunkalpha3\nhunkalpha4\nhunkalpha5\nhunkalpha6\nhunkalpha7\nhunkalpha8",
+            "old_string": ""
+          },
+          {
+            "new_string": "hunkbravo1\nhunkbravo2\nhunkbravo3\nhunkbravo4\nhunkbravo5\nhunkbravo6\nhunkbravo7\nhunkbravo8",
+            "old_string": ""
+          },
+          {
+            "new_string": "hunkcharlie1\nhunkcharlie2\nhunkcharlie3\nhunkcharlie4\nhunkcharlie5\nhunkcharlie6\nhunkcharlie7\nhunkcharlie8",
+            "old_string": ""
+          }
+        ],
+        "file_path": "lib/barkpark/budget.ex"
       }
     },
     {

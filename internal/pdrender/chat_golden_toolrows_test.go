@@ -44,10 +44,22 @@ type chatToolrowsFixture struct {
 }
 
 type chatToolrowsVariant struct {
-	Kind       string          `json:"kind"`
-	Name       string          `json:"name"`
-	Block      json.RawMessage `json:"block"`
-	Projection chatProjEntry   `json:"projection"`
+	Kind       string           `json:"kind"`
+	Name       string           `json:"name"`
+	Block      json.RawMessage  `json:"block"`
+	Projection chatToolrowsProj `json:"projection"`
+}
+
+// chatToolrowsProj is the toolrows projection entry: the reply-body
+// chatProjEntry's {type,text} plus the budget-aware `overflow` field the
+// generator stamps on chat-tool-diff variants (charter D40) — the literal
+// number of DRAWABLE rows the fold discards, asserted verbatim so a
+// raw-element budget (which would count folded gap separators too) reds on
+// the number, not just on word presence.
+type chatToolrowsProj struct {
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	Overflow int    `json:"overflow"`
 }
 
 // loadChatToolrowsGolden reads the toolrows fixture and floor-guards it: a gutted
@@ -139,10 +151,47 @@ func TestChatGoldenToolrowsParity(t *testing.T) {
 					)
 				}
 			}
+
+			// (4) The fold NUMBER (charter D40): a chat-tool-diff variant's
+			// overflow footnote must show the generator's drawable-only count
+			// VERBATIM. Word presence is blind to the number — under a
+			// raw-element budget the adjudicating variant (24 drawable + 2
+			// folded-region gaps) would honestly render "+6 more lines" and
+			// still realize every projected word; asserting the literal "+4"
+			// is what makes the non-ratified reading red.
+			if v.Projection.Type == "chat-tool-diff" {
+				if v.Projection.Overflow > 0 {
+					want := "… +" + itoa(v.Projection.Overflow) + " more lines"
+					if !strings.Contains(stripped, want) {
+						t.Fatalf(
+							"variant %q: overflow footnote %q not rendered (drawable-only budget, D40):\n%s",
+							v.Name, want, stripped,
+						)
+					}
+				} else if strings.Contains(stripped, "more lines") {
+					t.Fatalf(
+						"variant %q: projection says overflow 0, but the render claims a fold:\n%s",
+						v.Name, stripped,
+					)
+				}
+			}
 		})
 	}
 
-	// (4) Coverage floor: all six promoted block types realized somewhere — the
+	// The adjudicating budget variant must EXIST: at least one chat-tool-diff
+	// variant folds (overflow > 0), else the fold-number assertion above is
+	// vacuously green and a regen that drops it silently sheds the D40 lock.
+	folded := false
+	for _, v := range fx.Variants {
+		if v.Projection.Type == "chat-tool-diff" && v.Projection.Overflow > 0 {
+			folded = true
+		}
+	}
+	if !folded {
+		t.Fatalf("fixture floor: no folding chat-tool-diff variant — the D40 budget lock is unexercised")
+	}
+
+	// (5) Coverage floor: all six promoted block types realized somewhere — the
 	// three inert rows (D25) plus the three interactive cards (D35). A regen that
 	// drops one reds here.
 	for _, want := range []string{
@@ -176,5 +225,67 @@ func TestChatToolDiffPathFromInput(t *testing.T) {
 	out := ansi.Strip(reg.RenderDoc(blocks, ctx))
 	if !strings.Contains(out, "lib/barkpark/chat.ex") {
 		t.Fatalf("nested input.file_path not rendered in diff header:\n%s", out)
+	}
+}
+
+// TestChatToolDiffGapAfterBudget pins the D40 third clause on the terminal
+// surface: a gap hunk separator never SPENDS budget (it draws free between
+// drawn hunks) and never DRAWS once the budget is spent — the rule of a fully
+// folded hunk would be chrome introducing rows the fold already discarded.
+func TestChatToolDiffGapAfterBudget(t *testing.T) {
+	reg := DefaultRegistry(DarkTheme())
+	ctx := RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}
+
+	render := func(lines []any) string {
+		block := map[string]any{"type": "chat-tool-diff", "lines": lines}
+		raw, err := json.Marshal([]any{block})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		blocks, err := Decode(raw)
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return ansi.Strip(reg.RenderDoc(blocks, ctx))
+	}
+
+	row := func(text string) any { return map[string]any{"op": "+", "text": text} }
+	gap := map[string]any{"op": "gap", "text": ""}
+
+	// A gap BETWEEN drawn hunks draws its rule and spends nothing.
+	var mid []any
+	for i := 0; i < 10; i++ {
+		mid = append(mid, row("aa"+itoa(i)))
+	}
+	mid = append(mid, gap)
+	for i := 0; i < 10; i++ {
+		mid = append(mid, row("bb"+itoa(i)))
+	}
+	out := render(mid)
+	if !strings.Contains(out, "─") {
+		t.Fatalf("a gap between drawn hunks must draw its separator rule:\n%s", out)
+	}
+	if !strings.Contains(out, "bb9") {
+		t.Fatalf("the 20th DRAWABLE row must draw (the gap spent budget):\n%s", out)
+	}
+	if strings.Contains(out, "more lines") {
+		t.Fatalf("20 drawable rows + 1 gap is NOT an overflow:\n%s", out)
+	}
+
+	// A gap AFTER the budget is spent belongs to the folded tail: no rule.
+	var late []any
+	for i := 0; i < 20; i++ {
+		late = append(late, row("cc"+itoa(i)))
+	}
+	late = append(late, gap)
+	for i := 0; i < 4; i++ {
+		late = append(late, row("dd"+itoa(i)))
+	}
+	out = render(late)
+	if strings.Contains(out, "─") {
+		t.Fatalf("a gap of a fully folded hunk must NOT draw once the budget is spent (D40):\n%s", out)
+	}
+	if !strings.Contains(out, "… +4 more lines") {
+		t.Fatalf("the footnote must count the 4 folded DRAWABLE rows only:\n%s", out)
 	}
 }
