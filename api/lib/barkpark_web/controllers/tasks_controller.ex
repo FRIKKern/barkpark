@@ -925,66 +925,151 @@ defmodule BarkparkWeb.TasksController do
   # Obsidian's showOrphans. A node budget guards a pathological corpus; the
   # tenancy + dataset scope ride scope_opts/request_dataset exactly like the
   # sibling graph actions.
+  #
+  # TWO ceilings, BOTH reported honestly (stw9-backlog-graph-server-honesty):
+  #   - per_type_cap  — the per-type page ceiling (the list_documents hard cap).
+  #     Deliberately NOT lifted: one derivation already costs ~9.6k queries and
+  #     lifting the cap multiplies the dominant per-document term (the N+1 is
+  #     filed separately as stw10-backlog-graph-n-plus-one). When a type's list
+  #     comes back at the cap, one COUNT confirms whether more exist.
+  #   - node_budget   — the whole-graph node ceiling. When it fires, edges are
+  #     re-filtered to the SURVIVING node set so no edge endpoint dangles
+  #     (previously the take dropped the phantom tail while every edge kept
+  #     pointing at it).
+  # `truncated` goes true whenever EITHER ceiling fired — clients (graph.ts:193)
+  # discard `truncation_reason` unless `truncated` is true, so the flag is
+  # load-bearing. Both values are config-overridable for tests only.
   @graph_corpus_node_budget 2000
+  @graph_corpus_per_type_limit 1000
 
-  def graph_corpus(conn, _params) do
+  def graph_corpus(conn, params) do
     dataset = request_dataset(conn)
-    # limit 1000 (the list_documents hard cap) so the corpus isn't silently
-    # truncated at the default page size of 100 — BOTH the node list and
-    # corpus_edges read through this opts, so a large dataset still yields a
-    # complete graph (the node budget below is the real ceiling).
-    opts = scope_opts(conn) |> Keyword.put(:dataset, dataset) |> Keyword.put(:limit, 1000)
+    per_type_limit = graph_corpus_per_type_limit()
+
+    # per-type limit (default: the list_documents hard cap) so the corpus isn't
+    # silently truncated at the default page size of 100 — BOTH the node list
+    # and corpus_edges read through this opts.
+    opts =
+      scope_opts(conn) |> Keyword.put(:dataset, dataset) |> Keyword.put(:limit, per_type_limit)
+
     list_opts = Keyword.put(opts, :perspective, :published)
 
-    types = dataset |> Content.list_schemas(opts) |> Enum.map(& &1.name)
+    all_types = dataset |> Content.list_schemas(opts) |> Enum.map(& &1.name)
 
-    real_nodes =
-      types
-      |> Enum.flat_map(fn type -> Content.list_documents(type, dataset, list_opts) end)
-      |> Enum.map(fn d ->
-        pid = Content.published_id(d.doc_id)
-        %{id: pid, doc_id: pid, type: d.type, title: d.title || pid, phantom: false}
-      end)
-      |> Enum.uniq_by(& &1.id)
+    case parse_graph_types(params["types"], all_types) do
+      {:error, message} ->
+        bad_request(conn, message)
 
-    node_ids = MapSet.new(real_nodes, & &1.id)
+      {:ok, types} ->
+        # Node-listing phase, carrying the per-type-cap signal out instead of
+        # discarding it: a type whose page comes back at the cap gets ONE count
+        # query to confirm the ceiling actually fired (vs exactly-at-cap).
+        {doc_lists, per_type_capped} =
+          Enum.map_reduce(types, false, fn type, capped ->
+            docs = Content.list_documents(type, dataset, list_opts)
 
-    raw_edges =
-      types
-      |> Enum.flat_map(fn type -> Content.corpus_edges(type, dataset, opts) end)
-      |> Enum.uniq_by(fn e -> {e.from_id, e.to_id, e.field} end)
+            capped =
+              capped or
+                (length(docs) >= per_type_limit and
+                   Content.count_documents(type, dataset, list_opts) > per_type_limit)
 
-    edges =
-      Enum.map(raw_edges, fn e ->
-        %{
-          from_id: e.from_id,
-          to_id: e.to_id,
-          kind: e.kind || "references",
-          weight: nil,
-          plugin_source: nil
-        }
-      end)
+            {docs, capped}
+          end)
 
-    phantom_nodes =
-      raw_edges
-      |> Enum.reject(fn e -> MapSet.member?(node_ids, e.to_id) end)
-      |> Enum.map(& &1.to_id)
-      |> Enum.uniq()
-      |> Enum.map(fn tid -> %{id: tid, doc_id: tid, type: nil, title: tid, phantom: true} end)
+        real_nodes =
+          doc_lists
+          |> List.flatten()
+          |> Enum.map(fn d ->
+            pid = Content.published_id(d.doc_id)
+            %{id: pid, doc_id: pid, type: d.type, title: d.title || pid, phantom: false}
+          end)
+          |> Enum.uniq_by(& &1.id)
 
-    all_nodes = real_nodes ++ phantom_nodes
-    truncated = length(all_nodes) > @graph_corpus_node_budget
-    nodes = if truncated, do: Enum.take(all_nodes, @graph_corpus_node_budget), else: all_nodes
+        node_ids = MapSet.new(real_nodes, & &1.id)
 
-    json(conn, %{
-      ok: true,
-      dataset: dataset,
-      nodes: nodes,
-      edges: edges,
-      truncated: truncated,
-      truncation_reason: if(truncated, do: "node_budget", else: nil)
-    })
+        raw_edges =
+          types
+          |> Enum.flat_map(fn type -> Content.corpus_edges(type, dataset, opts) end)
+          |> Enum.uniq_by(fn e -> {e.from_id, e.to_id, e.field} end)
+
+        edges =
+          Enum.map(raw_edges, fn e ->
+            %{
+              from_id: e.from_id,
+              to_id: e.to_id,
+              kind: e.kind || "references",
+              weight: nil,
+              plugin_source: nil
+            }
+          end)
+
+        phantom_nodes =
+          raw_edges
+          |> Enum.reject(fn e -> MapSet.member?(node_ids, e.to_id) end)
+          |> Enum.map(& &1.to_id)
+          |> Enum.uniq()
+          |> Enum.map(fn tid -> %{id: tid, doc_id: tid, type: nil, title: tid, phantom: true} end)
+
+        all_nodes = real_nodes ++ phantom_nodes
+        node_budget = graph_corpus_node_budget()
+        over_budget = length(all_nodes) > node_budget
+        nodes = if over_budget, do: Enum.take(all_nodes, node_budget), else: all_nodes
+
+        # Edge honesty: only edges whose BOTH endpoints survived the budget.
+        # Under budget this is a no-op (every to_id has a real or phantom node);
+        # over budget it kills the orphaned-edge class the old code shipped.
+        kept_ids = MapSet.new(nodes, & &1.id)
+
+        edges =
+          Enum.filter(edges, fn e ->
+            MapSet.member?(kept_ids, e.from_id) and MapSet.member?(kept_ids, e.to_id)
+          end)
+
+        json(conn, %{
+          ok: true,
+          dataset: dataset,
+          nodes: nodes,
+          edges: edges,
+          truncated: per_type_capped or over_budget,
+          truncation_reason: graph_truncation_reason(per_type_capped, over_budget)
+        })
+    end
   end
+
+  # types= validation: nil/blank → all schemas; otherwise a comma-separated
+  # list validated against the schema-name set. An unknown type is a hard 400 —
+  # silently ignoring it would ship a graph that quietly ignores the caller's
+  # narrowing (the exact dishonesty class this endpoint's truncation fix kills).
+  defp parse_graph_types(raw, all_types) when raw in [nil, ""], do: {:ok, all_types}
+
+  defp parse_graph_types(raw, all_types) when is_binary(raw) do
+    requested =
+      raw
+      |> String.split(",")
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    case {requested, requested -- all_types} do
+      {[], _} -> {:ok, all_types}
+      {_, []} -> {:ok, Enum.filter(all_types, &(&1 in requested))}
+      {_, unknown} -> {:error, "unknown types: #{Enum.join(unknown, ", ")}"}
+    end
+  end
+
+  defp parse_graph_types(_raw, _all_types),
+    do: {:error, "types must be a comma-separated string of schema names"}
+
+  defp graph_truncation_reason(true, true), do: "per_type_cap+node_budget"
+  defp graph_truncation_reason(true, false), do: "per_type_cap"
+  defp graph_truncation_reason(false, true), do: "node_budget"
+  defp graph_truncation_reason(false, false), do: nil
+
+  defp graph_corpus_node_budget,
+    do: Application.get_env(:barkpark, :graph_corpus_node_budget, @graph_corpus_node_budget)
+
+  defp graph_corpus_per_type_limit,
+    do: Application.get_env(:barkpark, :graph_corpus_per_type_limit, @graph_corpus_per_type_limit)
 
   # GRAPH ROOT RESOLUTION (gap #4 BOUND DECISION). Roots on ANY content doc, so
   # we DELIBERATELY do NOT call find_task_by_doc_id/2 (which hard-filters

@@ -274,4 +274,224 @@ defmodule BarkparkWeb.GraphControllerTest do
       assert resp.status == 401
     end
   end
+
+  # ── GET /v1/graph — the whole-dataset corpus graph (first-ever coverage) ────
+  #
+  # stw9-backlog-graph-server-honesty: types= validation, BOTH-ceilings
+  # truncation truth (per_type_cap + node_budget), and the post-budget edge
+  # filter. Assertions are RELATIONSHIPS (subset/closure/cap arithmetic over
+  # seeded docs), never absolute live counts — the corpus drifts daily.
+  # Ceilings are config-overridden per test (restored on exit) so an
+  # over-budget corpus is a handful of seeded docs, not thousands.
+
+  describe "GET /v1/graph (corpus)" do
+    # A schema with a real scalar reference field so corpus edges (and dangling
+    # refs → phantom nodes) exist. `refType` deliberately absent: existence
+    # resolves type-agnostically, the `post` targets stay resolvable.
+    defp register_note_schema!(scope) do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "note",
+            "title" => "Note",
+            "visibility" => "public",
+            "fields" => [%{"name" => "rel", "type" => "reference"}]
+          },
+          @dataset,
+          scope
+        )
+    end
+
+    # The corpus reads the :published perspective, so fixtures must be
+    # published — a bare create only mints the draft twin.
+    defp mk_pub_post!(doc_id, scope) do
+      mk_post!(doc_id, scope)
+      {:ok, doc} = Content.publish_document(doc_id, "post", @dataset, scope)
+      doc
+    end
+
+    defp mk_note!(doc_id, rel, scope) do
+      content = if rel, do: %{"rel" => rel}, else: %{}
+
+      {:ok, _} =
+        Content.create_document(
+          "note",
+          %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
+          @dataset,
+          scope
+        )
+
+      {:ok, doc} = Content.publish_document(doc_id, "note", @dataset, scope)
+      doc
+    end
+
+    defp override_env!(key, value) do
+      previous = Application.fetch_env(:barkpark, key)
+      Application.put_env(:barkpark, key, value)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, v} -> Application.put_env(:barkpark, key, v)
+          :error -> Application.delete_env(:barkpark, key)
+        end
+      end)
+    end
+
+    defp corpus!(conn, qs) do
+      resp = conn |> authed() |> get("/v1/graph?dataset=#{@dataset}#{qs}")
+      assert resp.status == 200
+      Jason.decode!(resp.resp_body)
+    end
+
+    defp node_ids(body), do: MapSet.new(body["nodes"], & &1["id"])
+
+    # The closure invariant: no edge endpoint may be missing from nodes.
+    defp assert_edges_closed!(body) do
+      ids = node_ids(body)
+
+      for edge <- body["edges"] do
+        assert MapSet.member?(ids, edge["from_id"]),
+               "edge from_id #{edge["from_id"]} missing from nodes"
+
+        assert MapSet.member?(ids, edge["to_id"]),
+               "edge to_id #{edge["to_id"]} missing from nodes"
+      end
+    end
+
+    test "401 without a token — the corpus route is token-gated", %{conn: conn} do
+      resp = get(conn, "/v1/graph")
+      assert resp.status == 401
+    end
+
+    test "types= narrows the corpus to the requested schemas", %{conn: conn, scope: scope} do
+      register_note_schema!(scope)
+      post_id = uniq("corpus-post")
+      note_id = uniq("corpus-note")
+      mk_pub_post!(post_id, scope)
+      mk_note!(note_id, post_id, scope)
+
+      unfiltered = corpus!(conn, "")
+      filtered = corpus!(conn, "&types=post")
+
+      # The unfiltered corpus carries both seeded docs…
+      assert MapSet.member?(node_ids(unfiltered), post_id)
+      assert MapSet.member?(node_ids(unfiltered), note_id)
+
+      # …the filtered one only the requested type: every real node is a post,
+      # the note (and its outbound edge) is gone, and the filtered node set is
+      # a subset of the unfiltered one.
+      assert filtered["ok"] == true
+      real_types = filtered["nodes"] |> Enum.reject(& &1["phantom"]) |> Enum.map(& &1["type"])
+      assert real_types != []
+      assert Enum.all?(real_types, &(&1 == "post"))
+      refute MapSet.member?(node_ids(filtered), note_id)
+      refute Enum.any?(filtered["edges"], &(&1["from_id"] == note_id))
+      assert MapSet.subset?(node_ids(filtered), node_ids(unfiltered))
+    end
+
+    test "an unknown type returns 400 rather than being silently ignored", %{conn: conn} do
+      resp = conn |> authed() |> get("/v1/graph?dataset=#{@dataset}&types=post,no-such-type")
+
+      assert resp.status == 400
+      body = Jason.decode!(resp.resp_body)
+      assert body["ok"] == false
+      assert body["reason"] == "bad_request"
+      assert body["message"] =~ "no-such-type"
+    end
+
+    test "small corpus: truncated:false, nil reason, edges closed (incl. the phantom)",
+         %{conn: conn, scope: scope} do
+      register_note_schema!(scope)
+      post_id = uniq("closed-post")
+      note_real = uniq("closed-note-real")
+      note_dangling = uniq("closed-note-dangling")
+      ghost_id = uniq("closed-ghost")
+      mk_pub_post!(post_id, scope)
+      mk_note!(note_real, post_id, scope)
+      mk_note!(note_dangling, ghost_id, scope)
+
+      body = corpus!(conn, "")
+
+      assert body["truncated"] == false
+      assert body["truncation_reason"] == nil
+
+      # The dangling ref materialised as a phantom node, and every edge
+      # endpoint — real or phantom — is present in nodes.
+      ghost = Enum.find(body["nodes"], &(&1["id"] == ghost_id))
+      assert ghost["phantom"] == true
+
+      assert Enum.any?(
+               body["edges"],
+               &(&1["from_id"] == note_dangling and &1["to_id"] == ghost_id)
+             )
+
+      assert Enum.any?(body["edges"], &(&1["from_id"] == note_real and &1["to_id"] == post_id))
+      assert_edges_closed!(body)
+    end
+
+    test "per-type cap fired → truncated:true AND reason per_type_cap (the flag is load-bearing)",
+         %{conn: conn, scope: scope} do
+      override_env!(:graph_corpus_per_type_limit, 3)
+      for _ <- 1..5, do: mk_pub_post!(uniq("cap-post"), scope)
+
+      body = corpus!(conn, "&types=post")
+
+      post_nodes = Enum.filter(body["nodes"], &(&1["type"] == "post"))
+      assert length(post_nodes) == 3
+
+      # graph.ts:193 discards the reason unless truncated is true — both must
+      # be set together or the truncation is invisible client-side.
+      assert body["truncated"] == true
+      assert body["truncation_reason"] == "per_type_cap"
+    end
+
+    test "a type with EXACTLY cap-many docs is not reported truncated (COUNT confirms the ceiling)",
+         %{conn: conn, scope: scope} do
+      override_env!(:graph_corpus_per_type_limit, 3)
+      for _ <- 1..3, do: mk_pub_post!(uniq("atcap-post"), scope)
+
+      body = corpus!(conn, "&types=post")
+
+      assert length(body["nodes"]) == 3
+      assert body["truncated"] == false
+      assert body["truncation_reason"] == nil
+    end
+
+    test "node budget: edges filtered to the surviving set, phantoms not wholesale-dropped",
+         %{conn: conn, scope: scope} do
+      register_note_schema!(scope)
+      # 4 real notes, each referencing a distinct dangling target → 4 phantoms.
+      # Budget 6 keeps all 4 real + 2 phantom nodes.
+      for _ <- 1..4, do: mk_note!(uniq("budget-note"), uniq("budget-ghost"), scope)
+      override_env!(:graph_corpus_node_budget, 6)
+
+      body = corpus!(conn, "&types=note")
+
+      assert body["truncated"] == true
+      assert body["truncation_reason"] == "node_budget"
+      assert length(body["nodes"]) == 6
+
+      # Phantoms survive the take (the old code's real++phantom tail-drop kept
+      # them only by luck of the budget; the edge filter is what must hold)…
+      assert Enum.count(body["nodes"], & &1["phantom"]) == 2
+      # …and ONLY edges into surviving phantoms remain — no orphaned edge
+      # outlives its dropped node.
+      assert length(body["edges"]) == 2
+      assert_edges_closed!(body)
+    end
+
+    test "both ceilings fired → the reason names both", %{conn: conn, scope: scope} do
+      register_note_schema!(scope)
+      for _ <- 1..4, do: mk_note!(uniq("both-note"), uniq("both-ghost"), scope)
+      override_env!(:graph_corpus_per_type_limit, 2)
+      override_env!(:graph_corpus_node_budget, 3)
+
+      body = corpus!(conn, "&types=note")
+
+      assert body["truncated"] == true
+      assert body["truncation_reason"] == "per_type_cap+node_budget"
+      assert length(body["nodes"]) == 3
+      assert_edges_closed!(body)
+    end
+  end
 end

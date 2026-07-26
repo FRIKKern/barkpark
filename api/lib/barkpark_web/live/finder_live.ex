@@ -28,9 +28,11 @@ defmodule BarkparkWeb.FinderLive do
 
   @default_dataset "production"
   @hit_limit 12
-  # Same ceiling as TasksController.graph_corpus/2 — keeps the inline payload
-  # bounded on huge datasets.
+  # Same ceilings as TasksController.graph_corpus/2 — keeps the inline payload
+  # bounded on huge datasets. Both config-overridable (tests), same keys as the
+  # controller twin.
   @graph_node_budget 2000
+  @graph_node_per_type_limit 1000
 
   @impl true
   def mount(params, _session, socket) do
@@ -53,7 +55,9 @@ defmodule BarkparkWeb.FinderLive do
         node_count: 0,
         graph_nodes: "[]",
         graph_edges: "[]",
-        graph_root: ""
+        graph_root: "",
+        graph_truncated: false,
+        graph_truncation_reason: nil
       )
 
     socket =
@@ -67,13 +71,19 @@ defmodule BarkparkWeb.FinderLive do
   end
 
   @impl true
-  def handle_async(:graph_corpus, {:ok, {nodes_json, edges_json, root, node_count}}, socket) do
+  def handle_async(
+        :graph_corpus,
+        {:ok, {nodes_json, edges_json, root, node_count, truncated, truncation_reason}},
+        socket
+      ) do
     {:noreply,
      assign(socket,
        node_count: node_count,
        graph_nodes: nodes_json,
        graph_edges: edges_json,
-       graph_root: root
+       graph_root: root,
+       graph_truncated: truncated,
+       graph_truncation_reason: truncation_reason
      )}
   end
 
@@ -115,6 +125,8 @@ defmodule BarkparkWeb.FinderLive do
         data-edges={@graph_edges}
         data-root={@graph_root}
         data-rev={@node_count}
+        data-truncated={to_string(@graph_truncated)}
+        data-truncation-reason={@graph_truncation_reason}
       >
       </div>
       <section class="bp-finder-panel">
@@ -143,7 +155,7 @@ defmodule BarkparkWeb.FinderLive do
         <p class="bp-finder-count">
           {@node_count} documents · live search served by Phoenix · {if @q != "",
             do: "#{@hit_count} hits",
-            else: "type to search"}
+            else: "type to search"}<span :if={@graph_truncated}> · graph truncated ({@graph_truncation_reason})</span>
         </p>
       </section>
     </main>
@@ -193,15 +205,38 @@ defmodule BarkparkWeb.FinderLive do
   # The flat /v1/graph twin (TasksController.graph_corpus/2), derived at mount
   # and inlined for the hook — published perspective, real + phantom nodes,
   # budget-capped. Backlog: extract the shared derivation (filed at Decide).
+  #
+  # Truncation truth mirrors the controller (stw9-backlog-graph-server-honesty):
+  # BOTH ceilings are detected (per_type_cap — a type's page at the cap with a
+  # confirming COUNT — and node_budget), edges are re-filtered to the surviving
+  # node set, and the {truncated, reason} pair rides the payload so /finder
+  # never claims a complete corpus it didn't derive.
   defp graph_payload(dataset) do
-    opts = [dataset: dataset, limit: 1000]
+    per_type_limit =
+      Application.get_env(:barkpark, :graph_corpus_per_type_limit, @graph_node_per_type_limit)
+
+    node_budget = Application.get_env(:barkpark, :graph_corpus_node_budget, @graph_node_budget)
+
+    opts = [dataset: dataset, limit: per_type_limit]
     list_opts = Keyword.put(opts, :perspective, :published)
 
     types = dataset |> Content.list_schemas(opts) |> Enum.map(& &1.name)
 
+    {doc_lists, per_type_capped} =
+      Enum.map_reduce(types, false, fn type, capped ->
+        docs = Content.list_documents(type, dataset, list_opts)
+
+        capped =
+          capped or
+            (length(docs) >= per_type_limit and
+               Content.count_documents(type, dataset, list_opts) > per_type_limit)
+
+        {docs, capped}
+      end)
+
     real_nodes =
-      types
-      |> Enum.flat_map(fn type -> Content.list_documents(type, dataset, list_opts) end)
+      doc_lists
+      |> List.flatten()
       |> Enum.map(fn d ->
         pid = Content.published_id(d.doc_id)
         %{id: pid, doc_id: pid, type: d.type, title: d.title || pid, phantom: false}
@@ -227,9 +262,30 @@ defmodule BarkparkWeb.FinderLive do
       |> Enum.uniq()
       |> Enum.map(fn tid -> %{id: tid, doc_id: tid, type: nil, title: tid, phantom: true} end)
 
-    nodes = Enum.take(real_nodes ++ phantom_nodes, @graph_node_budget)
+    all_nodes = real_nodes ++ phantom_nodes
+    over_budget = length(all_nodes) > node_budget
+    nodes = if over_budget, do: Enum.take(all_nodes, node_budget), else: all_nodes
+
+    # Only edges whose BOTH endpoints survived the budget (no-op under budget).
+    kept_ids = MapSet.new(nodes, & &1.id)
+
+    edges =
+      Enum.filter(edges, fn e ->
+        MapSet.member?(kept_ids, e.from_id) and MapSet.member?(kept_ids, e.to_id)
+      end)
+
     root = List.first(real_nodes)[:id]
 
-    {Jason.encode!(nodes), Jason.encode!(edges), root || "", length(nodes)}
+    truncated = per_type_capped or over_budget
+
+    reason =
+      case {per_type_capped, over_budget} do
+        {true, true} -> "per_type_cap+node_budget"
+        {true, false} -> "per_type_cap"
+        {false, true} -> "node_budget"
+        {false, false} -> nil
+      end
+
+    {Jason.encode!(nodes), Jason.encode!(edges), root || "", length(nodes), truncated, reason}
   end
 end
