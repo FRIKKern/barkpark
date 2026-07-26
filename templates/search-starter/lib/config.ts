@@ -56,3 +56,30 @@ export const SCOPE = `/w/${WORKSPACE}/p/${PROJECT}`;
  * (`search:<ws>:<proj>:<dataset>`). Mirrors {@link SCOPE} for the WS transport.
  */
 export const WS_SCOPE = `${WORKSPACE}:${PROJECT}`;
+
+/* ── site copy ─────────────────────────────────────────────────────────── */
+
+/**
+ * The frontpage hero copy — ONE voice, declared once and read by BOTH surfaces
+ * that speak it: the hero in `components/finder` and the `<meta name=
+ * "description">` in `app/layout`. They used to be two independently authored
+ * strings and had already drifted into two different pitches shipping in the
+ * same HTML ("across every document" vs "over a Barkpark dataset … deployed
+ * from one template"). Declaring the tagline here is what keeps them equal.
+ *
+ * The `NEXT_PUBLIC_SITE_*` overrides are a SELF-HOST seam only. The managed
+ * deploy path cannot carry `NEXT_PUBLIC_*` names at all — all three layers of
+ * the engine allowlist are closed over `BARKPARK_*` (charter D47; the same
+ * reason `next.config.mjs` DERIVES the browser vars) — so on every provisioned
+ * site the fallbacks below ARE the shipped copy. Write them as finished copy,
+ * never as placeholders.
+ */
+export const SITE_EYEBROW = process.env.NEXT_PUBLIC_SITE_EYEBROW || "Search";
+
+/** Hero headline. See {@link SITE_TAGLINE} for the env-seam caveat. */
+export const SITE_TITLE = process.env.NEXT_PUBLIC_SITE_TITLE || "Search everything.";
+
+/** Hero sub-headline AND the document `<meta name="description">`. */
+export const SITE_TAGLINE =
+  process.env.NEXT_PUBLIC_SITE_TAGLINE ||
+  "Instant, typo-tolerant search across every document — with a live graph of how it all connects.";

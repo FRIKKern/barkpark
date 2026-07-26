@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { siteMarkers } from "@/lib/markers";
+import { SITE_TAGLINE } from "@/lib/config";
 
+// The description is the SAME string the hero renders (`lib/config`), not a
+// second hand-written pitch — a search result and the page it opens must not
+// promise different things.
 export const metadata: Metadata = {
   title: "Search — Barkpark",
-  description:
-    "Instant, typo-tolerant search over a Barkpark dataset — with a live corpus graph. A premium search site, deployed from one template.",
+  description: SITE_TAGLINE,
 };
 
 /**
