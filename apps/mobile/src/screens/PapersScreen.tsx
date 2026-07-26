@@ -68,16 +68,25 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
     ;(async () => {
       // Read-through on open (D42): paint the cached page-0 fold instantly
       // with the stale badge, then let the network confirm or replace it.
+      // ONLY while 'loading' (cold open / retry) — a pull-to-refresh re-runs
+      // this effect with live content on screen, and repainting the cached
+      // page-0 over it would kill the spinner, flash the stale badge, and
+      // collapse every loaded page. (Server switches unmount this screen, so
+      // 'ready' here always means live content for THIS connection.)
       const cached = readCachedPaperList(connection)
       if (alive && cached !== undefined) {
-        setState({
-          phase: 'ready',
-          pager: hydrate(cached.data),
-          refreshing: false,
-          loadingMore: false,
-          loadedAtMs: Date.now(),
-          cachedAtMs: cached.cachedAtMs,
-        })
+        setState((cur) =>
+          cur.phase === 'loading'
+            ? {
+                phase: 'ready',
+                pager: hydrate(cached.data),
+                refreshing: false,
+                loadingMore: false,
+                loadedAtMs: Date.now(),
+                cachedAtMs: cached.cachedAtMs,
+              }
+            : cur,
+        )
       }
       try {
         const page = await fetchPaperPage(client, connection.dataset, 0)

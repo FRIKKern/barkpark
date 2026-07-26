@@ -81,7 +81,12 @@ export function PaperReaderScreen({
           paintedAtMs: Date.now(),
         }
         if (cached.rev !== undefined) badge.rev = cached.rev
-        setState({ phase: 'ready', paper: cached.data, cached: badge })
+        // Paint only while 'loading' (mount / retry): if this effect re-runs
+        // with a live body on screen, repainting the cached copy would flash
+        // the stale badge over fresh content (same law as PapersScreen).
+        setState((cur) =>
+          cur.phase === 'loading' ? { phase: 'ready', paper: cached.data, cached: badge } : cur,
+        )
       }
       try {
         const paper = await fetchPaper(client, connection.dataset, paperId)
