@@ -63,14 +63,13 @@ export interface CorpusGraph {
   edges: GraphEdge[];
   /** Highest-degree node id (PREFERRED_ROOT wins when present), or null. */
   rootId: string | null;
-  /** The server cut the node list at its graph budget — the graph shown is a
-   * PREFIX of the corpus, and any caption must say so. HONESTY LIMIT: the
-   * upstream flag covers only the whole-graph node budget (2000); the server
-   * ALSO lists at most 1000 documents per type and stays `truncated: false`
-   * when that per-type cap bites, so `false` here is "not budget-truncated",
-   * not "complete" (server-side fix: stw9-backlog-graph-server-honesty). */
+  /** The server cut the corpus at a ceiling — the graph shown is a subset,
+   * and any caption must say so. Covers BOTH server ceilings (fixed by
+   * stw9-backlog-graph-server-honesty): the whole-graph node budget (2000)
+   * AND the 1000-docs-per-type cap, so `false` here really means "complete". */
   truncated: boolean;
-  /** Upstream truncation cause (e.g. "node_budget"), null when not truncated. */
+  /** Upstream truncation cause ("node_budget", "per_type_cap", or
+   * "per_type_cap+node_budget"), null when not truncated. */
   truncationReason: string | null;
 }
 
