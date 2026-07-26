@@ -2793,6 +2793,46 @@ defmodule Barkpark.CycleFleetTest do
                )
     end
 
+    test "numeric experiment rounds fall back to matching canonical round names", %{scope: scope} do
+      assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 15))
+
+      for candidate <- 1..3 do
+        id = "numeric-baseline-#{candidate}"
+
+        assert {:ok, assignment} =
+                 CycleFleet.create_assignment(
+                   assignment_attrs(scope, id, "experiment", "legendary-experimenter", [])
+                 )
+
+        assert {:ok, _result} =
+                 complete_result(assignment, "terminal-#{id}", "completed", %{
+                   round: 1,
+                   round_name: "baseline",
+                   candidate: candidate
+                 })
+      end
+
+      for candidate <- 1..3 do
+        id = "canonical-diverge-#{candidate}"
+
+        assert {:ok, assignment} =
+                 CycleFleet.create_assignment(
+                   assignment_attrs(scope, id, "experiment", "legendary-experimenter", [])
+                 )
+
+        assert {:ok, _result} =
+                 complete_result(assignment, "terminal-#{id}", "completed", %{
+                   round: "diverge",
+                   candidate: candidate
+                 })
+      end
+
+      assert {:ok, summary} = CycleFleet.reconcile(scope)
+      assert summary.experiment.round_counts["baseline"] == 3
+      assert summary.experiment.round_counts["diverge"] == 3
+      assert summary.experiment.missing_rounds == ~w(attack converge pilot)
+    end
+
     test "Legendary becomes exact only after every planned phase is complete", %{scope: scope} do
       assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 30))
       complete_experiments(scope)
