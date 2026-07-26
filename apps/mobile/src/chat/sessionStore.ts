@@ -12,6 +12,8 @@ import {
   respondChatApproval,
   sendChatMessage,
   streamChatEvents,
+  type StreamFailure,
+  type StreamStatus,
 } from '../api/chat'
 import {
   initialChatState,
@@ -25,7 +27,10 @@ import {
 // semantics with less wakeup churn on a phone).
 const TICK_MS = 500
 
-export type StreamStatus = 'connecting' | 'open' | 'reconnecting' | 'closed'
+// The five-state stream vocabulary is OWNED by the transport (charter D24 —
+// src/api/chat.ts produces it); re-exported here so consumers of the store
+// don't have to reach into the api layer for the type.
+export type { StreamFailure, StreamStatus } from '../api/chat'
 
 export interface SessionSnapshot {
   state: ChatState
@@ -36,14 +41,25 @@ export interface SessionSnapshot {
   /** transport failures of fire-and-forget POSTs (send/interrupt). */
   transportError: string | undefined
   streamStatus: StreamStatus
+  /** rides along with 'degraded'/'refused' — the refused header label needs
+   * the HTTP status to say WHICH wall (signed out / gone / other). */
+  streamFailure: StreamFailure | undefined
 }
 
 export class ChatSessionStore {
   private snapshot: SessionSnapshot
   private readonly listeners = new Set<() => void>()
-  private readonly controller = new AbortController()
+  /** Per-start controller (charter D25): stop() aborts it PERMANENTLY, so a
+   * restart provisions a fresh one — and every async closure captures its own
+   * start's controller, never `this.controller` (reading the field in an old
+   * closure would reintroduce the aborted-forever race). */
+  private controller = new AbortController()
   private tick: ReturnType<typeof setInterval> | undefined
   private stopped = false
+  /** Per-start fence (D25): callbacks from a superseded start — its stream's
+   * unconditional terminal 'closed', a late seed GET — must never clobber the
+   * live start's state. */
+  private startGen = 0
 
   constructor(
     private readonly connection: InstanceConnection,
@@ -55,6 +71,7 @@ export class ChatSessionStore {
       loadError: undefined,
       transportError: undefined,
       streamStatus: 'connecting',
+      streamFailure: undefined,
     }
   }
 
@@ -67,25 +84,47 @@ export class ChatSessionStore {
 
   /** Kick off the initial full GET (since=0 — seeds messages, title, mode),
    * then the SSE stream with Last-Event-ID at the seeded cursor, plus the
-   * wedge tick. Idempotent guard: stop() wins if it already ran. */
+   * wedge tick. TRUE PAIR with stop() (charter D25): on RUNNING it no-ops
+   * (the tick handle is the running marker — stop() nulls it); after stop()
+   * it RESTARTS — clears the stopped latch, provisions a FRESH per-start
+   * AbortController, and re-runs seed GET + SSE + tick. */
   start(): void {
+    if (this.tick !== undefined) return // already running — a second start() is a no-op
+    this.stopped = false
+    const gen = ++this.startGen
+    const controller = new AbortController()
+    this.controller = controller
+    this.set({
+      loading: true,
+      loadError: undefined,
+      streamStatus: 'connecting',
+      streamFailure: undefined,
+    })
     void (async () => {
       try {
         const session = await getChatSession(this.connection, this.sessionId, 0)
-        if (this.stopped) return
+        if (this.stopped || gen !== this.startGen) return
         this.dispatch({ type: 'tailFetched', gen: 0, session })
         this.set({ loading: false })
       } catch (err) {
-        if (this.stopped) return
+        if (this.stopped || gen !== this.startGen) return
         this.set({ loading: false, loadError: message(err) })
         return
       }
       void streamChatEvents(this.connection, this.sessionId, {
-        signal: this.controller.signal,
+        signal: controller.signal,
         lastEventId: String(this.snapshot.state.lastSeq),
-        onFrame: (frame) => this.dispatch({ type: 'frame', name: frame.event, data: frame.data }),
-        onStatus: (streamStatus) => {
-          if (!this.stopped) this.set({ streamStatus })
+        onFrame: (frame) => {
+          // Fenced per start: a superseded stream may still be draining.
+          if (this.stopped || gen !== this.startGen) return
+          this.dispatch({ type: 'frame', name: frame.event, data: frame.data })
+        },
+        onStatus: (streamStatus, streamFailure) => {
+          // Fenced per start: streamChatEvents emits a terminal status on loop
+          // exit — a superseded stream's 'closed' must never clobber the live
+          // stream's status.
+          if (this.stopped || gen !== this.startGen) return
+          this.set({ streamStatus, streamFailure })
         },
       })
     })()
@@ -94,7 +133,10 @@ export class ChatSessionStore {
 
   stop(): void {
     this.stopped = true
-    if (this.tick !== undefined) clearInterval(this.tick)
+    if (this.tick !== undefined) {
+      clearInterval(this.tick)
+      this.tick = undefined // start()'s running marker — stop() must null it (D25)
+    }
     this.controller.abort()
   }
 

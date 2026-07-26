@@ -41,8 +41,16 @@ const MAX_SSE_BUFFER_BYTES = 1_048_576
 // Consecutive clean 200→EOF closes with zero data frames between them = a
 // misconfigured proxy / instantly-terminating LB looping silently. EventSource
 // would retry forever; after this many we escalate to a thrown error so the caller
-// isn't stuck in an invisible loop. Resets on any data frame. See [clean-close-infinite-silent].
+// isn't stuck in an invisible loop. Resets on any data OR keepalive frame (a
+// keepalive proves a real, live stream — an instantly-terminating LB never emits
+// one). See [clean-close-infinite-silent].
 const MAX_CONSECUTIVE_CLEAN_CLOSES = 5
+
+// Under maxReconnects: 'unbounded' the clean-close escalation above is disarmed
+// (retry-forever means forever on clean closes too). Compensation: past the old
+// threshold the clean-close delay escalates on the jittered exponential up to
+// this cap, so a dead LB costs ~4 requests/min instead of 60.
+const CLEAN_CLOSE_MAX_DELAY_MS = 16_000
 
 // Reconnect-delay jitter factor: 0.5–1.0×. Full jitter de-synchronizes a fleet's
 // reconnect storm after a server restart (thundering herd) while keeping the delay
@@ -54,8 +62,16 @@ function withJitter(ms: number): number {
 export interface ListenOptions {
   perspective?: Perspective
   onUnsubscribe?: () => void
-  /** Max reconnect attempts after an *error* (clean stream close doesn't count). Default 5. 0 disables. */
-  maxReconnects?: number
+  /**
+   * Max reconnect attempts after an *error* (clean stream close doesn't count).
+   * Default 5. 0 disables. `'unbounded'` retries forever AND disarms the
+   * consecutive-clean-close escalation (the delay escalates to a 16s cap instead
+   * of throwing). The sentinel is a STRING deliberately, not Infinity:
+   * `JSON.stringify(Infinity)` is `null`, which the `?? 5` default would silently
+   * turn back into the bounded default across any serialization boundary — the
+   * string survives JSON verbatim, and unknown strings fail loud.
+   */
+  maxReconnects?: number | 'unbounded'
   /** Base reconnect delay ms. Exponential backoff ×2, capped at 8000 ms. Default 500. */
   reconnectBaseMs?: number
   /**
@@ -99,13 +115,20 @@ export function createListenHandle<T = BarkparkDocument>(
   // flows to Math.min(NaN * 2**n, 8000) = NaN → setTimeout(fn, NaN) coerces to 0, so
   // the client hammers the server with zero-delay reconnects instead of backing off.
   // Fail closed synchronously — before any connection is opened — like every other knob.
+  // Widened additively for the 'unbounded' sentinel — Infinity is STILL rejected
+  // (accepting it would silently relax a published BarkparkValidationError
+  // contract, and it cannot survive JSON anyway).
   if (
     opts?.maxReconnects !== undefined &&
+    opts.maxReconnects !== 'unbounded' &&
     !(Number.isInteger(opts.maxReconnects) && opts.maxReconnects >= 0)
   ) {
-    throw new BarkparkValidationError('listen: maxReconnects must be a non-negative integer', {
-      field: 'maxReconnects',
-    })
+    throw new BarkparkValidationError(
+      "listen: maxReconnects must be a non-negative integer or 'unbounded'",
+      {
+        field: 'maxReconnects',
+      },
+    )
   }
   if (
     opts?.reconnectBaseMs !== undefined &&
@@ -142,7 +165,12 @@ export function createListenHandle<T = BarkparkDocument>(
   let lastEventId: string | undefined
   let reconnectCount = 0
   let cleanCloseCount = 0
-  const maxReconnects = opts?.maxReconnects ?? 5
+  const maxReconnectsOpt = opts?.maxReconnects ?? 5
+  // 'unbounded' maps to POSITIVE_INFINITY internally so the reconnectCount
+  // comparison below is unchanged; the sentinel additionally gates the
+  // clean-close ×5 escalation (see the clean-close block).
+  const unbounded = maxReconnectsOpt === 'unbounded'
+  const maxReconnects = unbounded ? Number.POSITIVE_INFINITY : maxReconnectsOpt
   const reconnectBase = opts?.reconnectBaseMs ?? 500
   // `> 0` naturally disables on 0 / negative / NaN — no separate validation needed.
   const idleTimeoutMs = opts?.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
@@ -281,7 +309,13 @@ export function createListenHandle<T = BarkparkDocument>(
                   if (parsed.eventId !== undefined) lastEventId = parsed.eventId
 
                   if (parsed.dataLines.length === 0) {
-                    // pure comment / keepalive — not yielded
+                    // pure comment / keepalive — not yielded. A keepalive still
+                    // proves the endpoint is a real live stream, so it resets the
+                    // silent-close escalation in BOTH modes — otherwise five 75s
+                    // idle-watchdog cycles over a quiet board would kill a healthy
+                    // stream. (An instantly-terminating LB never emits a
+                    // 30s-cadence keepalive, so the detector keeps its teeth.)
+                    cleanCloseCount = 0
                     frameEnd = findFrameBoundary(buffer)
                     continue
                   }
@@ -326,14 +360,24 @@ export function createListenHandle<T = BarkparkDocument>(
             // mean the endpoint is looping silently. Escalate to a thrown error so the
             // caller eventually surfaces it instead of an invisible ~1s reconnect loop.
             cleanCloseCount++
-            if (cleanCloseCount >= MAX_CONSECUTIVE_CLEAN_CLOSES) {
+            if (cleanCloseCount >= MAX_CONSECUTIVE_CLEAN_CLOSES && !unbounded) {
               throw new BarkparkAPIError('listen: repeated empty stream closes')
             }
             // A clean immediate 200→EOF means the server isn't really streaming
             // (misconfigured proxy / instantly-terminating LB). Floor the reconnect at 1s
             // so that case can't busy-spin — twin of the Go floor in internal/apiclient/change.go.
             // Jitter (0.5–1.0×, min 500ms) scatters a fleet's reconnects; still no busy-spin.
-            await sleep(withJitter(Math.max(reconnectBase, 1000)), abortController.signal)
+            // Under 'unbounded' the ×5 throw above is disarmed (retry-forever means
+            // forever on clean closes too — any finite bound just relocates the
+            // placebo); past the old threshold the delay escalates on the jittered
+            // exponential capped at CLEAN_CLOSE_MAX_DELAY_MS.
+            const cleanCloseFloor = Math.max(reconnectBase, 1000)
+            const past = cleanCloseCount - MAX_CONSECUTIVE_CLEAN_CLOSES + 1
+            const cleanCloseDelay =
+              unbounded && past > 0
+                ? Math.min(cleanCloseFloor * 2 ** past, CLEAN_CLOSE_MAX_DELAY_MS)
+                : cleanCloseFloor
+            await sleep(withJitter(cleanCloseDelay), abortController.signal)
             if (unsubscribed || abortController.signal.aborted) return
             continue outer
           } catch (err) {

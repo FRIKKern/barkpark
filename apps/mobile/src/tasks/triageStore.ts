@@ -56,7 +56,11 @@ export class TriageStore {
 
   readonly getSnapshot = (): TriageState => this.snapshot
 
+  /** TRUE PAIR with stop() (charter D25 twin of ChatSessionStore): restart
+   * clears the stopped latch and re-reads, so a remounted screen gets a live
+   * store again instead of a permanently inert one. */
   start(): void {
+    this.stopped = false
     this.load()
   }
 

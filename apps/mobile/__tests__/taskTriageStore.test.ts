@@ -211,6 +211,39 @@ test('a pulse round trip installs the bumped epoch for the next fenced write', a
   expect(stampCalls).toEqual([{ observedEpoch: 5 }])
 })
 
+test('the store is restartable: stop() then start() re-reads — the D25 twin', async () => {
+  let fetches = 0
+  const store = new TriageStore(
+    fakeApi({
+      fetch: () => {
+        fetches += 1
+        return Promise.resolve(parseTaskDetail(envelope()))
+      },
+    }),
+    't1',
+    WORKER,
+  )
+  store.start()
+  await flush()
+  expect(fetches).toBe(1)
+  expect(store.getSnapshot().phase).toBe('ready')
+
+  store.stop()
+  store.refresh() // a stopped store is inert — nothing reaches the wire
+  await flush()
+  expect(fetches).toBe(1)
+
+  // start() clears the stopped latch and re-reads: the remounted screen gets
+  // a LIVE store again, not a permanently dead one.
+  store.start()
+  await flush()
+  expect(fetches).toBe(2)
+  expect(store.getSnapshot().phase).toBe('ready')
+  store.refresh()
+  await flush()
+  expect(fetches).toBe(3) // dispatch works again after the restart
+})
+
 // ── wire shapes ──────────────────────────────────────────────────────────────
 
 test('parseTaskDoc reads the criteria off content.acceptance_criteria', () => {

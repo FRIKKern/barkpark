@@ -12,8 +12,27 @@ import type { ChatRollup } from './wire'
 
 const POLL_MS = 60_000
 
+/** A fetched rollup remembers WHICH connection it came from. */
+interface RollupEntry {
+  connection: InstanceConnection
+  rollup: ChatRollup
+}
+
+/** Identity-keyed truth (polish AC4b), pure so it is jest-provable: a rollup
+ * fetched from one connection is not another connection's badge — on a
+ * connection change the badge disappears IMMEDIATELY (same render, no effect
+ * timing window) and returns only when the new server's rollup lands. */
+export function rollupFor(
+  connection: InstanceConnection | undefined,
+  entry: RollupEntry | undefined,
+): ChatRollup | undefined {
+  return connection !== undefined && entry !== undefined && entry.connection === connection
+    ? entry.rollup
+    : undefined
+}
+
 export function useChatRollup(connection: InstanceConnection | undefined): ChatRollup | undefined {
-  const [rollup, setRollup] = useState<ChatRollup | undefined>(undefined)
+  const [entry, setEntry] = useState<RollupEntry | undefined>(undefined)
 
   useEffect(() => {
     if (connection === undefined) return
@@ -21,7 +40,7 @@ export function useChatRollup(connection: InstanceConnection | undefined): ChatR
     const load = async () => {
       try {
         const r = await fetchChatRollup(connection)
-        if (alive) setRollup(r)
+        if (alive) setEntry({ connection, rollup: r })
       } catch {
         // Honest degrade: keep the last-known badge; a dead rollup never
         // takes the tab bar down with it.
@@ -35,7 +54,8 @@ export function useChatRollup(connection: InstanceConnection | undefined): ChatR
     }
   }, [connection])
 
-  // A disconnected app carries no badge (and a stale rollup from a previous
-  // server never leaks across a reconnect).
-  return connection === undefined ? undefined : rollup
+  // A disconnected app carries no badge, and a stale rollup from a previous
+  // connection never survives a reconnect — the entry is keyed to the
+  // connection identity it was fetched from.
+  return rollupFor(connection, entry)
 }
