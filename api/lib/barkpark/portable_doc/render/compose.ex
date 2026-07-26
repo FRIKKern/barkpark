@@ -307,12 +307,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     }
   end
 
-  # Article mode emits semantic `<ul>` / `<ol>` via PdList / PdListItem so
-  # browsers / readers get real list semantics (a11y, copy-paste, default
-  # spacing). Email / default mode keeps the flex-row PdBox scaffold below
-  # with literal "• " / "1. " prefix spans — Outlook strips `<ul>` padding,
-  # so the prefix-as-text scaffold is the byte-stable email target.
-  def compose_block(%{"type" => "list"} = b, :article) do
+  # Lists stay semantic in every style. Article mode leaves the resulting
+  # PdList/PdListItem frame bare for the paper stylesheet; email/default mode
+  # applies its Outlook-safe spacing inline in Walk.
+  def compose_block(%{"type" => "list"} = b, _style) do
     ordered = Map.get(b, "ordered") == true
 
     items =
@@ -331,32 +329,6 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       end)
 
     %{"kind" => "PdList", "ordered" => ordered, "children" => items}
-  end
-
-  def compose_block(%{"type" => "list"} = b, _style) do
-    ordered = Map.get(b, "ordered") == true
-
-    item_rows =
-      Map.get(b, "items", [])
-      |> List.wrap()
-      |> Enum.with_index()
-      |> Enum.map(fn {item, idx} ->
-        prefix = if ordered, do: "#{idx + 1}. ", else: "• "
-
-        %{
-          "kind" => "PdBox",
-          "style" => %{"flexDirection" => "row"},
-          "children" => [
-            %{"kind" => "PdText", "children" => [prefix]},
-            %{
-              "kind" => "PdText",
-              "children" => compose_inline_children(normalize_list_item(item))
-            }
-          ]
-        }
-      end)
-
-    %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => item_rows}
   end
 
   def compose_block(%{"type" => "callout"} = b, style) do
