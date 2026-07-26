@@ -1,0 +1,42 @@
+{
+  "id": "grip-20260726T130000Z-v-elixir-chat-emit",
+  "wave": "barkpark-tasks-mobile-wave-2026-07-26",
+  "role": "verifier",
+  "lane": "elixir-chat-emit",
+  "created_utc": "2026-07-26T13:00:00Z",
+  "subject": "Server end of slice 2 'live Mermaid in chat' + callee-return basis for the S5 503 reason-split",
+  "claims": [
+    {
+      "claim": "A ```mermaid fence in assistant markdown becomes a PortableDoc block whose type string is exactly \"diagram\" (NOT \"mermaid\"), with the fence body verbatim under \"source\".",
+      "level": "L2 (ran the code)",
+      "rerun": "cd api && cat > test/barkpark/portable_doc/probe_test.exs <<'EOF'\ndefmodule P do\n  use ExUnit.Case, async: true\n  test \"m\" do\n    b = Barkpark.PortableDoc.FromMarkdown.blocks(\"```mermaid\\ngraph TD\\n  A[Recorder] --> B[Runtime]\\n```\\n\")\n    IO.inspect(b)\n    assert Enum.any?(b, &(&1[\"type\"] == \"diagram\"))\n  end\nend\nEOF\nCC=clang mix test test/barkpark/portable_doc/probe_test.exs; rm test/barkpark/portable_doc/probe_test.exs",
+      "static_anchor": "api/lib/barkpark/portable_doc/from_markdown.ex:66 — `\"mermaid\" -> [%{\"type\" => \"diagram\", \"source\" => source}]`"
+    },
+    {
+      "claim": "ChatController.message_json/1 already ships those blocks on the wire for role:\"assistant\" — no store leg, no server change for slice 2.",
+      "level": "L2 (ran the code, in-memory struct, no DB)",
+      "rerun": "cd api && grep -n 'defp toolrow_blocks(%StudioChat.Message{role: \"assistant\"' -A 3 lib/barkpark_web/controllers/chat_controller.ex",
+      "static_anchor": "chat_controller.ex:1225 (message_json) + :1243-1245 (assistant -> FromMarkdown.blocks/1)"
+    },
+    {
+      "claim": "Mobile dispatches \"diagram\" to MermaidIsland; the discard is the render leaf only.",
+      "level": "L2 (git show origin/main)",
+      "rerun": "git show origin/main:apps/mobile/src/papers/portabledoc/blocks.tsx | grep -n 'diagram' ; git show origin/main:apps/mobile/src/screens/ChatSessionScreen.tsx | sed -n '237p'"
+    },
+    {
+      "claim": "renderBlockNative on origin/main has signature (block, ctx, key) — NO register param.",
+      "level": "L2",
+      "rerun": "git show origin/main:apps/mobile/src/papers/portabledoc/blocks.tsx | sed -n '886p'"
+    },
+    {
+      "claim": "chat_controller_test.exs is green locally (61 tests, 0 failures) — DB is available.",
+      "level": "L2",
+      "rerun": "cd api && CC=clang mix test test/barkpark_web/controllers/chat_controller_test.exs 2>&1 | tail -5"
+    },
+    {
+      "claim": "The 503 at chat_controller.ex:253 can only distinguish reasons its callees actually return; the enumerated set is closed and small.",
+      "level": "L2 (read every callee on the path)",
+      "rerun": "cd api && sed -n '779,809p' lib/barkpark_web/controllers/chat_controller.ex && sed -n '43,70p' lib/barkpark/studio_chat/recorder.ex && sed -n '288,292p' lib/barkpark/studio_chat/runtime.ex && sed -n '1964,1977p' lib/barkpark_web/studio/claude_chat.ex"
+    }
+  ]
+}

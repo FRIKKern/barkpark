@@ -268,14 +268,25 @@ type ConditionalGetResult struct {
 // Callers whose responses legitimately grow past that (the task board's corpus
 // fetch crossed it at 9.1 MB) use GetConditionalBounded with their own cap.
 func (c *Client) GetConditional(url, ifNoneMatch string) (*ConditionalGetResult, error) {
-	return c.GetConditionalBounded(url, ifNoneMatch, maxManifestBytes)
+	return c.getConditionalBounded(url, ifNoneMatch, maxManifestBytes, "capabilities manifest response")
 }
 
-// GetConditionalBounded is GetConditional with a caller-chosen body cap. A
-// response larger than maxBytes errors instead of being silently truncated —
-// a truncated JSON body would parse as garbage or, worse, as a plausible
-// prefix. The cap is a refusal, never a trim.
+// GetConditionalBounded is GetConditional with a caller-owned body cap. It
+// exists for authenticated APIs whose valid payloads are larger than the
+// capabilities manifest while still requiring a hard memory-safety ceiling. A
+// response larger than maxBytes errors instead of being silently truncated — a
+// truncated JSON body would parse as garbage or, worse, as a plausible prefix.
+// The cap is a refusal, never a trim; callers must choose a positive,
+// contract-specific maxBytes, and the manifest's established 8 MiB limit is
+// unchanged.
 func (c *Client) GetConditionalBounded(url, ifNoneMatch string, maxBytes int64) (*ConditionalGetResult, error) {
+	return c.getConditionalBounded(url, ifNoneMatch, maxBytes, "response")
+}
+
+func (c *Client) getConditionalBounded(url, ifNoneMatch string, maxBytes int64, subject string) (*ConditionalGetResult, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("%s limit must be positive", subject)
+	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -303,7 +314,7 @@ func (c *Client) GetConditionalBounded(url, ifNoneMatch string, maxBytes int64) 
 			return nil, err
 		}
 		if int64(len(body)) > maxBytes {
-			return nil, fmt.Errorf("response exceeds %d bytes — refusing to parse a truncated body", maxBytes)
+			return nil, fmt.Errorf("%s exceeds %d bytes — refusing to parse a truncated body", subject, maxBytes)
 		}
 		res.Body = body
 	}

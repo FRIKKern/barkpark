@@ -125,9 +125,9 @@ func TestRenderNeverExceedsWidth(t *testing.T) {
 	}
 }
 
-// TestRenderHeightPinsTickerAndFooter proves the frame is exactly `height`
+// TestRenderHeightPinsStatusAndFooter proves the frame is exactly `height`
 // lines and that the footer hint is the last line regardless of body size.
-func TestRenderHeightPinsTickerAndFooter(t *testing.T) {
+func TestRenderHeightPinsStatusAndFooter(t *testing.T) {
 	b := loadBoardFixture(t)
 	st := fixtureUIState()
 	for _, height := range []int{20, 30, 40, 60} {
@@ -147,9 +147,9 @@ func TestRenderHeightPinsTickerAndFooter(t *testing.T) {
 func TestRenderShortHeightScrolls(t *testing.T) {
 	b := loadBoardFixture(t)
 	st := fixtureUIState()
-	frame := plainFrame(b, st, 80, 18)
-	if lines := strings.Split(frame, "\n"); len(lines) != 18 {
-		t.Fatalf("got %d lines, want 18", len(lines))
+	frame := plainFrame(b, st, 80, 14)
+	if lines := strings.Split(frame, "\n"); len(lines) != 14 {
+		t.Fatalf("got %d lines, want 14", len(lines))
 	}
 	if !strings.Contains(frame, "more below") && !strings.Contains(frame, "more above") {
 		t.Errorf("short pane should surface a scroll affordance:\n%s", frame)
@@ -219,24 +219,29 @@ func TestReadyCountIncludesEpicRoots(t *testing.T) {
 	}
 }
 
-// TestRenderTruncationNote — when the list clamp dropped rows (TaskCount below
-// the summed lifecycle counts), the header carries an honest "showing N of M"
-// note instead of presenting a partial board as the whole.
-func TestRenderTruncationNote(t *testing.T) {
+func TestBottomChromeIsExactlyThreeUsefulLines(t *testing.T) {
 	b := Board{
 		TaskCount: 1000,
 		Counts:    map[string]int{"open": 900, "done": 600}, // total 1500 > 1000 fetched
 	}
-	frame := ansi.Strip(Render(b, UIState{Conn: ConnPolling}, 80, 30, fixedNow))
-	if !strings.Contains(frame, "showing 1000 of 1500") {
-		t.Errorf("truncated board is missing the 'showing N of M' note:\n%s", frame)
+	chrome := bottomChrome(b, UIState{Conn: ConnPolling}, 80, fixedNow)
+	if len(chrome) != 3 {
+		t.Fatalf("bottom chrome uses %d lines, want bar + status + keys", len(chrome))
 	}
-
-	// A whole board (fetched == total) shows no note.
-	whole := Board{TaskCount: 60, Counts: map[string]int{"open": 20, "done": 40}}
-	wf := ansi.Strip(Render(whole, UIState{Conn: ConnPolling}, 80, 30, fixedNow))
-	if strings.Contains(wf, "showing") {
-		t.Errorf("a whole board should carry no truncation note:\n%s", wf)
+	plain := ansi.Strip(strings.Join(chrome, "\n"))
+	for _, want := range []string{"ready", "done", "▄", "jk move"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("three-line chrome missing %q:\n%s", want, plain)
+		}
+	}
+	lines := strings.Split(plain, "\n")
+	if !strings.Contains(lines[0], "▄") || !strings.Contains(lines[1], "in flight") || !strings.Contains(lines[2], "jk move") {
+		t.Errorf("bottom chrome order = %q, want slim bar, totals, keys", lines)
+	}
+	for _, noise := range []string{"showing", "recent activity", "pulse"} {
+		if strings.Contains(plain, noise) {
+			t.Errorf("three-line chrome retained %q noise:\n%s", noise, plain)
+		}
 	}
 }
 
@@ -256,8 +261,23 @@ func TestRenderEmptyBoardIsHonest(t *testing.T) {
 	}
 }
 
-// TestRenderActionStrip proves the strip renders directly above the footer, and
-// only consumes a line when it has something to say.
+func TestHeaderNamesSnapshotFailureInsteadOfCallingItOffline(t *testing.T) {
+	old := Chrome
+	Chrome = ChromeInfo{Server: "guerrilla"}
+	t.Cleanup(func() { Chrome = old })
+
+	st := UIState{Conn: ConnOffline, ConnProblem: "snapshot too large", LastSync: fixedNow}
+	line := ansi.Strip(headerLine1(st, 100, fixedNow))
+	if !strings.Contains(line, "snapshot too large") {
+		t.Fatalf("header omitted the snapshot failure: %q", line)
+	}
+	if strings.Contains(line, "offline") {
+		t.Fatalf("header mislabeled a rejected snapshot as offline: %q", line)
+	}
+}
+
+// TestRenderActionStrip proves transient feedback replaces the help row rather
+// than expanding the fixed three-line footer.
 func TestRenderActionStrip(t *testing.T) {
 	b := Board{Counts: map[string]int{}}
 	st := UIState{Conn: ConnLive, LastSync: fixedNow,
@@ -266,17 +286,15 @@ func TestRenderActionStrip(t *testing.T) {
 	if len(lines) != 20 {
 		t.Fatalf("got %d lines, want 20", len(lines))
 	}
-	footer := lines[len(lines)-1]
-	strip := lines[len(lines)-2]
-	if !strings.Contains(footer, "jk move") {
-		t.Errorf("footer not pinned last: %q", footer)
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "claimed as tui-mbp · epoch 4") {
+		t.Errorf("action feedback did not replace the help row: %q", last)
 	}
-	if !strings.Contains(strip, "claimed as tui-mbp · epoch 4") {
-		t.Errorf("action strip not directly above the footer: %q", strip)
+	if strings.Contains(last, "jk move") {
+		t.Errorf("action feedback and keyboard help collided: %q", last)
 	}
 
-	// An empty strip costs no line: the footer is the last line with the ticker
-	// immediately above it (no blank act line inserted).
+	// An empty strip leaves keyboard help in the third slot.
 	stNo := UIState{Conn: ConnLive, LastSync: fixedNow}
 	noStrip := ansi.Strip(Render(b, stNo, 80, 20, fixedNow))
 	if strings.Contains(noStrip, "claimed as") {
@@ -298,7 +316,7 @@ func TestRenderActionStripKeepsURLTail(t *testing.T) {
 	st := UIState{Conn: ConnLive, LastSync: fixedNow, Strip: ActionStrip{Message: url, Role: RoleOK}}
 	for _, width := range []int{60, 72, 84} {
 		lines := strings.Split(ansi.Strip(Render(b, st, width, 20, fixedNow)), "\n")
-		strip := lines[len(lines)-2]
+		strip := lines[len(lines)-1]
 		if ansi.StringWidth(strip) > width {
 			t.Errorf("width %d: strip over budget: %q", width, strip)
 		}
@@ -587,7 +605,7 @@ func firstSelectableTask(b Board, st UIState) (ref string, selIdx int) {
 
 // TestHoverPaintedInFrame proves the hover highlight in the STYLED frame (a
 // forced truecolor profile, since the runner's default drops ANSI): a live
-// hover changes the frame, EXACTLY the hovered row re-renders in the accent
+// hover changes the frame, EXACTLY the hovered task card re-renders in the accent
 // foreground (the chat Phases-pane selection grammar — no background bar), every
 // OTHER line is byte-identical (siblings never recede), and the change is
 // styling ONLY — the ansi-stripped text is unchanged. The cursor is parked on
@@ -651,8 +669,8 @@ func TestHoverPaintedInFrame(t *testing.T) {
 		}
 		hoveredLines++
 	}
-	if hoveredLines != 1 {
-		t.Errorf("hover restyled %d lines, want exactly 1 (only the hovered row wears the accent)", hoveredLines)
+	if hoveredLines != 2 {
+		t.Errorf("hover restyled %d lines, want exactly 2 (both lines of the active task card)", hoveredLines)
 	}
 
 	// The hover is a FOREGROUND restyle (the chat Phases-pane grammar), never a
@@ -1064,33 +1082,14 @@ func pulseBoard(at time.Time) Board {
 	}
 }
 
-// TestRenderTickerNowLine proves the now-line: a live pulse paints the
-// worker's own words above the event tail; a board without a pulse paints no
-// extra line at all (an absent pulse costs nothing).
-func TestRenderTickerNowLine(t *testing.T) {
-	st := UIState{Conn: ConnLive, LastSync: fixedNow}
-	frame := ansi.Strip(Render(pulseBoard(fixedNow.Add(-time.Minute)), st, 80, 20, fixedNow))
-	if !strings.Contains(frame, "opus-7 · wiring the decoder · 1m") {
-		t.Errorf("frame missing the now-line:\n%s", frame)
-	}
-
-	// Without a pulse the ticker is the classic two lines: rule + event.
-	bare := pulseBoard(fixedNow.Add(-time.Minute))
-	bare.Now[0].Claim.Now = nil
-	frameBare := ansi.Strip(Render(bare, st, 80, 20, fixedNow))
-	if strings.Contains(frameBare, "wiring the decoder") {
-		t.Errorf("pulse-less board still paints a now-line:\n%s", frameBare)
-	}
-}
-
-// TestRenderTickerPulseDecay pins "stale never lies fresh" (charter D9): a
+// TestPulseLineDecay pins "stale never lies fresh" (charter D9): a
 // fresh pulse wears the live spinner; once the pulse outlives the lease TTL
 // the spinner is withheld, the line dims and says "stale" outright — visible
 // even ANSI-stripped, so no terminal can render a dead pulse as current.
-func TestRenderTickerPulseDecay(t *testing.T) {
-	st := UIState{Conn: ConnLive, LastSync: fixedNow}
-
-	fresh := ansi.Strip(Render(pulseBoard(fixedNow.Add(-time.Minute)), st, 80, 20, fixedNow))
+func TestPulseLineDecay(t *testing.T) {
+	freshBoard := pulseBoard(fixedNow.Add(-time.Minute))
+	freshTask := freshBoard.Now[0]
+	fresh := ansi.Strip(pulseLine(freshTask, freshTask.Claim.Now, 0, 80, fixedNow))
 	if !strings.Contains(fresh, "⠋ opus-7 · wiring the decoder") {
 		t.Errorf("fresh pulse missing its live spinner:\n%s", fresh)
 	}
@@ -1098,7 +1097,9 @@ func TestRenderTickerPulseDecay(t *testing.T) {
 		t.Errorf("fresh pulse dishonestly reads stale:\n%s", fresh)
 	}
 
-	stale := ansi.Strip(Render(pulseBoard(fixedNow.Add(-12*time.Minute)), st, 80, 20, fixedNow))
+	staleBoard := pulseBoard(fixedNow.Add(-12 * time.Minute))
+	staleTask := staleBoard.Now[0]
+	stale := ansi.Strip(pulseLine(staleTask, staleTask.Claim.Now, 0, 80, fixedNow))
 	if !strings.Contains(stale, "· opus-7 · wiring the decoder · stale 12m") {
 		t.Errorf("stale pulse missing the explicit decay:\n%s", stale)
 	}
@@ -1112,31 +1113,15 @@ func TestRenderTickerPulseDecay(t *testing.T) {
 	oldp := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
-	leanFrame := Render(pulseBoard(fixedNow.Add(-4*time.Minute)), st, 80, 20, fixedNow)
+	leanBoard := pulseBoard(fixedNow.Add(-4 * time.Minute))
+	leanTask := leanBoard.Now[0]
+	leanFrame := pulseLine(leanTask, leanTask.Claim.Now, 0, 80, fixedNow)
 	if !strings.Contains(leanFrame, warnStyle.Render(spinnerGlyph(0))) {
 		t.Errorf("a leaning pulse (4m of a 5m lease) should wear the warn spinner")
 	}
-	freshFrame := Render(pulseBoard(fixedNow.Add(-time.Minute)), st, 80, 20, fixedNow)
+	freshFrame := pulseLine(freshTask, freshTask.Claim.Now, 0, 80, fixedNow)
 	if !strings.Contains(freshFrame, infoStyle.Render(spinnerGlyph(0))) {
 		t.Errorf("a fresh pulse should wear the info (blue) spinner")
-	}
-}
-
-// TestRenderTickerFreshestPulseWins — with several live claims pulsing, the
-// one now-line belongs to whoever spoke last.
-func TestRenderTickerFreshestPulseWins(t *testing.T) {
-	b := pulseBoard(fixedNow.Add(-3 * time.Minute))
-	b.Now = append(b.Now, Task{
-		DocID: "louder", Title: "Louder task", Lifecycle: "in_progress",
-		Claim: &Claim{Worker: "opus-9", Epoch: 1, ClaimedAt: fixedNow.Add(-time.Minute),
-			Now: &ClaimPulse{Text: "regenerating the goldens", At: fixedNow.Add(-time.Minute)}},
-	})
-	frame := ansi.Strip(Render(b, UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 20, fixedNow))
-	if !strings.Contains(frame, "opus-9 · regenerating the goldens") {
-		t.Errorf("the freshest pulse did not win the now-line:\n%s", frame)
-	}
-	if strings.Contains(frame, "wiring the decoder") {
-		t.Errorf("two now-lines painted — the board has exactly one:\n%s", frame)
 	}
 }
 

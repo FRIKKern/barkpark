@@ -52,11 +52,10 @@ type SpineRow struct {
 	Ref        string // task doc id, or a header fold key
 	Selectable bool
 	RK         rowKind // the shell rowKind for a selectable row
-	// Guide draws the ↳ subtask guide on a spineTask row. It is decoupled from
-	// Depth so a phase band's DIRECT child can be indented one level (Depth>0)
-	// WITHOUT a ↳ guide (it is not a subtask), while a real subtask below it wears
-	// the guide (charter wave-10 W10-A: band indent ≠ tree nesting).
-	Guide bool
+	// Outline is the exact section/tree prefix (├─, └─, and │ continuation
+	// rails). It already includes any phase-band offset, so rendering performs no
+	// second topology guess.
+	Outline string
 
 	task Task          // spineTask
 	hdr  spineHeader   // *Header
@@ -80,15 +79,15 @@ func spineRows(b Board, st UIState) []SpineRow {
 	}
 
 	// emitNested renders a task subtree in parent-before-child tree order, each row
-	// offset by `depthOffset` indent levels WITHOUT a spurious ↳ guide on the offset
-	// (Guide rides the tree depth only). No cap: the caller has already narrowed the
+	// offset by `depthOffset` indent levels before its exact branch outline. No cap:
+	// the caller has already narrowed the
 	// slice to the focus neighborhood (modeFocus) or is showing all of it
 	// (modeExpanded), and the section-level trailing line owns every fold count.
 	emitNested := func(tasks []Task, depthOffset int, shellRK rowKind) {
 		for _, nt := range nestTasks(tasks) {
 			rows = append(rows, SpineRow{
 				Kind: spineTask, Depth: nt.depth + depthOffset, Ref: nt.task.DocID, Selectable: true,
-				RK: shellRK, task: nt.task, Guide: nt.depth > 0,
+				RK: shellRK, task: nt.task, Outline: strings.Repeat("  ", depthOffset) + nt.outline,
 			})
 		}
 	}
@@ -241,8 +240,9 @@ func headerRowKind(k spineKind) rowKind {
 
 // nestedTask is a task plus its tree depth within a section.
 type nestedTask struct {
-	task  Task
-	depth int
+	task    Task
+	depth   int
+	outline string
 }
 
 // nestTasks arranges a flat, band-ordered section task slice into parent-before-
@@ -269,27 +269,38 @@ func nestTasks(tasks []Task) []nestedTask {
 	}
 	out := make([]nestedTask, 0, len(tasks))
 	seen := make(map[string]bool, len(tasks))
-	var walk func(t Task, depth int)
-	walk = func(t Task, depth int) {
-		id := bareID(t.DocID)
-		if seen[id] {
-			return
-		}
-		seen[id] = true
-		out = append(out, nestedTask{task: t, depth: depth})
-		for _, c := range childrenOf[id] {
-			walk(c, depth+1)
+	var walkSiblings func(siblings []Task, depth int, ancestorContinues []bool)
+	walkSiblings = func(siblings []Task, depth int, ancestorContinues []bool) {
+		for i, t := range siblings {
+			id := bareID(t.DocID)
+			if seen[id] {
+				continue
+			}
+			hasNext := i < len(siblings)-1
+			var prefix strings.Builder
+			for _, continues := range ancestorContinues {
+				if continues {
+					prefix.WriteString("│ ")
+				} else {
+					prefix.WriteString("  ")
+				}
+			}
+			if hasNext {
+				prefix.WriteString("├─")
+			} else {
+				prefix.WriteString("└─")
+			}
+			seen[id] = true
+			out = append(out, nestedTask{task: t, depth: depth, outline: prefix.String()})
+			walkSiblings(childrenOf[id], depth+1, append(ancestorContinues, hasNext))
 		}
 	}
-	for _, r := range roots {
-		walk(r, 0)
-	}
+	walkSiblings(roots, 0, nil)
 	// Any task orphaned by a cycle (never reached from a root) is appended flat,
 	// so the count stays exactly len(tasks) — the head-cap math depends on it.
 	for _, t := range tasks {
 		if !seen[bareID(t.DocID)] {
-			out = append(out, nestedTask{task: t, depth: 0})
-			seen[bareID(t.DocID)] = true
+			walkSiblings([]Task{t}, 0, nil)
 		}
 	}
 	return out

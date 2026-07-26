@@ -280,6 +280,7 @@ defmodule Barkpark.Plugins.Capabilities do
     }
     |> maybe_put_build(base, opts)
     |> maybe_gate_views(opts)
+    |> maybe_gate_chat(base, opts)
     |> then(fn m -> Map.put(m, "etag", etag_for(m)) end)
   end
 
@@ -318,6 +319,42 @@ defmodule Barkpark.Plugins.Capabilities do
         Enum.map(commands, &Map.delete(&1, "views"))
       end)
     end
+  end
+
+  # The root `chat` capability-discovery key (charter D27, wave t3code): the
+  # per-provider picker vocabulary %{"providers" => %{"<provider>" =>
+  # %{"modes", "models", "efforts"}}} sourced from Runtime.capabilities/1 —
+  # codex ships empty arrays TODAY, so clients must degrade, never assume.
+  # STRICTLY OPT-IN (`include_chat: true`, wired from `?chat=1`) for the same
+  # reason `build`/`views` are: released bp binaries strict-decode the manifest
+  # root, so an unconditional new root key would brick every CLI in the wild.
+  # Withheld from tier "none" exactly like maybe_put_build — an anonymous
+  # caller discovers nothing about the chat surface. Sits BEFORE the etag step
+  # so the gated key feeds etag_for/1 (chat and non-chat bodies get distinct
+  # etags; no 304 cross-contamination).
+  defp maybe_gate_chat(manifest, caller_tier, opts) do
+    if Keyword.get(opts, :include_chat, false) and caller_tier != "none" do
+      Map.put(manifest, "chat", %{"providers" => chat_provider_caps()})
+    else
+      manifest
+    end
+  end
+
+  # One entry per registered provider. The advertised `modes` EXCLUDE the
+  # provider's danger mode (bypassPermissions): the /v1/chat transport
+  # categorically rejects it (D22 — the armed ceremony is not representable
+  # remotely), so advertising it would bait every picker into a guaranteed 400.
+  defp chat_provider_caps do
+    Map.new(Barkpark.StudioChat.Session.providers(), fn provider ->
+      caps = Barkpark.StudioChat.Runtime.capabilities(provider)
+
+      {provider,
+       %{
+         "modes" => (Map.get(caps, :modes) || []) -- [Map.get(caps, :danger_mode)],
+         "models" => Map.get(caps, :models) || [],
+         "efforts" => Map.get(caps, :efforts) || []
+       }}
+    end)
   end
 
   @doc """
@@ -420,7 +457,7 @@ defmodule Barkpark.Plugins.Capabilities do
   defp command_noun(%{"noun" => n}) when is_binary(n), do: n
   defp command_noun(_), do: nil
 
-  # Orthogonal chat side-branch (D36 / charter D16). The seven `chat.*` commands
+  # Orthogonal chat side-branch (D36 / charter D16). The nine `chat.*` commands
   # DECLARE `auth_tier: "admin"` (unchanged — admin/ingest keep discovering them
   # through the rank ladder), but a caller holding the `chat` capability ALSO
   # discovers the `chat` noun. This is a capability grant, not a rank lift: it
@@ -625,14 +662,15 @@ defmodule Barkpark.Plugins.Capabilities do
       # Claude chat sessions (charter bp-chat-tui, D21). StudioChat is
       # CORE-embedded, NOT a Barkpark.Plugin — it never flows through
       # plugin_nouns/2, so the noun is hand-declared here so MCP/SDK codegen and
-      # any headless harness can DISCOVER chat. The seven non-streaming verbs are
+      # any headless harness can DISCOVER chat. The nine non-streaming verbs are
       # registered below; the SSE `GET /v1/chat/sessions/:id/events` route is a
       # builtin carve-out (like `listen`) with no manifest verb — it is NAMED
       # here so a reading agent knows live streaming exists via `bp chat`.
       %{
         "name" => "chat",
         "summary" =>
-          "Claude chat sessions — create/list/read/update, send, interrupt, approve. " <>
+          "Claude chat sessions — create/list/read/update, send, interrupt, approve, " <>
+            "archive/unarchive. " <>
             "Live token streaming rides the `bp chat` SSE events channel " <>
             "(a builtin carve-out, not a manifest verb).",
         "plugin" => nil
@@ -2341,13 +2379,13 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json"
       ),
       # ── Provider-neutral chat transport (charter bp-chat-tui, D21-D24) ───
-      # The seven non-streaming verbs behind the `/v1/chat` scope, which is
+      # The nine non-streaming verbs behind the `/v1/chat` scope, which is
       # `pipe_through [:api, :require_admin]` — every route needs a data-plane
       # bearer with the global `admin` permission (D21: instance-global scope,
       # NO tenant/workspace/project/dataset column, so NO scoped_prefix). All
       # `auth_tier: "admin"` so the existence-hiding projection hides `chat.*`
       # from anon/lower-tier callers exactly like the other admin nouns. The
-      # eighth route — `GET /v1/chat/sessions/:id/events` (SSE) — is a builtin
+      # SSE route — `GET /v1/chat/sessions/:id/events` — is a builtin
       # streaming carve-out with no manifest verb (like `listen`); it is named
       # in the `chat` noun summary. `writes: false` throughout: these are chat
       # transport calls, not content mutations, so bp does not run the content
@@ -2482,6 +2520,28 @@ defmodule Barkpark.Plugins.Capabilities do
           ),
           arg("decision", true, "string", "allow | deny (never a caller-supplied updatedInput).")
         ],
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "chat.archive",
+        "chat",
+        "archive",
+        "Archive a chat session — it leaves the active sidebar for the archived shelf (idempotent; liveness untouched).",
+        "POST",
+        "/v1/chat/sessions/:id/archive",
+        "admin",
+        args: [arg("id", true, "string", "Chat session id.")],
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "chat.unarchive",
+        "chat",
+        "unarchive",
+        "Unarchive a chat session — it returns from the archived shelf to the active sidebar (idempotent).",
+        "POST",
+        "/v1/chat/sessions/:id/unarchive",
+        "admin",
+        args: [arg("id", true, "string", "Chat session id.")],
         default_output: "minimal"
       )
     ]

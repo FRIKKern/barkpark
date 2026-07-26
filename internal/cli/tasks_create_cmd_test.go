@@ -221,15 +221,24 @@ func TestEnsureTaskPortableBrief(t *testing.T) {
 		t.Fatalf("brief = %#v, want PortableDoc v1", body["brief"])
 	}
 	blocks, _ := brief["blocks"].([]any)
-	if len(blocks) != 6 {
-		t.Fatalf("blocks = %d, want purpose/state/definition-of-done pairs", len(blocks))
+	if len(blocks) != 4 {
+		t.Fatalf("blocks = %d, want criteria then purpose pairs", len(blocks))
 	}
-	purpose := blocks[1].(map[string]any)["content"].([]any)[0].(map[string]any)["value"]
+	if blocks[0].(map[string]any)["id"] != "criteria" || blocks[1].(map[string]any)["id"] != "criteria-list" {
+		t.Fatalf("criteria are not the first brief section: %#v", blocks)
+	}
+	if blocks[1].(map[string]any)["type"] != "list" {
+		t.Fatalf("criteria are not a TUI-supported list: %#v", blocks[1])
+	}
+	purpose := blocks[3].(map[string]any)["content"].([]any)[0].(map[string]any)["value"]
 	if strings.Contains(purpose.(string), "**") {
 		t.Fatalf("purpose retained Markdown markers: %q", purpose)
 	}
-	if blocks[5].(map[string]any)["type"] != "list" {
-		t.Fatalf("definition of done is not a TUI-supported list: %#v", blocks[5])
+	for _, block := range blocks {
+		id, _ := block.(map[string]any)["id"].(string)
+		if id == "state" || id == "state-callout" || id == "done" || id == "done-list" || id == "done-copy" {
+			t.Fatalf("brief retained deprecated generated block %q", id)
+		}
 	}
 }
 

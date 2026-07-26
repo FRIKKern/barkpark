@@ -67,7 +67,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `order` | `_updatedAt:desc` | `<field>:asc\|desc`, comma-join secondaries |
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
-| `filter[<field>][<op>]` | — | Ops `op` ∈ `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted entry `strength >= min`; flat elements never match), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
+| `filter[<field>][<op>]` | — | Ops `op` ∈ `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs). Depth 1. |
 
 **Response:** `result` is `{perspective, documents:[envelopes], count, limit, offset}` (`count` = page rows); outer keys per §3.
@@ -78,7 +78,7 @@ Fetch one document by id. 404 if missing or the schema is `"private"`. Takes `?f
 
 ### 5a. Reference Expansion
 
-`?expand=true` (or `?expand=author,category`) inlines reference fields with the full referenced document — both single refs and `arrayOf`-of-reference lists, each value a plain id string or a `{_ref: id}` object. **Depth 1** only — the inlined doc's refs and missing targets stay raw (expanded = map, raw = string).
+`?expand=true` (or `?expand=author,category`) inlines reference fields with the full referenced document — single refs and `arrayOf`-of-reference lists, values plain id strings or `{_ref: id}`. **Depth 1** only — nested refs and missing targets stay raw (expanded = map, raw = string).
 
 ### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [public]
 
@@ -106,7 +106,7 @@ Apply a batch of mutations atomically (any failure rolls back the batch). Body: 
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
-**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the existing doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`). Result operation `"update"`. Also composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend` with `set`; `ifMatch` aliases `ifRevisionID`; a 1-mutation batch inherits `If-Match`. Server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
+**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the existing doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
 
 The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
 
@@ -115,7 +115,7 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
 - **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist. Requires `type` (else `400 malformed`); honors `ifRevisionID`.
 
-**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add `warnings: [{code,severity,message}]` — non-blocking advisories (e.g. `label_norm`); bulldocs paper-ingest 200 carries the same key.
+**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add non-blocking `warnings: [{code,severity,message}]` (e.g. `label_norm`); paper-ingest 200 carries the same key.
 
 Failures use the §9 error envelope.
 
@@ -123,11 +123,13 @@ Failures use the §9 error envelope.
 
 SSE stream of document mutations, scoped to the resolved workspace + project.
 
-**Resuming:** `Last-Event-ID: <int>` header (or `?lastEventId=<int>` for browsers); replays the scope's events with greater `id`, oldest first, then streams live.
+**Resuming:** `Last-Event-ID: <int>` header (or `?lastEventId=<int>` for browsers); replays scope events with greater `id`, oldest first, then live.
 
-Standard SSE response headers. **First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
+**First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
 
 **Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data` fields: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (rev *before*, `null` on `create`), `result` (envelope), `syncTags` (outer format). **Keepalive:** `: keepalive` every 30 s idle.
+
+**Shed frame:** a stalled consumer gets ONE final `event: overloaded` / `data: {"type":"overloaded","reason":"slow_consumer"}`, then the stream closes — reconnect with `Last-Event-ID`. (The chat stream never sheds.)
 
 **Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a compact live workflow summary (unreplayable, NO `id:`).
 
@@ -137,7 +139,7 @@ Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the gl
 
 - `GET P/v1/schemas/:dataset` → `{"_schemaVersion": 1, "schemas": [ <schema>, ... ]}`
 - `GET P/v1/schemas/:dataset/:name` → `{"_schemaVersion": 1, "schema": <schema>}`
-- `POST P/v1/schemas/:dataset` — upsert a schema definition; returns 201 with the schema object.
+- `POST P/v1/schemas/:dataset` — upsert; 201 with the schema object.
 - `DELETE P/v1/schemas/:dataset/:name` → `{"deleted": "post"}`
 
 ## 8a. Tickets plugin — `/v1/tickets`
@@ -150,15 +152,15 @@ A **`bptk_` key IS an identity**: an operator mints one per outsider, who files/
 | Operator (bearer) | `GET /tickets/inbox[/:id[/attachments/:asset_id]]` (open first) · `POST /tickets/:id/answer` `{body,close?}` · `POST /tickets/:id/close` |
 | Admin (`/v1/plugins/tickets/keys`) | `POST` mint · `GET` ls · `POST /:id/{rotate,pause,unpause}` · `DELETE /:id` revoke |
 
-**Auth.** A `bptk_` key is refused by every non-ticket route — it projects tier `"none"` from `/v1/capabilities`. **Paused** → `403` `key paused` (reversible, thread kept); **revoked** → `401` (indistinguishable from no token); **rotate** = new secret, same identity row (history kept).
+**Auth.** A `bptk_` key is refused by every non-ticket route (tier `"none"` in `/v1/capabilities`). **Paused** → `403` `key paused` (reversible); **revoked** → `401` (same as no token); **rotate** = new secret, same identity row.
 
-**Attachments** (submitter-only): MIME from magic bytes (client header ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign ticket/asset → `404`. **Write rate limits** (per key, per class; reads exempt): create **10/hr**, message **60/hr**, attachment **30/hr**; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** plus a `quickstart` card of curls.
+**Attachments** (submitter-only): MIME from magic bytes (client header ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign → `404`. **Write limits** per key (reads exempt): create 10/hr, message 60/hr, attachment 30/hr; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** + `quickstart` curls.
 
 ## 8b. Sheets plugin — `POST /v1/plugins/sheets/:slug/ops` [admin]
 
-Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_TOKEN` shared secret also authorizes. Ops apply INDIVIDUALLY, not atomically — a refused op lands in the 200 response's `errors` as `{index,code,message}`. Full grammar: the `Barkpark.Plugins.Sheets.Session` moduledoc.
+Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_TOKEN` shared secret also authorizes. Ops apply INDIVIDUALLY, not atomically — a refused op lands in the 200's `errors` as `{index,code,message}`. Full grammar: the `Barkpark.Plugins.Sheets.Session` moduledoc.
 
-**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col:<0-based absolute index inside the rect>, dir:"asc"|"desc"}]}` — a PURE row permutation of the rect: formulas move VERBATIM (refs never rewritten; Excel semantics), undo is the exact inverse permutation. Refusals: `sort_merge_overlap` / `sort_frozen_overlap` (rect must sit below the frozen band) / `invalid_sort_keys`.
+**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col,dir}]}` — a pure row permutation of the rect (formulas move verbatim, undo = the inverse permutation). Refusals: `sort_merge_overlap`/`sort_frozen_overlap` (rect below the frozen band)/`invalid_sort_keys`.
 
 **Filtering** is per-viewer view-state in Studio + the `/sheets` reader (sorting is an edit mutation). Deliberately NO filter wire endpoint; adding one is a design regression.
 
@@ -174,7 +176,7 @@ Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403
 
 Additive: `halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `rev_mismatch` 409 · `webhook_not_found`/`event_not_found` 404 · `duplicate_task`/`duplicate_of` 409 · `schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · media `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413. Workspace/publish: `workspace_suspended` 403 · `quota_exceeded` 402 (`details.quota`) · `unknown_tag`/`label_spine` 422; `playground_expired` 403.
 
-Endpoint-specific: ingest `invalid_paper`/`invalid_text`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint` · sessions `missing_slug`/`invalid_kind`/`conflict_retry` · sheets `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media `share_expired` · site-deploy `build_id_mismatch` (404) · grants/tokens `invalid_grant`/`unprocessable` · Chat hosts `invalid_enrollment` (401)/`invalid_state_report` (422) · step-up `mfa_required`/`mfa_enrolment_required` · wksp-import `bundle_import_disabled`/`invalid_mode`/`workspace_slug_conflict`/`import_constraint_violation`/`import_failed` · wksp-export `export_failed`. Source `Errors.known_codes/0`.
+Endpoint-specific: ingest `invalid_paper`/`invalid_text`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint` · sessions `missing_slug`/`invalid_kind`/`conflict_retry` · sheets `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media `share_expired` · site-deploy `build_id_mismatch` (404) · grants/tokens `invalid_grant`/`unprocessable` · Chat hosts `invalid_enrollment` (401)/`invalid_state_report` (422) · step-up `mfa_required`/`mfa_enrolment_required` · wksp-import `bundle_import_disabled`/`invalid_mode`/`workspace_slug_conflict`/`import_constraint_violation`/`import_failed` · wksp-export `export_failed` · chat (`/v1/chat`): `runtime_capacity` 503+`Retry-After` / `runtime_unavailable` 503 / `chat_unsupported` 422 / `chat_create_failed` 503; chat clients: 5xx = *transient* (retry, honor `Retry-After`), 4xx = *refused* (never retry). Source `Errors.known_codes/0`.
 
 ## 10. Legacy `/api/*` Routes
 
@@ -182,4 +184,4 @@ Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE
 
 ## 11. Rate Limiting
 
-Per token (or IP), read/write buckets per dataset: **300r/60w** per min (`config :barkpark, :rate_limits` or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over → `429` + `Retry-After` (§9); ticket keys per-key (§8a).
+Per token (or IP), read/write buckets per dataset: **300r/60w** per min (config `:rate_limits` or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over → `429` + `Retry-After` (§9); ticket keys per-key (§8a).

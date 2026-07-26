@@ -317,6 +317,118 @@ func TestMidTurnQueuedUserFixturePreservesTurnOneUntilFreshInit(t *testing.T) {
 	}
 }
 
+// TestSettleRaceStaleTailFetchDoesNotCorrupt proves charter D77: a stale turn-1
+// tail-settle GET landing AFTER a queued turn-2's init already flipped Phase must
+// still settle turn 1 into a single row AND clear the stale tail — the old
+// Phase==TurnIdle guard mis-read the resumed streaming phase and left turn 1
+// rendered twice, then turn-2 deltas concatenated onto the stale tail. Reverting
+// the guard to `st.Phase == TurnIdle` makes this test fail (mutation-proof).
+func TestSettleRaceStaleTailFetchDoesNotCorrupt(t *testing.T) {
+	st := State{SessionID: "s1"}
+	st, _ = drive(st, t0, initFrame(t), deltaFrame(t, "turn one"))
+
+	// Turn 1's result emits the settle GET, which captures turn 1's generation.
+	st, effs := drive(st, t0, resultFrame(t, "", false))
+	fetch, ok := hasFetchTail(effs)
+	if !ok {
+		t.Fatal("result must emit the tail-settle FetchTailEffect")
+	}
+	if st.Phase != TurnIdle || st.Tail != "turn one" {
+		t.Fatalf("turn one settling: phase=%v tail=%q", st.Phase, st.Tail)
+	}
+
+	// A queued turn 2's init lands BEFORE turn 1's GET returns — it flips Phase to
+	// TurnStreaming, exactly the signal the old guard (Phase==TurnIdle) mis-read.
+	st, _ = drive(st, t0, initFrame(t))
+	if st.Phase != TurnStreaming {
+		t.Fatalf("turn two init must resume streaming, got %v", st.Phase)
+	}
+
+	// Turn 1's stale GET finally lands, carrying turn 1's generation and turn 1's
+	// settled row. Its Gen still matches TailGen (turn 2 has not appended a delta
+	// yet), so it settles turn 1 into ONE row AND clears the stale tail.
+	settled := Session{ID: "s1", Messages: []Message{
+		{Seq: 1, Role: "assistant", Blocks: json.RawMessage(`[{"type":"paragraph","content":[{"type":"text","value":"turn one"}]}]`)},
+	}}
+	st, _ = drive(st, t0, TailFetchedEvent{Session: settled, Gen: fetch.Gen})
+	if len(st.Messages) != 1 {
+		t.Fatalf("turn one must settle into exactly one row, got %d", len(st.Messages))
+	}
+	if st.Tail != "" {
+		t.Fatalf("the stale settle must clear turn one's tail (no double render), got %q", st.Tail)
+	}
+
+	// Turn 2's deltas now build a CLEAN tail — never concatenated onto a stale
+	// turn-1 prefix.
+	st, _ = drive(st, t0, deltaFrame(t, "turn two"))
+	if st.Tail != "turn two" {
+		t.Fatalf("turn two tail must be clean, got %q (stale-tail corruption)", st.Tail)
+	}
+}
+
+// TestSettleRaceLiveTailSurvivesStaleFetch proves the OTHER wrong-fix the guard
+// must avoid (charter D77): an unconditional `st.Tail = ""` would wipe turn 2's
+// LIVE text when turn 1's stale GET lands after turn 2 already streamed a delta.
+// The generation mismatch protects it.
+func TestSettleRaceLiveTailSurvivesStaleFetch(t *testing.T) {
+	st := State{SessionID: "s1"}
+	st, _ = drive(st, t0, initFrame(t), deltaFrame(t, "one"))
+	st, effs := drive(st, t0, resultFrame(t, "", false))
+	fetch, ok := hasFetchTail(effs)
+	if !ok {
+		t.Fatal("result must emit the tail-settle FetchTailEffect")
+	}
+
+	// Turn 2 init + a delta re-stamp the tail to generation 2 BEFORE turn 1's GET
+	// lands. (The stale "one" prefix is a bounded transient that clears at turn
+	// 2's own settle; the load-bearing invariant is that turn 2's text is NOT lost.)
+	st, _ = drive(st, t0, initFrame(t), deltaFrame(t, "two"))
+
+	st, _ = drive(st, t0, TailFetchedEvent{
+		Session: Session{ID: "s1", Messages: []Message{{Seq: 1, Role: "assistant", Blocks: json.RawMessage(`[]`)}}},
+		Gen:     fetch.Gen,
+	})
+	if !strings.Contains(st.Tail, "two") {
+		t.Fatalf("turn two's live text must survive a stale settle, got %q", st.Tail)
+	}
+}
+
+// TestAnsweredRefetchClearsTailAtGeneration proves the answered-refetch path
+// (since=0) carries the current generation and clears the tail at its boundary
+// when no new turn has advanced it (charter D77 explicit decision).
+func TestAnsweredRefetchClearsTailAtGeneration(t *testing.T) {
+	st := State{SessionID: "s1", Gen: 2, TailGen: 2, Tail: "live", AnswerInFlight: map[string]string{"r1": "allow"}}
+	st, effs := drive(st, t0, AnsweredEvent{RequestID: "r1"})
+	fetch, ok := hasFetchTail(effs)
+	if !ok || fetch.Gen != 2 {
+		t.Fatalf("answered refetch must carry the current generation, got %+v ok=%v", fetch, ok)
+	}
+	st, _ = drive(st, t0, TailFetchedEvent{Session: Session{ID: "s1"}, Gen: fetch.Gen})
+	if st.Tail != "" {
+		t.Fatalf("the answered refetch must clear the tail at its boundary, got %q", st.Tail)
+	}
+}
+
+// TestWedgeRefetchClearsTailAtGeneration proves the 8s interrupt-wedge refetch
+// path carries the current generation and clears the degraded tail at its
+// boundary (charter D77 explicit decision).
+func TestWedgeRefetchClearsTailAtGeneration(t *testing.T) {
+	st := State{SessionID: "s1", Phase: TurnStreaming, Gen: 1, TailGen: 1, Tail: "degraded"}
+	st, _ = drive(st, t0, InterruptEvent{})
+	st, effs := drive(st, t0.Add(9*time.Second), TickEvent{})
+	fetch, ok := hasFetchTail(effs)
+	if !ok || fetch.Gen != 1 {
+		t.Fatalf("the wedge refetch must carry the current generation, got %+v ok=%v", fetch, ok)
+	}
+	if st.Phase != TurnIdle {
+		t.Fatalf("the wedge must degrade to idle, got %v", st.Phase)
+	}
+	st, _ = drive(st, t0, TailFetchedEvent{Session: Session{ID: "s1"}, Gen: fetch.Gen})
+	if st.Tail != "" {
+		t.Fatalf("the wedge refetch must clear the degraded tail, got %q", st.Tail)
+	}
+}
+
 // TestFreshSendStartsWaiting proves the idle-send path: a send with no active
 // turn flips to waiting and is NOT badged.
 func TestFreshSendStartsWaiting(t *testing.T) {

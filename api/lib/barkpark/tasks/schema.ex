@@ -214,6 +214,81 @@ defmodule Barkpark.Tasks.Schema do
           "description" =>
             "Concise plain-text/Markdown fallback and search excerpt. Put the presentation-grade brief in brief as PortableDoc; text-only clients read this field."
         },
+        %{
+          "name" => "purpose",
+          "title" => "Purpose",
+          "type" => "composite",
+          "group" => "brief",
+          "description" =>
+            "Why this task exists, its intended endgame, scored importance/relevance with reasons, and evidence for the claims. Readers label any missing-value fallback as derived.",
+          "fields" => [
+            %{"name" => "part_of", "title" => "What this is part of", "type" => "string"},
+            %{
+              "name" => "impact",
+              "title" => "What this blocks or enables",
+              "type" => "text",
+              "rows" => 2
+            },
+            %{
+              "name" => "statement",
+              "title" => "What this accomplishes",
+              "type" => "text",
+              "rows" => 3
+            },
+            %{
+              "name" => "why",
+              "title" => "Why this matters",
+              "type" => "text",
+              "rows" => 3,
+              "description" =>
+                "State the causal reason this task is necessary inside its parent mission: the problem, risk, or missing capability it resolves and why that contribution matters to the larger goal. Do not restate the title, acceptance criteria, or desired outcome."
+            },
+            %{"name" => "endgame", "title" => "Endgame", "type" => "text", "rows" => 3},
+            %{
+              "name" => "importance",
+              "title" => "Importance",
+              "type" => "composite",
+              "fields" => [
+                %{
+                  "name" => "score",
+                  "title" => "Score (0–100)",
+                  "type" => "number",
+                  "validation" => %{"min" => 0, "max" => 100}
+                },
+                %{"name" => "reason", "title" => "Reason", "type" => "text", "rows" => 2}
+              ]
+            },
+            %{
+              "name" => "relevance",
+              "title" => "Relevance",
+              "type" => "composite",
+              "fields" => [
+                %{
+                  "name" => "score",
+                  "title" => "Score (0–100)",
+                  "type" => "number",
+                  "validation" => %{"min" => 0, "max" => 100}
+                },
+                %{"name" => "reason", "title" => "Reason", "type" => "text", "rows" => 2}
+              ]
+            },
+            %{
+              "name" => "proof",
+              "title" => "Proof",
+              "type" => "arrayOf",
+              "ordered" => true,
+              "of" => %{
+                "name" => "proof_item",
+                "type" => "composite",
+                "fields" => [
+                  %{"name" => "claim", "title" => "Claim", "type" => "text", "rows" => 2},
+                  %{"name" => "evidence", "title" => "Evidence", "type" => "text", "rows" => 2},
+                  %{"name" => "source", "title" => "Source", "type" => "string"}
+                ]
+              }
+            }
+          ]
+        },
 
         # Approach sketch inline; the FULL design doc travels as design_doc.
         %{

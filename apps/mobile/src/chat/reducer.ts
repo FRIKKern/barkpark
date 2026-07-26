@@ -380,6 +380,14 @@ function reduceClaudeFrame(st: ChatState, data: string): ReduceResult {
     delta.type === 'text_delta' &&
     typeof delta.text === 'string'
   ) {
+    // D77 RESIDUAL (recorded, deliberately unfixed — mob-bl-chat-tab-polish
+    // AC2): gen advances ONLY on system/init frames, so a turn whose deltas
+    // arrive BEFORE its init shares the PRIOR turn's gen — a stale settle
+    // issued for that prior gen could then clear this live tail. The wire
+    // emits init first, so the window is theoretical today, and reduce.go
+    // carries the equivalent weakness — any fix must land on both surfaces
+    // together (parity-preserving). Do NOT re-add the removed phase guard
+    // here; it was the wrong fix (it silently dropped streamed text).
     const next: ChatState = { ...st, tail: st.tail + delta.text, tailGen: st.gen }
     if (next.phase === 'idle' || next.phase === 'waiting') next.phase = 'streaming'
     // While interrupting, deltas may keep landing until the CLI actually

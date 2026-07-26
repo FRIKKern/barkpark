@@ -168,6 +168,14 @@ var (
 	// state — the hover reads as "lit up", not inverted. Transient pointer state
 	// only, painted while a verb is under the cursor; "color = state" stays intact.
 	verbHoverStyle = lipgloss.NewStyle().Foreground(titleColor).Background(pressedBgColor)
+
+	// The wide divider steps through three pointer states without changing
+	// geometry: subdued at rest, readable on hover, and bold accent while held.
+	// Terminal cells have no alpha channel, so palette brightness is the honest
+	// opacity analogue.
+	dividerRestStyle    = lipgloss.NewStyle().Foreground(dimColor)
+	dividerHoverStyle   = lipgloss.NewStyle().Foreground(neutralColor)
+	dividerGrabbedStyle = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 )
 
 // glyphStyleFor paints the STATUS GLYPH by the spec §1 brightness+meaning ladder

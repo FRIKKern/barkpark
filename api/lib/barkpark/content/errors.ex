@@ -157,7 +157,21 @@ defmodule Barkpark.Content.Errors do
                          "import_failed",
                          # Workspace bundle EXPORT (PDS W3) — v1/workspace_controller.ex:
                          # the export stream failed or timed out before the tar completed.
-                         "export_failed"
+                         "export_failed",
+                         # Chat transport send/create failures (chat_controller.ex,
+                         # charter D26 reason split — mobile/TUI clients branch on
+                         # these: 5xx → transient retry, 4xx → refused/permanent).
+                         # 503 + Retry-After: the managed runtime pool is full.
+                         "runtime_capacity",
+                         # 503: the runtime is not there right now (dead process,
+                         # closed port, runtime-gone) — retryable.
+                         "runtime_unavailable",
+                         # 422: the provider/operation combination can never
+                         # succeed as asked — permanent, do not retry.
+                         "chat_unsupported",
+                         # 503: creating the session row/spawn failed — a store
+                         # defect distinct from runtime availability.
+                         "chat_create_failed"
                        ])
 
   def to_envelope(reason), do: to_envelope(reason, nil)

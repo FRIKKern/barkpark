@@ -95,6 +95,10 @@ defmodule BarkparkWeb.ChatController do
   # protects the node from a fully-stalled reader's unbounded mailbox.
   @default_max_heap_words 10_000_000
 
+  # Retry-After for the D26 capacity leg: long enough for an admission slot to
+  # free up, short enough that a queued mobile send feels live.
+  @capacity_retry_after_seconds 15
+
   # ── POST /v1/chat/sessions ─────────────────────────────────────────────────
 
   @doc """
@@ -134,12 +138,15 @@ defmodule BarkparkWeb.ChatController do
           |> json(full_session_json(StudioChat.get_session(id), []))
 
         {:error, reason} ->
+          # A create_session failure is a store/spawn defect, NOT runtime
+          # unavailability — a DISTINCT code (charter D26) so a client never
+          # retries a persistent store failure as if it were transient capacity.
           Logger.warning("chat transport: create_session failed: #{inspect(reason)}")
 
           ErrorResponse.emit_custom(
             conn,
             503,
-            "chat_unavailable",
+            "chat_create_failed",
             "could not create chat session"
           )
       end
@@ -211,8 +218,13 @@ defmodule BarkparkWeb.ChatController do
   def update(conn, %{"id" => id} = params) do
     body = Map.drop(params, ["id"])
 
-    with {:ok, ops} <- validate_patch(body),
-         %StudioChat.Session{} <- fetch_scoped(id, scope(conn)) do
+    # Fetch BEFORE validate: the mode/model/effort validators consult the
+    # SESSION's provider capability matrix (a codex session must not accept
+    # claude-only values), so the row has to exist first. Deliberate precedence
+    # flip: unknown session + bad body is now 404, not 400 — the tenant
+    # not-found oracle outranks body shape (pinned in the controller tests).
+    with %StudioChat.Session{provider: provider} <- fetch_scoped(id, scope(conn)),
+         {:ok, ops} <- validate_patch(body, provider) do
       Enum.each(ops, &apply_patch_op(id, &1))
       json(conn, full_session_json(StudioChat.get_session(id), []))
     else
@@ -250,7 +262,7 @@ defmodule BarkparkWeb.ChatController do
 
         {:error, reason} ->
           Logger.warning("chat transport: send failed: #{inspect(reason)}")
-          ErrorResponse.emit_custom(conn, 503, "chat_unavailable", "chat runtime is unavailable")
+          send_failure_response(conn, reason)
       end
     else
       nil -> not_found(conn)
@@ -323,6 +335,44 @@ defmodule BarkparkWeb.ChatController do
     else
       nil -> not_found(conn)
       {:error, message} -> bad_request(conn, message)
+    end
+  end
+
+  # ── POST /v1/chat/sessions/:id/{archive,unarchive} ─────────────────────────
+
+  @doc """
+  Archive a session (charter D28) — stamp `archived_at` so it leaves the active
+  sidebar for the archived shelf. 200 `{session}`, idempotent (re-archiving
+  re-stamps the timestamp). The store call rides `store_scope(scope(conn))`
+  (NEVER `:global` — the LiveView's hardcoded scope is not precedent), so a
+  foreign tenant's session joins the not-found oracle (`:noop` → 404),
+  indistinguishable from a missing id. Orthogonal to `status`: archiving never
+  touches liveness. NO fleet frame is emitted (D28 — no broadcast path exists):
+  clients remove optimistically on the 200 and reconcile on the next list poll.
+  """
+  def archive(conn, %{"id" => id}) do
+    respond_archived(conn, StudioChat.archive_session(id, store_scope(scope(conn))))
+  end
+
+  @doc "Unarchive (charter D28) — clear `archived_at`. Same oracle + idempotency."
+  def unarchive(conn, %{"id" => id}) do
+    respond_archived(conn, StudioChat.unarchive_session(id, store_scope(scope(conn))))
+  end
+
+  defp respond_archived(conn, result) do
+    case result do
+      {:ok, %StudioChat.Session{} = session} ->
+        json(conn, full_session_json(session, []))
+
+      :noop ->
+        not_found(conn)
+
+      {:error, reason} ->
+        # `archived_at` is a bare change with no constraints, so this branch is
+        # defensively unreachable — but a store surprise must be a logged 500,
+        # never a CaseClauseError.
+        Logger.warning("chat transport: archive flip failed: #{inspect(reason)}")
+        ErrorResponse.emit(conn, {:error, :archive_failed}, "could not update archived state")
     end
   end
 
@@ -803,10 +853,78 @@ defmodule BarkparkWeb.ChatController do
              # representable over the transport.
              bypass_armed: false
            }),
-         {:ok, session_pid} <- Recorder.session_pid(recorder) do
+         {:ok, session_pid} when not is_nil(session_pid) <- Recorder.session_pid(recorder) do
       Runtime.send_turn(session.provider, session_pid, content)
+    else
+      # `Recorder.session_pid/1` has NO failure branch — a Recorder whose
+      # provider runtime never came up (or already exited) replies `{:ok, nil}`.
+      # That nil used to flow into the adapter's `is_pid`-guarded send and raise
+      # FunctionClauseError → 500, BYPASSING the D26 reason split entirely; map
+      # it to the transient runtime_unavailable leg instead.
+      {:ok, nil} -> {:error, :runtime_session_missing}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, other}
     end
   end
+
+  @doc false
+  # The D26 send-failure reason split: classify the Recorder/Runtime failure
+  # term over an explicit ALLOWLIST, then answer with the fixed public code.
+  # NEVER interpolate the reason into the wire message — `safe_command`'s rescue
+  # leg returns raw exception structs, and echoing one is an information leak
+  # (the server-side Logger line above already carries the full term). Public
+  # (`@doc false`) so every allowlist leg is assertable without arranging the
+  # matching runtime failure live — the exit-reason-mapping seam convention.
+  def send_failure_response(conn, reason) do
+    case classify_send_failure(reason) do
+      :capacity ->
+        # Transient by definition — say when to come back (mirrors the
+        # rate-limit plugs' Retry-After convention).
+        conn
+        |> put_resp_header("retry-after", Integer.to_string(@capacity_retry_after_seconds))
+        |> ErrorResponse.emit_custom(
+          503,
+          "runtime_capacity",
+          "chat runtime capacity is exhausted — retry shortly"
+        )
+
+      :unavailable ->
+        ErrorResponse.emit_custom(conn, 503, "runtime_unavailable", "chat runtime is unavailable")
+
+      :unsupported ->
+        # PERMANENT for this session/provider — a 503 would make a well-behaved
+        # client retry forever, so it must be a 4xx (charter D26).
+        ErrorResponse.emit_custom(
+          conn,
+          422,
+          "chat_unsupported",
+          "chat is not supported for this session's provider or operation"
+        )
+    end
+  end
+
+  # Capacity: admission refused the spawn — the runtime pool is full or two
+  # spawns raced the registration; both clear on their own.
+  defp classify_send_failure({:managed_runtime_capacity, _}), do: :capacity
+  defp classify_send_failure(:admission_registration_conflict), do: :capacity
+
+  # Unavailable: the runtime is not there right now (dead GenServer, closed or
+  # absent port, dead app-server, the {:ok, nil} guard above) — retryable.
+  defp classify_send_failure({:not_running, _}), do: :unavailable
+  defp classify_send_failure(:port_closed), do: :unavailable
+  defp classify_send_failure(:no_port), do: :unavailable
+  defp classify_send_failure({:app_server_exit, _}), do: :unavailable
+  defp classify_send_failure(:runtime_session_missing), do: :unavailable
+
+  # Unsupported: the provider/operation combination can never succeed as asked.
+  defp classify_send_failure({:provider_not_ready, _}), do: :unsupported
+  defp classify_send_failure({:provider_protocol_incompatible, _}), do: :unsupported
+  defp classify_send_failure({:unsupported_runtime_operation, _}), do: :unsupported
+  defp classify_send_failure({:missing_runtime_contract, _}), do: :unsupported
+
+  # Opaque fallback: any term outside the allowlist stays a generic transient
+  # 503 — unknown ≠ permanent, and the term itself never reaches the wire.
+  defp classify_send_failure(_), do: :unavailable
 
   # Append the caller's turn as an organic `role:"user"` row so the Session's
   # replayable history carries the human side (the LiveView composer persists its
@@ -842,15 +960,48 @@ defmodule BarkparkWeb.ChatController do
 
     with %StudioChat.Session{mode: mode, provider: provider} when mode != value <- prior,
          recorder when is_pid(recorder) <- Recorder.whereis(id),
-         {:ok, session} <- Recorder.session_pid(recorder) do
+         {:ok, session} when is_pid(session) <- Recorder.session_pid(recorder) do
       Runtime.steer(provider, session, %{mode: value})
     else
       _ -> :ok
     end
   end
 
-  defp apply_patch_op(id, {:model_choice, value}), do: StudioChat.set_model_choice(id, value)
-  defp apply_patch_op(id, {:effort_choice, value}), do: StudioChat.set_effort_choice(id, value)
+  # model_choice/effort_choice steer a LIVE runtime exactly like the mode block
+  # above (steer parity, charter t3code D26 sibling ruling): prior-read → set →
+  # change-guard (steer only on an actual CHANGE — the TUI leave-PATCH echoes
+  # current values) → Recorder.whereis → Runtime.steer, fail-soft on a dead or
+  # absent Recorder. An adapter that cannot steer the axis (claude has no effort
+  # steer) returns {:error, {:unsupported_steer, _}}, which is ignored — the
+  # persisted choice still lands and takes effect on the next spawn.
+  defp apply_patch_op(id, {:model_choice, value}) do
+    prior = StudioChat.get_session(id)
+    StudioChat.set_model_choice(id, value)
+
+    with %StudioChat.Session{model_choice: choice, provider: provider} when choice != value <-
+           prior,
+         recorder when is_pid(recorder) <- Recorder.whereis(id),
+         {:ok, session} when is_pid(session) <- Recorder.session_pid(recorder) do
+      Runtime.steer(provider, session, %{model: value})
+    else
+      _ -> :ok
+    end
+  end
+
+  defp apply_patch_op(id, {:effort_choice, value}) do
+    prior = StudioChat.get_session(id)
+    StudioChat.set_effort_choice(id, value)
+
+    with %StudioChat.Session{effort_choice: choice, provider: provider} when choice != value <-
+           prior,
+         recorder when is_pid(recorder) <- Recorder.whereis(id),
+         {:ok, session} when is_pid(session) <- Recorder.session_pid(recorder) do
+      Runtime.steer(provider, session, %{effort: value})
+    else
+      _ -> :ok
+    end
+  end
+
   defp apply_patch_op(id, {:title, value}), do: StudioChat.rename(id, value)
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -942,27 +1093,27 @@ defmodule BarkparkWeb.ChatController do
   defp provider_cwd(provider), do: Runtime.cwd(provider)
 
   @patch_keys ~w(draft mode model_choice effort_choice title)
-  defp validate_patch(params) do
+  defp validate_patch(params, provider) do
     with :ok <- reject_non_object(params),
          :ok <- reject_unknown_keys(params, @patch_keys) do
-      collect_patch_ops(params, @patch_keys, [])
+      collect_patch_ops(params, @patch_keys, provider, [])
     end
   end
 
-  defp collect_patch_ops(_params, [], ops), do: {:ok, Enum.reverse(ops)}
+  defp collect_patch_ops(_params, [], _provider, ops), do: {:ok, Enum.reverse(ops)}
 
-  defp collect_patch_ops(params, [key | rest], ops) do
+  defp collect_patch_ops(params, [key | rest], provider, ops) do
     if Map.has_key?(params, key) do
-      case patch_op(key, Map.get(params, key)) do
-        {:ok, op} -> collect_patch_ops(params, rest, [op | ops])
+      case patch_op(key, Map.get(params, key), provider) do
+        {:ok, op} -> collect_patch_ops(params, rest, provider, [op | ops])
         {:error, _} = err -> err
       end
     else
-      collect_patch_ops(params, rest, ops)
+      collect_patch_ops(params, rest, provider, ops)
     end
   end
 
-  defp patch_op("draft", value) do
+  defp patch_op("draft", value, _provider) do
     cond do
       is_nil(value) -> {:ok, {:draft, nil}}
       is_binary(value) and byte_size(value) <= @draft_max_bytes -> {:ok, {:draft, value}}
@@ -971,15 +1122,16 @@ defmodule BarkparkWeb.ChatController do
     end
   end
 
-  defp patch_op("mode", value), do: with({:ok, m} <- req_mode(value), do: {:ok, {:mode, m}})
+  defp patch_op("mode", value, provider),
+    do: with({:ok, m} <- req_mode(value, provider), do: {:ok, {:mode, m}})
 
-  defp patch_op("model_choice", value),
-    do: with({:ok, m} <- req_model(value), do: {:ok, {:model_choice, m}})
+  defp patch_op("model_choice", value, provider),
+    do: with({:ok, m} <- req_model(value, provider), do: {:ok, {:model_choice, m}})
 
-  defp patch_op("effort_choice", value),
-    do: with({:ok, e} <- req_effort(value), do: {:ok, {:effort_choice, e}})
+  defp patch_op("effort_choice", value, provider),
+    do: with({:ok, e} <- req_effort(value, provider), do: {:ok, {:effort_choice, e}})
 
-  defp patch_op("title", value) do
+  defp patch_op("title", value, _provider) do
     with true <- is_binary(value) || {:error, "title must be a string"},
          trimmed <- String.trim(value),
          true <- trimmed != "" || {:error, "title must not be blank"},
@@ -1064,29 +1216,30 @@ defmodule BarkparkWeb.ChatController do
     end
   end
 
-  # mode allowlist EXCLUDES bypassPermissions (D22 — not accepted remotely).
-  defp valid_modes, do: StudioChat.Session.modes() -- ["bypassPermissions"]
-
-  defp req_mode(value) do
+  # PATCH validators consult the SESSION's provider capability matrix (the same
+  # source validate_create/1 reads), not a hardcoded claude — a codex session
+  # must reject claude-only values and vice versa. The mode allowlist still
+  # EXCLUDES bypassPermissions (D22 — not accepted remotely).
+  defp req_mode(value, provider) do
     cond do
       not is_binary(value) -> {:error, "mode must be a string"}
-      value in valid_modes() -> {:ok, value}
+      value in (Runtime.capabilities(provider).modes -- ["bypassPermissions"]) -> {:ok, value}
       true -> {:error, "invalid mode"}
     end
   end
 
-  defp req_model(value) do
+  defp req_model(value, provider) do
     cond do
       not is_binary(value) -> {:error, "model must be a string"}
-      value in Runtime.capabilities("claude").models -> {:ok, value}
+      value in Runtime.capabilities(provider).models -> {:ok, value}
       true -> {:error, "invalid model"}
     end
   end
 
-  defp req_effort(value) do
+  defp req_effort(value, provider) do
     cond do
       not is_binary(value) -> {:error, "effort must be a string"}
-      value in Runtime.capabilities("claude").efforts -> {:ok, value}
+      value in Runtime.capabilities(provider).efforts -> {:ok, value}
       true -> {:error, "invalid effort"}
     end
   end

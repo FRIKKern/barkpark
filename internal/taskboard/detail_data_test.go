@@ -45,6 +45,23 @@ func decodeDetailFixture(t *testing.T) ([]Task, DetailIndex) {
 	return tasks, details
 }
 
+func TestDecodeTaskPurposePreservesAuthoredZeroScoreAndPlacement(t *testing.T) {
+	p := decodeTaskPurpose(map[string]any{
+		"part_of": "Reader trust epic",
+		"impact":  "unblocks operator adoption",
+		"importance": map[string]any{
+			"score":  float64(0),
+			"reason": "deliberately deprioritized",
+		},
+	})
+	if p.PartOf != "Reader trust epic" || p.Impact != "unblocks operator adoption" {
+		t.Fatalf("purpose placement/impact lost: %+v", p)
+	}
+	if !p.Importance.Set || p.Importance.Score != 0 {
+		t.Fatalf("authored zero score was mistaken for missing: %+v", p.Importance)
+	}
+}
+
 // detailFixtureServer serves the two task endpoints from the detail fixture so
 // FetchSnapshotFull runs its real fetch+decode+overlay path.
 func detailFixtureServer(t *testing.T) *httptest.Server {

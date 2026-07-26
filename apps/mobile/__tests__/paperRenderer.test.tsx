@@ -28,7 +28,7 @@ import {
   openableUrl,
   paragraphInline,
 } from '../src/papers/portabledoc/model'
-import type { Theme } from '../src/ui/theme'
+import { light, type Theme } from '../src/ui/theme'
 
 // react-native-webview is a native TurboModule with no jest mock of its own;
 // the suite never renders the island (stateful leaf), so a null stub is
@@ -39,17 +39,12 @@ const capstone = require('../../../tooling/webview-spike/assets/capstone.json') 
   blocks: ({ type: string } & Record<string, unknown>)[]
 }
 
-const theme: Theme = {
-  bg: '#f6f7f6',
-  surface: '#ffffff',
-  border: '#e2e6e3',
-  text: '#17211b',
-  textMuted: '#5d6b62',
-  accent: '#1f6f4a',
-  accentText: '#ffffff',
-  danger: '#b3372e',
-  success: '#1f6f4a',
-}
+// The REAL light palette, not a literal duplicate: the suite predates the
+// tsconfig __tests__/**/*.tsx include and its hand-copied mock silently
+// drifted (it lacked the #6126 `bubble` role — the live proof the gate was
+// typecheck-blind). Importing from theme.ts means future role additions can
+// never drift here silently again.
+const theme: Theme = light
 const ctx: BlockCtx = { theme }
 
 /* ── element-tree walker ────────────────────────────────────────────────────── */

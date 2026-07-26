@@ -35,9 +35,22 @@ type TasksState =
   | { phase: 'error'; message: string }
   | { phase: 'ready'; prime: PrimeBrief; refreshing: boolean }
 
+/** The stale-board affordance's one truth, pure so it is jest-provable: the
+ * banner shows ONLY when a painted board (ready) has lost its live stream —
+ * loading/error screens carry their own honesty already. */
+export function staleBoardNotice(
+  phase: TasksState['phase'],
+  streamDown: boolean,
+): string | undefined {
+  return phase === 'ready' && streamDown
+    ? 'Live updates paused — the board may be stale. Tap to refresh.'
+    : undefined
+}
+
 export function TasksScreen({ connection }: { connection: InstanceConnection }) {
   const theme = useTheme()
   const [state, setState] = useState<TasksState>({ phase: 'loading' })
+  const [streamDown, setStreamDown] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [openTask, setOpenTask] = useState<{ docId: string; title?: string } | undefined>(undefined)
   const client = useMemo(() => makeInstanceClient(connection), [connection])
@@ -68,14 +81,22 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
   // one re-fetch.
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
-    const handle = client.listen('task')
+    // maxReconnects: 'unbounded' (charter D23): a board that sits open all day
+    // must survive sleep/wake cycles and server restarts — the SDK retries
+    // transient failures forever (jittered, 16s-capped) instead of dying after
+    // five. Only a terminal failure (signed out, revoked token, repeated
+    // refusals) ends the stream, and that flips the stale-board banner below.
+    const handle = client.listen('task', undefined, { maxReconnects: 'unbounded' })
     let alive = true
+    // No eager reset here: after a connection change the board genuinely IS
+    // possibly stale until the new stream's welcome frame proves it live —
+    // the reset below is the honest one.
     ;(async () => {
       try {
         for await (const ev of handle) {
           if (!alive) break
           if (ev.type === 'welcome') {
-            console.log('[barkpark-mobile] listen welcome frame:', JSON.stringify(ev))
+            setStreamDown(false) // the connect proof — the board is live again
           } else if (ev.type === 'mutation') {
             if (refetchTimer.current !== undefined) clearTimeout(refetchTimer.current)
             refetchTimer.current = setTimeout(() => {
@@ -83,9 +104,12 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
             }, 400)
           }
         }
-      } catch (err) {
-        // Honest degrade: the board still works on pull-to-refresh.
-        if (alive) console.log('[barkpark-mobile] listen stream ended:', String(err))
+        // The iterator ending without an unmount means the stream is gone.
+        if (alive) setStreamDown(true)
+      } catch {
+        // Honest degrade: live updates are dead — SAY so (the stale-board
+        // banner) instead of a console.log nobody sees; pull-to-refresh works.
+        if (alive) setStreamDown(true)
       }
     })()
     return () => {
@@ -160,30 +184,43 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
     )
   }
 
+  const notice = staleBoardNotice(state.phase, streamDown)
+
   return (
-    <SectionList
-      style={{ backgroundColor: theme.bg }}
-      contentContainerStyle={styles.listContent}
-      sections={sections}
-      keyExtractor={(card) => card.doc_id}
-      refreshControl={
-        <RefreshControl
-          refreshing={state.refreshing}
-          onRefresh={refresh}
-          tintColor={theme.accent}
-        />
-      }
-      renderSectionHeader={({ section }) => (
-        <Text style={[styles.sectionHeader, { color: theme.textMuted }]}>{section.title}</Text>
+    <View style={[styles.listRoot, { backgroundColor: theme.bg }]}>
+      {notice !== undefined && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={refresh}
+          style={[styles.staleBanner, { borderColor: theme.border, backgroundColor: theme.surface }]}
+        >
+          <Text style={[styles.staleText, { color: theme.textMuted }]}>{notice}</Text>
+        </Pressable>
       )}
-      renderItem={({ item }) => (
-        <TaskRow
-          card={item}
-          theme={theme}
-          onOpen={() => setOpenTask({ docId: item.doc_id, title: item.title })}
-        />
-      )}
-    />
+      <SectionList
+        style={{ backgroundColor: theme.bg }}
+        contentContainerStyle={styles.listContent}
+        sections={sections}
+        keyExtractor={(card) => card.doc_id}
+        refreshControl={
+          <RefreshControl
+            refreshing={state.refreshing}
+            onRefresh={refresh}
+            tintColor={theme.accent}
+          />
+        }
+        renderSectionHeader={({ section }) => (
+          <Text style={[styles.sectionHeader, { color: theme.textMuted }]}>{section.title}</Text>
+        )}
+        renderItem={({ item }) => (
+          <TaskRow
+            card={item}
+            theme={theme}
+            onOpen={() => setOpenTask({ docId: item.doc_id, title: item.title })}
+          />
+        )}
+      />
+    </View>
   )
 }
 
@@ -234,6 +271,16 @@ function TaskRow({
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
+  listRoot: { flex: 1 },
+  staleBanner: {
+    borderWidth: 1,
+    borderRadius: 10,
+    marginHorizontal: 16,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  staleText: { fontSize: 12, textAlign: 'center' },
   listContent: { padding: 16, gap: 10 },
   sectionHeader: {
     fontSize: 12,

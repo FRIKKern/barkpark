@@ -1442,6 +1442,20 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
         task("pk-epic", "Peek epic",
           lifecycle: "in_progress",
           description: "The long body of the epic.",
+          purpose: %{
+            "statement" => "Make task inspection trustworthy",
+            "why" => "Operators need the reason before implementation prose",
+            "endgame" => "Every task explains its contribution",
+            "importance" => %{"score" => 94, "reason" => "core planning signal"},
+            "relevance" => %{"score" => 97, "reason" => "active reader work"},
+            "proof" => [
+              %{
+                "claim" => "Reader contract",
+                "evidence" => "criteria renders first",
+                "source" => "board test"
+              }
+            ]
+          },
           claim: %{
             "worker" => "studio:kalle",
             "epoch" => 3,
@@ -1494,6 +1508,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert html =~ "goldens byte-identical"
       assert html =~ ~s(data-role="peek-evidence")
       assert html =~ "PR #1421 merged"
+      assert html =~ ~s(data-role="peek-purpose")
+      assert html =~ "Make task inspection trustworthy"
+      assert html =~ "94/100"
+      assert html =~ ~s(data-role="peek-purpose-proof")
+      assert html =~ "criteria renders first"
+
+      {criteria_at, _} = :binary.match(html, ~s(data-role="peek-criteria"))
+      {purpose_at, _} = :binary.match(html, ~s(data-role="peek-purpose"))
+      {description_at, _} = :binary.match(html, ~s(data-role="peek-description"))
+      assert criteria_at < purpose_at
+      assert purpose_at < description_at
       # lineage both ways — the child sits in the family tree, the blocker in
       # its own section
       assert html =~ ~s(data-role="peek-tree")
@@ -1508,6 +1533,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       assert html =~ ~s(data-role="peek")
       assert html =~ "Peek epic"
+    end
+
+    test "a sparse task gets intentional criteria and purpose fallbacks", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=pk-child")
+
+      assert html =~ "No acceptance criteria recorded — completion cannot be verified."
+      assert html =~ "Peek epic"
+      assert html =~ "Why this task is necessary to achieve Peek epic is not recorded"
+      assert html =~ "Advance Peek epic by completing this task"
+      refute html =~ "Barkpark mission"
+      refute html =~ "A completed, evidence-backed Barkpark outcome"
     end
 
     test "close patches back to the bare board", %{conn: conn} do
@@ -1869,6 +1905,22 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert html =~ "claimed"
       assert html =~ "@w-hist"
       assert html =~ ~s(data-role="peek-created")
+    end
+
+    test "derived Why identifies missing goal rationale instead of restating criteria",
+         %{conn: conn} do
+      task("ctx-rationale", "A task with a completion contract",
+        lifecycle: "open",
+        parent_id: "ctx-mid",
+        criteria: [%{"criterion" => "The check passes", "met" => false}]
+      )
+
+      {:ok, _view, html} = live(conn, "/admin/projects?task=ctx-rationale")
+
+      assert html =~
+               "Why this task is necessary for Mid parent within Grand goal is not recorded"
+
+      refute html =~ "acceptance criteria define the required outcome"
     end
   end
 
@@ -2320,6 +2372,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       |> put_some("acceptance_criteria", opts[:criteria])
       |> put_some("github", opts[:github])
       |> put_some("description", opts[:description])
+      |> put_some("purpose", opts[:purpose])
       |> put_some("design_doc", opts[:design_doc])
       |> put_some("claim", opts[:claim])
 

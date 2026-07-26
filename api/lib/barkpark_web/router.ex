@@ -1741,6 +1741,14 @@ defmodule BarkparkWeb.Router do
     post("/sessions/:id/messages", ChatController, :create_message)
     post("/sessions/:id/interrupt", ChatController, :interrupt)
     post("/sessions/:id/approval", ChatController, :approval)
+
+    # Archive shelf flips (charter D28): POST verbs (NOT a PATCH key — archived
+    # is lifecycle, not a continuity field), same tenant oracle as every other
+    # id route. They ride THIS :require_chat_access scope, never the
+    # :registered_chat_host scope below.
+    post("/sessions/:id/archive", ChatController, :archive)
+    post("/sessions/:id/unarchive", ChatController, :unarchive)
+
     get("/sessions/:id/events", ChatController, :events)
   end
 
