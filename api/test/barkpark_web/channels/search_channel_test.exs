@@ -339,4 +339,127 @@ defmodule BarkparkWeb.SearchChannelTest do
       _ = {ws, proj}
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # W10/D62 — schema-visibility gate over the WS transport
+  #
+  # The gate lives at ONE chokepoint (DocumentsRetriever's `base`), keyed on
+  # the caller_context the channel threads via `scope_opts(socket)` — nothing
+  # is duplicated per-transport. These tests prove the WS transport inherits
+  # it: a caller_context subject to filtering gets NO private-type documents
+  # for `types:["session"]` (the live leak's exact shape), while a tokened
+  # caller keeps EXACT parity with the query route (`authed?` admits any
+  # api_token, public-read included — the filter is not stricter over WS).
+  # ---------------------------------------------------------------------------
+
+  describe "schema-visibility gate over the WS transport (W10/D62)" do
+    setup %{ws: ws, proj: proj} do
+      scope = [workspace_id: ws.id, project_id: proj.id]
+
+      # The live leak's shape: a PRIVATE session schema next to a public type,
+      # both with PUBLISHED docs (the leak was visibility, not perspective).
+      for {type, visibility} <- [{"session", "private"}, {"post", "public"}] do
+        {:ok, _} =
+          Barkpark.Content.upsert_schema(
+            %{"name" => type, "title" => type, "visibility" => visibility},
+            "test",
+            scope
+          )
+      end
+
+      for {type, id, title} <- [
+            {"session", "ws-leak-session", "Wsleakprobe private session"},
+            {"post", "ws-pub-post", "Wsleakprobe public post"}
+          ] do
+        {:ok, _} = create_document_in!(ws, proj, type, %{"doc_id" => id, "title" => title}, "test")
+
+        {:ok, _} =
+          Barkpark.Content.publish_document(id, type, "test",
+            workspace_id: ws.id,
+            project_id: proj.id
+          )
+      end
+
+      :ok
+    end
+
+    test ~s|a filtered caller gets NOTHING for types:["session"] — and facets never name the private type|,
+         %{ws: ws, proj: proj} do
+      # `CallerContext.from_conn` prefers a `:caller_context` assign over the
+      # `:api_token` — so the api_token authorizes the JOIN while the search
+      # itself runs as a caller the visibility gate applies to. This exercises
+      # the full channel path (join → handle_in → pipeline → retriever) and
+      # proves the ONE chokepoint governs the WS transport; in production every
+      # WS caller carries a token and rides the parity bypass below.
+      raw = "vis-tok-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "vis-gate", "test", ["read"], ws.id)
+
+      socket =
+        socket(UserSocket, "vis-id", %{
+          api_token: token,
+          caller_context: Barkpark.Content.CallerContext.anonymous()
+        })
+
+      {:ok, _reply, joined} =
+        Phoenix.ChannelTest.join(
+          socket,
+          BarkparkWeb.SearchChannel,
+          "search:#{ws.slug}:#{proj.slug}:test"
+        )
+
+      # The live repro: types:["session"] passed straight through pre-fix and
+      # returned full private bodies. Now: nothing.
+      ref =
+        push(joined, "query", %{
+          "q" => "wsleakprobe",
+          "seq" => 1,
+          "engine" => "postgres",
+          "types" => "session"
+        })
+
+      assert_reply ref, :ok, reply
+      assert reply.documents == []
+      assert reply.count == 0
+
+      # Untyped query: only the public hit, and the type facet must not name
+      # the private type (a documents-only filter would leave it as an
+      # existence oracle).
+      ref2 = push(joined, "query", %{"q" => "wsleakprobe", "seq" => 2, "engine" => "postgres"})
+      assert_reply ref2, :ok, r2
+
+      ids = Enum.map(r2.documents, & &1["_id"])
+      assert "ws-pub-post" in ids
+      refute "ws-leak-session" in ids
+      assert r2.count == 1
+
+      type_labels = ((r2.facets || %{})["type"] || []) |> Enum.map(& &1["label"])
+      refute "session" in type_labels
+    end
+
+    test "parity bypass: a tokened WS caller (public-read permissions) still reads private types — the filter is not stricter over WS than the query route",
+         %{ws: ws, proj: proj} do
+      raw = "vis-pr-tok-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "vis-parity", "test", ["public-read", "read"], ws.id)
+      socket = socket(UserSocket, "vis-pr-id", %{api_token: token})
+
+      {:ok, _reply, joined} =
+        Phoenix.ChannelTest.join(
+          socket,
+          BarkparkWeb.SearchChannel,
+          "search:#{ws.slug}:#{proj.slug}:test"
+        )
+
+      ref =
+        push(joined, "query", %{
+          "q" => "wsleakprobe",
+          "seq" => 3,
+          "engine" => "postgres",
+          "types" => "session"
+        })
+
+      assert_reply ref, :ok, reply
+      assert "ws-leak-session" in Enum.map(reply.documents, & &1["_id"])
+      assert reply.count == 1
+    end
+  end
 end

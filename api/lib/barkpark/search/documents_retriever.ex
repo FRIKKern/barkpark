@@ -85,6 +85,24 @@ defmodule Barkpark.Search.DocumentsRetriever do
       # SearchChannel, federated) at once. Fail-closed via `scope_to_grants`'
       # `where: false` on an undecidable grant.
       |> maybe_scope_to_grants(opts)
+      # Schema-visibility gate (search-template W10 / D62). Anonymous callers
+      # are restricted to PUBLIC-visibility schema types — the search twin of
+      # QueryController's `preview? or authed? or schema_public?` gate, which
+      # 404s an anonymous read of a private (or schemaless) type while this
+      # path used to serve full private bodies (live: `?type=session` returned
+      # cwd/machine/git_head to a tokenless caller). Same one-clause-on-`base`
+      # law as the grant clause above: results, count AND facets all derive
+      # from `base`, so this seals flat/scoped HTTP, federated, the WS channel,
+      # loopback AND the pipeline's drop_tokens/typo_widen recovery retries
+      # (they reuse retriever_opts) in one place — never duplicated per
+      # transport. ALLOWLIST, not denylist: it matches the query route's live
+      # 404 for schemaless types and fails closed on any future visibility
+      # value; an empty allowlist yields an empty result. Bypassed for ANY
+      # authenticated principal (`:api_token`/`:user`) — EXACT parity with
+      # query_controller.ex's `authed?` (which admits any token, including
+      # public-read); tightening that for public-read tokens must move both
+      # routes together and is filed separately.
+      |> restrict_anonymous_to_public_types(scope, opts)
 
     base = if browse?, do: base, else: where_match(base, parsed, terms, config, relaxed)
     base = if type, do: where(base, [d], d.type == ^type), else: base
@@ -297,6 +315,42 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> Enum.sort_by(fn %{"label" => label, "count" => count} -> {-count, label} end)
 
     if buckets == [], do: map, else: Map.put(map, name, buckets)
+  end
+
+  # Schema-visibility gate (D62) — see the `base` pipeline comment above. An
+  # authenticated principal (any api_token or user session) bypasses entirely:
+  # exact parity with QueryController's `authed?/1`, never stricter on one
+  # route. Everyone else — anonymous, nil, or any unknown future principal —
+  # fails CLOSED onto the public-type allowlist.
+  defp restrict_anonymous_to_public_types(query, scope, opts) do
+    case Keyword.get(opts, :caller_context) do
+      %{principal_type: p} when p in [:api_token, :user] ->
+        query
+
+      _ ->
+        where(query, [d], d.type in ^public_type_names(scope, opts))
+    end
+  end
+
+  # The ALLOWLIST of schema type names an anonymous caller may search: schemas
+  # in the caller's tenancy scope whose visibility is EXPLICITLY "public" —
+  # `visibility: nil` / "private" / any future value is NOT public, matching
+  # `Content.schema_public?/3` (the query route's gate) byte-for-byte. A type
+  # with no schema row at all is absent by construction (the query route 404s
+  # it; a denylist would admit it). Cost: one 39-row scan measured at 0.078ms
+  # on live prod vs a 224-675ms search fixed cost. Empty allowlist ⇒
+  # `d.type in []` ⇒ WHERE false ⇒ empty results/count/facets (fail closed).
+  # The Indx indexer applies the same predicate at index time
+  # (IndexerWorker.schema_public?/1) — one invariant, two enforcement points.
+  defp public_type_names(scope, opts) do
+    scope
+    |> Barkpark.Content.list_schemas(
+      workspace_id: Keyword.get(opts, :workspace_id),
+      project_id: Keyword.get(opts, :project_id)
+    )
+    |> Enum.filter(&(&1.visibility == "public"))
+    |> Enum.map(& &1.name)
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
   end
 
   # Mirror of Content.scope_to_dataset for the search read path (barkpark-y9ee).
