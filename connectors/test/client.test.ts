@@ -327,7 +327,8 @@ describe("retry — keyed off error.code, not the raw status", () => {
     server.use(
       http.post(`${TEST_BASE}/v1/chat/sessions`, () => {
         hits += 1;
-        if (hits < 2) return errorResponse(503, "chat_create_failed", "runtime down");
+        if (hits < 2)
+          return errorResponse(503, "chat_create_failed", "runtime down");
         return HttpResponse.json(
           { id: SESSION_ID, cwd: "/opt/barkpark" },
           { status: 201 },
