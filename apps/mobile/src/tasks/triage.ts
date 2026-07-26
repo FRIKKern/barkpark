@@ -24,11 +24,20 @@
 // (a race), and those are surfaced with the server's own words.
 //
 // THE TRAP (recorded in the wave log): a pulse bumps the claim epoch, so a
-// stamp issued with a pre-pulse epoch 409s. It is closed here STRUCTURALLY,
-// not by discipline: the epoch is only ever read from the CURRENT doc, and
-// every write's 200 body replaces that doc — so a successful pulse installs
-// its own fresh epoch before any later stamp can be built. Single-flight
-// (one write at a time) closes the remaining interleaving window.
+// stamp issued with a pre-pulse epoch 409s. Two windows had to be closed for
+// that to be structural rather than a matter of discipline:
+//
+//   write/write — single-flight: exactly one write is in flight at a time, so
+//     no stamp is ever built from a doc a concurrent write has already moved.
+//   write/read  — GENERATION TAGGING (below): a read started before a write
+//     landed carries a pre-write generation, so its (older) doc is DROPPED
+//     instead of reinstalled as current truth. Without this, a pull-to-refresh
+//     overlapping a pulse could put epoch N back on screen after the pulse had
+//     installed N+1, and the next stamp would 409 stale_claim.
+//
+// What is NOT claimed: the server fence is still the only authority. A racing
+// writer on another device can move the epoch between our read and our write
+// at any time — that 409 is expected, and `RE_READ_REASONS` self-heals it.
 import {
   describeTaskError,
   type TaskCriterion,
@@ -85,6 +94,11 @@ export interface TriageState {
    * blocks epoch-fenced actions until the re-read lands. */
   staleEpoch: boolean
   nextOpId: number
+  /** Bumped by every write whose 200 body we install. A `fetch` effect carries
+   * the generation it was issued at; a `loaded` answer tagged with an older one
+   * describes a server state that predates a write we have already applied, so
+   * it is dropped rather than reinstalled (the write/read reorder). */
+  writeGeneration: number
 }
 
 export function initialTriageState(docId: string, worker: string): TriageState {
@@ -96,13 +110,18 @@ export function initialTriageState(docId: string, worker: string): TriageState {
     refreshing: false,
     staleEpoch: false,
     nextOpId: 1,
+    writeGeneration: 0,
   }
 }
 
 // ── events ───────────────────────────────────────────────────────────────────
 
 export type TriageEvent =
-  | { type: 'loaded'; detail: TaskDetail }
+  /** `generation` is the state's `writeGeneration` at the moment the read was
+   * issued (the shell copies it off the `fetch` effect). Omit it only for a
+   * read that is answering nothing in particular — an untagged answer is always
+   * applied. */
+  | { type: 'loaded'; detail: TaskDetail; generation?: number }
   | { type: 'loadFailed'; message: string }
   | { type: 'refresh' }
   | { type: 'stamp'; criterion: number; met: boolean; text: string }
@@ -116,7 +135,9 @@ export type TriageEvent =
 // ── effects ──────────────────────────────────────────────────────────────────
 
 export type TriageEffect =
-  | { type: 'fetch' }
+  /** The shell must echo `generation` back on the resulting `loaded` event —
+   * that is what lets the reducer drop a response the writes have outrun. */
+  | { type: 'fetch'; generation: number }
   | {
       type: 'stamp'
       opId: number
@@ -270,7 +291,14 @@ function refuse(state: TriageState, text: string): Out {
 export function reduce(state: TriageState, ev: TriageEvent): Out {
   switch (ev.type) {
     case 'loaded': {
-      // A landing read is authoritative: it clears the stale-epoch brake and
+      // GENERATION FENCE: a read issued before a write landed describes server
+      // state we have already superseded. Applying it would put the pre-write
+      // doc (old claim epoch) back on screen and make the next stamp 409
+      // stale_claim. Drop it — but end the refresh, or the spinner never stops.
+      if (ev.generation !== undefined && ev.generation !== state.writeGeneration) {
+        return { state: { ...state, refreshing: false }, effects: [] }
+      }
+      // An in-time read IS authoritative: it clears the stale-epoch brake, and
       // any in-flight optimism it cannot vouch for is already gone (writes are
       // single-flight, and a fence refusal drops the op before asking).
       return {
@@ -291,7 +319,10 @@ export function reduce(state: TriageState, ev: TriageEvent): Out {
     }
 
     case 'refresh':
-      return { state: { ...state, refreshing: true }, effects: [{ type: 'fetch' }] }
+      return {
+        state: { ...state, refreshing: true },
+        effects: [{ type: 'fetch', generation: state.writeGeneration }],
+      }
 
     case 'dismissNotice': {
       const next = { ...state }
@@ -410,6 +441,9 @@ export function reduce(state: TriageState, ev: TriageEvent): Out {
         ...state,
         detail,
         staleEpoch: false,
+        // This write's body IS the new truth — every read already in flight is
+        // now stale, and the bump is what makes their answers droppable.
+        writeGeneration: state.writeGeneration + 1,
         notice: { tone: 'ok', text: confirmationFor(action, ev.doc) },
       }
       delete next.pending
@@ -431,7 +465,9 @@ export function reduce(state: TriageState, ev: TriageEvent): Out {
         // trap is the classic case). Brake the fenced actions and re-read.
         next.staleEpoch = true
         next.refreshing = true
-        return { state: next, effects: [{ type: 'fetch' }] }
+        // A refused write applied nothing, so the generation has not moved —
+        // this forced re-read is in-time by construction and will be applied.
+        return { state: next, effects: [{ type: 'fetch', generation: next.writeGeneration }] }
       }
       return { state: next, effects: [] }
     }
