@@ -231,7 +231,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case shelfLoadedMsg:
 		m.shelfLoading = false
 		if msg.err != nil {
-			m.shelfErr = msg.err.Error()
+			// Prefixed AT THE SOURCE, like the unarchive failure below: the shelf
+			// paints m.shelfErr verbatim (under stale rows it is the only context
+			// the line has), so every writer here owns its own wording.
+			m.shelfErr = "could not read the shelf — " + msg.err.Error()
 			return m, nil
 		}
 		m.shelfErr = ""

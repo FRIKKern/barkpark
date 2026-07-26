@@ -1609,7 +1609,7 @@ func (m Model) renderShelf() string {
 	case m.shelfLoading && len(m.shelf) == 0:
 		b.WriteString(dimStyle.Render("Loading the shelf…"))
 	case m.shelfErr != "" && len(m.shelf) == 0:
-		b.WriteString(noticeStyle.Render("Could not load the shelf: "+m.shelfErr) + "\n")
+		b.WriteString(noticeStyle.Render(m.shelfErr) + "\n")
 		b.WriteString(dimStyle.Render("press r to retry · esc back to the herd"))
 	case len(m.shelf) == 0:
 		b.WriteString(dimStyle.Render("Nothing on the shelf — `a` on the herd archives a session."))

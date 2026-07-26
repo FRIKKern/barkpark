@@ -767,11 +767,13 @@ func TestShelfScreenPaintsRowsAndTheRestoreKey(t *testing.T) {
 	if got := empty.renderShelf(); !strings.Contains(got, "Nothing on the shelf") {
 		t.Errorf("an empty shelf must say so:\n%s", got)
 	}
+	// A failed READ is prefixed at the source (model.go), so the paint can print
+	// it verbatim — under stale rows that line is the only context there is.
 	failed := empty
-	failed.shelfErr = "server said no"
-	if got := failed.renderShelf(); !strings.Contains(got, "Could not load the shelf") ||
+	failed = mustModel(failed.Update(shelfLoadedMsg{err: errArchiveTest}))
+	if got := failed.renderShelf(); !strings.Contains(got, "could not read the shelf — boom") ||
 		!strings.Contains(got, "press r to retry") {
-		t.Errorf("a failed shelf read must offer the retry:\n%s", got)
+		t.Errorf("a failed shelf read must say so and offer the retry:\n%s", got)
 	}
 }
 
