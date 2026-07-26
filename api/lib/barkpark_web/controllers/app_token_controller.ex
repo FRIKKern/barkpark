@@ -189,29 +189,22 @@ defmodule BarkparkWeb.AppTokenController do
     unprocessable(conn, ~s(body must carry "token" or "email"))
   end
 
+  # The bucket key comes from RateLimiter.client_ip/1 — the ONE trust boundary
+  # for x-forwarded-for (it was the limiter's to draw, not this controller's).
+  # The earlier first-hop read here was inherited from the pulse limiter and was
+  # not a limit at all: Caddy APPENDS, so a caller reaching this endpoint
+  # directly could send its own header and rotate its bucket key per request.
+  # The resolver believes the chain only from a trusted front and takes the
+  # rightmost non-proxy hop. The Cloud control plane's relayed address
+  # (Registry.revoke_app_token/3) still wins — a whole team does not share one
+  # bucket keyed on the single Cloud egress IP — provided that egress address is
+  # listed in BARKPARK_TRUSTED_PROXIES; unlisted, it is correctly disbelieved.
   defp revoke_rate_limited?(conn) do
     RateLimiter.check(
-      {:app_token_revoke, client_ip(conn)},
+      {:app_token_revoke, RateLimiter.client_ip(conn)},
       capacity: @revoke_bucket_capacity,
       refill_per_sec: @revoke_bucket_capacity / 60
     ) == :rate_limited
-  end
-
-  # First x-forwarded-for hop as the client ip. INHERITED, not introduced here
-  # (charter D43): this is verbatim the idiom the pre-existing pulse limiter
-  # already uses, and it is only sound because the instance is fronted by its own
-  # proxy (which APPENDS, keeping the true first hop first). A caller reaching
-  # this endpoint directly can pick its own bucket key — which was equally true
-  # before, so nothing here widens it. What DID change: the Cloud proxy now
-  # relays the phone's address in this header (Registry.revoke_app_token/3), so a
-  # whole team no longer shares one bucket keyed on the single Cloud egress IP.
-  # Hardening the boundary (a trusted-proxy allowlist) belongs to the limiter,
-  # not to this pass.
-  defp client_ip(conn) do
-    case get_req_header(conn, "x-forwarded-for") do
-      [forwarded | _] -> forwarded |> String.split(",") |> hd() |> String.trim()
-      [] -> conn.remote_ip |> :inet.ntoa() |> to_string()
-    end
   end
 
   defp mint(conn, params) do

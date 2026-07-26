@@ -602,6 +602,45 @@ case System.get_env("SMTP_HOST") do
     :ok
 end
 
+# Trust boundary for x-forwarded-for on every IP-keyed rate bucket
+# (Barkpark.RateLimiter.client_ip/1). NOT prod-gated: which fronts sit in front
+# of this box is a property of the DEPLOYMENT, not of MIX_ENV, and a self-hoster
+# running MIX_ENV=dev behind a relay needs the same knob.
+#
+# Unset keeps the config.exs default (empty — loopback is trusted
+# unconditionally and is never listed here), so a plain self-host needs nothing.
+# Set it to the Barkpark Cloud control plane's egress address to let its relayed
+# caller IP be believed on the revoke DELETE; unlisted, that relay is
+# disbelieved and the whole team shares one bucket keyed on the egress IP.
+#
+# INDIVIDUAL ADDRESSES ONLY (mirrors cloud/config/runtime.exs TRUSTED_PROXY_PEERS
+# and its charter D5 reasoning). A CIDR range re-opens the forgery hole: an
+# attacker inside the range has its real appended hop SKIPPED and its forged
+# left-hand hop believed. A malformed entry raises at boot rather than silently
+# degrading the boundary to a no-op.
+if proxies = System.get_env("BARKPARK_TRUSTED_PROXIES") do
+  config :barkpark,
+         :trusted_proxies,
+         proxies
+         |> String.split(",")
+         |> Enum.map(&String.trim/1)
+         |> Enum.reject(&(&1 == ""))
+         |> Enum.map(fn proxy ->
+           case :inet.parse_address(String.to_charlist(proxy)) do
+             {:ok, address} ->
+               address
+
+             {:error, _} ->
+               raise """
+               BARKPARK_TRUSTED_PROXIES contains #{inspect(proxy)}, which is not a valid IP address.
+               Expected a comma-separated list of individual addresses, e.g. "203.0.113.7".
+               CIDR ranges are NOT supported: trusting a whole range lets any host in it forge
+               every client's rate-limit bucket key via X-Forwarded-For.
+               """
+           end
+         end)
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

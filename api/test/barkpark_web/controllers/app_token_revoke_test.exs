@@ -67,6 +67,23 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
     |> delete("/v1/auth/app-tokens", Jason.encode!(body))
   end
 
+  # The same revoke arriving DIRECTLY from a public peer that forges the header —
+  # the shape the trust boundary exists for (Barkpark.RateLimiter.client_ip/1).
+  defp revoke_direct(bearer, peer, forged_ip, body) do
+    as(build_conn(), bearer)
+    |> Map.put(:remote_ip, peer)
+    |> put_req_header("x-forwarded-for", forged_ip)
+    |> delete("/v1/auth/app-tokens", Jason.encode!(body))
+  end
+
+  # A chain as our own front actually produces it: the control plane relayed the
+  # phone's address, Caddy appended the control plane's egress on the right.
+  defp revoke_relayed(bearer, phone_ip, relay_ip, body) do
+    as(build_conn(), bearer)
+    |> put_req_header("x-forwarded-for", "#{phone_ip}, #{relay_ip}")
+    |> delete("/v1/auth/app-tokens", Jason.encode!(body))
+  end
+
   defp self_revoke(bearer) do
     as(build_conn(), bearer) |> delete("/v1/auth/app-tokens/current")
   end
@@ -243,6 +260,47 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
       # teammate spent the whole team's allowance and the 429 surfaced at the
       # proxy as a misleading 502 instance_unreachable.
       assert revoke_from(admin, caller_b, %{email: email}) |> json_response(200)
+    end
+
+    test "a DIRECT caller cannot forge its way out of the bucket: 11 hits, 11 forged IPs, still 429",
+         %{admin: admin} do
+      email = unique_email()
+      # A public peer reaching the endpoint without passing our own front, so its
+      # x-forwarded-for carries no authority at all.
+      peer = {203, 0, 113, 66}
+
+      for i <- 1..10 do
+        assert revoke_direct(admin, peer, "9.9.9.#{i}", %{email: email}) |> json_response(200)
+      end
+
+      # A fresh forgery on the 11th hit does NOT buy a fresh allowance: the
+      # bucket keyed on the verified peer, not on the header. Restore the old
+      # first-hop read (RateLimiter.client_ip/1 → first hop unconditionally) and
+      # this is a 200 — every request its own bucket, i.e. no limit at all.
+      throttled = revoke_direct(admin, peer, "9.9.9.11", %{email: email}) |> json_response(429)
+      assert throttled["error"]["code"] == "rate_limited"
+    end
+
+    test "behind a LISTED relay the per-phone bucketing still holds (the #6224 relay keeps working)",
+         %{admin: admin} do
+      email = unique_email()
+      relay = "198.51.100.55"
+      original = Application.get_env(:barkpark, :trusted_proxies)
+      Application.put_env(:barkpark, :trusted_proxies, [{198, 51, 100, 55}])
+      on_exit(fn -> Application.put_env(:barkpark, :trusted_proxies, original || []) end)
+
+      # Phone A burns its whole 10/min through the relay…
+      for _ <- 1..10 do
+        assert revoke_relayed(admin, "203.0.113.7", relay, %{email: email}) |> json_response(200)
+      end
+
+      assert revoke_relayed(admin, "203.0.113.7", relay, %{email: email}) |> json_response(429)
+
+      # …and its teammate on the SAME control plane is untouched: the ORIGINAL
+      # first hop is still the bucket key once the relay's egress address is
+      # listed. Drop the allowlist entry and both phones collapse onto the
+      # relay's own address — the pre-#6224 one-bucket-per-team behaviour.
+      assert revoke_relayed(admin, "198.51.100.9", relay, %{email: email}) |> json_response(200)
     end
   end
 end

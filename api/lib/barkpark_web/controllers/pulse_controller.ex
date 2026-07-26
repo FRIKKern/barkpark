@@ -107,10 +107,14 @@ defmodule BarkparkWeb.PulseController do
     end
   end
 
+  # Every IP-keyed bucket below keys on RateLimiter.client_ip/1 — the ONE trust
+  # boundary for x-forwarded-for: the header is believed only from a trusted
+  # front, and the rightmost non-proxy hop wins, so a caller reaching the box
+  # directly cannot pick its own bucket key.
   defp check_ip_bucket(conn, channel, cfg) do
     rate = cfg["rate_per_min"]
 
-    case RateLimiter.check({:pulse, client_ip(conn), channel},
+    case RateLimiter.check({:pulse, RateLimiter.client_ip(conn), channel},
            capacity: @burst,
            refill_per_sec: rate / 60
          ) do
@@ -131,21 +135,12 @@ defmodule BarkparkWeb.PulseController do
   # visitors polling normally never trip it; a single-IP flood does. Retry
   # of 1s: at 10 tokens/sec a client is clear again almost immediately.
   defp check_read_bucket(conn, channel) do
-    case RateLimiter.check({:pulse_read, client_ip(conn), channel},
+    case RateLimiter.check({:pulse_read, RateLimiter.client_ip(conn), channel},
            capacity: @read_capacity,
            refill_per_sec: @read_refill_per_sec
          ) do
       :ok -> :ok
       :rate_limited -> {:rate_limited, 1}
-    end
-  end
-
-  # RemoteIp-style header awareness is deliberately minimal: trust the first
-  # x-forwarded-for hop when present (Caddy fronts prod), else the peer.
-  defp client_ip(conn) do
-    case get_req_header(conn, "x-forwarded-for") do
-      [forwarded | _] -> forwarded |> String.split(",") |> hd() |> String.trim()
-      [] -> conn.remote_ip |> :inet.ntoa() |> to_string()
     end
   end
 
