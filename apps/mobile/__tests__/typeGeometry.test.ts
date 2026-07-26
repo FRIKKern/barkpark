@@ -377,33 +377,52 @@ const NAMED: Record<string, string> = {
   'ui/TabBar.tsx#label': '14/20',
 }
 
-// The three inline-style renderers. blocks.tsx's 14 role references ARE its
-// two registers (paper + chat body/H1/H2/H3) plus the block-specific outliers;
-// the scale counts are its per-block chrome. Adding a block renderer moves a
-// count here and reds this test — intended: the reviewer then sees which rung
-// the new block chose instead of taking it on trust.
+// The inline-style renderers, per family module since the D49 split (the old
+// blocks.tsx monolith's census redistributed token-for-token; register.ts's 8
+// role references ARE the two registers — paper + chat body/H1/H2/H3 — and
+// each family file carries its own block chrome). Adding a block renderer
+// moves a count here and reds this test — intended: the reviewer then sees
+// which rung the new block chose instead of taking it on trust, and a
+// renderer slice moves only its OWN family's rows (D49's recorded shared-file
+// exception; conflicts regen-resolve).
 const CENSUS: Record<string, Record<string, number>> = {
-  'papers/portabledoc/blocks.tsx': {
-    'roles.calloutBody': 1,
-    'roles.chatBody': 1,
-    'roles.chatH1': 1,
-    'roles.chatH2': 1,
-    'roles.chatH3': 1,
+  'papers/portabledoc/blocks/core-container.tsx': {
+    'roles.tocRow': 1,
+    'scale.base': 1,
+    'scale.md': 4,
+    'scale.micro': 1,
+    'scale.xs': 2,
+  },
+  'papers/portabledoc/blocks/core-doc.tsx': {
+    'scale.base': 2,
+    'scale.sm': 1,
+    'scale.xs': 1,
+  },
+  'papers/portabledoc/blocks/core-media.tsx': {
     'roles.codeBlock': 1,
-    'roles.paperH1': 1,
-    'roles.paperH2': 1,
-    'roles.paperH3': 1,
+    'scale.sm': 1,
+    'scale.xs': 1,
+  },
+  'papers/portabledoc/blocks/core-prose.tsx': {
+    'roles.calloutBody': 1,
     'roles.paperIngress': 1,
     'roles.paperPullquote': 1,
-    'roles.readingBody': 1,
+    'scale.base': 1,
+    'scale.sm': 3,
+    'scale.xs': 2,
+  },
+  'papers/portabledoc/blocks/dataviz.tsx': {
     'roles.statValue': 1,
-    'roles.tocRow': 1,
-    'scale.base': 7,
-    'scale.md': 4,
     'scale.md.fontSize': 1,
-    'scale.micro': 1,
-    'scale.sm': 9,
-    'scale.xs': 8,
+    'scale.sm': 1,
+    'scale.xs': 1,
+  },
+  'papers/portabledoc/blocks/table.tsx': {
+    'scale.sm': 2,
+  },
+  'papers/portabledoc/blocks/taskboard.tsx': {
+    'scale.base': 3,
+    'scale.sm': 1,
   },
   'papers/portabledoc/chat.tsx': {
     'roles.chatApparatus': 4,
@@ -413,6 +432,19 @@ const CENSUS: Record<string, Record<string, number>> = {
   },
   'papers/portabledoc/inlines.tsx': {
     'scale.sm.fontSize': 1,
+  },
+  'papers/portabledoc/register.ts': {
+    'roles.chatBody': 1,
+    'roles.chatH1': 1,
+    'roles.chatH2': 1,
+    'roles.chatH3': 1,
+    'roles.paperH1': 1,
+    'roles.paperH2': 1,
+    'roles.paperH3': 1,
+    'roles.readingBody': 1,
+  },
+  'papers/portabledoc/registry.tsx': {
+    'scale.xs': 1,
   },
 }
 
@@ -437,6 +469,6 @@ describe('every call site resolves to the geometry the app shipped', () => {
     // A resolver that silently matched nothing would make both pins vacuous.
     expect(Object.keys(ledger.named).length).toBeGreaterThan(80)
     expect(ledger.named['ui/TabBar.tsx#label']).toBe('14/20')
-    expect(ledger.census['papers/portabledoc/blocks.tsx']?.['scale.sm']).toBeGreaterThan(0)
+    expect(ledger.census['papers/portabledoc/blocks/core-prose.tsx']?.['scale.sm']).toBeGreaterThan(0)
   })
 })
