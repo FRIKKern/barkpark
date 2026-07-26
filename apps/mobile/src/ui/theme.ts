@@ -18,9 +18,25 @@ export interface Theme {
    * (the ChatGPT/Claude register: quiet gray, NOT the accent), read with
    * the normal text color. */
   bubble: string
+  /** Which palette this is — REQUIRED so consumers stop sniffing hex
+   * literals (MermaidIsland's `theme.bg !== '#f6f7f6'` was the live bug
+   * this kills: retune the light background and dark detection breaks). */
+  isDark: boolean
+  /** Code panel — a step off the surface so code reads as a region. */
+  codeBg: string
+  /** Code foreground — near-text, tuned for the code panel. */
+  codeFg: string
+  /** Warning — the manifest's lifecycle.blocked family (role: warn). */
+  warn: string
+  /** Soft warning fill (chip/row background under `warn` content). */
+  warnSoft: string
+  /** Soft success fill (chip/row background under `success` content). */
+  successSoft: string
+  /** Soft danger fill (chip/row background under `danger` content). */
+  dangerSoft: string
 }
 
-const light: Theme = {
+export const light: Theme = {
   bg: '#f6f7f6',
   surface: '#ffffff',
   border: '#e2e6e3',
@@ -31,9 +47,16 @@ const light: Theme = {
   danger: '#b3372e',
   success: '#1f6f4a',
   bubble: '#e9ede9',
+  isDark: false,
+  codeBg: '#eef1ef',
+  codeFg: '#233029',
+  warn: '#d97706',
+  warnSoft: '#f9f1e2',
+  successSoft: '#e7f2ea',
+  dangerSoft: '#f8e9e7',
 }
 
-const dark: Theme = {
+export const dark: Theme = {
   bg: '#121714',
   surface: '#1b221e',
   border: '#2c352f',
@@ -44,6 +67,13 @@ const dark: Theme = {
   danger: '#e06c5f',
   success: '#3fa374',
   bubble: '#242d27',
+  isDark: true,
+  codeBg: '#161c19',
+  codeFg: '#cfd9d2',
+  warn: '#fbbf24',
+  warnSoft: '#33290f',
+  successSoft: '#1d2b23',
+  dangerSoft: '#33211f',
 }
 
 export function useTheme(): Theme {

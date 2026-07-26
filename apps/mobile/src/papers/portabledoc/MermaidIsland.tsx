@@ -63,7 +63,7 @@ export function scriptStringLiteral(s: string): string {
  * "</script>" from author content survives into the HTML). */
 export function islandHtml(source: string, theme: Theme): string {
   const src = scriptStringLiteral(source)
-  const dark = theme.bg !== '#f6f7f6' ? 'true' : 'false'
+  const dark = theme.isDark ? 'true' : 'false'
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
