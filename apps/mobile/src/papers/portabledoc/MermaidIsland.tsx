@@ -43,6 +43,7 @@ import { StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 
 import type { Theme } from '../../ui/theme'
+import { scale } from '../../ui/typography'
 
 const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js'
 const INITIAL_HEIGHT = 220
@@ -167,7 +168,7 @@ export function MermaidIsland({ source, theme }: { source: string; theme: Theme 
 const styles = StyleSheet.create({
   island: { borderWidth: 1, borderRadius: 8, overflow: 'hidden', padding: 8 },
   placeholder: { borderWidth: 1, borderRadius: 8, padding: 12, gap: 6 },
-  placeholderLabel: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  placeholderSource: { fontFamily: 'monospace', fontSize: 11, lineHeight: 16 },
-  truncatedNote: { fontSize: 11, fontStyle: 'italic', marginTop: 4 },
+  placeholderLabel: { ...scale.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  placeholderSource: { ...scale.micro, fontFamily: 'monospace' },
+  truncatedNote: { ...scale.micro, fontStyle: 'italic', marginTop: 4 },
 })

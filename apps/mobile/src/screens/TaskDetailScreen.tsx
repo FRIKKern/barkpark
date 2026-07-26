@@ -37,6 +37,7 @@ import {
 } from '../tasks/triage'
 import { useTaskTriage } from '../tasks/useTaskTriage'
 import { useTheme, type Theme } from '../ui/theme'
+import { scale } from '../ui/typography'
 
 export function TaskDetailScreen({
   connection,
@@ -479,16 +480,19 @@ function Fact({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: { borderBottomWidth: 1, paddingHorizontal: 16, paddingTop: 52, paddingBottom: 10, gap: 6 },
-  back: { fontSize: 14 },
-  headerTitle: { fontSize: 17, fontWeight: '700', lineHeight: 22 },
+  back: { ...scale.base },
+  // RATIFIED DRIFT (the wave's ONE deliberate size change): 17 was the only
+  // 17 pt in the app and sat off every rung of the scale. It lands on lg,
+  // which keeps the 22 lead exactly and drops the size by 1 pt.
+  headerTitle: { ...scale.lg, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { padding: 16, gap: 12, paddingBottom: 32 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
   card: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 },
-  cardTitle: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
+  cardTitle: { ...scale.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
-    fontSize: 11,
+    ...scale.micro,
     borderWidth: 1,
     borderRadius: 5,
     paddingHorizontal: 6,
@@ -496,16 +500,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   fact: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  factLabel: { fontSize: 12, width: 120 },
-  factValue: { flex: 1, fontSize: 13 },
+  factLabel: { ...scale.xs, width: 120 },
+  factValue: { flex: 1, ...scale.sm },
   nowBlock: { gap: 2, marginTop: 4 },
-  nowText: { fontSize: 14, fontStyle: 'italic', lineHeight: 19 },
+  nowText: { ...scale.base, fontStyle: 'italic' },
   criterion: { borderTopWidth: 1, paddingTop: 8, gap: 4 },
   criterionTop: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  mark: { fontSize: 15, width: 16 },
-  criterionText: { flex: 1, fontSize: 14, lineHeight: 19 },
+  mark: { ...scale.md, width: 16 },
+  criterionText: { flex: 1, ...scale.base },
   criterionActions: { flexDirection: 'row', gap: 16, marginTop: 2 },
-  metaText: { fontSize: 12, lineHeight: 16 },
+  metaText: { ...scale.xs },
   actionBar: { borderTopWidth: 1, padding: 10, paddingBottom: 26 },
   stampRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   input: {
@@ -515,12 +519,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     maxHeight: 96,
-    fontSize: 14,
+    ...scale.base,
   },
-  action: { fontSize: 14, fontWeight: '600' },
-  fenceLine: { flex: 1, fontSize: 12, lineHeight: 16 },
-  notice: { fontSize: 12, paddingHorizontal: 16, paddingVertical: 8 },
-  body: { fontSize: 15, textAlign: 'center' },
-  muted: { fontSize: 13, textAlign: 'center' },
-  link: { fontSize: 14, textDecorationLine: 'underline' },
+  action: { ...scale.base, fontWeight: '600' },
+  fenceLine: { flex: 1, ...scale.xs },
+  notice: { ...scale.xs, paddingHorizontal: 16, paddingVertical: 8 },
+  body: { ...scale.md, textAlign: 'center' },
+  muted: { ...scale.sm, textAlign: 'center' },
+  link: { ...scale.base, textDecorationLine: 'underline' },
 })

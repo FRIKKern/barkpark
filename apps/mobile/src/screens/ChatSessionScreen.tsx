@@ -64,6 +64,7 @@ import { renderBlockNative, type BlockCtx } from '../papers/portabledoc/blocks'
 import type { Block } from '../papers/portabledoc/model'
 import { haptic } from '../ui/haptics'
 import { useTheme, type Theme } from '../ui/theme'
+import { roles, scale } from '../ui/typography'
 
 const CARD_TITLES: Record<string, string> = {
   approval: 'Approval requested',
@@ -893,10 +894,10 @@ const styles = StyleSheet.create({
     paddingTop: 54,
     paddingBottom: 12,
   },
-  back: { fontSize: 26, fontWeight: '400', lineHeight: 28, marginTop: -2 },
-  headerTitle: { flex: 1, fontSize: 16, fontWeight: '600' },
+  back: { ...roles.backGlyph, fontWeight: '400', marginTop: -2 },
+  headerTitle: { flex: 1, ...scale.lg, fontWeight: '600' },
   headerMeta: { flexDirection: 'row', gap: 8 },
-  metaBadge: { fontSize: 12 },
+  metaBadge: { ...scale.xs },
   transcript: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
   // Generous vertical rhythm between turns — whitespace is the hierarchy.
@@ -909,19 +910,22 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     maxWidth: '80%',
   },
-  userText: { fontSize: 16, lineHeight: 23 },
+  // THE BUBBLE LAW (#6126): 16/23 user, 16/26 assistant — the user turn is
+  // deliberately tighter than the answer. Both are token-owned now; the
+  // rendered pairs are byte-identical to what #6126 settled.
+  userText: { ...roles.userBubble },
   // Assistant turns: full-width document text on the background.
-  assistantText: { fontSize: 16, lineHeight: 26, alignSelf: 'stretch' },
+  assistantText: { ...roles.chatBody, alignSelf: 'stretch' },
   // The rendered-blocks form of the same turn — the identical full-width,
   // chrome-free frame; the block renderers carry their own vertical rhythm,
   // so this adds no padding of its own.
   assistantDoc: { alignSelf: 'stretch' },
-  queuedBadge: { fontSize: 11, marginTop: 4 },
-  systemLine: { fontSize: 13, lineHeight: 18, fontStyle: 'italic' },
+  queuedBadge: { ...scale.micro, marginTop: 4 },
+  systemLine: { ...scale.sm, fontStyle: 'italic' },
   // The work-log handle: hugs its text so the tap target is the label, not
   // the full transcript width.
   logHeader: { alignSelf: 'flex-start' },
-  logHeaderText: { fontFamily: 'monospace', fontSize: 13, lineHeight: 19 },
+  logHeaderText: { ...scale.sm, fontFamily: 'monospace' },
   // The re-engage affordance floats over the transcript's bottom edge. The
   // layer is box-none so it never eats a scroll the pill itself is not under.
   jumpLayer: { position: 'absolute', left: 0, right: 0, bottom: 14, alignItems: 'center' },
@@ -933,7 +937,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
-  jumpGlyph: { fontSize: 17, lineHeight: 20, fontWeight: '600' },
+  jumpGlyph: { ...roles.jumpGlyph, fontWeight: '600' },
   card: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 16,
@@ -941,9 +945,9 @@ const styles = StyleSheet.create({
     gap: 10,
     alignSelf: 'stretch',
   },
-  cardTitle: { fontSize: 11, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
-  cardBody: { fontSize: 15, lineHeight: 22 },
-  cardStatus: { fontSize: 13, fontWeight: '600' },
+  cardTitle: { ...scale.micro, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
+  cardBody: { ...scale.md },
+  cardStatus: { ...scale.sm, fontWeight: '600' },
   cardActions: { flexDirection: 'row', gap: 10, marginTop: 2 },
   pillBtn: {
     borderRadius: 999,
@@ -952,8 +956,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pillBtnText: { fontSize: 14, fontWeight: '600' },
-  notice: { fontSize: 12, textAlign: 'center', paddingHorizontal: 18, paddingVertical: 4 },
+  pillBtnText: { ...scale.base, fontWeight: '600' },
+  notice: { ...scale.xs, textAlign: 'center', paddingHorizontal: 18, paddingVertical: 4 },
   // The composer floats on the background: a pill input + a round send.
   composer: {
     flexDirection: 'row',
@@ -970,8 +974,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 11,
     paddingBottom: 11,
-    fontSize: 16,
-    lineHeight: 21,
+    ...roles.composerInput,
     maxHeight: 120,
   },
   roundBtn: {
@@ -981,9 +984,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendGlyph: { fontSize: 20, fontWeight: '700', lineHeight: 24 },
-  stopGlyph: { fontSize: 14, lineHeight: 16 },
-  body: { fontSize: 15, textAlign: 'center' },
-  muted: { fontSize: 13, textAlign: 'center' },
-  link: { fontSize: 14, textDecorationLine: 'underline' },
+  sendGlyph: { ...roles.sendGlyph, fontWeight: '700' },
+  stopGlyph: { ...roles.stopGlyph },
+  body: { ...scale.md, textAlign: 'center' },
+  muted: { ...scale.sm, textAlign: 'center' },
+  link: { ...scale.base, textDecorationLine: 'underline' },
 })

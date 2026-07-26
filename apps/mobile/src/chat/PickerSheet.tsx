@@ -35,6 +35,7 @@ import type { ChatCapabilities, ChatProviderCaps } from '../api/chat'
 import type { SessionChoices } from './sessionStore'
 import { haptic } from '../ui/haptics'
 import type { Theme } from '../ui/theme'
+import { scale } from '../ui/typography'
 
 /** Which picker row a value belongs to — also the SessionChoices key it
  * writes, so there is no second mapping to drift. */
@@ -293,12 +294,12 @@ const styles = StyleSheet.create({
   grabberBar: { width: 36, height: 4, borderRadius: 2 },
   sheetBody: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 32, gap: 18 },
   row: { gap: 8 },
-  rowLabel: { fontSize: 12, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
+  rowLabel: { ...scale.xs, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  chipText: { fontSize: 14, fontWeight: '600' },
-  note: { fontSize: 13, lineHeight: 18 },
+  chipText: { ...scale.base, fontWeight: '600' },
+  note: { ...scale.sm },
   archiveRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 16, gap: 4 },
-  archiveText: { fontSize: 15, fontWeight: '600' },
-  degraded: { fontSize: 14, lineHeight: 20, paddingVertical: 12 },
+  archiveText: { ...scale.md, fontWeight: '600' },
+  degraded: { ...scale.base, paddingVertical: 12 },
 })

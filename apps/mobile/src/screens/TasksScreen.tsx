@@ -29,6 +29,7 @@ import {
 import { fetchPrimeBrief, makeInstanceClient, type BriefTaskCard, type InstanceConnection, type PrimeBrief } from '../api/instance'
 import { TaskDetailScreen } from './TaskDetailScreen'
 import { useTheme, type Theme } from '../ui/theme'
+import { scale } from '../ui/typography'
 
 type TasksState =
   | { phase: 'loading' }
@@ -280,10 +281,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  staleText: { fontSize: 12, textAlign: 'center' },
+  staleText: { ...scale.xs, textAlign: 'center' },
   listContent: { padding: 16, gap: 10 },
   sectionHeader: {
-    fontSize: 12,
+    ...scale.xs,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 1,
@@ -293,7 +294,7 @@ const styles = StyleSheet.create({
   row: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 6, marginBottom: 8 },
   rowTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   priority: {
-    fontSize: 11,
+    ...scale.micro,
     fontWeight: '700',
     borderWidth: 1,
     borderRadius: 5,
@@ -301,11 +302,11 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     overflow: 'hidden',
   },
-  title: { flex: 1, fontSize: 15, fontWeight: '600', lineHeight: 20 },
+  title: { flex: 1, ...scale.md, fontWeight: '600' },
   rowMeta: { flexDirection: 'row', gap: 12 },
-  metaText: { fontSize: 12 },
-  nowLine: { fontSize: 13, fontStyle: 'italic', lineHeight: 18 },
-  body: { fontSize: 15, textAlign: 'center' },
-  muted: { fontSize: 13, textAlign: 'center' },
-  link: { fontSize: 14, textDecorationLine: 'underline' },
+  metaText: { ...scale.xs },
+  nowLine: { ...scale.sm, fontStyle: 'italic' },
+  body: { ...scale.md, textAlign: 'center' },
+  muted: { ...scale.sm, textAlign: 'center' },
+  link: { ...scale.base, textDecorationLine: 'underline' },
 })

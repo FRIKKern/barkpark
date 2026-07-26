@@ -13,6 +13,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { useTheme } from './theme'
+import { scale } from './typography'
 
 export type TabKey = 'tasks' | 'chat' | 'papers'
 
@@ -70,7 +71,7 @@ export function TabBar({
 const styles = StyleSheet.create({
   bar: { flexDirection: 'row', borderTopWidth: 1, paddingBottom: 24, paddingTop: 10 },
   tab: { flex: 1, alignItems: 'center', gap: 2, flexDirection: 'row', justifyContent: 'center' },
-  label: { fontSize: 14 },
+  label: { ...scale.base },
   badge: {
     marginLeft: 4,
     minWidth: 18,
@@ -80,5 +81,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
-  badgeText: { color: '#ffffff', fontSize: 11, fontWeight: '700' },
+  badgeText: { ...scale.micro, color: '#ffffff', fontWeight: '700' },
 })
