@@ -57,10 +57,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # session). `editor_type` is assigned by `Shared.rebuild_panes/1` from the
   # PaneBuilder editor map's `:type`, so it is the pane's real doc type.
   defp read_only_pane?(socket) do
-    case socket.assigns[:editor_type] do
-      nil -> false
-      type -> type != Content.paper_type()
-    end
+    type = socket.assigns[:editor_type]
+    Content.blocks_type?(type) and type != Content.paper_type()
   end
 
   defp refuse_read_only_pane(socket) do
