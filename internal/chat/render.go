@@ -1489,7 +1489,7 @@ func (m Model) pickerPage() int {
 // (messages · pending · cost · relative age).
 func (m Model) herdRowLine(s SessionSummary, now time.Time) string {
 	row := m.herd.herdRowFor(s.ID)
-	title := strings.TrimSpace(s.Title)
+	title := herdRowTitle(row, s)
 	if title == "" {
 		title = "untitled session"
 	}
@@ -1504,6 +1504,19 @@ func (m Model) herdRowLine(s SessionSummary, now time.Time) string {
 		meta += " · " + age
 	}
 	return fmt.Sprintf("%s %-40s %s", herdPill(row, now), truncate(title, 40), dimStyle.Render(meta))
+}
+
+// herdRowTitle is the row's honest title: the HERD's held title when it holds
+// one, else the cold list's. The herd is the fresher source by construction —
+// herdSeed/herdSnapshot copy every non-blank list/snapshot title into the row,
+// and the live D69h `title` frame lands THERE and nowhere else, so a session
+// renamed after the last list read (the async titler, a rename from Studio)
+// updates the row in place instead of waiting for the next roster refetch.
+func herdRowTitle(row HerdRow, s SessionSummary) string {
+	if t := strings.TrimSpace(row.Title); t != "" {
+		return t
+	}
+	return strings.TrimSpace(s.Title)
 }
 
 // herdPill is the four-state pill (working|blocked|idle|unknown), padded to a

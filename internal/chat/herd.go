@@ -25,6 +25,9 @@ import (
 //   - a NULL live-flip title keeps the held title (flips carry title:null by
 //     design — the snapshot/list title is the one worth keeping);
 //   - HEARTBEATS bump LastFrameAt only — never AgentState, never LastFlipAt;
+//   - a TITLE frame (D69h) renames the row IN PLACE and touches NOTHING else —
+//     not the state, not either clock (the async titler is a server-side write,
+//     never a sign of agent life);
 //   - STALL is computed FRESH from LastFrameAt at sort/render time (D53h): a
 //     fresh frame un-stalls for free, and there is no stored bool to go stale.
 
@@ -68,10 +71,12 @@ func (h HerdState) clone() HerdState {
 
 // ── wire frame parsing ───────────────────────────────────────────────────────
 
-// fleetSnapshotFrame / fleetStateFrame / fleetHeartbeatFrame mirror the three
-// D45h frame shapes verbatim. Title is *string on the flip frame because the
-// wire says `title:null` on every live flip BY DESIGN — nil must mean "keep
-// what you hold", never "blank the title".
+// fleetSnapshotFrame / fleetStateFrame / fleetHeartbeatFrame / fleetTitleFrame
+// mirror the four D45h/D69h frame shapes verbatim. Title is *string on the flip
+// frame because the wire says `title:null` on every live flip BY DESIGN — nil
+// must mean "keep what you hold", never "blank the title". The title frame's
+// Title is a plain string: that frame exists ONLY to carry one, so a null there
+// is simply a blank the trimTitle law drops.
 type fleetSnapshotFrame struct {
 	Sessions []fleetStateFrame `json:"sessions"`
 }
@@ -86,6 +91,14 @@ type fleetStateFrame struct {
 type fleetHeartbeatFrame struct {
 	SessionID string `json:"session_id"`
 	TS        string `json:"ts"`
+}
+
+// fleetTitleFrame is the D69h title update: id-less, seq-less, unreplayable,
+// and carrying ONLY {session_id,title} — no state, no ts, no owner stamp
+// (chat_controller.fleet_title_frame/2 is pinned to exactly this shape).
+type fleetTitleFrame struct {
+	SessionID string `json:"session_id"`
+	Title     string `json:"title"`
 }
 
 // applyFleetFrame parses one wire frame (event name + data bytes) and reduces
@@ -112,6 +125,12 @@ func applyFleetFrame(h HerdState, event string, data []byte) (HerdState, bool) {
 			return h, false
 		}
 		return herdHeartbeat(h, f.SessionID, parseHerdTime(f.TS)), true
+	case "title":
+		var f fleetTitleFrame
+		if err := json.Unmarshal(data, &f); err != nil || f.SessionID == "" {
+			return h, false
+		}
+		return herdTitle(h, f.SessionID, f.Title), true
 	}
 	return h, false
 }
@@ -221,6 +240,30 @@ func herdHeartbeat(h HerdState, sessionID string, ts time.Time) HerdState {
 	if ts.After(row.LastFrameAt) {
 		row.LastFrameAt = ts
 	}
+	out.Rows[sessionID] = row
+	return out
+}
+
+// herdTitle folds the D69h `title` frame: it renames the row IN PLACE and
+// touches NOTHING else — never AgentState, never LastFlipAt, and deliberately
+// NOT LastFrameAt either. The async AI titler is a SERVER-side write that lands
+// once per session, typically while the runtime sits idle; treating it as a
+// sign of life would let a rename silently un-stall a wedged session — the one
+// lie the D53h badge exists to prevent. A blank title keeps the held one (the
+// shared trimTitle law), and a title for a session the herd does not hold is
+// IGNORED: the roster is list-sourced and {session_id,title} carries no
+// agent_state to mount an honest row from (the same rule herdHeartbeat obeys).
+func herdTitle(h HerdState, sessionID, title string) HerdState {
+	row, ok := h.Rows[sessionID]
+	if !ok {
+		return h
+	}
+	t := trimTitle(title)
+	if t == "" {
+		return h
+	}
+	out := h.clone()
+	row.Title = t
 	out.Rows[sessionID] = row
 	return out
 }

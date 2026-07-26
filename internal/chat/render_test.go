@@ -685,6 +685,42 @@ func TestHerdRowPillAgeCost(t *testing.T) {
 	}
 }
 
+// TestHerdRowTitleFollowsTheTitleFrame is the READ half of the D69h fold: a
+// live `title` frame renames the picker row IN PLACE, without a roster refetch.
+// The paint must read the HERD's held title, not the cold list's — a fold
+// nobody reads would be a stored value with no reader, and the stale row title
+// this frame exists to fix would survive the fix.
+func TestHerdRowTitleFollowsTheTitleFrame(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	m := Model{width: 100, now: func() time.Time { return now }, sessions: []SessionSummary{
+		{ID: "a", Title: "stale list title", MessageCount: 1, AgentState: "idle",
+			AgentStateAt: now.Add(-time.Minute).Format(time.RFC3339Nano)},
+	}}
+	m.herd = herdSeed(m.herd, m.sessions)
+	if !strings.Contains(m.pickerRows()[1], "stale list title") {
+		t.Fatalf("precondition: the cold list title paints, got:\n%q", m.pickerRows()[1])
+	}
+
+	h, ok := applyFleetFrame(m.herd, "title", []byte(`{"session_id":"a","title":"renamed in Studio"}`))
+	if !ok {
+		t.Fatal("the title frame must apply")
+	}
+	m.herd = h
+	row := m.pickerRows()[1]
+	if !strings.Contains(row, "renamed in Studio") {
+		t.Fatalf("the renamed row must paint the fresh title, got:\n%q", row)
+	}
+	if strings.Contains(row, "stale list title") {
+		t.Fatalf("the stale list title must be gone, got:\n%q", row)
+	}
+
+	// A herd row that holds NO title still falls back to the list's (a roster
+	// row the stream and the seed have not reached).
+	if got := herdRowTitle(HerdRow{SessionID: "a"}, SessionSummary{ID: "a", Title: " listed "}); got != "listed" {
+		t.Fatalf("a titleless herd row must fall back to the list title, got %q", got)
+	}
+}
+
 // TestTranscriptOrdering proves the transcript stacks settled messages, then
 // optimistic local sends, then the live tail — the reading order a person sees.
 func TestTranscriptOrdering(t *testing.T) {

@@ -151,6 +151,65 @@ func TestHerdHeartbeatBumpsLastFrameOnly(t *testing.T) {
 	}
 }
 
+// TestHerdTitleRenamesInPlaceOnly is the D69h title-fold proof: the frame
+// renames the row and touches NOTHING else — state and BOTH clocks are
+// untouched, so a rename can never un-stall a wedged session (the lie the fold
+// must not tell). A blank title keeps the held one, and a title for a session
+// the herd does not hold never mounts a row (the herdHeartbeat rule).
+func TestHerdTitleRenamesInPlaceOnly(t *testing.T) {
+	flipAt := hNow.Add(-10 * time.Minute) // already past herdStallAfter
+	h := seedHerd(HerdRow{SessionID: "a", AgentState: "working", Title: "held", LastFlipAt: flipAt, LastFrameAt: flipAt})
+	if !herdStalled(h.Rows["a"], hNow) {
+		t.Fatal("precondition: the row must be stalled before the rename")
+	}
+
+	got := herdTitle(h, "a", "  renamed elsewhere  ")
+	r := got.Rows["a"]
+	if r.Title != "renamed elsewhere" {
+		t.Fatalf("title frame must rename the row (trimmed), got %q", r.Title)
+	}
+	if r.AgentState != "working" || !r.LastFlipAt.Equal(flipAt) || !r.LastFrameAt.Equal(flipAt) {
+		t.Fatalf("title frame must touch NOTHING else, got %+v", r)
+	}
+	if !herdStalled(r, hNow) {
+		t.Fatal("a rename must NEVER un-stall a wedged session (it is not a sign of life)")
+	}
+
+	// a blank title keeps the held one (the shared trimTitle law)
+	if got = herdTitle(got, "a", "   "); got.Rows["a"].Title != "renamed elsewhere" {
+		t.Fatalf("a blank title must keep the held one, got %q", got.Rows["a"].Title)
+	}
+	// unknown session: ignored, roster untouched
+	if got = herdTitle(got, "ghost", "nobody"); len(got.Rows) != 1 {
+		t.Fatalf("a title must never mount a row, got %d rows", len(got.Rows))
+	}
+}
+
+// TestApplyFleetFrameFoldsTheTitleFrame proves the WIRE half of D69h: the
+// id-less {session_id,title} frame (chat_controller.fleet_title_frame/2's exact
+// shape) decodes and lands on the row — the fold this client did not have, so a
+// session renamed elsewhere no longer wears a stale title until the next
+// snapshot. A session-id-less or malformed frame is ignored, never a crash.
+func TestApplyFleetFrameFoldsTheTitleFrame(t *testing.T) {
+	h := seedHerd(HerdRow{SessionID: "a", AgentState: "idle", Title: "old title", LastFlipAt: hNow, LastFrameAt: hNow})
+	got, ok := applyFleetFrame(h, "title", []byte(`{"session_id":"a","title":"Fix the auth redirect loop"}`))
+	if !ok {
+		t.Fatal("a title frame must apply")
+	}
+	if got.Rows["a"].Title != "Fix the auth redirect loop" {
+		t.Fatalf("the title frame must fold onto the row, got %q", got.Rows["a"].Title)
+	}
+	if got.Rows["a"].AgentState != "idle" || !got.Rows["a"].LastFrameAt.Equal(hNow) {
+		t.Fatalf("the title frame must carry no state/liveness, got %+v", got.Rows["a"])
+	}
+	if _, ok := applyFleetFrame(h, "title", []byte(`{"title":"orphan"}`)); ok {
+		t.Fatal("a session-id-less title frame must be ignored")
+	}
+	if _, ok := applyFleetFrame(h, "title", []byte(`{not json`)); ok {
+		t.Fatal("malformed JSON must be ignored, never a crash")
+	}
+}
+
 // TestHerdStallBadgeFreshFromFrames is the D53h stall proof: working + no
 // frame for >150s (the NEW herd const, NOT workflowStallAfter) wears the
 // badge; any fresh frame — a heartbeat included — clears it for free; blocked

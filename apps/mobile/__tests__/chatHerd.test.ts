@@ -13,6 +13,8 @@ import {
   herdSeed,
   herdSnapshot,
   herdStalled,
+  herdTitle,
+  herdTitleFor,
   type HerdState,
 } from '../src/chat/herd'
 import type { ChatSessionSummary } from '../src/chat/wire'
@@ -96,6 +98,47 @@ test('herdHeartbeat bumps lastFrameAt only', () => {
   const before = h
   h = herdHeartbeat(h, 'ghost', t0 + 30_000)
   expect(h).toEqual(before) // unknown session ignored
+})
+
+// The D69h title fold: the frame renames the row IN PLACE and touches nothing
+// else — state and BOTH clocks are untouched, so a rename can never un-stall a
+// wedged session. A blank title keeps the held one; an unknown session id never
+// mounts a row (the herdHeartbeat rule).
+test('herdTitle renames in place only', () => {
+  let h = herdFlip(emptyHerd(), {
+    session_id: 'a',
+    agent_state: 'working',
+    ts: iso(t0),
+    title: 'held',
+  })
+  const later = t0 + HERD_STALL_AFTER_MS + 1000
+  expect(herdStalled(h.rows.a!, later)).toBe(true) // precondition: wedged
+
+  h = herdTitle(h, 'a', '  renamed elsewhere  ')
+  expect(h.rows.a?.title).toBe('renamed elsewhere') // trimmed
+  expect(h.rows.a?.agentState).toBe('working')
+  expect(h.rows.a?.lastFlipAtMs).toBe(t0)
+  expect(h.rows.a?.lastFrameAtMs).toBe(t0)
+  // A rename is NOT a sign of life — it must never un-stall a wedged session.
+  expect(herdStalled(h.rows.a!, later)).toBe(true)
+
+  // A blank title keeps the held one; an unknown session is ignored entirely.
+  expect(herdTitle(h, 'a', '   ')).toEqual(h)
+  expect(herdTitle(h, 'ghost', 'nobody')).toEqual(h)
+})
+
+// The read projection: the herd's held title wins over the list's
+// point-in-time read (that is the whole point of folding the frame), and a
+// herd row holding no title falls back to the list's.
+test('herdTitleFor prefers the herd title over the list read', () => {
+  const h = herdTitle(
+    herdSeed(emptyHerd(), [{ id: 'a', title: 'stale list title' }]),
+    'a',
+    'renamed in Studio',
+  )
+  expect(herdTitleFor(h, 'a', 'stale list title')).toBe('renamed in Studio')
+  expect(herdTitleFor(emptyHerd(), 'a', ' listed ')).toBe('listed')
+  expect(herdTitleFor(emptyHerd(), 'a', undefined)).toBe('')
 })
 
 // The D53h stall proof: working + no frame past the threshold wears the
@@ -189,7 +232,20 @@ test('applyFleetFrame parses the three shapes', () => {
   expect(beat.state.rows.a?.lastFrameAtMs).toBe(t0 + 2000)
   expect(beat.state.rows.a?.agentState).toBe('blocked')
 
+  // The D69h title frame: id-less, seq-less, {session_id,title} only.
+  const renamed = applyFleetFrame(
+    beat.state,
+    'title',
+    JSON.stringify({ session_id: 'a', title: 'Renamed elsewhere' }),
+  )
+  expect(renamed.ok).toBe(true)
+  expect(renamed.state.rows.a?.title).toBe('Renamed elsewhere')
+  // …and it carries no state and no liveness at all.
+  expect(renamed.state.rows.a?.agentState).toBe('blocked')
+  expect(renamed.state.rows.a?.lastFrameAtMs).toBe(t0 + 2000)
+
   // Not herd-shaped: unknown event, malformed JSON, missing session_id.
+  expect(applyFleetFrame(beat.state, 'mystery', '{}').ok).toBe(false)
   expect(applyFleetFrame(beat.state, 'title', '{}').ok).toBe(false)
   expect(applyFleetFrame(beat.state, 'state', 'not json').ok).toBe(false)
   expect(applyFleetFrame(beat.state, 'state', '{"agent_state":"idle"}').ok).toBe(false)

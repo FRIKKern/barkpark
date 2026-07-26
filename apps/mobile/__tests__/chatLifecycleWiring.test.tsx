@@ -245,6 +245,29 @@ test('PROBE E3 — a heartbeat does NOT flip state, and the stall clock ticks', 
   }
 })
 
+test('PROBE E4 — a live `title` frame renames the row without a refetch', async () => {
+  mockList.mockResolvedValue([summary('a', { title: 'stale list title' })])
+  const tree = await mount()
+  try {
+    expect(renderedOrder(tree)[0]).toContain('stale list title')
+    expect(mockList).toHaveBeenCalledTimes(1)
+
+    await fleetFrame('title', { session_id: 'a', title: 'Fix the auth redirect loop' })
+
+    // MUTANT KILLED (two at once). Drop the 'title' case from applyFleetFrame
+    // and the row keeps the stale title (the state this client shipped in:
+    // the server emits the D69h frame and NOBODY folded it). Keep the fold but
+    // render `session.title` instead of the herd's, and the fold becomes a
+    // stored value with no reader — same stale row, green reducer test.
+    expect(renderedOrder(tree)[0]).toContain('Fix the auth redirect loop')
+    expect(renderedOrder(tree)[0]).not.toContain('stale list title')
+    // Renaming is not a roster change: no re-list was needed to see it.
+    expect(mockList).toHaveBeenCalledTimes(1)
+  } finally {
+    await act(async () => tree.unmount())
+  }
+})
+
 /* ── Probe F: swipe → optimistic removal → the right verb ────────────────── */
 
 test('PROBE F — a committed swipe removes the row optimistically and POSTs archive', async () => {
