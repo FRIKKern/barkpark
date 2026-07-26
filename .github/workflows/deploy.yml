@@ -130,13 +130,25 @@ jobs:
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
+          # The control plane's egress address, reusing the SAME secret this
+          # workflow already SSHes the control plane with — so the address is
+          # authored ONCE. instance-deploy.sh writes it as BARKPARK_TRUSTED_PROXIES
+          # (only when .env has no line yet, and only if it parses as bare IPs), so
+          # the box BELIEVES the caller address the control plane relays on a
+          # proxied revoke instead of collapsing every caller onto one rate-limit
+          # bucket. Secret unset ⇒ empty ⇒ the script writes a commented
+          # placeholder and logs the gap; the deploy is never blocked on it.
+          CP_HOST: ${{ secrets.CP_HOST }}
         run: |
           install -m 600 /dev/null /tmp/deploy_key
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
           SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
           $SCP deploy/instance-deploy.sh "root@${GUERRILLA_HOST}:/tmp/"
-          $SSH "root@${GUERRILLA_HOST}" 'bash /tmp/instance-deploy.sh'
+          # The remote env assignment is quoted on the REMOTE side too, so a
+          # malformed secret can only ever land in the script's validated variable
+          # — never split into extra words of the remote command line.
+          $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' bash /tmp/instance-deploy.sh"
       - name: Smoke test
         env:
           GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}

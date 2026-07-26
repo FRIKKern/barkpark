@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -391,6 +392,20 @@ type WarmPool struct {
 	// so Barkpark.Mailer stays on the Local adapter (no delivery) exactly as
 	// before this field existed. Populated from the worker's SMTP_RELAY_* env.
 	Mail MailRelay
+
+	// TrustedProxies is the control plane's EGRESS address (or a comma-separated
+	// list, e.g. an IPv4 + an IPv6 egress), written into the instance's
+	// BARKPARK_TRUSTED_PROXIES so the box BELIEVES the caller address the control
+	// plane relays on a proxied request. Barkpark.RateLimiter.client_ip walks
+	// x-forwarded-for right-to-left and skips only LISTED hops, so on a
+	// cloud-managed instance the rightmost hop is the control plane's egress: unset
+	// here, every proxied revoke keys on ONE bucket (the whole team shares
+	// 10/minute) instead of one per phone. Not a forgery and not a 5xx — a SILENT
+	// loss of the per-caller bucketing. Zero value → the step is skipped and the
+	// instance keeps loopback-only trust, exactly as before this field existed.
+	// Populated from the worker's BARKPARK_CLOUD_EGRESS_IPS env (the SAME address
+	// as the CP_HOST deploy secret — see deploy/README.md).
+	TrustedProxies string
 
 	// MigrateArgv is the `mix ecto.migrate` argv the migrate step carries. It is
 	// NOT executed in tests (the fake runner records it); the real runner shells
@@ -820,6 +835,74 @@ func secretsInstallStep(s Secrets, mail MailRelay) CaddyStep {
 	}
 }
 
+// NormalizeTrustedProxies validates + canonicalizes a comma-separated egress list
+// into the exact shape api/config/runtime.exs accepts for
+// BARKPARK_TRUSTED_PROXIES: individual IP literals, comma-joined, no ranges.
+//
+// It is deliberately STRICTER than "write whatever the operator typed": runtime.
+// exs RAISES on a malformed entry, so a fat-fingered value would not degrade the
+// bucket key — it would refuse to boot the instance at the next restart (and this
+// step's own restart is that restart). A CIDR range is rejected with its own
+// message because it is the tempting wrong answer: trusting a whole range lets
+// any host in it forge every client's bucket key via x-forwarded-for, which is
+// why the Elixir side refuses ranges outright.
+//
+// Empty/whitespace input is NOT an error — it is the "not configured" state, and
+// returns ("", nil) so the caller skips the step and the instance keeps
+// loopback-only trust.
+func NormalizeTrustedProxies(raw string) (string, error) {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
+		}
+		// ParseCIDR, not a bare "/" check: the range case earns its OWN message (it is
+		// the tempting wrong answer), while anything else that merely contains a slash
+		// — a URL, say — falls through to the plain not-an-IP message instead of being
+		// mislabeled a range.
+		if _, _, err := net.ParseCIDR(entry); err == nil {
+			return "", fmt.Errorf("%q is a CIDR range; BARKPARK_TRUSTED_PROXIES takes individual addresses only (a trusted range lets any host in it forge every client's rate-limit bucket key)", entry)
+		}
+		ip := net.ParseIP(entry)
+		if ip == nil {
+			return "", fmt.Errorf("%q is not a valid IP address", entry)
+		}
+		out = append(out, ip.String())
+	}
+	return strings.Join(out, ","), nil
+}
+
+// trustedProxiesStep writes BARKPARK_TRUSTED_PROXIES=<control plane egress> into
+// the instance's /opt/barkpark/.env, idempotently (strip any prior line, append
+// the current value, mv) — the same grep -v/printf/mv idiom secretsInstallStep
+// uses, so re-running the go-live chain never duplicates the line.
+//
+// It carries NO restart of its own: the caller runs it immediately BEFORE
+// secretsInstallStep, whose single `systemctl restart barkpark` picks up this
+// value together with the minted secrets (Phoenix reads the trust list once at
+// boot, exactly like PHX_HOST). Ordering the other way round would leave the box
+// running WITHOUT the trust list until some later restart.
+//
+// The value is non-secret (a public server address), so it appears in the Title/
+// Cmd — an operator reading the narrated step should be able to SEE which
+// address the instance was told to believe.
+func trustedProxiesStep(egress string) CaddyStep {
+	const envFile = "/opt/barkpark/.env"
+	script := `touch ` + envFile + `; ` +
+		`grep -v -e '^BARKPARK_TRUSTED_PROXIES=' ` + envFile + ` > ` + envFile + `.bpnew || true; ` +
+		`printf 'BARKPARK_TRUSTED_PROXIES=%s\n' '` + egress + `' >> ` + envFile + `.bpnew; ` +
+		`mv ` + envFile + `.bpnew ` + envFile
+	return CaddyStep{
+		Title: "trust the control plane's relayed caller address (BARKPARK_TRUSTED_PROXIES=" + egress + ")",
+		Cmd:   "set BARKPARK_TRUSTED_PROXIES=" + egress + " in " + envFile,
+		Argv:  []string{"bash", "-lc", script},
+		// The step rewrites .env; a failure could echo neighbouring secret-shaped
+		// lines (DATABASE_URL, SECRET_KEY_BASE) from grep/printf into captured output.
+		RedactEnvSecrets: true,
+	}
+}
+
 // generateBase64Key mints a fresh standard-base64 (padded) string of 32 random
 // bytes — the shape BARKPARK_KEK REQUIRES (runtime.exs Base.decode64's it to
 // EXACTLY 32 bytes) and a clean, independent 32-byte draw for the cloak key and
@@ -1245,6 +1328,24 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		wp.progress("configure", "failed", "secrets")
 		return LiveServer{}, fmt.Errorf("secrets: %w", err)
 	}
+
+	// 5a. trusted proxies — tell the box to BELIEVE the caller address the control
+	// plane relays (BARKPARK_TRUSTED_PROXIES = the CP's egress). Runs BEFORE
+	// secrets-install so that step's single restart loads it (Phoenix reads the
+	// trust list once at boot). Unset → skipped, and the instance keeps
+	// loopback-only trust: proxied revokes then all key on ONE bucket per team
+	// instead of one per phone. A MALFORMED value fails the chain CLOSED rather
+	// than shipping a .env that raises at the very restart two lines below.
+	if egress, err := NormalizeTrustedProxies(wp.TrustedProxies); err != nil {
+		wp.progress("configure", "failed", "trusted-proxies")
+		return LiveServer{}, fmt.Errorf("trusted-proxies: BARKPARK_CLOUD_EGRESS_IPS is malformed: %w", err)
+	} else if egress != "" {
+		if err := runner.Run(ctx, trustedProxiesStep(egress)); err != nil {
+			wp.progress("configure", "failed", "trusted-proxies")
+			return LiveServer{}, fmt.Errorf("trusted-proxies: %w", err)
+		}
+	}
+
 	if err := runner.Run(ctx, secretsInstallStep(secrets, wp.Mail)); err != nil {
 		wp.progress("configure", "failed", "secrets")
 		return LiveServer{}, fmt.Errorf("secrets: %w", err)
