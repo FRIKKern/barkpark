@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { http, HttpResponse, delay } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
@@ -35,6 +35,9 @@ void _listenFilterIsEqOnly
 // The exported ListenOptions types createListenHandle's reconnect/perspective opts.
 const _listenOptions: ListenOptions = { maxReconnects: 3, reconnectBaseMs: 100 }
 void _listenOptions
+// D23: the 'unbounded' sentinel is part of the public type.
+const _unboundedOptions: ListenOptions = { maxReconnects: 'unbounded' }
+void _unboundedOptions
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => {
@@ -471,6 +474,196 @@ describe('createListenHandle', () => {
       expect(() =>
         createListenHandle(config, 'post', undefined, { maxReconnects: 10, reconnectBaseMs: 500 }),
       ).not.toThrow()
+    })
+  })
+
+  describe("maxReconnects: 'unbounded' (charter D23 sentinel)", () => {
+    // An SSE fetch stub that answers 200 + immediate clean EOF on every connect
+    // (the instantly-terminating-LB shape), optionally emitting a keepalive
+    // comment first. Counts connects.
+    function cleanClosingFetch(opts?: { keepalive?: boolean }): {
+      fetchImpl: typeof globalThis.fetch
+      calls: () => number
+    } {
+      let calls = 0
+      const fetchImpl = (() => {
+        calls++
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            if (opts?.keepalive) {
+              controller.enqueue(new TextEncoder().encode(': keepalive\n\n'))
+            }
+            controller.close()
+          },
+        })
+        return Promise.resolve(
+          new Response(stream, {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          }),
+        )
+      }) as unknown as typeof globalThis.fetch
+      return { fetchImpl, calls: () => calls }
+    }
+
+    it("accepts 'unbounded' — a STRING that survives a JSON round-trip; Infinity/negatives/unknown strings still rejected", () => {
+      expect(() =>
+        createListenHandle(config, 'post', undefined, { maxReconnects: 'unbounded' }),
+      ).not.toThrow()
+
+      // The sentinel survives JSON verbatim…
+      const roundTripped = JSON.parse(
+        JSON.stringify({ maxReconnects: 'unbounded' }),
+      ) as ListenOptions
+      expect(roundTripped.maxReconnects).toBe('unbounded')
+      expect(() =>
+        createListenHandle(config, 'post', undefined, roundTripped),
+      ).not.toThrow()
+
+      // …while Infinity is a one-way door: JSON turns it into null, which the
+      // `?? 5` default would silently rebound — the exact placebo D23 forbids.
+      expect(
+        (JSON.parse(JSON.stringify({ maxReconnects: Infinity })) as { maxReconnects: unknown })
+          .maxReconnects,
+      ).toBeNull()
+
+      // The validator contract is additive: everything rejected before stays rejected.
+      for (const bad of [Number.POSITIVE_INFINITY, -1, 1.5, Number.NaN]) {
+        expect(() =>
+          createListenHandle(config, 'post', undefined, { maxReconnects: bad }),
+        ).toThrowError(BarkparkValidationError)
+      }
+      // Unknown strings fail LOUD (never silently bounded, never silently forever).
+      expect(() =>
+        createListenHandle(config, 'post', undefined, {
+          maxReconnects: 'forever' as unknown as number,
+        }),
+      ).toThrowError(BarkparkValidationError)
+    })
+
+    it("clean-closing forever under 'unbounded' never throws and the delay escalates to the 16s cap", async () => {
+      vi.useFakeTimers()
+      // withJitter(ms) === ms with random pinned to 1 — delays become deterministic.
+      const rand = vi.spyOn(Math, 'random').mockReturnValue(1)
+      try {
+        const { fetchImpl, calls } = cleanClosingFetch()
+        const handle = createListenHandle({ ...config, fetch: fetchImpl }, 'post', undefined, {
+          maxReconnects: 'unbounded',
+        })
+        const iterator = handle[Symbol.asyncIterator]()
+        let threw: unknown
+        const drain = iterator.next().catch((err: unknown) => {
+          threw = err
+          return { done: true as const, value: undefined }
+        })
+
+        // Connect #1 lands without any timer.
+        await vi.advanceTimersByTimeAsync(0)
+        expect(calls()).toBe(1)
+
+        // Closes 1–4 sleep the flat 1s floor: one reconnect per second.
+        for (let expected = 2; expected <= 5; expected++) {
+          await vi.advanceTimersByTimeAsync(1000)
+          expect(calls()).toBe(expected)
+        }
+        // Close 5 crossed the old ×5 throw threshold — no throw; delay escalates
+        // to 2s (1s of advance is no longer enough)…
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(calls()).toBe(5)
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(calls()).toBe(6)
+        // …then 4s, 8s, 16s.
+        await vi.advanceTimersByTimeAsync(4000)
+        expect(calls()).toBe(7)
+        await vi.advanceTimersByTimeAsync(8000)
+        expect(calls()).toBe(8)
+        // The old 8s error-backoff ceiling is NOT the cap here: 8s of advance
+        // does not reconnect, the full 16s does.
+        await vi.advanceTimersByTimeAsync(8000)
+        expect(calls()).toBe(8)
+        await vi.advanceTimersByTimeAsync(8000)
+        expect(calls()).toBe(9)
+        // And 16s is the CAP — the next delay stays 16s (min(32s, cap)).
+        await vi.advanceTimersByTimeAsync(16000)
+        expect(calls()).toBe(10)
+
+        expect(threw).toBeUndefined() // 9 consecutive silent closes, zero escalation throw
+
+        handle.unsubscribe()
+        await vi.advanceTimersByTimeAsync(0)
+        const done = await drain
+        expect(done.done).toBe(true)
+      } finally {
+        rand.mockRestore()
+        vi.useRealTimers()
+      }
+    })
+
+    it('keepalive frames reset the clean-close counter in BOTH modes (deliberate default-mode change)', async () => {
+      vi.useFakeTimers()
+      const rand = vi.spyOn(Math, 'random').mockReturnValue(1)
+      try {
+        for (const maxReconnects of [undefined, 'unbounded' as const]) {
+          const { fetchImpl, calls } = cleanClosingFetch({ keepalive: true })
+          const handle = createListenHandle({ ...config, fetch: fetchImpl }, 'post', undefined, {
+            ...(maxReconnects !== undefined ? { maxReconnects } : {}),
+          })
+          const iterator = handle[Symbol.asyncIterator]()
+          let threw: unknown
+          const drain = iterator.next().catch((err: unknown) => {
+            threw = err
+            return { done: true as const, value: undefined }
+          })
+
+          await vi.advanceTimersByTimeAsync(0)
+          expect(calls()).toBe(1)
+          // 8 keepalive-then-EOF cycles — well past the ×5 threshold. Each cycle
+          // reconnects after exactly the 1s floor (the keepalive reset both
+          // disarms the default-mode throw and holds off the unbounded-mode
+          // escalation), so one advance of 1s = exactly one reconnect.
+          for (let expected = 2; expected <= 9; expected++) {
+            await vi.advanceTimersByTimeAsync(1000)
+            expect(calls()).toBe(expected)
+          }
+          expect(threw).toBeUndefined()
+
+          handle.unsubscribe()
+          await vi.advanceTimersByTimeAsync(0)
+          await drain
+        }
+      } finally {
+        rand.mockRestore()
+        vi.useRealTimers()
+      }
+    })
+
+    it("refused-class errors still terminate immediately under 'unbounded'", async () => {
+      // 401 → BarkparkAuthError: one attempt, no retry, even with retry-forever.
+      let attempts = 0
+      server.use(
+        http.get(`${TEST_BASE_URL}/v1/data/listen/:dataset`, () => {
+          attempts++
+          return HttpResponse.json(
+            { error: { code: 'unauthorized', message: 'nope', request_id: 'req_x' } },
+            { status: 401 },
+          )
+        }),
+      )
+      const handle = createListenHandle(config, 'post', undefined, { maxReconnects: 'unbounded' })
+      await expect(handle[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(BarkparkAuthError)
+      expect(attempts).toBe(1)
+
+      // Non-5xx APIError (404) is refused-class too — immediate throw, no retry.
+      let apiAttempts = 0
+      server.use(
+        http.get(`${TEST_BASE_URL}/v1/data/listen/:dataset`, () => {
+          apiAttempts++
+          return HttpResponse.json({ error: { code: 'not_found' } }, { status: 404 })
+        }),
+      )
+      const handle2 = createListenHandle(config, 'post', undefined, { maxReconnects: 'unbounded' })
+      await expect(handle2[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(BarkparkAPIError)
+      expect(apiAttempts).toBe(1)
     })
   })
 

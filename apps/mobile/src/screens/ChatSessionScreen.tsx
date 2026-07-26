@@ -18,6 +18,7 @@ import {
 } from 'react-native'
 
 import type { InstanceConnection } from '../api/instance'
+import type { StreamFailure, StreamStatus } from '../api/chat'
 import { answerable, approvalStatus, isCard, requestId, type ChatMessage } from '../chat/wire'
 import { useChatSession } from '../chat/useChatSession'
 import { useTheme, type Theme } from '../ui/theme'
@@ -26,6 +27,42 @@ const CARD_TITLES: Record<string, string> = {
   approval: 'Approval requested',
   question: 'Question',
   plan: 'Plan proposed',
+}
+
+// ── header connection label (charter D24) ────────────────────────────────────
+
+export interface HeaderStatus {
+  text: string
+  tone: 'muted' | 'danger'
+  /** refused is actionable: 'retry' rebuilds the store (which re-reads the
+   * stored token — the re-auth flow), 'back' leaves the dead session. */
+  action?: 'retry' | 'back'
+}
+
+/** The label map — the raw StreamStatus enum NEVER reaches the UI. open and
+ * closed render nothing (silence is the healthy state); degraded keeps the
+ * transcript intact and the composer editable; refused names WHICH wall the
+ * stream hit and what tapping it does. Pure, so it is jest-provable. */
+export function headerStatus(
+  status: StreamStatus,
+  failure?: StreamFailure,
+): HeaderStatus | undefined {
+  switch (status) {
+    case 'connecting':
+      return { text: 'connecting…', tone: 'muted' }
+    case 'degraded':
+      return { text: 'reconnecting…', tone: 'muted' }
+    case 'refused': {
+      const http = failure?.httpStatus
+      if (http === 401 || http === 403)
+        return { text: 'signed out — sign in again', tone: 'danger', action: 'retry' }
+      if (http === 404) return { text: 'session gone', tone: 'danger', action: 'back' }
+      return { text: 'connection refused — tap to retry', tone: 'danger', action: 'retry' }
+    }
+    case 'open':
+    case 'closed':
+      return undefined
+  }
 }
 
 type Row =
@@ -46,8 +83,18 @@ export function ChatSessionScreen({
   onBack: () => void
 }) {
   const theme = useTheme()
-  const { state, loading, loadError, transportError, streamStatus, send, interrupt, answer, retry } =
-    useChatSession(connection, sessionId)
+  const {
+    state,
+    loading,
+    loadError,
+    transportError,
+    streamStatus,
+    streamFailure,
+    send,
+    interrupt,
+    answer,
+    retry,
+  } = useChatSession(connection, sessionId)
   const [draft, setDraft] = useState('')
   const listRef = useRef<FlatList<Row>>(null)
 
@@ -82,6 +129,11 @@ export function ChatSessionScreen({
 
   const title = state.title !== '' ? state.title : (sessionTitle ?? sessionId)
   const turnActive = state.phase !== 'idle'
+  const connLabel = headerStatus(streamStatus, streamFailure)
+  // The composer is DISABLED behind a refused wall (sending into a dead stream
+  // would lie) but stays EDITABLE while degraded — the transcript is intact
+  // and the retry loop is live.
+  const composerBlocked = loading || loadError !== undefined || streamStatus === 'refused'
 
   let body
   if (loading) {
@@ -147,9 +199,25 @@ export function ChatSessionScreen({
           {state.mode !== '' && (
             <Text style={[styles.metaBadge, { color: theme.textMuted }]}>{state.mode}</Text>
           )}
-          {streamStatus !== 'open' && (
-            <Text style={[styles.metaBadge, { color: theme.textMuted }]}>{streamStatus}</Text>
-          )}
+          {connLabel !== undefined &&
+            (connLabel.action !== undefined ? (
+              <Pressable
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={connLabel.action === 'back' ? onBack : retry}
+              >
+                <Text style={[styles.metaBadge, { color: theme.danger }]}>{connLabel.text}</Text>
+              </Pressable>
+            ) : (
+              <Text
+                style={[
+                  styles.metaBadge,
+                  { color: connLabel.tone === 'danger' ? theme.danger : theme.textMuted },
+                ]}
+              >
+                {connLabel.text}
+              </Text>
+            ))}
         </View>
       </View>
 
@@ -170,7 +238,7 @@ export function ChatSessionScreen({
           value={draft}
           onChangeText={setDraft}
           multiline
-          editable={!loading && loadError === undefined}
+          editable={!composerBlocked}
         />
         {turnActive ? (
           <Pressable
@@ -186,7 +254,7 @@ export function ChatSessionScreen({
           accessibilityRole="button"
           accessibilityLabel="Send message"
           onPress={onSend}
-          disabled={draft.trim() === '' || loading || loadError !== undefined}
+          disabled={draft.trim() === '' || composerBlocked}
           style={[
             styles.roundBtn,
             { backgroundColor: draft.trim() === '' ? theme.border : theme.accent },

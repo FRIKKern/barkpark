@@ -1,0 +1,5 @@
+---
+'@barkpark/core': minor
+---
+
+`listen()` accepts `maxReconnects: 'unbounded'` — a string sentinel (deliberately not `Infinity`: `JSON.stringify(Infinity)` is `null`, which the `?? 5` default would silently turn back into the bounded default across any serialization boundary; the string survives JSON verbatim and unknown strings still throw `BarkparkValidationError`). Under `'unbounded'` the client retries errors forever AND the consecutive-clean-close ×5 escalation is disarmed — past the old threshold the clean-close delay escalates on the jittered exponential capped at 16s, so a dead load balancer costs ~4 requests/min instead of 60. Keepalive comment frames now reset the clean-close counter in BOTH modes (previously only data frames did — five idle-watchdog cycles over a quiet board could kill a healthy stream); refused-class errors (auth failures, non-5xx API errors) still terminate immediately. The default (`5`) and the validator's rejection of `Infinity`/negatives/fractions are unchanged.
