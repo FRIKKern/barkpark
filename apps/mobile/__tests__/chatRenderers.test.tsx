@@ -4,11 +4,11 @@
 // FOUR law families are pinned here, each chosen because a plausible future
 // edit breaks it SILENTLY:
 //
-//   1. REGISTRY ≡ AUTHORED CASES (charter D31) — every registered block type
-//      has an authored case that renders without hitting the unknown-block
-//      fallback, and the registry is exactly 43 entries. Adding a renderer
-//      without a case, or deleting one, reds here. Mirrors the react twin's
-//      `covers EXACTLY the registered types` (PortableDoc.test.tsx).
+//   1. REGISTRY ≡ AUTHORED CASES (charter D31/D49) — every registered block
+//      type has an authored case (per-family files under __tests__/cases/)
+//      that renders without hitting the unknown-block fallback. Adding a
+//      renderer without a case, or deleting one, reds here. Mirrors the react
+//      twin's `covers EXACTLY the registered types` (PortableDoc.test.tsx).
 //   2. THE GOLDEN FLOOR (charter D31) — the GENERATOR-OWNED fixture
 //      (`mix barkpark.chat.gen_golden_toolrows` is its sole writer) is
 //      IMPORTED, never copied. Mobile is its third consumer, after
@@ -31,6 +31,19 @@ import type { ReactElement, ReactNode } from 'react'
 // bundles it into the app.
 import goldenToolrows from '../../../internal/pdrender/testdata/chat_golden_toolrows.json'
 
+import { chatCases } from './cases/chat.cases'
+import { coreCodeCases } from './cases/core-code.cases'
+import { coreContainerCases } from './cases/core-container.cases'
+import { coreDocCases } from './cases/core-doc.cases'
+import { coreMediaCases } from './cases/core-media.cases'
+import { coreProseCases } from './cases/core-prose.cases'
+import { datavizCases } from './cases/dataviz.cases'
+import { formsCases } from './cases/forms.cases'
+import { mathCases } from './cases/math.cases'
+import { sheetCases } from './cases/sheet.cases'
+import { tableCases } from './cases/table.cases'
+import { taskboardCases } from './cases/taskboard.cases'
+import type { BlockCase } from './cases/types'
 import {
   CardRow,
   TranscriptRow,
@@ -116,78 +129,25 @@ function text(block: unknown, ctx: BlockCtx = chat): string {
 
 /* ── 1. the registry tripwire (charter D31) ─────────────────────────────────── */
 
-// One authored case per registered type. This list is the tripwire's other
-// half: it must stay ≡ the registry, so a renderer added without a case (or a
-// case left behind by a deleted renderer) reds.
-const CASES: { type: string; block: Record<string, unknown> }[] = [
-  { type: 'heading', block: { type: 'heading', level: 2, text: 'Heading' } },
-  { type: 'paragraph', block: { type: 'paragraph', text: 'body copy' } },
-  { type: 'eyebrow', block: { type: 'eyebrow', text: 'EYEBROW' } },
-  { type: 'byline', block: { type: 'byline', items: ['Ada', 'Grace'] } },
-  { type: 'ingress', block: { type: 'ingress', text: 'the lede' } },
-  { type: 'pullquote', block: { type: 'pullquote', text: 'pulled' } },
-  { type: 'list', block: { type: 'list', items: ['one', 'two'] } },
-  { type: 'bulletList', block: { type: 'bulletList', items: ['one'] } },
-  { type: 'bullet_list', block: { type: 'bullet_list', items: ['one'] } },
-  { type: 'bulleted-list', block: { type: 'bulleted-list', items: ['one'] } },
-  { type: 'bulleted_list', block: { type: 'bulleted_list', items: ['one'] } },
-  { type: 'numbered_list', block: { type: 'numbered_list', items: ['one'] } },
-  { type: 'callout', block: { type: 'callout', tone: 'info', title: 'Note', text: 'careful' } },
-  { type: 'code', block: { type: 'code', value: 'const x = 1' } },
-  { type: 'divider', block: { type: 'divider' } },
-  { type: 'image', block: { type: 'image', src: 'https://example.com/a.png', alt: 'a' } },
-  {
-    type: 'figure',
-    block: { type: 'figure', child: { type: 'paragraph', text: 'inner' }, caption: 'Figure 1. cap' },
-  },
-  { type: 'diagram', block: { type: 'diagram', source: 'flowchart TD\n A --> B' } },
-  { type: 'table', block: { type: 'table', head: ['h'], rows: [['cell']] } },
-  { type: 'toc', block: { type: 'toc', items: [{ text: 'Outline', level: 1 }] } },
-  { type: 'stat', block: { type: 'stat', value: '42', label: 'answers' } },
-  { type: 'stats', block: { type: 'stats', items: [{ value: '7', label: 'seven' }] } },
-  { type: 'stat-grid', block: { type: 'stat-grid', items: [{ value: '7' }] } },
-  { type: 'note', block: { type: 'note', label: 'NB', text: 'noted' } },
-  { type: 'notes', block: { type: 'notes', items: [{ text: 'noted' }] } },
-  { type: 'cards', block: { type: 'cards', items: [{ title: 'Card', text: 'body' }] } },
-  { type: 'steps', block: { type: 'steps', steps: [{ title: 'First' }] } },
-  { type: 'expandable', block: { type: 'expandable', summary: 'More', blocks: [] } },
-  { type: 'blockquote', block: { type: 'blockquote', text: 'quoted', cite: 'someone' } },
-  { type: 'quote', block: { type: 'quote', text: 'quoted' } },
-  { type: 'footnote', block: { type: 'footnote', notes: [{ text: 'a note' }] } },
-  { type: 'section', block: { type: 'section', title: 'Sec', blocks: [] } },
-  {
-    type: 'columns',
-    block: { type: 'columns', columns: [[{ type: 'paragraph', text: 'col' }]] },
-  },
-  { type: 'terminal', block: { type: 'terminal', title: 'sh', children: [] } },
-  { type: 'tasks', block: { type: 'tasks', snapshot: [{ title: 'T', status: 'open' }] } },
-  { type: 'task-list', block: { type: 'task-list', snapshot: [{ title: 'T', status: 'done' }] } },
-  { type: 'action', block: { type: 'action', label: 'Open' } },
-  // the six typed chat rows
-  {
-    type: 'chat-tool-diff',
-    block: {
-      type: 'chat-tool-diff',
-      input: { file_path: 'a.ex' },
-      lines: [{ op: '+', text: 'added' }],
-      added: 1,
-      removed: 0,
-    },
-  },
-  {
-    type: 'chat-todo',
-    block: { type: 'chat-todo', todos: [{ content: 'do it', status: 'pending' }] },
-  },
-  { type: 'chat-thinking', block: { type: 'chat-thinking', tokens: 12 } },
-  {
-    type: 'chat-approval',
-    block: { type: 'chat-approval', tool_name: 'Bash', summary: 's', approval_status: 'pending' },
-  },
-  {
-    type: 'chat-question',
-    block: { type: 'chat-question', questions: [{ question: 'Q?', options: ['A'] }] },
-  },
-  { type: 'chat-plan', block: { type: 'chat-plan', title: 'Plan', preview: 'p' } },
+// One authored case per registered type, split into per-family case files
+// (charter D49) mirroring src/papers/portabledoc/blocks/ — a renderer slice
+// adds its cases in its OWN family file, touching nothing shared here. The
+// concatenation is the tripwire's other half: it must stay ≡ the registry, so
+// a renderer added without a case (or a case left behind by a deleted
+// renderer) reds.
+const CASES: BlockCase[] = [
+  ...coreProseCases,
+  ...coreMediaCases,
+  ...coreContainerCases,
+  ...coreDocCases,
+  ...coreCodeCases,
+  ...datavizCases,
+  ...formsCases,
+  ...mathCases,
+  ...sheetCases,
+  ...tableCases,
+  ...taskboardCases,
+  ...chatCases,
 ]
 
 describe('registry tripwire (charter D31)', () => {
@@ -195,9 +155,10 @@ describe('registry tripwire (charter D31)', () => {
     const authored = CASES.map((c) => c.type).sort()
     const registered = Object.keys(BLOCK_RENDERERS).sort()
     expect(authored).toEqual(registered)
-    // 37 paper-surface entries (30 canonical + 7 function-identity aliases)
-    // plus the six typed chat-* rows this slice registers.
-    expect(registered).toHaveLength(43)
+    // The hand-counted toHaveLength literal RETIRED at split time (charter
+    // D48): set-equality above + the per-family case files carry the guard
+    // until the anchored cross-surface pin (mobile ≡ react ∖ EXCLUSIONS via a
+    // live deep import of react's REGISTERED_TYPES) lands at crown.
   })
 
   it('enumerates the 7 function-identity aliases — numbered_list is NOT one', () => {
