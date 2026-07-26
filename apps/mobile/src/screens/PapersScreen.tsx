@@ -20,22 +20,38 @@ import {
 } from 'react-native'
 
 import { makeInstanceClient, type InstanceConnection } from '../api/instance'
-import { fetchPaperPage, PAPER_PAGE_SIZE, type PaperListItem } from '../api/papers'
-import { EMPTY_PAGER, appendPage, shouldLoadMore, type PagerState } from '../papers/paperPager'
+import {
+  classifyPaperFailure,
+  fetchPaperPage,
+  PAPER_PAGE_SIZE,
+  type PaperFetchFailure,
+  type PaperListItem,
+} from '../api/papers'
+import { EMPTY_PAGER, appendPage, hydrate, shouldLoadMore, type PagerState } from '../papers/paperPager'
+import { readCachedPaperList, writeCachedPaperList } from '../state/cache'
 import { relativeTime } from './ChatScreen'
 import { PaperReaderScreen } from './PaperReaderScreen'
 import { useTheme, type Theme } from '../ui/theme'
 import { scale } from '../ui/typography'
 
+// Distinct copy per failure class (D42): offline is a DEVICE condition,
+// failure is a BARKPARK condition — collapsing them lies to the user about
+// what to fix. Exported so the offline probes assert the distinction.
+export const PAPERS_OFFLINE_COPY = "You're offline — papers can't load right now."
+export const PAPERS_FAILED_COPY = 'Could not load papers from your Barkpark.'
+
 type ListState =
   | { phase: 'loading' }
-  | { phase: 'error'; message: string }
+  | { phase: 'error'; failure: PaperFetchFailure }
   | {
       phase: 'ready'
       pager: PagerState
       refreshing: boolean
       loadingMore: boolean
       loadedAtMs: number
+      /** present = painting the CACHED page (stale badge shown): when the
+       * cache row was written. Cleared the moment the network confirms. */
+      cachedAtMs?: number
     }
 
 export function PapersScreen({ connection }: { connection: InstanceConnection }) {
@@ -50,8 +66,22 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
   useEffect(() => {
     let alive = true
     ;(async () => {
+      // Read-through on open (D42): paint the cached page-0 fold instantly
+      // with the stale badge, then let the network confirm or replace it.
+      const cached = readCachedPaperList(connection)
+      if (alive && cached !== undefined) {
+        setState({
+          phase: 'ready',
+          pager: hydrate(cached.data),
+          refreshing: false,
+          loadingMore: false,
+          loadedAtMs: Date.now(),
+          cachedAtMs: cached.cachedAtMs,
+        })
+      }
       try {
         const page = await fetchPaperPage(client, connection.dataset, 0)
+        writeCachedPaperList(connection, page) // write-through: next open paints this
         if (alive)
           setState({
             phase: 'ready',
@@ -60,14 +90,21 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
             loadingMore: false,
             loadedAtMs: Date.now(),
           })
-      } catch {
-        if (alive) setState({ phase: 'error', message: 'Could not load papers from your Barkpark.' })
+      } catch (err) {
+        if (!alive) return
+        // Cached content already painted stands, badge and all — a failed
+        // refresh must not blank a readable list.
+        if (cached !== undefined) {
+          setState((cur) => (cur.phase === 'ready' ? { ...cur, refreshing: false } : cur))
+          return
+        }
+        setState({ phase: 'error', failure: classifyPaperFailure(err) })
       }
     })()
     return () => {
       alive = false
     }
-  }, [client, connection.dataset, attempt])
+  }, [client, connection, connection.dataset, attempt])
 
   const retry = useCallback(() => {
     setState({ phase: 'loading' })
@@ -127,9 +164,17 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
   }
 
   if (state.phase === 'error') {
+    const offline = state.failure === 'offline'
     return (
       <View style={[styles.center, { backgroundColor: theme.bg }]}>
-        <Text style={[styles.body, { color: theme.danger }]}>{state.message}</Text>
+        <Text style={[styles.body, { color: offline ? theme.text : theme.danger }]}>
+          {offline ? PAPERS_OFFLINE_COPY : PAPERS_FAILED_COPY}
+        </Text>
+        {offline && (
+          <Text style={[styles.muted, { color: theme.textMuted }]}>
+            Papers you have opened before stay readable offline once cached.
+          </Text>
+        )}
         <Pressable accessibilityRole="button" onPress={retry}>
           <Text style={[styles.link, { color: theme.accent }]}>Try again</Text>
         </Pressable>
@@ -166,6 +211,15 @@ export function PapersScreen({ connection }: { connection: InstanceConnection })
       }
       onEndReached={loadMore}
       onEndReachedThreshold={0.6}
+      ListHeaderComponent={
+        state.cachedAtMs !== undefined ? (
+          <View style={[styles.staleBadge, { backgroundColor: theme.warnSoft, borderColor: theme.warn }]}>
+            <Text style={[styles.staleText, { color: theme.text }]}>
+              Cached list · updated {relativeTime(new Date(state.cachedAtMs).toISOString(), state.loadedAtMs)}
+            </Text>
+          </View>
+        ) : null
+      }
       ListFooterComponent={
         state.loadingMore ? (
           <View style={styles.footer}>
@@ -244,6 +298,15 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
   listContent: { padding: 16, gap: 10 },
   footer: { paddingVertical: 16, alignItems: 'center' },
+  staleBadge: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginBottom: 10,
+    alignItems: 'center',
+  },
+  staleText: { ...scale.xs, fontWeight: '600' },
   row: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 6, marginBottom: 8 },
   title: { ...scale.md, fontWeight: '600' },
   description: { ...scale.sm },

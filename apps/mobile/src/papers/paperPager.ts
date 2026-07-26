@@ -38,6 +38,15 @@ export function appendPage(state: PagerState, page: PaperPage): PagerState {
   return next
 }
 
+/** Fold a CACHED page 0 into a fresh PagerState (D42 read-through). The cache
+ * path MUST yield the identical shape and invariants as the network path —
+ * so it IS the network fold, applied to the empty pager: offset advances by
+ * the cached page's raw pageLen, hasMore comes from the page itself, total
+ * carries through. Anything else would fork the paging laws. */
+export function hydrate(cachedPage: PaperPage): PagerState {
+  return appendPage(EMPTY_PAGER, cachedPage)
+}
+
 /** Whether the screen should fetch another page on end-reach. */
 export function shouldLoadMore(state: PagerState): boolean {
   return state.hasMore
