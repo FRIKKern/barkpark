@@ -276,6 +276,18 @@ describe('the fold runs on the D77 gen clock', () => {
     expect(workLogExpanded(rederived, 'm-2', 4)).toBe(true)
   })
 
+  it('the disclosure needs only the PERSISTED fold — never the per-tick group array', () => {
+    const stored = observeGroups(initialWorkLogFold, groups, 3)
+    // Re-observing before toggling changes nothing, because the birth is
+    // already stored. THAT is what lets the screen's toggle handler drop
+    // `groups` from its dependencies — groups is re-derived on every token
+    // frame, and a handler that changed with it would re-mint every row's
+    // props through rowCtx and make memo(TranscriptRow) inert all over again.
+    expect(toggleWorkLog(stored, 'm-2', 4)).toEqual(
+      toggleWorkLog(observeGroups(stored, groups, 4), 'm-2', 4),
+    )
+  })
+
   it('observeGroups keeps the birth gen of a group that GREW mid-turn', () => {
     const first = observeGroups(initialWorkLogFold, groups, 4)
     const grown = workLogGroups([...rows, wl('m-4', 'tool')])

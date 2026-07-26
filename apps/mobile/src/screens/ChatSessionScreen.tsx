@@ -331,21 +331,27 @@ export function ChatSessionScreen({
     [rows, groups, isOpen],
   )
 
+  // Deliberately NOT dependent on `groups`: that array is re-derived on every
+  // token frame, so a handler keyed on it would change identity per frame,
+  // re-mint every row's props through rowCtx, and make memo(TranscriptRow)
+  // inert all over again. It does not need groups — the birth gen is already
+  // persisted in `fold` by the render-phase stamp above.
   const toggleLog = useCallback(
     (key: string) => {
       haptic('disclosureToggle')
-      setFold((f) => toggleWorkLog(observeGroups(f, groups, state.gen), key, state.gen))
+      setFold((f) => toggleWorkLog(f, key, state.gen))
     },
-    [groups, state.gen],
+    [state.gen],
   )
 
   // Follow mode. The LIST does the pinning (maintainScrollAtEnd); this only
   // tracks whether the user is following, so the pill knows whether it has
   // anything to offer. Disengagement is structural — the user scrolled — and
   // never a timer, which is what the two removed scrollToEnd yanks were.
-  // How much content is below, right now. The pill compares this against the
-  // mark follow was lost at — so "new content arrived" needs no observer, no
-  // effect and no counter.
+  //
+  // `mark` is how much content is below, right now: the pill compares it
+  // against the mark follow was lost at, so "new content arrived" needs no
+  // observer, no effect and no counter.
   const mark = contentMark(rows.length, state.tail.length)
 
   const onScroll = useCallback(
@@ -387,16 +393,25 @@ export function ChatSessionScreen({
     reFollow('sent')
   }, [draft, send, reFollow])
 
-  const renderItem = useCallback(
-    ({ item }: { item: Row }) =>
-      transcriptItem(item, {
-        theme,
-        blockCtx,
-        inFlight: state.answerInFlight,
-        onAnswer: answer,
-        onToggleLog: toggleLog,
-      }),
+  // ONE memoized ctx, not an object literal per row: an inline literal would
+  // be a fresh identity on every render, which the comparator reads as
+  // "changed" for every row. Every field here survives a tail tick — the
+  // reducer keeps answerInFlight, and the two handlers are keyed on things
+  // that move per TURN at most.
+  const rowCtx = useMemo<RowCtx>(
+    () => ({
+      theme,
+      blockCtx,
+      inFlight: state.answerInFlight,
+      onAnswer: answer,
+      onToggleLog: toggleLog,
+    }),
     [theme, blockCtx, state.answerInFlight, answer, toggleLog],
+  )
+
+  const renderItem = useCallback(
+    ({ item }: { item: Row }) => transcriptItem(item, rowCtx),
+    [rowCtx],
   )
 
   const title = state.title !== '' ? state.title : (sessionTitle ?? sessionId)
