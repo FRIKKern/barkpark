@@ -23,11 +23,26 @@ module.exports = defineConfig([
   // because those are layout, not type, and the token module does not own
   // them.
   //
-  // KNOWN GAP, left deliberately: a string-keyed `{'fontSize': 12}` escapes,
-  // since the selector reads `key.name`. Widening to `key.value` makes the
-  // `> Literal` child match the KEY as well as the value and double-reports
-  // every site. No call site in the app uses that form; a narrow rule that
-  // never lies beats a broad one that cries twice.
+  // TWO KNOWN EVASIONS, both left open deliberately — a syntactic rule bans a
+  // SHAPE, not an intent, and pretending otherwise is worse than saying so:
+  //
+  //   1. CONST LAUNDERING. `const S = 15; ... { fontSize: S }` passes, because
+  //      the value is an Identifier by the time it reaches the property. This
+  //      is not hypothetical: it is the exact idiom chat.tsx used until this
+  //      wave (`const ROW_SIZE = 13; const ROW_LINE = 19`). Measured at the
+  //      base sha, chat.tsx carried 28 hand-typed type values in property
+  //      position and this rule saw 12 of them: the other 16 were laundered
+  //      through those two bindings. Closing it needs constant folding or a
+  //      type-aware rule that resolves the binding — a different instrument,
+  //      filed as a follow-up rather than bolted on here.
+  //   2. STRING KEYS. `{'fontSize': 12}` escapes, since the selector reads
+  //      `key.name`. Widening to `key.value` makes the `> Literal` child match
+  //      the KEY as well as the value and double-reports every site.
+  //
+  // Neither form appears at any call site in the app today. A narrow rule that
+  // never lies beats a broad one that cries twice — but the gaps are named
+  // here so the next reader knows a green run means "no raw literal in a style
+  // property", not "no hand-typed type value anywhere".
   //
   // typography.ts is exempt for the obvious reason: it is where the numbers
   // are supposed to live — dropping that ignore reds the token module itself
