@@ -89,7 +89,7 @@ export function GraphLanding({
           above). It sits above the canvas but lets pointer events through. */}
       <div className="pointer-events-none absolute bottom-5 left-5 z-20 max-w-xs select-none">
         <p className="text-xs font-medium leading-relaxed text-foreground/75">
-          Barkpark documentation graph
+          Barkpark document graph
         </p>
         <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-text">
           {matches
