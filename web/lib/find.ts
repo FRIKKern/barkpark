@@ -7,10 +7,21 @@
  * Barkpark document into a uniform hit the UI can render regardless of `_type`.
  */
 
-/** Search engines Barkpark exposes. Postgres = exact/operator-aware (and the
- * anonymous-safe flat route); Indx = fuzzy/typo-tolerant lexical recall, only
- * reachable on a token-scoped route. */
+/** Search engines Barkpark exposes. Postgres = exact/operator-aware; Indx =
+ * fuzzy/typo-tolerant lexical recall. Both ride the same route (scoped when a
+ * token is configured, flat-anonymous otherwise). */
 export type SearchEngine = "postgres" | "indx";
+
+/**
+ * The ONE default engine — consumed by the SSR seed (layout), the Finder's
+ * `initialEngine` prop default, the `?engine=` URL readers (Finder + the
+ * `/api/find` route), so every surface agrees on what "no engine param" means.
+ * Postgres: always provisioned wherever Barkpark runs, exact + operator-aware.
+ * Indx keeps its pill as the opt-in fuzzy upgrade — on instances where it isn't
+ * provisioned, an `engine=indx` request degrades to a Postgres retry with an
+ * honest `indxUnavailable` flag (see `runSearch`), never a broken first paint.
+ */
+export const DEFAULT_ENGINE: SearchEngine = "postgres";
 
 export const ENGINES: ReadonlyArray<{
   id: SearchEngine;
@@ -38,15 +49,54 @@ export interface DocType {
   href: (slug: string) => string;
 }
 
-export const DOC_TYPES: ReadonlyArray<DocType> = [
-  { type: "post", label: "Posts", href: (s) => `/d/post/${s}` },
-  { type: "paper", label: "Papers", href: (s) => `/d/paper/${s}` },
-  { type: "sheet", label: "Sheets", href: (s) => `/d/sheet/${s}` },
-  { type: "page", label: "Pages", href: (s) => `/d/page/${s}` },
-  { type: "author", label: "Authors", href: (s) => `/d/author/${s}` },
-  { type: "category", label: "Categories", href: (s) => `/d/category/${s}` },
-  { type: "project", label: "Projects", href: (s) => `/d/project/${s}` },
-];
+/** The content types this site's finder surfaces + facets over, config-driven.
+ *
+ * `NEXT_PUBLIC_BARKPARK_DOC_TYPES` is a comma-separated list, each entry either
+ * a bare `type` or `type:Label` (the label auto-Title-Cases + pluralises when
+ * omitted). It MUST be `NEXT_PUBLIC_` so the value is inlined into BOTH the
+ * server route (find-search) and the client bundle (use-live-search) — otherwise
+ * the two would compute a different `types` allowlist and drift.
+ *
+ * Default keeps the multi-type demo set; a single-type seed site sets e.g.
+ * `NEXT_PUBLIC_BARKPARK_DOC_TYPES=guide:Guides`. On the managed-deploy path (the
+ * build env is scrubbed to the BUILD_ALLOW list, which drops NEXT_PUBLIC_* but
+ * keeps the singular `BARKPARK_DOC_TYPE`), the server bundle falls back to that
+ * single type; the client bundle sees neither and keeps the demo default (a
+ * benign superset — extra types in the WS `types` allowlist just yield no hits). */
+function titleCase(type: string): string {
+  const t = type.charAt(0).toUpperCase() + type.slice(1);
+  return t.endsWith("s") ? t : `${t}s`;
+}
+
+function parseDocTypes(spec: string | undefined): DocType[] {
+  const entries = (spec ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (entries.length === 0) {
+    return [
+      { type: "post", label: "Posts" },
+      { type: "paper", label: "Papers" },
+      { type: "sheet", label: "Sheets" },
+      { type: "page", label: "Pages" },
+      { type: "author", label: "Authors" },
+      { type: "category", label: "Categories" },
+      { type: "project", label: "Projects" },
+    ].map((t) => ({ ...t, href: (s: string) => `/d/${t.type}/${s}` }));
+  }
+  return entries.map((entry) => {
+    const [type, label] = entry.split(":").map((s) => s.trim());
+    return {
+      type,
+      label: label && label.length > 0 ? label : titleCase(type),
+      href: (s: string) => `/d/${type}/${s}`,
+    };
+  });
+}
+
+export const DOC_TYPES: ReadonlyArray<DocType> = parseDocTypes(
+  process.env.NEXT_PUBLIC_BARKPARK_DOC_TYPES ?? process.env.BARKPARK_DOC_TYPE,
+);
 
 const TYPE_BY_NAME = new Map(DOC_TYPES.map((t) => [t.type, t]));
 

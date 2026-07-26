@@ -10,6 +10,7 @@ import type {
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  DEFAULT_ENGINE,
   DOC_TYPES,
   ENGINES,
   FACET_DIMENSIONS,
@@ -484,7 +485,7 @@ export function Finder({
   variant = "page",
   initialData = null,
   initialSeed = null,
-  initialEngine = "indx",
+  initialEngine = DEFAULT_ENGINE,
 }: {
   variant?: "page" | "home" | "master";
   /** Server-rendered browse result for the landing — seeds the first paint so
@@ -535,8 +536,11 @@ export function Finder({
   const currentQueryString = sp.toString();
 
   const q = sp.get("q") ?? "";
-  // Default to Indx — the landing then showcases native facets + fuzzy recall.
-  const engine: SearchEngine = sp.get("engine") === "postgres" ? "postgres" : "indx";
+  // Unbiased URL reader: an explicit `engine=indx` opts into fuzzy recall;
+  // anything else resolves to the ONE shared default (postgres — see
+  // DEFAULT_ENGINE), matching the SSR seed and the /api/find route.
+  const engine: SearchEngine =
+    sp.get("engine") === "indx" ? "indx" : DEFAULT_ENGINE;
   const sort: SortId = SORTS.some((s) => s.id === sp.get("sort"))
     ? (sp.get("sort") as SortId)
     : "relevance";
@@ -1268,19 +1272,25 @@ export function Finder({
       {/* Popular shortcuts now live in the status row above (idle state),
           replacing the old engine tagline — no separate line. */}
 
-      {/* banners */}
+      {/* banners — total failure is HUMAN copy (the server already folds the
+          upstream error through humanUpstreamMessage), never a raw upstream
+          dump; the honest recovery hint is that the next keystroke retries.
+          `data-search-error` is a STRUCTURAL oracle for the journey-smoke
+          harness (tooling/search-smoke) — keep it when editing the copy. */}
       {data?.error ? (
-        <section className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
-          <strong className="font-medium">Search failed.</strong>
-          <pre className="mt-2 whitespace-pre-wrap text-xs">{data.error}</pre>
+        <section
+          data-search-error
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200"
+        >
+          <strong className="font-medium">Search is unavailable right now.</strong>{" "}
+          The search service didn&apos;t answer — it may be restarting. Searching
+          again retries automatically.
         </section>
       ) : null}
       {data?.indxUnavailable ? (
         <section className="rounded-lg border border-amber-300/70 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-          Indx needs a scoped read token, which isn&apos;t configured in this
-          deployment — showing <strong>Postgres</strong> results. Set{" "}
-          <code className="font-mono">BARKPARK_TOKEN</code> to enable
-          fuzzy/typo search.
+          Live Indx engine unavailable — showing <strong>Postgres</strong>{" "}
+          results.
         </section>
       ) : null}
       {/* Recovery/fuzzy-widen is now a compact pill in the engine row above

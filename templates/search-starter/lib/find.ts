@@ -7,10 +7,21 @@
  * Barkpark document into a uniform hit the UI can render regardless of `_type`.
  */
 
-/** Search engines Barkpark exposes. Postgres = exact/operator-aware (and the
- * anonymous-safe flat route); Indx = fuzzy/typo-tolerant lexical recall, only
- * reachable on a token-scoped route. */
+/** Search engines Barkpark exposes. Postgres = exact/operator-aware; Indx =
+ * fuzzy/typo-tolerant lexical recall. Both ride the same route (scoped when a
+ * token is configured, flat-anonymous otherwise). */
 export type SearchEngine = "postgres" | "indx";
+
+/**
+ * The ONE default engine — consumed by the SSR seed (layout), the Finder's
+ * `initialEngine` prop default, the `?engine=` URL readers (Finder + the
+ * `/api/find` route), so every surface agrees on what "no engine param" means.
+ * Postgres: always provisioned wherever Barkpark runs, exact + operator-aware.
+ * Indx keeps its pill as the opt-in fuzzy upgrade — on instances where it isn't
+ * provisioned, an `engine=indx` request degrades to a Postgres retry with an
+ * honest `indxUnavailable` flag (see `runSearch`), never a broken first paint.
+ */
+export const DEFAULT_ENGINE: SearchEngine = "postgres";
 
 export const ENGINES: ReadonlyArray<{
   id: SearchEngine;
