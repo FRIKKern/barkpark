@@ -1,0 +1,58 @@
+name: bp-graph-drift
+
+# DIRECTIONAL byte-identity tripwire for the four bp-graph.js copies
+# (search-template epic D72). bp-graph.js declares its own direction in its
+# header — the canonical is api/priv/static/assets/bp-graph.js and the other
+# three are verbatim mirrors — so this job compares each MIRROR against the
+# CANONICAL and names the one that rotted.
+#
+# WHY A DEDICATED WORKFLOW AND NOT doc-gates.yml: doc-gates.yml triggers on
+# web/** and templates/** but has NO api/priv/** path and no **/*.js glob, so a
+# CANONICAL-ONLY edit — exactly the edit the mirror doctrine mandates — would
+# never fire it. The trigger list below therefore names all four literal copies
+# plus this script and this workflow.
+#
+# ADVISORY, honestly labelled: this repo has no branch protection
+# (branches/main/protection -> 404 "Branch not protected", /rulesets -> []), so
+# there is no required-check list to register against and no workflow here gates
+# a merge. This job REDS THE PR PAGE. Repo-wide protection is tracked separately
+# (stw10-backlog-branch-protection).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/priv/static/assets/bp-graph.js"
+      - "web/public/bp-graph.js"
+      - "templates/search-starter/public/bp-graph.js"
+      - "templates/astro-search-starter/public/bp-graph.js"
+      - "scripts/check-bp-graph-drift.sh"
+      - ".github/workflows/bp-graph-drift.yml"
+  pull_request:
+    paths:
+      - "api/priv/static/assets/bp-graph.js"
+      - "web/public/bp-graph.js"
+      - "templates/search-starter/public/bp-graph.js"
+      - "templates/astro-search-starter/public/bp-graph.js"
+      - "scripts/check-bp-graph-drift.sh"
+      - ".github/workflows/bp-graph-drift.yml"
+
+concurrency:
+  group: bp-graph-drift-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  drift:
+    name: bp-graph.js mirror identity (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Prove the tripwire can fail before trusting that it passed: the selftest
+      # asserts the REASON STRINGS (DRIFTED / MISSING MIRROR / MISSING
+      # CANONICAL), not just drift counts.
+      - name: Self-test the tripwire
+        run: bash scripts/check-bp-graph-drift.sh --selftest
+
+      - name: Check mirror identity
+        run: bash scripts/check-bp-graph-drift.sh

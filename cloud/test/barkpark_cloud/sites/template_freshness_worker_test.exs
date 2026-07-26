@@ -82,6 +82,12 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
 
   defp sweep, do: TemplateFreshnessWorker.perform(%Oban.Job{args: %{}})
 
+  # The scoped analytics reads this owner has seen — MEASURED, not claimed.
+  defp analytics_reads do
+    StudioLinkFakeHttpClient.requests()
+    |> Enum.count(&String.contains?(&1.url, "/v1/data/analytics/"))
+  end
+
   ## ---------------------------------------------------------------------------
 
   describe "the sweep" do
@@ -195,6 +201,101 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
       _never = site_fixture(bp, "static", "astro")
 
       assert {:ok, %{enqueued: 0, duplicate: 0, skipped: 0, failed: 0}} = sweep()
+    end
+  end
+
+  describe "the inert-sweep counter (residue 1)" do
+    test "counts a box with NO code revision — an inert sweep is no longer indistinguishable from a quiet one" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+
+      # A box that has reported neither git_commit nor version: Deploy.code_rev/1
+      # falls back to the "unknown" CONSTANT, which freezes build_id's code half,
+      # so no code roll on this box can EVER mint a new build here.
+      bp = bp |> Ecto.Changeset.change(git_commit: nil, version: nil) |> Repo.update!()
+      refute Deploy.code_rev_known?(bp)
+
+      _site = site_fixture(bp, "static", "astro") |> deployed(bp)
+
+      # The count rides ALONGSIDE the real outcome, never instead of it.
+      assert {:ok, %{enqueued: 1, code_rev_unknown: 1}} = sweep()
+
+      # And on the quiet tick, where the whole hazard lives: without this key the
+      # summary is byte-identical to a healthy fleet's.
+      assert {:ok, %{enqueued: 0, duplicate: 1, code_rev_unknown: 1}} = sweep()
+    end
+
+    test "a healthy box reports zero, and an unreadable box is not ALSO diagnosed code-rev-unknown" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+      assert Deploy.code_rev_known?(bp)
+      _site = site_fixture(bp, "static", "astro") |> deployed(bp)
+
+      assert {:ok, %{enqueued: 1, code_rev_unknown: 0}} = sweep()
+
+      # A box whose analytics read fails is SKIPPED; one sick box must not read
+      # as two distinct diagnoses.
+      StudioLinkFakeHttpClient.program(%{
+        @analytics_path => {:ok, %{status: 502, body: "upstream down"}}
+      })
+
+      assert {:ok, %{skipped: 1, code_rev_unknown: 0}} = sweep()
+    end
+
+    test "SHAPE LAW: a sixth OUTCOME ATOM raises KeyError — the count must be a KEY seeded in zero" do
+      # This is the constraint the implementation is shaped by, asserted rather
+      # than trusted. `perform/1` reduces with `Map.update!(acc, outcome, …)`, so
+      # returning a new atom from sweep_site/1 would crash the whole sweep.
+      zero = %{
+        enqueued: 0,
+        duplicate: 0,
+        skipped: 0,
+        failed: 0,
+        deferred: 0,
+        code_rev_unknown: 0
+      }
+
+      assert_raise KeyError, fn -> Map.update!(zero, :code_rev_stale, &(&1 + 1)) end
+      assert %{code_rev_unknown: 1} = Map.update!(zero, :code_rev_unknown, &(&1 + 1))
+    end
+  end
+
+  describe "one analytics read per site per tick (residue 2a)" do
+    test "the probed content_rev is handed to Deploy.enqueue instead of re-read — on BOTH tick kinds" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+      _site = site_fixture(bp, "static", "astro") |> deployed(bp)
+
+      # program/1 resets this owner's request log, so the fixture's own marker
+      # deploy is not counted against the tick.
+      StudioLinkFakeHttpClient.program(%{})
+      assert {:ok, %{enqueued: 1}} = sweep()
+
+      assert analytics_reads() == 1,
+             "enqueue-tick: the sweep probes content_rev, then Deploy.enqueue/5 must REUSE it"
+
+      StudioLinkFakeHttpClient.program(%{})
+      assert {:ok, %{duplicate: 1}} = sweep()
+
+      assert analytics_reads() == 1,
+             "quiet-tick: the no-op path pays exactly one read too"
+    end
+
+    test "two sites = two reads, one each (the saving is per site, not a global cache)" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+      _a = site_fixture(bp, "static", "astro") |> deployed(bp)
+      _b = site_fixture(bp, "node", "nextjs") |> deployed(bp)
+
+      StudioLinkFakeHttpClient.program(%{})
+      # One enqueues, one defers (per-box start cap) — the deferred site is
+      # skipped BEFORE probing, so it costs no read at all.
+      assert {:ok, %{enqueued: 1, deferred: 1}} = sweep()
+      assert analytics_reads() == 1
+
+      StudioLinkFakeHttpClient.program(%{})
+      assert {:ok, %{enqueued: 1, duplicate: 1}} = sweep()
+      assert analytics_reads() == 2
     end
   end
 
