@@ -85,6 +85,27 @@ jobs:
           CHROME: /usr/bin/google-chrome
         run: node tooling/search-smoke/journey-smoke.mjs --self-test
 
+  finder-unit:
+    name: Finder unit specs (dep-free, no browser)
+    # Same reason the astro twin has `astro-search-finder-test`: the browser
+    # smoke certifies the JOURNEY, not the pure helpers the journey depends on.
+    # `curatePopularQueries` decides what the Popular chip row promises, and the
+    # only way to prove "an all-noise pool renders NO row" is to feed it one.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22 strips TypeScript types natively — no npm ci, no build step, so
+      # this job stays seconds-fast and cannot be broken by a dependency.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run the finder unit specs
+        working-directory: templates/search-starter
+        run: node --test 'lib/**/*.test.ts'
+
   live-journey:
     name: Journey smoke — live demo (report mode, never gates)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

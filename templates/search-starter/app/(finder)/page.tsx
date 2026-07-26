@@ -22,8 +22,22 @@ import { fetchListings } from "@/lib/listings";
  * place-directory template (`templates/place-directory`) is what flips the env
  * var. Both code paths stay in the tree; this is a config switch, not a swap.
  *
- * On mobile the finder owns the full screen, so the heavy pointer/pan surface is
- * hidden below `md` and a short hint takes its place either way.
+ * NO_MOBILE_FALLBACK — below `md` this page renders NOTHING, on purpose.
+ *
+ * The (finder) layout gives the left rail `w-full` on a phone, so this pane —
+ * the layout's `flex-1` <section> — is laid out at x=390 in a 390px viewport,
+ * inside an `overflow-hidden` parent. It is not merely small: it is entirely
+ * off-screen and unreachable, with no scroll that can bring it back. The
+ * `md:hidden` "← Search above, then tap a result" hint that used to live here
+ * was therefore invisible to every phone visitor while still sitting in the
+ * accessibility tree, narrating an interactive graph that a screen-reader user
+ * could never reach (measured at 390x844: bounding box left=390..464).
+ *
+ * A hint the sighted user cannot see and the screen-reader user is misled by is
+ * worse than no hint, and it has no honest home here — the visible column on a
+ * phone belongs to <Finder>, which already shows the search box and a browse
+ * list as its own idle state. So the heavy pointer/pan surface stays gated
+ * behind `hidden md:block` + <DesktopOnly> and nothing replaces it.
  */
 export default async function FinderLanding() {
   const landing = process.env.NEXT_PUBLIC_FINDER_LANDING;
@@ -56,22 +70,7 @@ async function MapFinderLanding() {
           <MapLanding listings={listings} />
         </DesktopOnly>
       </div>
-
-      {/* Mobile fallback: a short hint instead of the pan-heavy map. */}
-      <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center md:hidden">
-        <div
-          aria-hidden
-          className="text-4xl text-zinc-300 select-none dark:text-zinc-700"
-        >
-          ←
-        </div>
-        <p className="max-w-xs text-sm text-zinc-500 dark:text-zinc-400">
-          Search above to find a listing, then tap a result to open it here.
-        </p>
-        <p className="max-w-xs text-xs text-zinc-400 dark:text-zinc-600">
-          The interactive map is available on a wider screen.
-        </p>
-      </div>
+      {/* No mobile fallback here — see NO_MOBILE_FALLBACK in the module doc. */}
     </>
   );
 }
@@ -99,22 +98,7 @@ async function GraphFinderLanding() {
           <GraphLanding nodes={nodes} edges={edges} rootId={rootId} />
         </DesktopOnly>
       </div>
-
-      {/* Mobile fallback: a short hint instead of the pointer-heavy graph. */}
-      <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center md:hidden">
-        <div
-          aria-hidden
-          className="text-4xl text-zinc-300 select-none dark:text-zinc-700"
-        >
-          ←
-        </div>
-        <p className="max-w-xs text-sm text-zinc-500 dark:text-zinc-400">
-          Search above to find a document, then tap a result to read it here.
-        </p>
-        <p className="max-w-xs text-xs text-zinc-400 dark:text-zinc-600">
-          The interactive documentation graph is available on a wider screen.
-        </p>
-      </div>
+      {/* No mobile fallback here — see NO_MOBILE_FALLBACK in the module doc. */}
     </>
   );
 }
