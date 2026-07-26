@@ -1,0 +1,32 @@
+{
+  "id": "grip-20260726T000000Z-mob-seal-ledger-mechanics",
+  "wave": "barkpark-tasks-mobile-wave-2026-07-26-seal",
+  "phase": "verify",
+  "assignment": "ledger-mechanics-batch",
+  "recipes": [
+    {
+      "claim": "The authoring-excellence 're-parented to root' precedent means parent_id = the epic ROOT task doc_id (not null, not a successor epic), with lifecycle_status flipped to 'considering' and criteria left unmet as activation gates.",
+      "rerun": "bp task get ae-search-tsvector-arm-latency -o json | python3 -c \"import json,sys;d=json.load(sys.stdin)['doc'];print(d['parent_id'],d['lifecycle_status'],d['criteria_progress'])\""
+    },
+    {
+      "claim": "The authoring-excellence epic was SEALED (lifecycle done, 4/4 criteria met) while FOUR children were still lifecycle_status 'open', and its close_reason census (47 done + 1 cancelled + 2 re-parented = 50) does not reconcile with child_count 54. The four open rows were inserted 46 minutes BEFORE the root's last write.",
+      "rerun": "bp task get authoring-excellence -o json | python3 -c \"import json,sys;from collections import Counter;d=json.load(sys.stdin);print(d['child_count'],Counter(c['lifecycle_status'] for c in d['children']));print(d['doc']['updated_at']);print([ (c['doc_id'],c['inserted_at']) for c in d['children'] if c['lifecycle_status']=='open'])\""
+    },
+    {
+      "claim": "A cancelled close records content.close_reason exactly as a done close does; the reason write in apply_close_update is status-agnostic and only autostamp_merge_gate gates on 'done'. Criteria may also be stamped met on a cancel.",
+      "rerun": "git show origin/main:api/lib/barkpark/tasks/close.ex | sed -n '383,391p'; bp task get ae-search-or-arm-restructure -o json | python3 -c \"import json,sys;d=json.load(sys.stdin)['doc'];print(d['lifecycle_status'],d['criteria_progress'],d['content']['close_reason'][:80])\""
+    },
+    {
+      "claim": "The epic children[] roster is a bare type=task + parent_id match with the drafts. prefix stripped on BOTH sides and NO status filter, so the draft row drafts.task-a3722cb3acd7c8f1 is child 45 of 45. bp doc discard-draft fenced_delete's that row, so it leaves the roster (45 -> 44). There is no published twin: bp task get on the bare id resolves to the draft (status 'draft').",
+      "rerun": "grep -n 'defp child_tasks' -A14 api/lib/barkpark_web/controllers/tasks_controller.ex; bp task get task-a3722cb3acd7c8f1 -o json | python3 -c \"import json,sys;d=json.load(sys.stdin)['doc'];print(d['doc_id'],d['status'])\""
+    },
+    {
+      "claim": "No papers-cache / mob-w3-* offline-cache task exists on the ledger; mob-w3-rich-tail is the only mob-w3-* row. Zero of the 17 open PRs touch apps/mobile, studio_chat, or herd.",
+      "rerun": "bp search query 'papers cache sqlite offline reader mobile' --all -o json | python3 -c \"import json,sys;print([x['id'] for x in json.load(sys.stdin)['documents'] if x['id'].startswith('mob-w3')])\"; for n in $(gh pr list --state open --limit 50 --json number -q '.[].number'); do gh pr view $n --json files -q '.files[].path' | grep -cE '^apps/mobile|studio_chat|herd'; done"
+    },
+    {
+      "claim": "task-e4833f198e293ed1 and task-993d136b0fbf2fd1 are BOTH parent_id null orphans, ownership is cleanly split by an explicit cross-reference, and e4833's item 5 claims apps/mobile territory still unfixed on origin/main (inlines.tsx:159 bare-array -> null; inlines.tsx:196-200 inline code reads node.value only).",
+      "rerun": "git show origin/main:apps/mobile/src/papers/portabledoc/inlines.tsx | grep -n \"isMap(node)) return null\\|case 'code'\""
+    }
+  ]
+}

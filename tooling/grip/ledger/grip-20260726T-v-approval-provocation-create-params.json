@@ -1,0 +1,57 @@
+{
+  "grip_id": "v-approval-provocation-create-params-2026-07-26",
+  "verifier": "v-approval-provocation-create-params",
+  "wave": "barkpark-tasks-mobile-wave-2026-07-26-seal",
+  "assignment": "Real-send brief: (a) ChatController.create params contract + can a member [read,write,chat] token create; (b) claude adapter/Recorder approval-mint path — which modes, which prompts; (c) spend cap / admission limit a scripted drive could trip; (d) can mobile deep-open a session by id (archive-then-verify ordering)?",
+  "verdict": "All four answered from origin/main + live read-only probes. THREE premise corrections: (1) guerrilla ALREADY runs managed claude runtimes (39 live sessions, cwd=/opt/barkpark/api, one at $263.81) — the 'no claude CLI in any baked image' premise is false for guerrilla; (2) spend is NOT cents — the cheapest real 1-message haiku session on guerrilla cost $0.342; (3) ALLOWING an ExitPlanMode card auto-flips the session to mode 'auto' (recorder.ex:1770/1776-1778) in cwd /opt/barkpark/api — the production checkout. The drive must DENY plan cards and only ALLOW a non-ExitPlanMode ask.",
+  "recipes": [
+    {
+      "claim": "ChatController.create body = {provider?, execution_target?, execution_host_id?, mode?, model?, effort?} and NOTHING else (unknown key => 400); id server-minted; cwd always Runtime.cwd(provider); default mode 'plan' for claude; bypassPermissions stripped from the create allowlist",
+      "rerun": "git show origin/main:api/lib/barkpark_web/controllers/chat_controller.ex | sed -n '104,150p;1011,1041p'"
+    },
+    {
+      "claim": "A member-shaped [read,write,chat] token CAN create — RequireChatAccess resolves 'chat' + non-nil workspace_id to {:workspace, ws}; a chat token with NO workspace binding is 403; admin resolves to :global. has_permission? is a bare list membership, permissions is a free-form {:array,:string}",
+      "rerun": "git show origin/main:api/lib/barkpark_web/plugs/require_chat_access.ex | sed -n '48,66p'; git show origin/main:api/lib/barkpark/auth.ex | sed -n '808,813p'"
+    },
+    {
+      "claim": "A turnkey workspace-bound chat token mint exists: POST /w/:ws/p/:proj/v1/chat/tokens (router.ex:2358), admin-gated, permissions HARDCODED to ['chat'] in Auth.create_chat_token/3, and it also inserts a member workspace_memberships row",
+      "rerun": "git show origin/main:api/lib/barkpark_web/router.ex | grep -n 'chat/tokens'; git show origin/main:api/lib/barkpark_web/controllers/chat_token_controller.ex | sed -n '1,50p'"
+    },
+    {
+      "claim": "--permission-prompt-tool stdio ships in EVERY mode including plan, so asks reach Barkpark as control_request/can_use_tool -> {:claude_chat_permission, %{request_id, tool_name, input, title, decision_reason}}; plan mode's ExitPlanMode ask fires on EVERY plan session",
+      "rerun": "git show origin/main:api/lib/barkpark_web/studio/claude_chat.ex | sed -n '922,948p;1845,1880p'"
+    },
+    {
+      "claim": "Deterministic non-plan provocation: the loopback MCP allowlist is fail-closed full-name — read tools (task_ready/task_show/task_prime/bp_doc_*/bp_search_query/chat_read_tail/chat_wait_for_state) auto-approve in every mode; ANY mutating loopback tool (task_create, task_next, chat_send, chat_spawn_session, bp_auth_*) and EVERY non-loopback tool mints the card",
+      "rerun": "git show origin/main:api/lib/barkpark_web/studio/claude_chat.ex | sed -n '605,645p'"
+    },
+    {
+      "claim": "DANGER: an ALLOWED ExitPlanMode is the plan-approve fact; the Recorder then engages Autopilot = mode 'auto' (steer + StudioChat.set_mode) — write authority in the session cwd. On guerrilla that cwd is /opt/barkpark/api, the production checkout. Only ExitPlanMode triggers it; any other allowed ask does not",
+      "rerun": "git show origin/main:api/lib/barkpark_web/studio/claude_chat.ex | sed -n '1438,1450p'; git show origin/main:api/lib/barkpark/studio_chat/recorder.ex | sed -n '1765,1800p;524,532p'"
+    },
+    {
+      "claim": "NO spend cap anywhere: runtime_usage.ex is append-only receipts (no cap/limit/reject leg); the launch argv carries no --max-budget-usd. The ONLY admission limit is RuntimeAdmission — node-local concurrent MANAGED runtimes, default 3, unconfigured in api/config, registered_host exempt; exhaustion => 503 runtime_capacity + Retry-After 15. No rate-limit plug on the :require_chat_access pipeline",
+      "rerun": "git show origin/main:api/lib/barkpark/studio_chat/runtime_usage.ex | grep -nE 'cap|limit|budget|spend' ; git show origin/main:api/lib/barkpark/studio_chat/runtime_admission.ex | sed -n '10,14p;77,90p'; git grep -n 'max_managed_runtimes' origin/main -- api/config; git show origin/main:api/lib/barkpark_web/studio/claude_chat.ex | grep -c 'max-budget-usd'; git show origin/main:api/lib/barkpark_web/router.ex | sed -n '694,698p'"
+    },
+    {
+      "claim": "Recorder self-reaps after 30 min of frame silence (@idle_after_ms), and a pending approval does NOT hold it open. After the reap, POST /approval and POST /interrupt are SILENT no-ops that still answer 204/202 with request_id null and NO approval_status write (the inner `with` in approval/2 has no else clause)",
+      "rerun": "git show origin/main:api/lib/barkpark/studio_chat/recorder.ex | sed -n '30,34p;709,720p'; git show origin/main:api/lib/barkpark_web/controllers/chat_controller.ex | sed -n '305,340p'"
+    },
+    {
+      "claim": "NO deep-open by id in the mobile app: ChatSessionScreen takes sessionId as a prop, but ChatScreen's openSession state initialises to undefined with no seeding prop — the ONLY entry is a SessionRow onPress. Rows in BOTH shelves are tappable, so an archived session IS reachable via the Archived toggle; archiving the OPEN session pops back out (nextOpenAfterArchive)",
+      "rerun": "git show origin/main:apps/mobile/src/screens/ChatScreen.tsx | sed -n '118,126p;247,260p;343,358p;108,116p'; git show origin/main:apps/mobile/src/screens/ChatSessionScreen.tsx | sed -n '271,282p'"
+    },
+    {
+      "claim": "Mobile has NO create-session call — src/api/chat.ts covers list/show/messages/interrupt/approval/PATCH/archive/unarchive/events but no POST /v1/chat/sessions; session creation for the drive must go out-of-band",
+      "rerun": "git grep -n '/v1/chat/sessions' origin/main -- apps/mobile/src/api/chat.ts"
+    },
+    {
+      "claim": "LIVE (guerrilla, read-only): ?chat=1 manifest advertises claude modes [plan,acceptEdits,auto,dontAsk,manual] + models [haiku,sonnet,opus,fable] + 5 efforts; codex all-empty",
+      "rerun": "curl -s -H \"Authorization: Bearer $BP_TOKEN\" 'https://guerrilla.barkpark.cloud/v1/capabilities?chat=1' | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"chat\"])'"
+    },
+    {
+      "claim": "LIVE (guerrilla, read-only): 39 active + 1 archived chat sessions, ALL execution_target=managed, zero pending_approvals, rollup idle:39; max session 911 messages / $263.81; the archived 1-message haiku session cost $0.342 with cwd /opt/barkpark/api and effective model claude-haiku-4-5 (model_choice null => instance default)",
+      "rerun": "curl -s -H \"Authorization: Bearer $BP_TOKEN\" 'https://guerrilla.barkpark.cloud/v1/chat/sessions?archived=false' -o /tmp/s.json; curl -s -H \"Authorization: Bearer $BP_TOKEN\" 'https://guerrilla.barkpark.cloud/v1/chat/rollup'; python3 -c \"import json;d=json.load(open('/tmp/s.json'))['sessions'];print(len(d), sum(1 for s in d if s['execution_target']=='managed'), max((s.get('total_cost_usd') or 0, s['message_count']) for s in d))\""
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "id": "grip-20260726T120000Z-mob-seal-exchange-live-member-oracle",
+  "wave": "barkpark-tasks-mobile-wave-2026-07-26-seal",
+  "phase": "verify",
+  "assignment": "exchange-live-member-oracle",
+  "recipes": [
+    {
+      "claim": "The member-reachable app-token exchange is DEPLOYED on api.barkpark.cloud: POST /v1/barkparks/b2b81e69-…/app-token returns 200 with a bpapp_ token, permissions [read,write,chat], expires_at null, workspace_id 03e3d6d9-d123-4557-9c06-ae4382a20626.",
+      "rerun": "CT=$(python3 -c \"import json,os;print(json.load(open(os.path.expanduser('~/.config/barkpark/config.json')))['cloud_token'])\"); curl -s -w '\\nHTTP %{http_code}\\n' -X POST -H \"Authorization: Bearer $CT\" https://api.barkpark.cloud/v1/barkparks/b2b81e69-c79c-4eff-b6d7-84507d15b925/app-token"
+    },
+    {
+      "claim": "The minted token is member-shaped at the wire: GET guerrilla /v1/structure/production -> 403 forbidden 'token lacks required permission' (the smoke.sh admin-floor oracle bounces), while member-legal reads succeed — /api/schemas 200, /v1/tasks?limit=1 200, /v1/tasks/prime?view=brief 200, /v1/capabilities reports auth_tier 'write' (never 'admin').",
+      "rerun": "TOK=<minted>; for U in v1/structure/production api/schemas 'v1/tasks?limit=1' v1/capabilities; do curl -s -o /dev/null -w \"$U %{http_code}\\n\" -H \"Authorization: Bearer $TOK\" \"https://guerrilla.barkpark.cloud/$U\"; done"
+    },
+    {
+      "claim": "BP_SMOKE_REQUIRE_EXCHANGE=1 bash tooling/mobile-smoke/smoke.sh passes 12 ok / 0 failed in mode=exchange against LIVE guerrilla today (2026-07-26) — mint, capabilities, structure-403 oracle, tasks prime, tasks events, SSE welcome, paper read, chat sessions 200 (39 sessions), and the three ghost-id 404 oracles.",
+      "rerun": "BP_SMOKE_REQUIRE_EXCHANGE=1 bash tooling/mobile-smoke/smoke.sh"
+    },
+    {
+      "claim": "The revoke half is live and self-cleaning: DELETE /v1/barkparks/:id/app-token with an EMPTY body (logout-everywhere) returned 200 {\"revoked_count\":2}, after which the minted token 401s ('missing or invalid token') and /v1/capabilities drops to auth_tier 'none'. A second DELETE returns 200 {\"revoked_count\":0} — idempotent.",
+      "rerun": "CT=…; curl -s -w '\\nHTTP %{http_code}\\n' -X DELETE -H \"Authorization: Bearer $CT\" -H 'Content-Type: application/json' https://api.barkpark.cloud/v1/barkparks/b2b81e69-c79c-4eff-b6d7-84507d15b925/app-token; curl -s -o /dev/null -w '%{http_code}\\n' -H \"Authorization: Bearer <minted>\" 'https://guerrilla.barkpark.cloud/v1/tasks/prime?view=brief'"
+    },
+    {
+      "claim": "smoke.sh's fleet walk DIVERGES from the app: smoke.sh hits bare GET /v1/barkparks (team-scoped to current_team) while apps/mobile/src/cloud/api.ts:208 hits /v1/barkparks?scope=all and only sets X-Barkpark-Team when opts.teamId is given (api.ts:105). Live counts differ: scope=all -> 5 barkparks across 2 teams, bare -> 4. cloud/lib/barkpark_cloud/web/auth.ex:62-68 falls back to Accounts.primary_team(user) (OLDEST membership) when no x-barkpark-team header is sent, so smoke.sh only passes for a member whose OLDEST membership is the Guerrilla team; otherwise the fleet walk dies at 'no barkpark with url … in the cloud fleet'.",
+      "rerun": "CT=…; curl -s -H \"Authorization: Bearer $CT\" 'https://api.barkpark.cloud/v1/barkparks?scope=all' | python3 -c 'import json,sys;print(len(json.load(sys.stdin)[\"barkparks\"]))'; curl -s -H \"Authorization: Bearer $CT\" https://api.barkpark.cloud/v1/barkparks | python3 -c 'import json,sys;print(len(json.load(sys.stdin)[\"barkparks\"]))'; git show origin/main:cloud/lib/barkpark_cloud/web/auth.ex | sed -n '55,69p'"
+    },
+    {
+      "claim": "The owner account holds TWO team memberships (Guerrilla owner 506f035e…, Gyldendal admin 9d71ba21…), and config.json's cloud_team equals the Guerrilla id, which is exactly what /v1/me reports as the active/primary team. Because login (cloud12_cmd.go:215, login_device.go:176, setup_cloud_login.go:105) writes resp.TeamID = the primary team and `bp team use` (teams_cmd.go:150) would write the same id here, the on-disk value is INDISTINGUISHABLE between the two writers — no `bp team use` is needed for the exchange, which sends no team pin and still resolves Guerrilla.",
+      "rerun": "curl -s -H \"Authorization: Bearer $CT\" https://api.barkpark.cloud/v1/me | python3 -m json.tool | head -50; git grep -n 'CloudTeam =' -- internal/cli | grep -v _test"
+    },
+    {
+      "claim": "smoke.sh's own header comment is STALE on revoke: lines 26-28 still say 'there is NO HTTP revoke path yet, so every exchange-minted smoke token remains live on the instance … clean up server-side', and the mint leg echoes 'NO HTTP revoke exists yet (mob-bl-app-token-revoke)' — but mob-w2-app-token-revoke (5/5) and mob-bl-app-token-revoke (3/3) are both lifecycle done and the DELETE is live-proven. smoke.sh has NO revoke step, so every run still accretes app:<email> tokens.",
+      "rerun": "git show origin/main:tooling/mobile-smoke/smoke.sh | sed -n '26,28p;89,91p'; for t in mob-w2-app-token-revoke mob-bl-app-token-revoke; do bp task get $t -o json | python3 -c \"import json,sys;d=json.load(sys.stdin)['doc'];print(d['doc_id'],d['lifecycle_status'],d['criteria_progress'])\"; done"
+    }
+  ]
+}
