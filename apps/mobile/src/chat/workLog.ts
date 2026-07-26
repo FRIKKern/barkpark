@@ -89,13 +89,51 @@ export function workLogSummary(group: WorkLogGroup): string {
  *               is the clock reading; everything else is derived.
  *   overrides — group key → the user's explicit disclosure. A hand always wins
  *               over the clock, and permanently: someone who opened an old log
- *               to read it must not have it slammed shut by the next turn. */
+ *               to read it must not have it slammed shut by the next turn.
+ *   frozenGen — the clock reading the fold is PINNED to while the reader is
+ *               disengaged, or undefined while it runs live (see freezeFold). */
 export interface WorkLogFold {
   born: Readonly<Record<string, number>>
   overrides: Readonly<Record<string, boolean>>
+  frozenGen?: number
 }
 
 export const initialWorkLogFold: WorkLogFold = { born: {}, overrides: {} }
+
+/** FREEZE THE FOLD CLOCK WHILE THE READER IS AWAY.
+ *
+ * The auto-fold is a good thing to do to the row you are looking at and a
+ * terrible thing to do to the row above it: a group collapsing from four rows
+ * to one header removes height from the transcript, and a user who scrolled up
+ * to read history has the text they were reading slide out from under their
+ * thumb — caused by a turn happening somewhere else entirely. The list's own
+ * physics cannot save them, because maintainScrollAtEnd deliberately does not
+ * fight a reader who is away from the end.
+ *
+ * So the CLOCK is what freezes, not the fold state: while `following` is false
+ * the fold answers with the gen it was pinned at, so nothing folds and nothing
+ * unfolds. On re-engage the pin lifts and the live gen applies again in one
+ * step — every group behind a finished turn folds, which is exactly what the
+ * user asked for by coming back to the bottom.
+ *
+ * Overrides still win (workLogExpanded reads them first) and taps still work
+ * while frozen: a hand is never frozen out, only the clock is. Returns the SAME
+ * object when the pin does not move. */
+export function freezeFold(fold: WorkLogFold, gen: number, following: boolean): WorkLogFold {
+  if (following) {
+    if (fold.frozenGen === undefined) return fold
+    const { frozenGen: _dropped, ...live } = fold
+    return live
+  }
+  if (fold.frozenGen !== undefined) return fold
+  return { ...fold, frozenGen: gen }
+}
+
+/** The gen the fold actually reads — the pin while frozen, the live clock
+ * otherwise. One accessor so no call site can forget the freeze. */
+export function foldGen(fold: WorkLogFold, gen: number): number {
+  return fold.frozenGen ?? gen
+}
 
 /** Stamp the clock onto any group seen for the first time. Returns the SAME
  * object when there is nothing new to stamp — identity stability keeps this
@@ -111,7 +149,10 @@ export function observeGroups(
     born ??= { ...fold.born }
     born[group.key] = gen
   }
-  return born === undefined ? fold : { born, overrides: fold.overrides }
+  // Spread, never a two-field literal: the freeze pin is part of this state and
+  // rebuilding the record by hand is how a new field silently gets dropped on
+  // the commonest write path.
+  return born === undefined ? fold : { ...fold, born }
 }
 
 /** THE FOLD, on the D77 clock.
@@ -120,12 +161,16 @@ export function observeGroups(
  * work scrolls past as it happens. The instant `gen` advances (a new
  * system/init frame — the fence's own increment, not a heuristic) every group
  * born earlier is behind a finished turn, and folds. A group not yet observed
- * reads as live: it can only have appeared under the current clock. */
+ * reads as live: it can only have appeared under the current clock.
+ *
+ * The clock read is `foldGen`, not `gen`: a frozen fold (a reader away from the
+ * end) answers on the pinned reading, so no turn elsewhere in the transcript
+ * moves the rows under them. An override still beats both. */
 export function workLogExpanded(fold: WorkLogFold, key: string, gen: number): boolean {
   const override = fold.overrides[key]
   if (override !== undefined) return override
   const born = fold.born[key]
-  return born === undefined || born >= gen
+  return born === undefined || born >= foldGen(fold, gen)
 }
 
 /** The disclosure tap. Records the OPPOSITE of what is currently shown, so the
@@ -133,7 +178,7 @@ export function workLogExpanded(fold: WorkLogFold, key: string, gen: number): bo
  * would produce a control that does nothing on its first press). */
 export function toggleWorkLog(fold: WorkLogFold, key: string, gen: number): WorkLogFold {
   return {
-    born: fold.born,
+    ...fold,
     overrides: { ...fold.overrides, [key]: !workLogExpanded(fold, key, gen) },
   }
 }
@@ -146,6 +191,57 @@ export function toggleWorkLog(fold: WorkLogFold, key: string, gen: number): Work
  * screen and this module imports nothing at all. Rows outside every group pass
  * through untouched and in order; a folded group leaves exactly its header
  * behind, so the transcript never silently loses a row it does not replace. */
+/** THE HEADER-ROW CACHE — the last thing a token frame was still re-minting.
+ *
+ * foldWorkLog is pure and cheap, but it CONSTRUCTS a header row per group per
+ * call, and the screen calls it on every delta frame. A fresh object fails the
+ * transcript's identity comparator, so each apparatus group's header row
+ * re-rendered on every token of every answer — PROBE D measured three fresh
+ * rows out of eight where only the tail had changed.
+ *
+ * The fix is memoization on the header's whole visible input, which is exactly
+ * two things: whether the group is open, and which rows it contains (the
+ * collapsed line is a count). `headerSignature` states that; a group whose
+ * signature is unchanged hands back the row object it handed back last frame.
+ *
+ * Keyed by GROUP KEY, one entry per group, and swept against the live group list
+ * on every call, so the table is bounded by the transcript's group count with no
+ * eviction policy to get wrong. This is the one memoizing seam in a module of
+ * frozen-input functions; it stays honest by being IDEMPOTENT — calling it twice
+ * with the same groups yields the same row objects, which is what lets the
+ * screen derive its list rows through it during render. */
+export interface CachedHeader<R> {
+  sig: string
+  row: R
+}
+
+/** A header row's whole visible input: the disclosure state and the members it
+ * stands for. Roles ride along positionally, so members pin them too. */
+export function headerSignature(group: WorkLogGroup, open: boolean): string {
+  return `${open ? 'o' : 'c'}:${group.members.join('~')}`
+}
+
+/** Wrap a header constructor in the memo table, returning the `header` callback
+ * foldWorkLog wants. `table` is the caller's own long-lived Map (the screen
+ * holds one per session) and is swept here: a group that left the transcript
+ * loses its entry. */
+export function workLogHeaderCache<R>(
+  table: Map<string, CachedHeader<R>>,
+  groups: readonly WorkLogGroup[],
+  mint: (group: WorkLogGroup, open: boolean) => R,
+): (group: WorkLogGroup, open: boolean) => R {
+  const live = new Set(groups.map((group) => group.key))
+  for (const key of [...table.keys()]) if (!live.has(key)) table.delete(key)
+  return (group, open) => {
+    const sig = headerSignature(group, open)
+    const hit = table.get(group.key)
+    if (hit !== undefined && hit.sig === sig) return hit.row
+    const row = mint(group, open)
+    table.set(group.key, { sig, row })
+    return row
+  }
+}
+
 export function foldWorkLog<R>(
   rows: readonly R[],
   groups: readonly WorkLogGroup[],

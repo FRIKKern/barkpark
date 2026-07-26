@@ -41,12 +41,15 @@ import {
 } from '../chat/followScroll'
 import {
   foldWorkLog,
+  freezeFold,
   initialWorkLogFold,
   observeGroups,
   toggleWorkLog,
   workLogExpanded,
   workLogGroups,
+  workLogHeaderCache,
   workLogSummary,
+  type CachedHeader,
   type WorkLogGroup,
   type WorkLogRow,
 } from '../chat/workLog'
@@ -60,7 +63,7 @@ import {
   type ChatMessage,
 } from '../chat/wire'
 import { useChatSession } from '../chat/useChatSession'
-import { renderBlockNative, type BlockCtx } from '../papers/portabledoc/blocks'
+import { BLOCK_RENDERERS, renderBlockNative, type BlockCtx } from '../papers/portabledoc/blocks'
 import type { Block } from '../papers/portabledoc/model'
 import { haptic } from '../ui/haptics'
 import { useTheme, type Theme } from '../ui/theme'
@@ -185,7 +188,7 @@ export function assembleRows(settled: Row[], echoes: Row[], tail: string): Row[]
   return out
 }
 
-// ── the two-phase floor (charter D8/D9) ──────────────────────────────────────
+// ── the two-phase floor (chat-TUI charter D8/D9) ─────────────────────────────
 
 /** What a row's body paints: a document (server PortableDoc blocks) or plain
  * text. Nothing in between — there is no partial-markdown state. */
@@ -231,6 +234,26 @@ export function rendersBlocks(role: string): boolean {
   return kind === 'assistant' || kind === 'card' || kind === 'block'
 }
 
+/** Does this blocks array have anything the renderer can actually DRAW?
+ *
+ * `renderBlockNative` never throws and never renders nothing: an unregistered
+ * type degrades to the labeled dashed box. That is right per BLOCK — a mixed
+ * turn should show the paragraphs it has and be honest about the one block this
+ * client is too old to draw — and wrong per TURN: a turn whose blocks are ALL
+ * unknown paints a stack of dashed boxes and NO answer, while the full text of
+ * that answer sits unused in `source_markdown` on the very same row. So the
+ * decision is per turn and it is made HERE, screen-side: the block layer keeps
+ * its per-block honesty untouched (zero diffs), and the transcript asks it one
+ * question first — is there a single block worth entering the document path
+ * for?
+ *
+ * BLOCK_RENDERERS is the registry `renderBlockNative` itself dispatches on, so
+ * this can never disagree with what would be drawn — including the chat-* rows,
+ * which are spread into that same registry. */
+export function anyRenderableBlocks(blocks: readonly Block[]): boolean {
+  return blocks.some((b) => BLOCK_RENDERERS[b.type] !== undefined)
+}
+
 /** THE two-phase decision, pure so jest can pin it without a native host.
  *
  * Phase 1 — the live tail (SSE `chat` delta frames) is ALWAYS plain text: the
@@ -241,8 +264,10 @@ export function rendersBlocks(role: string): boolean {
  * document in one step. Local echoes are the user's own words: plain, always.
  *
  * Every block-BEARING role takes the blocks path; a row that arrived without
- * usable blocks (a mid-persist frame, or a thinner server) degrades honestly to
- * its source text — the same tolerance render.go's renderStructuralDoc shows. */
+ * usable blocks (a mid-persist frame, or a thinner server) — or with blocks this
+ * client cannot draw a single one of (anyRenderableBlocks) — degrades honestly
+ * to its source text, the same tolerance render.go's renderStructuralDoc
+ * shows. */
 export function bodyRender(row: Row): BodyRender {
   if (row.kind === 'tail') return { kind: 'text', text: row.text }
   if (row.kind === 'local') return { kind: 'text', text: row.content }
@@ -252,7 +277,7 @@ export function bodyRender(row: Row): BodyRender {
   const m = row.message
   if (rendersBlocks(m.role)) {
     const blocks = messageBlocks(m)
-    if (blocks !== undefined) return { kind: 'blocks', blocks }
+    if (blocks !== undefined && anyRenderableBlocks(blocks)) return { kind: 'blocks', blocks }
   }
   return { kind: 'text', text: (m.source_markdown ?? '').trim() }
 }
@@ -385,22 +410,34 @@ export function ChatSessionScreen({
     setSeenGen(state.gen)
   }
 
-  const observed = observeGroups(fold, groups, state.gen)
+  // The fold's clock is PINNED while the reader is away from the end (see
+  // freezeFold): an auto-fold removes height, and a reader who scrolled up must
+  // not have the line they are reading slide away because a turn finished
+  // somewhere below them. Both writes ride the one setFold — a second
+  // render-phase setState on the same value would be a wasted pass.
+  const observed = freezeFold(observeGroups(fold, groups, state.gen), state.gen, follow.following)
   if (observed !== fold) setFold(observed)
   const isOpen = useCallback(
     (key: string) => workLogExpanded(observed, key, state.gen),
     [observed, state.gen],
   )
-  const listRows = useMemo(
-    () =>
-      foldWorkLog<Row>(rows, groups, (row) => row.key, isOpen, (group, open) => ({
-        key: `log-${group.key}`,
-        kind: 'log',
-        group,
-        open,
-      })),
-    [rows, groups, isOpen],
-  )
+  // The header rows survive a token frame by IDENTITY (workLogHeaderCache) —
+  // without this every apparatus group's header re-rendered on every delta,
+  // which is the one cost PROBE D still measured after the row memos landed.
+  // A useMemo'd Map, not state and not a ref: it is a memo TABLE, so writing it
+  // must neither schedule a render nor count as reading a ref during one, and
+  // the lookup is idempotent — a second render pass over the same groups hands
+  // back the same row objects.
+  const headerTable = useMemo(() => new Map<string, CachedHeader<Row>>(), [])
+  const listRows = useMemo(() => {
+    const header = workLogHeaderCache<Row>(headerTable, groups, (group, open) => ({
+      key: `log-${group.key}`,
+      kind: 'log',
+      group,
+      open,
+    }))
+    return foldWorkLog<Row>(rows, groups, (row) => row.key, isOpen, header)
+  }, [headerTable, rows, groups, isOpen])
 
   // Deliberately NOT dependent on `groups`: that array is re-derived on every
   // token frame, so a handler keyed on it would change identity per frame,
@@ -443,6 +480,15 @@ export function ChatSessionScreen({
     },
     [mark],
   )
+
+  /** The observed-intent latch (followScroll's `dragged`). onScrollBeginDrag is
+   * the ONE scroll-view callback a finger is the only source of: a keyboard
+   * dismissal, a rotation, a late row measurement and the list's own
+   * maintainScrollAtEnd re-pin all fire onScroll and none of them fire this. So
+   * a geometric re-engage is licensed here and nowhere else. */
+  const onDragBegin = useCallback(() => {
+    setFollow((f) => reduceFollow(f, { type: 'dragged' }))
+  }, [])
 
   /** The ONE re-engage path — the pill and send share it, and nothing else in
    * this file scrolls the transcript. */
@@ -524,6 +570,7 @@ export function ChatSessionScreen({
         maintainScrollAtEnd={TRANSCRIPT_FOLLOW}
         maintainScrollAtEndThreshold={FOLLOW_THRESHOLD}
         onScroll={onScroll}
+        onScrollBeginDrag={onDragBegin}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.center}>
@@ -829,10 +876,13 @@ export function CardRow({
   const pendingDecision = inFlight[rid]
   const canAnswer = answerable(m) && pendingDecision === undefined
   // The card BODY is the server's typed chat-approval/question/plan block when
-  // one arrived (the TUI's cardBodyLines twin); a blockless row keeps the plain
-  // markdown it always showed. The frame and footer below are the envelope's,
+  // one arrived (the TUI's cardBodyLines twin); a blockless row — or one whose
+  // blocks this client cannot draw a single one of — keeps the plain markdown it
+  // always showed, because a card asking for a decision must never present the
+  // decision as a dashed box. The frame and footer below are the envelope's,
   // untouched either way — the block never carries the answer (D35).
-  const blocks = messageBlocks(m)
+  const raw = messageBlocks(m)
+  const blocks = raw !== undefined && anyRenderableBlocks(raw) ? raw : undefined
   return (
     <View style={[styles.card, { borderColor: theme.border, backgroundColor: theme.surface }]}>
       <Text style={[styles.cardTitle, { color: theme.textMuted }]}>
