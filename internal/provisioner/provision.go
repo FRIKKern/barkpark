@@ -59,6 +59,15 @@ type Seams struct {
 	// from the worker's SMTP_RELAY_* env in cmd/barkpark-provisioner/main.go.
 	Mail cloud.MailRelay
 
+	// CloudEgressIPs is the control plane's own EGRESS address — written into every
+	// provisioned instance's BARKPARK_TRUSTED_PROXIES so the box believes the caller
+	// address the control plane relays (the per-phone rate-limit bucket on a proxied
+	// revoke). Empty → the instance keeps loopback-only trust and every proxied
+	// request keys on ONE bucket per team. Sourced from the worker's
+	// BARKPARK_CLOUD_EGRESS_IPS env in cmd/barkpark-provisioner/main.go — the SAME
+	// address as the CP_HOST deploy secret, authored once (see deploy/README.md).
+	CloudEgressIPs string
+
 	// HealthPollInterval / HealthPollDeadline tune the bounded health-gate poll the
 	// chain runs after configuring a box (cloud F2). Production leaves both ZERO so
 	// the cloud package picks its defaults (~10s interval, ~4m deadline) — generous
@@ -377,6 +386,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		Runner:             seams.Runner,
 		Secrets:            seams.Secrets,
 		Mail:               seams.Mail,
+		TrustedProxies:     seams.CloudEgressIPs,
 		HealthPollInterval: seams.HealthPollInterval,
 		HealthPollDeadline: seams.HealthPollDeadline,
 		// The chain fires create/secure/configure at its real phase boundaries;

@@ -63,6 +63,14 @@ type RestoreExecutor struct {
 	// Mail is the shared relay (unused by restore today — identity comes from the
 	// bundle — but carried so a future .env merge can point the box at it).
 	Mail MailRelay
+	// TrustedProxies is the control plane's EGRESS address, written into the
+	// resurrected box's BARKPARK_TRUSTED_PROXIES. A resurrect does NOT run
+	// configureHost (it is its own chain), so without this a resurrected box would
+	// come back with loopback-only trust and silently keep ONE rate-limit bucket per
+	// team for every proxied request. The archived bundle carries identity, never
+	// this: the trust list is a property of the CURRENT control plane, not of the
+	// box's past. Empty → the step is skipped, as before this field existed.
+	TrustedProxies string
 	// ControlURL is the origin the on-box agent beats to (InstallAgent writes it).
 	ControlURL string
 }
@@ -189,6 +197,13 @@ func (e *RestoreExecutor) InstallSecrets(ctx context.Context, kind, prefix, kek,
 	if e.RunnerFor == nil {
 		return fmt.Errorf("resurrect configure: no runner factory wired")
 	}
+	// Shape-gate the trust list FIRST: it is a pure string check, so a malformed
+	// worker env fails the resurrect before a single byte is unsealed or shipped —
+	// rather than leaving a .env that raises at the restart RestoreData ends with.
+	egress, err := NormalizeTrustedProxies(e.TrustedProxies)
+	if err != nil {
+		return fmt.Errorf("resurrect configure: BARKPARK_CLOUD_EGRESS_IPS is malformed: %w", err)
+	}
 	secrets, err := OpenSecretsWithKEK(ctx, e.Store, prefix, kek)
 	if err != nil {
 		return err
@@ -197,7 +212,15 @@ func (e *RestoreExecutor) InstallSecrets(ctx context.Context, kind, prefix, kek,
 	if err != nil {
 		return err
 	}
-	return e.restoreRunner(kind, ip).Run(ctx, step)
+	runner := e.restoreRunner(kind, ip)
+	// The trust list rides along with the identity merge — both are .env edits, and
+	// the single restart that loads them comes later, at RestoreData's tail.
+	if egress != "" {
+		if err := runner.Run(ctx, trustedProxiesStep(egress)); err != nil {
+			return fmt.Errorf("resurrect configure: trusted proxies: %w", err)
+		}
+	}
+	return runner.Run(ctx, step)
 }
 
 // InstallAgent writes the freshly-minted monitoring token + enables the beat
