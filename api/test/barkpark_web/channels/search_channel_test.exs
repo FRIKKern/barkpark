@@ -371,7 +371,8 @@ defmodule BarkparkWeb.SearchChannelTest do
             {"session", "ws-leak-session", "Wsleakprobe private session"},
             {"post", "ws-pub-post", "Wsleakprobe public post"}
           ] do
-        {:ok, _} = create_document_in!(ws, proj, type, %{"doc_id" => id, "title" => title}, "test")
+        {:ok, _} =
+          create_document_in!(ws, proj, type, %{"doc_id" => id, "title" => title}, "test")
 
         {:ok, _} =
           Barkpark.Content.publish_document(id, type, "test",
