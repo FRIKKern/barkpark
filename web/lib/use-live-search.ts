@@ -130,8 +130,8 @@ export function useLiveSearch(): UseLiveSearch {
             resolve(
               shapeFindResponse(reply, {
                 engine,
-                // The socket always carries the scoped read token, so indx is
-                // live — what the caller asked for is what's served.
+                // Fallback only — the reply's server-reported `engineUsed`
+                // (which retriever ACTUALLY answered) wins in the shaper.
                 engineUsed: engine,
                 browse,
                 cache: false,

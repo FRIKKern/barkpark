@@ -12,7 +12,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   DEFAULT_ENGINE,
   DOC_TYPES,
-  ENGINES,
   FACET_DIMENSIONS,
   SORTS,
   typeLabel,
@@ -596,9 +595,6 @@ export function Finder({
   // Identity of the current view: engine + query. No cache/bust dimension —
   // every search goes straight to the engine, always fresh.
   const reqKey = `${engine} ${q}`;
-  // Manual refetch trigger (the reindex button) — not a cache; bumping it re-runs
-  // the fetch effect for the SAME view to pull freshly-reindexed data.
-  const [refreshNonce, setRefreshNonce] = useState(0);
   // Key the server-rendered seed corresponds to: the landing (empty query) on
   // the page's engine. When it matches `reqKey` on mount we use the seed instead
   // of refetching — the first paint already has the results.
@@ -680,7 +676,6 @@ export function Finder({
     q,
     seedKey,
     sessionId,
-    refreshNonce,
     liveEnabled,
     liveReady,
     liveSearch,
@@ -1028,30 +1023,7 @@ export function Finder({
     setParams(patch);
   };
 
-  const [reindexMsg, setReindexMsg] = useState<string | null>(null);
-  const reindexNow = async () => {
-    setReindexMsg("queuing…");
-    try {
-      const r = await fetch("/api/admin/reindex", { method: "POST" });
-      const d = (await r.json()) as { ok?: boolean; error?: string };
-      if (d.ok) {
-        setReindexMsg("rebuilding ~30s…");
-        // The rebuild runs async on the API node; refetch once it should be live.
-        setTimeout(() => {
-          setRefreshNonce((n) => n + 1);
-          setReindexMsg(null);
-        }, 32000);
-      } else {
-        setReindexMsg(d.error ?? "reindex failed");
-        setTimeout(() => setReindexMsg(null), 4000);
-      }
-    } catch (e) {
-      setReindexMsg((e as Error).message);
-      setTimeout(() => setReindexMsg(null), 4000);
-    }
-  };
-
-  // Advanced options panel (cache/reindex/syntax) — a stateful toggle rather
+  // Advanced options panel (query syntax) — a stateful toggle rather
   // than <details>, so the interactive Popular chips can share its header row
   // without a click also toggling the panel.
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -1146,27 +1118,10 @@ export function Finder({
               className="w-full rounded-lg border border-zinc-300 bg-transparent py-2.5 pl-9 pr-3 text-base outline-none transition-colors focus:border-zinc-500 dark:border-zinc-700 dark:focus:border-zinc-400"
             />
           </div>
-          <div
-            role="radiogroup"
-            aria-label="Search engine"
-            className="flex shrink-0 rounded-lg border border-zinc-300 p-0.5 dark:border-zinc-700"
-          >
-            {ENGINES.map((e) => (
-              <button
-                key={e.id}
-                role="radio"
-                aria-checked={engine === e.id}
-                onClick={() => setParams({ engine: e.id })}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  engine === e.id
-                    ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
-                    : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200"
-                }`}
-              >
-                {e.label}
-              </button>
-            ))}
-          </div>
+          {/* The engine pill is RETIRED: the demo no longer advertises an
+              engine it cannot promise is provisioned. `?engine=indx` in the
+              URL still opts in, and the server-reported `engineUsed` keeps
+              the readout honest either way. */}
         </div>
         {/* Status row (fixed height): Popular shortcuts when idle, parsed-query
             chips when searching, + the fuzzy pill — with the Options toggle on
@@ -1238,22 +1193,6 @@ export function Finder({
         </div>
         {optionsOpen ? (
           <div className="flex flex-col gap-3 border-l-2 border-zinc-200 pl-3 dark:border-zinc-800">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-zinc-400">
-                Every query hits {engine === "indx" ? "Indx" : "Postgres"}{" "}
-                directly — always fresh, no cache.
-              </span>
-              {engine === "indx" ? (
-                <button
-                  onClick={reindexNow}
-                  disabled={!!reindexMsg}
-                  title="Trigger an Indx blue/green rebuild"
-                  className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:hover:text-zinc-200"
-                >
-                  {reindexMsg ?? "reindex"}
-                </button>
-              ) : null}
-            </div>
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
               <span>
                 <code className="font-mono">&quot;exact phrase&quot;</code> phrase

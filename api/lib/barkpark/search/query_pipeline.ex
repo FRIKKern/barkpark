@@ -21,6 +21,7 @@ defmodule Barkpark.Search.QueryPipeline do
           highlights: map(),
           recovery: String.t() | nil,
           corrected_to: String.t() | nil,
+          engine_used: String.t() | nil,
           ms: non_neg_integer()
         }
 
@@ -62,17 +63,17 @@ defmodule Barkpark.Search.QueryPipeline do
     {parsed, corrected_to} =
       expand_synonyms(surface, scope, parsed, Keyword.get(opts, :workspace_id))
 
-    {hits, total, recovery, engine_meta} =
+    {hits, total, recovery, engine_meta, engine_used} =
       case surface do
         "documents" ->
           search_documents(scope, parsed, config, context, opts)
 
         "media" ->
           {h, t, r} = search_media(scope, parsed, config, context, opts)
-          {h, t, r, %{}}
+          {h, t, r, %{}, nil}
 
         _ ->
-          {[], 0, nil, %{}}
+          {[], 0, nil, %{}, nil}
       end
 
     highlights = highlight_hits(surface, hits, parsed, config, scope, opts)
@@ -92,6 +93,12 @@ defmodule Barkpark.Search.QueryPipeline do
        # buckets and the coverage truncation boundary.
        facets: Map.get(engine_meta, :facets),
        truncation: Map.get(engine_meta, :truncation),
+       # Which retriever ACTUALLY served the returned hits — "postgres" whenever
+       # the served result came from the Postgres retriever, even when the
+       # caller asked for another engine (zero-hit recovery, the D3-b tenant
+       # gate, an unregistered engine). The client heuristic guessing this has
+       # shipped dead code twice; the pipeline is the only place that knows.
+       engine_used: engine_used,
        ms: ms
      }}
   end
@@ -174,6 +181,12 @@ defmodule Barkpark.Search.QueryPipeline do
         Retrievers.resolve(%{"engine" => engine})
       end
 
+    # Engine honesty: the requested engine only counts as SERVED when its own
+    # retriever module answered. Both silent postgres substitutions — the D3-b
+    # tenant gate above and Retrievers.resolve/1's unknown-engine fallback —
+    # resolve to DocumentsRetriever, so the module identity IS the truth.
+    primary_engine = if retriever == DocumentsRetriever, do: "postgres", else: engine
+
     {hits, total, engine_meta} = retriever.search(scope, parsed, config, retriever_opts)
 
     strategy = Map.get(config, "zero_hit_strategy", "drop_tokens")
@@ -182,17 +195,23 @@ defmodule Barkpark.Search.QueryPipeline do
     # below this count (the zero-hit path below is unchanged).
     low_hit_threshold = Map.get(config, "low_hit_threshold", 3)
 
-    {final_hits, final_total, recovery} =
+    # Every branch also reports which retriever the FINAL hits came from: the
+    # recovery passes (recover_documents / try_typo_widen) run the Postgres
+    # DocumentsRetriever regardless of the primary engine, so a successful
+    # recovery is a served-by-postgres answer — the exact silent substitution
+    # (indx request → empty → postgres re-run → happy 200 wearing indx's name)
+    # this field exists to make visible.
+    {final_hits, final_total, recovery, engine_used} =
       cond do
         # No recovery configured.
         total == 0 and strategy == "none" ->
-          {hits, total, nil}
+          {hits, total, nil, primary_engine}
 
         # Zero-hit path — unchanged: drop_tokens then typo_widen.
         total == 0 ->
           case recover_documents(scope, parsed, config, retriever_opts, strategy) do
-            {rh, rt, recovery} -> {rh, rt, recovery}
-            nil -> {hits, total, nil}
+            {rh, rt, recovery} -> {rh, rt, recovery, "postgres"}
+            nil -> {hits, total, nil, primary_engine}
           end
 
         # Thin-results path — widen fuzzy on a positive-but-small result set and
@@ -203,18 +222,18 @@ defmodule Barkpark.Search.QueryPipeline do
         # zero-hit path above still falls back to Postgres for any engine.
         engine == "postgres" and total < low_hit_threshold and strategy != "none" ->
           case try_typo_widen(scope, parsed, config, retriever_opts, strategy) do
-            {rh, rt, _r} when rt > total -> {rh, rt, "typo_widen"}
-            _ -> {hits, total, nil}
+            {rh, rt, _r} when rt > total -> {rh, rt, "typo_widen", "postgres"}
+            _ -> {hits, total, nil, primary_engine}
           end
 
         true ->
-          {hits, total, nil}
+          {hits, total, nil, primary_engine}
       end
 
     # Carry the PRIMARY retriever's engine meta (Indx facets + truncation)
     # regardless of zero-hit recovery — facets describe the whole dataset, so
     # they stay meaningful even when the text matched nothing.
-    {final_hits, final_total, recovery, engine_meta}
+    {final_hits, final_total, recovery, engine_meta, engine_used}
   end
 
   defp recover_documents(scope, parsed, config, opts, strategy) do
