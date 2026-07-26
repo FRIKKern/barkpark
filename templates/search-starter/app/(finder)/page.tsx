@@ -77,7 +77,8 @@ async function MapFinderLanding() {
 
 /** The default Barkpark docs demo: an interactive graph of the docs corpus. */
 async function GraphFinderLanding() {
-  const { nodes, edges, rootId } = await fetchCorpusGraph();
+  const { nodes, edges, rootId, truncated, truncationReason } =
+    await fetchCorpusGraph();
   // bp-doc-id HEALTH marker (content-truth): the graph's anchor node id proves
   // the SSR rendered a real corpus. `rootId` prefers the highest-degree real
   // node; fall back to the first real (non-phantom) node id. Empty corpus →
@@ -95,7 +96,16 @@ async function GraphFinderLanding() {
           execute it on phones where nothing is shown. */}
       <div className="hidden h-full w-full md:block">
         <DesktopOnly>
-          <GraphLanding nodes={nodes} edges={edges} rootId={rootId} />
+          {/* truncated/truncationReason pass through so the landing's "showing
+              a subset" note can actually fire — dropping them here was a
+              complete dead prop path (stw9-graph-truncation-prop-wiring). */}
+          <GraphLanding
+            nodes={nodes}
+            edges={edges}
+            rootId={rootId}
+            truncated={truncated}
+            truncationReason={truncationReason}
+          />
         </DesktopOnly>
       </div>
       {/* No mobile fallback here — see NO_MOBILE_FALLBACK in the module doc. */}
