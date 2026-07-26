@@ -646,6 +646,33 @@ defmodule BarkparkCloud.RegistryTest do
       assert {:ok, b2} = Registry.register_managed_barkpark(t2, "api", "api")
       refute b1.url == b2.url
     end
+
+    # Full public identity for supports: register_support_barkpark/2 runs the
+    # SAME reservation dance (shared insert_with_url_reservation/4) — clean
+    # first, suffix on a cross-role/cross-team collision. The deep support
+    # coverage lives in FleetSupportsTest; this pins the shared-helper contract
+    # next to the mains' tests it mirrors.
+    test "a SUPPORT reservation runs the same dance — clean first, suffix on collision" do
+      t1 = team_fixture()
+      t2 = team_fixture()
+
+      assert {:ok, main1} = Registry.register_managed_barkpark(t1, "Gyldendal", "gyldendal")
+      assert main1.url == "https://gyldendal.barkpark.cloud"
+
+      {:ok, parent} = Registry.register_managed_barkpark(t2, "Parent", "parent")
+
+      assert {:ok, support} =
+               Registry.register_support_barkpark(t2, %{
+                 name: "Gyldendal",
+                 slug: "gyldendal",
+                 parent_id: parent.id,
+                 token_id: nil
+               })
+
+      # The clean label was taken by t1's MAIN → the support lands suffixed.
+      assert support.url == Barkpark.provisioning_url({"gyldendal", t2.id})
+      assert support.fleet_role == "support"
+    end
   end
 
   describe "Barkpark subdomain helpers" do

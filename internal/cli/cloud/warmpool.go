@@ -910,6 +910,15 @@ func (defaultCaddySteps) Steps(name, zone string, appPort int) []CaddyStep {
 	return out
 }
 
+// DefaultCaddyStepper / DefaultHealthGate expose the go-live chain's production
+// secure-leg defaults to callers OUTSIDE the WarmPool (the provisioner's
+// support chain runs the same DNS → Caddy/TLS → public-health sequence without
+// a WarmPool now that supports carry a full public identity). They are exactly
+// what withDefaults fills — one truth, no duplicated step list or gate options.
+func DefaultCaddyStepper() CaddyStepper { return defaultCaddySteps{} }
+
+var DefaultHealthGate HealthChecker = defaultHealthChecker
+
 // withDefaults fills any nil injected seam with its default. The Pool, DNS, and
 // Registry have no zero-value default (the caller MUST inject a provider-backed
 // pool, a DNS provider, and a registry client) and are validated in Provision.

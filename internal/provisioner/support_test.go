@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/cli/setup"
 )
 
 // supportFakeRunner is the recording cloud.SupportRunner: every step script,
@@ -82,6 +83,22 @@ func (r *supportFakeRunner) allScripts() []string {
 
 var _ cloud.SupportRunner = (*supportFakeRunner)(nil)
 
+// supportFakeCaddy records the secure step's Caddy invocations (name|zone|port)
+// and hands back one inert step so the runner log proves the TLS leg ran.
+type supportFakeCaddy struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (c *supportFakeCaddy) Steps(name, zone string, appPort int) []cloud.CaddyStep {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, fmt.Sprintf("%s|%s|%d", name, zone, appPort))
+	return []cloud.CaddyStep{{Title: "fake caddy/TLS step for " + name + "." + zone}}
+}
+
+var _ cloud.CaddyStepper = (*supportFakeCaddy)(nil)
+
 // supportHarness stands up the fake CP + fake parent main and records
 // EVERYTHING for ordering + custody asserts.
 type supportHarness struct {
@@ -106,6 +123,13 @@ type supportHarness struct {
 	parentToken  string
 	exportedTars int
 
+	// The public-identity seams (full-public-identity slice): the secure step's
+	// DNS zone + Caddy recorder, and the configure step's public health gate.
+	dns          *cloud.FakeDNS
+	caddy        *supportFakeCaddy
+	healthProbes []string // "target|token" per gate probe
+	healthOK     bool     // false → the gate never passes (deadline path)
+
 	// failEchoLeg, when set to "mutate" or "mint", makes that parent-main leg
 	// answer 500 with a body that ECHOES the parent token plus echoSecret (an
 	// unregistered secret-like string) — the header-echoing error page the
@@ -122,6 +146,9 @@ func newSupportHarness(t *testing.T) *supportHarness {
 		mintTokenID: "tid-1",
 		parentToken: "parent-admin-tok-hunter2-XYZ",
 		echoSecret:  "would-be-minted-tok-9f8e7d",
+		dns:         cloud.NewFakeDNS(),
+		caddy:       &supportFakeCaddy{},
+		healthOK:    true,
 	}
 
 	// echoFail writes the header-echoing 500 body for the failEchoLeg leg.
@@ -256,6 +283,17 @@ func (h *supportHarness) worker(runner *supportFakeRunner, deleted *[]string) *W
 		ConfigureHost: func(_ context.Context, _ cloud.SupportRunner, _ cloud.SupportConfigureOpts) (cloud.Secrets, error) {
 			return cloud.Secrets{AdminToken: "bp_admin_boxtoken123"}, nil
 		},
+		DNS:   h.dns,
+		Caddy: h.caddy,
+		Health: func(_ context.Context, base, token string) (setup.HealthReport, error) {
+			h.mu.Lock()
+			h.healthProbes = append(h.healthProbes, base+"|"+token)
+			ok := h.healthOK
+			h.mu.Unlock()
+			return setup.HealthReport{OK: ok}, nil
+		},
+		HealthPollInterval: 2 * time.Millisecond,
+		HealthPollDeadline: 20 * time.Millisecond,
 		StepReporter:       (&HTTPStepReporter{ControlURL: h.cp.URL, Token: "wtok"}).Report,
 		ConsoleReporter:    (&HTTPConsoleReporter{ControlURL: h.cp.URL, Token: "wtok"}).Report,
 		RosterPollInterval: 2 * time.Millisecond,
@@ -273,8 +311,11 @@ func (h *supportHarness) worker(runner *supportFakeRunner, deleted *[]string) *W
 
 // TestRunSupportWith_ClaimsAndDispatchesHappyPath proves the 5th drain loop
 // claims from /v1/internal/support-jobs/claim, dispatches the full support
-// chain, reports the steps STRICTLY as create→configure→content→verify→ready,
-// and succeeds ONLY AFTER the fake roster returned a live row with capacity.
+// chain, reports the steps STRICTLY as create→secure→configure→content→
+// verify→ready (full public identity: secure stands up DNS + Caddy/TLS off
+// the claim's slug label, configure gates on the PUBLIC health poll), and
+// succeeds ONLY AFTER the fake roster returned a live row with capacity —
+// with the box's minted admin token riding the succeed body (mains' key).
 func TestRunSupportWith_ClaimsAndDispatchesHappyPath(t *testing.T) {
 	h := newSupportHarness(t)
 	runner := &supportFakeRunner{capacityJSON: `{"size_class":"standard"}`}
@@ -330,25 +371,33 @@ func TestRunSupportWith_ClaimsAndDispatchesHappyPath(t *testing.T) {
 	if strings.Contains(h.succeeds[0], h.mintToken) {
 		t.Fatal("CUSTODY VIOLATION: the succeed body carried the ledger token VALUE")
 	}
+	// Full public identity: the box's minted ADMIN token rides the succeed body
+	// under mains' `admin_token` key so the CP stores it encrypted and
+	// mint_studio_link works on the support.
+	if at, _ := sb["admin_token"].(string); at != "bp_admin_boxtoken123" {
+		t.Fatalf("succeed must carry the box admin token as admin_token, got %q in %s", at, h.succeeds[0])
+	}
 
-	// PDF-D84: steps are reported ONLY as create/configure/content/verify/ready.
+	// Steps are reported ONLY as create/secure/configure/content/verify/ready
+	// (all CP-legal; `freshen` stays main-only).
 	seen := map[string]bool{}
 	for _, s := range h.steps {
 		name := strings.SplitN(s, "/", 2)[0]
 		seen[name] = true
 		switch name {
-		case "create", "configure", "content", "verify", "ready":
+		case "create", "secure", "configure", "content", "verify", "ready":
 		default:
 			t.Fatalf("off-vocabulary step reported: %q (the CP validate_step would 422)", s)
 		}
 	}
-	for _, want := range []string{"create", "configure", "content", "verify", "ready"} {
+	for _, want := range []string{"create", "secure", "configure", "content", "verify", "ready"} {
 		if !seen[want] {
 			t.Fatalf("step %q never reported; got %v", want, h.steps)
 		}
 	}
 	// Strict boundary order: each step's done precedes the next step's started.
-	boundary := []string{"create/started", "create/done", "configure/started", "configure/done",
+	boundary := []string{"create/started", "create/done", "secure/started", "secure/done",
+		"configure/started", "configure/done",
 		"content/started", "content/done", "verify/started", "verify/done", "ready/started", "ready/done"}
 	idx := 0
 	for _, s := range h.steps {
@@ -358,6 +407,24 @@ func TestRunSupportWith_ClaimsAndDispatchesHappyPath(t *testing.T) {
 	}
 	if idx != len(boundary) {
 		t.Fatalf("step boundaries out of order: matched %d of %v in %v", idx, boundary, h.steps)
+	}
+
+	// The secure step stood the PUBLIC identity up off the claim's slug label:
+	// A record helper.barkpark.cloud → the box IP…
+	if vals, _ := h.dns.Resolve(context.Background(), "helper.barkpark.cloud"); len(vals) != 1 || vals[0] != "203.0.113.9" {
+		t.Fatalf("secure must upsert helper.barkpark.cloud → 203.0.113.9, resolved %v", vals)
+	}
+	// …the Caddy/TLS steps invoked with (label, zone, app port)…
+	h.caddy.mu.Lock()
+	caddyCalls := append([]string{}, h.caddy.calls...)
+	h.caddy.mu.Unlock()
+	if len(caddyCalls) != 1 || caddyCalls[0] != "helper|barkpark.cloud|4000" {
+		t.Fatalf("caddy steps must be built for helper|barkpark.cloud|4000, got %v", caddyCalls)
+	}
+	// …and configure gated on the PUBLIC health poll over the fqdn with the
+	// box's own minted admin token (never the parent's).
+	if len(h.healthProbes) == 0 || h.healthProbes[0] != "https://helper.barkpark.cloud|bp_admin_boxtoken123" {
+		t.Fatalf("the public health gate must probe https://helper.barkpark.cloud with the box admin token, got %v", h.healthProbes)
 	}
 
 	// PDF-D89: succeed is reported only AFTER a live roster read.
@@ -533,8 +600,152 @@ func TestRunOnceSupport_RosterTimeout_FailsNeverSucceeds(t *testing.T) {
 	if len(deleted) != 1 || deleted[0] != "support-box-helper" {
 		t.Fatalf("the half-built box must be torn down on a verify timeout, deleted: %v", deleted)
 	}
+	// Teardown symmetry: the secure step's A record is deleted alongside the
+	// box (a failed support must not leave a dangling public record).
+	if vals, _ := h.dns.Resolve(context.Background(), "helper.barkpark.cloud"); len(vals) != 0 {
+		t.Fatalf("the A record must be deleted on teardown, still resolves %v", vals)
+	}
 	if h.rosterCalls < 2 {
 		t.Fatalf("the poll should have retried before the budget expired, rosterCalls=%d", h.rosterCalls)
+	}
+}
+
+// TestRunOnceSupport_SecureDNSFailure_TearsDown proves the new secure step
+// fails closed like every other post-create step: a DNS upsert error reports
+// secure/failed, tears the box down, and never touches the parent main.
+func TestRunOnceSupport_SecureDNSFailure_TearsDown(t *testing.T) {
+	h := newSupportHarness(t)
+	runner := &supportFakeRunner{capacityJSON: `{"size_class":"standard"}`}
+	var deleted []string
+	w := h.worker(runner, &deleted)
+
+	// Swap the DNS seam for one whose upsert always fails (delete recorded so
+	// the fail-open teardown half is still observable).
+	var dnsDeletes []string
+	seams := SupportSeams{
+		CreateServer: func(_ context.Context, name string) (cloud.Server, error) {
+			return cloud.Server{Name: "support-box-" + name, IP: "203.0.113.9"}, nil
+		},
+		DeleteServer: func(_ context.Context, serverName string) error {
+			deleted = append(deleted, serverName)
+			return nil
+		},
+		RunnerFor: func(string) cloud.SupportRunner { return runner },
+		DNS: &supportFailingDNS{onDelete: func(zone, name, typ string) {
+			dnsDeletes = append(dnsDeletes, name+"."+zone+"/"+typ)
+		}},
+		Caddy:        h.caddy,
+		StepReporter: (&HTTPStepReporter{ControlURL: h.cp.URL, Token: "wtok"}).Report,
+	}
+	w.SupportProvision = DefaultSupportProvision(seams)
+
+	claimed, err := w.RunOnceSupport(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnceSupport should consume the job cleanly (fail reported), got: %v", err)
+	}
+	if !claimed {
+		t.Fatal("the job should have been claimed + consumed")
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.succeeds) != 0 {
+		t.Fatalf("no succeed after a failed secure step: %v", h.succeeds)
+	}
+	if len(h.fails) != 1 || !strings.Contains(h.fails[0], "dns: upsert helper.barkpark.cloud") {
+		t.Fatalf("want one honest fail naming the DNS upsert, got: %v", h.fails)
+	}
+	secureFailed := false
+	for _, s := range h.steps {
+		if s == "secure/failed" {
+			secureFailed = true
+		}
+	}
+	if !secureFailed {
+		t.Fatalf("secure/failed never reported; steps: %v", h.steps)
+	}
+	if len(deleted) != 1 || deleted[0] != "support-box-helper" {
+		t.Fatalf("the box must be torn down on a secure failure, deleted: %v", deleted)
+	}
+	// The fail path still attempts the (idempotent) record delete.
+	if len(dnsDeletes) != 1 || dnsDeletes[0] != "helper.barkpark.cloud/A" {
+		t.Fatalf("teardown must delete the A record, got %v", dnsDeletes)
+	}
+	for _, e := range h.events {
+		if e == "mutate" || e == "mint" || e == "export" || e == "roster" {
+			t.Fatalf("a secure failure must write NOTHING to the parent main; events: %v", h.events)
+		}
+	}
+}
+
+// supportFailingDNS fails every upsert and records deletes — the secure-step
+// failure double. A failing DeleteRecord is exercised implicitly as fail-open
+// (the chain logs and proceeds), so only the delete CALL is recorded here.
+type supportFailingDNS struct {
+	onDelete func(zone, name, typ string)
+}
+
+func (d *supportFailingDNS) UpsertRecord(context.Context, cloud.Record) error {
+	return fmt.Errorf("zone api answered 503")
+}
+
+func (d *supportFailingDNS) DeleteRecord(_ context.Context, zone, name, typ string) error {
+	if d.onDelete != nil {
+		d.onDelete(zone, name, typ)
+	}
+	return nil
+}
+
+func (d *supportFailingDNS) Resolve(context.Context, string) ([]string, error) { return nil, nil }
+
+// TestRunOnceSupport_BadSlugLabel_FailsFence proves the DNS-label fence on the
+// claim's top-level slug (the reserved url's first label): a slug that cannot
+// be a DNS label fails the job BEFORE anything is created — no box, no DNS, no
+// parent-main writes.
+func TestRunOnceSupport_BadSlugLabel_FailsFence(t *testing.T) {
+	for _, badSlug := range []string{"Bad_Slug!", ""} {
+		t.Run("slug="+badSlug, func(t *testing.T) {
+			h := newSupportHarness(t)
+			h.claimJSON = func() string {
+				return fmt.Sprintf(`{"job":{"id":"job-sup-bad","claim_token":"ct-b"},"barkpark":{"id":"bp-3","name":"helper","slug":%q},"support":{"parent_url":%q,"parent_admin_token":%q,"dataset":"production","workspace":"default","name":"helper"}}`,
+					badSlug, h.main.URL, h.parentToken)
+			}
+			runner := &supportFakeRunner{}
+			var deleted []string
+			w := h.worker(runner, &deleted)
+			// A create reaching the provider would mean the fence leaked.
+			w.SupportProvision = func(ctx context.Context, spec SupportJobSpec) (string, string, string, Teardown, error) {
+				seams := SupportSeams{
+					CreateServer: func(context.Context, string) (cloud.Server, error) {
+						t.Fatal("create must never run on a bad slug label")
+						return cloud.Server{}, nil
+					},
+					DNS:   h.dns,
+					Caddy: h.caddy,
+				}
+				return SupportProvisionWith(ctx, seams, spec)
+			}
+
+			claimed, err := w.RunOnceSupport(context.Background())
+			if err != nil {
+				t.Fatalf("RunOnceSupport should consume the job via the fail report, got: %v", err)
+			}
+			if !claimed {
+				t.Fatal("the job should have been claimed + consumed")
+			}
+
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if len(h.fails) != 1 || !strings.Contains(h.fails[0], "invalid support slug") {
+				t.Fatalf("want one honest fail naming the slug fence, got: %v", h.fails)
+			}
+			if len(h.succeeds) != 0 {
+				t.Fatalf("no succeed on a fenced claim: %v", h.succeeds)
+			}
+			if len(deleted) != 0 {
+				t.Fatalf("nothing to tear down on a pre-create fence, deleted: %v", deleted)
+			}
+		})
 	}
 }
 
@@ -648,6 +859,8 @@ func TestRunOnceSupport_CreateFailure_WritesNothing(t *testing.T) {
 			return nil
 		},
 		RunnerFor: func(string) cloud.SupportRunner { return runner },
+		DNS:       h.dns,
+		Caddy:     h.caddy,
 		ConfigureHost: func(context.Context, cloud.SupportRunner, cloud.SupportConfigureOpts) (cloud.Secrets, error) {
 			t.Fatal("configure must not run after a failed create")
 			return cloud.Secrets{}, nil

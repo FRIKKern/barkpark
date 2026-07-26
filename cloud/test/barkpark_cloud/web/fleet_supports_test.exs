@@ -214,6 +214,63 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       # The transaction rolled back — the base row was NOT left behind.
       refute Enum.any?(Registry.list_barkparks(team), &(&1.slug == "support-bogus"))
     end
+
+    # Full public identity: a support's url is its reservation from birth, the
+    # SAME clean-first dance mains run — mint_studio_link needs the url, and the
+    # claim payload's slug (the worker's DNS label) derives from its first label.
+    test "reserves the CLEAN <slug>.barkpark.cloud url at registration" do
+      team = team_fixture()
+      main = main_fixture(team)
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Support Url",
+          slug: "support-url",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      assert support.url == "https://support-url.barkpark.cloud"
+      assert Barkpark.subdomain_from_url(support) == "support-url"
+    end
+
+    test "falls back to the suffixed url when the clean label is claimed by any team" do
+      t1 = team_fixture()
+      t2 = team_fixture()
+
+      # t1's MAIN claims the clean label first (the global url index decides).
+      assert {:ok, main1} = Registry.register_managed_barkpark(t1, "Muscle", "muscle")
+      assert main1.url == "https://muscle.barkpark.cloud"
+
+      main2 = main_fixture(t2)
+
+      {:ok, support} =
+        Registry.register_support_barkpark(t2, %{
+          name: "Muscle",
+          slug: "muscle",
+          parent_id: main2.id,
+          token_id: nil
+        })
+
+      assert support.url == Barkpark.provisioning_url({"muscle", t2.id})
+      assert String.starts_with?(Barkpark.subdomain_from_url(support), "muscle-")
+    end
+
+    test "a reserved slug is forced onto the suffixed url (never claims the clean label)" do
+      team = team_fixture()
+      main = main_fixture(team)
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "api",
+          slug: "api",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      refute support.url == "https://api.barkpark.cloud"
+      assert support.url == Barkpark.provisioning_url({"api", team.id})
+    end
   end
 
   ## POST /v1/fleet/supports
@@ -640,6 +697,14 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       assert body["job_id"] == job_id
       assert body["name"] == "Helper Box"
 
+      # Full public identity: the top-level slug is the RESERVED url's first
+      # label — the DNS record the worker stands up (<label>.barkpark.cloud),
+      # no longer the pre-reservation provisioning_subdomain fallback.
+      support_row = Registry.get_barkpark(decode(created)["barkpark"]["id"])
+      assert support_row.url == "https://helper-box.barkpark.cloud"
+      assert body["slug"] == "helper-box"
+      assert body["slug"] == Barkpark.subdomain_from_url(support_row)
+
       # The PINNED support map — the Go slice binds against these exact keys.
       {:ok, expected_admin_token} = Vault.decrypt(main.admin_token_encrypted)
       support = body["support"]
@@ -690,6 +755,57 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       {_u, _team, token} = user_with_role("owner")
       conn = call(:post, "/v1/internal/support-jobs/claim", %{}, token)
       assert conn.status == 401
+    end
+  end
+
+  ## The succeed report closes the Open Studio custody chain: url reserved at
+  ## register + admin_token stored encrypted at succeed = mint_studio_link has
+  ## both halves it needs. The CP side was already role-agnostic
+  ## (maybe_put_admin_token) — this pins that a SUPPORT succeed carrying the
+  ## box's minted admin token actually lands in custody.
+
+  describe "provision_support succeed carries the box admin token" do
+    test "admin_token lands encrypted on the SUPPORT row — reveal works" do
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+
+      created =
+        call(
+          :post,
+          "/v1/fleet/supports",
+          %{name: "Studio Helper", barkpark_id: main.id, mode: "provision"},
+          token
+        )
+
+      assert created.status == 202
+      support_id = decode(created)["barkpark"]["id"]
+
+      claim = call(:post, "/v1/internal/support-jobs/claim", %{}, @worker_token)
+      assert claim.status == 200
+      body = decode(claim)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{body["job_id"]}/succeed",
+          %{
+            ip: "203.0.113.77",
+            token_id: "tid-9",
+            admin_token: "sup-box-admin-tok",
+            claim_token: body["claim_token"]
+          },
+          @worker_token
+        )
+
+      assert conn.status == 200
+
+      support = Registry.get_barkpark(support_id)
+      assert support.host == "203.0.113.77"
+      assert support.fleet_token_id == "tid-9"
+      # The url was reserved at registration and the admin token decrypts —
+      # exactly what mint_studio_link/2 reads (no more :not_live 409).
+      assert is_binary(support.url) and support.url != ""
+      assert {:ok, "sup-box-admin-tok"} = Registry.reveal_admin_token(support)
     end
   end
 

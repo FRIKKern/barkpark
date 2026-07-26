@@ -13001,25 +13001,31 @@
 
   // ── Personal Dev Fleet: SUPPORT provisioning theater (PDF-D84) ──────────────
   // A support box is a warm-image worker bound to a main — its provision job
-  // emits ONLY create → configure → content → verify → ready (no freshen, no
-  // secure: a support has no public FQDN, so there is nothing to secure — a
-  // required `secure` row would hang forever). These tables are ADDITIVE and
-  // selected where fleet_role === "support"; SERVER_STEP_ORDER above stays
-  // byte-identical (three __app.test.mjs sites lock it).
-  var SUPPORT_STEP_ORDER = ["create", "configure", "content", "verify", "ready"];
+  // emits create → secure → configure → content → verify → ready. `secure`
+  // joined the vocabulary when supports gained a FULL public identity: the url
+  // is reserved at registration and the worker stands up DNS + Caddy/TLS
+  // exactly like a main (Open Studio works on a support now). Only `freshen`
+  // stays main-only (a support degrades onto the baked release silently).
+  // These tables are ADDITIVE and selected where fleet_role === "support";
+  // SERVER_STEP_ORDER above stays byte-identical (three __app.test.mjs sites
+  // lock it).
+  var SUPPORT_STEP_ORDER = ["create", "secure", "configure", "content", "verify", "ready"];
   var SUPPORT_STEP_LABELS = {
     create: "Creating your support server",
+    secure: "Securing your domain",
     configure: "Configuring the runtime",
     content: "Syncing your dataset",
     verify: "Waiting for the first heartbeat",
     ready: "Online"
   };
   // Pacing estimates (ms), tuned to the support chain: create is a plain box
-  // create (no warm pool), configure installs the runtime + listener unit,
-  // content merges the dataset import, verify polls the main's roster until
-  // the listener's first beat lands (PDF-D89 — the long honest pole).
+  // create (no warm pool), secure waits on DNS + the ACME certificate (the
+  // same 45s expectation as the main chain's secure), configure installs the
+  // runtime + listener unit, content merges the dataset import, verify polls
+  // the main's roster until the listener's first beat lands (PDF-D89 — the
+  // long honest pole).
   var SUPPORT_STEP_EXPECTED_MS = {
-    create: 20000, configure: 60000, content: 25000, verify: 45000, ready: 5000
+    create: 20000, secure: 45000, configure: 60000, content: 25000, verify: 45000, ready: 5000
   };
 
   // The ONE role predicate (PDF-D92: fleet_role/fleet_parent_id ride every
@@ -13229,9 +13235,10 @@
     var raw = (bp && bp.provision_steps) || [];
     now = (typeof now === "number") ? now : Date.now();
     // PDF-D84: a support row folds over the SUPPORT tables — every one of its
-    // 5 steps is planned (no optional set), and the two main-only steps are
-    // dropped even from a rogue payload: a support must NEVER render a secure
-    // (or freshen) step, whatever the server reports.
+    // 6 steps is planned (no optional set; `secure` is a real, planned rung
+    // now that supports carry a full public identity). The ONE main-only step
+    // left, freshen, is dropped even from a rogue payload: a support must
+    // NEVER render it, whatever the server reports.
     var support = isSupportBp(bp);
     var tables = support
       ? { labels: SUPPORT_STEP_LABELS, expectedMs: SUPPORT_STEP_EXPECTED_MS }
@@ -13244,7 +13251,7 @@
     for (var i = 0; i < raw.length; i++) {
       var s = raw[i];
       if (!s || typeof s.step !== "string") continue;
-      if (support && (s.step === "secure" || s.step === "freshen")) continue;
+      if (support && s.step === "freshen") continue;
       if (!byStep[s.step]) byStep[s.step] = [];
       byStep[s.step].push(s);
       if (!known[s.step]) { known[s.step] = true; order.push(s.step); }

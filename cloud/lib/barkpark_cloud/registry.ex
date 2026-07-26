@@ -274,10 +274,6 @@ defmodule BarkparkCloud.Registry do
   @spec register_managed_barkpark(Team.t() | binary(), String.t(), String.t(), keyword()) ::
           {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
   def register_managed_barkpark(team, name, slug, opts \\ []) do
-    tid = team_id(team)
-    suffixed = Barkpark.provisioning_url({slug, tid})
-    candidate = if Barkpark.reserved?(slug), do: suffixed, else: Barkpark.clean_url(slug)
-
     attrs = %{
       name: name,
       slug: slug,
@@ -303,13 +299,31 @@ defmodule BarkparkCloud.Registry do
       |> maybe_put_launch_opt(:region, Keyword.get(opts, :region))
       |> maybe_put_launch_opt(:server_type, Keyword.get(opts, :server_type))
 
-    case register_barkpark(team, Map.put(attrs, :url, candidate)) do
+    insert_with_url_reservation(team, attrs, slug, &register_barkpark(team, &1))
+  end
+
+  # The ONE clean-first/suffix-on-collision url reservation dance, shared by
+  # mains AND supports (a support's url is its reservation from birth, same as a
+  # main's — `mint_studio_link/2` needs it, and the worker turns its first label
+  # into the DNS record). `insert_fun` is the role-specific write (mains:
+  # `register_barkpark/2` with the quota backstop; supports: the quota-exempt
+  # fleet transaction) so the dance stays identical while the insert differs.
+  # RACE-SAFE exactly as before: `barkparks_url_unique_idx` decides a concurrent
+  # clean-claim and the loser retries with its suffixed url — unique by
+  # construction, so it can never collide.
+  defp insert_with_url_reservation(team, attrs, slug, insert_fun) when is_binary(slug) do
+    tid = team_id(team)
+    suffixed = Barkpark.provisioning_url({slug, tid})
+    candidate = if Barkpark.reserved?(slug), do: suffixed, else: Barkpark.clean_url(slug)
+
+    case insert_fun.(Map.put(attrs, :url, candidate)) do
       {:ok, barkpark} ->
         {:ok, barkpark}
 
       # usage-limits-quotas: the quota backstop fired in register_barkpark/2 — the
       # team is at its plan ceiling. Surface it unchanged so the router's go_live
       # `with/else` maps it to a 403 (never a 500 from an unmatched clause).
+      # (Supports never produce it — PDF-D86 — so the clause simply never matches.)
       {:error, :limit_reached} = err ->
         err
 
@@ -318,12 +332,17 @@ defmodule BarkparkCloud.Registry do
         # globally-unique suffixed FQDN. Only retry on a `url` uniqueness clash,
         # and only when we actually tried the clean form.
         if candidate != suffixed and url_conflict?(cs) do
-          register_barkpark(team, Map.put(attrs, :url, suffixed))
+          insert_fun.(Map.put(attrs, :url, suffixed))
         else
           {:error, cs}
         end
     end
   end
+
+  # A non-binary slug can't derive a url candidate — hand the attrs straight to
+  # the insert so ITS changeset names the real error (slug can't be blank),
+  # instead of a FunctionClauseError out of provisioning_url/1.
+  defp insert_with_url_reservation(_team, attrs, _slug, insert_fun), do: insert_fun.(attrs)
 
   @doc """
   Register a SUPPORT machine as a fleet group row bound to a main (Personal Dev
@@ -352,14 +371,24 @@ defmodule BarkparkCloud.Registry do
   chosen size onto the row so the claim payload carries it. The CALLER (router)
   has already verified `parent_id` belongs to `team` — this is the write, not the
   authorization.
+
+  FULL PUBLIC IDENTITY: the support's `url` is reserved HERE, at registration,
+  through the exact clean-first/suffix-on-collision dance mains run
+  (`insert_with_url_reservation/4`) — a support fronts the public internet like
+  a main now, so `mint_studio_link/2` works and the claim payload's `slug`
+  derives from the reserved url's first label (the DNS record the worker stands
+  up). Both register modes get it: a support's url is its reservation from
+  birth.
   """
   @spec register_support_barkpark(Team.t() | binary(), map()) ::
           {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
   def register_support_barkpark(team, attrs) do
+    slug = Map.get(attrs, :slug)
+
     base =
       %{
         name: Map.get(attrs, :name),
-        slug: Map.get(attrs, :slug)
+        slug: slug
       }
       |> maybe_put_launch_opt(:host, Map.get(attrs, :host))
       |> maybe_put_launch_opt(:server_type, Map.get(attrs, :server_type))
@@ -370,15 +399,17 @@ defmodule BarkparkCloud.Registry do
       fleet_token_id: Map.get(attrs, :token_id)
     }
 
-    Repo.transaction(fn ->
-      # insert_barkpark/2 (NOT register_barkpark/2) — the PDF-D86 quota bypass:
-      # support inserts skip barkpark_limit_reached?/1, mains do not.
-      with {:ok, bp} <- insert_barkpark(team, base),
-           {:ok, support} <- bp |> Barkpark.fleet_changeset(fleet) |> Repo.update() do
-        support
-      else
-        {:error, reason} -> Repo.rollback(reason)
-      end
+    insert_with_url_reservation(team, base, slug, fn base_with_url ->
+      Repo.transaction(fn ->
+        # insert_barkpark/2 (NOT register_barkpark/2) — the PDF-D86 quota bypass:
+        # support inserts skip barkpark_limit_reached?/1, mains do not.
+        with {:ok, bp} <- insert_barkpark(team, base_with_url),
+             {:ok, support} <- bp |> Barkpark.fleet_changeset(fleet) |> Repo.update() do
+          support
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
     end)
   end
 

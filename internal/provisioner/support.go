@@ -11,19 +11,29 @@
 // bp-login CloudClient), while this one runs everything from CLAIM-PAYLOAD
 // credentials. HARD LAW: package internal/cli is NEVER imported here.
 //
-// Steps are reported ONLY as create → configure → content → verify → ready
-// (PDF-D84 — the control plane's validate_step 422s anything else; freshen/
-// secure are never emitted for a support):
+// Steps are reported ONLY as create → secure → configure → content → verify →
+// ready (all six are CP-legal — validate_step 422s anything else; only
+// `freshen` stays main-only). `secure` joined the chain when supports gained a
+// FULL PUBLIC IDENTITY: the CP reserves the support's url at registration and
+// this chain stands up the same DNS + Caddy/TLS legs a main gets, so Open
+// Studio (mint_studio_link) works against <slug>.barkpark.cloud:
 //
 //	create     provider box (x86 warm image, identity label) + SSH wait-ready
-//	configure  cloud.ConfigureSupportHost — the reduced go-live subset
+//	secure     DNS A record <slug>.barkpark.cloud → the box IP, then the
+//	           canonical Caddy/TLS steps (the slug is the claim's top-level
+//	           slug = the reserved url's first label, supportNameRe-fenced)
+//	configure  cloud.ConfigureSupportHost — the reduced go-live subset — THEN
+//	           the bounded PUBLIC health poll against https://<slug>.<zone>
+//	           with the box's own minted admin token (fail closed, like mains)
 //	content    roster row (provisioning) + ledger-token mint on the PARENT MAIN
 //	           + scrubbed dataset export streamed over SSH + on-box merge-import
 //	verify     listener runtime install (LEDGER token only — provider keys are
 //	           NEVER written, PDF-D62/D88) + the server-side roster poll until
 //	           the row truthfully reads idle|working|blocked WITH capacity
 //	           (PDF-D89); an honest timeout FAILS the job, never fakes online
-//	ready      the terminal transition; the worker's /succeed POST follows
+//	ready      the terminal transition; the worker's /succeed POST follows —
+//	           carrying the box's minted admin token so the CP can store it
+//	           encrypted (the credential mint_studio_link needs), same as mains
 //
 // CREDENTIAL CUSTODY (the high-flip-risk surface): the parent main's admin
 // token rides the internal claim payload over the WORKER_TOKEN channel — the
@@ -47,6 +57,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/cli/setup"
 )
 
 // DefaultSupportProvisionTimeout bounds one whole provision_support chain. It is
@@ -63,6 +74,15 @@ const DefaultSupportRosterPollBudget = 10 * time.Minute
 
 // DefaultSupportRosterPollInterval is the gap between roster reads in verify.
 const DefaultSupportRosterPollInterval = 5 * time.Second
+
+// supportHealthPollInterval / supportHealthPollDeadline bound the configure
+// step's PUBLIC health poll, mirroring the go-live chain's F2 knobs: a cold
+// box's DNS has not propagated to the public resolver and Caddy has not yet
+// obtained the ACME cert, so the first https://<slug>.<zone> probe almost
+// always fails — poll on an interval up to a deadline, fail closed only past
+// it. Tests override both via SupportSeams so no real sleeps run.
+const supportHealthPollInterval = 10 * time.Second
+const supportHealthPollDeadline = 4 * time.Minute
 
 // supportProvisioningTTL is the provisioning roster row's honest freshness
 // budget (PDF-D56): the whole bring-up fits inside 30 min, after which an
@@ -150,21 +170,44 @@ type SupportBindSpec struct {
 // on the parent main (task-5866ec745efcd7f7: the worker's succeed report
 // carries it so the CP row's fleet_token_id is set and `bp cloud support
 // remove` can later revoke the token — "" when the mint response carried no
-// id), plus a Teardown that deletes that box. Non-nil error is the fail signal
-// (the worker reports it to /fail). The Teardown is non-nil ONLY on success —
-// the worker's lever for the money edge (succeed-report never lands → the box
-// is deleted rather than orphaned, mirroring RunOnce). On a chain FAILURE the
-// implementation has already torn its half-built box down.
-type SupportProvisionFunc func(ctx context.Context, spec SupportJobSpec) (ip, tokenID string, teardown Teardown, err error)
+// id), the box's own minted ADMIN token (the succeed report carries it so the
+// CP stores it encrypted and mint_studio_link works — the same key mains'
+// succeed sends; never logged, console-redacted from mid-chain), plus a
+// Teardown that deletes that box AND its DNS A record. Non-nil error is the
+// fail signal (the worker reports it to /fail). The Teardown is non-nil ONLY
+// on success — the worker's lever for the money edge (succeed-report never
+// lands → the box is deleted rather than orphaned, mirroring RunOnce). On a
+// chain FAILURE the implementation has already torn its half-built box down.
+type SupportProvisionFunc func(ctx context.Context, spec SupportJobSpec) (ip, tokenID, adminToken string, teardown Teardown, err error)
 
 // SupportSeams bundles the injectables one support chain needs. Production
-// (main()) sets Provider + the two reporters and leaves the rest nil for the
-// real defaults; tests inject fakes so no live cloud or SSH is ever touched.
+// (main()) sets Provider + DNS + the two reporters and leaves the rest nil for
+// the real defaults; tests inject fakes so no live cloud, DNS, or SSH is ever
+// touched.
 type SupportSeams struct {
 	// Provider is the cloud provider support boxes are created on (Hetzner —
 	// the x86 warm images live there, PDF-D58). Used by the default CreateServer/
 	// DeleteServer; ignored when both are injected.
 	Provider cloud.CloudProvider
+	// DNS is the provider the secure step upserts <slug>.barkpark.cloud on and
+	// every teardown path deletes it from. REQUIRED (like the go-live Seams —
+	// no safe default exists): a nil DNS fails the job honestly before any box
+	// is created. Production wires cloud.NewCloudDNS(); tests inject FakeDNS.
+	DNS cloud.DNSProvider
+	// Caddy produces the secure step's TLS/PHX_HOST steps for the box. nil →
+	// the canonical go-live stepper (cloud.DefaultCaddyStepper — the same
+	// setup.CaddySteps mains run, SkipAppRestart: ConfigureSupportHost's
+	// secrets-install restart picks the PHX_HOST/PHX_SCHEME pair up).
+	Caddy cloud.CaddyStepper
+	// Health runs the configure step's PUBLIC health gate against
+	// https://<slug>.<zone> with the box's minted admin token. nil → the real
+	// gate (cloud.DefaultHealthGate); tests inject a green/red func.
+	Health cloud.HealthChecker
+	// HealthPollInterval / HealthPollDeadline tune the bounded public-health
+	// poll (F2 — DNS propagation + cold ACME issuance take tens of seconds).
+	// 0 → the support defaults above. Tests set tiny values.
+	HealthPollInterval time.Duration
+	HealthPollDeadline time.Duration
 	// CreateServer creates + identity-labels one support box. nil → the real
 	// cloud.CreateSupportServer over Provider.
 	CreateServer func(ctx context.Context, name string) (cloud.Server, error)
@@ -211,26 +254,36 @@ var supportAgentPackages = map[string]struct{ pkg, bin, keyVar string }{
 // value the Worker's support drain calls per job. Tests bind it to fakes;
 // main() binds it to the real provider + SSH runner factory.
 func DefaultSupportProvision(seams SupportSeams) SupportProvisionFunc {
-	return func(ctx context.Context, spec SupportJobSpec) (string, string, Teardown, error) {
+	return func(ctx context.Context, spec SupportJobSpec) (string, string, string, Teardown, error) {
 		return SupportProvisionWith(ctx, seams, spec)
 	}
 }
 
-// SupportProvisionWith runs the five-step support chain for ONE claimed job.
-// On ANY failure after the box exists, the box is torn down before returning
-// (nil Teardown — no billed box the control plane cannot render, the same
-// no-orphan ethos as ProvisionWith); a create/placement failure writes NOTHING
-// (PDF-D58). On success the returned Teardown deletes the box — held by the
-// worker for the succeed-report money edge.
-func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJobSpec) (string, string, Teardown, error) {
+// SupportProvisionWith runs the six-step support chain for ONE claimed job.
+// On ANY failure after the box exists, the box AND its DNS record are torn
+// down before returning (nil Teardown — no billed box the control plane cannot
+// render, the same no-orphan ethos as ProvisionWith); a create/placement
+// failure writes NOTHING (PDF-D58). On success the returned Teardown deletes
+// the box + record — held by the worker for the succeed-report money edge.
+func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJobSpec) (string, string, string, Teardown, error) {
 	seams = seams.withSupportDefaults()
 
 	// Fence the claim payload BEFORE any side effect — a malformed claim is an
 	// honest job failure that writes nothing.
 	if err := validateSupportSpec(spec); err != nil {
-		return "", "", nil, err
+		return "", "", "", nil, err
+	}
+	// The DNS seam has no safe default (mirrors the go-live Seams contract):
+	// without it the secure step cannot stand the public identity up, so fail
+	// the job honestly before anything is created or billed.
+	if seams.DNS == nil {
+		return "", "", "", nil, fmt.Errorf("provisioner: a DNSProvider must be set for support jobs (the secure step stands up <slug>.%s)", Zone)
 	}
 	name := spec.Support.Name
+	// The DNS label is the claim's TOP-LEVEL slug — the first label of the url
+	// the CP reserved at registration (clean or suffixed), NEVER derived from
+	// the display name. supportNameRe fenced it in validateSupportSpec.
+	label := spec.Barkpark.Slug
 	parentURL := strings.TrimRight(strings.TrimSpace(spec.Support.ParentURL), "/")
 
 	// Custody: the parent admin token is a console-redaction secret from line
@@ -269,7 +322,7 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 		}
 	}
 
-	r := &supportRun{seams: seams, spec: spec, name: name, parentURL: parentURL, console: console, report: report}
+	r := &supportRun{seams: seams, spec: spec, name: name, label: label, parentURL: parentURL, console: console, report: report}
 
 	// ── create ──────────────────────────────────────────────────────────────
 	report("create", "started", "")
@@ -278,7 +331,7 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 		// PDF-D58: a placement failure writes NOTHING — no box, no roster row,
 		// no token. Honest terminal report, job released for retry.
 		report("create", "failed", err.Error())
-		return "", "", nil, fmt.Errorf("create support box for %q: %w", name, err)
+		return "", "", "", nil, fmt.Errorf("create support box for %q: %w", name, err)
 	}
 	r.host = host
 	r.runner = seams.RunnerFor(host.IP)
@@ -287,6 +340,27 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 		return r.failStep(ctx, "create", fmt.Errorf("box %s never answered SSH: %w", host.Name, err))
 	}
 	report("create", "done", host.IP)
+
+	// ── secure ──────────────────────────────────────────────────────────────
+	// The support's PUBLIC IDENTITY — the same leg mains run in configureHost:
+	// A record <label>.<zone> → the box IP, then the canonical Caddy/TLS steps
+	// (PHX_HOST/PHX_SCHEME written, app restart deferred to configure's
+	// secrets-install — one boot, not two). The label is globally unique by
+	// construction (the CP's url reservation decided it), so no cross-tenant
+	// A-record clobber is possible.
+	fqdn := label + "." + Zone
+	report("secure", "started", "")
+	report("secure", "progress", fmt.Sprintf("pointing %s at %s", fqdn, host.IP))
+	if err := seams.DNS.UpsertRecord(ctx, cloud.Record{Zone: Zone, Name: label, Type: "A", Value: host.IP}); err != nil {
+		return r.failStep(ctx, "secure", fmt.Errorf("dns: upsert %s: %w", fqdn, err))
+	}
+	report("secure", "progress", "requesting the TLS certificate")
+	for _, s := range seams.Caddy.Steps(label, Zone, AppPort) {
+		if err := r.runner.Run(ctx, s); err != nil {
+			return r.failStep(ctx, "secure", fmt.Errorf("caddy: %w", err))
+		}
+	}
+	report("secure", "done", fqdn)
 
 	// ── configure ───────────────────────────────────────────────────────────
 	report("configure", "started", "")
@@ -301,6 +375,14 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 	// The box's own minted admin token is a redaction secret too (it drives the
 	// on-box import; the import step also carries it in Redact).
 	console.addSecret(secrets.AdminToken)
+	// PUBLIC health gate — the box must answer over its fqdn before the chain
+	// proceeds, exactly like a main (FAIL CLOSED on a bounded poll: the window
+	// where DNS/ACME are still warming up is tolerated, a never-ready box is
+	// not). The box's own minted admin token drives the token-gated checks.
+	report("configure", "progress", fmt.Sprintf("waiting for https://%s to pass the health gate", fqdn))
+	if err := r.pollPublicHealth(ctx, "https://"+fqdn, secrets.AdminToken); err != nil {
+		return r.failStep(ctx, "configure", fmt.Errorf("public health: %s not ready: %w", fqdn, err))
+	}
 	report("configure", "done", "")
 
 	// ── content ─────────────────────────────────────────────────────────────
@@ -339,17 +421,23 @@ func SupportProvisionWith(ctx context.Context, seams SupportSeams, spec SupportJ
 	report("ready", "done", "")
 
 	teardown := func(tctx context.Context) error {
+		// DNS first (cheap, fail-open loud — mirrors cleanupHost), then the box:
+		// a leaked A record must never block deleting a billed server.
+		r.dnsTeardownBestEffort(tctx)
 		return seams.DeleteServer(tctx, host.Name)
 	}
-	return host.IP, r.tokenID, teardown, nil
+	return host.IP, r.tokenID, r.boxSecrets.AdminToken, teardown, nil
 }
 
 // supportRun carries one chain invocation's accumulated truth so each step
 // reads like the sequence it narrates (the supportAddRun idiom, re-hosted).
 type supportRun struct {
-	seams     SupportSeams
-	spec      SupportJobSpec
-	name      string
+	seams SupportSeams
+	spec  SupportJobSpec
+	name  string
+	// label is the fenced DNS label (the claim's top-level slug) — the first
+	// label of the url the CP reserved; <label>.Zone is the support's fqdn.
+	label     string
 	parentURL string
 	console   *consoleEmitter
 	report    func(step, status, detail string)
@@ -381,8 +469,10 @@ func reportDetailLines(detail string) []string {
 // failStep reports the honest terminal state for a failed step and tears the
 // half-built box down (best-effort) so no billed box is orphaned from the
 // control plane. The teardown runs on a FRESH bounded context — the chain ctx
-// may already be cancelled/expired. Returns the (nil-teardown) fail triple.
-func (r *supportRun) failStep(_ context.Context, step string, cause error) (string, string, Teardown, error) {
+// may already be cancelled/expired. The DNS A record is deleted first, fail-open
+// (idempotent when the secure step never wrote it — pre-secure failures land
+// here too). Returns the (nil-teardown) fail values.
+func (r *supportRun) failStep(_ context.Context, step string, cause error) (string, string, string, Teardown, error) {
 	// The returned error IS the /fail POST body (and the drain's stderr) — build
 	// it from scrubbed text so both inherit console redaction. %s, never %w:
 	// nothing unwraps these, and a wrapped cause would resurface unscrubbed text.
@@ -391,10 +481,59 @@ func (r *supportRun) failStep(_ context.Context, step string, cause error) (stri
 	r.report(step, "failed", cause.Error())
 	tctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	r.dnsTeardownBestEffort(tctx)
 	if derr := r.seams.DeleteServer(tctx, r.host.Name); derr != nil {
-		return "", "", nil, fmt.Errorf("support %s: %s: %s (AND box %s teardown failed: %s — reclaim it manually)", r.name, step, causeText, r.host.Name, r.console.redact(derr.Error()))
+		return "", "", "", nil, fmt.Errorf("support %s: %s: %s (AND box %s teardown failed: %s — reclaim it manually)", r.name, step, causeText, r.host.Name, r.console.redact(derr.Error()))
 	}
-	return "", "", nil, fmt.Errorf("support %s: %s: %s (box torn down; the roster row ages to offline honestly)", r.name, step, causeText)
+	return "", "", "", nil, fmt.Errorf("support %s: %s: %s (box torn down; the roster row ages to offline honestly)", r.name, step, causeText)
+}
+
+// dnsTeardownBestEffort deletes the support's A record — FAIL-OPEN with a loud
+// journal line: a leaked A record must never block a box teardown (the same
+// semantics as cleanupHost, which aggregates the DNS failure but still deletes
+// the server). DeleteRecord is idempotent, so calling it before the secure
+// step ever wrote the record is harmless.
+func (r *supportRun) dnsTeardownBestEffort(ctx context.Context) {
+	if r.seams.DNS == nil {
+		return // pre-validation failures — nothing was ever stood up
+	}
+	if err := r.seams.DNS.DeleteRecord(ctx, Zone, r.label, "A"); err != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: support %s: delete DNS %s.%s A failed (record leaked — remove it manually): %v\n",
+			r.name, r.label, Zone, err)
+	}
+}
+
+// pollPublicHealth is the configure step's bounded PUBLIC health poll — the
+// support-chain port of WarmPool.pollHealth (F2): probe immediately, treat any
+// error or non-OK report as not-ready-yet, retry every HealthPollInterval
+// until HealthPollDeadline, fail closed only past the deadline. ctx
+// cancellation aborts the wait between probes.
+func (r *supportRun) pollPublicHealth(ctx context.Context, target, token string) error {
+	deadline := time.Now().Add(r.seams.HealthPollDeadline)
+	var lastReport setup.HealthReport
+	var lastErr error
+	for {
+		report, err := r.seams.Health(ctx, target, token)
+		if err == nil && report.OK {
+			return nil
+		}
+		lastReport, lastErr = report, err
+
+		// Checked AFTER a probe so the gate is always attempted at least once,
+		// even with a zero/short deadline.
+		if !time.Now().Before(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(r.seams.HealthPollInterval):
+		}
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("health gate not ready after %s: %s", r.seams.HealthPollDeadline, strings.Join(lastReport.Failures(), ", "))
 }
 
 // ── content sub-steps ────────────────────────────────────────────────────────
@@ -695,6 +834,18 @@ func (s SupportSeams) withSupportDefaults() SupportSeams {
 	if s.ConfigureHost == nil {
 		s.ConfigureHost = cloud.ConfigureSupportHost
 	}
+	if s.Caddy == nil {
+		s.Caddy = cloud.DefaultCaddyStepper()
+	}
+	if s.Health == nil {
+		s.Health = cloud.DefaultHealthGate
+	}
+	if s.HealthPollInterval <= 0 {
+		s.HealthPollInterval = supportHealthPollInterval
+	}
+	if s.HealthPollDeadline <= 0 {
+		s.HealthPollDeadline = supportHealthPollDeadline
+	}
 	if s.MainHTTP == nil {
 		// No client-level timeout: the export streams a whole dataset bundle and
 		// the job ctx (DefaultSupportProvisionTimeout) bounds every call anyway.
@@ -725,6 +876,9 @@ func validateSupportSpec(spec SupportJobSpec) error {
 	}
 	if !supportNameRe.MatchString(spec.Support.Name) {
 		return fmt.Errorf("invalid support name %q — want a DNS-label shape (it becomes the worker id, the listener-<name> roster row, and a provider label)", spec.Support.Name)
+	}
+	if !supportNameRe.MatchString(spec.Barkpark.Slug) {
+		return fmt.Errorf("invalid support slug %q — want a DNS-label shape (it is the reserved url's first label and becomes the public <slug>.%s record + Caddy vhost)", spec.Barkpark.Slug, Zone)
 	}
 	parent := strings.TrimRight(strings.TrimSpace(spec.Support.ParentURL), "/")
 	if parent == "" {

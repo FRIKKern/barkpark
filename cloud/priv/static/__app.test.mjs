@@ -9719,14 +9719,17 @@ const FLEET_SUPPORT_PROV = {
   ],
 };
 
-test("PDF-D84: SUPPORT_STEP_ORDER is the 5-step support vocabulary, ADDITIVE beside the untouched SERVER order", () => {
-  assert.deepEqual([...hooks.supportStepOrder], ["create", "configure", "content", "verify", "ready"]);
-  // The server table still carries freshen+secure — the lock above holds, and
-  // the two arrays are distinct objects (no aliasing that could drift both).
+test("PDF-D84: SUPPORT_STEP_ORDER is the 6-step support vocabulary (secure joined with full public identity), ADDITIVE beside the untouched SERVER order", () => {
+  assert.deepEqual([...hooks.supportStepOrder], ["create", "secure", "configure", "content", "verify", "ready"]);
+  // The server table still carries freshen — the lock above holds, and the
+  // two arrays are distinct objects (no aliasing that could drift both).
   assert.deepEqual([...hooks.serverStepOrder], [
     "create", "freshen", "secure", "configure", "content", "verify", "ready",
   ]);
   assert.notEqual(hooks.supportStepOrder, hooks.serverStepOrder);
+  // secure paces by the SAME expectation as the main chain's secure — one DNS
+  // + ACME wait, one estimate.
+  assert.equal(hooks.supportStepExpectedMs.secure, hooks.SERVER_STEP_EXPECTED_MS.secure);
 });
 
 test("every support step has a label AND a pacing estimate (no orphans either way)", () => {
@@ -9738,19 +9741,23 @@ test("every support step has a label AND a pacing estimate (no orphans either wa
   }
 });
 
-test("provisionSteps folds a support over the SUPPORT tables: 5 planned rows, support labels, own estimates", () => {
+test("provisionSteps folds a support over the SUPPORT tables: 6 planned rows, support labels, own estimates", () => {
   const rows = hooks.provisionSteps({ fleet_role: "support", provision_steps: [] }, Date.now());
-  assert.deepEqual([...rows.map((r) => r.step)], ["create", "configure", "content", "verify", "ready"]);
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "content", "verify", "ready"]);
   assert.equal(rows[0].label, hooks.supportStepLabels.create);
+  // secure is a PLANNED rung — full public identity: DNS + Caddy/TLS ship on
+  // every provisioned support now, so the row renders pending from the start.
+  assert.equal(rows[1].step, "secure");
+  assert.equal(rows[1].role, "pending");
   // content is a PLANNED rung for a support (the dataset leg always ships) —
   // never the server-side optional that hides until reported.
-  assert.equal(rows[2].step, "content");
-  assert.equal(rows[2].role, "pending");
+  assert.equal(rows[3].step, "content");
+  assert.equal(rows[3].role, "pending");
   // rows carry the SUPPORT estimate so ring/pace/overall pace by it.
   assert.equal(rows[0].expectedMs, hooks.supportStepExpectedMs.create);
 });
 
-test("a support NEVER renders a secure (or freshen) step — even from a rogue payload", () => {
+test("a support renders a REPORTED secure step but NEVER freshen — even from a rogue payload", () => {
   const rows = hooks.provisionSteps({
     fleet_role: "support",
     provision_steps: [
@@ -9759,8 +9766,11 @@ test("a support NEVER renders a secure (or freshen) step — even from a rogue p
       { step: "freshen", status: "started", at: "2026-07-24T10:00:11Z" },
     ],
   }, Date.now());
-  assert.ok(!rows.some((r) => r.step === "secure" || r.step === "freshen"),
-    "the main-only rungs must be dropped from a support fold, whatever the server says");
+  const secure = rows.filter((r) => r.step === "secure")[0];
+  assert.ok(secure, "secure is a real support rung now (full public identity)");
+  assert.equal(secure.role, "active");
+  assert.ok(!rows.some((r) => r.step === "freshen"),
+    "freshen stays main-only and must be dropped from a support fold, whatever the server says");
 });
 
 test("a MAIN's fold is byte-compatible with before: server labels, optional rungs hidden until reported", () => {
@@ -9810,12 +9820,14 @@ test("fleet card with supports: one nested row each, deep-linked, never a second
   assert.equal((html.match(/fleet-support-card/g) || []).length, 1);
 });
 
-test("supportRowHtml per state: provisioning → the SUPPORT theater through newStepsHtml (no secure li)", () => {
+test("supportRowHtml per state: provisioning → the SUPPORT theater through newStepsHtml (secure planned, freshen never)", () => {
   const html = hooks.supportRowHtml(FLEET_SUPPORT_PROV, Date.parse("2026-07-24T10:01:00Z"));
   assert.match(html, /fleet-support-theater/);
   assert.match(html, /new-steps/); // the SHARED step component, not a bespoke list
   assert.match(html, /data-step="configure"/);
-  assert.ok(!/data-step="secure"/.test(html), "a support theater never shows a secure rung");
+  // Full public identity: secure is a planned support rung now (DNS + TLS).
+  assert.match(html, /data-step="secure"/);
+  assert.ok(!/data-step="freshen"/.test(html), "freshen stays main-only in the support theater");
   assert.match(html, /Configuring the runtime/); // support label, not "Configuring Barkpark"
 });
 

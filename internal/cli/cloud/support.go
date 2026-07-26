@@ -2,14 +2,18 @@
 // (Personal Dev Fleet Wave C, PDF-D56..D62).
 //
 // A SUPPORT is a subordinate runner box for the developer's MAIN Barkpark
-// (charter PDF-D1: hub-and-spoke — supports serve the main, they get no public
-// identity of their own). Its bring-up reuses the warm-pool go-live chain but
-// deliberately REDUCED (PDF-D59): a support has no public FQDN, so the
-// dns/caddy/public-health/tenant-register steps are DROPPED and the health gate
-// is a LOCAL curl on the box. This file owns the two cloud-seam halves —
-// creating the box and configuring it — while the orchestration (roster row,
-// bind, dataset pull, runtime install, systemd unit) lives in the CLI surface
-// (internal/cli/cloud_support_cmd.go), which narrates each named state.
+// (charter PDF-D1: hub-and-spoke — supports serve the main). Its bring-up
+// reuses the warm-pool go-live chain but deliberately REDUCED (PDF-D59): this
+// configure subset drops the dns/caddy/public-health/tenant-register steps and
+// gates on a LOCAL curl on the box. WHO adds the public identity differs by
+// chain: the CP worker chain (internal/provisioner/support.go) wraps this
+// subset with the full DNS → Caddy/TLS → public-health legs so a provisioned
+// support fronts <label>.barkpark.cloud like a main does (Open Studio works);
+// the laptop `bp cloud support add` chain still ships the box headless. This
+// file owns the two cloud-seam halves — creating the box and configuring it —
+// while the orchestration (roster row, bind, dataset pull, runtime install,
+// systemd unit) lives in the CLI surface (internal/cli/cloud_support_cmd.go),
+// which narrates each named state.
 //
 // This is NOT a rival provision chain: every step here IS the warm-pool step
 // (CreateWarmServer, EnsureFresh, secretsInstallStep, defaultMigrateArgv,
@@ -123,7 +127,9 @@ type SupportConfigureOpts struct {
 //	admin-token → LOCAL health probe (curl localhost:4000/api/schemas)
 //
 // DROPPED vs configureHost: dns, caddy/TLS, the public health poll, and the
-// control-plane tenant register — a support has no public identity. NEVER
+// control-plane tenant register — the CP worker chain layers dns/caddy + the
+// public health poll AROUND this subset itself (supports carry a full public
+// identity now); the CLI chain runs it bare. NEVER
 // authored here: barkpark.service (baked into the warm image). The minted
 // Secrets are returned so the caller can drive the on-box admin API (dataset
 // import) with the box's own admin token. Every failure is fail-closed except

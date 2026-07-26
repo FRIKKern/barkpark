@@ -283,6 +283,11 @@ func run(args []string) int {
 		// payload and is NEVER logged or written to the box.
 		SupportProvision: provisioner.DefaultSupportProvision(provisioner.SupportSeams{
 			Provider: provider,
+			// Full public identity: the support chain's secure step stands up
+			// <slug>.barkpark.cloud + Caddy/TLS exactly like a main, so the box
+			// needs the SAME Cloud DNS seam the go-live chain uses. Caddy/Health
+			// left nil → the real cloud-package defaults.
+			DNS: dns,
 			StepReporter: (&provisioner.HTTPStepReporter{
 				ControlURL: *controlURL,
 				Token:      tok,
