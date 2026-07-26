@@ -26,4 +26,8 @@ redact_multiline_keys < "$1" | sed -E \
   -e 's/(BARKPARK_[A-Z_]*TOKEN["'\'' ]*[:=][" '\'']*)[^"'\'' ,}]+/\1[REDACTED]/g' \
   -e 's/gh[pousr]_[A-Za-z0-9]{20,}/[REDACTED-GH-TOKEN]/g' \
   -e 's/github_pat_[A-Za-z0-9_]{20,}/[REDACTED-GH-TOKEN]/g' \
-  -e 's/AKIA[0-9A-Z]{16}/[REDACTED-AWS-KEY]/g'
+  -e 's/sk-ant-[A-Za-z0-9_-]{20,}/[REDACTED-ANTHROPIC-KEY]/g' \
+  -e 's/sk-[A-Za-z0-9]{20,}/[REDACTED-API-KEY]/g' \
+  -e 's/AKIA[0-9A-Z]{16}/[REDACTED-AWS-KEY]/g' \
+  -e 's/(AWS_SECRET_ACCESS_KEY["'\'' ]*[:=][" '\'']*)[^"'\'' ,}]+/\1[REDACTED-AWS-SECRET]/g' \
+  -e 's/(AWS_SESSION_TOKEN["'\'' ]*[:=][" '\'']*)[^"'\'' ,}]+/\1[REDACTED-AWS-SECRET]/g'

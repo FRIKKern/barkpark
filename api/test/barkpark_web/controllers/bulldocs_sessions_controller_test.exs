@@ -82,6 +82,156 @@ defmodule BarkparkWeb.BulldocsSessionsControllerTest do
     assert json_response(resp, 200)["ok"] == true
   end
 
+  # Final-review F5: the ops route writes the `drafts.<slug>` TWIN, not the
+  # published row `GET /sessions/:slug` reads. The receipt used to echo only
+  # the requested slug, which read as "the session was edited" — it was not.
+  # Pin the honest signal: the id actually written, plus the note that says a
+  # publish is still required.
+  test "the ops receipt names the draft twin it actually wrote", %{conn: conn} do
+    slug = "session-2026-07-25-receipt"
+
+    conn
+    |> authed()
+    |> post(
+      @path,
+      body(slug, %{
+        "blocks" => [
+          %{
+            "id" => "b1",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "v1"}]
+          }
+        ]
+      })
+    )
+
+    op = %{
+      "op" => "replace-block",
+      "id" => "b1",
+      "block" => %{
+        "id" => "b1",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "v2"}]
+      }
+    }
+
+    payload =
+      conn
+      |> authed()
+      |> post(@path <> "/" <> slug <> "/ops", Jason.encode!(op))
+      |> json_response(200)
+
+    assert payload["ok"] == true
+    assert payload["slug"] == slug
+    assert payload["written_doc_id"] == "drafts." <> slug
+    assert payload["note"] =~ "draft twin"
+
+    # And the honesty is real, not cosmetic: the PUBLISHED row a reader
+    # resolves still carries the pre-op block.
+    show = conn |> authed() |> get(@path <> "/" <> slug) |> json_response(200)
+    assert [%{"content" => [%{"value" => "v1"}]}] = show["blocks"]
+  end
+
+  # Final-review F1: `session.json` is `visibility: "private"` (a session
+  # carries cwd/hostname/git state). The query API must therefore refuse
+  # `type=session` to an ANONYMOUS caller, exactly like `form_response` — the
+  # ingest-gated GET is the only reader. A token read still sees it.
+  describe "visibility" do
+    test "an anonymous query API read does NOT serve session docs", %{conn: conn} do
+      slug = "session-private-check"
+      assert conn |> authed() |> post(@path, body(slug)) |> json_response(200)
+
+      anon =
+        build_conn()
+        |> get("/v1/data/query/production/session")
+
+      # `PublicRead`/QueryController fail CLOSED on a private type: 404, and in
+      # no case a body carrying the session.
+      assert anon.status in [401, 403, 404]
+      refute anon.resp_body =~ slug
+
+      # Control: the SAME anonymous request against the PUBLIC sibling type
+      # succeeds — so the refusal above is the private visibility, not a
+      # broken route or a blanket anonymous block on this endpoint.
+      assert build_conn() |> get("/v1/data/query/production/paper") |> json_response(200)
+    end
+
+    test "a token read of the same type still works", %{conn: conn} do
+      slug = "session-private-token-read"
+      assert conn |> authed() |> post(@path, body(slug)) |> json_response(200)
+      assert conn |> authed() |> get(@path <> "/" <> slug) |> json_response(200)
+    end
+
+    test "the registered session schema is private" do
+      session =
+        Barkpark.Plugins.Bulldocs.register_schemas([])
+        |> Enum.find(&(&1.name == "session"))
+
+      assert session.visibility == "private"
+    end
+  end
+
+  # Final-review F3: an upsert's pre-write read of the existing row and its
+  # write now happen under `pg_advisory_xact_lock("session:" <> slug)` — the
+  # SAME key `Content.Sessions.append_event/5` takes — so a checkpoint publish
+  # can never clobber a concurrently-appended event. The Ecto sandbox gives one
+  # connection per test, so a true race is untestable here (see the
+  # Content.Sessions moduledoc); what IS testable, and what the bug actually
+  # destroyed, is the carry-over: a blocks+fields publish must leave the trail
+  # intact.
+  test "a checkpoint-style publish preserves the event trail appended before it", %{conn: conn} do
+    slug = "session-trail-preserved"
+    assert conn |> authed() |> post(@path, body(slug)) |> json_response(200)
+
+    for note <- ~w(one two) do
+      resp =
+        conn
+        |> authed()
+        |> post(
+          @path <> "/" <> slug <> "/events",
+          Jason.encode!(%{"kind" => "note", "note" => note})
+        )
+
+      assert json_response(resp, 200)["ok"] == true
+    end
+
+    # A full checkpoint publish: blocks + changed fields, NO "events" key
+    # (the client never sends one — "events" is server-owned).
+    checkpoint =
+      body(slug, %{
+        "status" => "closed",
+        "ended_at" => "2026-07-25T12:00:00Z",
+        "blocks" => [
+          %{
+            "id" => "current-task",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "wrapped up"}]
+          }
+        ]
+      })
+
+    assert (conn |> authed() |> post(@path, checkpoint) |> json_response(200))["ok"] == true
+
+    payload = conn |> authed() |> get(@path <> "/" <> slug) |> json_response(200)
+    assert payload["status"] == "closed"
+
+    assert [%{"kind" => "note", "note" => "one"}, %{"kind" => "note", "note" => "two"}] =
+             payload["events"]
+
+    assert [%{"id" => "current-task"}] = payload["blocks"]
+
+    # And a further append still lands on top of the republished row.
+    resp =
+      conn
+      |> authed()
+      |> post(
+        @path <> "/" <> slug <> "/events",
+        Jason.encode!(%{"kind" => "note", "note" => "three"})
+      )
+
+    assert json_response(resp, 200)["count"] == 3
+  end
+
   # Review fix #4 (minor): the no-slug fallback must carry the same
   # `%{error: %{code:, message:}}` envelope every other branch uses, not the
   # ad hoc `%{ok: false, error: "..."}` shape.

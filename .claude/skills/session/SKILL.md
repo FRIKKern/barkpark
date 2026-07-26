@@ -25,7 +25,8 @@ tooling required):
 Auth: `open`/`log`/`publish`/`view` are ingest-tier (`BARKPARK_INGEST_TOKEN`, with the
 normal bearer token as fallback) — a 401 here usually means neither is configured in this
 environment; check `bp whoami -o json` and the shell environment before assuming the
-feature is broken.
+feature is broken. `link-task` is the one verb NOT on the ingest tier: it writes a task,
+so it uses the regular bearer token (`BARKPARK_TOKEN`) like every other `bp task` call.
 
 ## 1. Open (once, at session start)
 
@@ -48,12 +49,12 @@ versions vary in exactly what they fold) — fall back to listing the directory 
 grepping for the repo name instead of giving up: `ls "$HOME/.claude/projects/" | grep
 <repo-name>`.
 
-Build the metadata payload. `description` and `tags` put this session on the Barkpark
-**publish wall** (same rule as papers/tasks): `description` must be non-trivial (≥20
-chars), and `tags` needs 2-4 weighted entries `{tag, strength 1-100, rationale ≥20 chars}`
-with distinct strengths, and **every tag must already be a registered, published
-`type:tag` doc**. Use the `sessions` tag (already registered on this server) plus one
-topic tag:
+Build the metadata payload. Sessions are **private and unwalled** on the server: the
+`session` schema is `visibility: "private"` (a session carries cwd, hostname and git
+state, so it is never anonymously readable — every read costs an ingest token), and
+sessions are NOT in the publish wall's walled types. So `description` and `tags` are
+**recommended, not enforced** — include them anyway, they are what makes a session
+findable later. Use the `sessions` tag plus one topic tag:
 
 ```bash
 WORK="${TMPDIR:-/tmp}/bp-session-$$"
@@ -79,17 +80,10 @@ JSON
 bp session open "$SLUG" --file "$WORK/meta.json"
 ```
 
-If `bp session open` fails with a tag error (`unknown_tag` / 422), the topic tag isn't
-registered yet — create it, publish it, then retry `open`:
-
-```bash
-bp doc create tag --yes --set _id=<topic-tag> --set title="<Topic Title>"
-bp doc publish tag <topic-tag> --yes
-bp session open "$SLUG" --file "$WORK/meta.json"
-```
-
-If you'd rather not mint a new tag, fall back to an existing registered one instead of
-inventing a topic tag (`bp doc ls tag` lists what's already registered).
+Tags on a session are free-form — the server does not require them to be registered
+`type:tag` docs (that check is the publish wall, which sessions are outside of). If you
+want a session's tags to line up with the rest of the corpus, pick from what's already
+there: `bp doc ls tag`.
 
 ## 2. Log (after every milestone, non-blocking)
 
@@ -102,6 +96,8 @@ bp session log "$SLUG" --kind epic-wave-complete --ref <wave-paper-slug>
 bp session log "$SLUG" --kind push               --ref "$(git rev-parse HEAD)"
 bp session log "$SLUG" --kind note               --note "<short free text>"
 ```
+
+Keep `--note` short — it rides the query string, not a JSON body.
 
 **Non-blocking:** if `bp session log` fails (network hiccup, transient 5xx, whatever),
 print a loud warning and move on — a failed log entry is never a reason to abort or retry

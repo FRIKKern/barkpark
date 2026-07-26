@@ -100,7 +100,52 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def upsert_blocks_doc(type, _attrs, _opts) when type not in @blocks_types,
     do: {:error, :not_a_blocks_type}
 
+  # PAPER leg — unchanged, unlocked, byte-identical to the pre-fix path.
+  def upsert_blocks_doc(@paper_type, attrs, opts) when is_map(attrs) and is_list(opts),
+    do: do_upsert_blocks_doc(@paper_type, attrs, opts)
+
+  # NON-PAPER leg (today: "session") — SERIALIZED against the OTHER writer of
+  # the same row, `Barkpark.Content.Sessions.append_event/5`.
+  #
+  # The race this closes: `do_upsert_blocks_doc/3` reads `existing` (its
+  # pre-write lookup), then builds `content` from `existing.content` as
+  # `base_content` and finally persists it. A session's `content["events"]`
+  # trail is never sent by an upsert caller ("events" is in
+  # `@blocks_doc_reserved_attrs`) — it survives ONLY by riding that
+  # `base_content` carry-over. So an `append_event/5` that COMMITS between the
+  # read and the write is silently overwritten: the checkpoint publishes and
+  # the just-logged milestone vanishes from the trail.
+  #
+  # `append_event/5` already serializes on `pg_advisory_xact_lock(hashtext(
+  # "session:" <> slug))`. Taking the SAME key here, and doing the `existing`
+  # read INSIDE that transaction, makes the two writers mutually exclusive: an
+  # append either lands before this upsert's read (and is carried over) or
+  # waits behind its commit (and appends to the freshly-written content).
+  # `pg_advisory_xact_lock` is released at commit/rollback — no unlock path to
+  # leak. A slug-less write (no row to race on) skips the lock entirely.
   def upsert_blocks_doc(type, attrs, opts) when is_map(attrs) and is_list(opts) do
+    case attrs["slug"] || attrs[:slug] do
+      slug when is_binary(slug) and slug != "" ->
+        Repo.transaction(fn ->
+          _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["#{type}:#{slug}"])
+          do_upsert_blocks_doc(type, attrs, opts)
+        end)
+        |> case do
+          # The inner result IS the return value — errors are NOT rolled back
+          # because every failure leg returns before (or IS) the single Repo
+          # write, so there is nothing partial to undo, and rolling back would
+          # rewrite `{:error, reason}` into `{:error, reason}` via a different
+          # code path for no gain.
+          {:ok, inner} -> inner
+          {:error, reason} -> {:error, reason}
+        end
+
+      _ ->
+        do_upsert_blocks_doc(type, attrs, opts)
+    end
+  end
+
+  defp do_upsert_blocks_doc(type, attrs, opts) do
     attrs = normalize_paper_attrs(attrs)
     slug = attrs["slug"]
     dataset = attrs["dataset"] || @paper_default_dataset
@@ -965,7 +1010,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
              block: affected.block,
              block_id: affected.block_id,
              op_kind: Map.get(op, "op"),
-             position: affected.position
+             position: affected.position,
+             # Session-handoff (final review, F5): the row this path actually
+             # WROTE is the `drafts.<slug>` twin (see `attrs["doc_id"]` above),
+             # NOT the published `<slug>` row a reader resolves. Naming it in
+             # the result lets an HTTP receipt be honest about which document
+             # changed instead of echoing the requested slug.
+             written_doc_id: attrs["doc_id"]
            }}
 
         {:error, _} = err ->

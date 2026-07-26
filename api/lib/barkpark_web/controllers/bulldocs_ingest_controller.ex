@@ -334,8 +334,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   @doc """
   Read a session by slug — the same visibility tier as the writes
-  (`auth: :ingest`; the doc is also readable via the public paper routes once
-  published). 404 when the slug doesn't resolve to a "session" row in scope.
+  (`auth: :ingest`). This is the ONLY session reader: there is no public
+  session route (`/papers/:slug` resolves `type: "paper"` only) and the query
+  API refuses `type=session` to an anonymous caller because session.json is
+  `visibility: "private"` (sessions carry cwd/hostname/git state). 404 when
+  the slug doesn't resolve to a "session" row in scope.
 
   Scoped by the SAME workspace/project resolution `ingest_session/2` threads
   via `put_scope/3` (`resolve_scope/2` below) — two workspaces can each hold
@@ -371,6 +374,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
   the paper-only `apply_paper_block_op/3`, this returns NO `rev`/
   `fragment_html` in its `{:ok, %{block, block_id, op_kind, position}}`
   result — the receipt below reflects that shape exactly.
+
+  DRAFT SEMANTICS (session-handoff final review, F5). The generic block-op path
+  writes its patched content to the `drafts.<slug>` TWIN, never to the
+  published `<slug>` row that `show_session/2` (and `bp session view`) reads.
+  So an op applied here is INVISIBLE to every session reader until a
+  `POST /v1/plugins/bulldocs/sessions` upsert republishes the slug. That is
+  not hidden: the receipt names the row it actually wrote (`written_doc_id`)
+  and carries a `note` saying so. Publish-through (ops landing straight on the
+  published row) is deliberately DEFERRED — `bp session publish` is the
+  supported way to change a session's blocks, and it is what the session skill
+  uses.
   """
   def apply_session_op(conn, %{"slug" => slug} = params) do
     op = Map.delete(params, "slug")
@@ -391,10 +405,26 @@ defmodule BarkparkWeb.BulldocsIngestController do
                dataset,
                session_scope_opts(conn, params)
              ) do
-          {:ok, %{block_id: block_id, op_kind: op_kind, position: position}} ->
+          {:ok,
+           %{
+             block_id: block_id,
+             op_kind: op_kind,
+             position: position,
+             written_doc_id: written_doc_id
+           }} ->
             conn
             |> put_status(:ok)
-            |> json(%{ok: true, slug: slug, op: op_kind, block_id: block_id, position: position})
+            |> json(%{
+              ok: true,
+              slug: slug,
+              op: op_kind,
+              block_id: block_id,
+              position: position,
+              # F5: name the row that was ACTUALLY written (the draft twin) and
+              # say plainly that it is not yet the row a reader sees.
+              written_doc_id: written_doc_id,
+              note: "ops write the draft twin; publish to make visible"
+            })
 
           {:error, :not_found} ->
             conn

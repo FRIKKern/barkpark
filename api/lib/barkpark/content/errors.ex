@@ -109,6 +109,20 @@ defmodule Barkpark.Content.Errors do
                          "missing_source",
                          "source_not_found",
                          "constraint",
+                         # Session-handoff (tasks 3-4) — the session legs of the
+                         # SAME controller. `missing_slug` (422, an upsert body
+                         # with no slug), `invalid_kind` (422, an event kind
+                         # outside `Content.Sessions.event_kinds/0` — the
+                         # envelope carries the allowed list) and
+                         # `conflict_retry` (409, the append-only trail's
+                         # CAS-on-rev lost a race; the caller retries the
+                         # append, nothing was written). Registered rather than
+                         # folded into the canonical `malformed`/`conflict`
+                         # because each names a distinct, actionable condition
+                         # the neighbours above already set the precedent for.
+                         "missing_slug",
+                         "invalid_kind",
+                         "conflict_retry",
                          # Sheets ops API — plugins/sheets/web/ops_controller.ex
                          "malformed_ops",
                          "batch_too_large",

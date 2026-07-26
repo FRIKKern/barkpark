@@ -141,7 +141,13 @@ defmodule Barkpark.Plugins.Bulldocs do
   def register_schemas(_opts) do
     # paper (public reader artifact) + form_response (PRIVATE — anonymous form
     # submissions land here; visibility "private" keeps every response off the
-    # public read API while bp/Studio token reads see them normally).
+    # public read API while bp/Studio token reads see them normally) +
+    # session (session.json — ALSO PRIVATE, same reason as form_response: a
+    # session record carries cwd, hostname, git branch/HEAD and a scrubbed
+    # transcript ref, so it must never be anonymously readable. Sessions are
+    # deliberately NOT in `AuthoringWall`'s `@walled_types`: they are
+    # machine-generated lifecycle records, and being private already removes
+    # the exposure the wall's curation exists to gate).
     for file <- ["paper.json", "form_response.json", "session.json"] do
       raw =
         @schemas_dir
@@ -204,8 +210,16 @@ defmodule Barkpark.Plugins.Bulldocs do
        auth: :ingest},
       # Session-handoff (task-3): a `session` is a blocks-doc twin of a paper
       # (Content.blocks_type?/1 whitelist), same ingest token tier. GET is
-      # `:ingest`-gated for symmetry with the writes — the doc is also
-      # readable via the public paper routes once published.
+      # `:ingest`-gated, and that gate is the ONLY reader: there is NO public
+      # session reader route (the `/papers/:slug` reader below resolves
+      # `type: "paper"` only), and the query API refuses the type anonymously
+      # because session.json is `visibility: "private"`. Every read of a
+      # session therefore costs a token.
+      #
+      # NOTE on the ops route: `apply_session_op` rides the GENERIC block-op
+      # path, which patches the `drafts.<slug>` twin — NOT the published row
+      # `show_session` reads. The op receipt names the written doc id and says
+      # so; a `POST /bulldocs/sessions` upsert is what makes an edit visible.
       {:post, "/bulldocs/sessions", BarkparkWeb.BulldocsIngestController, :ingest_session,
        auth: :ingest},
       {:get, "/bulldocs/sessions/:slug", BarkparkWeb.BulldocsIngestController, :show_session,

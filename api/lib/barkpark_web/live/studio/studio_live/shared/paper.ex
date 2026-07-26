@@ -37,6 +37,38 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     end
   end
 
+  # Session-handoff (final review, F4): the paper PANE is now opened by every
+  # blocks-doc type, not just "paper" (`PaneBuilder` keys on
+  # `Content.blocks_type?/1`), but every write below is hardcoded to the
+  # PAPER-only op path (`Content.apply_paper_block_op/4` /
+  # `apply_paper_block_ops/4`, and `sync_paper_edit_doc/1`'s
+  # `Content.get_paper/2`). Pointing those at a session either fails opaquely
+  # ("Edit failed") or — worse — resolves a SAME-SLUG paper and edits the wrong
+  # document.
+  #
+  # v1 ruling: a session pane is READ-ONLY in Studio. Guard at the two pane op
+  # entry points (the only writers), refuse with an honest notice, and leave
+  # the paper path byte-identical below. Sessions are edited through
+  # `bp session publish` (the ingest API), which is the only writer that
+  # understands a session's events trail + metadata contract.
+  @read_only_pane_notice "Sessions are read-only in Studio (v1) — edit via bp session publish"
+
+  # True when the open pane is a blocks-doc that is NOT a paper (today: a
+  # session). `editor_type` is assigned by `Shared.rebuild_panes/1` from the
+  # PaneBuilder editor map's `:type`, so it is the pane's real doc type.
+  defp read_only_pane?(socket) do
+    case socket.assigns[:editor_type] do
+      nil -> false
+      type -> type != Content.paper_type()
+    end
+  end
+
+  defp refuse_read_only_pane(socket) do
+    socket
+    |> put_flash(:error, @read_only_pane_notice)
+    |> assign(save_status: "Read-only")
+  end
+
   @doc false
   def paper_pane_op(socket, op) do
     paper = socket.assigns[:paper_doc]
@@ -44,6 +76,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     dataset = socket.assigns.dataset
 
     cond do
+      read_only_pane?(socket) ->
+        refuse_read_only_pane(socket)
+
       is_nil(slug) ->
         socket
 
@@ -102,6 +137,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     dataset = socket.assigns.dataset
 
     cond do
+      # Same v1 read-only guard as paper_pane_op/2 — see its comment. The batch
+      # path needs its own: a canvas run reaches here without passing through
+      # paper_pane_op/2.
+      read_only_pane?(socket) ->
+        refuse_read_only_pane(socket)
+
       is_nil(slug) ->
         socket
 

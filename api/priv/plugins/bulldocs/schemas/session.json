@@ -2,7 +2,7 @@
   "name": "session",
   "title": "Session",
   "icon": "🧵",
-  "visibility": "public",
+  "visibility": "private",
   "fields": [
     {"name": "title", "title": "Title", "type": "string", "group": "meta",
      "description": "Human-readable session title."},

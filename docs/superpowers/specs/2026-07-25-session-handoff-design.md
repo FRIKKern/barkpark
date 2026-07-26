@@ -72,7 +72,7 @@ The paper machinery is hard-gated to `type == "paper"` today. Generalize to a **
 | `api/lib/barkpark_web/studio/pane_builder.ex` | editor dispatch at `:415` and backlinks-open at `:202` key on the whitelist instead of `== "paper"` → sessions open in the real paper pane |
 | `api/lib/barkpark/content/papers/block_ops.ex` | `apply_document_block_op/4` already generalized — wire the HTTP ops path through it for non-paper types |
 
-Publish wall (description + published tags) applies to sessions the same as papers; the upload skill supplies both.
+**Visibility + wall (amended at final review).** `session.json` is `visibility: "private"` — a session carries cwd, hostname, git branch/HEAD and a transcript ref, so it must never be anonymously readable (the `form_response` precedent). Sessions are also deliberately **unwalled**: they stay out of `AuthoringWall`'s `@walled_types` (`~w(paper task)`). `description` + `tags` are RECOMMENDED for discoverability and the upload skill still supplies both, but nothing on the server enforces them for a session. Rationale: the real risk was anonymous exposure, which `private` closes; wall enforcement would gate machine-generated lifecycle records for no curation benefit. All three surfaces (schema, `AuthoringWall`, skill prose) agree on this.
 
 ## 3. Server: task → session reference
 
@@ -97,7 +97,7 @@ Block-level patch (rare) rides the generalized ops endpoint; no dedicated verb i
 
 `SKILL.md` + `helpers/scrub.sh`. Procedure is pure prose + `bp` CLI so Codex can execute it from AGENTS.md.
 
-**Open (session start):** `bp session open session-YYYY-MM-DD-<topic>` with metadata (harness, uuid, cwd, machine, git head/branch, `started_at`, `status: open`), description, tags (`session` + topic tag, published `type:tag` docs per publish wall). Slug stays in conversation context.
+**Open (session start):** `bp session open session-YYYY-MM-DD-<topic>` with metadata (harness, uuid, cwd, machine, git head/branch, `started_at`, `status: open`), description, tags (`session` + topic tag — recommended for discoverability, not server-enforced; sessions are unwalled per §2). Slug stays in conversation context.
 
 **Log (every milestone, agent-driven v1):** one `bp session log` call per event. Wired into the places milestones already happen:
 
