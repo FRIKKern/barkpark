@@ -330,10 +330,40 @@ defmodule BarkparkCloud.Sites.ContentPublishReceiverTest do
       refute Enum.any?(reqs, &(&1.method == :post)),
              "a second registration must NEVER POST a duplicate webhook row"
 
-      assert Enum.any?(reqs, fn r ->
-               r.method == :put and String.ends_with?(r.url, "/v1/webhooks/production/#{hook_id}")
+      put =
+        Enum.find(reqs, fn r ->
+          r.method == :put and String.ends_with?(r.url, "/v1/webhooks/production/#{hook_id}")
+        end)
+
+      assert put, "expected a PUT update of the EXISTING webhook row by id"
+
+      # The REPAIR half: guerrilla's rows were all auto-disabled, and a PUT
+      # without `active: true` returns 200 while content-auto stays dead. The
+      # box folds full re-enable (zeroed streak, cleared stamps) into this write.
+      assert Jason.decode!(put.body)["active"] == true,
+             "the reconciler's PUT must re-enable an auto-disabled row"
+    end
+
+    test "backfill REFUSES to write when the box webhook list is unreadable (:unknown is not :absent)" do
+      bp = team_fixture() |> live_barkpark()
+      StudioLinkFakeHttpClient.program([])
+
+      site = static_site(bp)
+
+      # The list GET fails. On the backfill path "I could not look" must never
+      # authorize a POST — webhooks.name has no unique constraint, so a write
+      # here could duplicate a row that actually exists, and the operator would
+      # see :ok on a run that made things worse.
+      StudioLinkFakeHttpClient.program(%{
+        "/v1/webhooks/production" => {:ok, %{status: 502, body: "box down"}}
+      })
+
+      assert :error = Registry.ensure_content_webhook(bp, site)
+
+      refute Enum.any?(StudioLinkFakeHttpClient.requests(), fn r ->
+               r.method in [:post, :put] and String.contains?(r.url, "/v1/webhooks/")
              end),
-             "expected a PUT update of the EXISTING webhook row by id"
+             "an unreadable list must produce NO webhook write on the backfill path"
     end
 
     test "deleting a site DEREGISTERS its box webhook (no orphan rows to auto-disable the endpoint)" do

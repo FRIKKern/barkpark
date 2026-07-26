@@ -53,12 +53,29 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
   live sites pick the template up. Without it the sweep is a correct no-op, by
   design, not by accident.
 
+  ## The per-box start cap (fan-out control)
+
+  The `:site_deploy` queue's concurrency 1 serializes JOBS, not builds:
+  `AutoDeployWorker` starts one build per job, so for it the queue really is a
+  serial gate — but this worker visits the whole fleet in ONE job, and
+  `Deploy.start/1` hands each site to a supervised Task immediately. The box
+  single-flights per SLUG only, so after any instance roll (`code_rev` is the
+  box's git commit and advances on every `api/**`/`internal/**`/`deploy/**`/
+  `templates/**` merge) an uncapped sweep would start K concurrent builds on a
+  2-core box that is also serving the content API.
+
+  So: at most ONE build start per box per tick (`@max_starts_per_box`).
+  Sites past the cap are counted `deferred` and cost nothing — an unchanged site
+  collapses to `duplicate` next tick anyway, and a changed one is picked up one
+  tick later. A box with N stale sites converges over N hours instead of
+  contending for one.
+
   ## Failure posture
 
   Per-site failures are isolated and logged; one unreachable box never aborts the
   sweep for the rest of the fleet. `perform/1` returns `{:ok, summary}` with the
-  counts (`enqueued`, `duplicate`, `skipped`, `failed`) so a run reads honestly in
-  the Oban job record.
+  counts (`enqueued`, `duplicate`, `skipped`, `failed`, `deferred`) so a run
+  reads honestly in the Oban job record.
   """
 
   use Oban.Worker,
@@ -79,13 +96,39 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
 
   require Logger
 
+  # See "The per-box start cap" in the moduledoc. One STARTED build per box per
+  # tick; the rest of that box's sites defer to the next hourly tick.
+  @max_starts_per_box 1
+
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
-    summary =
+    zero = %{enqueued: 0, duplicate: 0, skipped: 0, failed: 0, deferred: 0}
+
+    {summary, _starts_per_box} =
       Registry.list_deployed_content_sites()
-      |> Enum.reduce(%{enqueued: 0, duplicate: 0, skipped: 0, failed: 0}, fn site, acc ->
-        Map.update!(acc, sweep_site(site), &(&1 + 1))
+      |> Enum.reduce({zero, %{}}, fn site, {acc, starts} ->
+        # Defer BEFORE probing: once this box has started a build this tick,
+        # even the probe read would land on a box already busy building.
+        if Map.get(starts, site.barkpark_id, 0) >= @max_starts_per_box do
+          {Map.update!(acc, :deferred, &(&1 + 1)), starts}
+        else
+          outcome = sweep_site(site)
+
+          starts =
+            if outcome == :enqueued,
+              do: Map.update(starts, site.barkpark_id, 1, &(&1 + 1)),
+              else: starts
+
+          {Map.update!(acc, outcome, &(&1 + 1)), starts}
+        end
       end)
+
+    if summary.deferred > 0 do
+      Logger.info(
+        "template-freshness: #{summary.deferred} site(s) deferred to the next tick " <>
+          "(per-box start cap #{@max_starts_per_box})"
+      )
+    end
 
     {:ok, summary}
   end

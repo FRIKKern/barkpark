@@ -35,13 +35,13 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
     team
   end
 
-  defp live_barkpark(team) do
+  defp live_barkpark(team, url \\ @instance_url) do
     n = System.unique_integer([:positive])
     {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
 
     bp
     |> Ecto.Changeset.change(
-      url: @instance_url,
+      url: url,
       git_commit: "abc123",
       admin_token_encrypted: Vault.encrypt("instance-admin-token")
     )
@@ -151,6 +151,36 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
 
       assert length(deployments(site)) == before,
              "an unreadable content_rev must mint NOTHING — not a fresh build per tick"
+    end
+
+    test "caps STARTED builds at ONE per box per tick — the rest defer and converge over ticks" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+      _a = site_fixture(bp, "static", "astro") |> deployed(bp)
+      _b = site_fixture(bp, "node", "nextjs") |> deployed(bp)
+
+      # The queue's concurrency 1 serializes JOBS, not builds: this one job would
+      # otherwise start BOTH builds concurrently on a 2-core box (the box
+      # single-flights per slug only).
+      assert {:ok, %{enqueued: 1, deferred: 1, duplicate: 0}} = sweep()
+
+      # Next tick: the built site collapses to duplicate (no start), so the
+      # deferred one gets its build — the cap converges, never starves.
+      assert {:ok, %{enqueued: 1, duplicate: 1, deferred: 0}} = sweep()
+
+      # Quiet fleet: everything a no-op.
+      assert {:ok, %{enqueued: 0, duplicate: 2, deferred: 0}} = sweep()
+    end
+
+    test "the cap is PER BOX — two boxes each start one build in the same tick" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp1 = team_fixture() |> live_barkpark()
+      # barkparks.url is unique — the second box needs its own host.
+      bp2 = team_fixture() |> live_barkpark("https://beta.barkpark.cloud")
+      _ = site_fixture(bp1, "static", "astro") |> deployed(bp1)
+      _ = site_fixture(bp2, "static", "astro") |> deployed(bp2)
+
+      assert {:ok, %{enqueued: 2, deferred: 0}} = sweep()
     end
 
     test "ignores a container site and a never-deployed site" do

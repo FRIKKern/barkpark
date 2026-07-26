@@ -3615,7 +3615,9 @@ defmodule BarkparkCloud.Registry do
 
   # stw9 (charter D56): `:put` and `:delete` join the allowed verbs so webhook
   # HYGIENE is reachable at all — the box exposes `PUT /v1/webhooks/:dataset/:id`
-  # and `DELETE /v1/webhooks/:dataset/:id` (api/lib/barkpark_web/router.ex:2373-2374),
+  # and `DELETE /v1/webhooks/:dataset/:id` on the UNSCOPED admin block
+  # (api/lib/barkpark_web/router.ex:1996-1997 — the scoped `/w/:ws/p/:proj` mirror
+  # near :2373 declares the same verbs, but the CP calls the unscoped paths),
   # and without them the control plane could only ever CREATE rows: re-registration
   # duplicates (webhooks.name has no unique constraint) and a deleted site leaves an
   # ORPHAN endpoint that 404s every delivery until the box auto-disables it. The
@@ -4286,42 +4288,59 @@ defmodule BarkparkCloud.Registry do
 
   defp maybe_register_content_webhook(%Barkpark{} = barkpark, %Site{} = site, secret)
        when is_binary(secret),
-       do: do_ensure_content_webhook(barkpark, site, secret)
+       do: do_ensure_content_webhook(barkpark, site, secret, :create)
 
   @doc """
   IDEMPOTENTLY ensure `site`'s content-publish webhook exists on its box, pointed
-  at this site's per-site receiver and carrying this site's own secret.
+  at this site's per-site receiver, ACTIVE, and — when the row is freshly created —
+  carrying this site's own secret.
 
   This is the backfill/repair entry point (`create_site/2` calls the same code
   path inline for a fresh site). Safe to call any number of times: it LISTS the
   box's webhooks for the bound dataset first and matches
   `site-autodeploy-<site.id>` BY NAME —
 
-    * found    → `PUT /v1/webhooks/<dataset>/<id>` (re-point url/events/secret),
-    * absent   → `POST /v1/webhooks/<dataset>` (create),
-    * unknown  → (the list read failed) fall back to `POST`, preserving the
-      pre-stw9 best-effort behaviour: a possibly-duplicate row still beats a site
-      that never rebuilds on publish.
+    * found    → `PUT /v1/webhooks/<dataset>/<id>` (re-point url/events and set
+      `active: true` — the box folds FULL re-enable semantics into that write:
+      zeroed failure streak, cleared auto-disable stamps. The box deliberately
+      DROPS `secret` on update — rotation goes only through its rotate verb — so
+      an existing row keeps its stored secret, which this same reconciler minted),
+    * absent   → `POST /v1/webhooks/<dataset>` (create, with the secret),
+    * unknown  → (the list read failed) on the BACKFILL path this is `:error`,
+      never a write: "I could not look" must not authorize a possibly-duplicating
+      POST (the law at `find_content_webhook/3`). Only the CREATE path — a fresh
+      site whose name cannot exist on any box yet — still falls back to `POST`,
+      where duplication is impossible and best-effort beats a site that never
+      rebuilds on publish.
 
   `webhooks.name` has NO unique constraint on the box, so a blind re-POST — what
   this used to be — silently DUPLICATES the row on every backfill run, and every
   duplicate delivers the same payload again. List-then-create-by-name is what
   makes registration repeatable.
 
+  Re-enable tradeoff, made deliberately: the PUT overrides a human who disabled
+  the hook by hand. This runs only on site create and EXPLICIT backfill — never
+  on any schedule — so a repair run asserting "this site's auto-deploy hook is
+  live" is the operator's intent.
+
   Returns `:ok` (registered/updated), `:noop` (nothing to register — no secret,
-  no dataset, box not live) or `:error` (the box refused; logged). NEVER raises
-  and never touches the Site row — the row is the truth, this is reconciliation.
+  no dataset, box not live) or `:error` (the box refused, or the backfill could
+  not read the list; logged). NEVER raises and never touches the Site row — the
+  row is the truth, this is reconciliation.
   """
   @spec ensure_content_webhook(Barkpark.t(), Site.t()) :: :ok | :noop | :error
   def ensure_content_webhook(%Barkpark{} = barkpark, %Site{} = site) do
     case reveal_site_content_secret(site) do
-      {:ok, secret} when is_binary(secret) -> do_ensure_content_webhook(barkpark, site, secret)
-      _ -> :noop
+      {:ok, secret} when is_binary(secret) ->
+        do_ensure_content_webhook(barkpark, site, secret, :backfill)
+
+      _ ->
+        :noop
     end
   end
 
-  defp do_ensure_content_webhook(%Barkpark{} = barkpark, %Site{} = site, secret)
-       when is_binary(secret) do
+  defp do_ensure_content_webhook(%Barkpark{} = barkpark, %Site{} = site, secret, mode)
+       when is_binary(secret) and mode in [:create, :backfill] do
     with box_url when is_binary(box_url) and box_url != "" <- barkpark.url,
          dataset when is_binary(dataset) and dataset != "" <- site.bootstrap_dataset,
          url when is_binary(url) <- content_receiver_url(site) do
@@ -4331,34 +4350,58 @@ defmodule BarkparkCloud.Registry do
       # name is ALSO this reconciler's only identity key (see the moduledoc).
       name = content_webhook_name(site)
 
+      # `active: true` is the REPAIR half of reconciliation: guerrilla's rows were
+      # all auto-disabled, and a PUT without it returns 200 while content-auto
+      # stays dead — the reconciler reporting :ok on the exact state it was built
+      # to fix. On POST the box defaults to active anyway; on PUT false→true it
+      # zeroes the failure streak and clears the auto-disable stamps in the same
+      # write. `secret` rides along for the POST branch; the box drops it on PUT.
       body = %{
         name: name,
         events: ["publish", "unpublish", "delete"],
         url: url,
-        secret: secret
+        secret: secret,
+        active: true
       }
 
       base = "/v1/webhooks/#{URI.encode(dataset)}"
 
-      {method, path} =
-        case find_content_webhook(barkpark, dataset, name) do
-          {:ok, id} -> {:put, base <> "/" <> URI.encode(id)}
-          _absent_or_unknown -> {:post, base}
-        end
+      case find_content_webhook(barkpark, dataset, name) do
+        {:ok, id} ->
+          relay_webhook_write(barkpark, site, :put, base <> "/" <> URI.encode(id), body)
 
-      case relay_admin(barkpark, method, path, body) do
-        {:ok, status, _resp} when status in 200..299 ->
-          :ok
+        :absent ->
+          relay_webhook_write(barkpark, site, :post, base, body)
 
-        other ->
+        :unknown when mode == :create ->
+          # A fresh site's name cannot exist on the box yet, so POST-on-unknown
+          # cannot duplicate here — and registration is best-effort on create.
+          relay_webhook_write(barkpark, site, :post, base, body)
+
+        :unknown ->
           Logger.warning(
-            "content-publish webhook registration for site #{site.id} did not take: #{inspect(other)}"
+            "content-publish webhook backfill for site #{site.id} aborted: " <>
+              "box webhook list unreadable — refusing a possibly-duplicating POST"
           )
 
           :error
       end
     else
       _ -> :noop
+    end
+  end
+
+  defp relay_webhook_write(%Barkpark{} = barkpark, %Site{} = site, method, path, body) do
+    case relay_admin(barkpark, method, path, body) do
+      {:ok, status, _resp} when status in 200..299 ->
+        :ok
+
+      other ->
+        Logger.warning(
+          "content-publish webhook registration for site #{site.id} did not take: #{inspect(other)}"
+        )
+
+        :error
     end
   end
 
