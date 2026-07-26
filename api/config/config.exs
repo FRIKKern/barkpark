@@ -18,6 +18,14 @@ config :barkpark,
   # the full-bundle RSS peak the streamed export exists to remove.
   bundle_spill_dir: Path.expand("../tmp/bundle-spill", __DIR__)
 
+# Media blob byte storage. :local (the default) keeps today's on-disk layout
+# under :media_upload_dir, byte-identical to the pre-blobstore behaviour.
+# :s3 moves ORIGINALS to any S3-compatible bucket (Cloudflare R2, AWS S3,
+# MinIO, …) with local disk demoted to a regenerable write-through cache —
+# see `Barkpark.Media.Blobstore` and the BARKPARK_MEDIA_STORAGE / BARKPARK_S3_*
+# wiring in runtime.exs.
+config :barkpark, :media_storage, backend: :local
+
 # Configure the endpoint
 config :barkpark, BarkparkWeb.Endpoint,
   url: [host: "localhost"],

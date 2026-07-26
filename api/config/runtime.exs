@@ -436,6 +436,58 @@ case System.get_env("BARKPARK_MEDIA_DIR") do
     :ok
 end
 
+# Media blob STORAGE BACKEND (see `Barkpark.Media.Blobstore`). Unset ⇒ :local,
+# byte-identical to before — originals under the media blob root above.
+# BARKPARK_MEDIA_STORAGE=s3 moves originals to any S3-compatible bucket
+# (Cloudflare R2, AWS S3, MinIO, Backblaze B2, …); local disk becomes a
+# regenerable write-through cache (renditions + probe/rendition source blobs),
+# so the bucket is the source of truth and the disk can be lost without data
+# loss. The five required keys FAIL LOUDLY at boot when the backend is
+# selected — a half-configured bucket must not silently fall back to local
+# and split the blob set across two stores. Applies in ALL envs (same idiom
+# as BARKPARK_MEDIA_DIR above).
+case System.get_env("BARKPARK_MEDIA_STORAGE") do
+  "s3" ->
+    require_s3 = fn name ->
+      case System.get_env(name) do
+        value when is_binary(value) and value != "" ->
+          value
+
+        _ ->
+          raise """
+          BARKPARK_MEDIA_STORAGE=s3 is set but #{name} is missing.
+
+          The s3 media backend requires:
+              BARKPARK_S3_ENDPOINT           e.g. https://<account>.r2.cloudflarestorage.com
+              BARKPARK_S3_BUCKET             the bucket name
+              BARKPARK_S3_ACCESS_KEY_ID
+              BARKPARK_S3_SECRET_ACCESS_KEY
+          Optional:
+              BARKPARK_S3_REGION             default "auto" (R2); AWS needs a real region
+              BARKPARK_S3_KEY_PREFIX         namespace inside the bucket, default ""
+              BARKPARK_S3_PRESIGN_TTL        presigned-URL lifetime in seconds, default 3600
+              BARKPARK_S3_PUBLIC_BASE_URL    public/CDN origin for unsigned delivery
+          """
+      end
+    end
+
+    config :barkpark, :media_storage,
+      backend: :s3,
+      s3: [
+        endpoint: require_s3.("BARKPARK_S3_ENDPOINT"),
+        bucket: require_s3.("BARKPARK_S3_BUCKET"),
+        region: System.get_env("BARKPARK_S3_REGION") || "auto",
+        access_key_id: require_s3.("BARKPARK_S3_ACCESS_KEY_ID"),
+        secret_access_key: require_s3.("BARKPARK_S3_SECRET_ACCESS_KEY"),
+        key_prefix: System.get_env("BARKPARK_S3_KEY_PREFIX") || "",
+        presign_ttl: String.to_integer(System.get_env("BARKPARK_S3_PRESIGN_TTL") || "3600"),
+        public_base_url: System.get_env("BARKPARK_S3_PUBLIC_BASE_URL")
+      ]
+
+  _ ->
+    :ok
+end
+
 # Workspace-bundle export SPILL root (pds W11). The streamed export writes one
 # per-table spill file plus the assembled tar here; peak transient disk is
 # `tar-so-far + the largest single table`. Relocate it when the default lives
