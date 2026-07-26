@@ -5,14 +5,17 @@
 // epic mission-control richness stays a TUI+Studio surface this wave, so those
 // keys are deliberately not projected here (unknown JSON keys are simply
 // ignored — same forward-compat tolerance as the Go decoder).
+import type { Block } from '../papers/portabledoc/model'
 
-/** One persisted transcript row (message_json). Assistant rows carry `blocks`
- * alongside `source_markdown`; the mobile MVP renders the markdown source. */
+/** One persisted transcript row (message_json). Rich rows carry `blocks` —
+ * the server's PortableDoc conversion (chat_controller.ex message_json →
+ * FromMarkdown.blocks), the SAME block trees the Studio and the Go TUI
+ * render — alongside the `source_markdown` they were built from. */
 export interface ChatMessage {
   seq: number
   role: string
   source_markdown?: string
-  blocks?: unknown
+  blocks?: Block[]
   metadata?: Record<string, unknown>
   inserted_at?: string
 }
@@ -57,6 +60,16 @@ export interface ChatSessionSummary {
 export interface ChatRollup {
   counts: { working: number; blocked: number; idle: number; unknown: number }
   precedence: 'blocked' | 'working' | 'idle' | 'unknown'
+}
+
+/** The row's renderable block tree, or undefined. The declared type says what
+ * the server sends; THIS says what actually arrived — the JSON is a plain
+ * cast (api/chat.ts getChatSession), so a row with `blocks: null`, `blocks:
+ * {}` or an empty array must fall back to the markdown source rather than
+ * render an empty document. */
+export function messageBlocks(m: ChatMessage): Block[] | undefined {
+  const raw: unknown = m.blocks
+  return Array.isArray(raw) && raw.length > 0 ? (raw as Block[]) : undefined
 }
 
 function metaString(m: ChatMessage, key: string): string {

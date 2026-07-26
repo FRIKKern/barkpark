@@ -29,6 +29,14 @@ import {
   type Block,
 } from './model'
 
+/** Which typographic voice the same block tree speaks in. `paper` is the
+ * reader's serif document register; `chat` is the transcript's sans register
+ * (charter D22). An OPTIONAL FIELD, never a positional argument: every
+ * container recursion already forwards `ctx` wholesale, so the register
+ * reaches nested blocks for free, and `undefined` IS `'paper'` — the paper
+ * reader's call sites stay byte-unchanged. */
+export type BlockRegister = 'paper' | 'chat'
+
 export interface BlockCtx extends InlineCtx {
   theme: Theme
   /** The connected instance's base URL (connection.projectUrl). Root-relative
@@ -36,32 +44,73 @@ export interface BlockCtx extends InlineCtx {
    * census F2) — resolve against it, mirroring how the web surfaces serve
    * the same paths same-origin. */
   serverBase?: string
+  /** Defaults to 'paper'. */
+  register?: BlockRegister
 }
 
 type Render = (b: Block, ctx: BlockCtx, key: number) => ReactNode
 
-/* ── shared text styles ─────────────────────────────────────────────────────── */
+/* ── registers ──────────────────────────────────────────────────────────────── */
 
 const SERIF = 'serif'
 const MONO = 'monospace'
-const BODY_SIZE = 16
-const BODY_LINE = 26
 
-function bodyText(theme: Theme) {
-  return { fontFamily: SERIF, fontSize: BODY_SIZE, lineHeight: BODY_LINE, color: theme.text }
+interface RegisterSpec {
+  /** undefined = the platform's system sans (RN's default face). */
+  bodyFace: string | undefined
+  bodySize: number
+  bodyLine: number
+  /** lineHeight stays the shared ×1.3 formula — only size and lead move. */
+  heading: Record<1 | 2 | 3, { fontSize: number; marginTop: number }>
+}
+
+const REGISTERS: Record<BlockRegister, RegisterSpec> = {
+  // The reader: serif measure, display headings, generous lead.
+  paper: {
+    bodyFace: SERIF,
+    bodySize: 16,
+    bodyLine: 26,
+    heading: {
+      1: { fontSize: 26, marginTop: 24 },
+      2: { fontSize: 22, marginTop: 20 },
+      3: { fontSize: 18, marginTop: 16 },
+    },
+  },
+  // The transcript: the same 16/26 measure the #6126 assistant turn already
+  // ships, in the system sans — a chat answer is speech, not a printed page.
+  // Headings compress hard: an assistant turn is a few hundred words, so a
+  // 26 pt display head would out-shout the whole screen.
+  chat: {
+    bodyFace: undefined,
+    bodySize: 16,
+    bodyLine: 26,
+    heading: {
+      1: { fontSize: 20, marginTop: 16 },
+      2: { fontSize: 18, marginTop: 14 },
+      3: { fontSize: 16, marginTop: 12 },
+    },
+  },
+}
+
+function spec(ctx: BlockCtx): RegisterSpec {
+  return REGISTERS[ctx.register ?? 'paper']
+}
+
+function bodyText(ctx: BlockCtx) {
+  const s = spec(ctx)
+  return {
+    fontFamily: s.bodyFace,
+    fontSize: s.bodySize,
+    lineHeight: s.bodyLine,
+    color: ctx.theme.text,
+  }
 }
 
 /* ── prose core ─────────────────────────────────────────────────────────────── */
 
-const HEADING_STYLE: Record<1 | 2 | 3, { fontSize: number; marginTop: number }> = {
-  1: { fontSize: 26, marginTop: 24 },
-  2: { fontSize: 22, marginTop: 20 },
-  3: { fontSize: 18, marginTop: 16 },
-}
-
 const heading: Render = (b, ctx, key) => {
   const level = headingLevel(b)
-  const s = HEADING_STYLE[level]
+  const s = spec(ctx).heading[level]
   return (
     <Text
       key={key}
@@ -81,7 +130,7 @@ const heading: Render = (b, ctx, key) => {
 }
 
 const paragraph: Render = (b, ctx, key) => (
-  <Text key={key} style={[bodyText(ctx.theme), { marginVertical: 6 }]}>
+  <Text key={key} style={[bodyText(ctx), { marginVertical: 6 }]}>
     {renderInlineNodes(paragraphInline(b), ctx)}
   </Text>
 )
@@ -153,8 +202,8 @@ const list: Render = (b, ctx, key) => {
     <View key={key} style={{ marginVertical: 6, gap: 4 }}>
       {items.map((item, i) => (
         <View key={i} style={{ flexDirection: 'row', paddingLeft: 8 }}>
-          <Text style={[bodyText(ctx.theme), { width: 24 }]}>{ordered ? `${i + 1}.` : '•'}</Text>
-          <Text style={[bodyText(ctx.theme), { flex: 1 }]}>
+          <Text style={[bodyText(ctx), { width: 24 }]}>{ordered ? `${i + 1}.` : '•'}</Text>
+          <Text style={[bodyText(ctx), { flex: 1 }]}>
             {renderInlineNodes(itemInlines(item), ctx)}
           </Text>
         </View>
@@ -205,7 +254,7 @@ const callout: Render = (b, ctx, key) => {
           {title}
         </Text>
       )}
-      <Text style={[bodyText(ctx.theme), { fontSize: 15, lineHeight: 23 }]}>
+      <Text style={[bodyText(ctx), { fontSize: 15, lineHeight: 23 }]}>
         {renderInlineNodes(paragraphInline(b), ctx)}
       </Text>
     </View>
@@ -214,23 +263,36 @@ const callout: Render = (b, ctx, key) => {
 
 /* code / divider / image */
 
-const code: Render = (b, ctx, key) => (
-  <ScrollView
-    key={key}
-    horizontal
-    style={{
-      backgroundColor: ctx.theme.surface,
-      borderLeftWidth: 3,
-      borderLeftColor: ctx.theme.accent,
-      marginVertical: 10,
-    }}
-    contentContainerStyle={{ padding: 12 }}
-  >
-    <Text style={{ fontFamily: MONO, fontSize: 13, lineHeight: 20, color: ctx.theme.text }}>
-      {str(b.value)}
-    </Text>
-  </ScrollView>
-)
+// The paper register frames code as a quoted passage (surface slab + accent
+// rule). In chat that reads as a pulled-out card; the transcript instead wants
+// a quiet code REGION, so the chat register uses the codeBg/codeFg role pair
+// and drops the rule. The chrome is register-scoped — charter D22's no-chrome
+// law is TURN-level, so a code block still gets to look like a code block.
+const code: Render = (b, ctx, key) => {
+  const chat = (ctx.register ?? 'paper') === 'chat'
+  const frame = chat
+    ? { backgroundColor: ctx.theme.codeBg, borderRadius: 8, marginVertical: 10 }
+    : {
+        backgroundColor: ctx.theme.surface,
+        borderLeftWidth: 3,
+        borderLeftColor: ctx.theme.accent,
+        marginVertical: 10,
+      }
+  return (
+    <ScrollView key={key} horizontal style={frame} contentContainerStyle={{ padding: 12 }}>
+      <Text
+        style={{
+          fontFamily: MONO,
+          fontSize: 13,
+          lineHeight: 20,
+          color: chat ? ctx.theme.codeFg : ctx.theme.text,
+        }}
+      >
+        {str(b.value)}
+      </Text>
+    </ScrollView>
+  )
+}
 
 const divider: Render = (_b, ctx, key) => (
   <View key={key} style={{ alignItems: 'center', marginVertical: 18 }}>
@@ -640,7 +702,7 @@ const blockquote: Render = (b, ctx, key) => {
         marginVertical: 10,
       }}
     >
-      <Text style={[bodyText(ctx.theme), { fontStyle: 'italic' }]}>
+      <Text style={[bodyText(ctx), { fontStyle: 'italic' }]}>
         {renderInlineNodes(paragraphInline(b), ctx)}
       </Text>
       {cite !== '' && (

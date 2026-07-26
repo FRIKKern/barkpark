@@ -19,8 +19,17 @@ import {
 
 import type { InstanceConnection } from '../api/instance'
 import type { StreamFailure, StreamStatus } from '../api/chat'
-import { answerable, approvalStatus, isCard, requestId, type ChatMessage } from '../chat/wire'
+import {
+  answerable,
+  approvalStatus,
+  isCard,
+  messageBlocks,
+  requestId,
+  type ChatMessage,
+} from '../chat/wire'
 import { useChatSession } from '../chat/useChatSession'
+import { renderBlockNative, type BlockCtx } from '../papers/portabledoc/blocks'
+import type { Block } from '../papers/portabledoc/model'
 import { useTheme, type Theme } from '../ui/theme'
 
 const CARD_TITLES: Record<string, string> = {
@@ -65,10 +74,40 @@ export function headerStatus(
   }
 }
 
-type Row =
+export type Row =
   | { key: string; kind: 'message'; message: ChatMessage }
   | { key: string; kind: 'local'; content: string; queued: boolean }
   | { key: string; kind: 'tail'; text: string }
+
+// ── the two-phase floor (charter D8/D9) ──────────────────────────────────────
+
+/** What a row's body paints: a document (server PortableDoc blocks) or plain
+ * text. Nothing in between — there is no partial-markdown state. */
+export type BodyRender =
+  | { kind: 'blocks'; blocks: Block[] }
+  | { kind: 'text'; text: string }
+
+/** THE two-phase decision, pure so jest can pin it without a native host.
+ *
+ * Phase 1 — the live tail (SSE `chat` delta frames) is ALWAYS plain text: the
+ * `tail` row carries a growing STRING and no blocks field at all, so a half-
+ * written `**bold` is structurally incapable of flashing as markup. Phase 2 —
+ * at turn settle the tail is replaced by the persisted `message` row, which
+ * carries the server's already-converted blocks, and the turn becomes a
+ * document in one step. Local echoes are the user's own words: plain, always.
+ *
+ * Only assistant rows take the blocks path this slice; tool/todo/thinking rows
+ * keep their provenance line until the typed chat-* renderers land (S3). */
+export function bodyRender(row: Row): BodyRender {
+  if (row.kind === 'tail') return { kind: 'text', text: row.text }
+  if (row.kind === 'local') return { kind: 'text', text: row.content }
+  const m = row.message
+  if (m.role === 'assistant') {
+    const blocks = messageBlocks(m)
+    if (blocks !== undefined) return { kind: 'blocks', blocks }
+  }
+  return { kind: 'text', text: (m.source_markdown ?? '').trim() }
+}
 
 export function ChatSessionScreen({
   connection,
@@ -97,6 +136,13 @@ export function ChatSessionScreen({
   } = useChatSession(connection, sessionId)
   const [draft, setDraft] = useState('')
   const listRef = useRef<FlatList<Row>>(null)
+
+  // One ctx for every settled assistant turn: the SAME block renderers the
+  // paper reader uses, speaking the chat register (charter D22).
+  const blockCtx = useMemo<BlockCtx>(
+    () => ({ theme, serverBase: connection.projectUrl, register: 'chat' }),
+    [theme, connection.projectUrl],
+  )
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = state.messages.map((m) => ({
@@ -173,6 +219,7 @@ export function ChatSessionScreen({
           <TranscriptRow
             row={item}
             theme={theme}
+            blockCtx={blockCtx}
             inFlight={state.answerInFlight}
             onAnswer={answer}
           />
@@ -270,11 +317,13 @@ export function ChatSessionScreen({
 function TranscriptRow({
   row,
   theme,
+  blockCtx,
   inFlight,
   onAnswer,
 }: {
   row: Row
   theme: Theme
+  blockCtx: BlockCtx
   inFlight: Record<string, string>
   onAnswer: (requestId: string, decision: 'allow' | 'deny') => void
 }) {
@@ -291,6 +340,7 @@ function TranscriptRow({
   if (row.kind === 'tail') {
     // The streaming tail is an assistant turn in progress: the same unbubbled
     // document text, with a quiet inline cursor as the only liveness mark.
+    // Phase 1 of the two-phase floor — plain, never markup (see bodyRender).
     return (
       <Text style={[styles.assistantText, { color: theme.text }]}>
         {row.text}
@@ -302,26 +352,40 @@ function TranscriptRow({
   const m = row.message
   if (isCard(m)) return <CardRow m={m} theme={theme} inFlight={inFlight} onAnswer={onAnswer} />
 
-  const text = (m.source_markdown ?? '').trim()
+  const body = bodyRender(row)
+  if (body.kind === 'blocks') {
+    // Phase 2. Only a settled assistant turn ever reaches here (bodyRender's
+    // law), and the answer is a document: full-width, directly on the
+    // background — no bubble, no border, no chrome. The server already
+    // converted this turn to PortableDoc, so render THOSE blocks through the
+    // very renderer the paper reader uses, speaking the chat register.
+    return (
+      <View style={styles.assistantDoc}>
+        {body.blocks.map((b, i) => renderBlockNative(b, blockCtx, i))}
+      </View>
+    )
+  }
   if (m.role === 'user') {
-    // The one structural law: the user speaks in a soft rounded bubble…
+    // The one structural law: the user speaks in a soft rounded bubble — and
+    // never renders blocks (the #6126 bubble law: 16/23, plain, verbatim).
     return (
       <View style={[styles.userBubble, { backgroundColor: theme.bubble }]}>
-        <Text style={[styles.userText, { color: theme.text }]}>{text}</Text>
+        <Text style={[styles.userText, { color: theme.text }]}>{body.text}</Text>
       </View>
     )
   }
   if (m.role === 'assistant') {
-    // …and the answer is a document: full-width flowing text directly on the
-    // background — no bubble, no border, no chrome.
-    return <Text style={[styles.assistantText, { color: theme.text }]}>{text}</Text>
+    // An assistant turn that arrived without blocks (a row persisted before
+    // the conversion, or a server that does not send them) keeps the plain
+    // text it always had — never an empty turn.
+    return <Text style={[styles.assistantText, { color: theme.text }]}>{body.text}</Text>
   }
-  // Non-text rows (tool / todo / thinking / system): one honest muted line —
-  // the typed-block richness stays a TUI/Studio surface this wave.
-  if (text === '') return null
+  // Non-text rows (tool / todo / thinking): one honest muted line — the typed
+  // chat-* block richness lands with S3.
+  if (body.text === '') return null
   return (
     <Text numberOfLines={3} style={[styles.systemLine, { color: theme.textMuted }]}>
-      {m.role}: {text}
+      {m.role}: {body.text}
     </Text>
   )
 }
@@ -417,6 +481,10 @@ const styles = StyleSheet.create({
   userText: { fontSize: 16, lineHeight: 23 },
   // Assistant turns: full-width document text on the background.
   assistantText: { fontSize: 16, lineHeight: 26, alignSelf: 'stretch' },
+  // The rendered-blocks form of the same turn — the identical full-width,
+  // chrome-free frame; the block renderers carry their own vertical rhythm,
+  // so this adds no padding of its own.
+  assistantDoc: { alignSelf: 'stretch' },
   queuedBadge: { fontSize: 11, marginTop: 4 },
   systemLine: { fontSize: 13, lineHeight: 18, fontStyle: 'italic' },
   card: {
