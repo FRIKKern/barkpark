@@ -1,6 +1,6 @@
 ---
 name: session
-description: Open, log, checkpoint, and close a persistent Barkpark session record so work survives context limits, machine switches, and new conversations. Invoke at the START of any substantial work session ("start a session", "track this session", "begin session tracking"), after every milestone during the session (a paper published, a task closed, an epic wave sealed, a successful git push), before context is likely to run out or before a long/risky operation ("checkpoint", "save progress", "write a checkpoint"), and at the END of a work session ("wrap up", "end of session", "close out", "hand off to another machine", "I'm done for now"). Produces a `type:session` document on the Barkpark server (via `bp session open|log|publish`) carrying metadata, a milestone event trail, synthesis blocks (current task, progress, key files, decisions, next steps, learnings), and an optional scrubbed transcript upload — the counterpart skill `session-resume` reads it back on the next machine or session.
+description: Open, log, checkpoint, and close a persistent Barkpark session record so work survives context limits, machine switches, and new conversations. Invoke at the START of any substantial work session ("start a session", "track this session", "begin session tracking") — and when invoked MID-conversation, the open captures the FULL active thread so far (first checkpoint distills the entire conversation, trail backfilled, transcript covers turn one onward), after every milestone during the session (a paper published, a task closed, an epic wave sealed, a successful git push), before context is likely to run out or before a long/risky operation ("checkpoint", "save progress", "write a checkpoint"), and at the END of a work session ("wrap up", "end of session", "close out", "hand off to another machine", "I'm done for now"). Produces a `type:session` document on the Barkpark server (via `bp session open|log|publish`) carrying metadata, a milestone event trail, synthesis blocks (current task, progress, key files, decisions, next steps, learnings), and an optional scrubbed transcript upload — the counterpart skill `session-resume` reads it back on the next machine or session.
 ---
 
 # session — persistent session lifecycle
@@ -87,6 +87,16 @@ Tags on a session are free-form — the server does not require them to be regis
 `type:tag` docs (that check is the publish wall, which sessions are outside of). If you
 want a session's tags to line up with the rest of the corpus, pick from what's already
 there: `bp doc ls tag`.
+
+**Capture the full active thread, immediately.** Open is NOT just metadata: unless this
+is genuinely turn one of a fresh conversation, run a first checkpoint (§3) right after
+`bp session open`, and distill it from the ENTIRE conversation so far — every decision,
+milestone, and file touched since the thread began, not just what happens after this
+point. Backfill the trail too: one `bp session log` per milestone that already happened
+(a paper published earlier in the thread, a task closed, a push) so the events reflect
+the whole session, not its tail. The transcript side needs no special handling — the
+harness JSONL contains the thread from turn one, so the checkpoint's scrub-and-upload
+covers it in full.
 
 ## 2. Log (after every milestone, non-blocking)
 
