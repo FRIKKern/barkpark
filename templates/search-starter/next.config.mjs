@@ -79,6 +79,16 @@ const wsUrl = apiOrigin ? apiOrigin + '/socket' : ''
 
 const nextConfig = {
   output: 'standalone',
+  // undici powers the server-side keep-alive pool (lib/bp-fetch.ts). Next
+  // special-cases undici as a server-external (it vendors its own copy) and the
+  // standalone output tracer then SKIPS copying it — the staged release throws
+  // MODULE_NOT_FOUND at first SSR render, the landing loses its bp-doc-id meta,
+  // and the deploy HEALTH gate fails closed (live-caught on search-ember build
+  // bddce2a05bf1f09f). Naming it here forces the tracer to copy the real package
+  // into .next/standalone/node_modules. Local `next start` masks the gap (it
+  // resolves from the full node_modules), so keep this in sync with any new
+  // runtime-required server dep.
+  serverExternalPackages: ['undici'],
   ...(base ? { basePath: base, assetPrefix: base } : {}),
   // Inline the base path into the client bundle so `lib/base-path.ts` can prefix
   // the same-origin fetches + public assets Next does NOT auto-prefix.
