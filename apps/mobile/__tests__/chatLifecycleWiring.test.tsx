@@ -25,6 +25,7 @@ import {
   fetchChatCapabilities,
   getChatSession,
   listChatSessions,
+  patchChatSession,
   streamChatEvents,
   streamFleetEvents,
   unarchiveChatSession,
@@ -44,7 +45,11 @@ jest.mock('../src/api/chat', () => ({
   sendChatMessage: jest.fn(),
   interruptChat: jest.fn(),
   respondChatApproval: jest.fn(),
-  patchChatSession: jest.fn(),
+  // A bare jest.fn() returns undefined, and the store chains .catch() onto this
+  // — so a bare mock makes any chip press throw TypeError and the write path
+  // can never be exercised. That is exactly the trap the sibling suite's own
+  // comment warns about; it applies here too.
+  patchChatSession: jest.fn(() => Promise.resolve()),
   fetchChatCapabilities: jest.fn(),
 }))
 jest.mock('react-native-webview', () => ({ WebView: () => null }))
@@ -63,6 +68,7 @@ const mockFleet = streamFleetEvents as jest.Mock
 const mockStream = streamChatEvents as jest.Mock
 const mockGet = getChatSession as jest.Mock
 const mockCaps = fetchChatCapabilities as jest.Mock
+const mockPatch = patchChatSession as jest.Mock
 
 const conn: InstanceConnection = {
   projectUrl: 'https://bp.example',
@@ -90,6 +96,8 @@ beforeEach(() => {
   mockStream.mockReset()
   mockGet.mockReset()
   mockCaps.mockReset()
+  mockPatch.mockReset()
+  mockPatch.mockResolvedValue(undefined)
   fleets = []
   mockArchive.mockResolvedValue(undefined)
   mockUnarchive.mockResolvedValue(undefined)
@@ -145,6 +153,13 @@ function byLabel(tree: ReactTestRenderer, label: string): ReactTestInstance | un
 
 async function press(node: ReactTestInstance): Promise<void> {
   await act(async () => (node.props.onPress as () => void)())
+}
+
+/** Whether the chip carrying `label` reads as the selected one. */
+function selectedOf(tree: ReactTestRenderer, label: string): boolean {
+  const node = byLabel(tree, label)
+  if (node === undefined) throw new Error(`no chip labelled ${label}`)
+  return (node.props.accessibilityState as { selected?: boolean } | undefined)?.selected === true
 }
 
 /* ── Probe E: the fleet stream is CONNECTED, and the row reads it ─────────── */
@@ -383,6 +398,85 @@ test('PROBE I — the sheet renders the DISCOVERED vocabulary and the observed-m
     // model as "answering with opus" would be inventing a fact the wire has
     // not reported.
     expect(sheetText).not.toContain('answering with')
+  } finally {
+    await act(async () => tree.unmount())
+  }
+})
+
+test('PROBE I3 — pressing a chip WRITES: the PATCH fires and the selection moves', async () => {
+  // The review found this gap: every picker probe so far only READ the sheet.
+  // Three separate mutations — dropping the patchChatSession call, dropping the
+  // optimistic local write, and neutering onPick — each left the whole suite
+  // green, because nothing ever pressed a chip.
+  mockList.mockResolvedValue([summary('a')])
+  mockCaps.mockResolvedValue({
+    providers: {
+      claude: { modes: ['plan', 'auto'], models: ['sonnet', 'opus'], efforts: ['high'] },
+    },
+  })
+  mockGet.mockResolvedValue({
+    id: 'a',
+    provider: 'claude',
+    model_choice: 'opus',
+    mode: 'plan',
+    messages: [],
+  })
+  const tree = await mount()
+  try {
+    const rowA = tree.root.findAllByType(SwipeToArchive)[0]!
+    await press(rowA.findAll((n) => typeof n.props.onPress === 'function')[0]!)
+    await act(async () => {})
+    await press(byLabel(tree, 'Session options')!)
+
+    // The seed GET's model_choice is what starts selected.
+    expect(selectedOf(tree, 'Model: opus')).toBe(true)
+    expect(selectedOf(tree, 'Model: sonnet')).toBe(false)
+
+    await press(byLabel(tree, 'Model: sonnet')!)
+    await act(async () => {})
+
+    // MUTANT KILLED (1/3): drop the patchChatSession call inside setChoice and
+    // the chip still highlights — a picker that looks like it works and writes
+    // nothing to the server.
+    expect(mockPatch).toHaveBeenCalledWith(conn, 'a', { model_choice: 'sonnet' })
+
+    // MUTANT KILLED (2/3): drop the optimistic local write and the PATCH fires
+    // while the chip stays on the OLD value — the user taps and nothing moves.
+    // MUTANT KILLED (3/3): neuter onPick and neither happens.
+    expect(selectedOf(tree, 'Model: sonnet')).toBe(true)
+    expect(selectedOf(tree, 'Model: opus')).toBe(false)
+  } finally {
+    await act(async () => tree.unmount())
+  }
+})
+
+test('PROBE J — the swipe responder is ATTACHED, and it does not eat the tap', async () => {
+  // PanResponder builds its gestureState from internal touch history, so a
+  // synthetic dx cannot be fed through panHandlers. The honest split is:
+  // the pure threshold rule is pinned in the sibling suite (swipeCommits), and
+  // what THIS pins is that the handlers are actually on the row — the half a
+  // detached {...panHandlers} would silently remove.
+  mockList.mockResolvedValue([summary('a')])
+  const tree = await mount()
+  try {
+    const row = tree.root.findAllByType(SwipeToArchive)[0]!
+    // SCOPED to inside the wrapper on purpose: the FlatList's own ScrollView
+    // carries responder handlers too, so an unscoped search would stay green
+    // with the row's handlers detached.
+    const responders = row.findAll(
+      (n: ReactTestInstance) => typeof n.props.onResponderRelease === 'function',
+    )
+    // MUTANT KILLED: delete {...responder.panHandlers} from the inner
+    // Animated.View and the row becomes un-swipeable with every other test
+    // still green — archive by gesture simply stops existing.
+    expect(responders.length).toBeGreaterThan(0)
+
+    // Never claim on touch-down: a row that grabs the responder on contact
+    // would swallow the tap that opens the session.
+    const claimsOnTouchDown = responders[0]!.props.onStartShouldSetResponder as (
+      e: unknown,
+    ) => boolean
+    expect(claimsOnTouchDown({})).toBe(false)
   } finally {
     await act(async () => tree.unmount())
   }
