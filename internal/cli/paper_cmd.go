@@ -313,7 +313,7 @@ func runPaperView(out *writer, g globals, args []string) int {
 	// empty result yields "" and the section simply does not appear — the paper
 	// render above must never break on this new read. Skipped for the -o json /
 	// share / release-pinned paths above (they return before here).
-	if section := paperRenderRelated(client, ctx.Dataset, opt.slug, paperRelatedTopN); section != "" {
+	if section := paperRenderRelated(client, ctx.Dataset, opt.slug, paperRelatedTopN, width); section != "" {
 		out.outf("%s", section)
 	}
 	return exitOK
@@ -368,7 +368,7 @@ func (e paperRelatedEntry) backlinkOnly() bool {
 // transport error, a non-2xx status (incl. the anon 404 existence-hiding), a
 // decode failure, or an empty related list all yield "" so the caller prints
 // nothing and the paper render is never broken by this read.
-func paperRenderRelated(client *apiclient.Client, dataset, id string, limit int) string {
+func paperRenderRelated(client *apiclient.Client, dataset, id string, limit, width int) string {
 	id = strings.TrimSpace(id)
 	if client == nil || dataset == "" || id == "" {
 		return ""
@@ -393,7 +393,7 @@ func paperRenderRelated(client *apiclient.Client, dataset, id string, limit int)
 	if json.Unmarshal(body, &env) != nil || len(env.Result.Related) == 0 {
 		return ""
 	}
-	return formatRelatedSection(env.Result.Related)
+	return formatRelatedSection(env.Result.Related, width)
 }
 
 // formatRelatedSection renders up to paperRelatedTopN entries as a plain-text
@@ -402,7 +402,7 @@ func paperRenderRelated(client *apiclient.Client, dataset, id string, limit int)
 // with an indented shared-tags detail line. No SGR — plain text keeps piped and
 // golden captures clean and honours a NoColor profile. Returns "" for no
 // entries; the returned string carries NO trailing newline (outf adds it).
-func formatRelatedSection(entries []paperRelatedEntry) string {
+func formatRelatedSection(entries []paperRelatedEntry, width int) string {
 	if len(entries) == 0 {
 		return ""
 	}
@@ -423,16 +423,42 @@ func formatRelatedSection(entries []paperRelatedEntry) string {
 		if e.backlinkOnly() {
 			marker = "  · backlink"
 		}
-		lines = append(lines, fmt.Sprintf("  %.2f  %s%s%s", e.Score, label, typeSuffix, marker))
+		prefix := fmt.Sprintf("  %.2f  ", e.Score)
+		lines = append(lines, wrapRelatedLine(prefix, label+typeSuffix+marker, width)...)
 		if len(e.SharedTags) > 0 {
 			parts := make([]string, 0, len(e.SharedTags))
 			for _, t := range e.SharedTags {
 				parts = append(parts, fmt.Sprintf("%s (%d·%d)", t.Tag, t.SrcStrength, t.CandStrength))
 			}
-			lines = append(lines, "        tags: "+strings.Join(parts, ", "))
+			lines = append(lines, wrapRelatedLine("        tags: ", strings.Join(parts, ", "), width)...)
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// wrapRelatedLine keeps the Related appendix under the same width contract as
+// the PortableDoc body. Continuations align under the content, so a long title
+// or tag list remains readable instead of becoming the only overflowing line
+// in an otherwise valid 80-column render.
+func wrapRelatedLine(prefix, content string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	prefixWidth := ansi.StringWidth(prefix)
+	if prefixWidth >= width {
+		return strings.Split(wrapPaperPlainText(prefix+content, width), "\n")
+	}
+	wrapped := strings.Split(wrapPaperPlainText(content, width-prefixWidth), "\n")
+	continuation := strings.Repeat(" ", prefixWidth)
+	lines := make([]string, len(wrapped))
+	for i, line := range wrapped {
+		if i == 0 {
+			lines[i] = prefix + line
+			continue
+		}
+		lines[i] = continuation + line
+	}
+	return lines
 }
 
 // normalizePaperRef accepts the three forms users naturally paste into a
