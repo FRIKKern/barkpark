@@ -1,0 +1,63 @@
+{
+  "id": "grip-stw10-graph-honesty-measured",
+  "wave": "search-template-wave-10-2026-07-26",
+  "question": "Measure (not estimate) the /v1/graph coupled-honesty fix: real per-request DB query count and wall time, whether the per-type ceiling is silently firing, whether the phantom-drop ordering bug is live, and whether truncation_reason's literal value is a breaking client contract.",
+  "answer": "MEASURED, and every figure is worse than the direction assumed. (1) PERF: 9,612 DB queries and 14.2s wall for ONE /v1/graph derivation over 1,927 docs / 52 schemas (local dev DB, telemetry-counted on [:barkpark,:repo,:query]) — the inherited '78 queries' figure is a ~123x undercount, not an undercount by a little. Breakdown: 4 queries for list_schemas, 420 cumulative after node listing (~8/type x 52 types, because list_documents re-resolves workspace/project/dataset per call), 9,192 in the edge phase alone (~4.8/doc: one list_schemas per document inside extract_edges plus one existence query per reference). Live guerrilla: cold 97.8s, warm 18.5-25.1s, 462,518 bytes. (2) The node listing runs TWICE — graph_corpus lists documents per type at tasks_controller.ex:943 and corpus_edges lists them AGAIN at edges.ex:655 — an unnoticed doubling. (3) SILENT PER-TYPE TRUNCATION IS LIVE NOW: the graph returns 998 task nodes with truncated:false while 3,137 published tasks exist (bp search facets) — 68% of the task corpus is missing and reported as complete. The limit:1000 ceiling fires, uniq_by drops 2, and NOTHING sets truncated. (4) The phantom-drop ordering bug is REAL but LATENT and IMMINENT: all_nodes = real_nodes ++ phantom_nodes then Enum.take(2000) drops the tail, i.e. the whole phantom layer first, while `edges` is never re-filtered against the kept set; live is 1809 nodes = 90% of the 2000 budget, so it is ~200 documents from firing. (5) types= is PROVEN silently ignored: graph_corpus(conn, _params) discards params, and ?types=paper returns a byte-identical 462,518-byte payload. (6) NO CLIENT BRANCHES ON truncation_reason's VALUE — it is display-only everywhere (graph.ts passes it through as a string, graph-landing.tsx puts it in a title= tooltip, core/types.ts types it string|null, and `node_budget` appears only inside comments). The vocabulary is therefore FREE to extend to per_type_cap/node_budget/both with no breaking change. One wiring trap: graph.ts:193 gates on `truncated ? ... : null`, so a reason emitted without truncated:true is discarded client-side. (7) bp-graph.js does NOT consume truncation at all — its `truncate()` is label-ellipsis text truncation, a false-friend grep hit. (8) There is a SECOND, WORSE twin: finder_live.ex graph_payload/1 is a verbatim copy of graph_corpus that Enum.take's to @graph_node_budget 2000 and emits NO truncated and NO truncation_reason field whatsoever — the LiveView finder cannot report truncation even in principle. Its own comment admits the duplication. (9) BASELINE: graph_controller_test.exs is 11 tests, 0 failures, and ZERO of them exercise GET /v1/graph (graph_corpus) — its describe blocks cover only /v1/graph/:id, /orphans, /dangling, /:id/tasks. 'The fix works' is currently unfalsifiable, as briefed. (10) PREMISE CORRECTION: there is no api/lib/barkpark_web/controllers/graph_controller.ex — the action lives in TasksController, mounted at router.ex:1832 on [:api, :require_token]. The endpoint 401s without a bearer, so any anonymous graph probe is vacuous.",
+  "recipes": [
+    {
+      "claim": "One /v1/graph derivation costs 9,612 DB queries and 14.2s wall over 1,927 docs / 52 schemas; edge phase alone is 9,192",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && CC=clang MIX_ENV=dev mix run /path/to/qcount.exs 2>/dev/null | grep -E '^(types=|real_docs=|raw_edges=|queries_per_document=)'   # qcount.exs attaches :telemetry to [:barkpark,:repo,:query] and replays graph_corpus's own three phases (list_schemas -> list_documents per type -> corpus_edges per type) with dataset:production, limit:1000, perspective::published",
+      "expect": "types=52 queries_after_list_schemas=4 / real_docs=1927 cumulative_queries_after_node_listing=420 / raw_edges=82 TOTAL_QUERIES=9612 edge_phase_queries=9192 wall_ms=14233 / queries_per_document=4.99"
+    },
+    {
+      "claim": "Live guerrilla /v1/graph: cold ~98s, warm 18-25s, 462,518 bytes, 1809 nodes / 984 edges, truncated:false",
+      "rerun": "TOK=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser(\"~/.config/barkpark/config.json\")))[\"token\"])'); curl -s -H \"Authorization: Bearer $TOK\" 'https://guerrilla.barkpark.cloud/v1/graph?dataset=production' -o /tmp/g.json -w 'HTTP=%{http_code} bytes=%{size_download} time=%{time_total}\\n'; python3 -c \"import json;d=json.load(open('/tmp/g.json'));print('nodes',len(d['nodes']),'edges',len(d['edges']),'truncated',d.get('truncated'),'reason',d.get('truncation_reason'))\"",
+      "expect": "HTTP=200 bytes=462518 time=18-25 (warm) / nodes 1809 edges 984 truncated False reason None"
+    },
+    {
+      "claim": "types= is silently ignored — ?types=paper returns a byte-identical payload",
+      "rerun": "TOK=...; curl -s -H \"Authorization: Bearer $TOK\" 'https://guerrilla.barkpark.cloud/v1/graph?dataset=production&types=paper' -o /tmp/gt.json -w 'bytes=%{size_download}\\n'",
+      "expect": "bytes=462518 — identical to unfiltered; nodes 1809 edges 984 both ways"
+    },
+    {
+      "claim": "SILENT per-type truncation: 998 task nodes returned with truncated:false while 3,137 published tasks exist",
+      "rerun": "bp search query \"e\" -o json | python3 -c \"import json,sys;d=json.load(sys.stdin);print([(x['label'],x['count']) for x in d['facets']['type']][:8])\"",
+      "expect": "[('task', 3137), ('paper', 546), ('tag', 104), ...] vs graph's ('task', False): 998"
+    },
+    {
+      "claim": "Phantoms sit LAST and are dropped first; edges are never re-filtered against the kept node set",
+      "rerun": "git show origin/main:api/lib/barkpark_web/controllers/tasks_controller.ex | sed -n '950,986p'",
+      "expect": "node_ids from real_nodes (pre-take); all_nodes = real_nodes ++ phantom_nodes; nodes = Enum.take(all_nodes, @graph_corpus_node_budget); `edges` built at 957-966 with no membership filter; truncation_reason hardcoded \"node_budget\""
+    },
+    {
+      "claim": "No client branches on truncation_reason's literal value — display-only everywhere",
+      "rerun": "git grep -rn 'truncation_reason\\|truncationReason\\|node_budget\\|per_type_cap' -- templates web js internal",
+      "expect": "graph.ts:193 pass-through `str(json.truncation_reason) ?? null`; graph-landing.tsx:102 `title={truncationReason ?? undefined}`; core/types.ts:518 `string | null`; `node_budget` ONLY inside comments (graph-landing.tsx:17, graph.ts:73) — zero comparisons"
+    },
+    {
+      "claim": "graph.ts discards a reason emitted without truncated:true",
+      "rerun": "sed -n '190,196p' templates/search-starter/lib/graph.ts",
+      "expect": "const truncationReason = truncated ? (str(json.truncation_reason) ?? null) : null;"
+    },
+    {
+      "claim": "finder_live.ex is a verbatim twin that emits NO truncation flag at all",
+      "rerun": "git show origin/main:api/lib/barkpark_web/live/finder_live.ex | sed -n '195,235p'; git show origin/main:api/lib/barkpark_web/live/finder_live.ex | grep -n 'truncated'",
+      "expect": "graph_payload/1 mirrors graph_corpus; line ~230 `nodes = Enum.take(real_nodes ++ phantom_nodes, @graph_node_budget)`; grep for 'truncated' returns NOTHING"
+    },
+    {
+      "claim": "graph_controller_test.exs passes 11/11 and covers ZERO graph_corpus cases",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && CC=clang mix test test/barkpark_web/controllers/graph_controller_test.exs 2>&1 | tail -5; grep -c graph_corpus test/barkpark_web/controllers/graph_controller_test.exs",
+      "expect": "11 tests, 0 failures; grep -c graph_corpus => 0"
+    },
+    {
+      "claim": "There is no graph_controller.ex; the action is TasksController, and the route requires a token",
+      "rerun": "ls api/lib/barkpark_web/controllers/graph_controller.ex; git show origin/main:api/lib/barkpark_web/router.ex | sed -n '1829,1839p'; curl -s 'https://guerrilla.barkpark.cloud/v1/graph?dataset=production' -w ' HTTP=%{http_code}\\n'",
+      "expect": "No such file; pipe_through([:api, :require_token]) + get(\"/graph\", TasksController, :graph_corpus); HTTP=401 unauthorized"
+    },
+    {
+      "claim": "Documents are listed TWICE per request — once for nodes, once inside corpus_edges",
+      "rerun": "git show origin/main:api/lib/barkpark_web/controllers/tasks_controller.ex | sed -n '941,943p'; git show origin/main:api/lib/barkpark/content/edges.ex | sed -n '651,658p'",
+      "expect": "controller: Enum.flat_map(types, &Content.list_documents(&1, dataset, list_opts)); edges.ex corpus_edges/3: Content.list_documents(type, dataset, list_opts) |> Enum.flat_map(&extract_edges/2)"
+    }
+  ]
+}
