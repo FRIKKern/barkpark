@@ -18,6 +18,14 @@ defmodule BarkparkCloud.Web.RouterAppTokenRevokeTest do
       nonexistent id; unauthenticated → 401; malformed id → 404, not 500
     * instance-side 404 split (D8): canonical not_found envelope → 404;
       Phoenix no-route body (pre-revoke instance) → 409 revoke_unsupported
+    * the instance's DELIBERATE verdicts stay out of the 502 collapse
+      (mob-bl-revoke-hardening): 422 → 422 `revoke_refused`, 429 → 429
+      `instance_rate_limited`, and only a transport failure → 502 — asserted as
+      three DISTINCT response error codes
+    * the caller's IP is relayed as X-Forwarded-For, so two proxied callers key
+      two DIFFERENT instance-side buckets instead of sharing the Cloud egress one
+    * exactly-one-of is ENFORCED: `{"token": ""}` → 422 `invalid_token` (never a
+      silent logout-everywhere); both `token` and `email` → 422 `exactly_one_of`
     * not-live → 409; missing admin token → 404; transport failure → 502
     * `app_token_revoke:<ip>` bucket → 429 past 10 hits/min, mint bucket
       untouched (D7)
@@ -265,6 +273,127 @@ defmodule BarkparkCloud.Web.RouterAppTokenRevokeTest do
       StudioLinkFakeHttpClient.program([{:ok, %{status: 401, body: ~s({"error":"nope"})}}])
       denied = call(:delete, "/v1/barkparks/#{bp.id}/app-token", token)
       assert denied.status == 502
+    end
+
+    test "instance 422 (the presented token is an ADMIN token) → 422 revoke_refused, NOT the 502 collapse" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok,
+         %{
+           status: 422,
+           body:
+             ~s({"error":{"code":"unprocessable","message":"admin tokens cannot be revoked through the app-token path"}})
+         }}
+      ])
+
+      conn = call(:delete, "/v1/barkparks/#{bp.id}/app-token", token, %{token: "bpadmin_x"})
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "revoke_refused"
+    end
+
+    test "instance 429 (its own revoke bucket tripped) → 429 instance_rate_limited, NOT the 502 collapse" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 429, body: ~s({"error":{"code":"rate_limited","message":"slow down"}})}}
+      ])
+
+      conn = call(:delete, "/v1/barkparks/#{bp.id}/app-token", token, %{token: "bpapp_x"})
+
+      assert conn.status == 429
+      assert json_body(conn)["error"] == "instance_rate_limited"
+    end
+
+    test "the three instance outcomes stay DISTINCT by response error code: 422 revoke_refused vs 429 instance_rate_limited vs 502 instance_unreachable" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      codes =
+        for programmed <- [
+              {:ok, %{status: 422, body: ~s({"error":{"code":"unprocessable"}})}},
+              {:ok, %{status: 429, body: ~s({"error":{"code":"rate_limited"}})}},
+              {:error, {:http_client, :closed}}
+            ] do
+          StudioLinkFakeHttpClient.program([programmed])
+          conn = call(:delete, "/v1/barkparks/#{bp.id}/app-token", token, %{token: "bpapp_x"})
+          {conn.status, json_body(conn)["error"]}
+        end
+
+      assert codes == [
+               {422, "revoke_refused"},
+               {429, "instance_rate_limited"},
+               {502, "instance_unreachable"}
+             ]
+
+      # Distinct, not merely three tuples — the whole point of the split.
+      assert length(Enum.uniq(codes)) == 3
+    end
+
+    test "the caller's IP is RELAYED as X-Forwarded-For so the instance buckets per phone, not per control plane" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      StudioLinkFakeHttpClient.program([revoked_200(), revoked_200()])
+
+      for ip <- [{203, 0, 113, 7}, {198, 51, 100, 9}] do
+        conn =
+          :delete
+          |> conn("/v1/barkparks/#{bp.id}/app-token", Jason.encode!(%{token: @app_token_raw}))
+          |> put_req_header("content-type", "application/json")
+          |> put_req_header("authorization", "Bearer #{token}")
+          |> Map.put(:remote_ip, ip)
+          |> Router.call(@opts)
+
+        assert conn.status == 200
+      end
+
+      relayed =
+        StudioLinkFakeHttpClient.requests()
+        |> Enum.map(&List.keyfind(&1.headers, "X-Forwarded-For", 0))
+
+      # Two distinct proxied callers → two DISTINCT instance bucket keys. Before
+      # the relay both arrived from the single Cloud egress address and shared
+      # one 10/min allowance (a whole team behind one bucket).
+      assert relayed == [{"X-Forwarded-For", "203.0.113.7"}, {"X-Forwarded-For", "198.51.100.9"}]
+    end
+
+    test ~s|{"token": ""} is a 422 naming the field — it must NEVER fall through to logout-everywhere| do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:delete, "/v1/barkparks/#{bp.id}/app-token", token, %{token: ""})
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "invalid_token"
+      assert json_body(conn)["detail"] =~ "non-empty"
+
+      # And nothing was revoked anywhere: the instance was never called.
+      assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    test "a body carrying BOTH token and email is a 422 exactly_one_of — token does not silently win" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn =
+        call(:delete, "/v1/barkparks/#{bp.id}/app-token", token, %{
+          token: @app_token_raw,
+          email: "someone-else@example.com"
+        })
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "exactly_one_of"
+      assert StudioLinkFakeHttpClient.requests() == []
     end
 
     test "app_token_revoke:<ip> bucket → 429 past 10 hits/min; mint + start buckets untouched (D7)" do

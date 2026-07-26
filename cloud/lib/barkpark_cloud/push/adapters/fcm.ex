@@ -128,6 +128,13 @@ defmodule BarkparkCloud.Push.Adapters.FCM do
         # Same intent as the APNs collapse-id: a re-block of one session
         # replaces its own tray entry rather than stacking pointers to live
         # state. FCM caps collapse_key at 64 bytes like APNs.
+        #
+        # ACCEPTED, not fixed (mirrors the APNs `collapse_id/1` note): the cut is
+        # by BYTE, so a >64-byte id splitting a multibyte character would put
+        # invalid UTF-8 in the JSON body — Jason then raises on encode and the
+        # send crash-retries instead of delivering. Unreachable while session ids
+        # are ASCII uuids; changing the id shape must make this cut
+        # grapheme-aware.
         Map.put(base, "android", %{
           "priority" => "HIGH",
           "collapse_key" => binary_part(id, 0, min(byte_size(id), 64))
@@ -144,8 +151,24 @@ defmodule BarkparkCloud.Push.Adapters.FCM do
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
     |> Map.new(fn
       {k, v} when is_binary(v) -> {to_string(k), v}
-      {k, v} -> {to_string(k), to_string(v)}
+      {k, v} when is_number(v) or is_boolean(v) or is_atom(v) -> {to_string(k), to_string(v)}
+      # A map/list value — a type-hostile instance putting something other than
+      # the five D59h scalars in `data`. `to_string/1` has no String.Chars impl
+      # for those: it RAISES Protocol.UndefinedError, the job crash-retries 4×
+      # and is then discarded, so one bad field silently costs the whole
+      # notification. Serialize instead of raising.
+      {k, v} -> {to_string(k), encode_value(v)}
     end)
+  end
+
+  # JSON is the lossless string form of a nested value; `inspect/1` is the
+  # last-resort for anything JSON itself refuses (a tuple, a pid) so this helper
+  # can never raise.
+  defp encode_value(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> json
+      {:error, _} -> inspect(value)
+    end
   end
 
   # 404 alone is NOT proof of a dead device: FCM answers 404 `UNREGISTERED` for
@@ -185,6 +208,13 @@ defmodule BarkparkCloud.Push.Adapters.FCM do
 
   ## OAuth2 — the service-account assertion exchange (hop 1)
 
+  # NO SINGLE-FLIGHT, accepted deliberately (the APNs `provider_token/1` twin):
+  # a COLD cache lets a fan-out run up to queue-concurrency OAuth exchanges at
+  # once, last write winning. Google's token endpoint is rate-limited but happily
+  # issues several tokens for one service account — the redundant exchanges are
+  # wasted round-trips, not failures, and a 401 from a stale token already drops
+  # the cache (`classify/2`) so the retry re-exchanges. Same trade as APNs, where
+  # the burst can cost one `TooManyProviderTokenUpdates` retry cycle.
   defp access_token(creds) do
     case TokenCache.fetch(:fcm) do
       {:ok, token} -> {:ok, token}

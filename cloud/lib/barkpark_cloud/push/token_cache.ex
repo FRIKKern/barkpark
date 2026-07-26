@@ -16,6 +16,12 @@ defmodule BarkparkCloud.Push.TokenCache do
 
   Tests call `reset/0` in setup — the cache is process-global, so a cached token
   from one test would otherwise suppress the OAuth exchange another test asserts.
+
+  NO SINGLE-FLIGHT, on purpose: a COLD cache lets concurrent sends each miss and
+  each mint, last write winning. The accepted burst and its recovery path are
+  recorded at the two mint sites — `Adapters.APNS.provider_token/1` (Apple's 403
+  `TooManyProviderTokenUpdates` → the worker's generic retry, by which time the
+  winner is cached) and `Adapters.FCM.access_token/1`.
   """
 
   @keys [{__MODULE__, :apns}, {__MODULE__, :fcm}]

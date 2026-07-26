@@ -88,7 +88,8 @@ defmodule BarkparkWeb.AppTokenController do
   already filters revoked rows in its WHERE clause, so a revoked token fails
   closed on its next use with ZERO read-path changes.
 
-  Body, exactly one of:
+  Body, EXACTLY one of (enforced: both keys → 422; an empty `"token"` → 422
+  naming the field, never a silent logout-everywhere):
 
     * `{"token": raw}` — revoke exactly that token. Unknown raw → the same
       canonical 404 whatever the reason (nonexistent and foreign join one
@@ -143,6 +144,13 @@ defmodule BarkparkWeb.AppTokenController do
     end
   end
 
+  # EXACTLY-ONE-OF, enforced rather than documented: with both keys present the
+  # token clause below used to match first and silently win, so a body naming two
+  # different victims killed one of them without saying which.
+  defp revoke(conn, %{"token" => _, "email" => _}) do
+    unprocessable(conn, ~s(body must carry exactly one of "token" or "email", not both))
+  end
+
   defp revoke(conn, %{"token" => raw}) when is_binary(raw) and raw != "" do
     case Auth.get_api_token_by_raw(raw) do
       nil ->
@@ -158,6 +166,13 @@ defmodule BarkparkWeb.AppTokenController do
           end
         end
     end
+  end
+
+  # A present-but-empty (or non-string) "token" is a caller bug, not a request to
+  # revoke nothing: name the field instead of falling through to the generic
+  # "token or email" message.
+  defp revoke(conn, %{"token" => raw}) when not (is_binary(raw) and raw != "") do
+    unprocessable(conn, ~s("token" must be a non-empty string))
   end
 
   defp revoke(conn, %{"email" => email}) when is_binary(email) do
@@ -182,6 +197,16 @@ defmodule BarkparkWeb.AppTokenController do
     ) == :rate_limited
   end
 
+  # First x-forwarded-for hop as the client ip. INHERITED, not introduced here
+  # (charter D43): this is verbatim the idiom the pre-existing pulse limiter
+  # already uses, and it is only sound because the instance is fronted by its own
+  # proxy (which APPENDS, keeping the true first hop first). A caller reaching
+  # this endpoint directly can pick its own bucket key — which was equally true
+  # before, so nothing here widens it. What DID change: the Cloud proxy now
+  # relays the phone's address in this header (Registry.revoke_app_token/3), so a
+  # whole team no longer shares one bucket keyed on the single Cloud egress IP.
+  # Hardening the boundary (a trusted-proxy allowlist) belongs to the limiter,
+  # not to this pass.
   defp client_ip(conn) do
     case get_req_header(conn, "x-forwarded-for") do
       [forwarded | _] -> forwarded |> String.split(",") |> hd() |> String.trim()
