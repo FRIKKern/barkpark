@@ -41,7 +41,7 @@ never-block-on-the-child teardown are lifted from the CI-proven
 
 | Beat | What it proves |
 |---|---|
-| `LAND` | no "Search failed." banner · `[data-nav-result]` rows > 0 · zero `Runtime.exceptionThrown` |
+| `LAND` | no search-error banner (`[data-search-error]`, copy-text fallback) · `[data-nav-result]` rows > 0 · zero `Runtime.exceptionThrown` |
 | `TYPE` | a real keystroke transitions the result set **and** the websocket carried it |
 | `CLICK` | clicking the first result reaches a `.bp-paper-surface` with non-empty text, no new exception |
 | `E404` | `/d/zzztype/foo` returns a **real** HTTP 404, not a 200 with a not-found body |

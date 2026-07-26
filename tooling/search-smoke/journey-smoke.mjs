@@ -25,8 +25,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  THE FIVE BEATS
 // ─────────────────────────────────────────────────────────────────────────────
-//    LAND    the finder loads: no "Search failed." banner, at least one
-//            [data-nav-result] row, and ZERO Runtime.exceptionThrown.
+//    LAND    the finder loads: no search-error banner ([data-search-error],
+//            with a copy-text fallback), at least one [data-nav-result] row,
+//            and ZERO Runtime.exceptionThrown.
 //    TYPE    a real keystroke transitions the result set — AND the live-search
 //            websocket is asserted AT THE TRANSPORT, not through the DOM:
 //            Network.webSocketCreated fired, a `query` frame was SENT after the
@@ -96,9 +97,9 @@
 //    · /good/  — a healthy miniature of the finder: search input, result rows,
 //                a live socket that answers a `query` frame with count > 0, a
 //                detail page with a non-empty .bp-paper-surface, real 404s.
-//    · /rot/   — the SAME page carrying the shipped defects: the red "Search
-//                failed." banner, zero result rows, and a soft-404 that
-//                streams 200.
+//    · /rot/   — the SAME page carrying the shipped defects: the red
+//                [data-search-error] failure banner, zero result rows, and a
+//                soft-404 that streams 200.
 //    · /mute/  — the NASTY one: it lands, types and re-renders its results
 //                perfectly, with NO websocket at all. A DOM-only harness passes
 //                it green. This fixture is what proves the transport assertion
@@ -461,10 +462,15 @@ const check = (label, status, note = "") => ({ label, status, note });
 const joinUrl = (base, tail) => base.replace(/\/+$/, "") + "/" + tail.replace(/^\/+/, "");
 
 const COUNT_RESULTS = `document.querySelectorAll("[data-nav-result]").length`;
-// The banner is a plain <section> with a <strong>Search failed.</strong> inside;
-// there is no data-attribute to key on, so the assertion reads the text exactly
-// as a human does. Keep this string in sync with finder.tsx's banner copy.
-const BANNER_PRESENT = `!!Array.from(document.querySelectorAll("section")).find(function(s){return /Search failed\\./.test(s.textContent||"")})`;
+// STRUCTURAL oracle first: finder.tsx stamps `data-search-error` on the failure
+// banner precisely so this check survives copy edits (stw9 wave-9 review — the
+// copy DID change mid-wave, from "Search failed." to "Search is unavailable
+// right now.", which would have silently disarmed a text-only match). The text
+// fallback covers both generations of copy for older deployed bundles.
+const BANNER_PRESENT =
+  `!!(document.querySelector("[data-search-error]")||` +
+  `Array.from(document.querySelectorAll("section")).find(function(s){` +
+  `return /Search failed\\.|Search is unavailable/.test(s.textContent||"")}))`;
 // A stable signature of the current result set: change here == the list moved.
 const RESULT_SIGNATURE =
   `Array.from(document.querySelectorAll("[data-nav-result]")).slice(0,8)` +
@@ -478,7 +484,7 @@ async function runJourney(page, base, opts, ledger) {
   const landCount = await page.evaluate(COUNT_RESULTS);
   const landExceptions = page.exceptionsSince(0);
   const landChecks = [
-    check("no \"Search failed.\" banner", landBanner === false ? PASS : FAIL,
+    check("no search-error banner", landBanner === false ? PASS : FAIL,
       landBanner === true ? "the red first-paint banner is on the page" : landBanner?.__throw || ""),
     check("[data-nav-result] rows > 0", typeof landCount === "number" && landCount > 0 ? PASS : FAIL,
       `rows=${typeof landCount === "number" ? landCount : "?"}`),
@@ -665,7 +671,12 @@ function fixtureFinderPage({ mode, base }) {
   const rows = rotten
     ? ""
     : FIXTURE_ROWS.map((t, i) => `<a data-nav-result="" href="${base}d/paper/doc-${i}">${t}</a>`).join("\n");
-  const banner = rotten ? `<section><strong>Search failed.</strong><pre>indx 404</pre></section>` : "";
+  // Mirrors finder.tsx's real failure banner: the STRUCTURAL data-search-error
+  // attribute plus the current human copy — so the self-test proves the
+  // attribute-first oracle, not just the legacy text fallback.
+  const banner = rotten
+    ? `<section data-search-error><strong>Search is unavailable right now.</strong> The search service didn't answer.</section>`
+    : "";
   // THE BLIND SPOT UNDER TEST: `mute` renders rows and re-renders them on every
   // keystroke — a perfect DOM transition — with NO websocket at all. It is the
   // silent HTTP fallback, pixel-identical to a healthy finder. Any DOM-only
