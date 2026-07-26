@@ -25,7 +25,6 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   require Logger
 
   alias Barkpark.Content
-  alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Tickets.Attachments
 

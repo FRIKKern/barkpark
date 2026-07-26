@@ -1,3 +1,4 @@
+<!-- doc-tier: human | canonical-for: media-object-storage | budget: 1500tok -->
 # Media on object storage (S3 / R2 / MinIO / B2)
 
 By default Barkpark stores media blobs on local disk under the media root

@@ -87,7 +87,8 @@ defmodule Barkpark.Media.Blobstore.S3 do
 
   @impl true
   def delete(relative_path) do
-    url = Presign.url("DELETE", key_for(relative_path), presign_config(), expires_in: presign_ttl())
+    url =
+      Presign.url("DELETE", key_for(relative_path), presign_config(), expires_in: presign_ttl())
 
     # Local cache copy goes regardless of the remote outcome — a stale cached
     # original must not outlive its deleted row. The remote delete is
@@ -100,9 +101,7 @@ defmodule Barkpark.Media.Blobstore.S3 do
         :ok
 
       {:error, reason} ->
-        Logger.warning(
-          "Barkpark.Media.Blobstore.S3.delete #{relative_path}: #{inspect(reason)}"
-        )
+        Logger.warning("Barkpark.Media.Blobstore.S3.delete #{relative_path}: #{inspect(reason)}")
 
         :ok
     end
@@ -172,9 +171,7 @@ defmodule Barkpark.Media.Blobstore.S3 do
 
       other ->
         _ = File.rm(tmp_path)
-        Logger.warning(
-          "Barkpark.Media.Blobstore.S3.download #{relative_path}: #{inspect(other)}"
-        )
+        Logger.warning("Barkpark.Media.Blobstore.S3.download #{relative_path}: #{inspect(other)}")
 
         {:error, :storage_unavailable}
     end
