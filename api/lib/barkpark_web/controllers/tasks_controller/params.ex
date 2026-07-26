@@ -132,6 +132,11 @@ defmodule BarkparkWeb.TasksController.Params do
   def papers_of(%{"papers" => papers}) when is_list(papers), do: papers
   def papers_of(_), do: []
 
+  # Task 5 (session-handoff): content.sessions is a session-doc-id array,
+  # written via /v1/tasks/:id/sessions. Mirrors papers_of/1 byte-for-byte.
+  def sessions_of(%{"sessions" => sessions}) when is_list(sessions), do: sessions
+  def sessions_of(_), do: []
+
   # ─── Render / shape ─────────────────────────────────────────────────────
 
   # axi-s1 (R1): parse the optional `?view=` request param into a render view.
@@ -217,6 +222,9 @@ defmodule BarkparkWeb.TasksController.Params do
       # Phase A: surface content.papers at the top level the same way labels
       # are, so callers can read `doc.papers[]` without digging into content.
       papers: papers_of(content),
+      # Task 5 (session-handoff): surface content.sessions the same way papers
+      # are, so callers can read `doc.sessions[]` without digging into content.
+      sessions: sessions_of(content),
       content: Map.delete(content, "claim"),
       inserted_at: doc.inserted_at,
       updated_at: doc.updated_at

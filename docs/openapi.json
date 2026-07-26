@@ -110,6 +110,7 @@
                   "chat_create_failed",
                   "chat_unsupported",
                   "conflict",
+                  "conflict_retry",
                   "constraint",
                   "cors_forbidden",
                   "csrf_required",
@@ -127,6 +128,7 @@
                   "invalid_enrollment",
                   "invalid_filter",
                   "invalid_grant",
+                  "invalid_kind",
                   "invalid_mode",
                   "invalid_op",
                   "invalid_paper",
@@ -141,6 +143,7 @@
                   "malformed_proposal",
                   "mfa_enrolment_required",
                   "mfa_required",
+                  "missing_slug",
                   "missing_source",
                   "not_found",
                   "payload_too_large",
@@ -2004,6 +2007,75 @@
           "media"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/plugins/bulldocs/sessions/{slug}/events": {
+      "post": {
+        "operationId": "session.log",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append one milestone event to an open session (server stamps ts).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
       }
     },
     "/v1/auth/mfa/enroll": {
@@ -3972,6 +4044,64 @@
           "media"
         ],
         "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/plugins/bulldocs/sessions": {
+      "post": {
+        "operationId": "session.publish",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "Request body fields: slug.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Upsert session synthesis blocks + metadata (checkpoint or close).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/doc/{dataset}/{type}/{doc_id}": {
@@ -9174,6 +9304,55 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/plugins/bulldocs/sessions/{slug}": {
+      "get": {
+        "operationId": "session.view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a session back: metadata + event trail + synthesis blocks.",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
+      }
+    },
     "/v1/data/search/{dataset}": {
       "get": {
         "operationId": "search.query",
@@ -9376,6 +9555,75 @@
           "cycle"
         ],
         "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/tasks/{doc_id}/sessions": {
+      "post": {
+        "operationId": "session.link-task",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stamp a task with the session it was worked in (appends to the task's sessions[]).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "read"
       }
     },
     "/v1/auth/mfa/disable": {
@@ -12037,6 +12285,10 @@
     {
       "description": "ONIX 3.0 book metadata editor — Norwegian-publisher flavoured. Phase 4 skeleton (WI1) — book schema surface only; contributor / Thema / localizedText shapes are filled in by WI2 and codelist seeding lands in WI3.",
       "name": "onixedit"
+    },
+    {
+      "description": "session — plugin-contributed commands.",
+      "name": "session"
     },
     {
       "description": "Tasks — the W7 task-document substrate as a first-party plugin. Declares the `task` schema (goals/phases/events are all just tasks) and owns the TTL-sweep + compaction Oban cron jobs. Built on the core Barkpark.Tasks machinery, which stays in core as reusable utilities.",

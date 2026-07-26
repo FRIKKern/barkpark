@@ -618,6 +618,21 @@ defmodule Barkpark.Tasks.Schema do
           "of" => %{"type" => "reference", "refType" => "mediaAsset"}
         },
 
+        # Task 5 (session-handoff): session doc-ids this task was worked in,
+        # via POST /v1/tasks/:id/sessions {add,remove}. Mirrors `attachments`
+        # byte-for-byte — arrayOf reference, no server-side expansion.
+        # Sessions are referenced by slug string only; no FK.
+        %{
+          "name" => "sessions",
+          "title" => "Sessions",
+          "type" => "arrayOf",
+          "ordered" => false,
+          "group" => "system",
+          "description" =>
+            "session doc-ids this task was worked in, via POST /v1/tasks/:id/sessions {add,remove}. Arrays of references do not server-expand; fetch each by id.",
+          "of" => %{"type" => "reference", "refType" => "session"}
+        },
+
         # ── CLOSE — what `bd close` should leave behind ──────────────────
         %{
           "name" => "outcome",

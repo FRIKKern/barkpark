@@ -55,6 +55,35 @@ defmodule Barkpark.Content.Papers do
   @doc "The document type discriminator for papers."
   def paper_type, do: @paper_type
 
+  # The closed blocks-type whitelist (session-handoff Task 2): every document
+  # type whose write path rides the generalized `upsert_blocks_doc/3` /
+  # `BlockOps.upsert_blocks_doc/3` machinery (blocks body + metadata fields).
+  # Deliberately closed and hand-maintained, mirroring `AuthoringWall`'s
+  # `@walled_types` pattern — widening it is a reviewed one-line decision.
+  #
+  # SOLE SOURCE OF TRUTH lives in `BlockOps` (a compile-time module attribute
+  # there, required so its `upsert_blocks_doc/3` guard clause can pattern
+  # against it) — both delegates below defer to it rather than keeping an
+  # independent literal, so there is exactly one list to widen.
+  @doc "The closed whitelist of document types that ride the blocks-doc write path."
+  defdelegate blocks_types(), to: BlockOps
+
+  @doc "Whether `type` is in the blocks-doc whitelist (`blocks_types/0`)."
+  defdelegate blocks_type?(type), to: BlockOps
+
+  @doc """
+  Fetch a blocks-doc (a document whose type rides `upsert_blocks_doc/3`) by
+  `{slug, type, dataset}`. Generalizes `get_paper/3` off the hardcoded
+  `"paper"` type — same shape, `%Document{} | nil`.
+  """
+  def get_blocks_doc(slug, type, dataset \\ @paper_default_dataset, opts \\ [])
+      when is_binary(slug) and is_binary(type) do
+    case Content.get_document(slug, type, dataset, opts) do
+      {:ok, doc} -> doc
+      {:error, :not_found} -> nil
+    end
+  end
+
   @doc "Return one visibility-safe canonical source for any historical Paper shape."
   def reader_source(paper, dataset, scope_opts \\ [])
 
@@ -1507,6 +1536,14 @@ defmodule Barkpark.Content.Papers do
   true` escape. See `Barkpark.Content.Papers.BlockOps.upsert_paper/2`.
   """
   defdelegate upsert_paper(attrs, opts \\ []), to: BlockOps
+
+  @doc """
+  Upsert a blocks-doc keyed by `{dataset, slug}` for any type in the
+  `blocks_types/0` whitelist (`upsert_paper/2` generalized off the hardcoded
+  `"paper"` type — session-handoff Task 2). See
+  `Barkpark.Content.Papers.BlockOps.upsert_blocks_doc/3`.
+  """
+  defdelegate upsert_blocks_doc(type, attrs, opts \\ []), to: BlockOps
 
   @doc """
   Apply a single portable-doc `op` (a DocPatchOp map) to a paper's block list,

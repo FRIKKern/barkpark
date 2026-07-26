@@ -623,6 +623,27 @@ defmodule Barkpark.Tasks do
     do: Mutations.update_paper_refs_by_id(task_id, add_slugs, remove_slugs, caller_token_id)
 
   @doc """
+  Task 5 (session-handoff): add/remove `content.sessions` entries (session
+  doc-ids) on a single task, advisory-lock + CAS-on-rev guarded, emitting a
+  `task.referenced` mutation_event. Mirrors `update_paper_refs_by_id/4`
+  byte-for-byte — the only difference is the content key (`"sessions"`).
+  Sessions are referenced by slug string only; no FK.
+
+  `add_ids` and `remove_ids` are lists of exact session doc-id strings. The
+  result is a union add (dedup-preserving) minus the remove set. Idempotent:
+  re-adding an existing session ref or removing an absent one is a no-op on
+  that ref.
+
+  Returns `{:ok, doc}` (always re-reads + persists, even on a no-op set —
+  the rev bump + event keep the change observable), or `{:error, :not_found}`
+  / `{:error, :stale_claim}`.
+  """
+  @spec update_session_refs_by_id(binary(), [binary()], [binary()], binary() | nil) ::
+          {:ok, Document.t()} | {:error, term()}
+  def update_session_refs_by_id(task_id, add_ids, remove_ids, caller_token_id \\ nil),
+    do: Mutations.update_session_refs_by_id(task_id, add_ids, remove_ids, caller_token_id)
+
+  @doc """
   rail-l3: re-parent a task (change `content.parent_id`). `task_uuid` is the
   `documents.id`; `new_parent_doc_id` is a task's `doc_id` string, or `nil` to
   move to the root (the `parent_id` key is removed). Advisory-lock + CAS-on-rev

@@ -498,7 +498,13 @@ defmodule BarkparkWeb.TasksController do
           # fires (L1 notices are informational; refusal is the L4 task).
           json(
             conn,
-            with_rail_extras(close_response(doc, worker_id, conn), doc, baseline_rev, conn, params)
+            with_rail_extras(
+              close_response(doc, worker_id, conn),
+              doc,
+              baseline_rev,
+              conn,
+              params
+            )
           )
 
         {:error, {:doc_changed_since_claim, current_rev, changed_fields}} ->
@@ -1158,6 +1164,33 @@ defmodule BarkparkWeb.TasksController do
     end
   end
 
+  # Task 5 (session-handoff): POST /v1/tasks/:doc_id/sessions. Clone of
+  # papers/2 — reads add/remove session doc-ids from params, finds the task
+  # scoped by workspace+project, then delegates to
+  # Tasks.update_session_refs_by_id/4 (advisory-lock + CAS-on-rev +
+  # task.referenced mutation_event). Returns { ok, doc }. Sessions are
+  # referenced by slug string only; no FK.
+  def sessions(conn, %{"doc_id" => doc_id} = params) do
+    add = Params.string_list(params["add"])
+    remove = Params.string_list(params["remove"])
+
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, task} ->
+        case Tasks.update_session_refs_by_id(task.id, add, remove, caller_token_id(conn)) do
+          {:ok, %Document{} = doc} ->
+            json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
+
+          {:error, reason} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+        end
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
   # ─── POST /v1/tasks/:doc_id/move ────────────────────────────────────────
   # rail-l3: re-parent a task. Body shape:
   #   { "new_parent_id": "<doc-id>" }   move under that task's rail
@@ -1430,7 +1463,11 @@ defmodule BarkparkWeb.TasksController do
         bad_request(conn, "worker is required")
 
       {:error, :invalid_status} ->
-        unprocessable(conn, "invalid_status", "status must be one of: " <> Enum.join(Fleet.statuses(), " | "))
+        unprocessable(
+          conn,
+          "invalid_status",
+          "status must be one of: " <> Enum.join(Fleet.statuses(), " | ")
+        )
 
       {:error, :invalid_ttl} ->
         unprocessable(conn, "invalid_ttl", "ttl must be a positive integer (seconds)")
