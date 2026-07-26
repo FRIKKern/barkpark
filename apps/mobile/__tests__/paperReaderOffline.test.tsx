@@ -331,6 +331,32 @@ describe('PapersScreen offline truth', () => {
     }
   })
 
+  it('pull-to-refresh with live content never repaints the cache (mutant: paint-cache-over-ready)', async () => {
+    // Review guard: the read-through paint is LOADING-phase only. A refresh
+    // re-runs the load effect with live content on screen; repainting the
+    // cached page-0 over it would flash the stale badge, kill the spinner
+    // early, and collapse loaded pages. Mutant: drop the phase guard on the
+    // cache paint → the badge appears here and this probe reds.
+    mockFetchPage.mockResolvedValue(listPage(['Live Row']))
+    const tree = await mountList()
+    try {
+      expect(textOf(tree)).toContain('Live Row')
+      // Refresh while offline: the effect re-runs with a warm cache row (the
+      // write-through just stored 'Live Row') and a rejecting network.
+      mockFetchPage.mockRejectedValue(OFFLINE())
+      const refreshControl = tree.root.findByProps({ refreshing: false })
+      await act(async () => {
+        refreshControl.props.onRefresh()
+      })
+      const text = textOf(tree)
+      expect(text).toContain('Live Row') // the live list stands
+      expect(text).not.toContain('Cached list') // no stale-badge flash over live content
+      expect(text).not.toContain(PAPERS_OFFLINE_COPY) // and no error blank either
+    } finally {
+      await unmount(tree)
+    }
+  })
+
   it('cold-miss offline copy is DISTINCT from the failure copy (mutant: collapse-the-messages)', async () => {
     mockFetchPage.mockRejectedValue(OFFLINE())
     const offlineTree = await mountList()
