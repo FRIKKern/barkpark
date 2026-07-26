@@ -204,23 +204,24 @@ export type BodyRender =
  *   block       — tool/todo/thinking: the server carries exactly ONE typed
  *                 chat-* block, so the transcript draws a real diff/checklist/
  *                 thought row instead of one dim line.
- *   structural  — `system` has no block type to promote; one dim line.
- *   unknown     — the forward-compatible default arm: render the source, never
- *                 a crash and never a blank.
+ *   structural  — the forward-compatible default arm: `system` (nothing to
+ *                 promote) and any unknown future role render the SAME honest
+ *                 dim provenance line, so the two were one kind wearing two
+ *                 names — the separate `unknown` arm had no observable
+ *                 consequence anywhere and is folded in (never a crash,
+ *                 never a blank).
  *
  * Pure and exported so the taxonomy itself is jest-pinnable. */
-export type RoleKind = 'assistant' | 'user' | 'card' | 'block' | 'structural' | 'unknown'
+export type RoleKind = 'assistant' | 'user' | 'card' | 'block' | 'structural'
 
 const BLOCK_ROLES = new Set(['tool', 'todo', 'thinking'])
-const STRUCTURAL_ROLES = new Set(['system'])
 
 export function roleKind(role: string): RoleKind {
   if (role === 'assistant') return 'assistant'
   if (role === 'user') return 'user'
   if (isCardRole(role)) return 'card'
   if (BLOCK_ROLES.has(role)) return 'block'
-  if (STRUCTURAL_ROLES.has(role)) return 'structural'
-  return 'unknown'
+  return 'structural'
 }
 
 /** The roles whose rows carry a renderable chat-* block — the SIX the server

@@ -241,9 +241,12 @@ describe('registry tripwire (charter D31)', () => {
   })
 
   it('the six chat renderers are registered by SPREAD — same function identities', () => {
-    expect(CHAT_BLOCK_TYPES.sort()).toEqual(
+    // Copy before sorting: CHAT_BLOCK_TYPES is frozen (an in-place .sort()
+    // here used to silently reorder what every later reader saw).
+    expect([...CHAT_BLOCK_TYPES].sort()).toEqual(
       ['chat-approval', 'chat-plan', 'chat-question', 'chat-thinking', 'chat-todo', 'chat-tool-diff'].sort(),
     )
+    expect(Object.isFrozen(CHAT_BLOCK_TYPES)).toBe(true)
     for (const t of CHAT_BLOCK_TYPES) expect(BLOCK_RENDERERS[t]).toBe(CHAT_RENDERERS[t])
   })
 
@@ -328,6 +331,36 @@ describe('chat-tool-diff', () => {
     expect(out).toContain('A9')
     expect(out).toContain('B9') // the 20th DRAWABLE line, past 20 raw entries
     expect(out).not.toContain('more lines')
+  })
+
+  // The separator rule is the 1px border-colored <View> the gap arm emits —
+  // countable through the walker's style capture.
+  const gapRules = (w: Walk): number =>
+    w.styles.filter((s) => s.height === 1 && s.backgroundColor === theme.border).length
+
+  it('a gap of a fully folded hunk never DRAWS once the budget is spent (D40)', () => {
+    const lines = [
+      ...Array.from({ length: CHAT_DIFF_BUDGET }, (_, i) => ({ op: '+', text: `C${i}` })),
+      { op: 'gap', text: '' },
+      ...Array.from({ length: 4 }, (_, i) => ({ op: '+', text: `D${i}` })),
+    ]
+    const w = walk(renderBlockNative({ type: 'chat-tool-diff', lines }, chat, 0))
+    // The rule would introduce rows the fold already discarded — chrome for
+    // nothing. It stays in the folded tail with its hunk.
+    expect(gapRules(w)).toBe(0)
+    // …and the footnote counts the 4 folded DRAWABLE rows only, never the gap.
+    expect(w.text).toContain('… +4 more lines')
+    expect(w.text).not.toContain('+5 more lines')
+  })
+
+  it('a gap BETWEEN drawn hunks still draws its rule (the D40 fix removes none)', () => {
+    const lines = [
+      { op: '+', text: 'top' },
+      { op: 'gap', text: '' },
+      { op: '+', text: 'bottom' },
+    ]
+    const w = walk(renderBlockNative({ type: 'chat-tool-diff', lines }, chat, 0))
+    expect(gapRules(w)).toBe(1)
   })
 
   it('reads the path from the LIVE nested input.file_path, not just a flat path', () => {
@@ -511,13 +544,16 @@ function messageRow(m: Partial<ChatMessage> & { role: string }): Row {
 const toolBlock = [{ type: 'chat-tool-diff', lines: [{ op: '+', text: 'NEWLINE_HERE' }], added: 1 }]
 
 describe('role taxonomy', () => {
-  it('classifies the eight persisted roles + system + the unknown arm', () => {
+  it('classifies the eight persisted roles; system AND unknown fold to structural', () => {
     expect(roleKind('assistant')).toBe('assistant')
     expect(roleKind('user')).toBe('user')
     for (const r of ['approval', 'question', 'plan']) expect(roleKind(r)).toBe('card')
     for (const r of ['tool', 'todo', 'thinking']) expect(roleKind(r)).toBe('block')
+    // The forward-compatible default arm IS structural: a `system` row and an
+    // unknown future role paint the identical dim provenance line, so a
+    // separate `unknown` kind had no observable consequence and was folded in.
     expect(roleKind('system')).toBe('structural')
-    expect(roleKind('teleport')).toBe('unknown')
+    expect(roleKind('teleport')).toBe('structural')
   })
 
   it('exactly SIX block-bearing roles — user and system are deliberately out', () => {
@@ -674,7 +710,7 @@ describe('golden toolrows floor (the generator-owned fixture, imported)', () => 
     name: string
     kind: string
     block: Record<string, unknown> & { type: string }
-    projection: { type: string; text: string }
+    projection: { type: string; text: string; overflow?: number }
   }[]
 
   it.each(variants.map((v) => [v.name, v] as const))(
@@ -692,8 +728,31 @@ describe('golden toolrows floor (the generator-owned fixture, imported)', () => 
       expect(words.length).toBeGreaterThan(0)
       const hay = collapse(rendered)
       for (const w of words) expect(hay).toContain(w.toLowerCase())
+
+      // The fold NUMBER (charter D40): a diff variant's footnote shows the
+      // generator's drawable-only overflow VERBATIM. Word presence is blind to
+      // the number — under a raw-element budget the adjudicating variant
+      // (24 drawable + 2 gaps inside the first 20 raw) would render
+      // "+6 more lines" and still realize every projected word; the literal
+      // "+4" is what reds the non-ratified reading.
+      if (v.projection.type === 'chat-tool-diff') {
+        const overflow = v.projection.overflow ?? 0
+        if (overflow > 0) {
+          expect(rendered).toContain(`… +${overflow} more lines`)
+        } else {
+          expect(rendered).not.toContain('more lines')
+        }
+      }
     },
   )
+
+  it('carries the adjudicating budget variant (a folding chat-tool-diff)', () => {
+    // Without it the fold-number assertion above is vacuously green and a
+    // regen could silently shed the D40 lock.
+    expect(
+      variants.some((v) => v.projection.type === 'chat-tool-diff' && (v.projection.overflow ?? 0) > 0),
+    ).toBe(true)
+  })
 
   it('coverage floor: all SIX promoted block types appear in the fixture', () => {
     const seen = new Set(variants.map((v) => v.projection.type))

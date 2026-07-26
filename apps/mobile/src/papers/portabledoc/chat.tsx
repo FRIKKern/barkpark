@@ -112,9 +112,14 @@ const chatToolDiff: Render = (b, ctx, key) => {
   const removed = declaredRemoved ?? countOp(lines, '-')
   const path = chatDiffPath(b)
 
+  // The budget is DRAWABLE-ONLY on every surface (charter D40): a gap hunk
+  // separator never spends budget, and never draws once the budget is spent —
+  // a rule introducing rows the fold already discarded would be chrome for
+  // nothing (the terminal twin skips it the same way).
   const rows: ReactNode[] = []
   let shown = 0
   lines.forEach((ln, i) => {
+    if (shown >= CHAT_DIFF_BUDGET) return
     if (ln.op === 'gap') {
       rows.push(
         <View
@@ -124,7 +129,6 @@ const chatToolDiff: Render = (b, ctx, key) => {
       )
       return
     }
-    if (shown >= CHAT_DIFF_BUDGET) return
     const s = diffLineStyle(ln.op, theme)
     rows.push(
       <Text
@@ -460,5 +464,7 @@ export const CHAT_RENDERERS: Record<string, Render> = {
 }
 
 /** The block types the six renderers own — the role-dispatch and coverage-floor
- * tests read THIS, never a hand-retyped list. */
-export const CHAT_BLOCK_TYPES = Object.keys(CHAT_RENDERERS)
+ * tests read THIS, never a hand-retyped list. Frozen so a consumer cannot
+ * reorder it in place (an in-place `.sort()` in one test would silently
+ * reorder what every later reader sees). */
+export const CHAT_BLOCK_TYPES: readonly string[] = Object.freeze(Object.keys(CHAT_RENDERERS))

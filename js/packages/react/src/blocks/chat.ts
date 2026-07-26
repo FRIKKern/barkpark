@@ -156,13 +156,34 @@ export function diffRowsHtml(lines: DiffLine[]): string {
     .join('')
 }
 
+// Split the diff after the budget-th DRAWABLE row (charter D40): a gap hunk
+// separator never spends budget — it rides free in the head — and never stays
+// in the summary once the budget is spent (a gap at or past the fold belongs
+// to the `<details>` tail it separates). The web surface KEEPS the folded tail
+// behind `<details>`; parity with the terminal/mobile discard is the budget
+// arithmetic, never the DOM.
+function budgetSplit(lines: DiffLine[]): { head: DiffLine[]; rest: DiffLine[] } {
+  const head: DiffLine[] = []
+  const rest: DiffLine[] = []
+  let drawn = 0
+  for (const l of lines) {
+    if (drawn < CHAT_DIFF_BUDGET) {
+      head.push(l)
+      if (l.op !== 'gap') drawn++
+    } else {
+      rest.push(l)
+    }
+  }
+  return { head, rest }
+}
+
 const chatToolDiff: Emit = (block) => {
   const lines = chatDiffLineMaps(block.input)
   if (lines.length === 0) return ''
   const added = lines.filter((l) => l.op === '+').length
   const removed = lines.filter((l) => l.op === '-').length
-  const head = lines.slice(0, CHAT_DIFF_BUDGET)
-  const rest = lines.slice(CHAT_DIFF_BUDGET)
+  const drawable = lines.filter((l) => l.op !== 'gap').length
+  const { head, rest } = budgetSplit(lines)
 
   const counts =
     `<div class="text-dim" style="font-size: 11px; margin-bottom: 4px;">` +
@@ -170,8 +191,10 @@ const chatToolDiff: Emit = (block) => {
     `<span style="color: var(--danger);">−${removed}</span></div>`
 
   let body: string
-  if (lines.length > CHAT_DIFF_BUDGET) {
-    const overflow = lines.length - CHAT_DIFF_BUDGET
+  if (drawable > CHAT_DIFF_BUDGET) {
+    // +N counts undisplayed DRAWABLE rows only (D40) — a folded gap is a rule,
+    // not a line of code, and an honest footnote never counts chrome.
+    const overflow = drawable - CHAT_DIFF_BUDGET
     body =
       `<details><summary style="cursor: pointer; list-style: none;">` +
       diffRowsHtml(head) +

@@ -29,9 +29,11 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   ## Honest truncation is a RENDER concern only
 
-  A diff over `@collapsed_budget` lines collapses behind a `<details>` (exactly
-  like the existing `⎿` output block): the first ~20 lines stay in the summary
-  with an accurate `+N more lines`, the remainder reveals on expand. Persistence
+  A diff over `@collapsed_budget` DRAWABLE lines (gap separators never spend
+  budget — charter D40) collapses behind a `<details>` (exactly like the
+  existing `⎿` output block): the first 20 drawable lines stay in the summary
+  with an accurate `+N more lines` (drawable rows only), the rest reveals on
+  expand. Persistence
   (recorder.ex) keeps the FULL input verbatim, so a reopened session replays the
   identical diff — truncation never touches the store.
 
@@ -82,8 +84,8 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   def tool_diff(assigns) do
     lines = build_lines(assigns.input)
-    total = length(lines)
-    {head, rest} = Enum.split(lines, @collapsed_budget)
+    drawable = Enum.count(lines, &(&1.op != "gap"))
+    {head, rest} = budget_split(lines)
 
     assigns =
       assign(assigns,
@@ -91,9 +93,9 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
         rest: rest,
         added: Enum.count(lines, &(&1.op == "+")),
         removed: Enum.count(lines, &(&1.op == "-")),
-        overflow: max(total - @collapsed_budget, 0),
-        over?: total > @collapsed_budget,
-        empty?: total == 0
+        overflow: max(drawable - @collapsed_budget, 0),
+        over?: drawable > @collapsed_budget,
+        empty?: lines == []
       )
 
     ~H"""
@@ -137,6 +139,25 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   end
 
   # ── internals ──────────────────────────────────────────────────────────────
+
+  # Split the diff after the budget-th DRAWABLE row (charter D40): a `gap` hunk
+  # separator never spends budget — it rides free in the head — and never stays
+  # in the summary once the budget is spent (a gap at or past the fold belongs
+  # to the `<details>` tail it separates). The overflow footnote counts
+  # undisplayed DRAWABLE rows only. Mirrors Components.chat_diff_budget_split/1
+  # (string-keyed twin) plus chat_blocks.go and mobile chat.tsx.
+  defp budget_split(lines) do
+    {head, rest, _drawn} =
+      Enum.reduce(lines, {[], [], 0}, fn line, {head, rest, drawn} ->
+        if drawn < @collapsed_budget do
+          {[line | head], rest, drawn + if(line.op == "gap", do: 0, else: 1)}
+        else
+          {head, [line | rest], drawn}
+        end
+      end)
+
+    {Enum.reverse(head), Enum.reverse(rest)}
+  end
 
   # Build the flat diff-line list from the input shape, reusing TextDiff — the
   # ONE line-diff engine. `diff_lines/2` tolerates nil, so a defensively-missing
