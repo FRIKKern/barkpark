@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { unstable_cache } from "next/cache";
+import { isBarkparkError } from "@barkpark/core";
 import { client } from "./barkpark-client";
 import { bpAll, bpType } from "./bp-tags";
 
@@ -73,12 +74,24 @@ const cachedDoc = (type: string) =>
  * Error handling lives here too, so callers stay declarative: they branch on
  * `{ doc, error }` rather than each wrapping their own try/catch. Mirrors
  * `getPost` exactly.
+ *
+ * The two absent-doc shapes are kept DISTINCT (they render differently):
+ *   { doc: null, error: null }   → not-found  → the page 404s honestly
+ *   { doc: null, error: "..." }  → upstream unavailable → inline error panel
+ * An upstream 404 belongs to the FIRST bucket: the by-id leg already maps it
+ * to null inside `@barkpark/core`, but the slug-query leg THROWS
+ * `BarkparkNotFoundError` (e.g. when the type itself is unknown to the API),
+ * so it is caught here — a doc that does not exist must never wear a red
+ * failure panel.
  */
 export const getDocument = cache(
   async (type: string, slug: string): Promise<DocResult> => {
     try {
       return { doc: await cachedDoc(type)(slug), error: null };
     } catch (err) {
+      if (isBarkparkError(err, "BarkparkNotFoundError")) {
+        return { doc: null, error: null };
+      }
       return {
         doc: null,
         error: err instanceof Error ? err.message : String(err),
