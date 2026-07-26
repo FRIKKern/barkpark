@@ -10,7 +10,9 @@ four verbs, all via the `bp` CLI (Codex-compatible — pure prose + `bp`, no har
 tooling required):
 
 - `bp session open <slug> --file <meta.json>` — create/update metadata. POST to the
-  session upsert endpoint. On CREATE, `blocks` defaults to `[]`; on subsequent metadata-only
+  session upsert endpoint. The JSON payload MUST carry `"slug"` too — the positional
+  arg is not injected into the body (a slug-less payload 422s with `missing_slug`).
+  On CREATE, `blocks` defaults to `[]`; on subsequent metadata-only
   updates, existing `blocks` are left untouched (the upsert only replaces what you send).
 - `bp session log <slug> --kind <k> [--ref <r>] [--note <n>]` — append one event to the
   trail. The server stamps `ts`. `kind` MUST be exactly one of `paper-published`,
@@ -61,6 +63,7 @@ WORK="${TMPDIR:-/tmp}/bp-session-$$"
 mkdir -p "$WORK"
 cat > "$WORK/meta.json" <<JSON
 {
+  "slug": "$SLUG",
   "title": "Session: <short human title>",
   "harness": "claude-code",
   "session_uuid": "${CANDIDATE_UUID:-}",
@@ -112,6 +115,7 @@ session, not an append-only log. Use exactly these six sections:
 ```bash
 cat > "$WORK/checkpoint.json" <<JSON
 {
+  "slug": "$SLUG",
   "blocks": [
     {"id": "current-task", "type": "heading", "level": 2, "text": "Current task"},
     {"id": "current-task-body", "type": "paragraph", "content": [{"type": "text", "value": "<what's being worked on right now, one or two sentences>"}]},
