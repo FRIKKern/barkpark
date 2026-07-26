@@ -1,9 +1,12 @@
 // Key-value persistence seam. MMKV v4 is the real backing store (charter
-// D14 cache seam: MMKV for config/MRU); it is a NATIVE module, so under jest
-// (and Expo Go without a dev build) construction throws — the in-memory
-// fallback keeps every consumer honest about the same interface instead of
-// sprinkling try/catch at call sites. Swapping the seam also keeps the
-// expo-sqlite row cache (wired in TasksScreen's future) symmetrical.
+// D14 cache seam: MMKV for config/MRU); it is a NATIVE module, and under jest
+// (and Expo Go without a dev build) the REQUIRE itself throws — not MMKV
+// construction — which is exactly why the require lives inside getStorage()'s
+// try: a static top-level `import 'react-native-mmkv'` reds a whole suite
+// with 0 tests run, before any construction-time fallback could catch it.
+// The in-memory fallback keeps every consumer honest about the same interface
+// instead of sprinkling try/catch at call sites. Swapping the seam also keeps
+// the expo-sqlite row cache (src/state/cache.ts) symmetrical.
 
 export interface KeyValueStorage {
   getString(key: string): string | undefined

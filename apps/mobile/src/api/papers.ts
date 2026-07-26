@@ -36,6 +36,44 @@ function asStr(v: unknown): string | undefined {
   return typeof v === 'string' && v !== '' ? v : undefined
 }
 
+/** The two failure classes the offline reader UX distinguishes (D42):
+ * `offline` = the request never produced a response (fetch itself rejected —
+ * airplane mode, dead radio, unreachable host); `server` = the server
+ * answered and refused (non-2xx). The screens render DISTINCT copy per class:
+ * offline is a device condition, server is a Barkpark condition. */
+export type PaperFetchFailure = 'offline' | 'server'
+
+export class PaperRequestError extends Error {
+  readonly failure: PaperFetchFailure
+  readonly status?: number
+
+  constructor(message: string, failure: PaperFetchFailure, status?: number) {
+    super(message)
+    this.name = 'PaperRequestError'
+    this.failure = failure
+    if (status !== undefined) this.status = status
+  }
+}
+
+/** Anything that is not a classified PaperRequestError counts as `server` —
+ * an unexpected throw is not evidence the device is offline. */
+export function classifyPaperFailure(err: unknown): PaperFetchFailure {
+  return err instanceof PaperRequestError ? err.failure : 'server'
+}
+
+async function fetchOrOffline(
+  client: BarkparkClient,
+  path: string,
+  what: string,
+): Promise<Response> {
+  try {
+    return await client.fetchRaw<Response>(path)
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    throw new PaperRequestError(`${what} unreachable: ${detail}`, 'offline')
+  }
+}
+
 export const PAPER_PAGE_SIZE = 100
 
 export interface PaperPage {
@@ -65,8 +103,9 @@ export async function fetchPaperPage(
     `/v1/data/query/${encodeURIComponent(dataset)}/paper` +
     `?fields=title,description,main_tag&order=_updatedAt:desc` +
     `&limit=${PAPER_PAGE_SIZE}&offset=${Math.max(0, Math.floor(offset))}&count=true`
-  const response = await client.fetchRaw<Response>(path)
-  if (!response.ok) throw new Error(`paper list failed: HTTP ${response.status}`)
+  const response = await fetchOrOffline(client, path, 'paper list')
+  if (!response.ok)
+    throw new PaperRequestError(`paper list failed: HTTP ${response.status}`, 'server', response.status)
   const body = (await response.json()) as QueryEnvelope
   const docs = body.result?.documents ?? []
   const items: PaperListItem[] = []
@@ -95,8 +134,9 @@ export async function fetchPaperPage(
 /** Fetch one paper's full document (blocks included) for the reader. */
 export async function fetchPaper(client: BarkparkClient, dataset: string, id: string): Promise<PaperDoc> {
   const path = `/v1/data/doc/${encodeURIComponent(dataset)}/paper/${encodeURIComponent(id)}`
-  const response = await client.fetchRaw<Response>(path)
-  if (!response.ok) throw new Error(`paper fetch failed: HTTP ${response.status}`)
+  const response = await fetchOrOffline(client, path, 'paper fetch')
+  if (!response.ok)
+    throw new PaperRequestError(`paper fetch failed: HTTP ${response.status}`, 'server', response.status)
   const body = (await response.json()) as DocEnvelope
   // Envelope-tolerant like core's getDoc: {result: doc} or the flat doc.
   const doc = body.result ?? (body as unknown as Record<string, unknown>)
