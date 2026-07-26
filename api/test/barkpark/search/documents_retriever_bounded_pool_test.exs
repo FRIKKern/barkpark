@@ -29,7 +29,19 @@ defmodule Barkpark.Search.DocumentsRetrieverBoundedPoolTest do
   defp setup_scope do
     ws = create_workspace!()
     proj = create_project!(ws)
-    [workspace_id: ws.id, project_id: proj.id]
+    scope = [workspace_id: ws.id, project_id: proj.id]
+
+    # W10 schema-visibility gate: anonymous searches (no caller_context) are
+    # restricted to PUBLIC schema types — seed "post" as one, keeping the gate
+    # active while the pool bound stays the behaviour under test.
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => "post", "title" => "post", "visibility" => "public"},
+        @ds,
+        scope
+      )
+
+    scope
   end
 
   defp seed!(scope, title, opts \\ []) do

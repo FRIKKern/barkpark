@@ -79,6 +79,18 @@ defmodule Barkpark.Search.SurfaceConfigReadPathWorkspaceTest do
       scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
       scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
 
+      # W10 schema-visibility gate: the anonymous (no caller_context) searches
+      # below are restricted to PUBLIC schema types — seed "post" as one per
+      # tenant; the per-workspace config threading stays the behaviour under test.
+      for scope <- [scope_a, scope_b] do
+        {:ok, _} =
+          Content.upsert_schema(
+            %{"name" => "post", "title" => "post", "visibility" => "public"},
+            @scope,
+            scope
+          )
+      end
+
       # Each workspace owns its OWN identical komquat doc — so a workspace-only
       # narrowing cannot collapse both to zero (the vacuous trap).
       {:ok, _} =
@@ -157,6 +169,16 @@ defmodule Barkpark.Search.SurfaceConfigReadPathWorkspaceTest do
          %{conn: conn} do
       {ws, project} = ensure_default_scope!()
       scope = [workspace_id: ws.id, project_id: project.id]
+
+      # W10 schema-visibility gate: the anon HTTP search below is restricted to
+      # PUBLIC schema types — seed "post" as one in the Default scope (the state
+      # every live searchable type is in).
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "post", "visibility" => "public"},
+          @scope,
+          scope
+        )
 
       {:ok, _} =
         Content.create_document(

@@ -25,6 +25,7 @@ defmodule BarkparkWeb.FinderLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Content
+  alias Barkpark.Content.CallerContext
 
   @default_dataset "production"
   @hit_limit 12
@@ -102,11 +103,25 @@ defmodule BarkparkWeb.FinderLive do
         {:noreply, assign(socket, q: "", hits: [], hit_count: 0)}
 
       query ->
+        # Thread the socket's REAL caller context (search-template W10 / D62)
+        # so the retriever's schema-visibility gate sees who is asking instead
+        # of a nil it must fail closed on. This finder mounts on the PUBLIC
+        # `/finder` route (`:browser` pipeline, no on_mount auth), so today the
+        # context resolves to `CallerContext.anonymous/0` and hits are
+        # correctly narrowed to PUBLIC-visibility types — the same set the
+        # query route serves a tokenless reader. Deliberately NOT a synthetic
+        # authed context: that would hand private-type hits (session titles,
+        # machine paths) to every anonymous visitor — the exact leak D62
+        # seals. If this LV ever mounts behind auth, the assigned
+        # `:caller_context`/`:api_token` flows through here unchanged.
+        caller_context = CallerContext.from_conn(socket)
+
         {docs, count, _meta} =
           Content.search_documents(query, socket.assigns.dataset,
             perspective: :published,
             limit: @hit_limit,
-            engine: "indx"
+            engine: "indx",
+            caller_context: caller_context
           )
 
         {:noreply, assign(socket, q: query, hits: Enum.map(docs, &hit/1), hit_count: count)}

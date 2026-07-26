@@ -15,7 +15,22 @@ defmodule Barkpark.Search.DocumentsRetrieverTest do
   defp setup_scope do
     ws = create_workspace!()
     proj = create_project!(ws)
-    [workspace_id: ws.id, project_id: proj.id]
+    scope = [workspace_id: ws.id, project_id: proj.id]
+
+    # W10 schema-visibility gate: these searches carry NO caller_context
+    # (anonymous), so the retriever restricts hits to PUBLIC schema types.
+    # Seed the types under test as public schema rows — the state every live
+    # searchable type is in — keeping the gate ACTIVE through every assertion.
+    for type <- ~w(post page note) do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => type, "title" => type, "visibility" => "public"},
+          @ds,
+          scope
+        )
+    end
+
+    scope
   end
 
   defp unique_id, do: "doc-#{System.unique_integer([:positive])}"
