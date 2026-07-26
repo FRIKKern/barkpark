@@ -67,6 +67,15 @@ defmodule BarkparkWeb.GraphControllerTest do
     doc
   end
 
+  # The corpus endpoint reads with perspective: :published, so a fixture that
+  # only creates a DRAFT contributes no node and no edge — and would make the
+  # query-cost guard below silently vacuous (nothing to fold over).
+  defp mk_published_post!(doc_id, scope) do
+    _draft = mk_post!(doc_id, scope)
+    {:ok, doc} = Content.publish_document(doc_id, "post", @dataset, scope)
+    doc
+  end
+
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
   describe "auth gating" do
@@ -492,6 +501,143 @@ defmodule BarkparkWeb.GraphControllerTest do
       assert body["truncation_reason"] == "per_type_cap+node_budget"
       assert length(body["nodes"]) == 3
       assert_edges_closed!(body)
+    end
+  end
+
+  # ── /v1/graph corpus: the derivation must not scale queries with documents ──
+  #
+  # The corpus endpoint used to issue a schema-list query PER DOCUMENT (via
+  # extract_edges/2) and read every type's documents TWICE (once for nodes, once
+  # inside corpus_edges/3). On the live flagship corpus (4096 docs / 16 types)
+  # that was a 34s first paint and a >120s timeout under a concurrent build.
+  #
+  # This guard is DIFFERENTIAL, so it cannot be satisfied by a fast machine: it
+  # measures the SQL the endpoint issues at two corpus sizes and asserts the
+  # count barely moves.
+  #
+  # WHAT IT DOES AND DOES NOT COVER (measured, not assumed). Restoring the
+  # per-document schema read reds it: 88 queries at 4 posts -> 110 at 28, +22
+  # for +24 documents. Restoring the duplicated per-type document scan does NOT
+  # red it — that scan costs ONE query per type, so it is constant in query
+  # count however large the corpus grows, and a differential-count guard cannot
+  # see it by construction (it doubles rows transferred, not statements issued).
+  # The scan fix is covered by the edges/phantom test below, which proves the
+  # same graph comes out when the fold is fed already-read documents.
+  describe "GET /v1/graph query cost" do
+    defp count_repo_queries(fun) do
+      ref = make_ref()
+      test_pid = self()
+      handler_id = {:graph_query_counter, ref}
+
+      :telemetry.attach(
+        handler_id,
+        [:barkpark, :repo, :query],
+        fn _event, _measurements, _meta, _cfg -> send(test_pid, {ref, :query}) end,
+        nil
+      )
+
+      try do
+        fun.()
+      after
+        :telemetry.detach(handler_id)
+      end
+
+      drain = fn drain, acc ->
+        receive do
+          {^ref, :query} -> drain.(drain, acc + 1)
+        after
+          0 -> acc
+        end
+      end
+
+      drain.(drain, 0)
+    end
+
+    test "the corpus derivation does not issue a query per document", %{
+      conn: conn,
+      scope: scope
+    } do
+      # Reference-free posts: edges are empty either way, so what this measures
+      # is exactly the per-document schema read + the duplicated document scan.
+      for _ <- 1..4, do: mk_published_post!(uniq("cost-small"), scope)
+
+      small =
+        count_repo_queries(fn ->
+          resp = conn |> authed() |> get("/v1/graph")
+          assert resp.status == 200
+        end)
+
+      for _ <- 1..24, do: mk_published_post!(uniq("cost-large"), scope)
+
+      large =
+        count_repo_queries(fn ->
+          resp = conn |> authed() |> get("/v1/graph")
+          assert resp.status == 200
+        end)
+
+      # 24 further documents may cost a few more queries (paging), but NOT one
+      # (or two) apiece. Pre-fix this grew by ~24; post-fix it does not grow.
+      assert large - small <= 4,
+             """
+             /v1/graph query count scales with the number of documents:
+               #{small} queries at 4 posts -> #{large} at 28 (+#{large - small}).
+             The per-document schema read or the duplicated document scan is back.
+             """
+    end
+
+    test "corpus edges and phantom nodes still resolve after the prefetch", %{
+      conn: conn,
+      scope: scope
+    } do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "linked",
+            "title" => "Linked",
+            "visibility" => "public",
+            "fields" => [%{"name" => "related", "type" => "reference"}]
+          },
+          @dataset,
+          scope
+        )
+
+      target = mk_published_post!(uniq("edge-target"), scope)
+      missing = uniq("edge-missing")
+
+      src_id = uniq("edge-source")
+
+      {:ok, _} =
+        Content.create_document(
+          "linked",
+          %{"doc_id" => src_id, "title" => "source", "content" => %{"related" => target.doc_id}},
+          @dataset,
+          scope
+        )
+
+      {:ok, _} = Content.publish_document(src_id, "linked", @dataset, scope)
+
+      dangling_id = uniq("edge-dangling")
+
+      {:ok, _} =
+        Content.create_document(
+          "linked",
+          %{"doc_id" => dangling_id, "title" => "dangling", "content" => %{"related" => missing}},
+          @dataset,
+          scope
+        )
+
+      {:ok, _} = Content.publish_document(dangling_id, "linked", @dataset, scope)
+
+      resp = conn |> authed() |> get("/v1/graph")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      to_ids = Enum.map(body["edges"], & &1["to_id"])
+      assert target.doc_id in to_ids, "the real reference edge disappeared"
+      assert missing in to_ids, "the dangling reference edge disappeared"
+
+      phantoms = body["nodes"] |> Enum.filter(& &1["phantom"]) |> Enum.map(& &1["id"])
+      assert missing in phantoms, "the referenced-but-absent target lost its phantom node"
     end
   end
 end

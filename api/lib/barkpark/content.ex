@@ -307,6 +307,14 @@ defmodule Barkpark.Content do
   @spec corpus_edges(String.t(), String.t(), keyword()) :: [map()]
   def corpus_edges(type, dataset, opts \\ []), do: Edges.corpus_edges(type, dataset, opts)
 
+  @doc """
+  The projection SOURCE corpus over documents the caller already read.
+  See `Barkpark.Content.Edges.corpus_edges_for_docs/3`.
+  """
+  @spec corpus_edges_for_docs([map()], String.t(), keyword()) :: [map()]
+  def corpus_edges_for_docs(docs, dataset, opts \\ []),
+    do: Edges.corpus_edges_for_docs(docs, dataset, opts)
+
   # ── Scope resolution (extracted → Content.WriteScope) ─────────────────────
   #
   # Tenancy scope stamping/resolution + the lifecycle-hook helpers moved to

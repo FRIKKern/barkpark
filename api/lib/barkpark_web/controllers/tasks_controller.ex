@@ -954,7 +954,12 @@ defmodule BarkparkWeb.TasksController do
 
     list_opts = Keyword.put(opts, :perspective, :published)
 
-    all_types = dataset |> Content.list_schemas(opts) |> Enum.map(& &1.name)
+    # Keep the schema STRUCTS, not just their names: they are threaded into the
+    # edge fold below as a prefetch. `extract_edges/2` used to re-read this same
+    # invariant list once PER DOCUMENT — 4096 identical queries on the live
+    # corpus, the dominant cost behind a measured 34s first paint.
+    schemas = Content.list_schemas(dataset, opts)
+    all_types = Enum.map(schemas, & &1.name)
 
     case parse_graph_types(params["types"], all_types) do
       {:error, message} ->
@@ -987,9 +992,17 @@ defmodule BarkparkWeb.TasksController do
 
         node_ids = MapSet.new(real_nodes, & &1.id)
 
+        # Fold over the documents the node phase ALREADY read (doc_lists is in
+        # `types` order), instead of `corpus_edges/3` re-listing every type a
+        # second time, and hand the fold its schema prefetch.
+        edge_opts = Keyword.put(opts, :schemas, schemas)
+
         raw_edges =
           types
-          |> Enum.flat_map(fn type -> Content.corpus_edges(type, dataset, opts) end)
+          |> Enum.zip(doc_lists)
+          |> Enum.flat_map(fn {_type, docs} ->
+            Content.corpus_edges_for_docs(docs, dataset, edge_opts)
+          end)
           |> Enum.uniq_by(fn e -> {e.from_id, e.to_id, e.field} end)
 
         edges =
