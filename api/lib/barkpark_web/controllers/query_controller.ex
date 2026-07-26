@@ -11,6 +11,7 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Content.Expand
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
+  alias BarkparkWeb.AnonPerspective
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -19,7 +20,7 @@ defmodule BarkparkWeb.QueryController do
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
     if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) do
       t0 = System.monotonic_time(:microsecond)
-      perspective = resolve_perspective(conn, params)
+      perspective = AnonPerspective.resolve(conn, params)
       # Clamp to the same bounds Content.list_documents enforces (limit [1,1000],
       # offset [0,100_000] — see Content.Query) so the echoed limit/offset in the
       # response body match what the query actually used. Otherwise a paginator
@@ -76,7 +77,7 @@ defmodule BarkparkWeb.QueryController do
             |> Expand.expand(
               expand_spec,
               dataset,
-              [published_only: anon_pinned?(conn), caller_context: caller_context] ++
+              [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
                 scope_opts(conn)
             )
             |> project_fields(parse_fields(params["fields"]))
@@ -327,7 +328,7 @@ defmodule BarkparkWeb.QueryController do
       # definition). Rejected as not-found BEFORE any get_document call — the
       # same 404 path the controller already returns for a missing doc. An
       # `:edit` share and any token/preview caller pass through unchanged.
-      anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
+      AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
         {:error, :not_found}
 
       preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) ->
@@ -351,7 +352,7 @@ defmodule BarkparkWeb.QueryController do
         |> Expand.expand(
           expand_spec,
           dataset,
-          [published_only: anon_pinned?(conn), caller_context: caller_context] ++
+          [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
             scope_opts(conn)
         )
         |> project_fields(parse_fields(params["fields"]))
@@ -598,35 +599,13 @@ defmodule BarkparkWeb.QueryController do
 
   defp authed?(conn), do: not is_nil(conn.assigns[:api_token])
 
-  defp resolve_perspective(conn, params) do
-    if anon_pinned?(conn) do
-      # EVERY plain anonymous caller is pinned to the published perspective:
-      # the `?perspective=drafts|raw` param is IGNORED so a tokenless reader
-      # can never pull unpublished/draft content — neither via a read-only
-      # public share NOR via an ordinary public-visibility schema read (found
-      # live 2026-06-10: `curl …?perspective=drafts` with no token returned
-      # every draft). A token, a preview token (forced_perspective) or an
-      # `:edit` share falls through to the unchanged forced/param logic.
-      :published
-    else
-      case conn.assigns[:forced_perspective] do
-        nil -> parse_perspective(Map.get(params, "perspective", "published"))
-        forced -> parse_perspective(forced)
-      end
-    end
-  end
-
-  # True when the caller is pinned to published-only reads: no token, no
-  # preview token, and not an `:edit` share. This covers BOTH the read-only
-  # public share AND the plain tokenless read of a public-visibility schema —
-  # the two anonymous read paths must enforce the same invariant (an anonymous
-  # caller can never pull drafts; publish is the act of making content
-  # public). An `:edit` share is deliberately exempt: it is an anonymous
-  # editing surface, and its draft visibility is part of that contract.
-  defp anon_pinned?(conn) do
-    not authed?(conn) and not preview?(conn) and
-      not (conn.assigns[:share_public] == true and conn.assigns[:share_access] == :edit)
-  end
+  # Perspective resolution + the anon/public-read pin live in ONE place —
+  # `BarkparkWeb.AnonPerspective` (error-emitters-duplicated: this controller
+  # carried private twins of resolve/anon_pinned? that drifted from the shared
+  # chokepoint the search controllers use; stw7-backlog-drafts-clamp-gap
+  # deleted them). `preview?/1` and `authed?/1` stay: they gate
+  # backlinks/related/tag_browse/tag_docs above, a different question
+  # ("may this caller read at all") from perspective pinning.
 
   defp parse_int(nil, d), do: d
 
@@ -692,10 +671,6 @@ defmodule BarkparkWeb.QueryController do
   end
 
   defp parse_order(_), do: :updated_at_desc
-
-  defp parse_perspective("drafts"), do: :drafts
-  defp parse_perspective("raw"), do: :raw
-  defp parse_perspective(_), do: :published
 
   defp parse_expand(nil), do: []
   defp parse_expand(""), do: []
