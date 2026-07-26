@@ -61,7 +61,7 @@ export class TriageStore {
    * store again instead of a permanently inert one. */
   start(): void {
     this.stopped = false
-    this.load()
+    this.load(this.snapshot.writeGeneration)
   }
 
   stop(): void {
@@ -100,10 +100,14 @@ export class TriageStore {
     for (const eff of effects) this.run(eff)
   }
 
-  private load(): void {
+  /** `generation` is captured BEFORE the request goes out and echoed back on
+   * the answer: that is the whole write/read reorder fix (triage.ts `loaded`).
+   * A response that lands after a write has installed newer truth carries the
+   * older generation and the reducer drops it. */
+  private load(generation: number): void {
     this.api
       .fetch(this.snapshot.docId)
-      .then((detail) => this.dispatch({ type: 'loaded', detail }))
+      .then((detail) => this.dispatch({ type: 'loaded', detail, generation }))
       .catch((err: unknown) => this.dispatch({ type: 'loadFailed', message: message(err) }))
   }
 
@@ -111,7 +115,7 @@ export class TriageStore {
     const docId = this.snapshot.docId
     switch (eff.type) {
       case 'fetch':
-        this.load()
+        this.load(eff.generation)
         break
       case 'stamp': {
         const req: StampRequest = {

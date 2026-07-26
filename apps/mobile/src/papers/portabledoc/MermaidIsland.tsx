@@ -28,9 +28,10 @@
 // rings around the island: (1) the \u003c escape keeps author bytes inside
 // the JS string context; (2) a CSP meta restricts scripts to the mermaid CDN
 // + this document's own inline bootstrap, and blocks all other network
-// directions; (3) onShouldStartLoadWithRequest denies every navigation after
-// the initial HTML load, so even fully compromised island content cannot
-// take the WebView anywhere. mermaid runs securityLevel:'strict' on top.
+// directions; (3) onShouldStartLoadWithRequest (allowNavigation) allows the
+// island's own about:blank document and NOTHING else — not data:, not
+// about:srcdoc — so even fully compromised island content cannot take the
+// WebView anywhere. mermaid runs securityLevel:'strict' on top.
 //
 // HEIGHT: the island cannot know its rendered height up front. It starts at
 // a fixed estimate and self-reports the real content height once via
@@ -58,6 +59,23 @@ const MAX_HEIGHT = 8000
  * the script element at the HTML-parser level. Exported for the jest suite. */
 export function scriptStringLiteral(s: string): string {
   return JSON.stringify(s).replace(/</g, '\\u003c')
+}
+
+/** RING 3, as a pure predicate so it is testable without a WebView.
+ *
+ * The island loads exactly ONE document: its own inline HTML, which both
+ * platforms present as `about:blank` (RN WebView's baseUrl for `source.html`).
+ * NOTHING else is a legitimate navigation here, so the allow-list is that one
+ * string — no prefix matching.
+ *
+ * Why the old predicate was too loose: it also allowed any `data:` URL and any
+ * `about:` URL. `data:text/html,…` is a full navigable document with its own
+ * origin — a compromised island could hand the WebView attacker-authored HTML
+ * that the island's CSP meta does not cover (a CSP travels with the document
+ * that declares it, not with the WebView) — and `about:srcdoc` is likewise a
+ * document boundary, not a no-op. Exported for the jest suite. */
+export function allowNavigation(url: string): boolean {
+  return url === 'about:blank'
 }
 
 /** The island document. Exported for the jest suite (F1: asserts no raw
@@ -120,11 +138,9 @@ export function MermaidIsland({ source, theme }: { source: string; theme: Theme 
         originWhitelist={['*']}
         // F1 ring 3: the island loads exactly ONE document — its own inline
         // HTML. Every subsequent navigation (tapped link, injected redirect,
-        // window.location games) is denied here at the native seam.
-        onShouldStartLoadWithRequest={(request) => {
-          const url = request.url
-          return url === 'about:blank' || url.startsWith('data:') || url.startsWith('about:')
-        }}
+        // window.location games, a data: document) is denied here at the native
+        // seam. See allowNavigation above for the reasoning + its jest proofs.
+        onShouldStartLoadWithRequest={(request) => allowNavigation(request.url)}
         // Islands never scroll internally — the D11 scroll FAIL axis is
         // specifically about WebView-internal scrolling; keeping it off keeps
         // the document on the native FlatList scroller.

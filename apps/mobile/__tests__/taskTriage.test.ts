@@ -294,7 +294,7 @@ test('a fenced_off refusal brakes the fenced actions and forces a re-read', () =
 
   expect(failed.state.staleEpoch).toBe(true)
   expect(failed.state.refreshing).toBe(true)
-  expect(failed.effects).toEqual([{ type: 'fetch' }])
+  expect(failed.effects).toEqual([{ type: 'fetch', generation: failed.state.writeGeneration }])
   expect(failed.state.notice).toEqual({ tone: 'failed', text: 'fenced_off' })
   // Retrying blind on the epoch we know is stale is exactly the bug — refuse.
   const retried = drive(failed.state, { type: 'stamp', criterion: 0, met: true, text: 'ev' })
@@ -319,7 +319,7 @@ test('criterion_text_required and criteria_mismatch also force a re-read — our
       opId: started.state.pending?.opId ?? 0,
       error: new TaskApiError(409, reason),
     })
-    expect(failed.effects).toEqual([{ type: 'fetch' }])
+    expect(failed.effects).toEqual([{ type: 'fetch', generation: failed.state.writeGeneration }])
     expect(failed.state.staleEpoch).toBe(true)
   }
 })
@@ -329,7 +329,7 @@ test('criterion_text_required and criteria_mismatch also force a re-read — our
 test('a failed refresh keeps the truth already on screen', () => {
   const loaded = ready()
   const refreshed = drive(loaded, { type: 'refresh' })
-  expect(refreshed.effects).toEqual([{ type: 'fetch' }])
+  expect(refreshed.effects).toEqual([{ type: 'fetch', generation: 0 }])
   expect(refreshed.state.refreshing).toBe(true)
 
   const failed = drive(refreshed.state, { type: 'loadFailed', message: 'offline' })
@@ -346,4 +346,65 @@ test('a failed FIRST load is an honest error screen, not an empty task', () => {
   })
   expect(state.phase).toBe('error')
   expect(state.message).toBe('HTTP 404')
+})
+
+// ── the write/read reorder (task-67b2f856b4984382, found by the #6118 review) ─
+//
+// PINNED REGRESSION. The interleaving that used to reinstall older truth:
+// pull-to-refresh dispatches a fetch → a pulse 200 lands and installs epoch
+// N+1 → the SLOW fetch answer (server read taken PRE-pulse) arrives carrying
+// epoch N. Before generation tagging that answer became current truth, and the
+// next stamp then carried the pre-pulse epoch → server 409 stale_claim.
+
+test('a refresh answer that a write outran is DROPPED, not installed as truth', () => {
+  // 1. pull-to-refresh: the read is issued at the current generation.
+  const refreshed = drive(ready(), { type: 'refresh' })
+  const fetchEff = refreshed.effects[0]
+  if (fetchEff?.type !== 'fetch') throw new Error('expected a fetch effect')
+  const issuedAt = fetchEff.generation
+
+  // 2. a pulse completes while that read is still in flight: epoch 4 → 5.
+  const pulsed = drive(refreshed.state, { type: 'pulse', text: 'still on it' })
+  const pulseEff = pulsed.effects[0]
+  if (pulseEff?.type !== 'pulse') throw new Error('expected a pulse effect')
+  const applied = drive(pulsed.state, {
+    type: 'opSucceeded',
+    opId: pulseEff.opId,
+    doc: doc({ claim: { worker: WORKER, epoch: 5, tsIso: '2026-07-25T08:01:00Z' } }),
+  })
+  expect(currentEpoch(applied.state)).toBe(5)
+  expect(applied.state.writeGeneration).toBe(issuedAt + 1)
+
+  // 3. the slow, PRE-pulse read finally answers with epoch 4.
+  const late = drive(applied.state, {
+    type: 'loaded',
+    detail: detail({ claim: { worker: WORKER, epoch: 4, tsIso: '2026-07-25T08:00:00Z' } }),
+    generation: issuedAt,
+  })
+
+  // Dropped: epoch 5 stays on screen, and the refresh spinner still ends.
+  expect(currentEpoch(late.state)).toBe(5)
+  expect(late.state.refreshing).toBe(false)
+  expect(late.effects).toHaveLength(0)
+
+  // So the next stamp carries the POST-pulse epoch — no spurious 409.
+  const stamped = drive(late.state, { type: 'stamp', criterion: 0, met: true, text: 'ev' })
+  const stampEff = stamped.effects[0]
+  if (stampEff?.type !== 'stamp') throw new Error('expected a stamp effect')
+  expect(stampEff.observedEpoch).toBe(5)
+})
+
+test('an in-time refresh answer is still authoritative (the fence is not a mute button)', () => {
+  const refreshed = drive(ready(), { type: 'refresh' })
+  const fetchEff = refreshed.effects[0]
+  if (fetchEff?.type !== 'fetch') throw new Error('expected a fetch effect')
+
+  const landed = drive(refreshed.state, {
+    type: 'loaded',
+    detail: detail({ claim: { worker: WORKER, epoch: 9, tsIso: '2026-07-25T09:00:00Z' } }),
+    generation: fetchEff.generation,
+  })
+  expect(currentEpoch(landed.state)).toBe(9)
+  expect(landed.state.refreshing).toBe(false)
+  expect(landed.state.phase).toBe('ready')
 })
