@@ -3100,8 +3100,17 @@ defmodule BarkparkCloud.Registry do
   lesson): the canonical `{"error":{"code":"not_found"}}` envelope is a real
   token-not-found from the live revoke route; any other 404 shape is a
   pre-revoke instance with no such route yet → `:revoke_unsupported`.
+
+  Instance-side 422 and 429 are DELIBERATE answers, not outages, and each keeps
+  its own code (`:revoke_refused` / `:instance_rate_limited`) instead of
+  collapsing into `:instance_error`. Only a genuine transport failure — or a
+  status this route does not model — stays `:instance_error` (502 at the edge).
+
+  `opts` accepts `:client_ip` — the ORIGINAL caller's address, relayed as
+  `X-Forwarded-For` so the instance's own per-IP revoke bucket keys per phone
+  rather than on the single Cloud egress address.
   """
-  @spec revoke_app_token(Barkpark.t(), {:token, String.t()} | {:email, String.t()}) ::
+  @spec revoke_app_token(Barkpark.t(), {:token, String.t()} | {:email, String.t()}, keyword()) ::
           {:ok, map()}
           | {:error,
              :not_live
@@ -3109,8 +3118,12 @@ defmodule BarkparkCloud.Registry do
              | :decrypt_failed
              | :not_found
              | :revoke_unsupported
+             | :revoke_refused
+             | :instance_rate_limited
              | :instance_error}
-  def revoke_app_token(%Barkpark{url: url} = bp, {kind, value} = mode)
+  def revoke_app_token(barkpark, mode, opts \\ [])
+
+  def revoke_app_token(%Barkpark{url: url} = bp, {kind, value} = mode, opts)
       when is_binary(url) and url != "" and kind in [:token, :email] and is_binary(value) and
              value != "" do
     case reveal_admin_token(bp) do
@@ -3132,11 +3145,12 @@ defmodule BarkparkCloud.Registry do
         request = %{
           method: :delete,
           url: base <> "/v1/auth/app-tokens",
-          headers: [
-            {"Authorization", "Bearer " <> admin_token},
-            {"Accept", "application/json"},
-            {"Content-Type", "application/json"}
-          ],
+          headers:
+            [
+              {"Authorization", "Bearer " <> admin_token},
+              {"Accept", "application/json"},
+              {"Content-Type", "application/json"}
+            ] ++ forwarded_for(opts),
           body: body
         }
 
@@ -3160,13 +3174,56 @@ defmodule BarkparkCloud.Registry do
               _ -> {:error, :revoke_unsupported}
             end
 
+          # The instance REFUSED this revoke on purpose: the presented raw token
+          # resolves to an `admin`-carrying token, which the app-token path never
+          # kills (the stored custody credential must not die by a member-shaped
+          # call or a label collision). "Instance unreachable" would be a lie
+          # that sends the phone into a retry loop against a settled answer.
+          #
+          # INFORMATION EXPOSURE — bounded on purpose (the reasoning, recorded):
+          # separating 422 from 404 tells the caller "the token you presented
+          # exists AND carries admin". Reaching this arm at all requires ALREADY
+          # holding that admin token's plaintext, and a holder can confirm its own
+          # liveness far more directly (any admin-authed instance call). A member
+          # who does not hold it cannot distinguish this arm from `:not_found`, so
+          # no new admin-token-liveness oracle is opened — strictly less than the
+          # mint arm already exposes, which hands out live credentials.
+          {:ok, %{status: 422}} ->
+            {:error, :revoke_refused}
+
+          # The instance's own per-IP revoke bucket tripped (the D7 sibling of the
+          # proxy's window). Transport is healthy and the verdict is "slow down",
+          # so it stays a 429 end-to-end rather than masquerading as an outage the
+          # client would retry into.
+          {:ok, %{status: 429}} ->
+            {:error, :instance_rate_limited}
+
           _ ->
             {:error, :instance_error}
         end
     end
   end
 
-  def revoke_app_token(_, _), do: {:error, :not_live}
+  def revoke_app_token(_, _, _), do: {:error, :not_live}
+
+  # Relay the ORIGINAL caller's address so the instance's `{:app_token_revoke,
+  # ip}` bucket keys per phone. Without it every cloud-proxied revoke arrives
+  # from the single Cloud egress IP and a whole TEAM shares one 10/min allowance
+  # — which surfaced (before the split above) as a misleading 502.
+  #
+  # TRUST, RE-RECORDED — INHERITED, not introduced here (charter D43): the
+  # instance reads the FIRST x-forwarded-for hop as the client ip, exactly as its
+  # pre-existing pulse limiter already does. That is only sound because the
+  # instance is fronted by its own proxy (which appends, so our hop stays first);
+  # a caller reaching the instance directly could always pick its own bucket key,
+  # and this relay neither widens nor narrows that. Redesigning the trust
+  # boundary (a trusted-proxy allowlist on the limiter) is not this pass.
+  defp forwarded_for(opts) do
+    case Keyword.get(opts, :client_ip) do
+      ip when is_binary(ip) and ip != "" -> [{"X-Forwarded-For", ip}]
+      _ -> []
+    end
+  end
 
   @doc """
   Decrypt a Barkpark's stored content-bootstrap outputs (dwb-4) back to the map

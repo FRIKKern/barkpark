@@ -70,7 +70,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
-      DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, empty for logout-everywhere (wave 2; admin token stays server-side)
+      DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, EMPTY (never {token:""}) for logout-everywhere (wave 2; admin token stays server-side)
       POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
       POST    /v1/barkparks/:id/push-relay admin  provision the instance chat_blocked webhook that drives the push relay (D15; idempotent, converges)
       POST    /v1/fleet/supports   user      register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
@@ -2436,11 +2436,20 @@ defmodule BarkparkCloud.Web.Router do
   # custody physics as the mint above: the stored admin token is decrypted and
   # used server-side only, never serialized into any response. USER-authed +
   # TEAM-SCOPED fail-closed: wrong-team / nonexistent / malformed id is the
-  # SAME 404. Rate-limited per IP (`app_token_revoke:<ip>` bucket, 10/min, D7).
+  # SAME 404. Rate-limited per IP (`app_token_revoke:<ip>` bucket, 10/min, D7) —
+  # and the caller's IP is RELAYED to the instance as X-Forwarded-For, so the
+  # instance's sibling bucket keys per phone rather than lumping a whole team
+  # behind the single Cloud egress address.
+  # Body validation is EXACTLY-ONE-OF, enforced: `{"token": ""}` is a 422
+  # naming the field (it must never fall through to logout-everywhere) and a
+  # body carrying both "token" and "email" is a 422 (email is server-derived
+  # here, so "token wins" would be a silent wrong answer).
   # 404 not_found when the instance knows no such token; 409 revoke_unsupported
   # when the instance predates the revoke route (D8 capability-vs-absence);
-  # the rest mirror the mint arm. Audited as "barkpark.app_token_revoked" —
-  # the mode and count, NEVER a token value.
+  # 422 revoke_refused and 429 instance_rate_limited are the instance's own
+  # deliberate verdicts kept out of the 502 collapse; the rest mirror the mint
+  # arm. Audited as "barkpark.app_token_revoked" — the mode and count, NEVER a
+  # token value.
   delete "/v1/barkparks/:id/app-token" do
     conn = Auth.require_user(conn, [])
 
@@ -2464,45 +2473,37 @@ defmodule BarkparkCloud.Web.Router do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
             mode =
               case conn.body_params do
+                # EXACTLY-ONE-OF, enforced (not merely documented). The proxy
+                # derives the email SERVER-SIDE, so a body naming both a token
+                # and an email is a caller confusion about which credential dies
+                # — refuse it instead of letting "token" silently win.
+                %{"token" => _, "email" => _} ->
+                  {:invalid, "exactly_one_of",
+                   ~s|send exactly one of: "token" to log out THIS device, or an | <>
+                     ~s|empty body to log out everywhere. "email" is derived | <>
+                     ~s|server-side and is never accepted in the body.|}
+
                 %{"token" => raw} when is_binary(raw) and raw != "" ->
                   {:token, raw}
+
+                # A present-but-EMPTY (or non-string) token used to fall through
+                # to logout-everywhere: an unset variable on the phone signed the
+                # user out on every device. Now a 422 naming the field.
+                %{"token" => _} ->
+                  {:invalid, "invalid_token",
+                   ~s|"token" must be a non-empty string; omit it entirely to log | <>
+                     ~s|out everywhere.|}
 
                 _ ->
                   {:email, conn.assigns.current_user.email}
               end
 
-            case Registry.revoke_app_token(bp, mode) do
-              {:ok, payload} ->
-                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.app_token_revoked", %{
-                  name: bp.name,
-                  mode: elem(mode, 0),
-                  revoked_count: payload["revoked_count"]
-                })
+            case mode do
+              {:invalid, code, detail} ->
+                json(conn, 422, %{error: code, detail: detail})
 
-                json(conn, 200, payload)
-
-              {:error, :not_found} ->
-                json(conn, 404, %{error: "not_found"})
-
-              {:error, :not_live} ->
-                json(conn, 409, %{error: "not_live"})
-
-              {:error, :revoke_unsupported} ->
-                json(conn, 409, %{error: "revoke_unsupported"})
-
-              {:error, :no_admin_token} ->
-                json(conn, 404, %{
-                  error: "no_admin_token",
-                  detail:
-                    "No admin token is stored for this instance yet. It is captured at " <>
-                      "provision time — a pre-existing instance may need a re-provision."
-                })
-
-              {:error, :decrypt_failed} ->
-                json(conn, 500, %{error: "decrypt_failed"})
-
-              {:error, :instance_error} ->
-                json(conn, 502, %{error: "instance_unreachable"})
+              mode ->
+                revoke_app_token_on_instance(conn, team, bp, mode)
             end
 
           _ ->
@@ -10731,6 +10732,65 @@ defmodule BarkparkCloud.Web.Router do
     case conn.remote_ip do
       nil -> nil
       ip -> ip |> :inet.ntoa() |> to_string()
+    end
+  end
+
+  # The instance leg of DELETE /v1/barkparks/:id/app-token, once the body has
+  # resolved to exactly ONE revoke mode. Every verdict the instance reaches
+  # deliberately keeps its OWN status — its 422 (this token is an admin token,
+  # unkillable here) is a 422 and its 429 (its per-IP revoke bucket) is a 429.
+  # Only a transport failure, or a status this route does not model, is the 502
+  # `instance_unreachable`: telling a phone "your instance is down" about an
+  # answer the instance gave on purpose sends it into a pointless retry loop.
+  # The caller's IP rides along as X-Forwarded-For so the instance buckets per
+  # phone instead of per control plane (see Registry.revoke_app_token/3).
+  defp revoke_app_token_on_instance(conn, team, bp, mode) do
+    case Registry.revoke_app_token(bp, mode, client_ip: peer_ip(conn)) do
+      {:ok, payload} ->
+        audit_lifecycle_trigger(conn, team, bp.id, "barkpark.app_token_revoked", %{
+          name: bp.name,
+          mode: elem(mode, 0),
+          revoked_count: payload["revoked_count"]
+        })
+
+        json(conn, 200, payload)
+
+      {:error, :not_found} ->
+        json(conn, 404, %{error: "not_found"})
+
+      {:error, :not_live} ->
+        json(conn, 409, %{error: "not_live"})
+
+      {:error, :revoke_unsupported} ->
+        json(conn, 409, %{error: "revoke_unsupported"})
+
+      {:error, :revoke_refused} ->
+        json(conn, 422, %{
+          error: "revoke_refused",
+          detail:
+            "The instance refused to revoke that token: admin tokens cannot be " <>
+              "revoked through the app-token path."
+        })
+
+      {:error, :instance_rate_limited} ->
+        json(conn, 429, %{
+          error: "instance_rate_limited",
+          detail: "The instance's own revoke rate limit tripped. Retry in a minute."
+        })
+
+      {:error, :no_admin_token} ->
+        json(conn, 404, %{
+          error: "no_admin_token",
+          detail:
+            "No admin token is stored for this instance yet. It is captured at " <>
+              "provision time — a pre-existing instance may need a re-provision."
+        })
+
+      {:error, :decrypt_failed} ->
+        json(conn, 500, %{error: "decrypt_failed"})
+
+      {:error, :instance_error} ->
+        json(conn, 502, %{error: "instance_unreachable"})
     end
   end
 

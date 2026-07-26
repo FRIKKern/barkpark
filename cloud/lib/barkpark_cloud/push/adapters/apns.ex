@@ -136,6 +136,13 @@ defmodule BarkparkCloud.Push.Adapters.APNS do
   # APNs caps apns-collapse-id at 64 BYTES and 400s an oversize one. Session ids
   # are uuids (36 bytes) so this never bites today; the clamp is here so a future
   # id shape cannot turn every notification into a 400.
+  #
+  # ACCEPTED, not fixed: the clamp is a BYTE cut, so a >64-byte id whose 64th byte
+  # falls inside a multibyte character would yield an invalid-UTF-8 header value —
+  # i.e. a 400 from APNs (or a rejected header) for EVERY send, which is exactly
+  # the failure the clamp exists to prevent. Unreachable while session ids are
+  # ASCII uuids; a change to the id shape (the only way in) must make this cut
+  # grapheme-aware rather than lengthen the id.
   defp collapse_id(notification) do
     case get_in(notification, ["data", "session_id"]) do
       id when is_binary(id) and id != "" -> binary_part(id, 0, min(byte_size(id), 64))
@@ -185,6 +192,17 @@ defmodule BarkparkCloud.Push.Adapters.APNS do
   end
 
   # One ES256 provider token, cached (see TokenCache for why Apple insists).
+  #
+  # NO SINGLE-FLIGHT, accepted deliberately: on a COLD cache a fan-out can sign
+  # up to queue-concurrency JWTs concurrently (each `:miss` mints, the last write
+  # wins in `TokenCache.put/3`). Apple answers a burst of DISTINCT provider tokens
+  # for one key with 403 `TooManyProviderTokenUpdates`, which `classify/2` maps to
+  # the generic retryable arm — the Oban backoff then re-sends, by which time the
+  # winner's token is cached and every attempt presents the SAME one, so the send
+  # recovers on its own. The cost is a handful of extra signatures and one
+  # retry-cycle of delay on the first send after a deploy; a single-flight owner
+  # process would be a supervised singleton (with its own failure modes) bought
+  # for that. Revisit together with the connection pool, not before.
   defp provider_token(config) do
     case TokenCache.fetch(:apns) do
       {:ok, jwt} ->

@@ -58,6 +58,15 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
     as(build_conn(), bearer) |> delete("/v1/auth/app-tokens", Jason.encode!(body))
   end
 
+  # Same revoke, but arriving THROUGH a proxy that names the original caller —
+  # the shape every cloud-proxied revoke has now that the control plane relays
+  # X-Forwarded-For (Registry.revoke_app_token/3).
+  defp revoke_from(bearer, ip, body) do
+    as(build_conn(), bearer)
+    |> put_req_header("x-forwarded-for", ip)
+    |> delete("/v1/auth/app-tokens", Jason.encode!(body))
+  end
+
   defp self_revoke(bearer) do
     as(build_conn(), bearer) |> delete("/v1/auth/app-tokens/current")
   end
@@ -146,6 +155,25 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
     test "a body with neither token nor email → 422", %{admin: admin} do
       assert revoke(admin, %{}) |> json_response(422)
     end
+
+    test ~s|an EMPTY "token" is a 422 naming the field, not a fall-through|, %{admin: admin} do
+      body = revoke(admin, %{token: ""}) |> json_response(422)
+      assert body["error"]["message"] =~ ~s("token")
+      assert body["error"]["message"] =~ "non-empty"
+    end
+
+    test "a body carrying BOTH token and email → 422 (token no longer silently wins)",
+         %{admin: admin} do
+      ws = create_workspace!()
+      email = unique_email()
+      raw = mint_app_token(admin, email, ws)
+
+      body = revoke(admin, %{token: raw, email: email}) |> json_response(422)
+      assert body["error"]["message"] =~ "exactly one of"
+
+      # NEITHER victim died — the ambiguous body revoked nothing at all.
+      assert {:ok, _} = Auth.verify_token(raw)
+    end
   end
 
   describe "DELETE /v1/auth/app-tokens with {email} (logout everywhere)" do
@@ -194,6 +222,27 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
 
       throttled = revoke(admin, %{email: email}) |> json_response(429)
       assert throttled["error"]["code"] == "rate_limited"
+    end
+
+    test "two DISTINCT proxied callers do not share a bucket: A exhausting its allowance leaves B untouched",
+         %{admin: admin} do
+      email = unique_email()
+      caller_a = "203.0.113.7"
+      caller_b = "198.51.100.9"
+
+      # Caller A burns its whole 10/min…
+      for _ <- 1..10 do
+        assert revoke_from(admin, caller_a, %{email: email}) |> json_response(200)
+      end
+
+      assert revoke_from(admin, caller_a, %{email: email}) |> json_response(429)
+
+      # …and caller B — a different phone behind the SAME control plane — is
+      # completely unaffected. Before the Cloud proxy relayed X-Forwarded-For
+      # every proxied revoke keyed on the single Cloud egress IP, so one busy
+      # teammate spent the whole team's allowance and the 429 surfaced at the
+      # proxy as a misleading 502 instance_unreachable.
+      assert revoke_from(admin, caller_b, %{email: email}) |> json_response(200)
     end
   end
 end
