@@ -23,6 +23,7 @@ import {
   answerable,
   approvalStatus,
   isCard,
+  isCardRole,
   messageBlocks,
   requestId,
   type ChatMessage,
@@ -87,6 +88,44 @@ export type BodyRender =
   | { kind: 'blocks'; blocks: Block[] }
   | { kind: 'text'; text: string }
 
+/** How a settled row is drawn, mirroring the TUI taxonomy verbatim
+ * (internal/chat/render.go renderMessage's switch):
+ *
+ *   assistant   — the reply body, rendered as a document.
+ *   user        — the bubble; NEVER blocks (the #6126 law).
+ *   card        — approval/question/plan: the block is the card's BODY, but
+ *                 answerability stays on the envelope (D35), so these route to
+ *                 CardRow which wraps the body with the Allow/Deny footer.
+ *   block       — tool/todo/thinking: the server carries exactly ONE typed
+ *                 chat-* block, so the transcript draws a real diff/checklist/
+ *                 thought row instead of one dim line.
+ *   structural  — `system` has no block type to promote; one dim line.
+ *   unknown     — the forward-compatible default arm: render the source, never
+ *                 a crash and never a blank.
+ *
+ * Pure and exported so the taxonomy itself is jest-pinnable. */
+export type RoleKind = 'assistant' | 'user' | 'card' | 'block' | 'structural' | 'unknown'
+
+const BLOCK_ROLES = new Set(['tool', 'todo', 'thinking'])
+const STRUCTURAL_ROLES = new Set(['system'])
+
+export function roleKind(role: string): RoleKind {
+  if (role === 'assistant') return 'assistant'
+  if (role === 'user') return 'user'
+  if (isCardRole(role)) return 'card'
+  if (BLOCK_ROLES.has(role)) return 'block'
+  if (STRUCTURAL_ROLES.has(role)) return 'structural'
+  return 'unknown'
+}
+
+/** The roles whose rows carry a renderable chat-* block — the SIX the server
+ * projects a typed block onto. `user` is deliberately absent (bubble law) and
+ * so is `system` (nothing visual to promote). */
+export function rendersBlocks(role: string): boolean {
+  const kind = roleKind(role)
+  return kind === 'assistant' || kind === 'card' || kind === 'block'
+}
+
 /** THE two-phase decision, pure so jest can pin it without a native host.
  *
  * Phase 1 — the live tail (SSE `chat` delta frames) is ALWAYS plain text: the
@@ -96,13 +135,14 @@ export type BodyRender =
  * carries the server's already-converted blocks, and the turn becomes a
  * document in one step. Local echoes are the user's own words: plain, always.
  *
- * Only assistant rows take the blocks path this slice; tool/todo/thinking rows
- * keep their provenance line until the typed chat-* renderers land (S3). */
+ * Every block-BEARING role takes the blocks path; a row that arrived without
+ * usable blocks (a mid-persist frame, or a thinner server) degrades honestly to
+ * its source text — the same tolerance render.go's renderStructuralDoc shows. */
 export function bodyRender(row: Row): BodyRender {
   if (row.kind === 'tail') return { kind: 'text', text: row.text }
   if (row.kind === 'local') return { kind: 'text', text: row.content }
   const m = row.message
-  if (m.role === 'assistant') {
+  if (rendersBlocks(m.role)) {
     const blocks = messageBlocks(m)
     if (blocks !== undefined) return { kind: 'blocks', blocks }
   }
@@ -362,15 +402,27 @@ export function TranscriptRow({
   }
 
   const m = row.message
-  if (isCard(m)) return <CardRow m={m} theme={theme} inFlight={inFlight} onAnswer={onAnswer} />
+  // Cards keep their interactive shell whether or not a block arrived — the
+  // answer path is envelope-driven (D35), so CardRow owns the frame and the
+  // Allow/Deny footer and only its BODY becomes the typed chat-* block.
+  if (isCard(m))
+    return (
+      <CardRow
+        m={m}
+        theme={theme}
+        blockCtx={blockCtx}
+        inFlight={inFlight}
+        onAnswer={onAnswer}
+      />
+    )
 
   const body = bodyRender(row)
   if (body.kind === 'blocks') {
-    // Phase 2. Only a settled assistant turn ever reaches here (bodyRender's
-    // law), and the answer is a document: full-width, directly on the
-    // background — no bubble, no border, no chrome. The server already
-    // converted this turn to PortableDoc, so render THOSE blocks through the
-    // very renderer the paper reader uses, speaking the chat register.
+    // Phase 2 — a settled assistant turn, or a tool/todo/thinking row carrying
+    // its typed chat-* block. Either way the answer is a document: full-width,
+    // directly on the background — no bubble, no border, no chrome. The server
+    // already converted this row to PortableDoc, so render THOSE blocks through
+    // the very renderer the paper reader uses, speaking the chat register.
     return (
       <View style={styles.assistantDoc}>
         {body.blocks.map((b, i) => renderBlockNative(b, blockCtx, i))}
@@ -392,8 +444,8 @@ export function TranscriptRow({
     // text it always had — never an empty turn.
     return <Text style={[styles.assistantText, { color: theme.text }]}>{body.text}</Text>
   }
-  // Non-text rows (tool / todo / thinking): one honest muted line — the typed
-  // chat-* block richness lands with S3.
+  // Blockless structural rows (`system`) and any forward-compatible unknown
+  // role: one honest muted provenance line — never hidden, never a crash.
   if (body.text === '') return null
   return (
     <Text numberOfLines={3} style={[styles.systemLine, { color: theme.textMuted }]}>
@@ -402,14 +454,19 @@ export function TranscriptRow({
   )
 }
 
-function CardRow({
+/** An approval / question / plan row. Hook-free like TranscriptRow so jest can
+ * call it directly — that is what pins the card BODY actually rendering the
+ * typed chat-* block rather than the raw markdown. */
+export function CardRow({
   m,
   theme,
+  blockCtx,
   inFlight,
   onAnswer,
 }: {
   m: ChatMessage
   theme: Theme
+  blockCtx: BlockCtx
   inFlight: Record<string, string>
   onAnswer: (requestId: string, decision: 'allow' | 'deny') => void
 }) {
@@ -417,14 +474,23 @@ function CardRow({
   const status = approvalStatus(m)
   const pendingDecision = inFlight[rid]
   const canAnswer = answerable(m) && pendingDecision === undefined
+  // The card BODY is the server's typed chat-approval/question/plan block when
+  // one arrived (the TUI's cardBodyLines twin); a blockless row keeps the plain
+  // markdown it always showed. The frame and footer below are the envelope's,
+  // untouched either way — the block never carries the answer (D35).
+  const blocks = messageBlocks(m)
   return (
     <View style={[styles.card, { borderColor: theme.border, backgroundColor: theme.surface }]}>
       <Text style={[styles.cardTitle, { color: theme.textMuted }]}>
         {CARD_TITLES[m.role] ?? m.role}
       </Text>
-      <Text style={[styles.cardBody, { color: theme.text }]}>
-        {(m.source_markdown ?? '').trim()}
-      </Text>
+      {blocks !== undefined ? (
+        <View>{blocks.map((b, i) => renderBlockNative(b, blockCtx, i))}</View>
+      ) : (
+        <Text style={[styles.cardBody, { color: theme.text }]}>
+          {(m.source_markdown ?? '').trim()}
+        </Text>
+      )}
       {pendingDecision !== undefined ? (
         <Text style={[styles.cardStatus, { color: theme.textMuted }]}>
           answering: {pendingDecision}…

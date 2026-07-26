@@ -97,8 +97,14 @@ export function resolved(m: ChatMessage): boolean {
 // pending with a request_id is answerable; anything else is display-only.
 const CARD_ROLES = new Set(['approval', 'plan', 'question'])
 
+/** The role-level predicate — the role taxonomy reads THIS so the card set is
+ * declared once (render.go's cardRoles map is the twin). */
+export function isCardRole(role: string): boolean {
+  return CARD_ROLES.has(role)
+}
+
 export function isCard(m: ChatMessage): boolean {
-  return CARD_ROLES.has(m.role)
+  return isCardRole(m.role)
 }
 
 /** True for a card row still awaiting a decision (pending + a request_id). */
