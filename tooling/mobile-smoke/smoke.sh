@@ -5,10 +5,20 @@
 # (Cloud session-authed proxy -> instance admin-gated mint) against LIVE
 # guerrilla, then runs the FULL v1 journey AS the minted token:
 #
-#   fleet/cascade walk -> capabilities -> structure admin-floor oracle ->
-#   /v1/tasks/prime?view=brief -> /v1/tasks/events?since=0 ->
-#   SSE welcome frame on /v1/data/listen/production -> one paper read ->
+#   fleet/cascade walk -> capabilities (public-manifest reachability) ->
+#   structure admin-floor oracle -> token-floor control (anonymous
+#   /v1/tasks/prime -> 401) -> /v1/tasks/prime?view=brief as the token ->
+#   /v1/tasks/events?since=0 -> SSE welcome frame on
+#   /v1/data/listen/production -> one paper read ->
 #   chat floor: sessions list + send/approve/interrupt legs.
+#
+# AUTH-FLOOR HONESTY: /v1/capabilities answers 200 with NO Authorization header
+# at all, so an authed 200 there is a LIVENESS check, not a credential proof —
+# it would pass with a revoked, garbage or absent token. That leg now carries an
+# anonymous control probe and is labeled for what it proves (reachability). The
+# credential assertion lives on /v1/tasks/prime, which is probed BOTH ways:
+# anonymous (must fail closed, 401/403) and as the token (must be 200). Only the
+# pair proves the token — that is the shape the teardown recheck already used.
 #
 # The chat send/approve/interrupt legs probe a NONEXISTENT session id and
 # assert the not-found oracle (404, never 401/403): that proves the minted
@@ -212,11 +222,29 @@ trap revoke_minted_token EXIT
 say ""
 say "-- journey as the ${mode} token --"
 
-# capabilities: the manifest-driven cascade root every client boots from.
-if curl -sf "${auth[@]}" "$INSTANCE_URL/v1/capabilities" | jq -e '.commands | length > 0' >/dev/null; then
-  ok "GET /v1/capabilities -> manifest with commands"
+# capabilities: the manifest-driven cascade root every client boots from — and a
+# PUBLIC surface. GET /v1/capabilities answers 200 with no Authorization header
+# at all (verified on guerrilla), so an authed 200 here proves the manifest is
+# REACHABLE and well-formed, never that the credential is good: this leg passes
+# with a revoked, garbage or absent token. The anonymous control probe pins that
+# in the output instead of leaving it implied, and the leg is labeled for what it
+# actually proves. The credential assertion is the anonymous-401 + authed-200
+# pair on /v1/tasks/prime below.
+cap_anon=$(curl -s -o /dev/null -w '%{http_code}' "$INSTANCE_URL/v1/capabilities")
+cap_status=$(curl -s -o /tmp/mobile-smoke-cap.$$ -w '%{http_code}' "${auth[@]}" \
+  "$INSTANCE_URL/v1/capabilities")
+cap_body=$(cat /tmp/mobile-smoke-cap.$$ && rm -f /tmp/mobile-smoke-cap.$$)
+if [ "$cap_status" = "200" ] &&
+  jq -e '.commands | length > 0' <<<"$cap_body" >/dev/null 2>&1; then
+  if [ "$cap_anon" = "200" ]; then
+    ok "GET /v1/capabilities -> manifest with commands; anon control -> 200 too" \
+      "(PUBLIC surface: this leg proves reachability, NOT the token)"
+  else
+    ok "GET /v1/capabilities -> manifest with commands; anon control -> $cap_anon" \
+      "(token-gated on this deployment, so here the leg IS also a credential proof)"
+  fi
 else
-  bad "GET /v1/capabilities"
+  bad "GET /v1/capabilities -> $cap_status (no commands manifest)"
 fi
 
 # structure: /v1/structure is ADMIN-gated (router :require_admin) and the
@@ -242,11 +270,41 @@ case "$structure_status" in
     ;;
 esac
 
-# tasks prime (brief view) — the mobile Tasks tab's first paint.
+# token floor — the assertion /v1/capabilities cannot make. /v1/tasks/prime is
+# token-GATED (verified: 401 anonymously on guerrilla), so probing it with NO
+# Authorization header first is what turns the authed 200 below into a real
+# credential proof: the route demonstrably rejects an anonymous caller AND this
+# token clears it. Without the control, an authed 200 alone cannot tell "the
+# token works" apart from "the route is public" — exactly the hole the old
+# capabilities leg had. Deliberately unauthenticated: no "${auth[@]}" here.
+prime_anon=$(curl -s -o /dev/null -w '%{http_code}' \
+  "$INSTANCE_URL/v1/tasks/prime?view=brief")
+floor="unproven"
+case "$prime_anon" in
+  401 | 403)
+    floor="proven"
+    ok "GET /v1/tasks/prime (no Authorization) -> $prime_anon" \
+      "(token floor exists — so the authed 200 next is a real credential proof)"
+    ;;
+  *)
+    bad "GET /v1/tasks/prime (no Authorization) -> $prime_anon (expected 401/403;" \
+      "if this route answers anonymously, NOTHING in this journey proves the token)"
+    ;;
+esac
+
+# tasks prime (brief view) — the mobile Tasks tab's first paint, AS the token:
+# the authed half of the pair above. The label only claims a credential proof
+# when the control probe actually established the floor.
 prime_status=$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" \
   "$INSTANCE_URL/v1/tasks/prime?view=brief")
 if [ "$prime_status" = "200" ]; then
-  ok "GET /v1/tasks/prime?view=brief -> 200"
+  if [ "$floor" = "proven" ]; then
+    ok "GET /v1/tasks/prime?view=brief -> 200 (the ${mode} token clears the floor" \
+      "the control probe just proved)"
+  else
+    ok "GET /v1/tasks/prime?view=brief -> 200 (route reachable; NOT a credential" \
+      "proof — the anonymous control above did not fail closed)"
+  fi
 else
   bad "GET /v1/tasks/prime?view=brief -> $prime_status (expected 200)"
 fi
