@@ -187,18 +187,44 @@ defmodule BarkparkCloud.Sites.Deploy do
   # make PLAN a no-op — silently serving stale content forever, the worst possible
   # failure for a content-bound site. Distrust vacuous green.
   defp content_rev(%Site{} = site, %Barkpark{} = bp) do
+    case content_rev_probe(site, bp) do
+      {:ok, rev} -> rev
+      :error -> "u" <> (:crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower))
+    end
+  end
+
+  @doc """
+  READ the site's content revision from its box, WITHOUT the fail-open — the
+  honest half of `content_rev/2`.
+
+  `{:ok, rev}` when the box answered its scoped analytics read; `:error` when it
+  did not (box down, no admin token, non-2xx, unbound triple).
+
+  stw9 (charter D57): this exists so a SCHEDULED caller can tell "content
+  unchanged" from "I could not look". `content_rev/2` fail-opens an unreadable
+  revision to a fresh random `"u…"` marker — correct for a human-triggered
+  deploy (never serve stale content), but catastrophic on a timer: a sick box
+  would mint a brand-new `build_id` on EVERY tick, so the idempotent no-op that
+  makes an unforced sweep cheap never fires and the box builds forever.
+  `TemplateFreshnessWorker` probes first and SKIPS the site on `:error`.
+  """
+  @spec content_rev_probe(Site.t(), Barkpark.t()) :: {:ok, String.t()} | :error
+  def content_rev_probe(%Site{} = site, %Barkpark{} = bp) do
     with ws when is_binary(ws) <- site.bootstrap_workspace,
          proj when is_binary(proj) <- site.bootstrap_project,
          ds when is_binary(ds) <- site.bootstrap_dataset,
          path <-
            "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/analytics/#{URI.encode(ds)}",
          {:ok, status, body} when status in 200..299 <- Registry.relay_admin(bp, :get, path, nil) do
-      :sha256
-      |> :crypto.hash(Jason.encode!(body))
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 12)
+      rev =
+        :sha256
+        |> :crypto.hash(Jason.encode!(body))
+        |> Base.encode16(case: :lower)
+        |> binary_part(0, 12)
+
+      {:ok, rev}
     else
-      _ -> "u" <> (:crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower))
+      _ -> :error
     end
   end
 

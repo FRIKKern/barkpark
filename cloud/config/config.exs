@@ -292,7 +292,19 @@ config :barkpark_cloud, Oban,
        # fleet has seen (curator judgment → a human inbox). Runs at 06:00 (quiet,
        # off every on-the-hour + off-peak sweep). max_attempts: 1 + unique daily —
        # a missed tick is harmless and a double-enqueue must not double-send.
-       {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker}
+       {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker},
+       # stw9 (charter D57b): the hourly TEMPLATE-freshness sweep — re-enqueue an
+       # UNFORCED "template-auto" build for every deployed content-bound site, so
+       # a merged template change reaches live sites with no human in the loop.
+       # Unforced means an unchanged site collapses to the (site_id, build_id)
+       # no-op, so a quiet fleet costs one analytics read per site per hour; the
+       # worker additionally SKIPS any site whose content_rev it cannot read (the
+       # fail-open would otherwise mint a fresh build every tick — a build storm
+       # on a 2-core box). Offset to :41 so it never stampedes the :00 / :17 / :07
+       # sweeps, and it rides :site_deploy (concurrency 1) rather than
+       # :maintenance — a sweep that starts builds belongs behind the same serial
+       # gate the debounced auto-deploy uses.
+       {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker}
      ]}
   ]
 
