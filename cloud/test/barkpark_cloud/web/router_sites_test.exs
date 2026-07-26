@@ -675,9 +675,13 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       # the box's webhook changeset validate_required([:name, :url]), so a body
       # without a name 422s and the registration silently fails (the site never
       # auto-rebuilds on publish). Regression guard for that gap.
+      # stw9 (charter D56): registration is now list-then-create-by-name, so the
+      # webhook traffic is a GET (the lookup, empty body) followed by the WRITE.
+      # Match the write specifically — matching any /v1/webhooks/ request would
+      # pick the lookup and decode an empty body.
       wh_req =
         Enum.find(StudioLinkFakeHttpClient.requests(), fn r ->
-          String.contains?(r.url, "/v1/webhooks/")
+          r.method in [:post, :put] and String.contains?(r.url, "/v1/webhooks/")
         end)
 
       assert wh_req, "create must register the content-publish webhook on the box"
