@@ -1309,29 +1309,8 @@ func (m Model) renderPicker() string {
 	default:
 		// Window the ROW BLOCK ONLY by summed PHYSICAL lines (a workflow row is
 		// one navigable entry spanning three lines) — the header above and the
-		// notice/footer below always paint. m.height<=0 (bare test Models, no
-		// WindowSizeMsg yet) falls back to show-all, never an empty paint.
-		start, end := 0, len(rows)
-		if m.height > 0 {
-			counts := rowLineCounts(rows)
-			start = m.followPickTop()
-			end = pickerFitEnd(counts, m.pickerAvail(), start)
-		}
-		if start > 0 {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more above", start)) + "\n")
-		}
-		for i := start; i < end; i++ {
-			cursor := "  "
-			line := rows[i]
-			if i == m.pickCursor {
-				cursor = youStyle.Render("▸ ")
-				line = titleStyle.Render(rows[i])
-			}
-			b.WriteString(cursor + line + "\n")
-		}
-		if below := len(rows) - end; below > 0 {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more below", below)) + "\n")
-		}
+		// notice/footer below always paint.
+		b.WriteString(rowWindowBlock(rows, m.pickerAvail(), m.pickTop, m.pickCursor, m.height <= 0))
 		if len(m.sessions) == 0 {
 			b.WriteString("\n" + dimStyle.Render("No sessions yet — the row above starts your first one."))
 		}
@@ -1345,8 +1324,40 @@ func (m Model) renderPicker() string {
 
 	// The picker hint line (charter D71 fold): advertise the full navigation
 	// vocabulary the roster actually supports — pgup/pgdn + g/G paging shipped in
-	// #5896 but never reached this line, and `?` opens the key-reference overlay.
-	b.WriteString("\n\n" + dimStyle.Render("↑/↓ move · pgup/pgdn · g/G ends · enter attach · n new · r refresh · ? help · q quit"))
+	// #5896 but never reached this line, `?` opens the key-reference overlay, and
+	// `a`/`s` are the two halves of the archive door (dismiss here, restore from
+	// the shelf) — a screen the hint line never names is a screen nobody finds.
+	b.WriteString("\n\n" + dimStyle.Render("↑/↓ move · pgup/pgdn · g/G ends · enter attach · n new · a archive · s shelf · r refresh · ? help · q quit"))
+	return b.String()
+}
+
+// rowWindowBlock paints a windowed, cursor-highlighted row block with the ↑/↓
+// overflow affordances — the shared body of BOTH list screens (the herd picker
+// and the archived shelf), so their windowing and highlight behaviour cannot
+// drift apart. Budgets count PHYSICAL lines, never row indices (a workflow row
+// is one navigable entry spanning three lines). showAll (a bare test Model with
+// no WindowSizeMsg yet, height<=0) paints every row rather than an empty frame.
+func rowWindowBlock(rows []string, avail, top, cursor int, showAll bool) string {
+	start, end := 0, len(rows)
+	if !showAll {
+		counts := rowLineCounts(rows)
+		start = followTop(counts, avail, top, cursor)
+		end = pickerFitEnd(counts, avail, start)
+	}
+	var b strings.Builder
+	if start > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↑ %d more above", start)) + "\n")
+	}
+	for i := start; i < end; i++ {
+		prefix, line := "  ", rows[i]
+		if i == cursor {
+			prefix, line = youStyle.Render("▸ "), titleStyle.Render(rows[i])
+		}
+		b.WriteString(prefix + line + "\n")
+	}
+	if below := len(rows) - end; below > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  ↓ %d more below", below)) + "\n")
+	}
 	return b.String()
 }
 
@@ -1440,10 +1451,28 @@ func pickerFitEnd(counts []int, avail, top int) int {
 	return end
 }
 
-// followPickTop slides the stored viewport top the minimum distance that keeps
-// pickCursor's FULL physical-line span inside the window (cursor-follow). Pure:
-// render calls it for the effective top, the key/sync paths persist it back to
-// m.pickTop so paging accumulates. m.height<=0 means show-all (top 0).
+// followTop slides a stored viewport top the minimum distance that keeps the
+// cursor row's FULL physical-line span inside the window (cursor-follow). Pure
+// and list-agnostic: the picker and the shelf both window through it, so there
+// is ONE cursor-follow law in the package rather than a forked copy per screen.
+func followTop(counts []int, avail, top, cursor int) int {
+	if len(counts) == 0 {
+		return 0
+	}
+	cursor = clamp(cursor, 0, len(counts)-1)
+	top = clamp(top, 0, len(counts)-1)
+	if cursor < top {
+		return cursor
+	}
+	for top < cursor && cursor >= pickerFitEnd(counts, avail, top) {
+		top++
+	}
+	return top
+}
+
+// followPickTop is the herd home's effective viewport top: render calls it for
+// the paint, the key/sync paths persist it back to m.pickTop so paging
+// accumulates. m.height<=0 means show-all (top 0).
 func (m Model) followPickTop() int {
 	if m.height <= 0 {
 		return 0
@@ -1452,17 +1481,7 @@ func (m Model) followPickTop() int {
 	if len(rows) == 0 {
 		return 0
 	}
-	counts := rowLineCounts(rows)
-	avail := m.pickerAvail()
-	cursor := clamp(m.pickCursor, 0, len(rows)-1)
-	top := clamp(m.pickTop, 0, len(rows)-1)
-	if cursor < top {
-		return cursor
-	}
-	for top < cursor && cursor >= pickerFitEnd(counts, avail, top) {
-		top++
-	}
-	return top
+	return followTop(rowLineCounts(rows), m.pickerAvail(), m.pickTop, m.pickCursor)
 }
 
 // pickerPage is one window's worth of navigable rows — the pgup/pgdn stride.
@@ -1489,7 +1508,7 @@ func (m Model) pickerPage() int {
 // (messages · pending · cost · relative age).
 func (m Model) herdRowLine(s SessionSummary, now time.Time) string {
 	row := m.herd.herdRowFor(s.ID)
-	title := strings.TrimSpace(s.Title)
+	title := herdRowTitle(row, s)
 	if title == "" {
 		title = "untitled session"
 	}
@@ -1504,6 +1523,19 @@ func (m Model) herdRowLine(s SessionSummary, now time.Time) string {
 		meta += " · " + age
 	}
 	return fmt.Sprintf("%s %-40s %s", herdPill(row, now), truncate(title, 40), dimStyle.Render(meta))
+}
+
+// herdRowTitle is the row's honest title: the HERD's held title when it holds
+// one, else the cold list's. The herd is the fresher source by construction —
+// herdSeed/herdSnapshot copy every non-blank list/snapshot title into the row,
+// and the live D69h `title` frame lands THERE and nowhere else, so a session
+// renamed after the last list read (the async titler, a rename from Studio)
+// updates the row in place instead of waiting for the next roster refetch.
+func herdRowTitle(row HerdRow, s SessionSummary) string {
+	if t := strings.TrimSpace(row.Title); t != "" {
+		return t
+	}
+	return strings.TrimSpace(s.Title)
 }
 
 // herdPill is the four-state pill (working|blocked|idle|unknown), padded to a
@@ -1552,6 +1584,133 @@ func padCell(s string, w int) string {
 		return s + strings.Repeat(" ", d)
 	}
 	return s
+}
+
+// ── the archived shelf (charter D28) ─────────────────────────────────────────
+
+// renderShelf paints the archived shelf: the sessions `a` dismissed, and the
+// one key that puts them back. Honest states, the same four the picker owns —
+// loading, error-with-retry, EMPTY (a shelf with nothing on it says so, it does
+// not look broken), and the list.
+//
+// Rows wear NO attention pill on purpose. archived_at is dismissal and
+// agent_state is attention, but the server keeps archived sessions out of the
+// fleet snapshot entirely — so a pill here would be stale-by-construction for
+// every row shelved before this process started, i.e. the screen inventing a
+// liveness claim it cannot back. What the shelf shows instead is what it
+// honestly knows: the title, the size of the conversation, its cost, and how
+// long it has been shelved.
+func (m Model) renderShelf() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("bp chat · shelf") + dimStyle.Render("  ·  archived sessions") + "\n")
+	b.WriteString(dimStyle.Render(strings.Repeat("─", clamp(m.width, 8, 80))) + "\n\n")
+
+	switch {
+	case m.shelfLoading && len(m.shelf) == 0:
+		b.WriteString(dimStyle.Render("Loading the shelf…"))
+	case m.shelfErr != "" && len(m.shelf) == 0:
+		b.WriteString(noticeStyle.Render(m.shelfErr) + "\n")
+		b.WriteString(dimStyle.Render("press r to retry · esc back to the herd"))
+	case len(m.shelf) == 0:
+		b.WriteString(dimStyle.Render("Nothing on the shelf — `a` on the herd archives a session."))
+	default:
+		b.WriteString(rowWindowBlock(m.shelfRows(), m.shelfAvail(), m.shelfTop, m.shelfCursor, m.height <= 0))
+		// A REFUSED restore keeps the list AND says so (the model.go law: the row
+		// came back by shelf re-read, never by a guessed re-insert).
+		if m.shelfErr != "" {
+			b.WriteString("\n" + noticeStyle.Render(m.shelfErr))
+		}
+	}
+
+	b.WriteString("\n\n" + dimStyle.Render("↑/↓ move · enter/u restore · esc back · r refresh · ? help · q quit"))
+	return b.String()
+}
+
+// shelfRows is the shelf's navigable line list — one PHYSICAL line per archived
+// session, in the server's own order (last_active_at desc, the same order `bp
+// chat ls --archived` prints). There is no attention sort here: the herd order
+// ranks by what needs you, and nothing on the shelf does.
+func (m Model) shelfRows() []string {
+	rows := make([]string, 0, len(m.shelf))
+	now := m.clock()
+	for _, s := range m.shelf {
+		rows = append(rows, m.shelfRowLine(s, now))
+	}
+	return rows
+}
+
+// shelfRowLine paints one shelved session: the title (the herd's held title when
+// it holds one — herdRowTitle, so a D69h rename reads here too) and the dim meta
+// tail (messages · cost · how long shelved).
+func (m Model) shelfRowLine(s SessionSummary, now time.Time) string {
+	title := herdRowTitle(m.herd.herdRowFor(s.ID), s)
+	if title == "" {
+		title = "untitled session"
+	}
+	meta := fmt.Sprintf("%d msg", s.MessageCount)
+	if c := formatCost(s.TotalCostUSD); c != "" {
+		meta += " · " + c
+	}
+	if age := m.shelvedAge(s, now); age != "" {
+		meta += " · shelved " + age
+	}
+	return fmt.Sprintf("%-40s %s", truncate(title, 40), dimStyle.Render(meta))
+}
+
+// shelvedAge is how long the row has been on the shelf — archived_at when the
+// wire carries it, else the last activity we know of. Never fabricated: an
+// unstamped, never-active row simply shows no age.
+func (m Model) shelvedAge(s SessionSummary, now time.Time) string {
+	if t := parseHerdTime(s.ArchivedAt); !t.IsZero() {
+		return relAge(t, now)
+	}
+	return relAge(parseHerdTime(s.LastActiveAt), now)
+}
+
+// shelfAvail is the shelf's physical-line budget: the frame minus the chrome
+// renderShelf paints outside the row block (title + rule + blank above; two
+// footer lines below), plus one more when a refused-restore notice is up.
+// Floored at 1 so a pathologically short terminal still paints the cursor row.
+func (m Model) shelfAvail() int {
+	chrome := 6
+	if m.shelfErr != "" {
+		chrome++
+	}
+	avail := m.height - chrome
+	if avail < 1 {
+		avail = 1
+	}
+	return avail
+}
+
+// followShelfTop is the shelf's effective viewport top — the SAME cursor-follow
+// law the picker uses (followTop), never a forked copy.
+func (m Model) followShelfTop() int {
+	if m.height <= 0 {
+		return 0
+	}
+	rows := m.shelfRows()
+	if len(rows) == 0 {
+		return 0
+	}
+	return followTop(rowLineCounts(rows), m.shelfAvail(), m.shelfTop, m.shelfCursor)
+}
+
+// shelfPage is one window's worth of shelf rows — the pgup/pgdn stride.
+// Show-all (no height yet) pages the whole shelf, i.e. a full jump.
+func (m Model) shelfPage() int {
+	if m.height <= 0 {
+		return len(m.shelf)
+	}
+	rows := m.shelfRows()
+	if len(rows) == 0 {
+		return 1
+	}
+	n := pickerFitEnd(rowLineCounts(rows), m.shelfAvail(), m.followShelfTop()) - m.followShelfTop()
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 // ── the conversation screen ──────────────────────────────────────────────────

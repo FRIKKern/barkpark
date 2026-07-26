@@ -685,6 +685,136 @@ func TestHerdRowPillAgeCost(t *testing.T) {
 	}
 }
 
+// TestHerdRowTitleFollowsTheTitleFrame is the READ half of the D69h fold: a
+// live `title` frame renames the picker row IN PLACE, without a roster refetch.
+// The paint must read the HERD's held title, not the cold list's — a fold
+// nobody reads would be a stored value with no reader, and the stale row title
+// this frame exists to fix would survive the fix.
+func TestHerdRowTitleFollowsTheTitleFrame(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	m := Model{width: 100, now: func() time.Time { return now }, sessions: []SessionSummary{
+		{ID: "a", Title: "stale list title", MessageCount: 1, AgentState: "idle",
+			AgentStateAt: now.Add(-time.Minute).Format(time.RFC3339Nano)},
+	}}
+	m.herd = herdSeed(m.herd, m.sessions)
+	if !strings.Contains(m.pickerRows()[1], "stale list title") {
+		t.Fatalf("precondition: the cold list title paints, got:\n%q", m.pickerRows()[1])
+	}
+
+	h, ok := applyFleetFrame(m.herd, "title", []byte(`{"session_id":"a","title":"renamed in Studio"}`))
+	if !ok {
+		t.Fatal("the title frame must apply")
+	}
+	m.herd = h
+	row := m.pickerRows()[1]
+	if !strings.Contains(row, "renamed in Studio") {
+		t.Fatalf("the renamed row must paint the fresh title, got:\n%q", row)
+	}
+	if strings.Contains(row, "stale list title") {
+		t.Fatalf("the stale list title must be gone, got:\n%q", row)
+	}
+
+	// A herd row that holds NO title still falls back to the list's (a roster
+	// row the stream and the seed have not reached).
+	if got := herdRowTitle(HerdRow{SessionID: "a"}, SessionSummary{ID: "a", Title: " listed "}); got != "listed" {
+		t.Fatalf("a titleless herd row must fall back to the list title, got %q", got)
+	}
+}
+
+// ── the archived shelf screen ────────────────────────────────────────────────
+
+// TestShelfScreenPaintsRowsAndTheRestoreKey is the shelf's paint proof: the pane
+// can SHOW the shelf — rows with their title, size, cost and how long they have
+// been shelved — and the footer advertises the ONE verb that gets them back. It
+// also pins the two honest edges: an empty shelf says so, and a load error
+// offers the retry rather than a blank frame.
+func TestShelfScreenPaintsRowsAndTheRestoreKey(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	iso := func(t time.Time) string { return t.Format(time.RFC3339Nano) }
+	m := Model{width: 100, height: 24, screen: screenShelf, now: func() time.Time { return now }}
+	m.shelf = []SessionSummary{
+		{ID: "old", Title: "dismissed epic", MessageCount: 12, TotalCostUSD: 3.25,
+			ArchivedAt: iso(now.Add(-2 * time.Hour))},
+		{ID: "bare", MessageCount: 1},
+	}
+
+	out := m.renderShelf()
+	for _, want := range []string{"shelf", "dismissed epic", "12 msg", "$3.25", "shelved 2h", "enter/u restore"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the shelf paint must carry %q:\n%s", want, out)
+		}
+	}
+	// A titleless row is honest, never blank; and no cost is invented.
+	if !strings.Contains(out, "untitled session") {
+		t.Errorf("a titleless shelf row must read \"untitled session\":\n%s", out)
+	}
+	if strings.Count(out, "$") != 1 {
+		t.Errorf("a costless shelf row must not fabricate a cost:\n%s", out)
+	}
+	// No attention pill on the shelf: the fleet snapshot excludes archived
+	// sessions, so a pill here would be stale-by-construction.
+	for _, never := range []string{"● working", "○ idle", "? unknown", "⚠ stalled"} {
+		if strings.Contains(out, never) {
+			t.Errorf("the shelf must not paint an attention pill (%q):\n%s", never, out)
+		}
+	}
+	// The cursor marks the row it will restore.
+	if !strings.Contains(out, youStyle.Render("▸ ")+titleStyle.Render(m.shelfRows()[0])) {
+		t.Errorf("the shelf cursor must mark its row:\n%s", out)
+	}
+
+	empty := Model{width: 100, height: 24, screen: screenShelf, now: func() time.Time { return now }}
+	if got := empty.renderShelf(); !strings.Contains(got, "Nothing on the shelf") {
+		t.Errorf("an empty shelf must say so:\n%s", got)
+	}
+	// A failed READ is prefixed at the source (model.go), so the paint can print
+	// it verbatim — under stale rows that line is the only context there is.
+	failed := empty
+	failed = mustModel(failed.Update(shelfLoadedMsg{err: errArchiveTest}))
+	if got := failed.renderShelf(); !strings.Contains(got, "could not read the shelf — boom") ||
+		!strings.Contains(got, "press r to retry") {
+		t.Errorf("a failed shelf read must say so and offer the retry:\n%s", got)
+	}
+}
+
+// TestShelfRowFollowsTheHerdTitle: the shelf reads the SAME title projection the
+// herd home does (herdRowTitle), so a session renamed while it sits on the shelf
+// is not a mystery row.
+func TestShelfRowFollowsTheHerdTitle(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	m := Model{width: 100, height: 24, screen: screenShelf, now: func() time.Time { return now }}
+	m.shelf = []SessionSummary{{ID: "old", Title: "stale list title"}}
+	m.herd = seedHerd(HerdRow{SessionID: "old", AgentState: "idle", Title: "renamed while shelved"})
+
+	out := m.renderShelf()
+	if !strings.Contains(out, "renamed while shelved") || strings.Contains(out, "stale list title") {
+		t.Errorf("the shelf row must read the herd's held title:\n%s", out)
+	}
+}
+
+// TestShelfWindowsThroughTheSharedLaw: the shelf uses the picker's cursor-follow
+// windowing (followTop + pickerFitEnd), never a forked copy — a long shelf
+// clips with the same ↑/↓ affordances and the cursor row is always in view.
+func TestShelfWindowsThroughTheSharedLaw(t *testing.T) {
+	m := Model{width: 100, height: 12, screen: screenShelf, now: time.Now}
+	for i := 0; i < 30; i++ {
+		m.shelf = append(m.shelf, SessionSummary{ID: fmt.Sprintf("s%02d", i), Title: fmt.Sprintf("row %02d", i)})
+	}
+	m.shelfCursor = 25
+	m.shelfTop = m.followShelfTop()
+
+	out := m.renderShelf()
+	if !strings.Contains(out, "row 25") {
+		t.Errorf("the cursor row must be inside the window:\n%s", out)
+	}
+	if !strings.Contains(out, "more above") {
+		t.Errorf("a scrolled shelf must show the ↑ affordance:\n%s", out)
+	}
+	if strings.Contains(out, "row 00") {
+		t.Errorf("the window must clip the rows above it:\n%s", out)
+	}
+}
+
 // TestTranscriptOrdering proves the transcript stacks settled messages, then
 // optimistic local sends, then the live tail — the reading order a person sees.
 func TestTranscriptOrdering(t *testing.T) {

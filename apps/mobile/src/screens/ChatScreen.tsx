@@ -51,6 +51,7 @@ import {
   herdRowFor,
   herdSeed,
   herdStalled,
+  herdTitleFor,
   type HerdState,
 } from '../chat/herd'
 import type { ChatSessionSummary } from '../chat/wire'
@@ -307,6 +308,10 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
        * fleet connection buys, and reading the summary here instead would make
        * the whole stream invisible. */
       agentState: herdRowFor(herd, id).agentState,
+      /** Same law for the TITLE (D69h): the live `title` frame lands on the herd
+       * row, so a session renamed elsewhere reads fresh here instead of wearing
+       * the list read's stale title until the next refetch. */
+      title: herdTitleFor(herd, id, byId.get(id)?.title),
     }))
   }, [state, herd, nowMs, liveStatus])
 
@@ -439,10 +444,11 @@ export function ChatScreen({ connection }: { connection: InstanceConnection }) {
           <SessionRow
             session={item.session}
             agentState={item.agentState}
+            title={item.title}
             stalled={item.stalled}
             nowMs={nowMs}
             theme={theme}
-            onPress={() => setOpenSession({ id: item.session.id, title: item.session.title })}
+            onPress={() => setOpenSession({ id: item.session.id, title: item.title })}
           />
         </SwipeToArchive>
       )}
@@ -573,6 +579,7 @@ export function stateColors(theme: Theme, agentState: string): { fg: string; lab
 function SessionRow({
   session,
   agentState,
+  title,
   stalled,
   nowMs,
   theme,
@@ -581,6 +588,8 @@ function SessionRow({
   session: ChatSessionSummary
   /** The HERD's state, not the summary's — the live flip is the fresher fact. */
   agentState: string
+  /** The HERD's title (herdTitleFor), not the summary's — same law, D69h. */
+  title: string
   stalled: boolean
   nowMs: number
   theme: Theme
@@ -596,7 +605,7 @@ function SessionRow({
     >
       <View style={styles.rowTop}>
         <Text numberOfLines={2} style={[styles.title, { color: theme.text }]}>
-          {session.title !== undefined && session.title !== '' ? session.title : session.id}
+          {title !== '' ? title : session.id}
         </Text>
         {pending > 0 && (
           <View style={[styles.pendingBadge, { backgroundColor: theme.danger }]}>
