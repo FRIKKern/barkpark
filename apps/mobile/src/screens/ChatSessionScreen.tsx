@@ -109,6 +109,17 @@ export function bodyRender(row: Row): BodyRender {
   return { kind: 'text', text: (m.source_markdown ?? '').trim() }
 }
 
+/** The ctx every settled assistant turn renders under: the SAME block
+ * renderers the paper reader uses, speaking the chat register (charter D22).
+ *
+ * This is a standalone function rather than an inline object literal so the
+ * register binding is REACHABLE by jest. Inlined in the useMemo it was
+ * unpinnable: deleting `register: 'chat'` silently demoted every assistant
+ * turn to the paper serif and the whole suite stayed green. */
+export function chatBlockCtx(theme: Theme, serverBase?: string): BlockCtx {
+  return { theme, serverBase, register: 'chat' }
+}
+
 export function ChatSessionScreen({
   connection,
   sessionId,
@@ -137,10 +148,8 @@ export function ChatSessionScreen({
   const [draft, setDraft] = useState('')
   const listRef = useRef<FlatList<Row>>(null)
 
-  // One ctx for every settled assistant turn: the SAME block renderers the
-  // paper reader uses, speaking the chat register (charter D22).
   const blockCtx = useMemo<BlockCtx>(
-    () => ({ theme, serverBase: connection.projectUrl, register: 'chat' }),
+    () => chatBlockCtx(theme, connection.projectUrl),
     [theme, connection.projectUrl],
   )
 
@@ -314,7 +323,10 @@ export function ChatSessionScreen({
   )
 }
 
-function TranscriptRow({
+/** One transcript row. Hook-free by design (like the block renderers), so the
+ * jest suite can call it directly and walk the element tree it returns —
+ * that is what pins the blocks branch actually being wired up. */
+export function TranscriptRow({
   row,
   theme,
   blockCtx,

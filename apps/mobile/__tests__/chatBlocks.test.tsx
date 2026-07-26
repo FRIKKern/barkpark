@@ -18,7 +18,12 @@
 // renderers return — no native host.
 import type { ReactElement, ReactNode } from 'react'
 
-import { bodyRender, type Row } from '../src/screens/ChatSessionScreen'
+import {
+  bodyRender,
+  chatBlockCtx,
+  TranscriptRow,
+  type Row,
+} from '../src/screens/ChatSessionScreen'
 import { messageBlocks, type ChatMessage } from '../src/chat/wire'
 import { MermaidIsland, islandHtml } from '../src/papers/portabledoc/MermaidIsland'
 import { BLOCK_RENDERERS, renderBlockNative, type BlockCtx } from '../src/papers/portabledoc/blocks'
@@ -206,6 +211,73 @@ describe('chat register', () => {
     const inner = walk(render(nested, chat)).styles.find((s) => s.lineHeight === 26)
     expect(inner).toBeDefined()
     expect(inner?.fontFamily).toBeUndefined() // sans, not the paper serif
+  })
+})
+
+/* ── 2b. the SCREEN-SIDE wiring ─────────────────────────────────────────────── */
+
+// The register laws above all prove what the renderer DOES when handed a chat
+// ctx. These prove the transcript actually hands it one — the gap an
+// adversarial review found: two one-line deletions that left every other test
+// green while removing the whole feature.
+
+describe('screen wiring (the register actually reaches the transcript)', () => {
+  it('chatBlockCtx binds the chat register — deleting it demotes turns to serif', () => {
+    const ctx = chatBlockCtx(theme, 'https://guerrilla.barkpark.cloud')
+    expect(ctx.register).toBe('chat')
+    expect(ctx.serverBase).toBe('https://guerrilla.barkpark.cloud')
+    expect(ctx.theme).toBe(theme)
+    // The consequence, not just the flag: a paragraph rendered under the ctx
+    // the SCREEN builds is sans at the assistant measure, never paper serif.
+    const s = rootStyle(render({ type: 'paragraph', text: 'x' }, ctx))
+    expect(s.fontFamily).toBeUndefined()
+    expect(s.fontSize).toBe(16)
+    expect(s.lineHeight).toBe(26)
+  })
+
+  it('serverBase is optional — a ctx without one still carries the register', () => {
+    expect(chatBlockCtx(theme)).toEqual({ theme, serverBase: undefined, register: 'chat' })
+  })
+
+  it('TranscriptRow RENDERS an assistant turn as blocks, not as text', () => {
+    const row = assistantRow({
+      blocks: [
+        { type: 'heading', level: 2, text: 'Heading' },
+        { type: 'paragraph', text: 'body copy' },
+        { type: 'code', value: 'pnpm test' },
+      ],
+      source_markdown: '## Heading\n\nbody copy\n\n```\npnpm test\n```',
+    })
+    const w = walk(
+      TranscriptRow({
+        row,
+        theme,
+        blockCtx: chatBlockCtx(theme),
+        inFlight: {},
+        onAnswer: () => {},
+      }),
+    )
+    // The rendered tree carries the block content…
+    for (const s of ['Heading', 'body copy', 'pnpm test']) expect(w.text).toContain(s)
+    // …and NOT the raw markdown source it was built from: if the blocks
+    // branch is bypassed the fallback paints the fence markers verbatim.
+    expect(w.text).not.toContain('##')
+    expect(w.text).not.toContain('```')
+    // The chat register reached the leaf through the screen, not just the test.
+    expect(w.styles.some((s) => s.fontSize === 16 && s.lineHeight === 26)).toBe(true)
+  })
+
+  it('TranscriptRow keeps a blockless assistant turn as plain text', () => {
+    const w = walk(
+      TranscriptRow({
+        row: assistantRow({ source_markdown: 'just words' }),
+        theme,
+        blockCtx: chatBlockCtx(theme),
+        inFlight: {},
+        onAnswer: () => {},
+      }),
+    )
+    expect(w.text).toBe('just words')
   })
 })
 
