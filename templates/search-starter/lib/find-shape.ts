@@ -26,6 +26,10 @@ export interface UpstreamSearchJson {
   ms?: number;
   searchEventId?: string;
   correctedTo?: string | null;
+  /** Which retriever ACTUALLY served, reported by the query pipeline — the
+   * server truth `engineUsed` is set from. "postgres" even when indx was
+   * requested but silently substituted (zero-hit recovery, no live dataset). */
+  engineUsed?: string | null;
 }
 
 export function emptyParsed(): ParsedQuery {
@@ -35,7 +39,10 @@ export function emptyParsed(): ParsedQuery {
 export interface ShapeArgs {
   /** The engine the caller ASKED for (drives `indxUnavailable`). */
   engine: SearchEngine;
-  /** The engine actually served (may downgrade indx→postgres on no token). */
+  /** Transport-level fallback for the served engine, used ONLY when the
+   * upstream did not report `engineUsed` (an older API). The server value in
+   * the payload always wins — the client guessing "what actually served" has
+   * shipped dead code twice; the pipeline is the only place that knows. */
   engineUsed: SearchEngine;
   browse: boolean;
   cache: boolean;
@@ -52,13 +59,23 @@ export function shapeFindResponse(
     .map(normalizeHit)
     .filter((h): h is FindHit => h !== null);
 
+  // SERVER TRUTH: prefer the pipeline-reported engine over the caller's echo,
+  // so `indxUnavailable` below is reachable — an indx request the server
+  // silently answered on Postgres (zero-hit recovery) now says so.
+  const served: SearchEngine =
+    json.engineUsed === "indx"
+      ? "indx"
+      : json.engineUsed === "postgres"
+        ? "postgres"
+        : engineUsed;
+
   return {
     mode: browse ? "browse" : "search",
     hits,
     total: typeof json.count === "number" ? json.count : hits.length,
     engine,
-    engineUsed,
-    indxUnavailable: engine === "indx" && engineUsed !== "indx",
+    engineUsed: served,
+    indxUnavailable: engine === "indx" && served !== "indx",
     parsedQuery: browse ? null : (json.parsedQuery ?? emptyParsed()),
     recovery: json.recovery ?? null,
     facets: json.facets ?? null,

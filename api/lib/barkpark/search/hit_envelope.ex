@@ -25,7 +25,8 @@ defmodule Barkpark.Search.HitEnvelope do
 
   The envelope's key set is identical in both views (`documents`, `count`,
   `query`, `parsedQuery`, `highlights`, `recovery`, `correctedTo`, `facets`,
-  `truncation`) so shape-destructuring clients (`find-shape.ts`) never branch.
+  `truncation`, `engineUsed`) so shape-destructuring clients (`find-shape.ts`)
+  never branch.
   Surface-specific extras (`ms`, `seq`, `searchEventId`) are `Map.put` by the
   call sites.
   """
@@ -75,7 +76,12 @@ defmodule Barkpark.Search.HitEnvelope do
       recovery: meta[:recovery],
       correctedTo: meta[:corrected_to],
       facets: meta[:facets],
-      truncation: meta[:truncation]
+      truncation: meta[:truncation],
+      # Which retriever ACTUALLY served (query_pipeline.ex) — "postgres" even
+      # when another engine was requested but silently substituted (zero-hit
+      # recovery, tenant gate, unregistered engine). Additive: clients that
+      # don't read it are unchanged; clients that do stop guessing.
+      engineUsed: meta[:engine_used]
     }
   end
 

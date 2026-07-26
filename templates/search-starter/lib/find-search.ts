@@ -171,6 +171,8 @@ export async function runSearch({
     const json = await rawUpstream(searchUrl(engine, q, browse), signals);
     return shapeFindResponse(json, {
       engine,
+      // Fallback only — the upstream's server-reported `engineUsed` (which
+      // retriever ACTUALLY answered) wins in the shaper.
       engineUsed: engine,
       browse,
       cache: false,

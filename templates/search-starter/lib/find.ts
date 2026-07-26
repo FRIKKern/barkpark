@@ -17,28 +17,12 @@ export type SearchEngine = "postgres" | "indx";
  * `initialEngine` prop default, the `?engine=` URL readers (Finder + the
  * `/api/find` route), so every surface agrees on what "no engine param" means.
  * Postgres: always provisioned wherever Barkpark runs, exact + operator-aware.
- * Indx keeps its pill as the opt-in fuzzy upgrade — on instances where it isn't
- * provisioned, an `engine=indx` request degrades to a Postgres retry with an
- * honest `indxUnavailable` flag (see `runSearch`), never a broken first paint.
+ * The engine PILL is retired (Indx is unprovisionable headlessly, so the UI no
+ * longer advertises it); an explicit `?engine=indx` URL still opts in, and the
+ * server-reported `engineUsed` drives an honest `indxUnavailable` note when
+ * the request was silently served by Postgres instead.
  */
 export const DEFAULT_ENGINE: SearchEngine = "postgres";
-
-export const ENGINES: ReadonlyArray<{
-  id: SearchEngine;
-  label: string;
-  tagline: string;
-}> = [
-  {
-    id: "postgres",
-    label: "Postgres",
-    tagline: "Exact & operator-aware — phrases, exclusions, prefixes.",
-  },
-  {
-    id: "indx",
-    label: "Indx",
-    tagline: "Fuzzy & typo-tolerant — finds it even when you misspell.",
-  },
-];
 
 /** Document types the finder knows how to surface. Every type now has a reader
  * via the unified `/d/[type]/[slug]` detail route — there are no dead-end types
@@ -170,9 +154,12 @@ export interface FindResponse {
   total: number;
   /** Engine the caller asked for. */
   engine: SearchEngine;
-  /** Engine actually used (falls back to postgres when Indx is unavailable). */
+  /** Engine that ACTUALLY served — the server-reported `engineUsed` (the
+   * query pipeline is the only place that knows; a silent zero-hit-recovery
+   * substitution reports postgres here even on an indx request). */
   engineUsed: SearchEngine;
-  /** True when Indx was requested but no token was configured to reach it. */
+  /** True when indx was requested but the answer was served by Postgres —
+   * derived from the server truth, shown as a calm inline note. */
   indxUnavailable: boolean;
   parsedQuery: ParsedQuery | null;
   /** "drop_tokens" | "typo_widen" when a fallback widened the search, else null. */
