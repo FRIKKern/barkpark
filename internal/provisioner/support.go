@@ -29,7 +29,11 @@
 //	           the CP resolver's negative/stale cache of the slug never fails
 //	           a healthy box — hostname/SNI/cert checks stay on the fqdn
 //	content    roster row (provisioning) + ledger-token mint on the PARENT MAIN
-//	           + scrubbed dataset export streamed over SSH + on-box merge-import
+//	           + scrubbed dataset export streamed over SSH + on-box merge-import;
+//	           ws=="default" imports are BRACKETED: seeded-workspace reset +
+//	           admin-token re-mint before, re-mint again after (the baked image
+//	           carries seed docs, and both default-workspace deletes cascade
+//	           the box admin token — see contentDataset)
 //	verify     listener runtime install (LEDGER token only — provider keys are
 //	           NEVER written, PDF-D62/D88) + the server-side roster poll until
 //	           the row truthfully reads idle|working|blocked WITH capacity
@@ -652,11 +656,44 @@ func (r *supportRun) contentDataset(ctx context.Context) error {
 	if err := r.runner.Run(ctx, supportEnsureBpStep()); err != nil {
 		return fmt.Errorf("bp install on box: %w", err)
 	}
+	// ws=="default" is the ONE slug whose import target is PRE-POLLUTED: the
+	// warm image's baked Postgres carries the seed lineage's docs forward
+	// (bake-server-image.sh snapshots the data dir; the lineage was seeded
+	// SEED_PROFILE=demo), so the box's own "default" flunks the merge engine's
+	// fail-closed empty-shell proof (PDS-D9) and the import 409s
+	// workspace_slug_conflict — the third live provision_support failure of
+	// 2026-07-26. Reset: delete the seeded workspace (absent → no-op), then
+	// re-mint the box admin token the delete just cascaded
+	// (api_tokens.workspace_id :delete_all — the go-live mint's
+	// ensure_default_scope also recreates the empty default scope the ensure
+	// step below then 409-tolerates). Template slugs never enter here: their
+	// ensure creates a fresh empty shell and the seeded default is untouched.
+	resetDefault := r.spec.Support.Workspace == cloud.SupportDefaultWorkspaceSlug
+	if resetDefault {
+		if err := r.runner.Run(ctx, cloud.SupportResetDefaultWorkspaceStep()); err != nil {
+			return fmt.Errorf("reset seeded default workspace on box: %w", err)
+		}
+		if err := r.runner.Run(ctx, cloud.SupportAdminTokenStep(r.boxSecrets.AdminToken)); err != nil {
+			return fmt.Errorf("re-mint box admin token after default-workspace reset: %w", err)
+		}
+	}
 	if err := r.runner.Run(ctx, supportEnsureWorkspaceStep(r.spec.Support.Workspace, r.boxSecrets.AdminToken)); err != nil {
 		return fmt.Errorf("ensure workspace on box: %w", err)
 	}
 	if err := r.runner.Run(ctx, supportImportStep(r.spec.Support.Workspace, r.boxSecrets.AdminToken)); err != nil {
 		return fmt.Errorf("on-box merge-import: %w", err)
+	}
+	if resetDefault {
+		// The import's adopt branch deleted the empty "default" shell
+		// IN-TRANSACTION (PDS-D9: adopt_or_refuse_root_slug! → delete_workspace),
+		// cascading the token minted above a SECOND time. Restore it once more so
+		// the credential this chain holds — and reports to the CP at succeed for
+		// encrypted storage + mint_studio_link — is live, verbatim.
+		// ensure_default_scope now resolves slug "default" to the IMPORTED
+		// workspace, so the token lands scoped to the content it governs.
+		if err := r.runner.Run(ctx, cloud.SupportAdminTokenStep(r.boxSecrets.AdminToken)); err != nil {
+			return fmt.Errorf("restore box admin token after merge-import: %w", err)
+		}
 	}
 	return nil
 }
@@ -981,9 +1018,14 @@ sh /opt/barkpark/scripts/install-cli.sh`
 // shell → adopt-delete → import); this step routes every import — any slug —
 // through that same proven branch: POST /api/workspaces {name,slug} with the
 // BOX's own admin token, tolerating 409/422 (already exists) exactly like the
-// template bootstrap's ensureWorkspace, so a re-run converges and ws="default"
-// is byte-neutral. The created shell is empty, so the engine's empty-shell
-// adopt replaces it with the bundle's own workspace row in-transaction.
+// template bootstrap's ensureWorkspace, so a re-run converges. For ws=="default"
+// this step is a guaranteed 409 no-op — but only because contentDataset runs
+// the reset bracket FIRST: the warm image's baked Postgres carries seed docs,
+// so the box's pre-existing "default" was NEVER the empty shell this comment
+// once assumed (three live 409s, 2026-07-26); the reset deletes it and the
+// re-mint's ensure_default_scope recreates it provably empty. The shell is
+// then empty for EVERY slug, so the engine's empty-shell adopt replaces it
+// with the bundle's own workspace row in-transaction.
 func supportEnsureWorkspaceStep(ws, boxAdminToken string) cloud.CaddyStep {
 	// ws is fenced by supportSlugRe ([A-Za-z0-9_-]+) before any step builds, so
 	// it is safe inside both the single-quoted shell string and the JSON body.

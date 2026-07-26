@@ -571,6 +571,99 @@ func TestSupport_WorkspaceEnsureStep(t *testing.T) {
 	if ensureIdx > importIdx {
 		t.Fatalf("the workspace-ensure step must run BEFORE the merge-import (ensure=%d import=%d)", ensureIdx, importIdx)
 	}
+	// The default-workspace reset bracket is GATED to ws=="default": a template
+	// claim's ensure creates a fresh empty shell under a slug no box seeds, so
+	// the baked default stays untouched and NO reset/re-mint may run (each
+	// re-mint revokes + re-inserts the token — pure churn here).
+	for _, s := range runner.steps {
+		joined := strings.Join(s.Argv, " ")
+		if strings.Contains(joined, "Barkpark.Tenancy.delete_workspace") {
+			t.Fatalf("a template-workspace claim must NOT run the default-workspace reset, got: %s", s.Title)
+		}
+		if strings.Contains(joined, "Barkpark.Auth.create_token") {
+			t.Fatalf("a template-workspace claim must NOT re-mint the admin token, got: %s", s.Title)
+		}
+	}
+}
+
+// TestSupport_DefaultWorkspaceResetBracketsImport proves the ws=="default"
+// content-step bracket (the third live provision_support failure of
+// 2026-07-26: the warm image's baked Postgres carries the seed lineage's docs
+// forward, so the box's own "default" workspace flunks the merge engine's
+// fail-closed empty-shell proof and the import 409s workspace_slug_conflict).
+// The harness's stock claim IS a default-workspace claim, so the happy path
+// must run: reset (delete the seeded workspace, tolerate absent) → admin-token
+// re-mint (the reset delete cascaded the box token; ensure_default_scope
+// recreates the empty scope) → ensure-workspace → merge-import → admin-token
+// re-mint AGAIN (the import's PDS-D9 adopt-delete cascaded it a second time —
+// the credential the succeed report carries must be live for mint_studio_link).
+func TestSupport_DefaultWorkspaceResetBracketsImport(t *testing.T) {
+	h := newSupportHarness(t) // stock claim: workspace "default"
+	runner := &supportFakeRunner{capacityJSON: `{"size_class":"standard"}`}
+	var deleted []string
+	w := h.worker(runner, &deleted)
+
+	if _, err := w.RunOnceSupport(context.Background()); err != nil {
+		t.Fatalf("RunOnceSupport: %v", err)
+	}
+	h.mu.Lock()
+	if len(h.succeeds) != 1 {
+		t.Fatalf("want one succeed, got %d (fails: %v)", len(h.succeeds), h.fails)
+	}
+	h.mu.Unlock()
+
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	resetIdx, ensureIdx, importIdx := -1, -1, -1
+	var mintIdxs []int
+	for i, s := range runner.steps {
+		joined := strings.Join(s.Argv, " ")
+		switch {
+		case strings.Contains(joined, "Barkpark.Tenancy.delete_workspace"):
+			resetIdx = i
+			// Tolerate-absent + no token: the reset is DB-direct mix run.
+			if !strings.Contains(joined, `nil -> IO.puts("default workspace already absent`) {
+				t.Fatalf("the reset step must tolerate an absent workspace, got: %s", joined)
+			}
+			if strings.Contains(joined, "bp_admin_boxtoken123") {
+				t.Fatal("the reset step must not carry the box admin token (mix run is DB-direct)")
+			}
+		case strings.Contains(joined, "Barkpark.Auth.create_token"):
+			mintIdxs = append(mintIdxs, i)
+			// The chain's already-minted secret is restored VERBATIM (and redacted).
+			if !strings.Contains(joined, "bp_admin_boxtoken123") {
+				t.Fatal("the re-mint must restore the chain's own admin token value")
+			}
+			redacted := false
+			for _, r := range s.Redact {
+				if r == "bp_admin_boxtoken123" {
+					redacted = true
+				}
+			}
+			if !redacted {
+				t.Fatal("the re-mint step must Redact the box admin token")
+			}
+		case strings.Contains(joined, "POST http://localhost:4000/api/workspaces"):
+			ensureIdx = i
+		case strings.Contains(joined, "workspace import"):
+			importIdx = i
+		}
+	}
+	if resetIdx == -1 {
+		t.Fatal("the default-workspace reset step never ran on a ws=default claim")
+	}
+	if len(mintIdxs) != 2 {
+		t.Fatalf("want exactly 2 admin-token re-mints (post-reset + post-import), got %d at %v", len(mintIdxs), mintIdxs)
+	}
+	if ensureIdx == -1 || importIdx == -1 {
+		t.Fatalf("ensure (%d) and import (%d) must both run", ensureIdx, importIdx)
+	}
+	// The full bracket, strictly ordered:
+	// reset < mint#1 < ensure < import < mint#2.
+	if !(resetIdx < mintIdxs[0] && mintIdxs[0] < ensureIdx && ensureIdx < importIdx && importIdx < mintIdxs[1]) {
+		t.Fatalf("bracket out of order: reset=%d mint1=%d ensure=%d import=%d mint2=%d",
+			resetIdx, mintIdxs[0], ensureIdx, importIdx, mintIdxs[1])
+	}
 }
 
 // TestRunOnceSupport_RosterTimeout_FailsNeverSucceeds proves PDF-D89's honest
