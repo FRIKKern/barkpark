@@ -58,6 +58,7 @@ var helpSections = []helpSection{
 		{"pgdn / pgup", "page down / up one window"},
 		{"enter", "attach the row · new session (top row)"},
 		{"n", "new session"},
+		{"a", "archive the row (dismiss — it keeps running)"},
 		{"r", "refresh the roster"},
 		{"?", "toggle this help"},
 		{"q", "quit"},

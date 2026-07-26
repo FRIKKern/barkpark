@@ -72,6 +72,8 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openPickerRow()
 	case "n":
 		return m, m.createSessionCmd()
+	case "a":
+		return m.archiveCursorRow()
 	case "r":
 		m.loading = true
 		return m, m.loadSessionsCmd()
@@ -85,6 +87,44 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+// archiveCursorRow shelves the session under the cursor (charter D28).
+//
+// The removal is OPTIMISTIC and immediate: the server emits no fleet frame for
+// an archive flip, so nothing else will ever tell this list the row is gone.
+// The cursor is clamped afterwards so the highlight cannot end up past the
+// shortened roster, and the "+ new session" row (index 0) is not a session —
+// pressing `a` there does nothing rather than archiving whatever happens to
+// sort first.
+//
+// The herd row is deliberately LEFT ALONE. archived_at is dismissal; agent_state
+// is attention. A dismissed session that is still working is still working, and
+// scrubbing its herd state on the way out would be this screen inventing a
+// liveness change the server never made.
+func (m Model) archiveCursorRow() (tea.Model, tea.Cmd) {
+	if m.pickCursor <= 0 {
+		return m, nil
+	}
+	order := m.orderedSessions()
+	idx := m.pickCursor - 1
+	if idx >= len(order) {
+		return m, nil
+	}
+	id := order[idx].ID
+
+	kept := make([]SessionSummary, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s.ID != id {
+			kept = append(kept, s)
+		}
+	}
+	m.sessions = kept
+	if m.pickCursor > len(m.sessions) {
+		m.pickCursor = len(m.sessions)
+	}
+	m = m.syncHerdCursorFromIndex()
+	return m, m.archiveSessionCmd(id)
 }
 
 // openPickerRow acts on the cursor row: index 0 is the "+ new session" row, any

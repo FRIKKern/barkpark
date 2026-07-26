@@ -30,12 +30,18 @@ import type { ChatMessage } from '../src/chat/wire'
 import { ChatSessionScreen, TRANSCRIPT_FOLLOW } from '../src/screens/ChatSessionScreen'
 
 // (hoisted by jest above the imports)
+// The factory must cover EVERY api/chat binding the screen's stack reaches —
+// a missing one is not a type error (jest.mock erases the module's shape), it
+// is a runtime "is not a function" inside an effect. t3w2-s7 added the picker
+// discovery read and the choice PATCH; both land here.
 jest.mock('../src/api/chat', () => ({
   getChatSession: jest.fn(),
   sendChatMessage: jest.fn(),
   interruptChat: jest.fn(),
   respondChatApproval: jest.fn(),
   streamChatEvents: jest.fn(),
+  patchChatSession: jest.fn(() => Promise.resolve()),
+  fetchChatCapabilities: jest.fn(() => Promise.resolve(undefined)),
 }))
 jest.mock('react-native-webview', () => ({ WebView: () => null }))
 jest.mock('expo-haptics', () => ({

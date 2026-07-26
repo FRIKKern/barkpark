@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -352,4 +353,142 @@ func TestHelpMouseWheelScrollsOverlay(t *testing.T) {
 	if pnext.(Model).helpScroll != 1 {
 		t.Errorf("wheel over the picker overlay must scroll it, got %d", pnext.(Model).helpScroll)
 	}
+}
+
+// ── the archive key (charter D28, t3w2-s7) ───────────────────────────────────
+
+// TestPickerArchiveKeyRemovesRowOptimistically: `a` on a session row drops it
+// from the roster IMMEDIATELY and fires the archive verb. The optimism is not a
+// latency trick — the server emits NO fleet frame for an archive flip, so this
+// removal is the only signal the list will ever get.
+func TestPickerArchiveKeyRemovesRowOptimistically(t *testing.T) {
+	tr := &fakeTransport{}
+	m := newTestModel(tr)
+	m.sessions = []SessionSummary{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	m.pickCursor = 2 // row index 1 in the attention order
+
+	want := m.orderedSessions()[1].ID
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	nm := next.(Model)
+
+	if len(nm.sessions) != 2 {
+		t.Fatalf("the row must leave the roster on the keypress, got %d rows", len(nm.sessions))
+	}
+	for _, s := range nm.sessions {
+		if s.ID == want {
+			t.Fatalf("session %q must be gone from the roster", want)
+		}
+	}
+	if cmd == nil {
+		t.Fatal("`a` must issue the archive command")
+	}
+	msg := cmd()
+	am, ok := msg.(archivedMsg)
+	if !ok {
+		t.Fatalf("want archivedMsg, got %T", msg)
+	}
+	if am.id != want || len(tr.archived) != 1 || tr.archived[0] != want {
+		t.Fatalf("archive must target %q, got msg=%+v transport=%v", want, am, tr.archived)
+	}
+}
+
+// TestPickerArchiveKeyIgnoresNewSessionRow: cursor 0 is "+ new session", not a
+// session. `a` there must do NOTHING — archiving whatever happens to sort first
+// would be a destructive misfire on the one row that is not a session at all.
+func TestPickerArchiveKeyIgnoresNewSessionRow(t *testing.T) {
+	tr := &fakeTransport{}
+	m := newTestModel(tr)
+	m.sessions = []SessionSummary{{ID: "a"}}
+	m.pickCursor = 0
+
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	if got := len(next.(Model).sessions); got != 1 {
+		t.Fatalf("`a` on the new-session row must not touch the roster, got %d rows", got)
+	}
+	if cmd != nil {
+		t.Fatal("`a` on the new-session row must issue no command")
+	}
+}
+
+// TestPickerArchiveKeyClampsCursor: removing the last row must not strand the
+// cursor past the shortened roster.
+func TestPickerArchiveKeyClampsCursor(t *testing.T) {
+	m := newTestModel(&fakeTransport{})
+	m.sessions = []SessionSummary{{ID: "a"}, {ID: "b"}}
+	m.pickCursor = 2 // the last session row
+
+	nm := mustModel(m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}))
+	if nm.pickCursor > len(nm.sessions) {
+		t.Fatalf("cursor %d must be clamped to the %d remaining rows", nm.pickCursor, len(nm.sessions))
+	}
+}
+
+// TestArchiveLeavesHerdStateAlone is the orthogonality pin: archived_at is
+// DISMISSAL, agent_state is ATTENTION. A dismissed session that is still
+// working is still working — scrubbing or flipping its herd row on the way out
+// would be the client inventing a liveness change the server never made.
+func TestArchiveLeavesHerdStateAlone(t *testing.T) {
+	m := newTestModel(&fakeTransport{})
+	m.sessions = []SessionSummary{{ID: "a", AgentState: "working"}}
+	m.herd = herdSeed(m.herd, m.sessions)
+	m.pickCursor = 1
+	before := m.herd.Rows["a"]
+
+	nm := mustModel(m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}))
+	if got := nm.herd.Rows["a"]; got.AgentState != before.AgentState {
+		t.Errorf("archiving must not touch agent_state: was %q, now %q", before.AgentState, got.AgentState)
+	}
+}
+
+// TestArchiveFailureSurfacesAndRefetches: the archive POST failing must say so
+// AND re-read the roster. The re-read is what puts the row back — re-inserting
+// a remembered row would fight the attention sort and paint a stale state.
+func TestArchiveFailureSurfacesAndRefetches(t *testing.T) {
+	m := newTestModel(&fakeTransport{})
+	next, cmd := m.Update(archivedMsg{id: "a", err: errArchiveTest})
+	nm := next.(Model)
+	if !strings.Contains(nm.pickErr, "archive failed") {
+		t.Errorf("a failed archive must surface honestly, got %q", nm.pickErr)
+	}
+	if cmd == nil {
+		t.Fatal("a failed archive must re-read the roster")
+	}
+	if _, ok := cmd().(sessionsLoadedMsg); !ok {
+		t.Error("the recovery command must be the roster re-read")
+	}
+}
+
+// TestArchiveSuccessIsSilent: the row is already gone, so a successful flip has
+// nothing to say and nothing to re-fetch.
+func TestArchiveSuccessIsSilent(t *testing.T) {
+	m := newTestModel(&fakeTransport{})
+	next, cmd := m.Update(archivedMsg{id: "a"})
+	if got := next.(Model).pickErr; got != "" {
+		t.Errorf("a successful archive must be silent, got %q", got)
+	}
+	if cmd != nil {
+		t.Error("a successful archive must issue no follow-up command")
+	}
+}
+
+// TestHelpAdvertisesArchiveKey spot-pins the new picker row (help rows are
+// spot-pinned by design — the overlay is the canonical key map).
+func TestHelpAdvertisesArchiveKey(t *testing.T) {
+	joined := strings.Join(helpLines(), "\n")
+	if !strings.Contains(joined, "archive the row") {
+		t.Errorf("the help overlay must document the archive key:\n%s", joined)
+	}
+	// Dismissal, not deletion, and not a status change — the intent column is
+	// what stops `a` reading as "kill this session".
+	if !strings.Contains(joined, "keeps running") {
+		t.Error("the archive help row must say the session keeps running")
+	}
+}
+
+var errArchiveTest = errors.New("boom")
+
+// mustModel unwraps a handleKey result. Written to take the handler's two
+// returns directly so a call site reads mustModel(m.handleKey(...)).
+func mustModel(m tea.Model, _ tea.Cmd) Model {
+	return m.(Model)
 }

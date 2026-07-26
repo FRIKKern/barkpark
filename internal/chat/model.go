@@ -215,6 +215,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The POST landed; the reducer turns success into a full refetch (so the
 		// server-resolved card flips) or an honest error notice.
 		return m.apply(AnsweredEvent{RequestID: msg.requestID, Err: msg.err})
+	case archivedMsg:
+		// Success is silent: the row is already gone. A failure surfaces
+		// honestly AND re-reads the roster, which is what puts the row back —
+		// re-inserting a remembered row at a guessed position would fight the
+		// attention sort and paint a stale state.
+		if msg.err != nil {
+			m.pickErr = "archive failed — " + msg.err.Error()
+			return m, m.loadSessionsCmd()
+		}
+		return m, nil
 	case patchedMsg:
 		return m, nil
 	}
@@ -572,6 +582,14 @@ type fleetFrameMsg struct {
 // fleetErrMsg is the fleet stream's terminal give-up (degrades to a notice).
 type fleetErrMsg struct{ err error }
 
+// archivedMsg is the archive POST's completion. Success is silent — the row
+// left the picker the instant the key was pressed; only a failure has anything
+// to say.
+type archivedMsg struct {
+	id  string
+	err error
+}
+
 // sendDoneMsg / interruptDoneMsg / patchedMsg are verb-call completions (their
 // only job is to surface a transport error honestly; the truth is elsewhere).
 type (
@@ -609,5 +627,17 @@ func (m Model) resumeSessionCmd(id string) tea.Cmd {
 	return func() tea.Msg {
 		s, err := tr.GetSession(id, 0)
 		return sessionOpenedMsg{session: s, err: err}
+	}
+}
+
+// archiveSessionCmd shelves one session off the update loop. The row is already
+// gone from m.sessions by the time this runs (the optimistic removal happens in
+// the key handler): there is no fleet frame for an archive flip, so optimism is
+// the only removal signal that will ever arrive, and the refresh this batches
+// with is what reconciles a failed flip back into view.
+func (m Model) archiveSessionCmd(id string) tea.Cmd {
+	tr := m.tr
+	return func() tea.Msg {
+		return archivedMsg{id: id, err: tr.Archive(id)}
 	}
 }

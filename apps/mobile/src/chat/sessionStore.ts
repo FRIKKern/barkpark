@@ -9,6 +9,7 @@ import type { InstanceConnection } from '../api/instance'
 import {
   getChatSession,
   interruptChat,
+  patchChatSession,
   respondChatApproval,
   sendChatMessage,
   streamChatEvents,
@@ -22,6 +23,7 @@ import {
   type ChatEvent,
   type ChatState,
 } from './reducer'
+import type { ChatSession } from './wire'
 
 // The wedge timer's clock (reduce.go ticks at 100ms; 500ms keeps the same 8s
 // semantics with less wakeup churn on a phone).
@@ -119,8 +121,36 @@ export function tailOnlyGrowth(prev: ChatState, next: ChatState): boolean {
   )
 }
 
+/** The session's PERSISTED CHOICES — what the user asked for, kept beside the
+ * reducer rather than inside it.
+ *
+ * This deliberately does NOT live in ChatState. The reducer is the D77 turn
+ * machine: its `model` field is the OBSERVED model off system/init (fact,
+ * empty until a turn streams), and mixing a request into that machine is
+ * exactly the conflation ratified call #5 forbids. So the store carries the
+ * requests, the reducer carries the observation, and the picker renders both
+ * as the two different things they are. */
+export interface SessionChoices {
+  /** Which engine answers — the key the picker vocabulary is looked up under.
+   * '' until the seed GET lands. */
+  provider: string
+  /** The persisted permission-mode request. */
+  mode: string
+  /** The persisted model REQUEST (may differ from the observed model). */
+  modelChoice: string
+  /** The persisted effort REQUEST (no observed counterpart exists). */
+  effortChoice: string
+}
+
+export function emptyChoices(): SessionChoices {
+  return { provider: '', mode: '', modelChoice: '', effortChoice: '' }
+}
+
 export interface SessionSnapshot {
   state: ChatState
+  /** The persisted choices, refreshed by every session GET (seed + every
+   * turn-boundary tail refetch) and written optimistically by setChoice. */
+  choices: SessionChoices
   /** true until the initial full GET resolves (or fails). */
   loading: boolean
   /** initial-load failure — the screen renders error-with-retry. */
@@ -161,6 +191,7 @@ export class ChatSessionStore {
     }, schedule)
     this.snapshot = {
       state: initialChatState(sessionId),
+      choices: emptyChoices(),
       loading: true,
       loadError: undefined,
       transportError: undefined,
@@ -199,7 +230,7 @@ export class ChatSessionStore {
         const session = await getChatSession(this.connection, this.sessionId, 0)
         if (this.stopped || gen !== this.startGen) return
         this.dispatch({ type: 'tailFetched', gen: 0, session })
-        this.set({ loading: false })
+        this.set({ loading: false, choices: choicesFrom(this.snapshot.choices, session) })
       } catch (err) {
         if (this.stopped || gen !== this.startGen) return
         this.set({ loading: false, loadError: message(err) })
@@ -250,6 +281,32 @@ export class ChatSessionStore {
     this.dispatch({ type: 'answer', requestId, decision })
   }
 
+  /** Writes one picker choice: optimistic locally, PATCHed to the server.
+   *
+   * Optimism is the right default here because the write is cheap and its
+   * truth is re-asserted for free — every turn-boundary tail refetch overwrites
+   * `choices` from the server row, so a rejected PATCH self-corrects within one
+   * turn without a poll of its own. A failure still surfaces honestly as a
+   * transportError AND rolls the field back immediately, so a dead write never
+   * leaves the sheet claiming a choice the server refused. */
+  setChoice(key: keyof SessionChoices, value: string): void {
+    if (key === 'provider') return // provider is server truth, never a client write
+    const before = this.snapshot.choices
+    this.set({ transportError: undefined, choices: { ...before, [key]: value } })
+    const field =
+      key === 'mode' ? 'mode' : key === 'modelChoice' ? 'model_choice' : 'effort_choice'
+    patchChatSession(this.connection, this.sessionId, { [field]: value }).catch(
+      (err: unknown) => {
+        if (this.stopped) return
+        // Roll back to the value the server still holds, then say so.
+        this.set({
+          choices: { ...this.snapshot.choices, [key]: before[key] },
+          transportError: `could not set ${field} — ${message(err)}`,
+        })
+      },
+    )
+  }
+
   private dispatch(ev: ChatEvent): void {
     if (this.stopped) return
     const prev = this.snapshot.state
@@ -264,7 +321,13 @@ export class ChatSessionStore {
     switch (eff.type) {
       case 'fetchTail':
         getChatSession(this.connection, this.sessionId, eff.sinceSeq)
-          .then((session) => this.dispatch({ type: 'tailFetched', gen: eff.gen, session }))
+          .then((session) => {
+            // The turn-boundary refetch re-asserts server truth over the
+            // optimistic picker writes — the same "the server settles it"
+            // discipline the TUI's ctrl+p flip already runs on.
+            if (!this.stopped) this.set({ choices: choicesFrom(this.snapshot.choices, session) })
+            this.dispatch({ type: 'tailFetched', gen: eff.gen, session })
+          })
           .catch((err: unknown) =>
             this.dispatch({ type: 'tailFetched', gen: eff.gen, error: message(err) }),
           )
@@ -306,4 +369,21 @@ export class ChatSessionStore {
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** Folds a session read into the held choices. A blank/absent wire value KEEPS
+ * the held one rather than erasing it: the `?since=` tail refetch is a partial
+ * read of the same row, and an omitted key there means "unchanged", never
+ * "cleared". */
+function choicesFrom(held: SessionChoices, session: ChatSession): SessionChoices {
+  const pick = (wire: string | undefined, current: string): string => {
+    const v = (wire ?? '').trim()
+    return v !== '' ? v : current
+  }
+  return {
+    provider: pick(session.provider, held.provider),
+    mode: pick(session.mode, held.mode),
+    modelChoice: pick(session.model_choice, held.modelChoice),
+    effortChoice: pick(session.effort_choice, held.effortChoice),
+  }
 }

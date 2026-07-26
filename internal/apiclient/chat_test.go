@@ -667,3 +667,81 @@ func TestChatEventsPublicExit(t *testing.T) {
 		t.Errorf("exit frame must not carry stderr vocabulary, got %q", gotData)
 	}
 }
+
+// TestArchiveChatSessionVerbs is the archive wire pin (charter D28). Archive is
+// a lifecycle ACTION with its own POST routes — NOT a key on the PATCH
+// allowlist — so these assert the method and the exact path, both directions.
+func TestArchiveChatSessionVerbs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(*Client) (ChatSession, error)
+		want string
+	}{
+		{"archive", func(c *Client) (ChatSession, error) { return c.ArchiveChatSession("s1") },
+			"/v1/chat/sessions/s1/archive"},
+		{"unarchive", func(c *Client) (ChatSession, error) { return c.UnarchiveChatSession("s1") },
+			"/v1/chat/sessions/s1/unarchive"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			var gotBody []byte
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				wantBearer(t, r)
+				gotMethod, gotPath = r.Method, r.URL.Path
+				gotBody, _ = io.ReadAll(r.Body)
+				_, _ = io.WriteString(w, `{"id":"s1","title":"T","status":"active"}`)
+			}))
+			defer srv.Close()
+
+			got, err := tc.call(newChatClient(srv.URL))
+			if err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if gotMethod != http.MethodPost || gotPath != tc.want {
+				t.Errorf("got %s %s, want POST %s", gotMethod, gotPath, tc.want)
+			}
+			// A verb, not a field write: no JSON body rides along.
+			if len(gotBody) != 0 {
+				t.Errorf("archive verbs must send no body, got %q", gotBody)
+			}
+			// The 200 carries the refreshed session; callers that want it get it.
+			if got.ID != "s1" || got.Title != "T" {
+				t.Errorf("the 200 must decode into the session, got %+v", got)
+			}
+		})
+	}
+}
+
+// TestArchiveChatSessionNotFoundOracle: a foreign tenant's session and a
+// missing id are DELIBERATELY indistinguishable (both 404). The client must
+// surface that as an error so an optimistic caller can roll back — never
+// swallow it into a zero-value success.
+func TestArchiveChatSessionNotFoundOracle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":{"code":"not_found"}}`)
+	}))
+	defer srv.Close()
+
+	if _, err := newChatClient(srv.URL).ArchiveChatSession("nope"); err == nil {
+		t.Fatal("a 404 must be an error — a silent success would strand the row off both shelves")
+	}
+}
+
+// TestArchiveChatSessionEscapesID: ids reach the path escaped, so a hostile or
+// merely awkward id cannot climb out of its route segment.
+func TestArchiveChatSessionEscapesID(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		_, _ = io.WriteString(w, `{"id":"x"}`)
+	}))
+	defer srv.Close()
+
+	if _, err := newChatClient(srv.URL).UnarchiveChatSession("a/b"); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+	if gotPath != "/v1/chat/sessions/a%2Fb/unarchive" {
+		t.Errorf("id must be path-escaped, got %q", gotPath)
+	}
+}
