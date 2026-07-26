@@ -72,10 +72,24 @@ export const roles = {
    * renders turn blocks at the same measure (only the face moves). */
   chatBody: { fontSize: 16, lineHeight: 26 },
   /** The transcript heading register (S3): an assistant turn is a few hundred
-   * words, so the paper display head would out-shout the screen. Values are
-   * the shipped fontSize × 1.3 law, rounded — the same law paperH1/H2/H3
-   * follow. */
-  chatH1: { fontSize: 20, lineHeight: 26 },
+   * words, so the paper display head would out-shout the screen. All three
+   * are the shipped fontSize × 1.3 law, rounded — the same law paperH1/H2/H3
+   * follow. Each level answers the admission rule differently, so each is
+   * spelled out:
+   *
+   *   chatH1 does NOT diverge from the chrome scale — 20 × 1.3 IS xl's 26 —
+   *     so it earns a NAME but not its own numbers, and is an ALIAS. Writing
+   *     `{ fontSize: 20, lineHeight: 26 }` here would have been a duplicated
+   *     pair with no licence, exactly what the admission rule forbids.
+   *   chatH2 coincides with paperH3's pair (both 18 × 1.3). It keeps its own
+   *     numbers under the same divergence licence sectionTitle claims: a
+   *     transcript heading and a printed-page heading are different
+   *     registers and are free to move apart.
+   *   chatH3 DOES diverge: 16 × 1.3 = 20.8 → 21, where the lg step at the
+   *     same size carries 22. The heading law and the chrome ladder disagree
+   *     by a pixel at 16, and the heading law wins inside a heading.
+   */
+  chatH1: scale.xl,
   chatH2: { fontSize: 18, lineHeight: 23 },
   chatH3: { fontSize: 16, lineHeight: 21 },
   /** The mono measure of a chat APPARATUS row — a diff line, a todo's active

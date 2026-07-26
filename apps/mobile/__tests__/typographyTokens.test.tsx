@@ -97,7 +97,7 @@ describe('the token module is total', () => {
   it('every chrome step carries an explicit lead', () => {
     for (const [name, step] of Object.entries(scale)) {
       expect(typeof step.fontSize).toBe('number')
-      expect(typeof step.lineHeight).toBe(`number`)
+      expect(typeof step.lineHeight).toBe('number')
       // A lead below the size is a typo, not a design; above 1.6 is a bug.
       const ratio = step.lineHeight / step.fontSize
       expect({ name, ok: ratio > 1 && ratio < 1.6 }).toEqual({ name, ok: true })
@@ -119,6 +119,26 @@ describe('the token module is total', () => {
 /* ── 3. the heading law ──────────────────────────────────────────────────── */
 
 describe('heading roles ARE the ×1.3 law', () => {
+  // The ×1.3 assertion below is a RELATION, not a value: it holds for 26/34
+  // and equally for 28/36. Since S8 made typography.ts the sole owner of the
+  // app's rendered geometry, a heading register pinned only by its own ratio
+  // is not pinned at all — the whole reader could be scaled up a step and
+  // every test would stay green. These are the absolute values the paper and
+  // chat registers shipped (blocks.tsx REGISTERS before the migration); they
+  // are the thing a screenshot would have caught.
+  it('the heading roles keep the sizes the registers shipped', () => {
+    expect([roles.paperH1, roles.paperH2, roles.paperH3].map((s) => [s.fontSize, s.lineHeight])).toEqual([
+      [26, 34],
+      [22, 29],
+      [18, 23],
+    ])
+    expect([roles.chatH1, roles.chatH2, roles.chatH3].map((s) => [s.fontSize, s.lineHeight])).toEqual([
+      [20, 26],
+      [18, 23],
+      [16, 21],
+    ])
+  })
+
   it('paper and chat heading leads are the size × 1.3, rounded', () => {
     for (const step of [
       roles.paperH1,
