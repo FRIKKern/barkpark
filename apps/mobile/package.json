@@ -14,6 +14,7 @@
   "dependencies": {
     "@barkpark/core": "workspace:*",
     "@barkpark/react": "workspace:*",
+    "@legendapp/list": "3.3.3",
     "expo": "~57.0.8",
     "expo-haptics": "~57.0.1",
     "expo-sqlite": "~57.0.1",

@@ -4,11 +4,13 @@
 // local echoes (queued-badged mid-turn, D12), and the live streaming tail
 // (D9). Cards (approval / plan / question) answer through the same
 // allow/deny-only contract as the TUI and Studio — one row, one truth.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useMemo, useRef, useState } from 'react'
+import type { ReactElement } from 'react'
 import {
   ActivityIndicator,
-  FlatList,
   KeyboardAvoidingView,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   StyleSheet,
@@ -16,9 +18,32 @@ import {
   TextInput,
   View,
 } from 'react-native'
+// There is NO root export on @legendapp/list (main/module/types are null) —
+// a bare '@legendapp/list' import fails at the first build, not at runtime.
+import { LegendList, type LegendListRef } from '@legendapp/list/react-native'
 
 import type { InstanceConnection } from '../api/instance'
 import type { StreamFailure, StreamStatus } from '../api/chat'
+import {
+  contentMark,
+  distanceFromEnd,
+  FOLLOW_THRESHOLD,
+  initialFollowState,
+  reduceFollow,
+  showJumpPill,
+  type FollowState,
+} from '../chat/followScroll'
+import {
+  foldWorkLog,
+  initialWorkLogFold,
+  observeGroups,
+  toggleWorkLog,
+  workLogExpanded,
+  workLogGroups,
+  workLogSummary,
+  type WorkLogGroup,
+  type WorkLogRow,
+} from '../chat/workLog'
 import {
   answerable,
   approvalStatus,
@@ -31,6 +56,7 @@ import {
 import { useChatSession } from '../chat/useChatSession'
 import { renderBlockNative, type BlockCtx } from '../papers/portabledoc/blocks'
 import type { Block } from '../papers/portabledoc/model'
+import { haptic } from '../ui/haptics'
 import { useTheme, type Theme } from '../ui/theme'
 
 const CARD_TITLES: Record<string, string> = {
@@ -75,10 +101,82 @@ export function headerStatus(
   }
 }
 
+/** THE RATIFIED FOLLOW CONFIG, hoisted out of the JSX so it is reachable.
+ *
+ * `on` is absent DELIBERATELY and that absence is load-bearing: LegendList
+ * treats an omitted `on` as ALL triggers, but an explicit one as an opt-in
+ * list — so writing `on: {dataChange: true, itemLayout: true}` silently drops
+ * footerLayout, the re-pin that catches a row measuring LATE. MermaidIsland
+ * reports its height asynchronously by postMessage, so a diagram settling
+ * after layout is exactly the case that would otherwise strand the tail
+ * off-screen. A config that looks more explicit would be strictly weaker,
+ * which is why the absence gets a test rather than a comment alone. */
+export const TRANSCRIPT_FOLLOW: { animated: boolean } = { animated: true }
+
+/** Row height hint for the boot frame only — the measured heights replace it.
+ * Sized for a short assistant paragraph, the transcript's commonest row. */
+export const ESTIMATED_ROW_HEIGHT = 180
+
 export type Row =
   | { key: string; kind: 'message'; message: ChatMessage }
   | { key: string; kind: 'local'; content: string; queued: boolean }
   | { key: string; kind: 'tail'; text: string }
+  /** A work-log disclosure header — the collapsed stand-in for a run of
+   * apparatus rows (workLog.ts owns which rows those are and whether the run
+   * is open; this row is only its handle). */
+  | { key: string; kind: 'log'; group: WorkLogGroup; open: boolean }
+
+/** A row's role in the persisted vocabulary. Local echoes and the streaming
+ * tail are the user's and the assistant's own words respectively; the log
+ * header is chrome and belongs to no role, which is exactly why it never folds
+ * into a group of its own. */
+export function rowRole(row: Row): string {
+  switch (row.kind) {
+    case 'message':
+      return row.message.role
+    case 'local':
+      return 'user'
+    case 'tail':
+      return 'assistant'
+    case 'log':
+      return 'log'
+  }
+}
+
+/** The projection workLog.ts folds over — the screen's Row union stays here,
+ * the pure module never learns about it. */
+export function workLogRows(rows: readonly Row[]): WorkLogRow[] {
+  return rows.map((row) => ({ key: row.key, role: rowRole(row) }))
+}
+
+// ── row assembly (the memo's other half) ─────────────────────────────────────
+//
+// These three builders exist SEPARATELY, and the screen memoizes them
+// separately, for one reason: memo(TranscriptRow) is INERT unless a settled
+// row's props survive a tail tick unchanged. Building every row inside one
+// useMemo keyed on `state.tail` re-minted the whole array on every token
+// frame, so each settled row got a brand-new `row` object and re-rendered
+// anyway — the memo would have been decoration. Splitting on the reducer's own
+// identity boundaries (state.messages and state.local keep their array
+// identity across a delta; only state.tail changes) is what makes the
+// memoization real, and assembleRows is where the law is provable.
+
+export function messageRows(messages: readonly ChatMessage[]): Row[] {
+  return messages.map((message) => ({ key: `m-${message.seq}`, kind: 'message', message }))
+}
+
+export function localRows(local: readonly { content: string; queued: boolean }[]): Row[] {
+  return local.map((l, i) => ({ key: `l-${i}`, kind: 'local', content: l.content, queued: l.queued }))
+}
+
+/** Concatenate the pre-built halves with the live tail. The message and local
+ * rows are passed through BY REFERENCE — a tail tick mints exactly one new row
+ * object (the tail's) and leaves every settled row's identity alone. */
+export function assembleRows(settled: Row[], echoes: Row[], tail: string): Row[] {
+  const out: Row[] = [...settled, ...echoes]
+  if (tail !== '') out.push({ key: 'tail', kind: 'tail', text: tail })
+  return out
+}
 
 // ── the two-phase floor (charter D8/D9) ──────────────────────────────────────
 
@@ -141,6 +239,9 @@ export function rendersBlocks(role: string): boolean {
 export function bodyRender(row: Row): BodyRender {
   if (row.kind === 'tail') return { kind: 'text', text: row.text }
   if (row.kind === 'local') return { kind: 'text', text: row.content }
+  // A log header stands for rows it does not contain, so its body is the
+  // count and nothing more (workLogSummary owns that wording).
+  if (row.kind === 'log') return { kind: 'text', text: workLogSummary(row.group) }
   const m = row.message
   if (rendersBlocks(m.role)) {
     const blocks = messageBlocks(m)
@@ -186,41 +287,117 @@ export function ChatSessionScreen({
     retry,
   } = useChatSession(connection, sessionId)
   const [draft, setDraft] = useState('')
-  const listRef = useRef<FlatList<Row>>(null)
+  const listRef = useRef<LegendListRef>(null)
+  const [follow, setFollow] = useState<FollowState>(initialFollowState)
+  const [fold, setFold] = useState(initialWorkLogFold)
 
   const blockCtx = useMemo<BlockCtx>(
     () => chatBlockCtx(theme, connection.projectUrl),
     [theme, connection.projectUrl],
   )
 
-  const rows = useMemo<Row[]>(() => {
-    const out: Row[] = state.messages.map((m) => ({
-      key: `m-${m.seq}`,
-      kind: 'message',
-      message: m,
-    }))
-    state.local.forEach((l, i) => {
-      out.push({ key: `l-${i}`, kind: 'local', content: l.content, queued: l.queued })
-    })
-    if (state.tail !== '') out.push({ key: 'tail', kind: 'tail', text: state.tail })
-    return out
-  }, [state.messages, state.local, state.tail])
+  // Three memos, not one — see assembleRows: the split is what keeps a settled
+  // row's identity (and therefore memo(TranscriptRow)) alive across a tail tick.
+  const settledRows = useMemo(() => messageRows(state.messages), [state.messages])
+  const echoRows = useMemo(() => localRows(state.local), [state.local])
+  const rows = useMemo(
+    () => assembleRows(settledRows, echoRows, state.tail),
+    [settledRows, echoRows, state.tail],
+  )
 
-  // Follow mode: keep the newest content in view as rows/tail grow.
-  const scrollDown = useCallback(() => {
-    listRef.current?.scrollToEnd({ animated: false })
+  // The work log, folded on the D77 clock. `gen` is the reducer's own turn
+  // generation, read and never written (workLog.ts is a read-only consumer).
+  const groups = useMemo(() => workLogGroups(workLogRows(rows)), [rows])
+  // Stamp the clock onto any newly-appeared group and PERSIST it — during
+  // render, which is React's documented "adjust state while rendering" (the
+  // update is conditional and converges in one pass). Deriving it instead was
+  // a live bug: re-running observeGroups against the un-persisted fold would
+  // re-stamp every group with the CURRENT gen on every render, so a group's
+  // birth gen chased the clock and nothing ever folded.
+  const observed = observeGroups(fold, groups, state.gen)
+  if (observed !== fold) setFold(observed)
+  const isOpen = useCallback(
+    (key: string) => workLogExpanded(observed, key, state.gen),
+    [observed, state.gen],
+  )
+  const listRows = useMemo(
+    () =>
+      foldWorkLog<Row>(rows, groups, (row) => row.key, isOpen, (group, open) => ({
+        key: `log-${group.key}`,
+        kind: 'log',
+        group,
+        open,
+      })),
+    [rows, groups, isOpen],
+  )
+
+  const toggleLog = useCallback(
+    (key: string) => {
+      haptic('disclosureToggle')
+      setFold((f) => toggleWorkLog(observeGroups(f, groups, state.gen), key, state.gen))
+    },
+    [groups, state.gen],
+  )
+
+  // Follow mode. The LIST does the pinning (maintainScrollAtEnd); this only
+  // tracks whether the user is following, so the pill knows whether it has
+  // anything to offer. Disengagement is structural — the user scrolled — and
+  // never a timer, which is what the two removed scrollToEnd yanks were.
+  // How much content is below, right now. The pill compares this against the
+  // mark follow was lost at — so "new content arrived" needs no observer, no
+  // effect and no counter.
+  const mark = contentMark(rows.length, state.tail.length)
+
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent
+      setFollow((f) =>
+        reduceFollow(f, {
+          type: 'scrolled',
+          distanceFromEnd: distanceFromEnd({
+            contentHeight: contentSize.height,
+            offsetY: contentOffset.y,
+            viewportHeight: layoutMeasurement.height,
+          }),
+          viewportHeight: layoutMeasurement.height,
+          mark,
+        }),
+      )
+    },
+    [mark],
+  )
+
+  /** The ONE re-engage path — the pill and send share it, and nothing else in
+   * this file scrolls the transcript. */
+  const reFollow = useCallback((cause: 'jumped' | 'sent') => {
+    setFollow((f) => reduceFollow(f, { type: cause }))
+    listRef.current?.scrollToEnd({ animated: true })
   }, [])
-  useEffect(() => {
-    const t = setTimeout(scrollDown, 50)
-    return () => clearTimeout(t)
-  }, [rows.length, state.tail, scrollDown])
+
+  const onJump = useCallback(() => {
+    haptic('disclosureToggle')
+    reFollow('jumped')
+  }, [reFollow])
 
   const onSend = useCallback(() => {
     const content = draft.trim()
     if (content === '') return
     setDraft('')
     send(content)
-  }, [draft, send])
+    reFollow('sent')
+  }, [draft, send, reFollow])
+
+  const renderItem = useCallback(
+    ({ item }: { item: Row }) =>
+      transcriptItem(item, {
+        theme,
+        blockCtx,
+        inFlight: state.answerInFlight,
+        onAnswer: answer,
+        onToggleLog: toggleLog,
+      }),
+    [theme, blockCtx, state.answerInFlight, answer, toggleLog],
+  )
 
   const title = state.title !== '' ? state.title : (sessionTitle ?? sessionId)
   const turnActive = state.phase !== 'idle'
@@ -251,12 +428,17 @@ export function ChatSessionScreen({
     )
   } else {
     body = (
-      <FlatList
+      <LegendList
         ref={listRef}
-        data={rows}
-        keyExtractor={(row) => row.key}
+        data={listRows}
+        keyExtractor={(row: Row) => row.key}
+        dataKey={sessionId}
+        estimatedItemSize={ESTIMATED_ROW_HEIGHT}
+        initialScrollAtEnd
+        maintainScrollAtEnd={TRANSCRIPT_FOLLOW}
+        maintainScrollAtEndThreshold={FOLLOW_THRESHOLD}
+        onScroll={onScroll}
         contentContainerStyle={styles.listContent}
-        onContentSizeChange={scrollDown}
         ListEmptyComponent={
           <View style={styles.center}>
             <Text style={[styles.muted, { color: theme.textMuted }]}>
@@ -264,15 +446,7 @@ export function ChatSessionScreen({
             </Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <TranscriptRow
-            row={item}
-            theme={theme}
-            blockCtx={blockCtx}
-            inFlight={state.answerInFlight}
-            onAnswer={answer}
-          />
-        )}
+        renderItem={renderItem}
       />
     )
   }
@@ -317,7 +491,26 @@ export function ChatSessionScreen({
         </View>
       </View>
 
-      <View style={styles.transcript}>{body}</View>
+      <View style={styles.transcript}>
+        {body}
+        {/* The pill floats OVER the transcript and nothing else does — the
+            header stays an opaque plain View on the background (D29's
+            tripwire: a translucent or absolutely-positioned header re-opens
+            t3code's 922-line automatic-inset patch, which this app is
+            unpatched precisely because it does not need). */}
+        {showJumpPill(follow, mark) && (
+          <View style={styles.jumpLayer} pointerEvents="box-none">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Jump to the latest message"
+              onPress={onJump}
+              style={[styles.jumpPill, { backgroundColor: theme.surface, borderColor: theme.border }]}
+            >
+              <Text style={[styles.jumpGlyph, { color: theme.text }]}>↓</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
 
       {notice !== undefined && (
         <Text style={[styles.notice, { color: theme.textMuted }]}>{notice}</Text>
@@ -363,6 +556,23 @@ export function ChatSessionScreen({
   )
 }
 
+/** Everything a row needs that is not the row — hoisted into one named shape
+ * so the screen's renderItem has a single memo dependency to keep stable. */
+export interface RowCtx {
+  theme: Theme
+  blockCtx: BlockCtx
+  inFlight: Record<string, string>
+  onAnswer: (requestId: string, decision: 'allow' | 'deny') => void
+  /** The work-log disclosure. Optional because only the `log` row uses it and
+   * every other row must stay callable from jest with the props it always
+   * took — the hook-free contract cuts both ways. */
+  onToggleLog?: (groupKey: string) => void
+}
+
+export interface TranscriptRowProps extends RowCtx {
+  row: Row
+}
+
 /** One transcript row. Hook-free by design (like the block renderers), so the
  * jest suite can call it directly and walk the element tree it returns —
  * that is what pins the blocks branch actually being wired up. */
@@ -372,13 +582,27 @@ export function TranscriptRow({
   blockCtx,
   inFlight,
   onAnswer,
-}: {
-  row: Row
-  theme: Theme
-  blockCtx: BlockCtx
-  inFlight: Record<string, string>
-  onAnswer: (requestId: string, decision: 'allow' | 'deny') => void
-}) {
+  onToggleLog,
+}: TranscriptRowProps) {
+  if (row.kind === 'log') {
+    // The turn's labour, behind one quiet handle. Deliberately in the mono
+    // apparatus register the chat-* rows speak (13/19), not the prose one —
+    // this is chrome about the answer, never the answer.
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: row.open }}
+        accessibilityLabel={`${row.open ? 'Hide' : 'Show'} the work log — ${workLogSummary(row.group)}`}
+        hitSlop={10}
+        onPress={() => onToggleLog?.(row.group.key)}
+        style={styles.logHeader}
+      >
+        <Text style={[styles.logHeaderText, { color: theme.textMuted }]}>
+          {`${row.open ? '▾' : '▸'} ${workLogSummary(row.group)}`}
+        </Text>
+      </Pressable>
+    )
+  }
   if (row.kind === 'local') {
     return (
       <View style={[styles.userBubble, { backgroundColor: theme.bubble }]}>
@@ -452,6 +676,38 @@ export function TranscriptRow({
       {m.role}: {body.text}
     </Text>
   )
+}
+
+/** THE MEMO COMPARATOR, written out rather than left to memo's default shallow
+ * compare — because the whole point is that it is checkable. Every prop is
+ * identity-compared, which is only sound because each one is built to survive
+ * a tail tick: `row` comes from the split row memos (assembleRows), `blockCtx`
+ * and the two handlers are useMemo/useCallback-stable, and `inFlight` is the
+ * reducer's answerInFlight, which a delta frame never re-mints.
+ *
+ * Returning TRUE means React SKIPS the re-render. */
+export function transcriptRowPropsEqual(a: TranscriptRowProps, b: TranscriptRowProps): boolean {
+  return (
+    a.row === b.row &&
+    a.theme === b.theme &&
+    a.blockCtx === b.blockCtx &&
+    a.inFlight === b.inFlight &&
+    a.onAnswer === b.onAnswer &&
+    a.onToggleLog === b.onToggleLog
+  )
+}
+
+/** What the LIST renders. TranscriptRow stays exported as the raw function so
+ * jest keeps calling it directly; the list goes through this memo, and
+ * transcriptItem is the seam that proves it does. */
+export const MemoTranscriptRow = memo(TranscriptRow, transcriptRowPropsEqual)
+
+/** One list item. The screen's renderItem is a useCallback around THIS, so the
+ * "settled rows do not re-render on tail ticks" law has a reachable name: an
+ * edit that drops the memo (rendering TranscriptRow directly) changes what
+ * this returns, and the pin reds. */
+export function transcriptItem(row: Row, ctx: RowCtx): ReactElement {
+  return <MemoTranscriptRow row={row} {...ctx} />
 }
 
 /** An approval / question / plan row. Hook-free like TranscriptRow so jest can
@@ -565,6 +821,22 @@ const styles = StyleSheet.create({
   assistantDoc: { alignSelf: 'stretch' },
   queuedBadge: { fontSize: 11, marginTop: 4 },
   systemLine: { fontSize: 13, lineHeight: 18, fontStyle: 'italic' },
+  // The work-log handle: hugs its text so the tap target is the label, not
+  // the full transcript width.
+  logHeader: { alignSelf: 'flex-start' },
+  logHeaderText: { fontFamily: 'monospace', fontSize: 13, lineHeight: 19 },
+  // The re-engage affordance floats over the transcript's bottom edge. The
+  // layer is box-none so it never eats a scroll the pill itself is not under.
+  jumpLayer: { position: 'absolute', left: 0, right: 0, bottom: 14, alignItems: 'center' },
+  jumpPill: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  jumpGlyph: { fontSize: 17, lineHeight: 20, fontWeight: '600' },
   card: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 16,
