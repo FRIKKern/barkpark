@@ -28,7 +28,7 @@ import {
 } from '../src/screens/ChatSessionScreen'
 import { messageBlocks, type ChatMessage } from '../src/chat/wire'
 import { MermaidIsland, islandHtml } from '../src/papers/portabledoc/MermaidIsland'
-import { BLOCK_RENDERERS, renderBlockNative, type BlockCtx } from '../src/papers/portabledoc/blocks'
+import { BLOCK_RENDERERS, DEGRADE_ONLY, renderBlockNative, type BlockCtx } from '../src/papers/portabledoc/blocks'
 import { dark, light, type Theme } from '../src/ui/theme'
 import { roles } from '../src/ui/typography'
 
@@ -368,9 +368,13 @@ describe('two-phase floor: plain tail, blocks at settle', () => {
 
   it('the renderable test IS the dispatcher’s own registry — it cannot disagree', () => {
     // Not a hand-kept list: every key renderBlockNative would dispatch counts,
-    // including the six typed chat-* rows spread into the same registry.
-    for (const type of ['paragraph', 'heading', 'diagram', 'chat-tool-diff'])
+    // including the six typed chat-* rows spread into the same registry. The ONE
+    // documented exception — a registered DEGRADE CARD — has its own describe
+    // block below; none of the types here is one.
+    for (const type of ['paragraph', 'heading', 'diagram', 'chat-tool-diff']) {
+      expect(DEGRADE_ONLY.has(type)).toBe(false)
       expect(anyRenderableBlocks([{ type }])).toBe(BLOCK_RENDERERS[type] !== undefined)
+    }
     expect(anyRenderableBlocks([])).toBe(false)
   })
 
@@ -418,6 +422,109 @@ describe('two-phase floor: plain tail, blocks at settle', () => {
     expect(w.text).toContain('Run `rm -rf build`?')
     expect(w.text).toContain('Allow')
     expect(w.text).toContain('Deny')
+  })
+
+  /* ── the DEGRADE_ONLY seam (charter D47) ──────────────────────────────────── */
+
+  // THE HIGH-FLIP-RISK JUDGMENT of the tail slice, pinned where it can actually
+  // fail. `video` and `asciicast` gained renderers in mob-zb-s7 — but degrade
+  // CARDS, labeled boxes that state their ceiling rather than play anything. The
+  // turn-level test above derives "is this turn worth the document path?" from
+  // the registry, so registering those two would have flipped a turn made of
+  // NOTHING BUT them off the text path it takes today: instead of the full
+  // `source_markdown` the answer arrived with, the transcript would paint two
+  // summary cards. That is a strict information LOSS, caused by adding a
+  // renderer, invisible to every per-block test — so the subtraction is pinned
+  // three ways: the set's members are really registered (otherwise the
+  // subtraction is guarding nothing), the turn-level answer is false ANYWAY, and
+  // the rendered row still carries the answer.
+  describe('DEGRADE_ONLY: registering a degrade card must not flip a turn', () => {
+    const degrade = [...DEGRADE_ONLY]
+
+    it('names exactly the two degrade cards, and every one of them IS registered', () => {
+      expect(degrade.sort()).toEqual(['asciicast', 'video'])
+      // This is the assertion that makes the next one non-vacuous: if these
+      // types were simply unregistered, `anyRenderableBlocks` would answer false
+      // for the boring reason and the subtraction below could be deleted without
+      // a single test going red.
+      for (const type of degrade) expect(BLOCK_RENDERERS[type]).toBeDefined()
+    })
+
+    it('a degrade-only turn answers FALSE and keeps the FULL source_markdown', () => {
+      // Drop the `!DEGRADE_ONLY.has(...)` clause from anyRenderableBlocks and
+      // this is the test that reds.
+      for (const type of degrade) expect(anyRenderableBlocks([{ type }])).toBe(false)
+      expect(anyRenderableBlocks(degrade.map((type) => ({ type })))).toBe(false)
+
+      const answer = '## Deploy\n\nThe cast below shows the rollout, which took 4m12s end to end.'
+      const row = assistantRow({
+        blocks: [
+          { type: 'video', src: 'https://x.test/rollout.mp4' },
+          { type: 'asciicast', src: 'https://x.test/rollout.cast' },
+        ],
+        source_markdown: answer,
+      })
+      expect(bodyRender(row)).toEqual({ kind: 'text', text: answer })
+
+      // One level up, where the regression would actually land: the row paints
+      // the answer, not the two cards that would have replaced it.
+      const w = walk(
+        TranscriptRow({ row, theme, blockCtx: chatBlockCtx(theme), inFlight: {}, onAnswer: () => {} }),
+      )
+      expect(w.text).toBe(answer)
+      expect(w.text).not.toContain('▶ Video')
+      expect(w.text).not.toContain('▶ Asciicast')
+    })
+
+    it('a MIXED turn still takes the blocks path — and the card draws there', () => {
+      // The other half of the law: the subtraction is TURN-level only. Gating the
+      // dispatch instead would cost the mixed turn its card and replace it with
+      // an "Unsupported block" box, which is a lie about a type we support.
+      const mixed = [
+        { type: 'paragraph', text: 'The rollout is done.' },
+        { type: 'video', src: 'https://x.test/rollout.mp4' },
+      ]
+      expect(anyRenderableBlocks(mixed)).toBe(true)
+      expect(bodyRender(assistantRow({ blocks: mixed, source_markdown: 'raw' }))).toEqual({
+        kind: 'blocks',
+        blocks: mixed,
+      })
+      const w = walk(
+        TranscriptRow({
+          row: assistantRow({ blocks: mixed, source_markdown: 'raw' }),
+          theme,
+          blockCtx: chatBlockCtx(theme),
+          inFlight: {},
+          onAnswer: () => {},
+        }),
+      )
+      expect(w.text).toContain('The rollout is done.')
+      expect(w.text).toContain('▶ Video')
+      expect(w.text).not.toContain('Unsupported block')
+    })
+
+    it('a degrade-only CARD row keeps its markdown body too (the second call site)', () => {
+      // CardRow reaches anyRenderableBlocks independently of bodyRender, so a fix
+      // applied at one call site and not the other would leave an approval asking
+      // for a decision behind a video card.
+      const w = walk(
+        CardRow({
+          m: {
+            seq: 11,
+            role: 'approval',
+            blocks: [{ type: 'asciicast', src: 'https://x.test/s.cast' }],
+            source_markdown: 'Replay the failed deploy?',
+            metadata: { request_id: 'req-2', approval_status: 'pending' },
+          },
+          theme,
+          blockCtx: chatBlockCtx(theme),
+          inFlight: {},
+          onAnswer: () => {},
+        }),
+      )
+      expect(w.text).toContain('Replay the failed deploy?')
+      expect(w.text).not.toContain('▶ Asciicast')
+    })
   })
 
   it('messageBlocks is the runtime gate the declared type cannot enforce', () => {

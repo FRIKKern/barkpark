@@ -413,7 +413,10 @@ const CENSUS: Record<string, Record<string, number>> = {
   },
   'papers/portabledoc/blocks/core-media.tsx': {
     'roles.codeBlock': 1,
-    'scale.sm': 1,
+    // sm ×3 = the figure/video/asciicast caption rung: the two degrade cards
+    // (mob-zb-s7, D46d) label themselves at the same step a figcaption speaks at,
+    // one rung under body, because a card is apparatus about the content.
+    'scale.sm': 3,
     'scale.xs': 1,
   },
   'papers/portabledoc/blocks/core-prose.tsx': {
@@ -442,6 +445,22 @@ const CENSUS: Record<string, Record<string, number>> = {
     'scale.base': 1,
     'scale.sm': 1,
     'scale.xs': 2,
+  },
+  'papers/portabledoc/blocks/forms.tsx': {
+    // base ×2 = the question prompt and its static control rows (a control is
+    // read at body measure — it is the answer affordance, not apparatus);
+    // sm ×2 = the two dim context lines, rationale and recommendation.
+    'scale.base': 2,
+    'scale.sm': 2,
+  },
+  'papers/portabledoc/blocks/math.tsx': {
+    // The equation's THREE steps, declared once each in the STEPS table: lg is
+    // the display measure, md the inline one, xs the single reduced step every
+    // super/subscript renders at. sm ×1 is the "no tex source" line.
+    'scale.lg': 1,
+    'scale.md': 1,
+    'scale.sm': 1,
+    'scale.xs': 1,
   },
   'papers/portabledoc/blocks/table.tsx': {
     'scale.sm': 2,
