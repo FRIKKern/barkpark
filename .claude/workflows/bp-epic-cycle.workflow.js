@@ -130,7 +130,8 @@ const PAPER_BLOCK = `THE WAVE PAPER (the wave's living story — one Barkpark Pa
 - style=article is MANDATORY (without it the render falls back to the ugly email look). bp doc create ignores stdin — write/extend the body via the HTTP /v1/data/mutate path (patch merges into content), then bp doc publish; \`bp capabilities -o json\` shows the verbs.
 - Fable phases OWN the Paper; fan-out workers NEVER write it (20 concurrent patches clobber each other) — workers write their OWN bp task, and the next Fable folds their reports into the Paper.
 - The Paper always states what is IN FLIGHT: Digest appends the survey digest + verify plan BEFORE the verifiers fly; Decide appends decisions + the wave plan BEFORE the builders fly; Review closes the story as the debrief. Someone opening the Paper mid-wave must see exactly where the wave stands.
-- Link both ways: the Paper's id lives on the epic task (flat wave_paper field) and on every slice task; the Paper names the task ids it drives.`
+- Link both ways: the Paper's id lives on the epic task (flat wave_paper field) and on every slice task; the Paper names the task ids it drives.
+- MECHANICAL SPACING (law: /papers/mechanical-spacing-doctrine): vertical rhythm is CONTENT, not style — author gaps as explicit empty paragraph blocks ({"type":"paragraph","content":[]}): one after the title block, two before every level-2 heading, one before a closing callout; zero extra rows inside tables and lists (they pack — the row line is the separator). Never lean on renderer margins: a gap you did not author does not exist.`
 
 const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system, never an afterthought):
 - Stamp state changes the MOMENT they happen — claim when you start, evidence the second a criterion is proven, a note the second you deviate or stall. Never batch honesty to the end of your run.

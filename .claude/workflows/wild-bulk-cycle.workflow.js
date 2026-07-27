@@ -103,7 +103,8 @@ const TASKS_BLOCK = `THE BP TASK CONTRACT (the ledger is the spine — every pha
 const PAPER_BLOCK = `THE CYCLE PAPER (the cycle's living story — one Barkpark Paper, opened at Plan, closed at Verdict):
 - style=article is MANDATORY. bp doc create ignores stdin — write/extend the body via the HTTP /v1/data/mutate path (patch merges into content), then bp doc publish; \`bp capabilities -o json\` shows the verbs.
 - ONLY the single-Fable phases (Plan, Digest, Harmonize, Verdict) write the Paper; multi-agent phases and every fan-out worker NEVER write it (concurrent patches clobber each other) — they write their OWN bp tasks, and the next single-Fable phase folds their reports in.
-- Link both ways: the Paper's id lives on the epic task (flat wave_paper field) and on every cycle task; the Paper names the task ids it drives.`
+- Link both ways: the Paper's id lives on the epic task (flat wave_paper field) and on every cycle task; the Paper names the task ids it drives.
+- MECHANICAL SPACING (law: /papers/mechanical-spacing-doctrine): vertical rhythm is CONTENT, not style — author gaps as explicit empty paragraph blocks ({"type":"paragraph","content":[]}): one after the title block, two before every level-2 heading, one before a closing callout; zero extra rows inside tables and lists (they pack — the row line is the separator). Never lean on renderer margins: a gap you did not author does not exist.`
 
 const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system, never an afterthought):
 - Stamp state changes the MOMENT they happen — claim when you start, evidence the second a criterion is proven, a note the second you deviate or stall. Never batch honesty to the end of your run.
