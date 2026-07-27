@@ -467,6 +467,31 @@ describe('the four fidelity catch-ups that rode this slice', () => {
     ).toBe('bold')
   })
 
+  it('note/notes render the content[] shape — the eyebrow defect had a sibling', () => {
+    // Found in review: the eyebrow catch-up fixed one bare-`text` read, but the
+    // note body carried the identical defect and the reference had already swept
+    // it (react core.ts noteItemHtml). A note persisted as `{content:[…]}` — the
+    // shape the editor writes — rendered BLANK.
+    expect(text({ type: 'note', label: 'NB', content: [{ type: 'text', value: 'INLINE BODY' }] })).toBe(
+      'NBINLINE BODY',
+    )
+    expect(
+      text({ type: 'notes', items: [{ label: 'NB', content: [{ type: 'text', value: 'ITEM BODY' }] }] }),
+    ).toBe('NBITEM BODY')
+    // The bare-text path is untouched, so the case rows and the cross-surface
+    // notes golden stay put.
+    expect(text({ type: 'note', label: 'NB', text: 'noted' })).toBe('NBnoted')
+    expect(text({ type: 'note', content: [], text: 'FALLBACK' })).toBe('FALLBACK')
+    // The lead still leads, and marks survive the trip.
+    expect(
+      text({
+        type: 'note',
+        lead: 'Lead.',
+        content: [{ type: 'text', value: 'bold', marks: [{ type: 'bold' }] }],
+      }),
+    ).toBe('Lead. bold')
+  })
+
   it('cards paints tone — a danger card no longer renders identical to info', () => {
     const tint = (tone: string) =>
       walk({ type: 'cards', items: [{ title: 'T', text: 'b', tone }] }).styles[1]!.borderLeftColor

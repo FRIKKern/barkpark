@@ -11,7 +11,8 @@ import { ScrollView, Text, View } from 'react-native'
 
 import type { Theme } from '../../../ui/theme'
 import { scale } from '../../../ui/typography'
-import { asList, isMap, str, type Block } from '../model'
+import { renderInlineNodes } from '../inlines'
+import { asList, isMap, paragraphInline, str, type Block } from '../model'
 import { MONO, bodyText, spec, type BlockCtx, type Render } from '../register'
 import { renderBlockNative } from '../registry'
 
@@ -136,13 +137,19 @@ function toneTint(theme: Theme, tone: unknown): string | undefined {
   }
 }
 
-/* note / notes (label + lead + text) */
+/* note / notes (label + lead + text)
+ *
+ * The note body takes the paragraphInline law, not a bare `text` read — the same
+ * swept sibling of the heading/list content[] defect the eyebrow carried, and the
+ * reference fixed it for exactly this reason (react core.ts noteItemHtml). A note
+ * persisted as `{content:[…]}` rendered BLANK here. The `text` path is unchanged:
+ * the fallback only fires when `content` is absent or empty, so the case rows and
+ * the cross-surface notes golden stay put. */
 
 function noteRow(item: unknown, ctx: BlockCtx, key: number): ReactNode {
   const m = isMap(item) ? item : {}
   const label = str(m.label)
   const lead = str(m.lead).trim()
-  const text = str(m.text)
   return (
     <View key={key} style={{ flexDirection: 'row', gap: 10, marginVertical: 4 }}>
       {label !== '' && (
@@ -160,7 +167,7 @@ function noteRow(item: unknown, ctx: BlockCtx, key: number): ReactNode {
       )}
       <Text style={{ flex: 1, ...scale.base, color: ctx.theme.text }}>
         {lead !== '' && <Text style={{ fontWeight: '700' }}>{lead + ' '}</Text>}
-        {text}
+        {renderInlineNodes(paragraphInline(m), ctx)}
       </Text>
     </View>
   )
