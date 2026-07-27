@@ -86,6 +86,12 @@ const VERIFY_FLOOR = 3
 const STRAT_MODEL = A.strategist_model || 'fable'
 const SURVEY_MODEL = A.survey_model || 'opus'
 const REVIEW_MODEL = A.review_model || 'fable'
+// Decide's own knob, defaulting to STRAT_MODEL so behaviour is unchanged unless
+// asked. It exists so a run that dies at Decide on Fable exhaustion can be
+// RESUMED onto Opus without touching STRAT_MODEL — moving that constant would
+// change the strategist's and digest's cache keys too, re-buying an entire
+// survey round to fix a joint that runs once.
+const ARCH_MODEL = A.architect_model || STRAT_MODEL
 // The single source of depth in this workflow. Every agent() call derives its
 // effort from its model through this, so no call site can quietly acquire a
 // different depth than its tier implies — and adding an xhigh anywhere means
@@ -726,9 +732,9 @@ ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: m, effort: EFFORT_FOR(m) }
-), { label: 'architect', model: STRAT_MODEL, other: JOINT_FALLBACK })
+), { label: 'architect', model: ARCH_MODEL, other: JOINT_FALLBACK })
 
-if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; resume the run rather than restarting so neither round is re-bought.`)
+if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${ARCH_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; resume the run rather than restarting so neither round is re-bought.`)
 const wave = (architect.wave || []).slice(0, 8)
 log(`Architect cut ${wave.length} slices (${wave.filter((w) => w.builder_model === 'fable').length} fable); charter_written=${architect.charter_written}; tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}; backlog=${architect.backlog_filed}`)
 if (wave.length === 0) {
