@@ -162,4 +162,43 @@ defmodule BarkparkWeb.BulldocsFormControllerTest do
     resp = anon |> get("/v1/data/doc/production/form_response/#{id}")
     assert resp.status in [401, 403, 404]
   end
+
+  # The 20-submission cap used to key on `conn.remote_ip`, which behind the
+  # co-located Caddy (every prod instance reverse-proxies `localhost:4000`) is
+  # always 127.0.0.1 — so it was ONE global budget for the entire internet and a
+  # single abuser closed every public form on the box for everyone.
+  #
+  # PROTECTIVE, not vacuous: restore `conn.remote_ip |> :inet.ntoa()` and this
+  # test REDS on the very first assertion of the second caller — B is refused
+  # because A already drained the single loopback bucket.
+  #
+  # Honeypot submissions are billed by `rate_limit/1` BEFORE `honeypot/1`
+  # short-circuits, so the cap can be drained 20 times without a paper, a
+  # question allowlist, or a single row written.
+  describe "the per-address submission cap behind a trusted front" do
+    @front_caller_a "198.51.100.20"
+    @front_caller_b "198.51.100.21"
+
+    defp spam(conn, ip) do
+      conn
+      # Loopback peer + an appended chain: the exact shape Caddy delivers.
+      |> Map.put(:remote_ip, {127, 0, 0, 1})
+      |> put_req_header("x-forwarded-for", ip)
+      |> post(path("no-such-paper"), %{"website" => "spam.example"})
+    end
+
+    test "one caller draining its 20 submissions does not close the form for another", %{
+      conn: conn
+    } do
+      for _ <- 1..20, do: assert(spam(conn, @front_caller_a).status == 201)
+
+      # A is spent...
+      refused = spam(conn, @front_caller_a)
+      assert refused.status == 429
+      assert json_response(refused, 429)["error"]["code"] == "rate_limited"
+
+      # ...and B, arriving through the identical front, is untouched.
+      assert spam(conn, @front_caller_b).status == 201
+    end
+  end
 end

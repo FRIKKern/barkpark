@@ -6,7 +6,9 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   separate buckets. Limits come from
   `config :barkpark, :rate_limits` with per-dataset overrides in
   `datasets: %{"ds" => %{read: N, write: M}}`. Unauthenticated callers
-  are bucketed by client IP.
+  are bucketed by client IP, resolved through `Barkpark.RateLimiter.client_ip/1`
+  — never `conn.remote_ip`, which behind the co-located Caddy is ALWAYS
+  loopback and collapsed the whole anonymous internet into one shared bucket.
   """
 
   import Plug.Conn
@@ -82,8 +84,14 @@ defmodule BarkparkWeb.Plugs.RateLimit do
           "token:#{token_id}:#{class}:#{scope}"
 
         _ ->
-          ip = conn.remote_ip |> :inet.ntoa() |> to_string()
-          "ip:#{ip}:#{class}:#{scope}"
+          # The trust boundary, NOT the raw peer. Every prod instance runs Caddy
+          # on the box dialling localhost:4000, so `conn.remote_ip` is always
+          # 127.0.0.1 for anonymous traffic and this bucket was ONE global
+          # read/write budget for the entire internet — a single caller starved
+          # every other anonymous caller. `client_ip/1` believes the chain only
+          # when the peer is a trusted front and takes the rightmost non-proxy
+          # hop, so a direct caller still cannot pick its own key.
+          "ip:#{RateLimiter.client_ip(conn)}:#{class}:#{scope}"
       end
 
     case conn.private[:barkpark_rate_limit_scope] do
