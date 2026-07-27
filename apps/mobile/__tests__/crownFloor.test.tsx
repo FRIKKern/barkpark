@@ -28,6 +28,19 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { chatCases } from './cases/chat.cases'
+import { coreCodeCases } from './cases/core-code.cases'
+import { coreContainerCases } from './cases/core-container.cases'
+import { coreDocCases } from './cases/core-doc.cases'
+import { coreMediaCases } from './cases/core-media.cases'
+import { coreProseCases } from './cases/core-prose.cases'
+import { datavizCases } from './cases/dataviz.cases'
+import { formsCases } from './cases/forms.cases'
+import { mathCases } from './cases/math.cases'
+import { sheetCases } from './cases/sheet.cases'
+import { tableCases } from './cases/table.cases'
+import { taskboardCases } from './cases/taskboard.cases'
+import type { BlockCase } from './cases/types'
 import { walk } from './support/walk'
 import { MermaidIsland } from '../src/papers/portabledoc/MermaidIsland'
 import {
@@ -65,10 +78,14 @@ interface Fixture {
 
 const FIXTURE_DIR = join(__dirname, '..', '..', '..', 'api', 'test', 'support', 'fixtures', 'pd-parity')
 
-/** The corpus floor. 60 files today = 66 registered keys minus the 6 pure
- * aliases (below). Pinned from BELOW, not at equality, so the generator adding
- * a type does not red this line — while a path typo, a moved directory or a
- * half-written corpus, each of which would otherwise pass silently, does. */
+/** The corpus floor: one fixture per CANONICAL type, which is fewer than the
+ * registry holds because the authoring-drift spellings share their canonical
+ * type's fixture. Pinned from BELOW, never at equality — the generator adding a
+ * type must not red this line, and neither must a slice adding an alias, while a
+ * path typo, a moved directory or a half-written corpus (each of which would
+ * otherwise pass silently) must. Deliberately NOT stated as a ratio to the
+ * registry size: that arithmetic is what broke when h1/h2/h3/ordered-list
+ * landed mid-branch. */
 const MIN_FIXTURES = 60
 
 function loadFixtures(): Fixture[] {
@@ -85,6 +102,25 @@ function loadFixtures(): Fixture[] {
 }
 
 const FIXTURES = loadFixtures()
+
+/** The authored per-family cases, used ONLY to drive the types the generator
+ * gives no fixture (the authoring-drift spellings). Concatenated from the same
+ * files chatRenderers.test.tsx pins against the registry, so this list cannot
+ * fall behind a new renderer. */
+const ALL_CASES: BlockCase[] = [
+  ...coreProseCases,
+  ...coreMediaCases,
+  ...coreContainerCases,
+  ...coreDocCases,
+  ...coreCodeCases,
+  ...datavizCases,
+  ...formsCases,
+  ...mathCases,
+  ...sheetCases,
+  ...tableCases,
+  ...taskboardCases,
+  ...chatCases,
+]
 
 describe('the pd-parity corpus is the shape this suite believes it is', () => {
   it('found a REAL corpus — never reports success over an empty directory', () => {
@@ -111,33 +147,53 @@ describe('the pd-parity corpus is the shape this suite believes it is', () => {
     }
   })
 
-  it('covers every registered type except the 6 pure aliases', () => {
+  it('leaves NO registered type unmeasured — fixture-covered, or driven here', () => {
+    // The generator emits one fixture per CANONICAL type, so the authoring-drift
+    // spellings (bulletList, quote, h1/h2/h3, ordered-list, …) legitimately have
+    // none. What must never happen is a registered type that no corpus measures
+    // at all.
+    //
+    // This assertion used to ENUMERATE the fixture-less types, and that was the
+    // wrong shape: `mob-zb-bl-heading-alias-drift` landed h1/h2/h3/ordered-list
+    // on all four surfaces while this branch was in flight and the literal red
+    // on the merge ref — a maintenance chore masquerading as a guarantee, which
+    // is exactly what D48 says a count must never be. So the set is DERIVED, and
+    // the guarantee is the stronger one: every fixture-less type has an authored
+    // case AND is rendered here, in both registers, right now.
     const covered = new Set(FIXTURES.map((f) => f.type))
-    const uncovered = Object.keys(BLOCK_RENDERERS)
+    const fixtureless = Object.keys(BLOCK_RENDERERS)
       .filter((t) => !covered.has(t))
       .sort()
-    // Each of these shares a FUNCTION IDENTITY with a canonical key that IS
-    // covered, so the fixture for the canonical type exercises the identical
-    // code path — the alias adds a dictionary key, not a renderer. Asserted
-    // rather than assumed: a new uncovered type that is NOT an alias reds.
-    expect(uncovered).toEqual([
-      'bulletList',
-      'bullet_list',
-      'bulleted-list',
-      'bulleted_list',
-      'numbered_list',
-      'quote',
-    ])
-    for (const alias of uncovered) {
-      const twin = Object.keys(BLOCK_RENDERERS).find(
-        (k) => k !== alias && covered.has(k) && BLOCK_RENDERERS[k] === BLOCK_RENDERERS[alias],
-      )
-      // numbered_list is the one row here that is NOT a function-identity
-      // alias (it is a distinct ordered:true wrapper) — it is fixture-less
-      // because the generator emits one `list` fixture for the family. Its
-      // ordered arm is pinned in chatRenderers.test.tsx instead.
-      if (alias !== 'numbered_list') expect(`${alias} -> ${twin}`).not.toContain('undefined')
+    const cased = new Set(ALL_CASES.map((c) => c.type))
+    expect(fixtureless.filter((t) => !cased.has(t))).toEqual([])
+
+    resetUnknownBlockLog()
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      for (const type of fixtureless) {
+        const block = ALL_CASES.find((c) => c.type === type)?.block
+        for (const [name, ctx] of REGISTERS) {
+          const out = walk(renderBlockNative(block, ctx, 0), OPAQUE)
+          expect(`${type}/${name}: ${out.text}`).not.toContain('Unsupported block')
+          expect(`${type}/${name} painted`).toBe(
+            out.text.trim() === '' && out.styles.length === 0 && out.opaque === 0
+              ? `${type}/${name} BLANK`
+              : `${type}/${name} painted`,
+          )
+        }
+      }
+      expect(warn.mock.calls.map((c) => String(c[0]))).toEqual([])
+    } finally {
+      warn.mockRestore()
     }
+  })
+
+  it('keeps the corpus itself covering the canonical vocabulary', () => {
+    // The counterweight to deriving the set above: if the corpus shrank, every
+    // type would migrate into the fixture-less arm and still be "measured",
+    // which would quietly turn the cross-surface floor into a mobile-only one.
+    // So the number of types the CORPUS covers is pinned from below too.
+    expect(new Set(FIXTURES.map((f) => f.type)).size).toBeGreaterThanOrEqual(MIN_FIXTURES)
   })
 
   it('registers a renderer for every type in the corpus', () => {
