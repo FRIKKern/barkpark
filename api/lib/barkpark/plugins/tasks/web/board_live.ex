@@ -480,11 +480,6 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     end
   end
 
-  defp criteria_word([_one]), do: "criterion"
-  defp criteria_word(_many), do: "criteria"
-  defp plural_verb([_one]), do: "is"
-  defp plural_verb(_many), do: "are"
-
   # A voluntary UNCLAIM (wave 17) — the holder drops their own in-flight card
   # back on Open. Optimistic move to open (worker cleared so the card stops
   # painting their name), then the fenced release; a refused fence (lease
@@ -508,6 +503,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     {:noreply,
      assign(socket, :notice, refuse_notice(ctx.from_col, ctx.to_col, ctx.holder, ctx.worker))}
   end
+
+  # Wording helpers for the criteria-unmet refusal above. They live AFTER the
+  # last run_restage/3 clause on purpose: sitting between two clauses of the
+  # same name and arity is a --warnings-as-errors build failure.
+  defp criteria_word([_one]), do: "criterion"
+  defp criteria_word(_many), do: "criteria"
+  defp plural_verb([_one]), do: "is"
+  defp plural_verb(_many), do: "are"
 
   # Optimistically re-bucket the dragged card to its target lifecycle so the
   # board moves the instant you drop (D9). We synthesize a normalized card off
