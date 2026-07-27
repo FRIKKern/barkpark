@@ -92,6 +92,15 @@ const REVIEW_MODEL = A.review_model || 'fable'
 // change the strategist's and digest's cache keys too, re-buying an entire
 // survey round to fix a joint that runs once.
 const ARCH_MODEL = A.architect_model || STRAT_MODEL
+// FABLE OUTAGE SWITCH. When Fable is unreachable (spend limit, retention tier,
+// refusal class), every fable-selecting site must dispatch Opus INSTEAD — not
+// merely fall back to it. The distinction is load-bearing at the builder
+// fan-out, which is deliberately NOT wrapped in neverLose: a fable-assigned
+// slice dispatches once, returns null, and the slice is LOST with no retry. The
+// joints only waste three attempts; the builders lose work outright.
+// Identity by default, so passing nothing changes nothing.
+const NO_FABLE = A.no_fable === true
+const M = (m) => (NO_FABLE && m === 'fable' ? 'opus' : m)
 // The single source of depth in this workflow. Every agent() call derives its
 // effort from its model through this, so no call site can quietly acquire a
 // different depth than its tier implies — and adding an xhigh anywhere means
@@ -532,7 +541,7 @@ ${PREMISE_SMOKE_BLOCK}
 ${PAPER_BLOCK}
 ${LEAD_NOTES}`,
   { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: m, effort: EFFORT_FOR(m) }
-), { label: 'strategist', model: STRAT_MODEL, other: JOINT_FALLBACK })
+), { label: 'strategist', model: M(STRAT_MODEL), other: M(JOINT_FALLBACK) })
 if (!strategist) throw new Error(`Strategize returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK}. There is no partial wave to salvage — nothing has been surveyed, decided, or written. Resume the run rather than restarting.`)
 const surveyAssignments = (strategist.survey || []).slice(0, 20)
 if (surveyAssignments.length < SURVEY_FLOOR) {
@@ -560,7 +569,7 @@ Search Barkpark FIRST (\`bp search query "<terms>"\` — the \`query\` sub-verb 
 
 COVERAGE ACCOUNTING (your report is only trustworthy if its edges are visible): list EVERY file/paper/task you checked in coverage[] — the path, what you checked it for, and found / not_found / partial. NOT-FOUND IS A FINDING ("no existing rate limiter in api/" changes the plan as much as finding one). Anything you did not list is treated as unchecked — do not imply coverage you don't have. The wave Paper (${WAVE_PAPER}) will carry your coverage map; you do NOT write the Paper yourself.`,
       { label: `survey:${q.key}`, phase: 'Survey', schema: SURVEY_SCHEMA, model: m, effort: EFFORT_FOR(m) }
-    ), { label: `survey:${q.key}`, model: SURVEY_MODEL, other: 'fable' })
+    ), { label: `survey:${q.key}`, model: M(SURVEY_MODEL), other: M('fable') })
   )
 )).filter(Boolean)
 // ONE interception, in place, right at the resolve — `surveys` is serialised
@@ -610,7 +619,7 @@ ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'digest', phase: 'Digest', schema: AIM_SCHEMA, model: m, effort: EFFORT_FOR(m) }
-), { label: 'digest', model: STRAT_MODEL, other: JOINT_FALLBACK })
+), { label: 'digest', model: M(STRAT_MODEL), other: M(JOINT_FALLBACK) })
 if (!aim) throw new Error(`Digest returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). The survey reports are intact; resume the run rather than restarting so they are not re-bought.`)
 const verifyAssignments = (aim.verification || []).slice(0, 15)
 if (verifyAssignments.length < VERIFY_FLOOR) {
@@ -665,7 +674,7 @@ COVERAGE ACCOUNTING: list EVERY file/paper/task you checked in coverage[] — pa
       { label: `verify:${q.key}`, phase: 'Verify', schema: VERIFY_SCHEMA, model: m, effort: EFFORT_FOR(m), ...(q.needs_worktree ? { isolation: 'worktree' } : {}) }
     // Recovery hops the OTHER way for a fable-assigned verifier, so a lost
     // judgment-heavy dig retries on opus rather than giving up on the question.
-    ), { label: `verify:${q.key}`, model: q.model === 'fable' ? 'fable' : 'opus', other: q.model === 'fable' ? 'opus' : 'fable' })
+    ), { label: `verify:${q.key}`, model: M(q.model === 'fable' ? 'fable' : 'opus'), other: M(q.model === 'fable' ? 'opus' : 'fable') })
   )
 )).filter(Boolean)
 // Same single interception for the verify round, at its own resolve.
@@ -732,7 +741,7 @@ ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: m, effort: EFFORT_FOR(m) }
-), { label: 'architect', model: ARCH_MODEL, other: JOINT_FALLBACK })
+), { label: 'architect', model: M(ARCH_MODEL), other: M(JOINT_FALLBACK) })
 
 if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${ARCH_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; resume the run rather than restarting so neither round is re-bought.`)
 const wave = (architect.wave || []).slice(0, 8)
@@ -794,7 +803,7 @@ Catalog-first (measured law, /papers/scaffy-benchmark): before hand-editing a re
     // builder to STOP on a failed claim — so a rescue could turn a lost slice
     // into a stuck one. The IIFE exists only to bind the slice's model so
     // EFFORT_FOR can derive depth from it, exactly as every other call site.
-    ))(item.builder_model === 'fable' ? 'fable' : 'opus')
+    ))(M(item.builder_model === 'fable' ? 'fable' : 'opus'))
   )
 )).filter(Boolean)
 
@@ -844,7 +853,7 @@ ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${FLIP_RISK_BLOCK}`,
     { label: 'review', phase: 'Review', schema: REVIEW_SCHEMA, model: m, effort: EFFORT_FOR(m), isolation: 'worktree' }
-  ), { label: 'review', model: REVIEW_MODEL, other: JOINT_FALLBACK })
+  ), { label: 'review', model: M(REVIEW_MODEL), other: M(JOINT_FALLBACK) })
   // No throw here, and that is deliberate: by this point green branches EXIST on
   // disk. A lost Review costs the grade, the debrief, and the PR push — real
   // losses the lead must pick up (the downstream `review ? … : null` reads
