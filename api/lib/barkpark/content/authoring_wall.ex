@@ -166,6 +166,7 @@ defmodule Barkpark.Content.AuthoringWall do
     case LabelSpine.validate(content_of(ref)) do
       :ok ->
         emit_tag_norm_advisory(ref, pid)
+        emit_spacing_norm_advisory(ref, pid, type)
         {:ok, true}
 
       {:error, {:label_spine, _details}} = error ->
@@ -249,6 +250,42 @@ defmodule Barkpark.Content.AuthoringWall do
       )
     end
   end
+
+  # Advisory, never blocking (mechanical-spacing doctrine —
+  # /papers/mechanical-spacing-doctrine): an article paper with section
+  # structure (2+ level-2 headings) but not one authored spacer (empty
+  # paragraph block) is leaning on renderer margins for its vertical rhythm —
+  # the per-surface drift the doctrine bans. Advisory rather than a gate
+  # while renderers still inject margins of their own
+  # (task-d06d12de3fc0768b); promotion is a reviewed decision after
+  # margin-zero lands. Papers only: task briefs ride a different envelope.
+  # Emitted at spine-pass for the same reason as the tag-count norm — the
+  # request-scoped queue is dropped with a failed write, never surfaced.
+  defp emit_spacing_norm_advisory(ref, pid, "paper") do
+    content = content_of(ref) || %{}
+    blocks = List.wrap(content["blocks"])
+
+    h2_count =
+      Enum.count(blocks, &(is_map(&1) and &1["type"] == "heading" and &1["level"] == 2))
+
+    spacer? =
+      Enum.any?(blocks, fn b ->
+        is_map(b) and b["type"] == "paragraph" and List.wrap(b["content"]) == []
+      end)
+
+    if content["style"] == "article" and h2_count >= 2 and not spacer? do
+      Warnings.put(
+        "spacing_norm",
+        "#{pid}: article paper with #{h2_count} level-2 headings and no authored spacer " <>
+          "(empty paragraph) blocks — vertical rhythm is content, not style; space sections " <>
+          "with explicit empty paragraph blocks. See /papers/mechanical-spacing-doctrine."
+      )
+    end
+
+    :ok
+  end
+
+  defp emit_spacing_norm_advisory(_ref, _pid, _type), do: :ok
 
   defp content_of(%Document{content: content}), do: content
   defp content_of(%{content: content}), do: content
