@@ -38,21 +38,44 @@ A PR targeting `main` must clear:
 
 7. **`pr-task-gate` CI job** — `.github/workflows/pr-task-gate.yml`. Enforces
    task-obsession layer 1: every PR must carry a `Task: <doc_id>` trailer in its
-   description naming a task that is `in_progress` (claimed) on the
-   ledger-of-record (guerrilla). No task / task not found / not in_progress →
-   the check fails. The pure ledger decision is the unit-tested
-   `scripts/pr-task-gate.sh` (`bash scripts/pr-task-gate.test.sh`, hermetic);
-   the workflow only plumbs PR context in. Three designed behaviours:
-   **merge-base cutoff** — a PR whose base predates the gate (workflow absent at
-   base SHA) is grandfathered, so turning the gate on does not red the open-PR
-   fleet; **hotfix lane** — a `hotfix!` label passes AND auto-files an override
+   description naming a task that is task-backed on the ledger-of-record
+   (guerrilla). No task / task not found / task unowned → the check fails. The
+   pure ledger decision is the unit-tested `scripts/pr-task-gate.sh`
+   (`bash scripts/pr-task-gate.test.sh`, hermetic, and run in CI by this same
+   workflow's **`PR task gate self-test`** job — deliberately not in
+   `shell-harnesses.yml`, which is paths-filtered and so can never carry a
+   required name); the workflow only plumbs PR context in. Four designed
+   behaviours:
+   **merge-base cutoff, three-state** — the base COMMIT is resolved first; base
+   resolves + this workflow absent = grandfathered (so turning the gate on did
+   not red the open-PR fleet), base resolves + present = enforced, base
+   **unresolvable = a loud red**, never grandfathered. A guard that cannot tell
+   must fail, not wave the PR through: the two-state version reported SUCCESS
+   having skipped every downstream step;
+   **hotfix lane** — a `hotfix!` label passes AND auto-files an override
    task (needs the `BARKPARK_TASK_TOKEN` secret; without it the lane still
-   passes but logs that the record was not filed); **ledger-outage neutral** —
-   a 5xx / unreachable ledger warns and passes (an infra blip must not freeze
-   merges), while only a definitive "no task / not found / not in_progress"
-   fails. Optional `.github/pr-task-workers.json` (`{ "<gh-login>": "<worker>" }`)
+   passes but logs that the record was not filed);
+   **lapsed-claim grace** — the claim lease (~45min) is shorter than PR dwell,
+   so the TTL sweeper reaps claims out from under PRs that were green when they
+   opened (11 of the gate's last 15 reds). A task that is `open` because its
+   claim was **reaped** still passes for `LAPSE_GRACE_SECONDS` (default 21600 =
+   6h), read straight off the document's `claim.previous_worker` /
+   `claim.expired_at`. A task that was never claimed, or whose claim was
+   voluntarily **released** (`released_at ≥ expired_at`), or whose lapse is
+   older than the grace, still fails — the grace forgives the sweeper, not the
+   author;
+   **ledger outage = a red that says so** — a 5xx / unreachable ledger is
+   retried (3 attempts) and then **fails** with "task backing UNVERIFIED …
+   re-run this check once the ledger is up". It does not pass. GitHub has no
+   `neutral` conclusion for exit codes, so the only alternative to red would be
+   a green check that verified nothing (the old `exit 0` handler was, in fact,
+   unreachable dead code under GitHub's `bash -e`, and every outage already red
+   — under a misleading label).
+   Optional `.github/pr-task-workers.json` (`{ "<gh-login>": "<worker>" }`)
    tightens the check to require the task be claimed by the author's mapped
-   worker. **Currently advisory** until made required-by-name (below).
+   worker (matched against the lapsed claim's `previous_worker` when the grace
+   applies). The file does not exist today. **Currently advisory** until made
+   required-by-name (below).
 
 8. **`reland-check` CI job** — `.github/workflows/reland-check.yml`. **Advisory
    only** (`continue-on-error: true`): flags when a PR changes files a
@@ -179,8 +202,21 @@ a workflow that silently never runs on a conflicting PR must read as
 
 ```bash
 # One-time, needs repo admin. Adds pr-task-gate to the required checks.
+# app_id 15368 is GitHub Actions. The pin is load-bearing: GitHub validates
+# NEITHER the context string nor the app id (a typo'd id reads back as
+# `app_id: null`, i.e. "any app may satisfy this context"), and Vercel's app
+# 8329 already publishes check runs on this repo — an unpinned context is
+# therefore spoofable by anything holding `checks:write`.
+# Sent as a JSON body, not `-f checks[][…]` flags: those build the array
+# positionally and can split one check into two half-specified entries.
 gh api -X PATCH repos/:owner/:repo/branches/main/protection/required_status_checks \
-  -f 'checks[][context]=PR references an active task'
+  --input - <<'JSON'
+{"checks": [{"context": "PR references an active task", "app_id": 15368}]}
+JSON
+# Verify by round-tripping the read back: the context must match byte for byte
+# and app_id must be 15368, never null.
+gh api repos/:owner/:repo/branches/main/protection/required_status_checks \
+  --jq '.checks[] | select(.context == "PR references an active task")'
 ```
 
 Two human-provisioned prerequisites before flipping it on:
