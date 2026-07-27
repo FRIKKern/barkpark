@@ -316,6 +316,13 @@ case "$lifecycle" in
     # worker walking away, which is exactly the state the gate exists to red.
     # Only an explicit "no" (released_at is absent or predates the reap) passes.
     [ "$released_ge_expired" = "no" ] || fail "task '${TASK_ID}' is 'open' because its claim was RELEASED (released_at is at or after expired_at), not because a lease lapsed under a live PR — a released task is unowned. Claim it: bp task claim ${TASK_ID} <worker>"
+    # A grace test is `now - expired_at <= GRACE`, which a FUTURE expired_at
+    # satisfies trivially — and a reap can never stamp one, because the sweeper
+    # only reaps a claim whose expiry has already passed. So a negative age is
+    # not "very recently lapsed"; it is a clock or a document the gate cannot
+    # trust, and the epic's rule for that is red, never pass. -300s of slack
+    # absorbs honest runner/ledger clock skew.
+    [ "$lapse_age" -ge -300 ] || fail "task '${TASK_ID}' is 'open' and its claim.expired_at is ${lapse_age#-}s in the FUTURE — a reap cannot stamp a future expiry, so this document (or one of the two clocks) cannot be trusted to say when the claim lapsed. Re-claim it: bp task claim ${TASK_ID} <worker>"
     [ "$lapse_age" -le "$LAPSE_GRACE_SECONDS" ] || fail "task '${TASK_ID}' is 'open': the claim by '${prev_worker}' lapsed ${lapse_age}s ago, beyond the ${LAPSE_GRACE_SECONDS}s grace. Re-claim it: bp task claim ${TASK_ID} <worker>"
     actor="$prev_worker"
     verdict="open, but the claim by '${prev_worker}' was reaped only ${lapse_age}s ago (within the ${LAPSE_GRACE_SECONDS}s lapse grace)"

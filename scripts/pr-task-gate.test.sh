@@ -119,36 +119,44 @@ raw_doc lapsereleased open "{\"worker\":null,\"epoch\":4,\"previous_worker\":\"f
 # any claim carrying released_at" would pass the suite and quietly red every
 # task that had ever been released once.
 raw_doc lapsereleasedold open "{\"worker\":null,\"epoch\":4,\"previous_worker\":\"fable-tob\",\"expired_at\":\"$EXP_RECENT\",\"released_by\":\"fable-tob\",\"released_at\":\"$(iso_ago 1200)\"}"
+# A FUTURE expired_at. `now - expired_at <= GRACE` is satisfied by any timestamp
+# ahead of the clock, so without an explicit lower bound this fixture passes —
+# a one-field document edit would buy an indefinite waiver. A reap cannot stamp
+# a future expiry (the sweeper only reaps already-expired claims), so this is a
+# document the gate cannot trust, and untrustworthy is red.
+raw_doc lapsefuture open "{\"worker\":null,\"epoch\":3,\"previous_worker\":\"fable-tob\",\"expired_at\":\"$(iso_ago -86400)\"}"
+# ...and its boundary mirror: a few seconds of clock skew between the runner and
+# the ledger is honest and must still pass, so the bound is -300s, not 0.
+raw_doc lapseskew   open "{\"worker\":null,\"epoch\":3,\"previous_worker\":\"fable-tob\",\"expired_at\":\"$(iso_ago -30)\"}"
 
-# Boot a static server. http.server returns 200 for existing files, 404 else.
-python3 -m http.server 0 --directory "$fixtures" >/dev/null 2>&1 &
-SRV_PID=$!
-# Discover the assigned port by parsing the socket the child is listening on.
-port=""
-for _ in $(seq 1 50); do
-  port="$(python3 - "$SRV_PID" <<'PY' 2>/dev/null || true
-import sys, subprocess, re
-pid = sys.argv[1]
-# lsof first (present on macOS and the GitHub runners), then `ss` — this
-# harness now runs on every PR, and "the tool that finds the port is missing"
-# would red the gate for a reason that has nothing to do with any PR.
-probes = [(["lsof", "-Pan", "-p", pid, "-iTCP", "-sTCP:LISTEN"], r":(\d+) \(LISTEN\)"),
-          (["ss", "-ltnp"], r":(\d+)\s.*pid=%s\b" % re.escape(pid))]
-for argv, pattern in probes:
-    try:
-        out = subprocess.run(argv, capture_output=True, text=True).stdout
-    except OSError:
-        continue
-    m = re.search(pattern, out)
-    if m:
-        print(m.group(1))
-        break
+# Boot a static server. It returns 200 for existing files, 404 else.
+#
+# The server ANNOUNCES ITS OWN PORT rather than being interrogated with lsof/ss.
+# This harness now runs on every PR (it is the D26 fix), so a runner image
+# without those tools would red the gate for a reason that has nothing to do
+# with any PR — a false red inside the epic that exists to abolish them. The
+# process that owns the socket is the one that knows the number; ask it.
+# Inside $fixtures so the EXIT trap's `rm -rf` already cleans it up. It is not
+# reachable at any path the gate requests (/v1/data/doc/...), so it cannot
+# perturb a fixture.
+portfile="$fixtures/static.port"
+python3 - "$fixtures" "$portfile" >/dev/null 2>&1 <<'PY' &
+import sys, functools
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+
+srv = HTTPServer(("127.0.0.1", 0),
+                 functools.partial(SimpleHTTPRequestHandler, directory=sys.argv[1]))
+with open(sys.argv[2], "w") as f:
+    f.write("%d\n" % srv.server_address[1])
+srv.serve_forever()
 PY
-)"
-  [ -n "$port" ] && break
+SRV_PID=$!
+port=""
+for _ in $(seq 1 100); do
+  [ -s "$portfile" ] && port="$(tr -d ' \n' < "$portfile")" && [ -n "$port" ] && break
   sleep 0.1
 done
-if [ -z "$port" ]; then echo "TEST HARNESS FAIL: could not find server port" >&2; exit 99; fi
+if [ -z "$port" ]; then echo "TEST HARNESS FAIL: the fixture server never announced a port" >&2; exit 99; fi
 BASE="http://127.0.0.1:$port"
 
 pass=0 fail=0
@@ -192,6 +200,8 @@ check "lapsed, no expired_at, fails" 1 'TASK_ID=lapsenodate'
 check "lapsed, bad expired_at, fails" 1 'TASK_ID=lapsebadtime'
 check "open with live worker fails"  1 'TASK_ID=lapseworker'
 check "released after reap fails"    1 'TASK_ID=lapsereleased'
+check "future expired_at fails"      1 'TASK_ID=lapsefuture'
+check "small clock skew still passes" 0 'TASK_ID=lapseskew'
 check "released before reap passes"  0 'TASK_ID=lapsereleasedold'
 # The grace is a knob, and it must move the verdict in BOTH directions --
 # otherwise "env-overridable" is an untested claim about a variable nothing reads.
