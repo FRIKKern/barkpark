@@ -13,8 +13,8 @@
 // them into one loses the distinction between why-we-ask and what-we-advise) —
 // then the static control keyed by `type`.
 //
-// TWO RECORDED DIVERGENCES from the web twin, both toward the honest-ceiling
-// doctrine and both taken from the TUI:
+// THREE RECORDED DIVERGENCES from the web twin, all toward the honest-ceiling
+// doctrine and all taken from the TUI:
 //
 //   1. A `scale` whose span exceeds 100 rungs SUMMARIZES as "min … max"
 //      (scaleLadder's guard) rather than the web's clamp-and-enumerate to 101
@@ -24,6 +24,10 @@
 //      radios, one "Option" checkbox — formControl's arms) rather than the
 //      web's empty <div>. A control that renders nothing is a silent hole; the
 //      question's shape must survive missing options.
+//   3. A `scale` with max < min draws the "[ … ]" catch-all (form.go:137-139)
+//      rather than the web/Elixir empty control (forms.ts:50 / forms.ex:96) —
+//      same reason as 2: an inverted range is malformed input, not a reason to
+//      render a hole where a question was.
 //
 // Metro TDZ law (D49): this module imports renderBlockNative ONLY — never
 // BLOCK_RENDERERS.
@@ -157,11 +161,18 @@ const form: Render = (b, ctx, key) => {
   )
 }
 
-// `questionnaire` is a PURE ALIAS of `form`: both twins differ only by the
-// container's CSS class (react forms.ts:79 picks bp-form-questionnaire; the TUI
-// registers both types to the SAME formRenderer), and React Native has no class
-// names — so on this surface the alias is TOTAL, the two types render
-// byte-identical trees. It stays a distinct function rather than a second key
+// `questionnaire` is a PURE ALIAS of `form` on this surface — but note WHICH
+// twin that follows. The TUI registers both types to the SAME formRenderer and
+// draws no kind badge, so mobile matches the TUI exactly. The web differs by
+// more than a class name: forms.ts:79 picks `bp-form-questionnaire`, and
+// paper-surface.css `.bp-form-questionnaire::before { content: "Questionnaire" }`
+// renders that class as a VISIBLE badge. So the web shows a kind label mobile
+// deliberately drops (and mobile likewise ignores `kind` on a plain `form`
+// block, which the web would badge). Following the TUI here is the deliberate
+// call: a badge repeating the block type is apparatus, not content, and the
+// terminal already judged it not worth a row.
+//
+// It stays a distinct function rather than a second key
 // onto `form` because the registry's alias tripwire enumerates function
 // IDENTITIES: this is an alias of behavior, not of implementation, exactly the
 // shape the web twin chose (a delegating Emit).

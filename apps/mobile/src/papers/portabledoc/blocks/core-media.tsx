@@ -246,7 +246,14 @@ const video: Render = (b, ctx, key) => {
 
   let head = '▶ Video'
   if (tracks > 0) head += ` · ${tracks} caption track${tracks === 1 ? '' : 's'}`
-  if (url !== undefined) head += ' · open in browser'
+  // The card must state its ceiling in WORDS on both arms. Withholding "open in
+  // browser" is necessary but not sufficient: with a poster resolved and no
+  // label, what is left is a ▶ glyph over a 16:9 thumbnail — the universal
+  // play-button idiom with every counter-signal removed — plus no Pressable, so
+  // the tap is a silent no-op and the reader concludes the app is broken. The
+  // `image` sibling above states the same ceiling the same way ("Image
+  // unavailable: …"), as does figures.ex's degrade arm ("Watch the video").
+  head += url !== undefined ? ' · open in browser' : ' · cannot be opened here'
 
   const card = cardFrame(
     <>
@@ -302,8 +309,9 @@ const asciicast: Render = (b, ctx, key) => {
 
   return (
     // Renders EVEN src-less — the video/asciicast ASYMMETRY both twins carry,
-    // preserved deliberately: asciicastRenderer builds its box before it reads
-    // src, and the web emitter emits its mount div unconditionally. A cast block
+    // preserved deliberately: asciicastRenderer reads src and then renders its
+    // box unconditionally (it never returns nil the way videoRenderer does), and
+    // the web emitter emits its mount div unconditionally too. A cast block
     // is authored ABOUT a recording, so its duration and dimensions are content
     // in their own right; a src-less video block carries nothing at all.
     <View key={key} style={{ marginVertical: 12 }}>

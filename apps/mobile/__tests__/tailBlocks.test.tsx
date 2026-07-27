@@ -304,6 +304,39 @@ describe('equation — the transliterated parser agrees with the web twin', () =
     expect(stripRows(atomsToMathMl(texToMathAtoms(tex)))).toBe(stripRows(twinMathMl(tex)))
   })
 
+  it('the MULTI-ATOM numerator is a real slot boundary, not a flattened run', () => {
+    // THE case equation.go gets wrong, pinned on the TREE and not only through
+    // the corpus comparison above — because `stripRows` deletes every <mrow>,
+    // and <mrow> is the ONLY thing encoding the mfrac numerator/denominator
+    // boundary in MathML. After stripping, a numerator that swallowed the
+    // denominator serialises to exactly the same string as a correct split
+    // (`<mfrac><mi>a</mi><mo>+</mo><mi>b</mi><mi>c</mi></mfrac>` either way).
+    //
+    // Measured, rather than asserted: of four deliberately mis-split trees, the
+    // three that keep the mfrac in the same POSITION — numerator swallows all,
+    // split one atom early, numerator empty — are indistinguishable to the
+    // corpus row, while the regex reading `a + (b/c)` IS caught there, because
+    // its mfrac moves. So the corpus does cover equation.go's actual bug; what
+    // it cannot see is a slot-boundary drift, and that is what this assertion
+    // buys.
+    const items = (texToMathAtoms('\\frac{a+b}{c}') as { items: MathAtom[] }).items
+    expect(items).toHaveLength(1)
+    const frac = items[0] as MathAtom
+    expect(frac.kind).toBe('frac')
+    expect((frac as { numer: MathAtom }).numer).toEqual({
+      kind: 'row',
+      items: [
+        { kind: 'sym', text: 'a', mathml: 'mi' },
+        { kind: 'sym', text: '+', mathml: 'mo' },
+        { kind: 'sym', text: 'b', mathml: 'mi' },
+      ],
+    })
+    expect((frac as { denom: MathAtom }).denom).toEqual({
+      kind: 'row',
+      items: [{ kind: 'sym', text: 'c', mathml: 'mi' }],
+    })
+  })
+
   it('the 43-macro table is the twin’s table, entry by entry', () => {
     // A count alone would survive a corrupted symbol; a symbol check alone
     // would survive a dropped entry. Both, plus the pinned size.
@@ -486,6 +519,28 @@ describe('video — a poster-backed degrade card, and NOTHING without a src', ()
       expect(w.text).not.toContain('open in browser')
       expect(w.presses).toHaveLength(0)
     }
+  })
+
+  it('the unopenable card STATES its ceiling in words, poster or not', () => {
+    // Withholding "open in browser" is necessary but not sufficient. With a
+    // poster resolved and no label, the card is a ▶ glyph over a 16:9 thumbnail
+    // with no Pressable — the play-button idiom with every counter-signal
+    // removed, and a tap that silently does nothing. The honest-ceiling doctrine
+    // (hardblocks.go:14-20) wants a box that SAYS what it cannot do.
+    const posterCase = walk(
+      render({ type: 'video', src: 'javascript:alert(1)', poster: 'https://cdn.test/p.png' }),
+    )
+    expect(posterCase.text).toContain('cannot be opened here')
+    expect(posterCase.presses).toHaveLength(0)
+    // …and with no poster either, so the label is the arm's property, not the
+    // poster's.
+    expect(walk(render({ type: 'video', src: 'javascript:alert(1)' })).text).toContain(
+      'cannot be opened here',
+    )
+    // The OPENABLE arm keeps its own words and never borrows this phrase.
+    const ok = walk(render({ type: 'video', src: '/media/files/a.mp4' }, served))
+    expect(ok.text).toContain('open in browser')
+    expect(ok.text).not.toContain('cannot be opened')
   })
 })
 
