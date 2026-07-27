@@ -85,6 +85,32 @@ export const BLOCK_RENDERERS: Record<string, Render> = {
   ...CHAT_RENDERERS,
 }
 
+/* ── the degrade-only set (charter D47) ─────────────────────────────────────── */
+
+/** The registered types whose renderer is a DEGRADE CARD rather than a render:
+ * a labeled box that states its ceiling (`video`, `asciicast` — D46d). They ARE
+ * in BLOCK_RENDERERS, so a block of one still draws its card wherever the
+ * document path is taken — that part is right and stays.
+ *
+ * WHAT THIS SET EXISTS TO PREVENT. `anyRenderableBlocks` (ChatSessionScreen)
+ * asks one question per TURN — is there a single block worth entering the
+ * document path for? — and it derives the answer from THIS registry. So the act
+ * of registering a card silently changes an unrelated decision: a chat turn made
+ * of nothing but video/asciicast blocks answers "no" today and renders the full
+ * `source_markdown` the answer arrived with; the moment those types have
+ * renderers it answers "yes" and paints two summary cards INSTEAD of that
+ * markdown. A card is strictly less than the prose it would replace, so shipping
+ * the renderers without this subtraction would have DELETED information from
+ * turns that render fine now — the one regression in this whole family that no
+ * per-block test could see.
+ *
+ * Subtracting the set at TURN level and nowhere else keeps both halves: a
+ * degrade-only turn stays on the text path, and a MIXED turn takes the document
+ * path and draws the card next to the prose. Gating the dispatch instead would
+ * have been the worse fix — the mixed turn would lose its card to an
+ * "Unsupported block" box, which is a lie about a type we support. */
+export const DEGRADE_ONLY: ReadonlySet<string> = new Set(['video', 'asciicast'])
+
 /** Render one type-keyed block to a ReactNode. Unknown/malformed blocks
  * degrade to the labeled fallback — never a throw, never a silent hole
  * (registry.ts renderBlock twin). */

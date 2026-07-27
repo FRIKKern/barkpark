@@ -63,7 +63,7 @@ import {
   type ChatMessage,
 } from '../chat/wire'
 import { useChatSession } from '../chat/useChatSession'
-import { BLOCK_RENDERERS, renderBlockNative, type BlockCtx } from '../papers/portabledoc/blocks'
+import { BLOCK_RENDERERS, DEGRADE_ONLY, renderBlockNative, type BlockCtx } from '../papers/portabledoc/blocks'
 import type { Block } from '../papers/portabledoc/model'
 import { haptic } from '../ui/haptics'
 import { useTheme, type Theme } from '../ui/theme'
@@ -250,9 +250,18 @@ export function rendersBlocks(role: string): boolean {
  *
  * BLOCK_RENDERERS is the registry `renderBlockNative` itself dispatches on, so
  * this can never disagree with what would be drawn — including the chat-* rows,
- * which are spread into that same registry. */
+ * which are spread into that same registry.
+ *
+ * MINUS THE DEGRADE-ONLY TYPES (charter D47). Registration is not the same claim
+ * as renderability: `video` and `asciicast` are registered to DEGRADE CARDS —
+ * labeled boxes that state their ceiling — and a turn made of nothing but those
+ * is a turn this client cannot really draw. Counting them here would flip such a
+ * turn off the text path it takes today and paint summary cards INSTEAD of the
+ * full `source_markdown`, which is strictly less than the answer. The subtraction
+ * lives at TURN level only: `renderBlockNative` still draws the card, so a MIXED
+ * turn gets its prose AND its card. See DEGRADE_ONLY in registry.tsx. */
 export function anyRenderableBlocks(blocks: readonly Block[]): boolean {
-  return blocks.some((b) => BLOCK_RENDERERS[b.type] !== undefined)
+  return blocks.some((b) => BLOCK_RENDERERS[b.type] !== undefined && !DEGRADE_ONLY.has(b.type))
 }
 
 /** THE two-phase decision, pure so jest can pin it without a native host.
