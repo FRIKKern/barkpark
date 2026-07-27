@@ -33,5 +33,19 @@ const title = (process.env.BARKPARK_SITE_TITLE || 'Search everything.').trim()
 ---
 
 <Base title={title} docId={docId}>
-  <FinderIsland client:only="react" />
+  {/* The split shell is PAGE-owned so ClientRouter can swap the right pane on
+      navigation while the island (transition:persist) is reused untouched —
+      that is what makes opening a document feel like the Next edition: no
+      reload, the finder keeps its query, results and scroll.
+
+      The persist NAME must match the document page's island exactly, or Astro
+      treats them as different elements and remounts. */}
+  <div class="flex h-screen w-full overflow-hidden">
+    <FinderIsland client:only="react" transition:persist="finder-rail" />
+    {/* The graph's landing slot. The island PORTALS the corpus graph in here,
+        keeping it inside the finder's React tree (the context bridge) while its
+        DOM belongs to this page — so a document page, which renders no slot,
+        simply has no graph. */}
+    <div id="bp-graph-slot" class="hidden min-w-0 flex-1 md:block"></div>
+  </div>
 </Base>

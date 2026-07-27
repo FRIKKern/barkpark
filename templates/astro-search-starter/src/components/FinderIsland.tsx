@@ -15,6 +15,7 @@
 // use-live-search flips to the persistent Phoenix channel per keystroke (that
 // channel carries both engines too — D39). No separate Postgres transport.
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Finder } from '../finder/finder'
 import { FinderErrorBoundary } from './FinderErrorBoundary'
 import GraphPane from './GraphPane'
@@ -244,22 +245,46 @@ installInterceptor()
 const RAIL_CLASS =
   'shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[480px] lg:w-[640px] xl:w-[860px] 2xl:w-[1080px] dark:border-zinc-800'
 
-export interface FinderIslandProps {
-  /**
-   * `landing` — the master split: rail + corpus graph, the whole screen. Used
-   * by `index.astro`.
-   *
-   * `rail` — the rail ALONE, for `/d/<type>/<slug>` pages where the right pane
-   * is the prerendered document and there is no graph. The document stays real
-   * static HTML (SEO, zero client JS) instead of being pulled into this island,
-   * and the finder↔graph context bridge is not needed on that page because the
-   * graph is not on it — so the one-island rule (see the comment at the split
-   * below) is not violated by rendering only the rail here.
-   */
-  variant?: 'landing' | 'rail'
+/** The id of the page-owned node the corpus graph is PORTALLED into. Only the
+ * landing renders one; a document page does not, which is exactly how the graph
+ * disappears when a document opens without this island ever unmounting. */
+const GRAPH_SLOT_ID = 'bp-graph-slot'
+
+/**
+ * Track the graph slot across client-side navigations.
+ *
+ * THE PROBLEM THIS SOLVES. The island is `transition:persist`ed, so ClientRouter
+ * REUSES it across pages — that is what keeps the finder's query, results and
+ * scroll alive (the whole point). But persistence means the island's own markup
+ * cannot change per page, while the graph must appear on the landing and vanish
+ * on a document page.
+ *
+ * A React PORTAL is the resolution: the graph stays inside THIS React tree — so
+ * the finder↔graph context bridge (`useGraphMatches` / `useHoveredDoc`) is fully
+ * intact, which is the constraint that forced one island in the first place —
+ * while its DOM lands in a node the PAGE owns and ClientRouter swaps. Landing
+ * renders the slot, document pages don't, so the graph follows the page without
+ * the island ever unmounting.
+ *
+ * `astro:page-load` fires after every swap (and on the initial load), which is
+ * when the new page's DOM — and therefore the presence or absence of the slot —
+ * is finally readable.
+ */
+function useGraphSlot(): HTMLElement | null {
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const read = () => setSlot(document.getElementById(GRAPH_SLOT_ID))
+    read()
+    document.addEventListener('astro:page-load', read)
+    return () => document.removeEventListener('astro:page-load', read)
+  }, [])
+
+  return slot
 }
 
-export default function FinderIsland({ variant = 'landing' }: FinderIslandProps = {}) {
+export default function FinderIsland() {
+  const slot = useGraphSlot()
   // The 0ms head-start seed + first-paint browse are baked into a static
   // `search-seed.json` by the seed slice; fetch it at runtime and degrade
   // gracefully when it is absent (D40) — the finder still works, just without
@@ -301,33 +326,26 @@ export default function FinderIsland({ variant = 'landing' }: FinderIslandProps 
     />
   )
 
-  // RAIL-ONLY: the document page's left column. The page itself owns the flex
-  // container (its right pane is prerendered document HTML, outside this
-  // island), so this renders the aside and nothing else — Astro's
-  // `<astro-island>` wrapper is `display: contents`, so this aside is a direct
-  // flex child of the page's split exactly like the Next edition's is.
-  if (variant === 'rail') {
-    return (
-      <FinderErrorBoundary>
-        <HoveredDocProvider>
-          <FinderNavProvider>
-            <aside className={`hidden h-screen md:block ${RAIL_CLASS}`}>{finder}</aside>
-          </FinderNavProvider>
-        </HoveredDocProvider>
-      </FinderErrorBoundary>
-    )
-  }
+  // ONE composition on EVERY page — required, not tidiness: a persisted island
+  // is REUSED across navigations, so its own markup can never be per-page. The
+  // rail is always this aside; the graph rides a portal into whatever slot the
+  // current page provides (landing: yes, document: no).
+  //
+  // `hidden md:block` on a document page vs full-width on the landing is the one
+  // per-page difference, and it is driven by the SLOT, not by a prop: with a
+  // graph slot present the rail shares the screen (`w-full` under `md`, where
+  // the graph is hidden anyway); with no slot the document owns the small screen
+  // and the rail steps aside — the end state the Next edition reaches by
+  // mounting its detail as a `fixed inset-0 md:static` overlay.
+  const railClass = slot ? `w-full ${RAIL_CLASS}` : `hidden md:block ${RAIL_CLASS}`
 
   return (
     <FinderErrorBoundary>
       <HoveredDocProvider>
         <FinderNavProvider>
-          <div className="flex h-screen w-full overflow-hidden">
-            <aside className={`w-full ${RAIL_CLASS}`}>{finder}</aside>
-            <div className="hidden min-w-0 flex-1 md:block">
-              <GraphPane />
-            </div>
-          </div>
+          <aside className={`h-screen ${railClass}`}>{finder}</aside>
+          {/* The graph: same React tree (bridge intact), page-owned DOM. */}
+          {slot ? createPortal(<GraphPane />, slot) : null}
         </FinderNavProvider>
       </HoveredDocProvider>
     </FinderErrorBoundary>

@@ -51,7 +51,12 @@ const typeLabel = rawType ? rawType.charAt(0).toUpperCase() + rawType.slice(1) :
 <Base title={title} docId={doc._id}>
   <link rel="stylesheet" href={paperCss} />
   <div class="flex h-screen w-full overflow-hidden">
-    <FinderIsland client:only="react" variant="rail" />
+    {/* SAME persist name as the landing's island — that identity is what makes
+        ClientRouter REUSE the finder instead of remounting it, so opening this
+        document keeps the query, the result list and the scroll position. This
+        page renders NO #bp-graph-slot, which is precisely how the graph goes
+        away without the island unmounting. */}
+    <FinderIsland client:only="react" transition:persist="finder-rail" />
     <section class="min-w-0 flex-1 overflow-y-auto">
       {/* The detail chrome — the Next edition's components/detail-chrome.tsx,
           as plain static markup (no island needed): a type badge, the title
@@ -109,8 +114,20 @@ const typeLabel = rawType ? rawType.charAt(0).toUpperCase() + rawType.slice(1) :
   // useSearchParams). Static-safe: if JS never runs, the href already points at
   // the landing — the link is never broken, only less precise.
   ;(function () {
-    var a = document.getElementById('bp-detail-close')
-    if (a && window.location.search) a.href = a.getAttribute('href') + window.location.search
+    function wire() {
+      var a = document.getElementById('bp-detail-close')
+      if (!a) return
+      // Re-derive from the ORIGINAL href each time: with client-side navigation
+      // this runs again on every swap, and reading the live href would append
+      // the query repeatedly (?q=x?q=x).
+      var base = a.getAttribute('data-href-base') || a.getAttribute('href') || '/'
+      a.setAttribute('data-href-base', base)
+      a.setAttribute('href', window.location.search ? base + window.location.search : base)
+    }
+    wire()
+    // ClientRouter swaps the DOM without re-running module scripts, so re-wire
+    // after every navigation.
+    document.addEventListener('astro:page-load', wire)
   })()
 </script>
 

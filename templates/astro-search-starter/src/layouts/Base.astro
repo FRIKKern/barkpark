@@ -2,6 +2,7 @@
 // Base layout — bakes the HEALTH markers (bp-build-id / bp-content-rev /
 // bp-doc-id) the deploy engine asserts by value, plus the two-axis theme
 // bootstrap (data-theme mode × data-bp-theme identity, deploy-pinned default).
+import { ClientRouter } from 'astro:transitions'
 import { env } from '../lib/bp'
 interface Props {
   title: string
@@ -25,6 +26,14 @@ const themeBoot =
     <meta name="bp-site-base" content={env.siteBase} />
     {docId && <meta name="bp-doc-id" content={docId} />}
     <script set:html={themeBoot} />
+    {/* Client-side navigation: opening a document must NOT reload the page —
+        the finder rail has to keep its typed query, its results and its scroll
+        exactly as the Next edition does (Next swaps only the `children`
+        segment of a single mounted layout). ClientRouter intercepts same-origin
+        link clicks, fetches the target, swaps the DOM, and REUSES any element
+        marked `transition:persist` — which is how the finder island survives
+        the navigation instead of remounting. */}
+    <ClientRouter />
   </head>
   <body>
     <slot />
