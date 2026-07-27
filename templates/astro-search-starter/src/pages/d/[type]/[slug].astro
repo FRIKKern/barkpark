@@ -2,12 +2,27 @@
 // Document pages, STATICALLY generated at build — every published doc of the
 // featured type becomes real HTML here, rendered by the CANONICAL
 // @barkpark/react PortableDoc (all 42 block types, bp-* classes) through
-// Astro's React SSR. The PortableDoc-on-Astro mastery proof: same renderer,
-// same bytes-shape as Phoenix and Next — zero client JS on this page.
+// Astro's React SSR.
+//
+// THE SPLIT (parity with the Next edition's `app/(finder)/layout.tsx`): opening
+// a document must NOT drop the visitor on a bare standalone page — the finder
+// stays in the left rail and the document fills the right pane, exactly as on
+// the landing. The rail is the same island at `variant="rail"`; the document
+// beside it is still pure prerendered HTML with zero client JS, so the
+// PortableDoc-on-Astro proof and this page's SEO both survive.
+//
+// Divergence from Next, stated honestly: Next keeps ONE mounted layout and
+// swaps only the `children` segment, so the rail's typed query and scroll
+// survive the navigation. A static site serves each document as its own
+// document, so the rail remounts and re-seeds from `search-seed.json`. The
+// composition a visitor sees is the same; what differs is that the query box
+// starts empty here rather than carrying the text that led to the click.
 import Base from '../../../layouts/Base.astro'
+import FinderIsland from '../../../components/FinderIsland'
 import { PortableDoc } from '@barkpark/react'
 import paperCss from '@barkpark/react/paper-surface.css?url'
 import { allDocs, docBlocks, getDoc } from '../../../lib/bp'
+import '../../../styles/globals.css'
 
 export async function getStaticPaths() {
   const docs = await allDocs()
@@ -32,13 +47,18 @@ const blocks = docBlocks(full ?? doc)
 
 <Base title={title} docId={doc._id}>
   <link rel="stylesheet" href={paperCss} />
-  <main class="bp-paper-surface">
-    <article class="bp-paper-body">
-      <a class="back" href={import.meta.env.BASE_URL}>&lsaquo; Search</a>
-      <h1>{title}</h1>
-      {blocks.length > 0 ? <PortableDoc value={blocks} /> : <p class="empty">This document has no body content.</p>}
-    </article>
-  </main>
+  <div class="flex h-screen w-full overflow-hidden">
+    <FinderIsland client:only="react" variant="rail" />
+    <section class="min-w-0 flex-1 overflow-y-auto">
+      <main class="bp-paper-surface">
+        <article class="bp-paper-body">
+          <a class="back" href={import.meta.env.BASE_URL}>&lsaquo; Search</a>
+          <h1>{title}</h1>
+          {blocks.length > 0 ? <PortableDoc value={blocks} /> : <p class="empty">This document has no body content.</p>}
+        </article>
+      </main>
+    </section>
+  </div>
 </Base>
 
 <style>
@@ -46,4 +66,10 @@ const blocks = docBlocks(full ?? doc)
   .back { display: inline-block; margin-bottom: 24px; opacity: .6; color: inherit; text-decoration: none; }
   .back:hover { opacity: 1; }
   .empty { opacity: .6; }
+  /* The rail is hidden below `md`, so on a phone this link is the only way
+     back and must stay. At `md`+ the rail itself is the way back, which is
+     where the Next edition has no in-pane back affordance either. */
+  @media (min-width: 768px) {
+    .back { display: none; }
+  }
 </style>

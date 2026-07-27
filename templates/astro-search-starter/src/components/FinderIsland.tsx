@@ -235,7 +235,31 @@ installInterceptor()
 // a React-free module unit-tested by `shape-seed.test.ts` so the seed-shape
 // contract (baked `SeedDoc[]` → built `PrefixSeed`) can't silently regress.
 
-export default function FinderIsland() {
+/** Shared by both compositions so the rail is the SAME object on every page —
+ * identical widths and border to the Next edition's `(finder)/layout.tsx`
+ * aside. Below `md` the landing rail is the whole screen; on a document page it
+ * hides, because the document owns the small screen there (the Next edition
+ * reaches the same end state by mounting the detail as a `fixed inset-0`
+ * overlay ON TOP of the rail). */
+const RAIL_CLASS =
+  'shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[480px] lg:w-[640px] xl:w-[860px] 2xl:w-[1080px] dark:border-zinc-800'
+
+export interface FinderIslandProps {
+  /**
+   * `landing` — the master split: rail + corpus graph, the whole screen. Used
+   * by `index.astro`.
+   *
+   * `rail` — the rail ALONE, for `/d/<type>/<slug>` pages where the right pane
+   * is the prerendered document and there is no graph. The document stays real
+   * static HTML (SEO, zero client JS) instead of being pulled into this island,
+   * and the finder↔graph context bridge is not needed on that page because the
+   * graph is not on it — so the one-island rule (see the comment at the split
+   * below) is not violated by rendering only the rail here.
+   */
+  variant?: 'landing' | 'rail'
+}
+
+export default function FinderIsland({ variant = 'landing' }: FinderIslandProps = {}) {
   // The 0ms head-start seed + first-paint browse are baked into a static
   // `search-seed.json` by the seed slice; fetch it at runtime and degrade
   // gracefully when it is absent (D40) — the finder still works, just without
@@ -268,19 +292,38 @@ export default function FinderIsland() {
   // HoveredDoc) — two Astro islands would be two roots with no shared state.
   // On mobile the rail is full-width and the graph hides (the original's
   // `hidden md:flex` welcome-pane behaviour); rail widths mirror the original.
+  const finder = (
+    <Finder
+      variant="master"
+      initialData={seed.initialData}
+      initialSeed={seed.initialSeed}
+      initialEngine="postgres"
+    />
+  )
+
+  // RAIL-ONLY: the document page's left column. The page itself owns the flex
+  // container (its right pane is prerendered document HTML, outside this
+  // island), so this renders the aside and nothing else — Astro's
+  // `<astro-island>` wrapper is `display: contents`, so this aside is a direct
+  // flex child of the page's split exactly like the Next edition's is.
+  if (variant === 'rail') {
+    return (
+      <FinderErrorBoundary>
+        <HoveredDocProvider>
+          <FinderNavProvider>
+            <aside className={`hidden h-screen md:block ${RAIL_CLASS}`}>{finder}</aside>
+          </FinderNavProvider>
+        </HoveredDocProvider>
+      </FinderErrorBoundary>
+    )
+  }
+
   return (
     <FinderErrorBoundary>
       <HoveredDocProvider>
         <FinderNavProvider>
           <div className="flex h-screen w-full overflow-hidden">
-            <aside className="w-full shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[480px] lg:w-[640px] xl:w-[860px] 2xl:w-[1080px] dark:border-zinc-800">
-              <Finder
-                variant="master"
-                initialData={seed.initialData}
-                initialSeed={seed.initialSeed}
-                initialEngine="postgres"
-              />
-            </aside>
+            <aside className={`w-full ${RAIL_CLASS}`}>{finder}</aside>
             <div className="hidden min-w-0 flex-1 md:block">
               <GraphPane />
             </div>
