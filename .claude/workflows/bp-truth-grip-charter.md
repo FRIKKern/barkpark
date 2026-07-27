@@ -2523,3 +2523,62 @@ quarantine another epic's ledger rows. It will not run `git worktree prune`. It 
 "priority-2-4 hardening long tail" was enumerated by nobody in two rounds of survey and remains
 enumerated by nobody — slice 7 disposes the 79 by content, and whatever survives is named, not
 implied.
+
+
+### Wave 2026-07-27 (III) — wave 10 CLOSED. Three of eight slices landed. Grade B.
+
+Paper: `truth-grip-wave-10-2026-07-27`. PRs #6359, #6360, #6361 — all pushed, none merged (the lead merges).
+
+**WHAT LANDED — three slices, each of which does what it says.**
+
+| slice | task | final branch | PR |
+|---|---|---|---|
+| class-coverage tripwire, dual-spelling over all 16 modules | `tgw9-bl-uncontrolled-rejection-classes` | `…class-coverage-tripwire-dual-spelling-ov-2-r` | #6359 |
+| wild-bulk fact-provenance gate — criterion 3 clause (c) | `tgw9-s7-wildbulk-provenance-gate` | `…wild-bulk-cycle-gates-fact-provenance-be-5-r` | #6360 |
+| tail disposition + prune — clause (b) 86 → 32 | `tgw9-s4-tail-disposition` | `…tail-disposition-prune-drive-clause-b-s--6-r` | #6361 |
+
+**WHAT DID NOT BUILD, named rather than implied: FIVE of the eight slices returned nothing.**
+`tgw9-s1-ledger-commons-honest`, `tgw2-acceptance-suite`, `tgw9-s3-criteria-adjudicated` (the seal
+predicate — the wave's own thesis) and `tgw5-bl-level-mention-promotion` (the wave's one security
+item) produced no branch at all; `tgw6-bl-grip-suite-has-no-ci` was round 2 behind S1 by design and
+was correctly not attempted. **So the seal did not become a command, the L1-from-a-local-grep
+promotion is still live on main, and the ledger commons is still red** — the full grip suite on the
+combined wave branch is 644/640/3/1, and the three reds are exactly the ones S1 owns. Grip CI stays
+correctly blocked behind them (D104).
+
+**THE WAVE'S OWN FINDING, produced at review by re-derivation rather than by reading.** The tail
+disposition claimed each of its 45 parks carried a row-specific reason plus a named reactivation
+trigger in `content.engagement.note`. Re-derived over the live ledger: **0 of 46 `considering` rows
+carry a note.** The mechanism is not broken — a control writes one and reads it back verbatim — it
+was simply not used. The closes and the 26 disposition-patched open rows DO carry durable reasons;
+only the parks lost theirs, so 44 of 45 adjudications exist nowhere. That is this epic's disease
+inside this epic's own disposition row: a claim stored at the author's word and refuted the first
+time a program went and looked. Corrected in the committed row (§R7), corrected on the task's
+criterion evidence, one reason restored live, and the re-adjudication filed as
+`tgw10-bl-park-reasons-not-durable`.
+
+**A LIVE WRITE-PERMISSION HOLE, independently re-derived at review and NOT closed.** `screenCommand`
+ADMITS `git -C log push origin main`, `git -C show commit -m x` and `git --git-dir log push`: the
+global option's VALUE is read as the sub-verb, collides with the read-only allowlist, and the write
+verb behind it is never examined. `rerun.mjs` refuses all three. Two gates, one command, opposite
+rulings — `tgw4-screen-git-global-option-audit` stays OPEN and
+`tgw10-bl-screencommand-bypass-census` names the shape. **This is the highest-value open row in the
+namespace and the next wave should take it first.**
+
+**THE RULE THIS WAVE ADDS: a close-by-content is only as wide as the module you ran.** Run every gate
+that guards the capability, not the first one that agrees with you. The near-miss above would have
+laundered a live hole into a `done` row.
+
+**Clause (b) moved and the six stale refs are gone.** Blocking set 86 → 32 by content, one row at a
+time, every close a verified leaf on two lenses; six superseded remote branches re-derived at prune
+time with two-dot diffs and deleted, head SHAs recorded and confirmed still resolvable, so the
+deletion is reversible. `git worktree prune` was not run. The count reads 35 at review because this
+review filed one row and two builders' claim leases lapsed back into the ready pool — the pool is a
+live shared commons and the row says so rather than freezing a number.
+
+**WHAT THE NEXT WAVE TAKES.** Round 1 of the deferred set, in dependency order: `tgw9-s1` (the three
+independent ledger-commons reds — everything downstream is blocked on it), then
+`tgw6-bl-grip-suite-has-no-ci` the moment S1 is green, then `tgw5-bl-level-mention-promotion` and
+`tgw9-s3`. Plus the two rows this review produced: the `screenCommand` global-option hole and the 44
+lost park reasons. **The epic still does not seal, for the same reason it did not seal in wave 9 —
+the predicate does not hold — and now also because the predicate is still prose.**
