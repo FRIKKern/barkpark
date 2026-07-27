@@ -1,0 +1,13 @@
+name: hg-probe-paths
+
+on:
+  pull_request:
+    paths:
+      - 'nonexistent-path-for-probe/**'
+
+jobs:
+  paths-filtered:
+    name: probe-paths-filtered
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
