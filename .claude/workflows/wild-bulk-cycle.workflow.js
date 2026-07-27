@@ -233,6 +233,53 @@ if ((SURVEY_SCHEMA.properties.facts.items.required || []).includes('rerun')) {
   throw new Error('SURVEY_SCHEMA.facts[].rerun must stay OPTIONAL (charter D3: a missing command DEMOTES to L6, it never rejects).')
 }
 
+// THE FACT-PROVENANCE GATE — ported from bp-epic-cycle.workflow.js, semantics
+// unchanged. The schema check above only proves the CARRIER exists; it says
+// nothing about whether a returned fact filled it. Without this, a fact with no
+// rerun command — an unverified belief at the level of agent memory — is
+// serialised into the Digest prompt indistinguishable from a measured one, and
+// the Fable downstream of that prompt cuts up to 60 tasks on it.
+//
+// DEMOTE, NEVER REJECT (charter D3): a missing command lowers the fact's
+// authority level, it does not throw the fact away — the cheapest fix is for
+// the reader to add a one-line command, and a rejected fact never gets read.
+//
+// The reports are mutated IN PLACE, at the single barrier where the survey
+// resolves. That is deliberate: gating each JSON.stringify site separately is
+// the copies-that-must-agree defect in miniature, and the next serialisation
+// someone adds would silently be the ungated one.
+function gateFactProvenance(reports) {
+  let total = 0
+  let demoted = 0
+  for (const report of reports || []) {
+    const facts = (report && report.facts) || []
+    for (const fact of facts) {
+      if (!fact || typeof fact !== 'object') continue
+      total++
+      const rerun = typeof fact.rerun === 'string' ? fact.rerun.trim() : ''
+      if (rerun) continue
+      demoted++
+      // Annotated on the RESOLVED object, never in the schema: FACT_ITEMS is
+      // additionalProperties:false, and that constraint governs what the MODEL
+      // may return — it says nothing about what we may add after the fact.
+      fact.provenance = 'DEMOTED-NO-RERUN'
+      fact.provenance_note = 'no rerun command on this fact — it cannot be re-derived, so treat it as an unverified belief and never quote it above the level of agent memory (charter D3: demote, never reject; add a one-line rerun command and it levels up in ten seconds).'
+    }
+  }
+  return { total, demoted }
+}
+
+// Renders the gate's COUNT into the prompt of the phase that receives the facts,
+// so the reader sees how much of its own input was demoted rather than having to
+// notice the per-fact markers. Zero renders as an explicit all-clear, never as
+// nothing: a gate that is silent when clean is indistinguishable from a gate
+// that was deleted, and one that shouts when clean gets tuned out.
+function gripBlock(grip) {
+  if (!grip.total) return '\nFACT PROVENANCE GATE: no facts were returned at all — that is itself a signal about this sweep, not a clean bill of health.'
+  if (!grip.demoted) return `\nFACT PROVENANCE GATE: 0/${grip.total} fact(s) demoted — every fact below carries a rerun command that re-derives it.`
+  return `\n⚠ FACT PROVENANCE GATE: ${grip.demoted}/${grip.total} fact(s) are marked \`provenance: "DEMOTED-NO-RERUN"\`. Those facts carry NO command that re-derives them: treat each as an unverified belief at the level of agent memory, never as a settled measurement, and do not cut a task on one without first giving it a rerun command. The other ${grip.total - grip.demoted} are re-derivable as claimed.`
+}
+
 const DIGEST_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['synthesis', 'paper_updated', 'bundles', 'dropped'],
@@ -527,7 +574,12 @@ if (surveyed.length < DOMAIN_FLOOR) {
   throw new Error(`Domain survival floor: only ${surveyed.length} of ${DOMAIN_FLOOR} domains survived Recon+Survey. A domain drops out here when its lead died or its probe floor fired, and pipeline() swallows both into a silent null — so the cycle would digest a partial sweep and report it as whole. Check the pipeline[] failure lines above for the real cause, then resume the run rather than proceeding on ${surveyed.length}/${DOMAIN_FLOOR} of the codebase.`)
 }
 const totalCandidates = surveyed.reduce((n, s) => n + s.reports.reduce((m, r) => m + (r.fix_candidates || []).length, 0), 0)
-log(`Survey complete: ${surveyed.length}/3 domains, ${totalCandidates} raw fix candidates`)
+// ONE interception, in place, at the barrier where the survey resolves — BEFORE
+// the first JSON.stringify in this file, so every downstream serialisation of a
+// survey report (Digest today, whatever a later wave adds) reads gated facts.
+const surveyGrip = gateFactProvenance(surveyed.flatMap((s) => s.reports || []))
+const SURVEY_GRIP = gripBlock(surveyGrip)
+log(`Survey complete: ${surveyed.length}/3 domains, ${totalCandidates} raw fix candidates; provenance gate: ${surveyGrip.demoted}/${surveyGrip.total} fact(s) DEMOTED (no rerun command)`)
 
 // ── Phase 4: Digest — one Fable holds ALL reports (barrier: cross-domain dedup) ──
 phase('Digest')
@@ -544,6 +596,7 @@ ${JSON.stringify(planner.domains.map((d) => ({ slug: d.slug, name: d.name, scope
 
 SURVEY REPORTS BY DOMAIN (trust file:line evidence over prose; treat unanchored claims as rumors):
 ${JSON.stringify(surveyed.map((s) => ({ domain: s.domain.slug, reports: s.reports })), null, 2)}
+${SURVEY_GRIP}
 
 Your job:
 1. SYNTHESIZE: defect themes across domains, contradictions between scouts, what the sweep established and what stayed dark.
