@@ -167,6 +167,17 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
     block: { type: 'quote', content: [{ type: 'text', value: 'quoted words' }] },
     marker: 'bp-blockquote',
   },
+  // h-tag + ordered-list drift (charter D57). The markers are the CLOSING tags,
+  // so a level that came from the default rather than from the type reds: the h2
+  // and h3 cases deliberately carry NO `level` key, which is the live shape.
+  { type: 'h1', block: { type: 'h1', level: 1, text: 'drifted h1' }, marker: '</h1>' },
+  { type: 'h2', block: { type: 'h2', text: 'drifted h2' }, marker: '</h2>' },
+  { type: 'h3', block: { type: 'h3', text: 'drifted h3' }, marker: '</h3>' },
+  {
+    type: 'ordered-list',
+    block: { type: 'ordered-list', items: [{ content: [{ type: 'text', value: 'kebab ordered point' }] }] },
+    marker: '<ol>',
+  },
   // scaffy:add-block-type Filetree MARK:js-case-filetree
   {
     type: 'filetree',
@@ -522,7 +533,8 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // scaffy:add-block-type Blockquote MARK:js-count-blockquote
     // 49 canonical/aliased emitters from the scaffy census + 6 authoring-drift
     // aliases (bulletList / bullet_list / bulleted-list / bulleted_list /
-    // numbered_list / quote) added by pbw-w1 = 55.
+    // numbered_list / quote) added by pbw-w1 = 55, + the 4 h-tag/ordered-list
+    // drift aliases (h1 / h2 / h3 / ordered-list) added by charter D57.
     // scaffy:add-block-type Toc MARK:js-count-toc
     // scaffy:add-block-type Steps MARK:js-count-steps
     // scaffy:add-block-type Footnote MARK:js-count-footnote
@@ -534,7 +546,7 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // scaffy:add-block-type ApiEndpoint MARK:js-count-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:js-count-code-tabs
     // scaffy:add-block-type Tabs MARK:js-count-tabs
-    expect(registered).toHaveLength(66)
+    expect(registered).toHaveLength(70)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {

@@ -327,6 +327,21 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["bulleted-list"] = lr
 	r.blocks["bulleted_list"] = lr
 	r.blocks["numbered_list"] = orderedListRenderer{lr: lr}
+	// `ordered-list` is the same renderer under a second spelling (charter D57) —
+	// 2 live blocks. Their items are map-shaped (`{content:[…]}`), which itemNodes
+	// does NOT normalize, so the numbers land but the item text stays blank: the
+	// pre-existing defect the canonical `list` reproduces identically (charter
+	// D38, task-993d136b0fbf2fd1), not an alias defect.
+	r.blocks["ordered-list"] = orderedListRenderer{lr: lr}
+	// h-tag spellings → heading at the level the TYPE names (charter D57): 18 live
+	// prod blocks unknown-boxed on every surface, SIX of them carrying no `level`
+	// key. See headingAtLevel in blocks.go. Registered HERE with the other
+	// authoring-drift aliases rather than beside `heading`, because
+	// scaffy/commands/add-block-type.scaffy anchors on the heading registration
+	// line verbatim — that line is load-bearing template bytes, not free text.
+	r.blocks["h1"] = headingAtLevel{hr: headingRenderer{ir: ir}, level: 1}
+	r.blocks["h2"] = headingAtLevel{hr: headingRenderer{ir: ir}, level: 2}
+	r.blocks["h3"] = headingAtLevel{hr: headingRenderer{ir: ir}, level: 3}
 	r.blocks["quote"] = blockquoteRenderer{ir: ir}
 	r.blocks["callout"] = calloutRenderer{ir: ir}
 	r.blocks["divider"] = dividerRenderer{}
