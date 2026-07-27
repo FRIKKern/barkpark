@@ -116,6 +116,29 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+  sobelow-inline-overlap:
+    name: Sobelow baseline does not swallow its own inline waivers (blocking)
+    # BLOCKING on purpose, unlike the sobelow job above. That job is advisory
+    # because fingerprints drift across toolchains; this check reads only text —
+    # api/.sobelow-skips entries versus `# sobelow_skip` annotations in api/lib —
+    # so it is deterministic and toolchain-independent, and has no honest reason
+    # to be advisory. No BEAM, no deps, ~1s.
+    #
+    # What it protects: an entry present in BOTH places makes the inline waiver
+    # unfalsifiable. Sobelow binds an annotation to its function by AST
+    # adjacency, so a refactor can silently detach it — the moment the gate is
+    # supposed to speak — and a baseline carrying the same finding swallows it.
+    # Honest Gates D29.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Selftest (the ratchet must be able to fail)
+        run: bash api/scripts/sobelow-inline-overlap-check.sh --selftest
+
+      - name: No baseline entry duplicates an inline waiver
+        run: bash api/scripts/sobelow-inline-overlap-check.sh
+
   mix-audit:
     name: Dependency CVE audit (mix_audit over mix.lock, blocking)
     # BLOCKING (no continue-on-error). The 8 pre-existing CVEs were remediated by

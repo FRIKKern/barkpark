@@ -41,12 +41,20 @@ if [[ -e $BASELINE ]]; then
   echo "error: mix sobelow --clear-skip did not remove the baseline" >&2
   exit 1
 fi
+# `--skip` is LOAD-BEARING here, not decoration. Sobelow 0.14.1 only pairs an
+# inline `# sobelow_skip [...]` annotation with its function when `--skip` is
+# set (sobelow.ex:420-421 — `combine_skips` short-circuits on `get_env(:skip)`),
+# and the pairing suppresses the finding UPSTREAM of the writer
+# (sobelow.ex:403-410 does `mods -- skip_mods`, so the check never runs).
+# Without it, an inline-waived finding is generated, fingerprinted and written
+# into the baseline — so the file silently swallows its own waivers, and a
+# refactor that detaches an annotation from its function stops being visible.
 (
   cd -- "$API_DIR"
-  mix sobelow --mark-skip-all
+  mix sobelow --skip --mark-skip-all
 )
 if [[ ! -s $BASELINE ]]; then
-  echo "error: mix sobelow --mark-skip-all did not create a baseline" >&2
+  echo "error: mix sobelow --skip --mark-skip-all did not create a baseline" >&2
   exit 1
 fi
 
@@ -69,7 +77,7 @@ fi
   printf '%s\n' "$versions"
   printf 'baseline_lines=%s\n' "$(wc -l < "$BASELINE" | tr -d ' ')"
   printf 'baseline_sha256=%s\n' "$baseline_sha"
-  printf 'sequence=clear-skip,mark-skip-all\n'
+  printf 'sequence=clear-skip,skip+mark-skip-all\n'
   printf 'review=human-required;never-auto-commit\n'
 } > "$ARTIFACT_DIR/metadata.txt"
 
