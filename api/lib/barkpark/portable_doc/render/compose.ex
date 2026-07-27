@@ -286,6 +286,25 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   def compose_block(%{"type" => t} = b, style) when t == "numbered_list",
     do: compose_block(b |> Map.put("type", "list") |> Map.put("ordered", true), style)
 
+  def compose_block(%{"type" => t} = b, style) when t == "ordered-list",
+    do: compose_block(b |> Map.put("type", "list") |> Map.put("ordered", true), style)
+
+  # h-tag spellings → heading at the level the TYPE names (charter D57): 18 live
+  # blocks composed to `unknown_block_node/1` on the View and Email surfaces.
+  # The level is taken from the TYPE, overwriting any stored `level` — SIX of
+  # the 18 drifted headings (1 h2 + all 5 h3s) carry no `level` key, so
+  # borrowing the heading clause without forcing the level would render an `h3`
+  # as an `<h2>`. Zero live blocks contradict their type. Same
+  # VARIABLE-guard form as the list aliases above, and for the same reason: it
+  # keeps these spellings OUT of the tiers-completeness / parity-census
+  # extractors (both grep quoted string type heads and `t in [...]` literals),
+  # because an alias has no tier or golden of its own — it borrows its target's.
+  @heading_aliases ~w(h1 h2 h3)
+  def compose_block(%{"type" => t} = b, style) when t in @heading_aliases do
+    level = String.to_integer(String.trim_leading(t, "h"))
+    compose_block(b |> Map.put("type", "heading") |> Map.put("level", level), style)
+  end
+
   def compose_block(%{"type" => t} = b, style) when t == "quote",
     do: compose_block(Map.put(b, "type", "blockquote"), style)
 

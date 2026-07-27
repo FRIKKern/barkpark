@@ -132,6 +132,29 @@ func (o orderedListRenderer) Render(b Block, ctx RenderCtx) []string {
 	return o.lr.Render(b, ctx)
 }
 
+// headingAtLevel forces `level`, then defers to the heading renderer. It backs
+// the h1/h2/h3 authoring-drift aliases (mirrors compose.ex's @heading_aliases
+// clause and react's headingAtLevel): the level comes from the TYPE, not from
+// `level`, because SIX of the 18 drifted headings (1 h2 + all 5 h3s) carry no
+// `level` key and would otherwise render at headingLevel's default of 2. The
+// type wins outright; zero live blocks contradict it. The Attrs map is
+// COPIED before the level is set so the caller's block is never mutated (the
+// orderedListRenderer precedent directly above).
+type headingAtLevel struct {
+	hr    headingRenderer
+	level int
+}
+
+func (h headingAtLevel) Render(b Block, ctx RenderCtx) []string {
+	attrs := make(map[string]any, len(b.Attrs)+1)
+	for k, v := range b.Attrs {
+		attrs[k] = v
+	}
+	attrs["level"] = h.level
+	b.Attrs = attrs
+	return h.hr.Render(b, ctx)
+}
+
 // itemNodes normalizes a list item to a []any of inline nodes. The wire shape
 // for an item is an array of inline nodes; a bare string/number item is
 // tolerated and wrapped (mirrors compose_inline_children's scalar clauses). A

@@ -49,6 +49,16 @@ const heading: Emit = (b) => {
   return `<h${level}>${renderInlines(paragraphInline(b))}</h${level}>`
 }
 
+// The h1/h2/h3 authoring-drift aliases (charter D57), the JS twin of compose.ex's
+// @heading_aliases clause. The level comes from the TYPE, not from `level`: SIX
+// of the 18 drifted headings (1 h2 + all 5 h3s) carry no `level` key, so
+// `h3: heading` alone would emit `<h2>`. Spreading the level in makes the type
+// authoritative — zero live blocks contradict their own type spelling.
+const headingAtLevel =
+  (level: 1 | 2 | 3): Emit =>
+  (b) =>
+    heading({ ...b, level } as Block)
+
 // Swept sibling of the heading/list content[] defect: eyebrow read `text` alone,
 // so the 3 live eyebrows persisted as `{content:[…]}` rendered an empty
 // `<p class="bp-role-eyebrow"></p>`. The `text` path is byte-identical (the
@@ -1184,6 +1194,11 @@ const roadmap: Emit = (b) => {
 
 export const coreEmitters: Record<string, Emit> = {
   heading,
+  // h-tag spellings → heading at the level the TYPE names (charter D57): 18 live
+  // blocks emitted `bp-unknown-block` on every surface until this landed.
+  h1: headingAtLevel(1),
+  h2: headingAtLevel(2),
+  h3: headingAtLevel(3),
   eyebrow,
   byline,
   ingress,
@@ -1198,6 +1213,9 @@ export const coreEmitters: Record<string, Emit> = {
   'bulleted-list': list,
   bulleted_list: list,
   numbered_list: numberedList,
+  // `ordered-list` is the same emitter under a second spelling (charter D57) — 2
+  // live blocks, both with map-shaped items the list emitter already normalizes.
+  'ordered-list': numberedList,
   quote: blockquote,
   callout,
   code,
