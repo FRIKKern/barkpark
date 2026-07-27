@@ -784,10 +784,9 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
 
     test "@email palette keeps the pre-Stage-2 self-styled list byte-frozen" do
-      # Email COMPOSE never emits PdList (its list clause builds the "• " PdBox
-      # scaffold), but a raw PdList under a stylesheet-less palette must stay
-      # self-styled — Decision 1: every :email emission is byte-frozen, locked
-      # by the golden corpus (which covers every Pd kind). Exact pre-Stage-2 bytes.
+      # A PdList under a stylesheet-less palette stays self-styled — email
+      # clients may strip stylesheets, so semantic list structure carries its
+      # spacing inline. Exact pre-Stage-2 walker bytes.
       node = %{
         "kind" => "PdList",
         "children" => [

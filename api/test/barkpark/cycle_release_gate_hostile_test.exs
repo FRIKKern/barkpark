@@ -4,6 +4,8 @@ defmodule Barkpark.CycleReleaseGateHostileAdapter do
   alias Barkpark.CycleFleet.ReleaseGate.PaperCandidate
   alias Barkpark.Repo
 
+  @candidate_link_href "https://evidence.example/papers/candidate"
+  @candidate_link_label "Open candidate evidence"
   @surfaces ~w(source_json public_html cli task_board tui)
 
   @impl true
@@ -150,7 +152,8 @@ defmodule Barkpark.CycleReleaseGateHostileAdapter do
 
   defp raw_bytes(_request, candidate, role, surface) do
     "#{candidate.title} #{surface} release reader role=#{role} " <>
-      "503 total 42 shipped 291 stalled 170 excluded current superseded -11 +11"
+      "503 total 42 shipped 291 stalled 170 excluded current superseded -11 +11 " <>
+      "#{@candidate_link_label} #{@candidate_link_href}"
   end
 
   defp capture_request(request, role, surface) do
@@ -177,6 +180,8 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
   alias Barkpark.Repo
   alias Barkpark.Tenancy
 
+  @candidate_link_href "https://evidence.example/papers/candidate"
+  @candidate_link_label "Open candidate evidence"
   @capture_names for role <- ~w(campaign successor),
                      surface <- ~w(source_json public_html cli task_board tui),
                      do: "#{role}.#{surface}"
@@ -328,6 +333,7 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
 
       assert get_in(provenance, ["response_headers", "x_barkpark_paper_role"]) == role
       assert capture.byte_count == byte_size(capture.raw_bytes)
+      assert_candidate_link_parity(capture, surface)
     end
 
     assert %Consumption{kind: "activate", wave_id: wave_id} = Repo.get(Consumption, activation.id)
@@ -398,6 +404,8 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
     assert campaign_revision.content == campaign.content
     assert successor_revision.content == successor.content
     assert promoted.release_gate_admission_id == activation.id
+    assert_public_candidate_link(fixture.campaign_document.doc_id, campaign)
+    assert_public_candidate_link(fixture.successor_document.doc_id, successor)
 
     assert {:ok, promote_replay} = promote(fixture, activation.receipt, fixture.promote_key)
     assert promote_replay.id == promoted.id
@@ -418,6 +426,8 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
     assert rolled_campaign.released_revision_id == campaign.base_released_revision_id
     assert rolled_successor.current_revision_id == successor.base_current_revision_id
     assert rolled_successor.released_revision_id == successor.base_released_revision_id
+    refute public_paper_has_candidate_link?(fixture.campaign_document.doc_id)
+    refute public_paper_has_candidate_link?(fixture.successor_document.doc_id)
 
     assert {:ok, rollback_replay} =
              CycleFleet.rollback_correction(fixture.target_scope, rollback_attrs)
@@ -861,6 +871,16 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
               "current superseded -11 +11"
         },
         %{
+          "type" => "paragraph",
+          "content" => [
+            %{
+              "type" => "link",
+              "href" => @candidate_link_href,
+              "children" => [%{"type" => "text", "value" => @candidate_link_label}]
+            }
+          ]
+        },
+        %{
           "type" => "callout",
           "cycle_ledger" => stringify_keys(projection.cycle_ledger),
           "fleet" => stringify_keys(projection.fleet),
@@ -868,6 +888,47 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
         }
       ]
     }
+  end
+
+  defp assert_candidate_link_parity(capture, "source_json") do
+    decoded = Jason.decode!(capture.raw_bytes)
+
+    assert get_in(decoded, ["source", "blocks", Access.at(1), "content", Access.at(0)]) == %{
+             "type" => "link",
+             "href" => @candidate_link_href,
+             "children" => [%{"type" => "text", "value" => @candidate_link_label}]
+           }
+  end
+
+  defp assert_candidate_link_parity(capture, "public_html") do
+    assert capture.raw_bytes =~ ~s(href="#{@candidate_link_href}")
+    assert capture.raw_bytes =~ @candidate_link_label
+  end
+
+  defp assert_candidate_link_parity(capture, surface)
+       when surface in ~w(cli task_board tui) do
+    assert capture.raw_bytes =~ @candidate_link_href
+    assert Regex.replace(~r/\e\[[0-9;]*m/, capture.raw_bytes, "") =~ @candidate_link_label
+  end
+
+  defp assert_public_candidate_link(doc_id, candidate) do
+    paper = Barkpark.Content.get_public_paper(doc_id)
+
+    assert paper.current_revision_id == candidate.id
+    assert paper.released_revision_id == candidate.id
+    assert paper.content == candidate.content
+    assert public_paper_has_candidate_link?(doc_id)
+  end
+
+  defp public_paper_has_candidate_link?(doc_id) do
+    case Barkpark.Content.get_public_paper(doc_id) do
+      nil ->
+        false
+
+      paper ->
+        html = Barkpark.PortableDoc.Render.render_blocks(paper.content["blocks"], %{})
+        html =~ ~s(href="#{@candidate_link_href}") and html =~ @candidate_link_label
+    end
   end
 
   defp base_paper!(scope, dataset, doc_id) do

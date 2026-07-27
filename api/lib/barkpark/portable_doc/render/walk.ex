@@ -1473,12 +1473,9 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     "<#{tag}>" <> inner <> "</#{tag}>"
   end
 
-  # Non-article fallback (same pattern as heading/3): email COMPOSE never emits
-  # PdList — its list clause builds the flex-row PdBox scaffold with literal
-  # "• " / "1. " prefix spans (byte-stable Outlook target) — but a raw PdList
-  # reaching the walker under a stylesheet-less palette (the email golden corpus
-  # covers every Pd kind; hand-built trees via render_html) must stay self-styled
-  # and byte-frozen, so the pre-Stage-2 inline rule is kept verbatim here.
+  # Email/default keeps the same semantic structure but owns its styling inline:
+  # clients may strip stylesheets, so list indentation, typography, and item
+  # spacing must travel on the `<ul>` / `<ol>` / `<li>` elements themselves.
   defp list(n, width, pal) do
     tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
     inner = render_children(Map.get(n, "children", []), width, pal)
