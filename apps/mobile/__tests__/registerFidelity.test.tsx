@@ -268,8 +268,12 @@ describe('arm 1 — the chat register never speaks in the printed-page face', ()
   it('paints ZERO serif runs in the chat register, across every registered type', () => {
     // No allowlist, and none is possible: a chat answer is speech (D22). This
     // is the measured D50 leak, generalised from the two types that had it to
-    // all 66 — including every type a future slice adds, since the corpus is
-    // the case files.
+    // EVERY registered type — including every type a future slice adds, since
+    // the corpus is the case files. (This comment used to say "all 66". The
+    // number was correct for about four hours: the heading-alias slice took the
+    // registry to 70 the same night. Prose is not exempt from "derive, never
+    // quote" — a count in a comment rots exactly as fast as one in an
+    // assertion, and it rots SILENTLY because no gate reads it.)
     const leaks: string[] = []
     for (const { type, block } of CASES) {
       const styles = walk(renderBlockNative(block, chat, 0), OPAQUE).styles
@@ -382,9 +386,19 @@ describe('arm 3 — the register fingerprint (D50 REGISTER_BLIND)', () => {
     // mostly of task rows, charts, grids and code apparatus looks like. The
     // types that carry the DOCUMENT are the sensitive ones, and they are the
     // minority by design.
+    // The ONE deliberate literal in this suite, and the distinction matters.
+    // A cross-surface count (how many types react registers) must never be
+    // pinned — it changes under you, as 66→70 proved the same night this landed.
+    // This number is different in kind: REGISTER_BLIND is hand-authored IN THIS
+    // FILE, so the literal is not a fact about another surface but a speed-bump
+    // on my own allowlist — growing it should cost a deliberate edit, because
+    // every new row is a RULING that something legitimately ignores the
+    // register. It cannot rot from the outside.
     expect(Object.keys(REGISTER_BLIND)).toHaveLength(42)
+    // Derived from the map, never a second copy of the literal above: the
+    // partition must be total, with no type both blind and sensitive.
     const sensitive = Object.keys(BLOCK_RENDERERS).filter((t) => REGISTER_BLIND[t] === undefined)
-    expect(sensitive.length).toBe(Object.keys(BLOCK_RENDERERS).length - 42)
+    expect(sensitive.length).toBe(Object.keys(BLOCK_RENDERERS).length - Object.keys(REGISTER_BLIND).length)
     for (const t of ['paragraph', 'heading', 'ingress', 'pullquote', 'blockquote', 'list', 'callout']) {
       expect(sensitive).toContain(t)
     }
