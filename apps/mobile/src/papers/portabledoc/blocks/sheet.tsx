@@ -19,9 +19,15 @@
 // react uses them verbatim as `width:Npx`; this renderer uses them verbatim as
 // RN pt (the TUI cannot — its widths are character counts, so sheet.go drops
 // them and auto-sizes). Only a positive INTEGER counts, matching react's
-// `Number.isInteger` gate, and the value is clamped to a sane band: an
-// unbounded authored width would blow the ScrollView's content size, the same
-// hazard sheet.go clamps at its own `maxColWidth`.
+// `Number.isInteger` gate, and the value is clamped to a sane band — BOTH
+// bounds are narrowings from react, which uses any positive integer verbatim,
+// and each has its own reason. MAX: an unbounded authored width would blow the
+// ScrollView's content size, the same hazard sheet.go clamps at its own
+// `maxColWidth`. MIN: the web can afford a 4px spacer column because the
+// reader can still widen the window; on a phone the same column is 4pt of
+// unreachable content, so the floor keeps every authored cell readable rather
+// than faithfully invisible. FLIP TRIGGER for the min: deliberate spacer
+// columns showing up in the live corpus, where hiding them beats showing them.
 //
 // MERGES ARE A RECORDED NARROWING (D46b). `snapshot.merges` is deliberately
 // NOT read. The covered cells of a merged range are already "" in the dense
