@@ -629,6 +629,39 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   token passes all four main-side calls (export require_admin, mutate require_write,
   support-token mint require_admin, roster token_root) — verified route-by-route with pinning
   tests.
+- **PDF-D94 — D62 AMENDED BY OWNER: NEVER WRITES → NEVER KEEPS.** Rung 1 credential custody
+  ratified: browser → CP → box env pass-through, provably never persisted CP-side, with
+  redaction-proof tests inheriting the existing Redact/RedactEnvSecrets + Argv-only secret-step
+  contract. The printed SSH one-liner remains the fallback and the BYO story. Rung 2
+  (vault-backed apiKeyHelper over run-secrets) stays backlog until a second vault consumer
+  exists. Owner ratified 2026-07-28, closing the D88 sign-off gate (`pdf-bl-console-key-custody`).
+  Research: Papers `claude-ready-servers-credential-economics` + `claude-ready-servers-honest-review`.
+  WHY: the status quo is not "no risk" — it is manual-SSH-with-human-error; a pass-through that
+  provably never keeps is strictly more honest custody than a human relay.
+- **PDF-D95 — THE FOUR-TIER DISTINCTION: CAPABLE / ACTIVATED / OFFERED / TRUSTED.** Tier 1
+  CAPABLE (core cloud, every box): the claude binary baked pinned into the ONE shared warm image,
+  snapshot-labeled `claude=<ver>` — inert: no credentials, no unit, no exposure. Universal
+  because warm assign (≤15s) claims a box before its flavor is known, and arch-bound Hetzner
+  snapshots make flavor-forked images cost double bake lineages. Tier 2 ACTIVATED (per box): a
+  claim-payload flavor key gates managed-settings seed, fleet-listener unit, verify posture, GUI
+  toggle. Tier 3 OFFERED (per Barkpark instance): a `Barkpark.Plugins.Agents` plugin owns roster,
+  doc types, credential endpoints, and the `/v1/capabilities` advertisement — INDX precedent:
+  plugin means modular-with-lifecycle, never peripheral, and the off-state must degrade honestly.
+  Tier 4 TRUSTED (per credential): keys move only on the D94 ladder and are NEVER present in
+  tiers 1–3 — a leaked image, cloned box, or compromised bake yields an agent-capable brick.
+  Maxim: the cloud makes every box agent-capable; the flavor makes a box an agent; the plugin
+  makes a Barkpark an agent employer; the owner makes anyone trusted. Owner ratified 2026-07-28.
+  WHY: resolves the capstone's O1/O4 open rulings with one boundary per question — what is
+  installed (image), what a box is (flavor), what an instance offers (plugin), who is trusted
+  (owner) — so no distinction ever leaks downward into the image.
+- **PDF-D96 — VERIFY SPLIT: FAIL-OPEN EVERYWHERE, FAIL-CLOSED WHERE AGENT WAS ORDERED.** The
+  `agent_ready` verify probes uncredentialed `claude --version` + settings-parse into an honest
+  roster-visible state on every box (D62's fail-open spirit intact); it fails the chain CLOSED
+  only for boxes whose claim payload ordered an agent flavor (tier 2). Owner ratified 2026-07-28,
+  amending D62's letter ("fail-open agent CLI") for the ordered-agent case only. WHY: a promised
+  agent box must be provable at ready; an ordinary box must never block on a vendor CLI — and a
+  green chain over a missing binary (the 2026-07-27 finding) is exactly the seam-lie class
+  (INDX/postgres precedent) this charter exists to kill.
 
 ## Roadmap (waves; interleaved with MVP stages per the build plan)
 
