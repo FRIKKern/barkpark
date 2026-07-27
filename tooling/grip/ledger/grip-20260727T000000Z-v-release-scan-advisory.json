@@ -1,0 +1,76 @@
+{
+  "run_id": "grip-20260727T000000Z-v-release-scan-advisory",
+  "recipes": [
+    {
+      "subject": "GitHub check-runs API field set",
+      "quantity": "api:keys",
+      "rerun": "gh api \"repos/FRIKKern/barkpark/commits/025c249717a40f1a9ca6741fb6eafaab83ef3a92/check-runs\" --jq '.check_runs[0]|keys'",
+      "derived_level": "L1",
+      "deps": [
+        "api.github.com"
+      ],
+      "observed_at": "2026-07-27T00:00:00Z"
+    },
+    {
+      "subject": "GitHub actions jobs API field set",
+      "quantity": "api:keys",
+      "rerun": "gh api \"repos/FRIKKern/barkpark/actions/runs/30271957702/jobs\" --jq '.jobs[0]|keys'",
+      "derived_level": "L1",
+      "deps": [
+        "api.github.com"
+      ],
+      "observed_at": "2026-07-27T00:00:00Z"
+    },
+    {
+      "subject": "GraphQL CheckRun field set (no continue-on-error; has isRequired)",
+      "quantity": "graphql:introspect",
+      "rerun": "gh api graphql -f query='{ __type(name:\"CheckRun\"){ fields{name} } }' --jq '.data.__type.fields[].name'",
+      "derived_level": "L1",
+      "deps": [
+        "api.github.com"
+      ],
+      "observed_at": "2026-07-27T00:00:00Z"
+    },
+    {
+      "subject": "scripts/release-scan.sh ci.status misreport on an advisory-Sobelow sha",
+      "quantity": "script:stdout",
+      "rerun": "bash scripts/release-scan.sh 025c249717a40f1a9ca6741fb6eafaab83ef3a92 | jq '.ci'",
+      "derived_level": "L1",
+      "deps": [
+        "scripts/release-scan.sh",
+        "api.github.com"
+      ],
+      "observed_at": "2026-07-27T00:00:00Z"
+    },
+    {
+      "subject": "suite-join advisory derivation (name-free)",
+      "quantity": "api:join",
+      "rerun": "SHA=025c249717a40f1a9ca6741fb6eafaab83ef3a92; gh api \"repos/FRIKKern/barkpark/commits/$SHA/check-suites\" --jq '[.check_suites[]|{key:(.id|tostring),value:.conclusion}]|from_entries' > /tmp/s.json; gh api \"repos/FRIKKern/barkpark/commits/$SHA/check-runs\" --jq '.check_runs[]|{name,conclusion,suite:(.check_suite.id|tostring)}' | jq -s --slurpfile s /tmp/s.json 'map(. + {suite_conclusion: $s[0][.suite]})|map(select(.conclusion==\"failure\"))'",
+      "derived_level": "L1",
+      "deps": [
+        "api.github.com"
+      ],
+      "observed_at": "2026-07-27T00:00:00Z"
+    },
+    {
+      "subject": "uninterpolated matrix name on a skipped needs-dependent check run",
+      "quantity": "api:name",
+      "rerun": "gh api \"repos/FRIKKern/barkpark/commits/68b844c55/check-runs\" --jq '.check_runs[]|[.name,.conclusion]|@tsv'",
+      "derived_level": "L1",
+      "deps": [
+        "api.github.com"
+      ],
+      "observed_at": "2026-07-27T00:00:00Z"
+    },
+    {
+      "subject": "security.yml Sobelow job name + continue-on-error",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:.github/workflows/security.yml | grep -n 'name: Sobelow' -A 3",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/security.yml"
+      ],
+      "observed_at": "2026-07-27T00:00:00Z"
+    }
+  ]
+}
