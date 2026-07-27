@@ -80,6 +80,12 @@ allowlist, the write verb behind it is never examined. New specimen, filed on th
 **The rule this row exists to record: a close-by-content is only as wide as the module you ran.
 Run every gate that guards the capability, not the first one that agrees with you.**
 
+INDEPENDENTLY RE-DERIVED AT REVIEW (2026-07-27, wave-10 reviewer, this worktree, not a re-read of
+the above): `screenCommand('git -C log push origin main')` → `ok=true`, reason `admitted: within the
+host bound, allowlisted head and sub-verb, no write shape`; same for `git --git-dir log push`;
+`git -c log=1 push origin main` → refused on `sub-verb "log=1"`. The hole is real and the refusal to
+close the row is correct.
+
 ## R4 — evidence that has DECAYED (do not close on it)
 
 `tgw9-bl-d28-verify-floor-has-fired` cites a run record for "the VERIFY fan-out floor has fired":
@@ -132,14 +138,13 @@ nothing. **The head SHAs are recorded here so the deletion is reversible** (`git
 | `tgw4-round0-land` | `eaca91ecbb14e1a2ae4e0cb3ff85724da33ad6ff` |
 | `truth-grip/wave5-decide` | `c2935ecc5dda2ed00054cd1bd943695196410012` |
 | `truth-grip/wave6-decide-charter` | `6fb2f2552016717938cb49753080732b9a6da17a` |
- `git worktree prune` was NOT run (D119) and `git worktree list | wc -l` = **1454** before
-and after.
+
+`git worktree prune` was NOT run (D119) and `git worktree list | wc -l` = **1454** before and after.
 
 ## R6 — the disposition itself, and how to re-derive the drop
 
 86 rows read one at a time → **10 closed** (each `close_reason` names the commit, charter line or
-live probe), **45 parked** `considering` (each `engagement.note` carries a row-specific reason plus
-a named REACTIVATE trigger), **26 left open** as demoted children under D117 (each patched with
+live probe), **45 parked** `considering`, **26 left open** as demoted children under D117 (each patched with
 `disposition` / `disposition_owner` / `disposition_reason`, then republished), **5 live wave-10
 slices untouched**. Mechanics worth keeping:
 
@@ -158,6 +163,33 @@ bp doc patch task <id> --set disposition_owner=… --yes && bp doc publish task 
 - `in_progress → considering` is refused; release the claim first.
 - The server was mid-deploy for part of this run (`Back in a moment` HTML, then `500`s). Every
   mutation loop needs retry-on-transient **and** an idempotent skip that re-reads state first.
+
+## R7 — CORRECTION, added at review (2026-07-27): the 45 park REASONS did not persist
+
+The row above originally claimed each parked task carried "a row-specific reason plus a named
+REACTIVATE trigger" in `content.engagement.note`. **Re-derived at review, that is false.** Of the 46
+`considering` rows in the namespace, **0 carry a note**:
+
+```
+bp task ls --all -o json                       # filter lifecycle_status == "considering"
+bp task get <id> -o json                       # read content.engagement.note on each
+# 2026-07-27 result: 46 considering, 43 read clean + 2 parse-fails, 0 with a non-empty note
+```
+
+The mechanism is NOT broken — it was not used. A control proves it:
+
+```
+bp task stage tgw2-bl-throw-liveness-observation considering --object research \
+  --worker wave10-reviewer --note "…" --yes
+bp task get tgw2-bl-throw-liveness-observation -o json   # content.engagement.note is there, verbatim
+```
+
+So the parks are real and reversible (`bp task stage <id> open`), but **44 of the 45 justifications
+exist nowhere durable** — the disposition survived and its reasoning did not. That is this epic's own
+disease inside this epic's own disposition row: a claim stored at the author's word, refuted the
+first time a program went and looked. The one recoverable reason (`tgw2-bl-throw-liveness-observation`,
+recoverable only because §R4 wrote it down here) was restored at review. The rest are re-adjudication
+work, filed as `tgw10-bl-park-reasons-not-durable`.
 
 **BEFORE 86 (14:46Z) → AFTER 32 (15:18Z).** Attribution is exact: 86 − 10 − 45 = 31 survivors, all
 31 present, plus exactly one row a sibling slice filed mid-run
