@@ -25,9 +25,15 @@ function subscribe(onChange: () => void): () => void {
   if (typeof window === 'undefined') return () => {}
   window.addEventListener('popstate', onChange)
   window.addEventListener(LOCATION_EVENT, onChange)
+  // Astro's ClientRouter navigates with history.pushState, which fires NO
+  // popstate — so without this the finder would keep the URL it was mounted
+  // with after a client-side navigation, and the open row would highlight the
+  // wrong document (or none). `astro:page-load` fires after every swap.
+  document.addEventListener('astro:page-load', onChange)
   return () => {
     window.removeEventListener('popstate', onChange)
     window.removeEventListener(LOCATION_EVENT, onChange)
+    document.removeEventListener('astro:page-load', onChange)
   }
 }
 
