@@ -1,0 +1,53 @@
+name: hg-probe
+
+on:
+  pull_request:
+
+concurrency:
+  group: hg-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  always-green:
+    name: probe-always-green
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+
+  skipped-if:
+    name: probe-skipped-if
+    if: ${{ github.event.pull_request.title == 'RUN-THE-SKIPPED-JOB' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ran
+
+  will-fail:
+    name: probe-will-fail
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+
+  needs-failed-default:
+    name: probe-needs-failed-default
+    needs: will-fail
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ran
+
+  needs-failed-always:
+    name: probe-needs-failed-always
+    needs: will-fail
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "dep-result=${{ needs.will-fail.result }}"
+
+  matrix-suffix:
+    name: probe-matrix-consumes-a (${{ matrix.a }})
+    strategy:
+      matrix:
+        a: [1]
+        b: [9]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
