@@ -53,8 +53,22 @@ const blocks = docBlocks(full ?? doc)
       <main class="bp-paper-surface">
         <article class="bp-paper-body">
           <a class="back" href={import.meta.env.BASE_URL}>&lsaquo; Search</a>
-          <h1>{title}</h1>
-          {blocks.length > 0 ? <PortableDoc value={blocks} /> : <p class="empty">This document has no body content.</p>}
+          {/* NO page-level <h1> when there are blocks: under the PortableDoc
+              content-first doctrine the title IS an enforced body block, so the
+              renderer already emits it — printing one here rendered every
+              document's title TWICE. The Next edition renders <PortableDoc>
+              alone for exactly this reason (components/document-detail.tsx
+              renderBody), and falls back to its MetaCard — which carries the
+              title itself — only when a document has no blocks. This mirrors
+              that: heading only on the block-less path. */}
+          {blocks.length > 0 ? (
+            <PortableDoc value={blocks} />
+          ) : (
+            <>
+              <h1>{title}</h1>
+              <p class="empty">This document has no body content.</p>
+            </>
+          )}
         </article>
       </main>
     </section>
