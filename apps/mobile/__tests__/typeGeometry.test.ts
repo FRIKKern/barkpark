@@ -425,8 +425,16 @@ const CENSUS: Record<string, Record<string, number>> = {
   'papers/portabledoc/blocks/dataviz.tsx': {
     'roles.statValue': 1,
     'scale.md.fontSize': 1,
-    'scale.sm': 1,
-    'scale.xs': 1,
+    // The round-2 natives (mob-zb-s5, D56) are apparatus-heavy: `micro` is the
+    // axis tick / heat label / marginal-sum voice and `xs` the proportional
+    // row's label+digit. `scale.micro.lineHeight` is the ONE resolved-geometry
+    // read in the family — the chart's y tick is centred on its gridline by
+    // half its own line box, which is exactly the kind of computed offset the
+    // ESLint ban pushes through the token module rather than a literal.
+    'scale.micro': 7,
+    'scale.micro.lineHeight': 1,
+    'scale.sm': 2,
+    'scale.xs': 4,
   },
   'papers/portabledoc/blocks/table.tsx': {
     'scale.sm': 2,

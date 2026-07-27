@@ -316,14 +316,20 @@ describe('table', () => {
 /* ── unknown block degrade ──────────────────────────────────────────────────── */
 
 describe('unknown blocks', () => {
+  // THE SPECIMENS ARE DELIBERATE (mob-zb-s5). This test used `gauge-list` and
+  // `chart` until those became real renderers, which disarmed it silently — the
+  // fallback assertions simply stopped describing a fallback. `embed` and
+  // `dashboard` cannot repeat that: they are D48's RECORDED exclusions —
+  // server/Go-registry types with no @barkpark/react emitter — and mobile's
+  // registry is react ∖ EXCLUSIONS, so no renderer slice can ever claim them.
   it('renders the honest labeled fallback and logs once per type', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-    const first = render({ type: 'gauge-list', items: [] })
-    expect(first.text).toContain('Unsupported block: gauge-list')
-    render({ type: 'gauge-list' })
-    render({ type: 'gauge-list' })
+    const first = render({ type: 'embed', items: [] })
+    expect(first.text).toContain('Unsupported block: embed')
+    render({ type: 'embed' })
+    render({ type: 'embed' })
     expect(warn).toHaveBeenCalledTimes(1)
-    render({ type: 'chart' })
+    render({ type: 'dashboard' })
     expect(warn).toHaveBeenCalledTimes(2)
     warn.mockRestore()
   })
