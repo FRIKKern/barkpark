@@ -460,10 +460,30 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       {:ok, _} ->
         {:noreply, socket}
 
+      # PDS-D289 refuses a `done` close over unmet acceptance criteria. Saying
+      # "its claim moved under you" here would be the exact defect this wave
+      # exists to kill — a message that names the wrong cause. The board has no
+      # override affordance (that needs a reason, and a drag has nowhere to type
+      # one), so it says what happened and where to fix it.
+      {:error, {:criteria_unmet, indices}} ->
+        {:noreply,
+         rollback(
+           socket,
+           "Couldn't mark that done — acceptance " <>
+             criteria_word(indices) <>
+             " #{Enum.join(indices, ", ")} (0-based) #{plural_verb(indices)} not met yet. " <>
+             "Stamp them with evidence first, or close it from the CLI with a recorded reason."
+         )}
+
       {:error, _} ->
         {:noreply, rollback(socket, "Couldn't close that task — its claim moved under you.")}
     end
   end
+
+  defp criteria_word([_one]), do: "criterion"
+  defp criteria_word(_many), do: "criteria"
+  defp plural_verb([_one]), do: "is"
+  defp plural_verb(_many), do: "are"
 
   # A voluntary UNCLAIM (wave 17) — the holder drops their own in-flight card
   # back on Open. Optimistic move to open (worker cleared so the card stops
