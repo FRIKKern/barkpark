@@ -77,13 +77,36 @@ else
 fi
 
 # ── 2. Installed bp binary stale? ────────────────────────────────────────────
-# bp embeds its build commit; it is stale only if Go-side inputs changed since.
+# bp embeds its build commit via -ldflags; it is stale only if Go-side inputs
+# changed on the MERGED tip since. The compare-target is origin/main, NOT local
+# HEAD: a binary built in a diverged worktree (behind + ahead of the merged tip)
+# false-greens against HEAD because both sides are stale together — the binary
+# and the worktree it was built from miss the same merged CLI commits. Comparing
+# against origin/main is what makes a behind binary red honestly.
+#
+# The ldflags `commit` field is the ONLY trustworthy provenance signal here. We
+# never read `go version -m` vcs.revision/vcs.modified: Go's -buildvcs walk-up
+# binds to the nearest ancestor `.git` DIRECTORY, so in a worktree nested under
+# the primary checkout it stamps the ANCESTOR repo's HEAD, not the worktree's —
+# unsound for freshness. Only the ldflags stamp reflects the code that was built.
 if command -v bp >/dev/null 2>&1; then
   # Capture the bare hex SHA even when the build was dirty: a dirty tree stamps
   # e.g. "2a8b147ee-dirty-purpose", so allow a non-quote suffix after the hex
   # (\{7,\} anchors on a real short/long SHA, never a stray hex fragment) and
   # emit only \1 — the bare hex the ancestry check below feeds to git cat-file.
   BP_COMMIT="$(bp version 2>/dev/null | sed -n 's/.*"commit": *"\([0-9a-f]\{7,\}\)[^"]*".*/\1/p')"
+  # Guard order is load-bearing (proven on the fixture verdict matrix):
+  #   1. no stamp        → loud RED (unverifiable provenance; fix installs one)
+  #   2. commit unknown  → loud skip (can't diff a commit we don't have)
+  #   3. origin/main ref → loud skip when absent (offline/shallow — a BARE
+  #                        `git diff $(git merge-base …) origin/main` FALSE-GREENS
+  #                        here: merge-base errors, $base goes empty, the swallowed
+  #                        error leaves an empty diff that reads ok)
+  #   4. merge-base      → loud skip when empty (no common ancestry to compare)
+  #   5. diff            → RED iff Go inputs changed merge-base→origin/main
+  # The merge-base collapse is why a binary AHEAD with unpushed local Go commits
+  # stays GREEN: its merge-base with origin/main IS origin/main, so the diff is
+  # empty — a bare `git diff BP_COMMIT origin/main` would false-RED that case.
   if [ -z "$BP_COMMIT" ]; then
     # No commit field at all → the binary was built by a bare `go build` with no
     # -ldflags, so its provenance is unverifiable. This is the PATH/dist
@@ -92,10 +115,18 @@ if command -v bp >/dev/null 2>&1; then
     bad "installed bp has NO build-commit stamp (built without -ldflags) — run: make cli-install"
   elif ! git cat-file -e "$BP_COMMIT^{commit}" 2>/dev/null; then
     skip "bp build commit not in this checkout ($BP_COMMIT) — staleness check skipped"
-  elif [ -n "$(git diff --name-only "$BP_COMMIT" HEAD -- '*.go' go.mod go.sum internal cmd 2>/dev/null | head -1)" ]; then
-    bad "installed bp ($BP_COMMIT) predates Go changes in HEAD — run: make cli-install"
+  elif ! git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+    # origin/main is the compare-target; without it there is nothing sound to
+    # diff against. LOUD skip (never a silent ok) — the bare merge-base form
+    # would false-green here.
+    skip "origin/main ref unavailable (offline / never fetched) — bp staleness check skipped"
+  elif ! BP_MERGE_BASE="$(git merge-base "$BP_COMMIT" origin/main 2>/dev/null)" \
+       || [ -z "$BP_MERGE_BASE" ]; then
+    skip "no merge-base between bp commit ($BP_COMMIT) and origin/main — staleness check skipped"
+  elif [ -n "$(git diff --name-only "$BP_MERGE_BASE" origin/main -- '*.go' go.mod go.sum internal cmd deploy.sh 2>/dev/null | head -1)" ]; then
+    bad "installed bp ($BP_COMMIT) predates Go changes on origin/main — run: make cli-install"
   else
-    ok "installed bp ($BP_COMMIT) is current"
+    ok "installed bp ($BP_COMMIT) is current with origin/main"
   fi
 else
   skip "no bp on PATH — install: make cli-install"
