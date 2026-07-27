@@ -211,6 +211,11 @@ describe('bar-chart denominates by the DATA MAX', () => {
   it('values:false prints NO digit — the bar is the datum', () => {
     const w = walk({ type: 'bar-chart', bars: [{ label: 'alpha', value: 7 }] })
     expect(w.text).toBe('alpha')
+    // And the digit COLUMN goes with it: the web omits the span entirely, so a
+    // reserved 36pt would be dead gutter the bar could have used.
+    expect(w.styles.filter((s) => s.minWidth === 36)).toHaveLength(0)
+    expect(walk({ type: 'bar-chart', bars: [{ label: 'a', value: 7 }], values: true }).styles
+      .filter((s) => s.minWidth === 36)).toHaveLength(1)
   })
 })
 
@@ -360,10 +365,38 @@ describe('heatmap — all three variants draw lerped cells', () => {
     }
     // Grand total 10 = the row sums 3+7 = the col sums 4+6.
     expect(w.text).toContain('10')
-    // Value cells widen (the CSS minmax(28,auto)) and still carry a bin fill.
+    // Value cells widen (the CSS minmax(28,auto)) and stay TRANSPARENT: their
+    // bin colour rides the underline strip so the ink keeps full contrast
+    // (paper-surface.css .bp-heat__c--v — `text` on an 88%-accent fill is
+    // 3.3:1 in light and 3.1:1 in dark, both under AA for 0.7rem mono).
     const valueCells = w.styles.filter((s) => s.borderRadius === 3 && s.width === 40)
     expect(valueCells).toHaveLength(4)
-    expect(new Set(valueCells.map((s) => s.backgroundColor)).size).toBeGreaterThan(1)
+    expect(valueCells.map((s) => s.backgroundColor)).toEqual(Array(4).fill('transparent'))
+    const strips = w.styles.filter((s) => s.height === 3 && s.bottom === 0 && s.left === '15%')
+    expect(strips).toHaveLength(4)
+    // The strip is the bin channel, so it must still SPREAD across the rungs.
+    expect(new Set(strips.map((s) => s.backgroundColor)).size).toBeGreaterThan(1)
+  })
+
+  it('emphasises the grand total and dims every other sum (.bp-heat__sum--grand)', () => {
+    const w = walk({
+      type: 'heatmap',
+      cells: [
+        [1, 2],
+        [3, 4],
+      ],
+      marginals: true,
+    })
+    const sums = w.styles.filter((s) => s.minWidth === 28 && s.textAlign === 'right')
+    // 2 row sums + 2 col sums + the grand.
+    expect(sums).toHaveLength(5)
+    const grand = sums[sums.length - 1]!
+    expect(grand.color).toBe(light.text)
+    expect(grand.fontWeight).toBe('700')
+    for (const s of sums.slice(0, -1)) {
+      expect(s.color).toBe(light.textMuted)
+      expect(s.fontWeight).toBeUndefined()
+    }
   })
 
   it('a marginals-only matrix still routes to the extras variant', () => {

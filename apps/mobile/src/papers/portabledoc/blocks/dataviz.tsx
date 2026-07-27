@@ -241,11 +241,15 @@ function barRow(row: BarRow, ctx: BlockCtx, key: number): ReactNode {
           }}
         />
       </View>
-      <Text
-        style={{ ...scale.xs, fontFamily: MONO, color: ctx.theme.text, minWidth: 36, textAlign: 'right' }}
-      >
-        {row.digit}
-      </Text>
+      {/* No digit, no column: the web omits the span entirely on
+          `values: false`, so reserving its 36pt would leave dead gutter. */}
+      {row.digit !== '' && (
+        <Text
+          style={{ ...scale.xs, fontFamily: MONO, color: ctx.theme.text, minWidth: 36, textAlign: 'right' }}
+        >
+          {row.digit}
+        </Text>
+      )}
       {row.note !== undefined && row.note !== '' && (
         <Text numberOfLines={1} style={{ ...scale.micro, color: ctx.theme.textMuted, maxWidth: 72 }}>
           {row.note}
@@ -411,6 +415,23 @@ function binColor(bin: number, theme: Theme): string {
  * legend the calendar/matrix variants print promises this glyph exists. */
 const BIN_INSET = [0.41, 0.33, 0.24, 0.15]
 
+/** The value cell's underline strip — `.bp-heat__c--v::after`'s 3px bar. */
+const VALUE_STRIP = 3
+
+/** `color-mix(in srgb, <hex> N%, transparent)` as an alpha suffix. The glyph
+ * MUST composite over the cell fill the way the CSS `::after` does: mixing
+ * toward the card surface instead would make it bin-independent and wash it out
+ * on the top rungs. */
+function alphaHex(hex: string, a: number): string {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return hex
+  return (
+    hex +
+    Math.round(clamp(a, 0, 1) * 255)
+      .toString(16)
+      .padStart(2, '0')
+  )
+}
+
 function heatCell(
   key: number,
   size: number,
@@ -419,6 +440,7 @@ function heatCell(
   glyph: { bin: number } | null,
   value?: string,
 ): ReactNode {
+  const isValue = value !== undefined
   const inner =
     glyph === null
       ? null
@@ -427,27 +449,43 @@ function heatCell(
         : {
             side: Math.max(Math.round(size * (1 - 2 * BIN_INSET[clamp(glyph.bin, 0, 3)]!)), 2),
             radius: 1,
-            color: lerpHex(ctx.theme.surface, ctx.theme.text, 0.42),
+            color: alphaHex(ctx.theme.text, 0.42),
           }
   return (
     <View
       key={key}
       style={{
-        width: value === undefined ? size : VALUE_CELL_W,
+        width: isValue ? VALUE_CELL_W : size,
         height: size,
         borderRadius: 3,
-        backgroundColor: fill,
+        // A value cell keeps its ink on the CARD, never on the bin fill: at the
+        // top rung `text` over an 88%-accent cell measures 3.3:1 (light) and
+        // 3.1:1 (dark) — under AA for 0.7rem mono. The bin colour moves to an
+        // underline strip, which is what paper-surface.css .bp-heat__c--v does
+        // ("so ink text keeps full contrast on every theme").
+        backgroundColor: isValue ? 'transparent' : fill,
         alignItems: 'center',
         justifyContent: 'center',
       }}
     >
-      {inner !== null && value === undefined && (
+      {inner !== null && !isValue && (
         <View
           style={{ width: inner.side, height: inner.side, borderRadius: inner.radius, backgroundColor: inner.color }}
         />
       )}
-      {value !== undefined && (
-        <Text style={{ ...scale.micro, fontFamily: MONO, color: ctx.theme.text }}>{value}</Text>
+      {isValue && <Text style={{ ...scale.micro, fontFamily: MONO, color: ctx.theme.text }}>{value}</Text>}
+      {isValue && (
+        <View
+          style={{
+            position: 'absolute',
+            left: '15%',
+            right: '15%',
+            bottom: 0,
+            height: VALUE_STRIP,
+            borderRadius: VALUE_STRIP / 2,
+            backgroundColor: fill,
+          }}
+        />
       )}
     </View>
   )
@@ -601,10 +639,19 @@ function heatMatrix(grid: number[][], b: Record<string, unknown>, ctx: BlockCtx,
   const gutter = rowLabels.length > 0 || showMarg
   const cellW = showVals ? VALUE_CELL_W : GRID_CELL
   const row = { flexDirection: 'row', alignItems: 'center', gap: GRID_GAP } as const
-  const sumText = (v: number, k: number) => (
+  // `.bp-heat__sum` is dim mono; `--grand` is emphasised (weight 650, full ink)
+  // — the grand total is the one sum that reads as a conclusion.
+  const sumText = (v: number, k: number, grand = false) => (
     <Text
       key={k}
-      style={{ ...scale.micro, fontFamily: MONO, color: ctx.theme.textMuted, minWidth: SUM_W, textAlign: 'right' }}
+      style={{
+        ...scale.micro,
+        fontFamily: MONO,
+        color: grand ? ctx.theme.text : ctx.theme.textMuted,
+        ...(grand && { fontWeight: '700' as const }),
+        minWidth: SUM_W,
+        textAlign: 'right',
+      }}
     >
       {fmt(v)}
     </Text>
@@ -643,7 +690,7 @@ function heatMatrix(grid: number[][], b: Record<string, unknown>, ctx: BlockCtx,
             <View style={row}>
               {rowLabel('Σ', ctx)}
               {colSums.map((s, j) => sumText(s, j))}
-              {sumText(grand, cols)}
+              {sumText(grand, cols, true)}
             </View>
           )}
         </View>
