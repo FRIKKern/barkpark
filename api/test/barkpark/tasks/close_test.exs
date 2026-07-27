@@ -316,6 +316,10 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "done",
+                 # The closer flips its own criteria in the closing command, so
+                 # the D289 gate measures the doc AS READ (both unmet) and this
+                 # close only lands with a recorded reason.
+                 criteria_override: "merge semantics under test, not criteria proof",
                  criteria: [
                    %{
                      "index" => 0,
@@ -352,6 +356,7 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "done",
+                 criteria_override: "met-default semantics under test",
                  criteria: [
                    %{
                      "index" => 0,
@@ -496,6 +501,7 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "done",
+                 criteria_override: "guard semantics under test",
                  criteria: [
                    %{"index" => 0, "criterion" => "renders live value", "evidence" => "guarded"}
                  ]
@@ -587,6 +593,7 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "done",
+                 criteria_override: "guarded met-flip under test; A and C stay unmet",
                  criteria: [
                    %{
                      "index" => 1,
@@ -630,6 +637,7 @@ defmodule Barkpark.Tasks.CloseTest do
                  observed_epoch: 0,
                  observed_rev: observed_rev,
                  lifecycle_status: "done",
+                 criteria_override: "rev-CAS race under test",
                  criteria: [
                    %{
                      "index" => 0,
@@ -653,6 +661,7 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "done",
+                 criteria_override: "rev-CAS race under test",
                  criteria: [
                    %{
                      "index" => 0,
@@ -687,6 +696,7 @@ defmodule Barkpark.Tasks.CloseTest do
           Close.close(task.id, "w",
             observed_epoch: 0,
             lifecycle_status: "done",
+            criteria_override: "interleaving under test",
             criteria: [
               %{
                 "index" => 0,
@@ -1011,10 +1021,13 @@ defmodule Barkpark.Tasks.CloseTest do
 
       task = mk_task!(uniq("mg-textless"), scope, %{"acceptance_criteria" => textless})
 
+      # A text-less gate is NOT auto-stampable, so the D289 gate still counts it
+      # unmet — the lead's seal close names why it is closing over it.
       assert {:ok, closed} =
                Close.close(task.id, "lead-w",
                  observed_epoch: 0,
                  lifecycle_status: "done",
+                 criteria_override: "merge-gate criterion carries no wording; left for a human",
                  landed: %{"prs" => [999]}
                )
 
@@ -1031,10 +1044,13 @@ defmodule Barkpark.Tasks.CloseTest do
       task =
         mk_task!(uniq("mg-nolanded"), scope, %{"acceptance_criteria" => @merge_gate_criteria})
 
+      # No land digest -> nothing is auto-stampable -> the merge gate reads unmet
+      # to the D289 gate, and this pre-merge close has to say so.
       assert {:ok, closed} =
                Close.close(task.id, "builder-w",
                  observed_epoch: 0,
-                 lifecycle_status: "done"
+                 lifecycle_status: "done",
+                 criteria_override: "pre-merge close; the merge gate is the lead's to stamp"
                )
 
       [_built, gate] = closed.content["acceptance_criteria"]
@@ -1059,6 +1075,7 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "lead-w",
                  observed_epoch: 0,
                  lifecycle_status: "done",
+                 criteria_override: "unmarked criterion is not auto-stampable",
                  landed: %{"prs" => [789]}
                )
 
@@ -1138,6 +1155,437 @@ defmodule Barkpark.Tasks.CloseTest do
 
       gate = Enum.at(closed.content["acceptance_criteria"], 1)
       assert gate["met"] == false, "cancel is not a merge — the gate stays open"
+    end
+  end
+
+  # ─── (9) HOLDER GATE (PDS-D288) ───────────────────────────────────────────
+  #
+  # Before this gate, `check_fencing/2` compared the EPOCH and nothing else, so
+  # worker-B closing worker-A's task on A's epoch returned {:ok, doc} carrying
+  # `claim.worker = "worker-A", claim.closed_by = "worker-B"` — a row that reads
+  # like A finished the work. Three allow-arms (unclaimed / holder / self-resume)
+  # and a LOUD RECORDED OVERRIDE for everything else. It is an HONESTY gate:
+  # worker_id is client-supplied, so this stops accidents and makes deliberate
+  # foreign closes auditable — it is not authorization.
+
+  describe "close/3 — holder gate" do
+    test "worker-B closing worker-A's claimed task is REFUSED (was silently {:ok, doc})",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      doc_id = uniq("holder-foreign")
+      task = mk_task!(doc_id, scope)
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
+      epoch = claimed.content["claim"]["epoch"]
+
+      assert {:error, {:not_holder, "worker-A"}} =
+               Close.close(task.id, "worker-B", observed_epoch: epoch, lifecycle_status: "done")
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "in_progress", "nothing was written"
+      refute Map.has_key?(reloaded.content["claim"], "closed_by")
+      assert reloaded.rev == claimed.rev, "rev untouched on refusal"
+    end
+
+    test "arm 2 — the holder closes its own claim", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      doc_id = uniq("holder-self")
+      task = mk_task!(doc_id, scope)
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
+
+      assert {:ok, closed} =
+               Close.close(task.id, "worker-A",
+                 observed_epoch: claimed.content["claim"]["epoch"],
+                 lifecycle_status: "done"
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
+      assert closed.content["claim"]["closed_by"] == "worker-A"
+      refute Map.has_key?(closed.content, "close_override"), "an honest close confesses nothing"
+    end
+
+    test "arm 1 — a never-claimed container task still closes for anyone", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("holder-container"), scope)
+      refute Map.has_key?(task.content, "claim"), "precondition: no claim map"
+
+      assert {:ok, closed} =
+               Close.close(task.id, "some-lead", observed_epoch: 0, lifecycle_status: "done")
+
+      assert closed.content["lifecycle_status"] == "done"
+      refute Map.has_key?(closed.content, "close_override")
+    end
+
+    test "arm 3a — a TTL-reaped lease self-resumes on previous_worker", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("holder-reaped"), scope)
+
+      # What TtlSweeper leaves behind: worker nil'd, epoch bumped, the reaped
+      # holder recorded as previous_worker (ttl_sweeper.ex:355,366).
+      :ok =
+        foreign_patch_content!(task.id, %{
+          "lifecycle_status" => "open",
+          "claim" => %{
+            "worker" => nil,
+            "previous_worker" => "worker-A",
+            "epoch" => 3,
+            "expired_at" => "2026-07-27T00:00:00Z"
+          }
+        })
+
+      assert {:ok, closed} =
+               Close.close(task.id, "worker-A", observed_epoch: 3, lifecycle_status: "done")
+
+      assert closed.content["lifecycle_status"] == "done"
+      refute Map.has_key?(closed.content, "close_override")
+    end
+
+    test "arm 3b — a VOLUNTARILY released lease self-resumes on released_by", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      doc_id = uniq("holder-released")
+      task = mk_task!(doc_id, scope)
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
+
+      assert {:ok, released} =
+               Tasks.release(task.id, "worker-A",
+                 observed_epoch: claimed.content["claim"]["epoch"]
+               )
+
+      # The release path writes released_by, NOT previous_worker — a gate keyed
+      # on only one of the two keys silently refuses this whole path.
+      assert released.content["claim"]["worker"] == nil
+      assert released.content["claim"]["released_by"] == "worker-A"
+      refute Map.has_key?(released.content["claim"], "previous_worker")
+
+      assert {:ok, closed} =
+               Close.close(task.id, "worker-A",
+                 observed_epoch: released.content["claim"]["epoch"],
+                 lifecycle_status: "done"
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
+      refute Map.has_key?(closed.content, "close_override")
+    end
+
+    test "arm 3 does not admit a DIFFERENT worker over a released lease", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("holder-released-foreign"), scope)
+
+      :ok =
+        foreign_patch_content!(task.id, %{
+          "claim" => %{"worker" => nil, "released_by" => "worker-A", "epoch" => 2}
+        })
+
+      assert {:error, {:not_holder, "worker-A"}} =
+               Close.close(task.id, "worker-B", observed_epoch: 2, lifecycle_status: "done")
+
+      assert Repo.get!(Document, task.id).content["lifecycle_status"] == "open"
+    end
+
+    test "the override lands the foreign close AND records actor + held_by + reason",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      doc_id = uniq("holder-override")
+      task = mk_task!(doc_id, scope)
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
+
+      assert {:ok, closed} =
+               Close.close(task.id, "oc-lead",
+                 observed_epoch: claimed.content["claim"]["epoch"],
+                 lifecycle_status: "done",
+                 holder_override: "lead seal on merge of PR #6378"
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
+
+      # Re-read the persisted row — the confession is durable, not just echoed.
+      record = Repo.get!(Document, task.id).content["close_override"]["holder"]
+      assert record["actor"] == "oc-lead"
+      assert record["held_by"] == "worker-A"
+      assert record["reason"] == "lead seal on merge of PR #6378"
+      assert is_binary(record["ts"])
+      # And the ordinary close stamp still names who actually closed it.
+      assert Repo.get!(Document, task.id).content["claim"]["closed_by"] == "oc-lead"
+    end
+
+    test "a blank/whitespace override reason is NOT an override", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      doc_id = uniq("holder-blank-override")
+      task = mk_task!(doc_id, scope)
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
+      epoch = claimed.content["claim"]["epoch"]
+
+      for blank <- ["", "   ", nil] do
+        assert {:error, {:not_holder, "worker-A"}} =
+                 Close.close(task.id, "worker-B",
+                   observed_epoch: epoch,
+                   lifecycle_status: "done",
+                   holder_override: blank
+                 )
+      end
+
+      assert Repo.get!(Document, task.id).content["lifecycle_status"] == "in_progress"
+    end
+
+    test "the holder gate is independent of the epoch fence (a stale epoch still loses)",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      doc_id = uniq("holder-vs-fence")
+      task = mk_task!(doc_id, scope)
+      assert {:ok, _} = Tasks.claim_by_id(doc_id, "worker-A", scope)
+
+      # Wrong epoch → fenced_off wins, holder_override cannot buy past it.
+      assert {:error, :fenced_off} =
+               Close.close(task.id, "oc-lead",
+                 observed_epoch: 999,
+                 lifecycle_status: "done",
+                 holder_override: "lead seal"
+               )
+    end
+  end
+
+  # ─── (10) CRITERIA GATE (PDS-D289) ────────────────────────────────────────
+  #
+  # Measured on the doc AS READ, under the same advisory lock, BEFORE
+  # `merge_criteria` runs inside the close's own write — the only seat where the
+  # pre-close truth is visible. A gate placed after that merge is decorative by
+  # construction: the closing command's own met-flips would satisfy it.
+
+  describe "close/3 — criteria gate" do
+    @unproven [
+      %{"criterion" => "A: built", "met" => true, "evidence" => "PR #1"},
+      %{"criterion" => "B: proven", "met" => false}
+    ]
+
+    test "a done close over an unmet criterion is REFUSED, naming the index", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-refuse"), scope, %{"acceptance_criteria" => @unproven})
+
+      assert {:error, {:criteria_unmet, [1]}} =
+               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "done")
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open", "the close must not land"
+      assert reloaded.rev == task.rev, "rev untouched on refusal"
+    end
+
+    test "a closer that flips its OWN criteria in the closing command still hits the gate",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-selfflip"), scope, %{"acceptance_criteria" => @unproven})
+
+      # This is the whole point of the seat (close.ex, `check_criteria_proven/4`
+      # in do_close_txn's `with` chain, on the doc read under the advisory lock):
+      # a payload that flips every criterion met=true is measured against the
+      # PRE-merge state, so it cannot satisfy the gate it is being judged by.
+      assert {:error, {:criteria_unmet, [1]}} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [
+                   %{
+                     "index" => 0,
+                     "met" => true,
+                     "evidence" => "self-issued",
+                     "criterion" => "A: built"
+                   },
+                   %{
+                     "index" => 1,
+                     "met" => true,
+                     "evidence" => "self-issued",
+                     "criterion" => "B: proven"
+                   }
+                 ]
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open"
+      assert reloaded.content["acceptance_criteria"] == @unproven, "no partial criteria write"
+    end
+
+    test "a fully-proven task closes with no override and no record", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      proven = [%{"criterion" => "A: built", "met" => true, "evidence" => "PR #1"}]
+      task = mk_task!(uniq("crit-gate-proven"), scope, %{"acceptance_criteria" => proven})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "done")
+
+      assert closed.content["lifecycle_status"] == "done"
+      refute Map.has_key?(closed.content, "close_override")
+    end
+
+    test "a task with NO acceptance criteria is unaffected", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-none"), scope)
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "done")
+
+      assert closed.content["lifecycle_status"] == "done"
+    end
+
+    test "cancelled is EXEMPT by name — unmet criteria close unchanged", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-cancelled"), scope, %{"acceptance_criteria" => @unproven})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "cancelled")
+
+      assert closed.content["lifecycle_status"] == "cancelled"
+      assert closed.content["acceptance_criteria"] == @unproven, "criteria untouched"
+      refute Map.has_key?(closed.content, "close_override"), "an exemption is not an override"
+    end
+
+    test "blocked is EXEMPT by name — unmet criteria close unchanged", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-blocked"), scope, %{"acceptance_criteria" => @unproven})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "blocked")
+
+      assert closed.content["lifecycle_status"] == "blocked"
+      refute Map.has_key?(closed.content, "close_override")
+    end
+
+    test "the override lands the unproven close AND records actor + unmet + reason",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-override"), scope, %{"acceptance_criteria" => @unproven})
+
+      assert {:ok, _closed} =
+               Close.close(task.id, "oc-lead",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria_override: "B is proven by the wave paper, not by this repo"
+               )
+
+      record = Repo.get!(Document, task.id).content["close_override"]["criteria"]
+      assert record["actor"] == "oc-lead"
+      assert record["reason"] == "B is proven by the wave paper, not by this repo"
+      assert record["unmet"] == [%{"index" => 1, "criterion" => "B: proven"}]
+      assert is_binary(record["ts"])
+    end
+
+    test "a blank criteria_override reason is NOT an override", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-blank"), scope, %{"acceptance_criteria" => @unproven})
+
+      assert {:error, {:criteria_unmet, [1]}} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria_override: "   "
+               )
+    end
+
+    test "a malformed criteria payload keeps its OWN error ahead of the unmet gate",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-gate-precedence"), scope, %{"acceptance_criteria" => @unproven})
+
+      # Out of range, stale text guard, and an unguarded met-flip each keep the
+      # precise error the D56 guards ship — the unmet gate never masks them.
+      assert {:error, :criteria_index_out_of_range} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 9, "met" => false}]
+               )
+
+      assert {:error, :criteria_mismatch} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 1, "criterion" => "stale text", "met" => true}]
+               )
+
+      assert {:error, :criterion_text_required} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 1, "met" => true, "evidence" => "no text"}]
+               )
+
+      assert Repo.get!(Document, task.id).rev == task.rev, "nothing written on any of them"
+    end
+
+    test "BOTH overrides on one close write BOTH records", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      doc_id = uniq("crit-gate-both")
+      task = mk_task!(doc_id, scope, %{"acceptance_criteria" => @unproven})
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
+
+      assert {:ok, _} =
+               Close.close(task.id, "oc-lead",
+                 observed_epoch: claimed.content["claim"]["epoch"],
+                 lifecycle_status: "done",
+                 holder_override: "lead seal",
+                 criteria_override: "proven in the wave paper"
+               )
+
+      override = Repo.get!(Document, task.id).content["close_override"]
+      assert override["holder"]["held_by"] == "worker-A"
+      assert override["criteria"]["unmet"] == [%{"index" => 1, "criterion" => "B: proven"}]
+    end
+  end
+
+  # ─── (11) SENTINEL WORKER IDS (PDS-D290) ──────────────────────────────────
+  #
+  # 21 recorded closes carry the literal string "None" as closed_by — a
+  # stringified null that reads as a real closer to every downstream gate,
+  # accepted because nothing validated the SHAPE of a non-empty binary.
+
+  describe "close/3 — sentinel worker ids" do
+    test "empty-after-trim and None|null|nil|- are refused before the DB is touched",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("sentinel"), scope)
+
+      for sentinel <- ["", "   ", "None", "none", "NULL", "null", "nil", "-", " None "] do
+        assert {:error, {:sentinel_worker_id, ^sentinel}} =
+                 Close.close(task.id, sentinel, observed_epoch: 0, lifecycle_status: "done"),
+               "#{inspect(sentinel)} must never be recorded as a closer"
+      end
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open"
+      assert reloaded.rev == task.rev
+    end
+
+    test "a worker id that merely CONTAINS a sentinel is fine", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("sentinel-ok"), scope)
+
+      assert {:ok, closed} =
+               Close.close(task.id, "none-of-your-business",
+                 observed_epoch: 0,
+                 lifecycle_status: "done"
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
     end
   end
 end

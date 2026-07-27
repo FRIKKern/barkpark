@@ -511,8 +511,14 @@ defmodule Barkpark.Tasks.StampTest do
 
       # DEFAULT path — no observed_rev. Before D5 this 409'd
       # doc_changed_since_claim on ["acceptance_criteria"] by construction.
+      # Criterion 1 is an honest MISS, so the D289 criteria gate makes this
+      # done-close name why it is closing over it (accept-unmet-with-a-reason).
       assert {:ok, closed} =
-               Close.close(task.id, "w", observed_epoch: epoch, lifecycle_status: "done")
+               Close.close(task.id, "w",
+                 observed_epoch: epoch,
+                 lifecycle_status: "done",
+                 criteria_override: "criterion 1 is an honest miss: docs pending review"
+               )
 
       assert closed.content["lifecycle_status"] == "done"
 
