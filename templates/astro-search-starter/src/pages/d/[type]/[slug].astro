@@ -43,6 +43,9 @@ const title = (doc.title as string) || doc._id
 // at build; every page below is still pure static HTML.
 const full = await getDoc(doc._type, doc._id)
 const blocks = docBlocks(full ?? doc)
+// Badge label, same shape the Next chrome shows: a readable, capitalised type.
+const rawType = String(doc._type ?? '')
+const typeLabel = rawType ? rawType.charAt(0).toUpperCase() + rawType.slice(1) : 'Document'
 ---
 
 <Base title={title} docId={doc._id}>
@@ -50,6 +53,31 @@ const blocks = docBlocks(full ?? doc)
   <div class="flex h-screen w-full overflow-hidden">
     <FinderIsland client:only="react" variant="rail" />
     <section class="min-w-0 flex-1 overflow-y-auto">
+      {/* The detail chrome — the Next edition's components/detail-chrome.tsx,
+          as plain static markup (no island needed): a type badge, the title
+          truncated to one line, and a close button. Close returns to the
+          landing CARRYING THE CURRENT QUERY, because the finder keeps its
+          state in the query string — the inline script below appends
+          location.search so closing lands the finder as you left it, which is
+          exactly what the Next version does with useSearchParams(). */}
+      <header
+        class="sticky top-0 z-10 flex items-center gap-3 border-b border-zinc-200 bg-white/90 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90"
+      >
+        <span
+          class="inline-flex shrink-0 items-center rounded-md bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+          >{typeLabel}</span
+        >
+        <h2 class="min-w-0 flex-1 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          {title}
+        </h2>
+        <a
+          id="bp-detail-close"
+          href={import.meta.env.BASE_URL}
+          aria-label="Close document"
+          class="shrink-0 rounded-md px-2 py-1 text-lg leading-none text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >&times;</a
+        >
+      </header>
       <main class="bp-paper-surface">
         <article class="bp-paper-body">
           <a class="back" href={import.meta.env.BASE_URL}>&lsaquo; Search</a>
@@ -74,6 +102,17 @@ const blocks = docBlocks(full ?? doc)
     </section>
   </div>
 </Base>
+
+<script is:inline>
+  // Carry the finder's live query onto the close link, so closing a document
+  // restores the search exactly as it was (the Next chrome does this with
+  // useSearchParams). Static-safe: if JS never runs, the href already points at
+  // the landing — the link is never broken, only less precise.
+  ;(function () {
+    var a = document.getElementById('bp-detail-close')
+    if (a && window.location.search) a.href = a.getAttribute('href') + window.location.search
+  })()
+</script>
 
 <style>
   main { max-width: 760px; margin: 0 auto; padding: 48px 20px 96px; }
