@@ -85,6 +85,22 @@ describe('cross-surface registry parity (charter D48)', () => {
     expect(canonical).toContain('equation')
   })
 
+  it('is SET-EQUAL to react ∖ EXCLUSIONS ∪ MOBILE_AHEAD — the whole relation in one line', () => {
+    // The two subset tests below are each a direction of this equality, and they
+    // report BETTER diagnostics (they name the offending types). This states the
+    // relation whole, so a reader does not have to compose two assertions to see
+    // what the tripwire actually claims — and so nobody mistakes the pair for a
+    // one-sided check.
+    //
+    // NOTE what is NOT here: any length literal. D48's text mentions executing
+    // `REGISTERED_TYPES.length === 66`; that number was already stale when this
+    // suite landed (the heading-alias slice took it to 70 hours later), which is
+    // the whole argument for set equality over a count. The sets are compared
+    // sorted, so ordering is never a difference.
+    const expected = [...canonical.filter((t) => !EXCLUSIONS.has(t)), ...MOBILE_AHEAD].sort()
+    expect(mobile).toEqual(expected)
+  })
+
   it('registers EVERY canonical type — react ∖ EXCLUSIONS ⊆ mobile', () => {
     const missing = canonical.filter((t) => !mobile.includes(t) && !EXCLUSIONS.has(t))
     expect(missing).toEqual([])
