@@ -5,7 +5,10 @@ import type { BlockCase } from './types'
 export const coreProseCases: BlockCase[] = [
   { type: 'heading', block: { type: 'heading', level: 2, text: 'Heading' } },
   { type: 'paragraph', block: { type: 'paragraph', text: 'body copy' } },
-  { type: 'eyebrow', block: { type: 'eyebrow', text: 'EYEBROW' } },
+  // The content[] shape, not the bare `text` one: this is the shape the 3 live
+  // eyebrows persist and the shape that rendered BLANK until the paragraphInline
+  // law reached this renderer (mob-zb-s3).
+  { type: 'eyebrow', block: { type: 'eyebrow', content: [{ type: 'text', value: 'EYEBROW' }] } },
   { type: 'byline', block: { type: 'byline', items: ['Ada', 'Grace'] } },
   { type: 'ingress', block: { type: 'ingress', text: 'the lede' } },
   { type: 'pullquote', block: { type: 'pullquote', text: 'pulled' } },

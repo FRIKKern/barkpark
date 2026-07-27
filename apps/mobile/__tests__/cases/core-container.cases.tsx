@@ -12,5 +12,6 @@ export const coreContainerCases: BlockCase[] = [
   { type: 'steps', block: { type: 'steps', steps: [{ title: 'First' }] } },
   { type: 'expandable', block: { type: 'expandable', summary: 'More', blocks: [] } },
   { type: 'toc', block: { type: 'toc', items: [{ text: 'Outline', level: 1 }] } },
-  { type: 'action', block: { type: 'action', label: 'Open' } },
+  // With an href — the field the renderer used to drop on the floor (mob-zb-s3).
+  { type: 'action', block: { type: 'action', label: 'Open', href: 'https://example.com/board' } },
 ]

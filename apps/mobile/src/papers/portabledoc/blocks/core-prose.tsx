@@ -16,7 +16,11 @@ import {
   paragraphInline,
   str,
 } from '../model'
-import { bodyText, spec, type Render } from '../register'
+import { bodyText, spec, type BlockCtx, type Render } from '../register'
+
+function isChat(ctx: BlockCtx): boolean {
+  return (ctx.register ?? 'paper') === 'chat'
+}
 
 const heading: Render = (b, ctx, key) => {
   const level = headingLevel(b)
@@ -44,6 +48,11 @@ const paragraph: Render = (b, ctx, key) => (
   </Text>
 )
 
+// Swept sibling of the heading/list content[] defect (the reference carries the
+// same note): the eyebrow read `text` alone, so the 3 live eyebrows persisted as
+// `{content:[…]}` rendered EMPTY. Routing it through the paragraphInline law
+// leaves the `text` path byte-identical — the fallback only fires when `content`
+// is absent or empty.
 const eyebrow: Render = (b, ctx, key) => (
   <Text
     key={key}
@@ -57,7 +66,7 @@ const eyebrow: Render = (b, ctx, key) => (
       marginBottom: 2,
     }}
   >
-    {str(b.text)}
+    {renderInlineNodes(paragraphInline(b), ctx)}
   </Text>
 )
 
@@ -71,11 +80,21 @@ const byline: Render = (b, ctx, key) => {
   )
 }
 
+/* ── the two serif outliers, made register-aware (D50) ─────────────────────────
+ * The paperIngress and paperPullquote tokens carry `fontFamily: 'serif'` ON THE
+ * TOKEN. Reaching for either unconditionally painted a serif lede and a serif
+ * pull quote inside CHAT turns — a probe-proven leak, and the one place the
+ * register law was still broken after the split. The paper page keeps its airy
+ * serif measures verbatim; in the transcript both fall back to the register's own
+ * body step (`spec(ctx).body`, which IS the chat body measure there and carries
+ * no face), keeping their IDENTITY in weight/italic/centring rather than in a
+ * face the transcript never speaks. */
+
 const ingress: Render = (b, ctx, key) => (
   <Text
     key={key}
     style={{
-      ...roles.paperIngress,
+      ...(isChat(ctx) ? { ...spec(ctx).body, fontWeight: '600' as const } : roles.paperIngress),
       color: ctx.theme.text,
       marginVertical: 8,
     }}
@@ -88,7 +107,7 @@ const pullquote: Render = (b, ctx, key) => (
   <Text
     key={key}
     style={{
-      ...roles.paperPullquote,
+      ...(isChat(ctx) ? spec(ctx).body : roles.paperPullquote),
       fontStyle: 'italic',
       color: ctx.theme.text,
       marginVertical: 14,
