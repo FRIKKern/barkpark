@@ -286,6 +286,12 @@ emit("agg_needs", ",".join(agg.get("needs", [])))
 coe = [n for n, j in jobs.items() if j.get("continue-on-error") is True]
 emit("coe_jobs", ",".join(sorted(coe)))
 emit("coe_in_needs", ",".join(sorted(set(coe) & set(agg.get("needs", [])))))
+# …and the mirror hazard, which the allow-set cannot see: a BLOCKING job added
+# to elixir.yml but never wired into `needs`. The aggregator cannot judge a job
+# nobody told it about, so it would green while that job is red.
+blocking = {n for n, j in jobs.items()
+            if j.get("continue-on-error") is not True and n != "elixir-gate"}
+emit("blocking_not_in_needs", ",".join(sorted(blocking - set(agg.get("needs", [])))))
 disp = jobs.get("changes", {})
 emit("dispatcher_if", str(disp.get("if", "")))
 emit("dispatcher_matrix", "strategy" in disp)
@@ -308,6 +314,11 @@ PY
   assert_fact agg_name "Elixir gate"
   assert_fact coe_jobs format
   assert_fact coe_in_needs ""
+  # Every blocking job must be in the aggregator's needs set. Without this, a
+  # future slice (S4's format ceiling is the next one) can add a blocking job
+  # and the required context stays green while that job reds — the aggregator's
+  # one structural blind spot, closed here rather than left to a reviewer's eye.
+  assert_fact blocking_not_in_needs ""
   assert_fact dispatcher_if ""
   assert_fact dispatcher_matrix False
   assert_fact dispatcher_outputs "compile,test"
