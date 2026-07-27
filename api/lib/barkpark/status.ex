@@ -38,6 +38,7 @@ defmodule Barkpark.Status do
       components: components,
       open_incidents: length(incidents),
       version: safe(fn -> Barkpark.BuildInfo.version() end, "unknown"),
+      commit: commit(),
       uptime_seconds: node_uptime_seconds(),
       checked_at: DateTime.utc_now()
     }
@@ -83,6 +84,27 @@ defmodule Barkpark.Status do
       |> fold_status()
 
     fold_status([base, from_incidents])
+  end
+
+  @doc """
+  Short git sha of the RUNNING build — the one deploy record produced by the
+  running BEAM rather than by a file a script promised to write.
+
+  This is an IDENTITY, unlike `version` ("A.B.C.D", whose D is a commits-since-tag
+  DISTANCE — every commit at the same distance shares one string). It is published
+  on the public status payload so an unattended owner (or their uptime monitor,
+  with no bearer token) can read what the box is actually running.
+
+  Never nil, never absent: a build with no derivable sha renders `"unknown"`, so
+  the field's presence never doubles as an "all good" signal. The resolver is
+  injectable so that fallback is testable.
+  """
+  @spec commit((-> String.t())) :: String.t()
+  def commit(resolver \\ &Barkpark.BuildInfo.commit/0) do
+    case safe(resolver, "unknown") do
+      sha when is_binary(sha) and sha != "" -> sha
+      _ -> "unknown"
+    end
   end
 
   @doc "Overall status atom only (`operational` when all clear)."
