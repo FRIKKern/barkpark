@@ -181,6 +181,109 @@ test("the swallow-converting survival checks are both present", () => {
   assert.match(SOURCE, /Promise\.allSettled|allSettled|swallow/i, "the reason the pairing exists must stay written down next to it");
 });
 
+// ── the fact-provenance gate (charter D97 clause (c)) ────────────────────────
+//
+// The floors above keep the cycle WIDE. This section keeps what flows through it
+// HONEST. bp-epic-cycle has gated fact provenance since its own wave; wild-bulk
+// shipped without it, so a survey fact with no rerun command — an unverified
+// belief at the level of agent memory — reached the Fable that cuts up to 60
+// tasks carrying no marker at all. The schema's `rerun` key existing proves only
+// that the CARRIER exists; nothing checked whether a returned fact filled it.
+//
+// Same harness discipline as above, and the same disclaimer: this is a harness
+// over an extracted function, not a wave that watched the gate demote something.
+
+// Lifts a whole top-level function body by brace matching (never by line number
+// — every line number in this epic's history went stale within a wave).
+function extractFunction(name) {
+  const at = SOURCE.indexOf(`function ${name}(`);
+  assert.notEqual(at, -1, `\`function ${name}(\` is gone from ${WORKFLOW}`);
+  let depth = 0;
+  let started = false;
+  for (let i = SOURCE.indexOf("{", at); i < SOURCE.length; i++) {
+    if (SOURCE[i] === "{") { depth++; started = true; }
+    else if (SOURCE[i] === "}") {
+      depth--;
+      if (started && depth === 0) return SOURCE.slice(at, i + 1);
+    }
+  }
+  assert.fail(`could not brace-match the body of ${name}`);
+}
+
+test("wild-bulk-cycle HAS a fact-provenance gate, and it demotes rather than rejects (charter D3)", () => {
+  const gate = extractFunction("gateFactProvenance");
+  assert.match(gate, /provenance\s*=\s*'DEMOTED-NO-RERUN'/, "the demotion marker string is the contract downstream phases read — it must stay verbatim");
+  assert.match(gate, /provenance_note\s*=/, "a marker without the explanatory note tells the reader nothing about what to do");
+  assert.doesNotMatch(gate, /\bthrow\b/, "D3: a missing rerun command DEMOTES the fact, it never rejects it — a throw here would discard exactly the facts most in need of being read and fixed");
+  assert.doesNotMatch(gate, /\.filter\(|splice|delete /, "D3 again: the gate must not silently drop facts either — demotion is a marker, not a removal");
+});
+
+test("the gate is called BEFORE every serialisation in the file, so the hole cannot just move", () => {
+  const callAt = SOURCE.indexOf("gateFactProvenance(surveyed");
+  assert.notEqual(callAt, -1, "the gate is defined but never CALLED on the survey reports — a defined-and-unwired gate is the most expensive kind of vacuous green");
+
+  // Every JSON.stringify in the file, not just the fact-bearing one today: a
+  // later wave that adds a phase downstream of Survey inherits the gate for
+  // free, and one that adds a serialisation ABOVE the barrier reds here.
+  // Matched as the template interpolation `${JSON.stringify(` so the prose
+  // mention inside the gate's own comment is not counted as a serialisation.
+  const NEEDLE = "$" + "{JSON.stringify(";
+  const sites = [];
+  for (let i = SOURCE.indexOf(NEEDLE); i !== -1; i = SOURCE.indexOf(NEEDLE, i + 1)) sites.push(i);
+  assert.ok(sites.length >= 8, `expected the workflow's prompt serialisations to still be here; found ${sites.length}`);
+  for (const site of sites) {
+    const line = SOURCE.slice(0, site).split("\n").length;
+    assert.ok(callAt < site, `the fact-provenance gate must run before the serialisation at line ${line} — a serialisation above the barrier sees ungated facts`);
+  }
+});
+
+test("the gate FIRES over a rerun-less fact and stays silent over a complete set (never cry wolf)", () => {
+  const gate = extractFunction("gateFactProvenance");
+  const call = (reports) =>
+    run(`(() => { ${gate}
+                 const reports = ${JSON.stringify(reports)};
+                 const counts = gateFactProvenance(reports);
+                 return JSON.stringify({ counts, reports }); })()`);
+
+  const dirty = JSON.parse(call([
+    { facts: [{ claim: "a", rerun: "git show origin/main:x" }, { claim: "b" }, { claim: "c", rerun: "   " }] },
+    { facts: [{ claim: "d", rerun: "node --test x.mjs" }] },
+  ]));
+  assert.deepEqual(dirty.counts, { total: 4, demoted: 2 }, "two facts without a usable rerun command must be counted");
+  assert.equal(dirty.reports[0].facts[1].provenance, "DEMOTED-NO-RERUN");
+  assert.equal(dirty.reports[0].facts[2].provenance, "DEMOTED-NO-RERUN", "whitespace is not a rerun command");
+  assert.equal(dirty.reports[0].facts[0].provenance, undefined, "a fact that carries its command must be left alone");
+  assert.equal(dirty.reports[0].facts.length, 3, "demotion must never remove a fact");
+
+  const clean = JSON.parse(call([{ facts: [{ claim: "a", rerun: "curl -s localhost:4000/api/schemas" }] }]));
+  assert.deepEqual(clean.counts, { total: 1, demoted: 0 }, "an all-rerun set must demote nothing");
+  assert.equal(clean.reports[0].facts[0].provenance, undefined, "nothing may be marked when nothing is wrong — a gate that cries wolf gets tuned out");
+
+  // The shapes a dead agent actually returns. The gate must survive them rather
+  // than fault, because it sits between the survey barrier and every prompt.
+  assert.deepEqual(JSON.parse(call([])).counts, { total: 0, demoted: 0 });
+  assert.deepEqual(JSON.parse(call([{}, { facts: [] }])).counts, { total: 0, demoted: 0 });
+});
+
+test("the demotion COUNT is rendered into the downstream prompt, in both directions", () => {
+  const block = extractFunction("gripBlock");
+  const render = (grip) => run(`(() => { ${block} return gripBlock(${JSON.stringify(grip)}); })()`);
+
+  const loud = render({ total: 153, demoted: 42 });
+  assert.match(loud, /42\/153/, "the receiving phase must be told HOW MUCH of its input was demoted, not merely that some was");
+  assert.match(loud, /DEMOTED-NO-RERUN/, "the rendered block must name the marker the reader will find on the facts themselves");
+
+  const quiet = render({ total: 153, demoted: 0 });
+  assert.match(quiet, /0\/153/, "zero renders as an explicit all-clear — a gate that is silent when clean reads exactly like a gate that was deleted");
+  assert.doesNotMatch(quiet, /⚠/, "a clean run must not be dressed as a warning");
+
+  assert.notEqual(SOURCE.indexOf("${SURVEY_GRIP}"), -1, "the rendered block must actually be interpolated into a prompt — computing it and dropping it is the whole failure mode this criterion exists for");
+  assert.ok(
+    SOURCE.indexOf("const SURVEY_GRIP =") < SOURCE.indexOf("${SURVEY_GRIP}"),
+    "the block must be computed before it is rendered",
+  );
+});
+
 // ── the honesty the charter requires (D28) ───────────────────────────────────
 
 test("the file does not claim these floors have been observed firing in a real run", () => {
