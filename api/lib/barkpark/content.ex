@@ -307,6 +307,14 @@ defmodule Barkpark.Content do
   @spec corpus_edges(String.t(), String.t(), keyword()) :: [map()]
   def corpus_edges(type, dataset, opts \\ []), do: Edges.corpus_edges(type, dataset, opts)
 
+  @doc """
+  The projection SOURCE corpus over documents the caller already read.
+  See `Barkpark.Content.Edges.corpus_edges_for_docs/3`.
+  """
+  @spec corpus_edges_for_docs([map()], String.t(), keyword()) :: [map()]
+  def corpus_edges_for_docs(docs, dataset, opts \\ []),
+    do: Edges.corpus_edges_for_docs(docs, dataset, opts)
+
   # ── Scope resolution (extracted → Content.WriteScope) ─────────────────────
   #
   # Tenancy scope stamping/resolution + the lifecycle-hook helpers moved to
@@ -668,6 +676,19 @@ defmodule Barkpark.Content do
 
   @doc "Upsert a paper keyed by `{dataset, slug}` and broadcast a whole-HTML frame — walled by default (D26); `opts` accepts the audited `bypass_wall: true` escape. See `Content.Papers`."
   defdelegate upsert_paper(attrs, opts \\ []), to: Papers
+
+  @doc "The closed whitelist of document types that ride the blocks-doc write path. See `Content.Papers`."
+  defdelegate blocks_types(), to: Papers
+
+  @doc "Whether `type` is in the blocks-doc whitelist. See `Content.Papers`."
+  defdelegate blocks_type?(type), to: Papers
+
+  @doc "Upsert a blocks-doc keyed by `{dataset, slug}` for any whitelisted type (`upsert_paper/2` generalized). See `Content.Papers`."
+  defdelegate upsert_blocks_doc(type, attrs, opts \\ []), to: Papers
+
+  @doc "Fetch a blocks-doc by `{slug, type, dataset}`. See `Content.Papers`."
+  defdelegate get_blocks_doc(slug, type, dataset \\ Papers.paper_default_dataset(), opts \\ []),
+    to: Papers
 
   @doc "Apply a single portable-doc op to a paper's block list. See `Content.Papers`."
   def apply_paper_block_op(slug, op, dataset \\ Papers.paper_default_dataset(), opts \\ []),

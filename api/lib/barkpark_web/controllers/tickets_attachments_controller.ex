@@ -25,7 +25,6 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   require Logger
 
   alias Barkpark.Content
-  alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Tickets.Attachments
 
@@ -218,14 +217,33 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   #     for dangerous types — an outsider-uploaded text/html cannot execute.
   # sobelow_skip ["Traversal.SendFile", "XSS.ContentType"]
   defp stream_file(conn, file) do
-    full = Media.file_path(file.path)
-    mime = file.mime_type || MIME.from_path(full)
+    mime = file.mime_type || MIME.from_path(file.path)
 
-    conn
-    |> put_resp_content_type(MediaFile.serve_content_type(mime))
-    |> put_resp_header("x-content-type-options", "nosniff")
-    |> put_resp_header("content-disposition", disposition(file, mime))
-    |> send_file(200, full)
+    # The redirect branch (object-storage backend) bakes the same collapsed
+    # type + disposition into the presigned query (response-content-*), so a
+    # bucket-served attachment carries the identical stored-XSS headers the
+    # local send_file path sets below.
+    case Barkpark.Media.Blobstore.serve_strategy(file.path,
+           response_content_type: MediaFile.serve_content_type(mime),
+           response_content_disposition: disposition(file, mime)
+         ) do
+      {:file, full} ->
+        conn
+        |> put_resp_content_type(MediaFile.serve_content_type(mime))
+        |> put_resp_header("x-content-type-options", "nosniff")
+        |> put_resp_header("content-disposition", disposition(file, mime))
+        |> send_file(200, full)
+
+      {:redirect, url} ->
+        conn
+        |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
+        |> redirect(external: url)
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: %{code: "not_found", message: "attachment blob missing"}})
+    end
   end
 
   # Dangerous types download rather than render; everything else stays inline with

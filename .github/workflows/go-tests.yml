@@ -32,6 +32,12 @@ on:
       # these JSON mirrors with NO .go source change, so the Go realization leg must
       # run on THIS PR to catch a TUI divergence from the new projection.
       - "internal/pdrender/testdata/**"
+      # CLI manifest fixtures (docs/cli/fixtures/*.json). The capsbrief protective
+      # kit (ratio tripwire, invoke-completeness) and the mcp/tickets/cli suites all
+      # pin behaviour against full-manifest.json; a fixture regen carries NO .go
+      # diff, so the suite must run on THIS PR — same #963→#969-class gap as the
+      # templates/** carve-out above.
+      - "docs/cli/fixtures/**"
   pull_request:
     paths:
       - "**/*.go"
@@ -40,6 +46,7 @@ on:
       - ".github/workflows/go-tests.yml"
       - "templates/**"
       - "internal/pdrender/testdata/**"
+      - "docs/cli/fixtures/**"
 
 concurrency:
   # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded

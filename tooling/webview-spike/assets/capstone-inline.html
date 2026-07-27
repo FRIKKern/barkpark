@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>capstone — inline variant</title>
+<style>
+/*
+ * paper-surface.css — the ONE canonical paper-surface stylesheet
+ * (Paper editor parity Stage 2, wave 1 · charter Decision 4).
+ *
+ * SINGLE SOURCE for the portable paper-surface layer: the `--paper-*` theme
+ * tokens, the `--bp-*` typography tokens (Stage-1 single-source, #896), and the
+ * `.bp-paper-surface` element rules (h1-h6/p/a/ul/ol/li/code/pre/img). The
+ * Studio View + Edit panes and the /papers reader all resolve THESE selectors
+ * against THESE tokens — parity by construction, not by hand-matched mirrors.
+ *
+ * Embedded inline, never fetched over the network (CSP + self-contained
+ * standalone exports), through
+ * Barkpark.PortableDoc.Render.Stylesheet.css/0 (compile-time @external_resource)
+ * by three sinks:
+ *   - Studio         barkpark_web/layouts/root.html.heex     (<%= raw(css()) %>)
+ *   - /papers reader barkpark_web/layouts/bulldocs.html.heex (bp-theme
+ *                    `--paper-*` overrides layer AFTER this source)
+ *   - sheet export   plugins/sheets/html.ex                  (standalone <head>)
+ *
+ * EXTRACTED VERBATIM from root.html.heex (values byte-identical — move only):
+ *   --paper-* light/dark theme tokens   (was root.html.heex ~2233-2262)
+ *   --paper-* fallback tokens + fonts    (was ~2263-2291)
+ *   --bp-* typography tokens             (was ~2293-2327)
+ *   .bp-paper-surface element rules      (was ~2363-2406)
+ *
+ * KEPT in root.html.heex (Studio-shell / NOT portable — Decision 4):
+ *   surface CHROME (bg/color/font/size/line-height/tracking, max-width, padding,
+ *     media-query padding, .bp-paper-body) — the Studio page shell; the reader
+ *     owns its own 820/720px bp-theme shell, so surface chrome is NOT shared.
+ *   html[data-editor-focus] interplay, .bp-paper-editor-body typography mirror,
+ *     the inline-style de-inline override hacks (a later wave deletes them),
+ *     .bp-canvas-* node-view chrome, and the valueref stale-marker /
+ *     clickable-cursor affordances (Studio-only; the reader emits valuerefs
+ *     as plain text).
+ */
+/* ── `--paper-*` reading-surface theme tokens are now GENERATED into the marker
+   region below (design/tokens.json color.paper.surface → design/emit.mjs; VERBATIM
+   capture, ts-w1). What stays hand-authored here: the serif/mono FONT stacks and
+   the callout `--bp-tone-*` companions (the latter become the paperCallout token
+   family in a later wave). */
+html[data-theme="dark"] .bp-paper-surface,
+html[data-theme="dark"] .bp-paper-body {
+  /* Callout TONE tokens — DARK companions (authored): deepened bg, lifted fg,
+     consistent with the cool bp-dark token style above; kept readable-contrast.
+     Light values are lifted verbatim from Util.tone_palette/1 (fallback block). */
+  --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;
+  --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
+  --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
+  --bp-tone-danger-bg:  #2a1614; --bp-tone-danger-fg:  #f08a80;
+  --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
+}
+/* Fallback fonts + callout companions so a pre-paint no-data-theme load still gets
+   the light bp theme. The `--paper-*` colour fallback is in the GENERATED marker
+   region below (the html[data-theme] blocks win over it, as before). */
+.bp-paper-surface, .bp-paper-body {
+  /* Reading serif. Iowan Old Style leads the stack — the macOS system serif the
+     ORIGINAL Portable Doc editor renders in — so native reads pixel-match the
+     editor where the OS has that face. Source Serif 4 IS self-hosted now
+     (@font-face'd variable woff2, Roman + Italic, since #1984 — see
+     root.html.heex), so it supplies the same serif everywhere the OS lacks
+     Iowan; it is a real font here, not a bare fallback name. The stack ORDER and
+     these font values are owned by au-w5-reading-typography (human-gated) — do
+     not reorder or retune them here. */
+  --paper-font-serif: var(--tok-reading-font, "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif);
+  --paper-font-mono: ui-monospace, Menlo, monospace;
+  /* Callout TONE tokens — LIGHT (default). Values lifted VERBATIM from
+     Util.tone_palette/1 (util.ex): unknown tone falls back to info there, and
+     the `bp-callout--info` modifier is the emitted default here too. Dark
+     companions live in the html[data-theme="dark"] block above. */
+  --bp-tone-info-bg:    #e9eff7; --bp-tone-info-fg:    #2d5e8f;
+  --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
+  --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
+  --bp-tone-danger-bg:  #f7e9e6; --bp-tone-danger-fg:  #a63a2e;
+  --bp-tone-neutral-bg: #edf0ee; --bp-tone-neutral-fg: #4a544f;
+}
+
+/* ── Paper TYPOGRAPHY tokens (Stage-1 single-source — Goal editor-parity).
+   These `--bp-*` reading-scale vars feed BOTH the VIEW (`.bp-paper-surface
+   h1/p/li/...`) and EDIT (`.bp-paper-editor-body h1/p/li/...`) rules below.
+   Both panes descend from `.bp-paper-surface` (the Edit body lives inside
+   `<main class="bp-paper-shell bp-paper-surface">`), so both INHERIT these
+   — the two rule sets no longer have to be hand-matched byte-for-byte.
+   The NUMBERS themselves are NO LONGER hand-authored here: size/line-height/
+   heading-weight VAR-BRIDGE onto the emitted `--tok-reading-*` block (from
+   design/tokens.json via design/emit.mjs), declared just below on this same
+   `.bp-paper-surface, .bp-paper-body` scope, so the un-fallbacked var()s always
+   resolve. tokens.json is now the ONE source; change a reading value THERE and
+   `node design/emit.mjs --write` moves View AND Edit together. Only the
+   `--bp-*-tracking` letter-spacings stay hand-authored (no `--tok` twin exists).
+   Still byte-aligned with the standalone bundle (api/assets/paper-editor/src/
+   styles.css `:root`, re-derived by the mirror) and with render.ex
+   heading_style/2 INLINE values (h1 1.1/-0.02em, h2 1.2, h3 1.25 — the View
+   inline wins, so these mirror it).
+   NOTE: the VIEW-only list bottom-margin (`ul,ol { margin:0 0 24px }`) is
+   deliberately NOT a token — it belongs to VIEW alone (pulling it into Edit
+   re-introduces double-spacing; see styles.css :84). */
+.bp-paper-surface, .bp-paper-body {
+  --bp-body-size: var(--tok-reading-body-size);
+  --bp-body-lh: var(--tok-reading-body-lh);
+  --bp-body-tracking: 0.005em;
+  --bp-h1-size: var(--tok-reading-h1-size);   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: -0.02em;
+  --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);
+  --bp-h3-size: var(--tok-reading-h3-size);   --bp-h3-lh: var(--tok-reading-h3-lh);
+  --bp-heading-weight: var(--tok-reading-heading-weight);
+  --bp-para-margin-top: 12pt;
+  --bp-li-gap: 4pt;
+  --bp-list-indent: 24px;
+  --bp-code-size: 0.92em;
+  --bp-code-pad: 0.08em 0.35em;
+  --bp-code-radius: 3px;
+  --bp-pre-size: 14px;
+  --bp-pre-lh: 1.5;
+  --bp-pre-pad: 14px 16px;
+  --bp-pre-margin: 0 0 22px;
+  --bp-pre-radius: 4px;
+  /* Code-BLOCK frame tokens (S9 code-interior). DISTINCT from --bp-pre-* (the
+     generic 14px <pre>) and --bp-code-* (the inline-code chip): the article code
+     block is its own hardcoded terracotta-left-accent frame. These single-source
+     the literals Figures.code_block_html/1 + the .bp-canvas-code editor frame both
+     paint, so View↔Edit move together. */
+  --bp-codeblock-size: 0.9rem;
+  --bp-codeblock-lh: 1.5;
+  --bp-codeblock-pad: 0.9rem 1.1rem;
+  --bp-codeblock-margin: 1.2rem 0;
+  --bp-codeblock-radius: 0;
+  --bp-codeblock-accent-w: 3px;
+  --bp-img-margin: 0 0 22px;
+  --bp-img-radius: 3px;
+}
+
+/* ── Block typography (ported from paper.css). These apply to BOTH the
+   View-mode read-only stream rows and the Edit-mode block list, so a
+   paper reads as clean prose in either mode. */
+.bp-paper-surface h1, .bp-paper-surface h2, .bp-paper-surface h3,
+.bp-paper-surface h4, .bp-paper-surface h5, .bp-paper-surface h6 {
+  font-family: var(--paper-font-serif);
+  font-weight: var(--bp-heading-weight); color: var(--paper-ink);
+}
+/* Heading margins are intentionally ZERO. The user controls vertical
+   rhythm via block-level spacing (`.bp-paper-edit-block` gap) — baking
+   margin into the heading itself fights the block model and makes the
+   end result hard to author.
+
+   line-height + letter-spacing values match render.ex `heading_style/2`
+   INLINE values (level1: 1.1 / -0.02em, level2: 1.2, level3: 1.25). The
+   inline wins on the View pane, so the Edit pane CSS must mirror it to
+   keep View ↔ Edit byte-aligned. (Parity audit caught the previous
+   1.3 / -0.01em CSS as visible drift against the inline.) */
+/* Heading vertical rhythm — TOP-only margins so the flat edit ProseMirror
+   (siblings, margins collapse) and the div-wrapped reader (no collapse) land on
+   the SAME spacing: with zero bottom margins, additive==collapsed. This single
+   source feeds both surfaces; the first heading is clamped to 0 by each surface's
+   :first-child rule. */
+.bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
+.bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh);  margin: 1.9em 0 0; }
+.bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
+.bp-paper-surface p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
+.bp-paper-surface a  {
+  color: var(--paper-accent); text-decoration: none;
+  border-bottom: 1px solid var(--paper-accent-soft);
+}
+/* `margin: 0 0 24px` bottom-gap is VIEW-ONLY (Edit omits it — see token block). */
+.bp-paper-surface ul, .bp-paper-surface ol { margin: 0 0 24px; padding-left: var(--bp-list-indent); }
+.bp-paper-surface li { margin: var(--bp-li-gap) 0 0; }
+.bp-paper-surface ul li { list-style: disc; }
+.bp-paper-surface ol li { list-style: decimal; }
+.bp-paper-surface code {
+  font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
+  background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
+}
+.bp-paper-surface pre {
+  font-family: var(--paper-font-mono); font-size: var(--bp-pre-size); line-height: var(--bp-pre-lh);
+  background: var(--paper-bg-deep); border: 1px solid var(--paper-rule);
+  border-radius: var(--bp-pre-radius); padding: var(--bp-pre-pad); margin: var(--bp-pre-margin); overflow-x: auto;
+}
+.bp-paper-surface img {
+  display: block; max-width: 100%; height: auto; margin: var(--bp-img-margin);
+  border-radius: var(--bp-img-radius); border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
+}
+
+/* ── Article component classes (Stage 2, wave 2 · charter Decisions 2-4).
+   Emitted by Render.Walk in `:article` mode (roles/tones/chrome now carry
+   `bp-*` classes instead of inline THEME styles). Every value here is lifted
+   VERBATIM from the pre-Stage-2 walk.ex inline declarations, translating the
+   article palette's `pal.*` fields to the SAME tokens the palette resolved
+   (accent → --paper-accent, muted → --paper-ink-soft, rule → --paper-rule,
+   ink → --paper-ink, heading font → --paper-font-serif, code_bg →
+   --paper-bg-deep). View and Edit resolve THESE selectors — parity by
+   construction. Author DATA (marks, geometry, sheet b/i/bg/al + col widths +
+   error mark, hr thickness) stays INLINE on the same element. */
+
+/* Text ROLES (apply_text_role). Author marks (italic/bold/colour) still ride
+   inline on the same span; these own only the role typography. */
+.bp-paper-surface .bp-role-eyebrow {
+  font-family: var(--paper-font-serif); color: var(--paper-accent);
+  letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem;
+}
+.bp-paper-surface .bp-role-byline {
+  border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem;
+  color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem;
+}
+.bp-paper-surface .bp-role-ingress {
+  color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem;
+}
+.bp-paper-surface .bp-role-pullquote {
+  display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
+  border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft);
+  line-height: 1.5; font-size: 1.2rem;
+}
+
+/* Blockquote — a semantic attributed quotation (distinct from the styled
+   editorial pullquote above). A muted, italic passage behind a left rule, with
+   an optional `<cite>` attribution rendered as a non-italic muted line. */
+.bp-paper-surface .bp-blockquote {
+  margin: 1.4rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
+  border-left: 3px solid var(--paper-rule); color: var(--paper-ink-soft);
+  font-style: italic;
+}
+.bp-paper-surface .bp-blockquote > p { margin: 0; }
+.bp-paper-surface .bp-blockquote__cite {
+  display: block; margin-top: 0.4rem; font-style: normal;
+  font-size: 0.9rem; color: var(--paper-ink-soft);
+}
+.bp-paper-surface .bp-blockquote__cite::before { content: "\2014\00a0"; }
+
+/* Callout TONES. `bp-callout` is the card; `bp-callout--<tone>` resolves the
+   tone token pair (light + dark, defined above). */
+.bp-paper-surface .bp-callout { padding: 16px; border-left: 4px solid transparent; }
+.bp-paper-surface .bp-callout--info    { background: var(--bp-tone-info-bg);    color: var(--bp-tone-info-fg);    border-left-color: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-callout--success { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); border-left-color: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-callout--danger  { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg);  border-left-color: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-callout--neutral { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); border-left-color: var(--bp-tone-neutral-fg); }
+.bp-paper-surface .bp-callout__summary { cursor: pointer; font-weight: bold; }
+.bp-paper-surface .bp-callout__body { margin-top: 8px; }
+
+/* Table CHROME (also the sheet's outer collapse/width). `display:block` +
+   overflow-x makes a wide table scroll INSIDE its own box instead of widening
+   the document — a 3-col table was the measured mobile-overflow culprit at
+   390px (the reading column must never scroll horizontally). */
+.bp-paper-surface .bp-table { border-collapse: collapse; width: 100%; display: block; max-width: 100%; overflow-x: auto; }
+.bp-paper-surface .bp-table__th {
+  border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left;
+  text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
+  color: var(--paper-ink-soft); font-family: var(--paper-font-serif);
+}
+.bp-paper-surface .bp-table__td {
+  border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top;
+}
+
+/* Sheet CHROME (band + cell rules). Author DATA — col width, per-cell
+   b/i/bg/al, engine-error red/bold — stays INLINE on the <td> (sheets_parity). */
+.bp-paper-surface .bp-sheet__th {
+  border-bottom: 2px solid var(--paper-rule); padding: 6px 10px; text-align: left;
+  text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
+  color: var(--paper-ink-soft); font-family: var(--paper-font-serif);
+}
+.bp-paper-surface .bp-sheet__td {
+  border-bottom: 1px solid var(--paper-rule); padding: 6px 10px; vertical-align: top;
+  font-family: var(--paper-font-mono); font-size: 0.88rem;
+}
+.bp-paper-surface .bp-sheet-note { margin: 6px 0 0; font-size: 0.8rem; color: var(--paper-ink-soft); }
+/* Whole-string URL cell → accent anchor (the old hardcoded #2563eb was wrong in dark).
+   `border-bottom: none` cancels the `.bp-paper-surface a` at-rest link border —
+   underline + border would read as a double underline (same reason
+   `.bp-button--primary` declares `border: none` below). */
+.bp-paper-surface .bp-sheet-link { color: var(--paper-accent); text-decoration: underline; border-bottom: none; }
+
+/* Internal-reference + chip frames. The chip-shaped anchors (`.bp-tag`,
+   `.bp-blockref`) cancel the element `a` rule's accent-soft bottom border —
+   a chip/micro-ref must own its whole frame; the pre-Stage-2 design had no
+   underline affordance on them. `.bp-wikilink` deliberately KEEPS it: a
+   wikilink is a real link and shares the prose link's at-rest border. */
+.bp-paper-surface .bp-wikilink { color: var(--paper-accent); text-decoration: none; }
+.bp-paper-surface .bp-wikilink--unresolved { text-decoration: underline dotted; }
+.bp-paper-surface .bp-task-chip { white-space: nowrap; }
+.bp-paper-surface .bp-task-chip__badge {
+  border: 1px solid var(--paper-accent); border-radius: 10px; padding: 0 6px;
+  color: var(--paper-accent); font-size: 0.85em;
+}
+.bp-paper-surface .bp-tag {
+  color: var(--paper-accent); background: var(--paper-bg-deep); padding: 1px 6px;
+  border-radius: 3px; font-size: 0.9em; text-decoration: none; border-bottom: none;
+}
+.bp-paper-surface .bp-embed {
+  margin: 1em 0; padding: 0.25em 0 0.25em 1em; border-left: 3px solid var(--paper-accent);
+}
+.bp-paper-surface .bp-embed--unresolved {
+  padding: 0.5em 0.75em; border-left-color: var(--paper-bg-deep);
+  color: var(--paper-ink-soft); font-style: italic;
+}
+.bp-paper-surface .bp-blockref { color: var(--paper-ink-soft); font-size: 0.9em; text-decoration: none; border-bottom: none; }
+
+/* Buttons — `bp-button` is the secondary (outline); `--primary` overrides to
+   the accent fill (no border, matching the pre-Stage-2 inline box exactly). */
+.bp-paper-surface .bp-button {
+  display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent);
+  color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
+}
+.bp-paper-surface .bp-button--primary {
+  border: none; background: var(--paper-accent); color: #ffffff;
+}
+
+/* Divider rule — the default; author thickness overrides via inline border-top-width. */
+.bp-paper-surface .bp-hr { border: none; border-top: 1px solid var(--paper-rule); margin: 16px 0; }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TASK LIST — the Barkpark task design language (bp-task-design-language-spec)
+   Shared vocabulary with the `bp tasks` TUI: white ladder + colour-for-meaning.
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* ── Status palette tokens — ONE source, theme-aware in BOTH directions:
+   the OS default (prefers-color-scheme) AND the explicit light/dark toggle
+   (html[data-theme] stamped by the viewer, which WINS over the media query).
+   Defined at the surface so every task component inherits — no per-block copy,
+   nothing drifts, and the toggle actually moves the status colours. ── */
+/* BEGIN GENERATED: status-tones (from design/status-manifest.json — do not edit by hand; run scripts/status-manifest-check.sh --write) */
+.bp-paper-surface, .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; --st-violet: #7c3aed; }
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface, .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-violet: #a78bfa; }
+}
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; --st-violet: #7c3aed; }
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-violet: #a78bfa; }
+/* END GENERATED: status-tones */
+
+/* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
+/* ── `--paper-*` reading-surface theme tokens (color.paper.surface — relocated
+   from the hand region into this GENERATED block; Barkpark aesthetic-unification:
+   cool near-white ground, evergreen accent, replacing the legacy warm parchment).
+   Scoped to .bp-paper-surface; the html[data-theme] blocks win over the light
+   fallback so a pre-paint no-data-theme load still gets the light bp theme. */
+html[data-theme="light"] .bp-paper-surface,
+html[data-theme="light"] .bp-paper-body {
+  --paper-bg: #f6faf9;
+  --paper-bg-deep: #eaf1ee;
+  --paper-ink: #15211d;
+  --paper-ink-soft: #55635e;
+  --paper-ink-faint: #82918b;
+  --paper-rule: rgba(21, 33, 29, 0.09);
+  --paper-edit-hover: rgba(21, 33, 29, 0.08);
+  --paper-accent: #1e5347;
+  --paper-accent-soft: rgba(30, 83, 71, 0.10);
+  --paper-chrome-bg: #f6faf9;
+  --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --paper-reading-accent: #a23925;
+}
+html[data-theme="dark"] .bp-paper-surface,
+html[data-theme="dark"] .bp-paper-body {
+  --paper-bg: #0e1614;
+  --paper-bg-deep: #131d19;
+  --paper-ink: #e7ede9;
+  --paper-ink-soft: #9aaaa3;
+  --paper-ink-faint: #6c7a74;
+  --paper-rule: rgba(231, 237, 233, 0.10);
+  --paper-edit-hover: rgba(231, 237, 233, 0.09);
+  --paper-accent: #45b394;
+  --paper-accent-soft: rgba(70, 179, 148, 0.16);
+  --paper-chrome-bg: #131d19;
+  --paper-chrome-border: rgba(231, 237, 233, 0.13);
+  --paper-reading-accent: #d98a6a;
+}
+.bp-paper-surface, .bp-paper-body {
+  --paper-bg: #f6faf9;
+  --paper-bg-deep: #eaf1ee;
+  --paper-ink: #15211d;
+  --paper-ink-soft: #55635e;
+  --paper-ink-faint: #82918b;
+  --paper-rule: rgba(21, 33, 29, 0.09);
+  --paper-edit-hover: rgba(21, 33, 29, 0.08);
+  --paper-accent: #1e5347;
+  --paper-accent-soft: rgba(30, 83, 71, 0.10);
+  --paper-chrome-bg: #f6faf9;
+  --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --paper-reading-accent: #a23925;
+}
+.bp-paper-surface, .bp-paper-body {
+  --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
+  --tok-reading-heading-weight: 600;
+  --tok-reading-body-size: 18px;
+  --tok-reading-body-lh: 1.65;
+  --tok-reading-h1-size: 32px;
+  --tok-reading-h1-lh: 1.1;
+  --tok-reading-h2-size: 24px;
+  --tok-reading-h2-lh: 1.2;
+  --tok-reading-h3-size: 20px;
+  --tok-reading-h3-lh: 1.25;
+  --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface, .bp-paper-body {
+    --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
+    --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+    --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+    --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  }
+}
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {
+  --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {
+  --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+/* lifecycle glyph tones — the CSS half of the §6 GUI/TUI parity assertion */
+.bp-lg--in_progress { color: #2563eb; }
+.bp-lg--blocked { color: #d97706; }
+.bp-lg--done { color: #0d9488; }
+.bp-lg--closed { color: #0d9488; }
+.bp-lg--cancelled { color: #a1a1aa; }
+.bp-lg--ready { color: #18181b; }
+.bp-lg--open { color: #71717a; }
+.bp-lg--considering { color: #a1a1aa; }
+.bp-lg--researching { color: #7c3aed; }
+@media (prefers-color-scheme: dark) {
+  .bp-lg--in_progress { color: #60a5fa; }
+  .bp-lg--blocked { color: #fbbf24; }
+  .bp-lg--done { color: #2dd4bf; }
+  .bp-lg--closed { color: #2dd4bf; }
+  .bp-lg--cancelled { color: #71717a; }
+  .bp-lg--ready { color: #e7edf2; }
+  .bp-lg--open { color: #5f6b78; }
+  .bp-lg--considering { color: #71717a; }
+  .bp-lg--researching { color: #a78bfa; }
+}
+/* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
+html[data-bp-theme="evergreen"] .bp-paper-surface, html[data-bp-theme="evergreen"] .bp-paper-body {
+  --paper-bg: #f6faf9;
+  --paper-bg-deep: #eaf1ee;
+  --paper-ink: #15211d;
+  --paper-ink-soft: #55635e;
+  --paper-ink-faint: #82918b;
+  --paper-rule: rgba(21, 33, 29, 0.09);
+  --paper-edit-hover: rgba(21, 33, 29, 0.08);
+  --paper-accent: #1e5347;
+  --paper-accent-soft: rgba(30, 83, 71, 0.10);
+  --paper-chrome-bg: #f6faf9;
+  --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --paper-reading-accent: #a23925;
+  --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="evergreen"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="evergreen"][data-theme="dark"] .bp-paper-body {
+  --paper-bg: #0e1614;
+  --paper-bg-deep: #131d19;
+  --paper-ink: #e7ede9;
+  --paper-ink-soft: #9aaaa3;
+  --paper-ink-faint: #6c7a74;
+  --paper-rule: rgba(231, 237, 233, 0.10);
+  --paper-edit-hover: rgba(231, 237, 233, 0.09);
+  --paper-accent: #45b394;
+  --paper-accent-soft: rgba(70, 179, 148, 0.16);
+  --paper-chrome-bg: #131d19;
+  --paper-chrome-border: rgba(231, 237, 233, 0.13);
+  --paper-reading-accent: #d98a6a;
+  --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+html[data-bp-theme="charple"] .bp-paper-surface, html[data-bp-theme="charple"] .bp-paper-body {
+  --paper-bg: #fcf9fd;
+  --paper-bg-deep: #f0ecf3;
+  --paper-ink: #241e27;
+  --paper-ink-soft: #565059;
+  --paper-ink-faint: #7e7a81;
+  --paper-rule: rgba(36, 30, 39, 0.09);
+  --paper-edit-hover: rgba(36, 30, 39, 0.08);
+  --paper-accent: #7b3a96;
+  --paper-accent-soft: rgba(123, 58, 150, 0.10);
+  --paper-chrome-bg: #fcf9fd;
+  --paper-chrome-border: rgba(36, 30, 39, 0.12);
+  --paper-reading-accent: #302ba5;
+  --ok-hsl: 137.37 45.8% 35.72%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.01 48.12% 48.54%; --info-hsl: 221.09 46.48% 51.51%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="charple"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="charple"][data-theme="dark"] .bp-paper-body {
+  --paper-bg: #0b080c;
+  --paper-bg-deep: #151117;
+  --paper-ink: #e1dde3;
+  --paper-ink-soft: #a29da4;
+  --paper-ink-faint: #6f6b70;
+  --paper-rule: rgba(225, 221, 227, 0.10);
+  --paper-edit-hover: rgba(225, 221, 227, 0.09);
+  --paper-accent: #c78ae0;
+  --paper-accent-soft: rgba(199, 138, 224, 0.16);
+  --paper-chrome-bg: #151117;
+  --paper-chrome-border: rgba(225, 221, 227, 0.13);
+  --paper-reading-accent: #8480ea;
+  --ok-hsl: 133.37 34.29% 57.81%; --warn-hsl: 36.55 62.65% 53.22%; --danger-hsl: 5.58 76.29% 69.57%; --info-hsl: 220.48 78.3% 71.71%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+html[data-bp-theme="ember"] .bp-paper-surface, html[data-bp-theme="ember"] .bp-paper-body {
+  --paper-bg: #fef9f7;
+  --paper-bg-deep: #f4ece9;
+  --paper-ink: #291d19;
+  --paper-ink-soft: #5b504c;
+  --paper-ink-faint: #827a76;
+  --paper-rule: rgba(41, 29, 25, 0.09);
+  --paper-edit-hover: rgba(41, 29, 25, 0.08);
+  --paper-accent: #b34e1e;
+  --paper-accent-soft: rgba(179, 78, 30, 0.10);
+  --paper-chrome-bg: #fef9f7;
+  --paper-chrome-border: rgba(41, 29, 25, 0.12);
+  --paper-reading-accent: #bf321d;
+  --ok-hsl: 136.56 41.81% 36.51%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.3 45.96% 48.52%; --info-hsl: 220.99 44.07% 51.23%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="ember"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="ember"][data-theme="dark"] .bp-paper-body {
+  --paper-bg: #0d0806;
+  --paper-bg-deep: #18110e;
+  --paper-ink: #e5ddd9;
+  --paper-ink-soft: #a69d99;
+  --paper-ink-faint: #726b68;
+  --paper-rule: rgba(229, 221, 217, 0.10);
+  --paper-edit-hover: rgba(229, 221, 217, 0.09);
+  --paper-accent: #e8875a;
+  --paper-accent-soft: rgba(232, 135, 90, 0.16);
+  --paper-chrome-bg: #18110e;
+  --paper-chrome-border: rgba(229, 221, 217, 0.13);
+  --paper-reading-accent: #f5855c;
+  --ok-hsl: 133.24 33.65% 58.01%; --warn-hsl: 36.39 61.56% 53.68%; --danger-hsl: 5.64 74.73% 69.52%; --info-hsl: 220.45 76.42% 71.58%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+html[data-bp-theme="fjord"] .bp-paper-surface, html[data-bp-theme="fjord"] .bp-paper-body {
+  --paper-bg: #f6fbfd;
+  --paper-bg-deep: #e7f0f2;
+  --paper-ink: #162327;
+  --paper-ink-soft: #495559;
+  --paper-ink-faint: #747e81;
+  --paper-rule: rgba(22, 35, 39, 0.09);
+  --paper-edit-hover: rgba(22, 35, 39, 0.08);
+  --paper-accent: #0e6e85;
+  --paper-accent-soft: rgba(14, 110, 133, 0.10);
+  --paper-chrome-bg: #f6fbfd;
+  --paper-chrome-border: rgba(22, 35, 39, 0.12);
+  --paper-reading-accent: #0f8299;
+  --ok-hsl: 133.06 24.42% 40.04%; --warn-hsl: 36.2 52.84% 37.17%; --danger-hsl: 5.71 33.01% 48.02%; --info-hsl: 220.42 30.54% 49.43%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-body {
+  --paper-bg: #050a0c;
+  --paper-bg-deep: #0c1417;
+  --paper-ink: #d8e0e3;
+  --paper-ink-soft: #97a1a4;
+  --paper-ink-faint: #666e70;
+  --paper-rule: rgba(216, 224, 227, 0.10);
+  --paper-edit-hover: rgba(216, 224, 227, 0.09);
+  --paper-accent: #6cc4dd;
+  --paper-accent-soft: rgba(108, 196, 221, 0.16);
+  --paper-chrome-bg: #0c1417;
+  --paper-chrome-border: rgba(216, 224, 227, 0.13);
+  --paper-reading-accent: #53d6ea;
+  --ok-hsl: 131.84 26.28% 60%; --warn-hsl: 35.21 48.85% 57.57%; --danger-hsl: 6.23 56.9% 68.81%; --info-hsl: 220.18 55.98% 70.09%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+html[data-bp-theme="iris"] .bp-paper-surface, html[data-bp-theme="iris"] .bp-paper-body {
+  --paper-bg: #f9fafe;
+  --paper-bg-deep: #ecedf5;
+  --paper-ink: #1f1f2a;
+  --paper-ink-soft: #51525b;
+  --paper-ink-faint: #7a7b83;
+  --paper-rule: rgba(31, 31, 42, 0.09);
+  --paper-edit-hover: rgba(31, 31, 42, 0.08);
+  --paper-accent: #5b46d6;
+  --paper-accent-soft: rgba(91, 70, 214, 0.10);
+  --paper-chrome-bg: #f9fafe;
+  --paper-chrome-border: rgba(31, 31, 42, 0.12);
+  --paper-reading-accent: #3692e6;
+  --ok-hsl: 145.96 92.95% 27.76%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 2.06 59.77% 48.31%; --info-hsl: 221.65 59.02% 52.86%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="iris"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="iris"][data-theme="dark"] .bp-paper-body {
+  --paper-bg: #09080e;
+  --paper-bg-deep: #121219;
+  --paper-ink: #dedee5;
+  --paper-ink-soft: #9e9ea6;
+  --paper-ink-faint: #6c6c72;
+  --paper-rule: rgba(222, 222, 229, 0.10);
+  --paper-edit-hover: rgba(222, 222, 229, 0.09);
+  --paper-accent: #9d8cff;
+  --paper-accent-soft: rgba(157, 140, 255, 0.16);
+  --paper-chrome-bg: #121219;
+  --paper-chrome-border: rgba(222, 222, 229, 0.13);
+  --paper-reading-accent: #8cc8ff;
+  --ok-hsl: 134.5 39.04% 56.2%; --warn-hsl: 38.55 77.19% 47.99%; --danger-hsl: 5.1 88.03% 69.88%; --info-hsl: 220.68 92.97% 72.65%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+/* END GENERATED: tokens */
+
+/* ── Chat-block BASE tokens (hand-authored — charter D6, rpu-w1-chat-tokens). ──
+   The three chat blocks (chat-thinking / chat-todo / chat-tool-diff, emitted by
+   render/components.ex) style themselves with inline
+   `var(--primary | --muted-surface | --border-muted | --fg-dim | --font-mono)`
+   and NO fallback. Those five live only in root.html.heex's Studio <style>, so
+   OUTSIDE Studio — the `/papers` reader, the sheet `.html` export, any embedder
+   that loads only this stylesheet — they resolved to nothing and the chat chrome
+   collapsed to browser defaults. Define them ON the paper surface so chat
+   self-resolves on every surface that inlines Stylesheet.css/0.
+
+   Deliberately NOT in the design/tokens.json GENERATED block above: the four
+   colour values are lifted VERBATIM from root.html.heex's DEFAULT theme (they
+   must match the Studio bytes exactly, not an emit-derived value), and
+   `--font-mono` ALIASES this surface's own `--paper-font-mono` rather than
+   carrying a stack. They follow the SAME 4-block dual-swap shape as the
+   generated status tones (bare-light → prefers-dark → explicit-light →
+   explicit-dark) so an explicit light theme on a dark OS still wins over the
+   `prefers-color-scheme` block, and every dark value is re-skinned in the
+   `@media (prefers-color-scheme: dark)` block the reader reads.
+
+   NOTE (rpu-w1 review): D6 spec light `--border-muted: var(--border)`, but
+   `--border` lives ONLY in root.html.heex (Studio), so on a non-Studio surface
+   it was undefined and `border-top: 1px solid var(--border-muted)` (the
+   chat-tool-diff divider) collapsed to `border-style: none` in light mode.
+   Resolved here to the concrete light value `--border` carries in
+   root.html.heex's default theme — hsl(240 5.9% 90%) — so it self-resolves on
+   every surface with IDENTICAL rendering to Studio, without introducing a bare
+   `--border` token (which the paper-editor mirror would push into the editor's
+   light `:root`, wrongly overriding the inherited Studio dark `--border`). The
+   dark blocks already carry a concrete `--border-muted`. */
+.bp-paper-surface, .bp-paper-body {
+  --primary: hsl(163 46% 22%); --muted-surface: hsl(240 4.8% 95.9%); --border-muted: hsl(240 5.9% 90%); --fg-dim: hsl(240 4% 47%); --font-mono: var(--paper-font-mono);
+}
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface, .bp-paper-body {
+    --primary: hsl(160 42% 62%); --muted-surface: hsl(240 3.7% 12%); --border-muted: hsl(240 3.7% 11%); --fg-dim: hsl(240 5% 51%); --font-mono: var(--paper-font-mono);
+  }
+}
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {
+  --primary: hsl(163 46% 22%); --muted-surface: hsl(240 4.8% 95.9%); --border-muted: hsl(240 5.9% 90%); --fg-dim: hsl(240 4% 47%); --font-mono: var(--paper-font-mono);
+}
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {
+  --primary: hsl(160 42% 62%); --muted-surface: hsl(240 3.7% 12%); --border-muted: hsl(240 3.7% 11%); --fg-dim: hsl(240 5% 51%); --font-mono: var(--paper-font-mono);
+}
+
+/* ── diff + filetree containers (W7 code-story blocks — charter D85). ─────────
+   Both blocks self-style INLINE with the same evergreen tokens as the chat
+   family above (mono, --muted-surface chrome, --ok/--danger diff rows shared
+   with chat-tool-diff per D76), so they read identically in email. These
+   container rules add ONLY the paper-surface chrome (a reading font-size the
+   Studio-only `text-xs` class can't supply here) plus the filetree
+   annotation/legend hooks — no new token layer (D85); every duplicated value
+   agrees byte-for-byte with the emitters' inline declarations. */
+.bp-paper-surface .bp-diff, .bp-paper-surface .bp-filetree {
+  font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5;
+  background: var(--muted-surface); border-radius: 6px; padding: 6px 8px;
+  margin: 4px 0; overflow-x: auto;
+}
+.bp-paper-surface .bp-filetree-note { white-space: pre; }
+.bp-paper-surface .bp-filetree-legend { color: var(--fg-dim); font-size: 11px; margin-top: 4px; }
+
+.bp-paper-surface .bp-tasks {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  margin: 1.6rem 0;
+}
+.bp-paper-surface .bp-tasks--empty {
+  font-family: var(--paper-font-mono); color: var(--paper-ink-faint); font-size: 0.85rem;
+  border: 1px dashed var(--paper-chrome-border); border-radius: 8px; padding: 14px; text-align: center; margin: 1.4rem 0;
+}
+.bp-paper-surface .bp-tasks__title { font-family: var(--paper-font-serif); font-weight: 600; font-size: 1.05rem; color: var(--paper-ink); margin-bottom: 0.7rem; }
+.bp-paper-surface .bp-tasks__list { border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+
+/* the glyph ladder — one shared set with the terminal */
+.bp-paper-surface .bp-g { display: inline-flex; align-items: center; justify-content: center; width: 1.35em; flex: none; font-family: var(--paper-font-mono); font-weight: 600; line-height: 1; }
+.bp-paper-surface .bp-g--open    { color: var(--paper-ink); opacity: 0.5; }   /* 50% white — backlog */
+.bp-paper-surface .bp-g--ready   { color: var(--paper-ink); }                 /* full white — unchecked */
+.bp-paper-surface .bp-g--blocked { color: var(--st-warn); font-weight: 800; } /* ! — needs something */
+.bp-paper-surface .bp-g--done    { color: var(--st-ok); }                     /* ✓ — checked */
+.bp-paper-surface .bp-g--cancel  { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-g--considering { color: var(--paper-ink); opacity: 0.35; } /* ◌ — dim: a candidate, below backlog on the ladder */
+.bp-paper-surface .bp-g--researching { color: var(--st-violet); }                /* ◎ — violet: active investigation, the wave's one new hue */
+.bp-paper-surface .bp-g--progress { color: var(--st-info); }
+/* the in-flight state: the TUI Braille spinner, pure CSS (no JS) */
+.bp-paper-surface .bp-g--progress::before { content: "\2801"; animation: bp-braille 0.9s steps(1) infinite; }
+@keyframes bp-braille {
+  0%  { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; }
+  40% { content: "\283C"; } 50% { content: "\2834"; } 60% { content: "\2826"; } 70% { content: "\2827"; }
+  80% { content: "\2807"; } 90% { content: "\280F"; }
+}
+
+/* rows */
+.bp-paper-surface .bp-trow { display: flex; align-items: center; gap: 0.55rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.86rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-trow:first-child { border-top: none; }
+.bp-paper-surface .bp-trow__arr { color: var(--paper-ink-faint); font-family: var(--paper-font-mono); margin-right: -0.3rem; }
+.bp-paper-surface .bp-trow__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-trow--open .bp-trow__t { opacity: 0.6; }               /* backlog title recedes */
+.bp-paper-surface .bp-trow--done .bp-trow__t { color: var(--paper-ink-soft); } /* done recedes */
+.bp-paper-surface .bp-trow__m { display: flex; align-items: center; gap: 0.6rem; flex: none; }
+.bp-paper-surface .bp-trow__p { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-trow__p[data-p="1"] { color: var(--st-danger); }
+.bp-paper-surface .bp-trow__p[data-p="2"] { color: var(--st-warn); }
+.bp-paper-surface .bp-trow__cn { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-faint); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-trow__w { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--st-info); }
+.bp-paper-surface .bp-trow__blk { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--st-warn); }
+
+/* phase headers with rollup */
+.bp-paper-surface .bp-phase { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.9rem; background: var(--paper-bg-deep); border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-phase:first-child { border-top: none; }
+.bp-paper-surface .bp-phase__nm { font-weight: 600; font-size: 0.8rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-phase__rule { flex: 1; height: 1px; background: var(--paper-chrome-border); }
+.bp-paper-surface .bp-phase__n { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-soft); font-variant-numeric: tabular-nums; }
+
+/* momentum header — always feel progress */
+.bp-paper-surface .bp-momentum { border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 0.7rem 0.9rem; margin-bottom: 0.7rem; }
+.bp-paper-surface .bp-momentum__row { display: flex; align-items: center; gap: 1rem; font-size: 0.78rem; color: var(--paper-ink-soft); flex-wrap: wrap; }
+.bp-paper-surface .bp-momentum__i { display: inline-flex; align-items: center; gap: 0.35rem; }
+.bp-paper-surface .bp-momentum__i b { color: var(--paper-ink); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-momentum__grow { flex: 1; }
+.bp-paper-surface .bp-momentum__pct { font-weight: 800; font-size: 0.95rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-momentum__track { height: 7px; border-radius: 999px; background: var(--paper-bg-deep); overflow: hidden; margin-top: 0.5rem; }
+.bp-paper-surface .bp-momentum__fill { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--st-info), var(--st-ok), var(--st-info)); background-size: 200% 100%; animation: bp-shimmer 3s linear infinite; }
+@keyframes bp-shimmer { to { background-position: 200% 0; } }
+
+/* colour reuse for momentum count labels */
+.bp-paper-surface .bp-g--ready { color: var(--paper-ink); }
+.bp-paper-surface .bp-g--done  { color: var(--st-ok); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bp-paper-surface .bp-g--progress::before, .bp-paper-surface .bp-momentum__fill { animation: none; }
+  .bp-paper-surface .bp-g--progress::before { content: "\283F"; }
+}
+
+/* ── task detail — the "open a task and SEE it" card ── */
+.bp-paper-surface .bp-tdetail {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1.6rem 0;
+}
+.bp-paper-surface .bp-tdetail__title { font-family: var(--paper-font-serif); font-weight: 700; font-size: 1.15rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-tdetail__meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.55rem; font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tdetail__stamp { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.4rem; }
+.bp-paper-surface .bp-tdetail__timeline { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-top: 0.8rem; padding: 0.6rem 0; border-top: 1px solid var(--paper-rule); border-bottom: 1px solid var(--paper-rule); font-size: 0.76rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tl__seg { display: inline-flex; align-items: center; gap: 0.3rem; }
+.bp-paper-surface .bp-tl__arr { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-tdetail__desc { font-size: 0.9rem; color: var(--paper-ink); line-height: 1.55; margin-top: 0.9rem; }
+.bp-paper-surface .bp-tdetail__lbl { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); font-weight: 700; margin: 1rem 0 0.45rem; }
+.bp-paper-surface .bp-crit { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.84rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-crit--met .bp-crit__t { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-crit__t { flex: 1; min-width: 0; }
+.bp-paper-surface .bp-crit__ev { padding-left: 1.85rem; color: var(--paper-ink-faint); font-size: 0.76rem; margin: 0.1rem 0 0.3rem; }
+.bp-paper-surface .bp-tdetail__deps { font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tdetail__rail { display: flex; flex-direction: column; gap: 0.25rem; }
+.bp-paper-surface .bp-rail__r { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-rail__paper { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-accent); }
+.bp-paper-surface .bp-rail__more { font-size: 0.72rem; color: var(--paper-ink-faint); padding-left: 0.3rem; }
+.bp-paper-surface .bp-tdetail__labels { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.9rem; }
+
+/* ── task board (kanban) ── */
+.bp-paper-surface .bp-board {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 1.6rem 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.bp-paper-surface .bp-board__col { background: var(--paper-bg-deep); border-radius: 10px; padding: 10px; border-top: 3px solid var(--paper-ink-faint); }
+.bp-paper-surface .bp-board__col--ready { border-top-color: var(--paper-ink); }
+.bp-paper-surface .bp-board__col--progress { border-top-color: var(--st-info); }
+.bp-paper-surface .bp-board__col--blocked { border-top-color: var(--st-warn); }
+.bp-paper-surface .bp-board__col--done { border-top-color: var(--st-ok); }
+.bp-paper-surface .bp-board__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.bp-paper-surface .bp-board__label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
+.bp-paper-surface .bp-board__cards { display: flex; flex-direction: column; gap: 7px; }
+.bp-paper-surface .bp-bcard { display: flex; align-items: flex-start; gap: 0.4rem; background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 7px; padding: 8px 10px; }
+.bp-paper-surface .bp-bcard__t { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--paper-ink); line-height: 1.35; }
+.bp-paper-surface .bp-bcard__m { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+
+/* ── roadmap (author-dated phase/task bars) ── */
+.bp-paper-surface .bp-roadmap {
+  border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 14px 16px; margin: 1.6rem 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: auto;
+}
+.bp-paper-surface .bp-rm__scale { display: flex; margin-left: 34%; border-bottom: 1px solid var(--paper-rule); padding-bottom: 5px; margin-bottom: 8px; }
+.bp-paper-surface .bp-rm__scale span { flex: 1; font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-rm__lanes { display: flex; flex-direction: column; gap: 6px; }
+.bp-paper-surface .bp-rm__lane { display: flex; align-items: center; gap: 10px; }
+.bp-paper-surface .bp-rm__lane--phase .bp-rm__lbl { font-weight: 700; color: var(--paper-ink); }
+.bp-paper-surface .bp-rm__lane--phase .bp-rm__bar { opacity: 0.32; height: 8px; top: 8px; }
+.bp-paper-surface .bp-rm__lbl { width: 34%; flex: none; font-size: 0.78rem; color: var(--paper-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
+.bp-paper-surface .bp-rm__track { position: relative; flex: 1; height: 22px; background: var(--paper-bg-deep); border-radius: 5px; }
+.bp-paper-surface .bp-rm__bar { position: absolute; top: 5px; height: 12px; border-radius: 4px; min-width: 3px; }
+.bp-paper-surface .bp-rm__bar--open { background: var(--paper-ink); opacity: 0.35; }
+.bp-paper-surface .bp-rm__bar--ready { background: var(--paper-ink); opacity: 0.55; }
+.bp-paper-surface .bp-rm__bar--progress { background: var(--st-info); }
+.bp-paper-surface .bp-rm__bar--blocked { background: var(--st-warn); }
+.bp-paper-surface .bp-rm__bar--done { background: var(--st-ok); }
+.bp-paper-surface .bp-rm__bar--cancel { background: var(--paper-ink-faint); }
+.bp-paper-surface .bp-rm__today { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--st-danger); opacity: 0.6; }
+
+/* ── status legend — the shared vocabulary key ── */
+.bp-paper-surface .bp-legend {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; margin: 1.4rem 0;
+}
+.bp-paper-surface .bp-legend__r { display: flex; align-items: center; gap: 0.7rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.82rem; }
+.bp-paper-surface .bp-legend__r:first-child { border-top: none; }
+.bp-paper-surface .bp-legend__n { font-family: var(--paper-font-mono); font-size: 0.74rem; font-weight: 600; color: var(--paper-ink); width: 6.5rem; flex: none; }
+.bp-paper-surface .bp-legend__d { color: var(--paper-ink-soft); }
+
+/* ── notes: annotated label-chip list (the "what upgraded" column) ── */
+.bp-paper-surface .bp-notes { display: flex; flex-direction: column; gap: 0.9rem; margin: 1.4rem 0; }
+.bp-paper-surface .bp-note { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.9rem; align-items: baseline; }
+.bp-paper-surface .bp-note__k { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; text-transform: lowercase; letter-spacing: 0.02em; color: var(--paper-accent); background: color-mix(in srgb, var(--paper-accent) 12%, transparent); border-radius: 5px; padding: 2px 7px; text-align: center; }
+.bp-paper-surface .bp-note__d { font-size: 0.92rem; color: var(--paper-ink-soft); line-height: 1.55; }
+.bp-paper-surface .bp-note__d b { color: var(--paper-ink); font-weight: 600; }
+@media (max-width: 520px) { .bp-paper-surface .bp-note { grid-template-columns: 1fr; gap: 0.3rem; } .bp-paper-surface .bp-note__k { justify-self: start; } }
+
+/* ── terminal chrome — the bp tasks board look ── */
+.bp-paper-surface .bp-term {
+  background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 12px; overflow: hidden; margin: 1.6rem 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 18px 44px -24px rgba(0,0,0,0.28);
+}
+.bp-paper-surface .bp-term__bar { display: flex; align-items: center; gap: 0.7rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--paper-rule); background: color-mix(in srgb, var(--paper-ink) 4%, transparent); }
+.bp-paper-surface .bp-term__dots { display: inline-flex; gap: 6px; }
+.bp-paper-surface .bp-term__dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--paper-ink-faint); opacity: 0.55; }
+.bp-paper-surface .bp-term__dots i:nth-child(1) { background: #ef4444; opacity: 0.85; }
+.bp-paper-surface .bp-term__dots i:nth-child(2) { background: #f59e0b; opacity: 0.85; }
+.bp-paper-surface .bp-term__dots i:nth-child(3) { background: #22c55e; opacity: 0.85; }
+.bp-paper-surface .bp-term__title { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-term__live { margin-left: auto; font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--st-ok); display: inline-flex; align-items: center; gap: 5px; }
+.bp-paper-surface .bp-term__live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--st-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-ok) 22%, transparent); }
+.bp-paper-surface .bp-term__body { padding: 0.5rem 0.4rem; }
+.bp-paper-surface .bp-term__body .bp-tasks { margin: 0; }
+.bp-paper-surface .bp-term__foot { padding: 0.55rem 0.95rem; border-top: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-faint); }
+
+/* ── columns — responsive multi-column layout ── */
+.bp-paper-surface .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; align-items: start; }
+@media (max-width: 720px) { .bp-paper-surface .bp-cols { grid-template-columns: 1fr; } }
+.bp-paper-surface .bp-cols__c { min-width: 0; }
+.bp-paper-surface .bp-cols__c > :first-child { margin-top: 0; }
+
+/* ── section grid — the step-2 layout engine (mode:grid). Shared class so the
+   reader AND the canvas node-view paint the SAME grid (parity by construction).
+   `--bp-tracks` is a structural column count; `--bp-grid-gap` is a token VAR
+   (never px — D2). Keep BYTE-IDENTICAL with the styles.css + root.html.heex
+   mirrors (the .bp-cols trio precedent). */
+.bp-paper-surface .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
+@media (max-width: 720px) { .bp-paper-surface .bp-section__grid { grid-template-columns: 1fr; } }
+.bp-paper-surface .bp-section__cell { min-width: 0; }
+.bp-paper-surface .bp-section__cell > :first-child { margin-top: 0; }
+
+/* ── cards: titled rule/feature card grid ── */
+.bp-paper-surface .bp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 1.4rem 0; }
+.bp-paper-surface .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-top: 3px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-card--info { border-top-color: var(--st-info); }
+.bp-paper-surface .bp-card--ok { border-top-color: var(--st-ok); }
+.bp-paper-surface .bp-card--warn { border-top-color: var(--st-warn); }
+.bp-paper-surface .bp-card--danger { border-top-color: var(--st-danger); }
+/* bp-card__t/__d stay: the LEGACY `cards` fleet grid (components.ex cards_html/1)
+ * still emits them. The card WIDGET's model-A slot-chrome rules (__media/__action,
+ * STEP 4) are GONE (S10, parity2-bug-card-slot-chrome): model B recurses slots to
+ * bare semantics (h2 / p / img / a.bp-button) — no reader element carried them. */
+.bp-paper-surface .bp-card__t { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-weight: 700; font-size: 0.9rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-card__d { font-size: 0.85rem; color: var(--paper-ink-soft); line-height: 1.5; margin-top: 6px; }
+/* STEP 4 canvas edit hook — a light hover-revealed control row; chrome only (bp-canvas-*). */
+.bp-paper-surface .bp-canvas-card { position: relative; }
+.bp-paper-surface .bp-canvas-card__controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; opacity: 0; transition: opacity 0.12s ease; }
+.bp-paper-surface .bp-canvas-card:hover .bp-canvas-card__controls, .bp-paper-surface .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }
+.bp-paper-surface .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
+
+/* stage WIDGET canvas node-view (DESIGN 1 — the editable pipeline-node twin). The
+ * stage does NOT emit the reader `.bp-pnode` cell class (it stays gate-forbidden to
+ * protect the legacy pipeline), so its cell look is hand-mirrored here from the
+ * `.bp-pnode*` rules above — keep BYTE-ALIGNED. Studio mounts the canvas inside
+ * `.bp-paper-surface`, so this scope paints it. The reader never emits bp-canvas-stage,
+ * so these rules are inert on the reader surface. */
+.bp-paper-surface .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
+.bp-paper-surface .bp-canvas-stage--src { border-color: var(--paper-accent); }
+.bp-paper-surface .bp-canvas-stage__k, .bp-paper-surface .bp-canvas-stage__t, .bp-paper-surface .bp-canvas-stage__d, .bp-paper-surface .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; }
+.bp-paper-surface .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+.bp-paper-surface .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
+.bp-paper-surface .bp-canvas-stage__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
+.bp-paper-surface .bp-canvas-stage__f { font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-canvas-stage__src-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-family: var(--paper-font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); cursor: pointer; }
+
+/* ── pipeline: source → emit → gate flow ── */
+.bp-paper-surface .bp-pipe-scroll { overflow-x: auto; margin: 1.4rem 0; }
+.bp-paper-surface .bp-pipe { display: flex; align-items: stretch; gap: 8px; min-width: min-content; }
+.bp-paper-surface .bp-pnode { flex: 1 1 0; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
+.bp-paper-surface .bp-pnode--src { border-color: var(--paper-accent); }
+.bp-paper-surface .bp-pnode__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+.bp-paper-surface .bp-pnode__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
+.bp-paper-surface .bp-pnode__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
+.bp-paper-surface .bp-pnode__f { font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-pnode__src { font-family: var(--paper-font-mono); font-size: 0.64rem; color: var(--paper-accent); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-pipe__arr { display: flex; align-items: center; color: var(--paper-ink-faint); font-size: 1.1rem; flex: none; }
+
+/* ── data-viz slate: stat / stats / heatmap / chart (gui-premium w1) ──
+   Browser twins of the pdrender creative slate. All color resolves through the
+   paper tokens; intensity/series index only ever drive a custom property or an
+   indexed class — author data never carries color. */
+.bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
+
+.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 4px; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; margin: 1.4rem 0; vertical-align: top; }
+.bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; }
+.bp-paper-surface .bp-stat__l { font-size: 0.72rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; }
+.bp-paper-surface .bp-stat__bar { height: 6px; border-radius: 3px; background: var(--paper-rule); overflow: hidden; margin-bottom: 4px; }
+.bp-paper-surface .bp-stat__bar i { display: block; height: 100%; border-radius: 3px; background: var(--paper-accent); }
+.bp-paper-surface .bp-stat__spark { width: 100%; height: 26px; margin-top: 4px; }
+.bp-paper-surface .bp-stat__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+
+.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 1.4rem 0; }
+.bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; }
+
+.bp-paper-surface .bp-gauge { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-gauge__t { font-weight: 700; margin-bottom: 8px; }
+.bp-paper-surface .bp-gauge__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.bp-paper-surface .bp-gauge__l { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 9em; max-width: 33%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-gauge__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
+.bp-paper-surface .bp-gauge__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
+.bp-paper-surface .bp-gauge__d { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 3em; text-align: right; }
+.bp-paper-surface .bp-gauge__n { font-size: 0.68rem; color: var(--paper-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28%; }
+.bp-paper-surface .bp-gauge__note { font-size: 0.72rem; color: var(--paper-ink-soft); }
+
+.bp-paper-surface .bp-heat { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; display: inline-block; }
+.bp-paper-surface .bp-heat__grid { display: grid; gap: 4px; align-items: center; }
+.bp-paper-surface .bp-heat__c { aspect-ratio: 1; min-height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--paper-accent) calc(var(--i, 0) * 88%), var(--paper-rule)); }
+.bp-paper-surface .bp-heat__rl, .bp-paper-surface .bp-heat__cl { font-family: var(--paper-font-mono); font-size: 0.64rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-heat__rl { padding-right: 8px; text-align: right; }
+.bp-paper-surface .bp-heat__cl { text-align: center; }
+.bp-paper-surface .bp-heat__legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-family: var(--paper-font-mono); font-size: 0.64rem; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-heat__legend .bp-heat__c { width: 10px; flex: none; }
+
+.bp-paper-surface .bp-chart { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-chart__t { font-size: 0.78rem; font-weight: 600; color: var(--paper-ink); margin-bottom: 8px; }
+.bp-paper-surface .bp-chart svg { display: block; width: 100%; height: auto; }
+.bp-paper-surface .bp-chart__grid { stroke: var(--paper-rule); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.bp-paper-surface .bp-chart__axis { stroke: var(--paper-ink-faint); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.bp-paper-surface .bp-chart__tick { fill: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 11px; }
+.bp-paper-surface .bp-chart__s { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.bp-paper-surface .bp-chart__b { stroke: none; opacity: 0.85; }
+.bp-paper-surface .bp-chart__s0 { stroke: var(--paper-accent); }
+.bp-paper-surface .bp-chart__s1 { stroke: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chart__s2 { stroke: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chart__s3 { stroke: var(--bp-tone-danger-fg); }
+.bp-paper-surface rect.bp-chart__s0 { fill: var(--paper-accent); }
+.bp-paper-surface rect.bp-chart__s1 { fill: var(--bp-tone-info-fg); }
+.bp-paper-surface rect.bp-chart__s2 { fill: var(--bp-tone-warning-fg); }
+.bp-paper-surface rect.bp-chart__s3 { fill: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chart__legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
+.bp-paper-surface .bp-chart__key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-chart__swatch { width: 14px; height: 3px; border-radius: 2px; background: currentColor; }
+.bp-paper-surface .bp-chart__key .bp-chart__s0 { background: var(--paper-accent); }
+.bp-paper-surface .bp-chart__key .bp-chart__s1 { background: var(--bp-tone-info-fg, #3b82f6); }
+.bp-paper-surface .bp-chart__key .bp-chart__s2 { background: var(--bp-tone-warning-fg, #b45309); }
+.bp-paper-surface .bp-chart__key .bp-chart__s3 { background: var(--bp-tone-danger-fg, #b91c1c); }
+/* chart ANNOTATION layer (regions / refLines / points — data_viz.ex
+   `annotations` attr): washes behind the series, guides above them, labels in
+   the tick voice. Tones ride the same --bp-tone-* family as the series. */
+.bp-paper-surface .bp-chart__region { fill: var(--paper-ink-soft); opacity: 0.08; }
+.bp-paper-surface .bp-chart__region--info { fill: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chart__region--ok { fill: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-chart__region--warn { fill: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chart__region--danger { fill: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chart__refline { stroke: var(--paper-ink-soft); stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; opacity: 0.65; }
+.bp-paper-surface .bp-chart__refline--info { stroke: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chart__refline--ok { stroke: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-chart__refline--warn { stroke: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chart__refline--danger { stroke: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chart__ann { fill: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 10px; }
+.bp-paper-surface .bp-chart__pt { fill: var(--paper-accent); stroke: var(--paper-bg); stroke-width: 1.5; }
+
+/* ── data-viz slate 2: calendar heatmap, quantile dual-encode, matrix Σ,
+   stat denominators (gui-premium w5) ──
+   Quantile bin classes bp-heat__c--b0..b3 (zero/gap = --z) carry TWO channels,
+   the web read of the TUI shade ladder ░▒▓█: the color step (color-mix over
+   the accent — the same idiom as the legacy `--i` ramp, stepped at 22/44/66/88%)
+   AND a non-color channel — a growing ink inner marker on shade cells, the
+   exact value text on `--v` cells — so the datum survives grayscale and print.
+   Calendar heatmaps render EVERY week inside a horizontally scrollable
+   container; the web never width-drops weeks the way the terminal must. */
+.bp-paper-surface .bp-stat__denom { font-size: 1.05rem; font-weight: 500; color: var(--paper-ink-soft); }
+
+.bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }
+.bp-paper-surface .bp-heat__scroll { overflow-x: auto; padding-bottom: 2px; }
+.bp-paper-surface .bp-heat--cal .bp-heat__grid { gap: 3px; width: max-content; }
+.bp-paper-surface .bp-heat__ml { font-family: var(--paper-font-mono); font-size: 0.64rem; line-height: 1.2; color: var(--paper-ink-soft); white-space: nowrap; overflow: visible; min-width: 0; }
+
+.bp-paper-surface .bp-heat__c--z,
+.bp-paper-surface .bp-heat__c--b0,
+.bp-paper-surface .bp-heat__c--b1,
+.bp-paper-surface .bp-heat__c--b2,
+.bp-paper-surface .bp-heat__c--b3 { position: relative; }
+.bp-paper-surface .bp-heat__c--z { background: var(--paper-rule); }
+.bp-paper-surface .bp-heat__c--z::after { content: ""; position: absolute; top: 50%; left: 50%; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%; background: var(--paper-ink-faint); }
+.bp-paper-surface .bp-heat__c--b0 { background: color-mix(in srgb, var(--paper-accent) 22%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b1 { background: color-mix(in srgb, var(--paper-accent) 44%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b2 { background: color-mix(in srgb, var(--paper-accent) 66%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b3 { background: color-mix(in srgb, var(--paper-accent) 88%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b0::after,
+.bp-paper-surface .bp-heat__c--b1::after,
+.bp-paper-surface .bp-heat__c--b2::after,
+.bp-paper-surface .bp-heat__c--b3::after { content: ""; position: absolute; border-radius: 1px; background: color-mix(in srgb, var(--paper-ink) 42%, transparent); }
+.bp-paper-surface .bp-heat__c--b0::after { inset: 41%; }
+.bp-paper-surface .bp-heat__c--b1::after { inset: 33%; }
+.bp-paper-surface .bp-heat__c--b2::after { inset: 24%; }
+.bp-paper-surface .bp-heat__c--b3::after { inset: 15%; }
+
+/* value cells: the exact number IS the second channel — the bin color moves to
+   an underline strip so ink text keeps full contrast on every theme. These come
+   AFTER the marker rules so the strip geometry wins at equal specificity. */
+.bp-paper-surface .bp-heat__c--v { aspect-ratio: auto; min-height: 0; padding: 3px 7px 6px; font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-style: normal; font-size: 0.7rem; line-height: 1.3; text-align: right; color: var(--paper-ink); background: transparent; border-radius: 4px; }
+.bp-paper-surface .bp-heat__c--v::after { content: ""; position: absolute; inset: auto 15% 0; top: auto; width: auto; height: 3px; margin: 0; border-radius: 2px; }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--z { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--z::after { background: var(--paper-rule); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b0::after { background: color-mix(in srgb, var(--paper-accent) 22%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b1::after { background: color-mix(in srgb, var(--paper-accent) 44%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b2::after { background: color-mix(in srgb, var(--paper-accent) 66%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b3::after { background: color-mix(in srgb, var(--paper-accent) 88%, var(--paper-rule)); }
+
+/* Σ marginals: dim mono sums, the grand total emphasized. */
+.bp-paper-surface .bp-heat__sum { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.7rem; line-height: 1.3; color: var(--paper-ink-soft); text-align: right; padding: 3px 7px 6px; }
+.bp-paper-surface .bp-heat__sum--grand { font-weight: 650; color: var(--paper-ink); }
+.bp-paper-surface .bp-heat__cl--sum { text-align: right; padding-right: 7px; }
+
+/* ── form / questionnaire: the premium read (gui-premium w2) ──
+   forms.ex emits <fieldset class="bp-form-question bp-form-q--<type>"> cards
+   with classed option rows (article mode). The stylesheet owns ALL geometry:
+   numbered question cards, custom evergreen control faces (appearance:none),
+   the scale + yes/no as segmented rows. Everything resolves through the paper
+   tokens, so both schemes hold. */
+.bp-paper-surface .bp-form { display: flex; flex-direction: column; gap: 12px; margin: 2rem 0; counter-reset: bpq; }
+.bp-paper-surface .bp-form-grill::before,
+.bp-paper-surface .bp-form-questionnaire::before { content: "Grill"; font-family: var(--paper-font-mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-accent); }
+.bp-paper-surface .bp-form-questionnaire::before { content: "Questionnaire"; }
+
+.bp-paper-surface .bp-form-question { counter-increment: bpq; margin: 0; padding: 15px 17px 17px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 12px; }
+.bp-paper-surface .bp-form-question > legend { float: left; width: 100%; padding: 0; margin: 0; font-size: 1.02rem; font-weight: 650; line-height: 1.35; color: var(--paper-ink); }
+.bp-paper-surface .bp-form-question > legend::before { content: counter(bpq, decimal-leading-zero); display: block; margin-bottom: 5px; font-family: var(--paper-font-mono); font-size: 0.62rem; font-weight: 500; letter-spacing: 0.09em; color: var(--paper-accent); }
+.bp-paper-surface .bp-form-note { clear: both; font-style: italic; font-size: 0.88rem; color: var(--paper-ink-soft); margin: 0.35rem 0 0; line-height: 1.5; }
+.bp-paper-surface .bp-form-opts { clear: both; display: flex; flex-direction: column; gap: 6px; padding-top: 12px; }
+
+/* option rows — the whole row is the control */
+.bp-paper-surface .bp-form-opt { display: flex; align-items: center; gap: 10px; margin: 0; padding: 9px 12px; border: 1px solid var(--paper-chrome-border); border-radius: 9px; cursor: pointer; transition: border-color 0.12s ease, background 0.12s ease; }
+.bp-paper-surface .bp-form-opt:hover { border-color: var(--paper-accent); background: var(--paper-accent-soft); }
+.bp-paper-surface .bp-form-opt:has(input:checked) { border-color: var(--paper-accent); background: var(--paper-accent-soft); }
+.bp-paper-surface .bp-form-opt > span { font-size: 0.92rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-form-opt > input { appearance: none; -webkit-appearance: none; width: 16px; height: 16px; margin: 0; flex: none; border: 1.5px solid var(--paper-ink-faint); background: transparent; cursor: pointer; transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease; }
+.bp-paper-surface .bp-form-opt > input[type="radio"] { border-radius: 50%; }
+.bp-paper-surface .bp-form-opt > input[type="checkbox"] { border-radius: 4px; }
+.bp-paper-surface .bp-form-opt > input[type="radio"]:checked { border-color: var(--paper-accent); background: var(--paper-accent); box-shadow: inset 0 0 0 3px var(--paper-bg-deep); }
+.bp-paper-surface .bp-form-opt > input[type="checkbox"]:checked { border-color: var(--paper-accent); background: var(--paper-accent); }
+.bp-paper-surface .bp-form-opt > input:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--paper-accent-soft); }
+
+/* the scale + yes/no read as segmented rows; the plain lists stay stacked */
+.bp-paper-surface .bp-form-q--scale .bp-form-opts,
+.bp-paper-surface .bp-form-q--yesno .bp-form-opts { flex-direction: row; }
+.bp-paper-surface .bp-form-q--scale .bp-form-opt,
+.bp-paper-surface .bp-form-q--yesno .bp-form-opt { flex: 1 1 0; justify-content: center; padding: 10px 0; }
+.bp-paper-surface .bp-form-q--scale .bp-form-opt > input,
+.bp-paper-surface .bp-form-q--yesno .bp-form-opt > input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.bp-paper-surface .bp-form-q--scale .bp-form-opt > span { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-form-q--single .bp-form-opts,
+.bp-paper-surface .bp-form-q--multi .bp-form-opts { flex-direction: column; }
+
+.bp-paper-surface .bp-form-q--text textarea,
+.bp-paper-surface .bp-form textarea { display: block; width: 100%; box-sizing: border-box; min-height: 5rem; padding: 10px 12px; font: inherit; font-size: 0.92rem; line-height: 1.5; color: var(--paper-ink); background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 9px; resize: vertical; }
+.bp-paper-surface .bp-form textarea:focus { outline: none; border-color: var(--paper-accent); box-shadow: 0 0 0 3px var(--paper-accent-soft); }
+.bp-paper-surface .bp-form label { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-form fieldset { min-inline-size: 0; }
+
+/* ── field blocks: the aligned definition list (gui-premium w2) ──
+   The browser twin of the TUI's aligned field rows (#1497): a fixed-clamp dim
+   mono label column so CONSECUTIVE field blocks line up as one list, hairline
+   rules between adjacent rows, value affordances (swatch / preview / sub-rows)
+   in the value column. */
+.bp-paper-surface .bp-field { display: grid; grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr); column-gap: 1.1rem; align-items: baseline; margin: 0; padding: 0.36rem 0; }
+.bp-paper-surface .bp-field + .bp-field { border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-field__l { font-family: var(--paper-font-mono); font-size: 0.7rem; letter-spacing: 0.02em; color: var(--paper-ink-faint); transform: translateY(-1px); }
+.bp-paper-surface .bp-field__v { color: var(--paper-ink); font-size: 0.98rem; line-height: 1.5; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-field__mono { font-family: var(--paper-font-mono); font-size: 0.84em; }
+.bp-paper-surface .bp-field__none { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-field__swatch { display: inline-block; width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--paper-chrome-border); margin-right: 7px; vertical-align: -1px; }
+.bp-paper-surface .bp-field__img { display: block; max-width: 220px; border-radius: 8px; border: 1px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-field__sub { display: flex; gap: 0.7rem; align-items: baseline; }
+.bp-paper-surface .bp-field__sub > b { font-family: var(--paper-font-mono); font-size: 0.7rem; font-weight: 500; color: var(--paper-ink-soft); min-width: 4.2rem; flex: none; }
+.bp-paper-surface .bp-field__list { margin: 0; padding-left: 1.2rem; }
+.bp-paper-surface .bp-field__list li::marker { color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.8em; }
+@media (max-width: 560px) { .bp-paper-surface .bp-field { grid-template-columns: 1fr; row-gap: 2px; } }
+
+/* ── mermaid diagram polish (gui-premium w1) ──
+   The SVG palette is baked by the themed init in bulldocs.html.heex; this only
+   centers the render inside the (already tokenized) figure card. */
+/* `safe center`, not `center`: with the PRE-HYDRATION source text (long
+   unbreakable mermaid lines) a plain `center` overflows the flex line
+   symmetrically — the left half clips UNREACHABLY (scrollLeft can't go
+   negative) and the spill widens the document on narrow viewports. `safe`
+   falls back to start-alignment exactly when content overflows, keeping the
+   first character visible and the scroll usable; the centered look is
+   unchanged once the (max-width-bounded) SVG replaces the source. */
+.bp-paper-surface pre.mermaid { display: flex; justify-content: safe center; margin: 0; max-width: 100%; overflow-x: auto; }
+.bp-paper-surface pre.mermaid svg { max-width: 100%; height: auto; }
+
+/* ── unsupported-block degrade (gui-premium w5) ──
+   The walker (walk.ex) and compose.ex both emit `<div class="bp-unknown-block">`
+   for a forward-compat or corrupt Pd-node kind ("Unsupported block: <kind>" /
+   "invalid block") rather than raising — papers are schemaless. Until now that
+   fallback rendered as a bare unstyled div. Give it the SAME honest dashed-box
+   treatment as `.bp-dataviz--empty`: a faint mono note in a dashed frame that
+   reads as a deliberate "nothing renders here" state, never a broken layout.
+   Appended at the end of the hand-authored section, clear of the data-viz slate
+   region above (concurrently owned by gp-w5-dataviz-fidelity). */
+.bp-paper-surface .bp-unknown-block { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
+
+/* ── undelivered-block delivery wave (study /papers/portabledoc-potential-study;
+   tasks task-392e09d6e29c42d1 + task-49fcdc3e45c93c02). ──────────────────────
+   Every family below already EMITS this markup from render/*.ex but had zero
+   reader rules — bare browser defaults (or, for the bar families, literally
+   invisible fills). One section, one family per stanza, everything scoped
+   `.bp-paper-surface` and drawn from the `--paper-*` tokens so all four themes
+   inherit. The bar families mirror the ratified `.bp-gauge` anatomy above. */
+
+/* bar-chart: label + fill track + optional digit (data_viz.ex bar_chart_html). */
+.bp-paper-surface .bp-bar-chart { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-bar-chart__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.bp-paper-surface .bp-bar-chart__l { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 9em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-bar-chart__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
+.bp-paper-surface .bp-bar-chart__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
+.bp-paper-surface .bp-bar-chart__d { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 3em; text-align: right; }
+
+/* criteria-progress: the task family's meter — same row anatomy. */
+.bp-paper-surface .bp-criteria-progress { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-criteria-progress__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.bp-paper-surface .bp-criteria-progress__l { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 9em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-criteria-progress__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
+.bp-paper-surface .bp-criteria-progress__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
+.bp-paper-surface .bp-criteria-progress__d { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 3em; text-align: right; }
+
+/* steps: numbered procedure — counter chip + title + indented body. The
+   ::marker suppression matters: bp-steps is a semantic <ol> and the generic
+   list rules would otherwise paint the browser "1." beside our own chip
+   (double numbering, seen live on the rev-7 essay). */
+.bp-paper-surface .bp-steps { margin: 1.4rem 0 1.4rem 0; padding: 0; list-style: none; counter-reset: bp-step; }
+.bp-paper-surface .bp-steps__step::marker { content: ""; }
+.bp-paper-surface .bp-steps__step { counter-increment: bp-step; position: relative; padding: 0 0 14px 2.6rem; }
+.bp-paper-surface .bp-steps__step::before { content: counter(bp-step); position: absolute; left: 0; top: 0; width: 1.7rem; height: 1.7rem; border-radius: 50%; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.78rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.bp-paper-surface .bp-steps__step:not(:last-child)::after { content: ""; position: absolute; left: 0.82rem; top: 1.9rem; bottom: 0; width: 1px; background: var(--paper-rule); }
+.bp-paper-surface .bp-steps__title { font-weight: 700; margin: 0.15rem 0 0.2rem; }
+.bp-paper-surface .bp-steps__body > :first-child { margin-top: 0.3rem; }
+
+/* tabs / code-tabs: shared strip anatomy. Server HTML shows EVERY panel
+   (no-JS degrade); hydration hides the non-active ones, so the strip must
+   read as controls and the active tab must be visibly marked. */
+.bp-paper-surface .bp-tabs, .bp-paper-surface .bp-code-tabs { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+.bp-paper-surface .bp-tabs__strip, .bp-paper-surface .bp-code-tabs__strip { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-tabs__tab, .bp-paper-surface .bp-code-tabs__tab { appearance: none; background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 12px 7px; font-family: var(--paper-font-mono); font-size: 0.74rem; color: var(--paper-ink-soft); cursor: pointer; }
+.bp-paper-surface .bp-tabs__tab--active, .bp-paper-surface .bp-code-tabs__tab--active { color: var(--paper-ink); border-bottom-color: var(--paper-accent); font-weight: 700; }
+.bp-paper-surface .bp-tabs__panel, .bp-paper-surface .bp-code-tabs__panel { padding: 12px 15px; }
+.bp-paper-surface .bp-tabs__panel[hidden], .bp-paper-surface .bp-code-tabs__panel[hidden] { display: none; }
+.bp-paper-surface .bp-tabs__section { padding: 10px 15px; }
+.bp-paper-surface .bp-tabs__label, .bp-paper-surface .bp-code-tabs__label { font-family: var(--paper-font-mono); font-size: 0.72rem; font-weight: 700; color: var(--paper-ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 4px; }
+
+/* expandable: native <details> chrome (zero-JS disclosure). */
+.bp-paper-surface .bp-expandable { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 0; }
+.bp-paper-surface .bp-expandable > summary { padding: 10px 15px; font-weight: 700; cursor: pointer; color: var(--paper-ink); }
+.bp-paper-surface .bp-expandable > summary:hover { color: var(--paper-accent); }
+.bp-paper-surface .bp-expandable__body { padding: 2px 15px 12px; border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-expandable__body > :first-child { margin-top: 0.6rem; }
+
+/* footnote: the endnote list — small, ruled off from the prose. */
+.bp-paper-surface .bp-footnote { margin: 1.6rem 0; padding: 0.9rem 0 0 1.4rem; border-top: 1px solid var(--paper-rule); font-size: 0.82rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-footnote__note { margin: 0.25rem 0; }
+.bp-paper-surface .bp-footnote__note::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-faint); }
+
+/* equation: centered display math (native MathML) + honest empty degrade. */
+.bp-paper-surface .bp-equation { margin: 1.5rem 0; text-align: center; font-size: 1.08em; overflow-x: auto; }
+.bp-paper-surface .bp-equation--empty { border: 1px dashed var(--paper-chrome-border); border-radius: 10px; padding: 10px 13px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; text-align: left; }
+
+/* api-endpoint: method chip + path + params table. Method tones ride the
+   status palette so GET/POST/DELETE read at a glance without new colors. */
+.bp-paper-surface .bp-api-endpoint { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+.bp-paper-surface .bp-api-endpoint__head { display: flex; align-items: center; gap: 10px; padding: 9px 13px; background: var(--paper-bg-deep); }
+.bp-paper-surface .bp-api-endpoint__method { font-family: var(--paper-font-mono); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 6px; background: var(--paper-rule); color: var(--paper-ink); flex: none; }
+.bp-paper-surface .bp-api-endpoint__method--get { color: var(--st-ok); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__method--post { color: var(--st-info); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__method--put, .bp-paper-surface .bp-api-endpoint__method--patch { color: var(--st-warn); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__method--delete { color: var(--st-danger); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__path { font-family: var(--paper-font-mono); font-size: 0.8rem; background: none; padding: 0; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-api-endpoint__params { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.bp-paper-surface .bp-api-endpoint__params th { text-align: left; padding: 6px 13px; border-bottom: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-api-endpoint__params td { padding: 6px 13px; border-bottom: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-api-endpoint__params tr:last-child td { border-bottom: none; }
+
+/* toc: the in-paper nav card; sticky variant pins in article mode. */
+.bp-paper-surface .bp-toc { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 12px 15px; }
+.bp-paper-surface .bp-toc__list { margin: 0; padding-left: 1.3rem; }
+.bp-paper-surface .bp-toc__item { margin: 3px 0; }
+.bp-paper-surface .bp-toc__item::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-toc__item[data-level="2"] { margin-left: 1.1rem; font-size: 0.92em; }
+.bp-paper-surface .bp-toc__item[data-level="3"] { margin-left: 2.2rem; font-size: 0.88em; }
+.bp-paper-surface .bp-toc--sticky { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+
+/* asciicast: the player mount — reserve height so the figure never jumps. */
+.bp-paper-surface .bp-asciicast { min-height: 120px; background: var(--paper-bg-deep); }
+
+/* chat transcript blocks (Studio-sourced): one shared quiet-card treatment —
+   their inner layout is inline-styled by components.ex; this supplies the
+   frame those inline styles assumed. */
+.bp-paper-surface .bp-chat-approval, .bp-paper-surface .bp-chat-plan, .bp-paper-surface .bp-chat-question, .bp-paper-surface .bp-chat-thinking, .bp-paper-surface .bp-chat-todo, .bp-paper-surface .bp-chat-tool-diff { margin: 1.1rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 10px 13px; font-size: 0.85rem; }
+
+/* valueref-accept: the inline baseline-accept affordance (walk.ex). */
+.bp-paper-surface .bp-valueref-accept { appearance: none; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg-deep); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.68rem; padding: 1px 7px; margin-left: 6px; cursor: pointer; vertical-align: 1px; }
+.bp-paper-surface .bp-valueref-accept:hover { border-color: var(--paper-accent); }
+
+</style>
+<script>
+(function () {
+  function post(m) {
+    if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(m));
+  }
+  window.addEventListener('DOMContentLoaded', function () {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        post({ kind: 'fmp', domMs: Math.round(performance.now()) });
+      });
+    });
+  });
+})();
+</script>
+</head>
+<body>
+<div class="bp-paper-surface">
+<p class="bp-role-eyebrow">Barkpark Tasks · mobile epic preparation · THE CROWN REPORT · combines all five lanes · 2026-07-23</p><h1>Barkpark Tasks: one app, three surfaces — the fourth client of a living system</h1><p class="bp-role-ingress">The wish: a mobile app that is not Barkpark itself but rides its core — Cloud login, then server → workspace → project → dataset with one-option auto-select and last-location memory, then three surfaces where we chat excellently, browse tasks excellently, and read papers excellently, with the ambition of eventually editing them. Five lanes investigated the wish against origin/main and the live guerrilla server. This report is their synthesis and their court: it tells the whole story, weaves the strongest evidence into one argument, rules the forks the lanes left open, and ends with an honest go/no-go. The verdict up front: GO — as a staged Sweet Spot on Expo/React Native, because the investigation&#39;s central discovery is that the system was accidentally built for this app. The epic&#39;s first commit is closer to a transcription than an invention, with exactly one hard server build and one deliberate exception.</p><p class="bp-role-byline">The grand view · Three rival shapes · The one hinge · The shell bet · Chat · tasks · papers · Ground truth · Eleven rulings · Files &amp; first wave</p><div class="bp-stats"><div class="bp-stat"><div class="bp-stat__v">0</div><div class="bp-stat__l">new Elixir lines needed for the entire chat core loop — list/create/send/stream/interrupt/approve/resume ride the frozen /v1/chat contract, live-verified on guerrilla (38 sessions, rollup 200)</div></div><div class="bp-stat"><div class="bp-stat__v">0</div><div class="bp-stat__l">paths today that hand a plain team member a portable data-plane bearer — the epic&#39;s ONE hard server build (every lane confirmed it independently)</div></div><div class="bp-stat"><div class="bp-stat__v">6/6</div><div class="bp-stat__l">chat block families already rendering identically on Studio, TUI, and @barkpark/react — zero renderer-parity risk for mobile chat</div></div><div class="bp-stat"><div class="bp-stat__v">66/82<span class="bp-stat__denom">/82</span></div><div class="bp-stat__l">block types the JS renderer covers of the three-surface union; the 15-type gap is entirely the schema-field family — no prose, media, task, or chat block is missing</div></div><div class="bp-stat"><div class="bp-stat__v">1.4 KB</div><div class="bp-stat__l">median paper metadata payload with fields= projection, vs 137 KB full (99x) — measured live; the number that makes cache-for-instant-open cheap</div></div><div class="bp-stat"><div class="bp-stat__v">≤5 KB</div><div class="bp-stat__l">GET /v1/tasks/prime view=brief — the one-call instant-open the server already ships for agents; a phone cold-start is the same problem, already solved</div></div><div class="bp-stat"><div class="bp-stat__v">457 ms</div><div class="bp-stat__l">live search engine time for a one-term query — debounce ≥400 ms and cache-first are law; typeahead is out</div></div><div class="bp-stat"><div class="bp-stat__v">2,700 s</div><div class="bp-stat__l">the agent claim lease a backgrounded phone will violate — why agent-grade verbs wait for an explicit work mode in v1.5</div></div></div><nav class="bp-toc"><ol class="bp-toc__list"><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-009">01 · What the investigation established</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-016">02 · GO — the Operator&#39;s Leash, staged through the Minimal</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-023">03 · Minimal, Maximal, Sweet Spot — developed, then decided</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-031">04 · Login and the cascade: one hinge, then a port</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-039">05 · Expo/React Native — and cache-for-instant-open</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-047">06 · The third sibling client of an engine that is already multi-client</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-055">07 · Two document-shaped surfaces on one read spine</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-064">08 · The consolidated map — permissions, transports, scopes</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-071">09 · Eleven rulings — where the lanes disagreed, and how the crown decides</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-077">10 · The consolidated picture — merged across lanes, deduplicated</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-082">11 · What could hurt, what we don&#39;t know, what only the user can decide</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-088">12 · Go — and what wave 1 takes if it goes</a></li><li class="bp-toc__item" data-level="1"><a href="#blocks-cr-100">13 · This report and its five supporting lanes</a></li></ol></nav><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">01 · The grand view</p><h2>What the investigation established</h2><p>The wish reads like a product brief; the investigation turned it into physics. Barkpark Tasks is a hybrid of the chat app and the task app, exclusive to Barkpark Cloud at the start (interview truth: Cloud auth is the front door and identity layer; any Barkpark server is reached through it). Five lanes each took one decision the epic cannot dodge — what to build (product-shapes), how identity flows (identity-cascade), which shell and cache (shell-and-cache), how chat works on the wire (chat-third-client), and how tasks and papers read (tasks-papers-reading) — and each returned with the same central discovery from a different direction: <span style="font-weight:bold">all three surfaces are PortableDoc surfaces, and every surface the app needs already has a live, multi-client server heart.</span> Task briefs are PortableDoc envelopes (docs/setup/TASK-SYSTEM.md:45). Chat messages persist server-rendered blocks beside source_markdown (chat charter D8). Papers are PortableDoc natively. The Go TUI is the existence proof that one renderer composed with the task API and the chat API yields excellence at all three surfaces at once — the mobile app is structurally the fourth instance of a composition the platform has already proven, after the TUI, Studio, and the web reader.</p><p>The second discovery is just as load-bearing: the server&#39;s client doctrine is accidentally mobile-first. Chat live deltas are ephemeral by design, settled truth is Postgres rows with a monotonic seq, and the documented recovery is reconnect-and-refetch-at-turn-boundary (chat_controller.ex:53-60) — which is exactly the architecture an app that gets backgrounded every thirty seconds needs. Tasks expose a pull keyset events feed (GET /v1/tasks/events?since → {events, cursor, has_more}) that is strictly better for phones than SSE iOS would suspend: cache the cursor, replay on foreground. One type-agnostic SSE stream per dataset (/v1/data/listen/:dataset) invalidates papers AND tasks together. Cross-device draft continuity already exists (D14: PATCH draft/mode/model on leave, re-GET on resume) — a draft typed on the phone resumes in the desktop TUI with no new server work. Nothing about mobile requires inventing sync.</p><p>And the third: the gaps are few, named, and sharp. Exactly one server capability is missing for the whole v1 read-and-chat floor — no path today turns a Cloud identity into a portable, per-user data-plane token that a plain team member can hold (verified from both the Cloud and the instance side by three lanes independently). Exactly one genuinely new backend subsystem is wanted — native push, where the repo greps clean for APNs/FCM. And exactly one honest contradiction must be ruled — the eventual-editing ambition structurally exceeds every non-admin token today. Everything else in this report is assembly, with file:line anchors.</p><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Lane paper (descend for full depth)</span></th><th class="bp-table__th"><span>The decision it owns</span></th><th class="bp-table__th"><span>Its verdict in one line</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>barkpark-tasks-mobile-product-shapes</span></td><td class="bp-table__td"><span>What to build: Minimal vs Maximal vs Sweet Spot</span></td><td class="bp-table__td"><span>Build the Sweet Spot — the Operator&#39;s Leash — as a staged path whose v1 IS the Minimal plus three welds (hand-task strip, universal search, needs-you push)</span></td></tr><tr><td class="bp-table__td"><span>barkpark-tasks-mobile-identity-cascade</span></td><td class="bp-table__td"><span>Cloud login → server → workspace → project → dataset</span></td><td class="bp-table__td"><span>Every piece ships today except one joint; the epic builds a two-endpoint token exchange and ports the CLI&#39;s proven auto-select + MRU logic</span></td></tr><tr><td class="bp-table__td"><span>barkpark-tasks-mobile-shell-and-cache</span></td><td class="bp-table__td"><span>Expo/RN vs native vs PWA vs @barkpark/react reuse; the cache</span></td><td class="bp-table__td"><span>Expo/React Native — @barkpark/core runs unmodified, papers ride a WebView on the canonical string emitter, PWA and native Swift/Kotlin are refuted on evidence</span></td></tr><tr><td class="bp-table__td"><span>barkpark-tasks-mobile-chat-third-client</span></td><td class="bp-table__td"><span>Chat as the third sibling client of /v1/chat</span></td><td class="bp-table__td"><span>The entire core loop needs zero new Elixir; the TUI doctrine transliterates; the credential is the one structurally hard piece</span></td></tr><tr><td class="bp-table__td"><span>barkpark-tasks-mobile-tasks-papers-reading</span></td><td class="bp-table__td"><span>Browsing the ledger + reading PortableDoc on a phone</span></td><td class="bp-table__td"><span>A read-layer assembly, not an API project: prime + events cursor + SSE + fields= projection + persisted HTML already exist; editing has a researched answer behind one named auth wall</span></td></tr></tbody></table><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">02 · The verdict</p><h2>GO — the Operator&#39;s Leash, staged through the Minimal</h2><div class="bp-callout bp-callout--success"><strong>The recommendation, in one paragraph</strong> <span>Build it. Ship v1 as a Reader-Communicator with teeth: the full login cascade with one-option auto-select and last-location memory riding the ratified bp-login-ux device flow; read-first tasks on the TUI&#39;s proven spine + criteria-first grammar, plus fence-free human triage (stage / relabel / move / papers-link — the server itself says “thought is not contended work”); the full chat floor (send / stream / interrupt / approve-deny, queued badge, D14 draft continuity); a premium cached paper reader; one universal search box over tasks + papers; and needs-you push notifications promoted INTO v1 as the single deliberate new-backend exception — three lanes independently converged on the lock-screen approval as THE reason a mobile app should exist, and shipping without it would ship an app without its killer moment. One hard server build unlocks everything: the member-reachable app-token exchange. If push slips, v1 ships as the pure Minimal and push becomes v1.1 — the staging is the safety net, not a compromise.</span></div><p>Why GO rather than go-differently: every alternative shape was seriously developed and lost on evidence, not taste. The Maximal (“Pocket Studio”) fails v1 because three of its pillars are not “just a client” — native push has zero existing machinery, paper block editing exceeds every non-admin token, and nine ChatLive surfaces are LiveView-only and reach no client today; it remains the honest v3 horizon. The pure Minimal fails the wish&#39;s own name — an app called Barkpark Tasks that can only read is a viewer, not a leash. The Sweet Spot is a genuine synthesis, not a midpoint: the Minimal&#39;s reading excellence plus the one thing a phone is for — being reachable when your agents need you. And the staging is honest: v1.5 adds the task verbs (claim / release / close-with-evidence as an explicit work mode), the needs-you inbox, and rich question answers when the filed /answer route ships; v2 adds prose-only paper editing behind the declared auth seam, task creation, and host/provider controls.</p><p class="bp-role-pullquote" style="font-style:italic">The mobile app is not a new product surface. It is the fourth client of machinery that already ships — one renderer, two protocols, and a login flow that already exists.</p><p>What makes this epic unusually cheap for its ambition: the interaction grammars transfer wholesale. The task spine ordering, fold rows, criteria-first conditional detail, and color-as-state-only are shipped TUI law; the Studio board&#39;s own evolution already reached the phone — wave 18&#39;s deck replaced kanban with a rail of literal 9:19.5 phone-frame cards, live on main today. The chat client discipline is codified in numbered decisions (D5 cursor ownership, D8 settle-at-result, D11 interrupt wedge, D12 client-local queued badge, D14 continuity) that transliterate to touch. The login cascade&#39;s n==1 auto-select fast path is ratified charter decision 19, already merged for the CLI wizard. Mobile is the fourth consumer of all of it.</p><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">03 · Three rival shapes</p><h2>Minimal, Maximal, Sweet Spot — developed, then decided</h2><p>The wish demanded all three shapes be taken seriously. They were — each to screen-by-endpoint sketch depth in the product-shapes lane. The table is the honest side-by-side; the staged cut line below it is how the winner absorbs the loser&#39;s virtues instead of discarding them.</p><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Dimension</span></th><th class="bp-table__th"><span>A · Minimal — “Reader-Communicator”</span></th><th class="bp-table__th"><span>B · Maximal — “Pocket Studio”</span></th><th class="bp-table__th"><span>C · Sweet Spot — “Operator&#39;s Leash” (recommended)</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>Core idea</span></td><td class="bp-table__td"><span>The least app still excellent at reading tasks, chatting, reading papers</span></td><td class="bp-table__td"><span>Everything the platform offers, on a phone</span></td><td class="bp-table__td"><span>Read excellently + act on what needs YOU</span></td></tr><tr><td class="bp-table__td"><span>Screens</span></td><td class="bp-table__td"><span>~10</span></td><td class="bp-table__td"><span>~30+</span></td><td class="bp-table__td"><span>~14</span></td></tr><tr><td class="bp-table__td"><span>Tasks</span></td><td class="bp-table__td"><span>Read-only spine → criteria-first detail; deck-style cards</span></td><td class="bp-table__td"><span>Full board (deck/gantt/peek), drag claim/close, creation with dossier</span></td><td class="bp-table__td"><span>Read + fence-free triage in v1; claim/close as v1.5 work mode</span></td></tr><tr><td class="bp-table__td"><span>Chat</span></td><td class="bp-table__td"><span>Sessions → transcript; send/stream/interrupt/approve-deny</span></td><td class="bp-table__td"><span>Full ChatLive parity: ~40 handle_events, pickers, bypass arming, fleet rollup</span></td><td class="bp-table__td"><span>Minimal floor + hand-task weld + Doing strip + herd home</span></td></tr><tr><td class="bp-table__td"><span>Papers</span></td><td class="bp-table__td"><span>Cached reader; honest tail degradation</span></td><td class="bp-table__td"><span>Reader + block editing</span></td><td class="bp-table__td"><span>Reader in v1; prose-only patch-block editing in v2</span></td></tr><tr><td class="bp-table__td"><span>Search</span></td><td class="bp-table__td"><span>One debounced box over tasks+papers</span></td><td class="bp-table__td"><span>Full facets, suggestions, corrections</span></td><td class="bp-table__td"><span>One box + fields= projection (~1 KB hits)</span></td></tr><tr><td class="bp-table__td"><span>Push</span></td><td class="bp-table__td"><span>None</span></td><td class="bp-table__td"><span>Lock-screen approvals + task alerts + badges</span></td><td class="bp-table__td"><span>Needs-you push IN v1 — the deliberate exception</span></td></tr><tr><td class="bp-table__td"><span>Token</span></td><td class="bp-table__td"><span>[read, chat]</span></td><td class="bp-table__td"><span>Admin-tier or new seams</span></td><td class="bp-table__td"><span>[read, write, chat] (ruling 1, below)</span></td></tr><tr><td class="bp-table__td"><span>Net-new backend</span></td><td class="bp-table__td"><span>Zero</span></td><td class="bp-table__td"><span>Push + per-user editing seam + host management</span></td><td class="bp-table__td"><span>Push channel only</span></td></tr><tr><td class="bp-table__td"><span>Fate</span></td><td class="bp-table__td"><span>Absorbed: it IS v1 minus the welds — and the fallback if push slips</span></td><td class="bp-table__td"><span>Honest v3 horizon, not a v1</span></td><td class="bp-table__td"><span>The recommendation</span></td></tr></tbody></table><h3>The staged cut line</h3><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Stage</span></th><th class="bp-table__th"><span>Contains</span></th><th class="bp-table__th"><span>Why here and not earlier</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>v1</span></td><td class="bp-table__td"><span>3 tabs + universal search · full cascade with auto-select + last-location cache · instant cold open from cache (all writes require connectivity) · task read + fence-free human triage · chat floor (send/stream/interrupt/approve-deny, queued badge, D14 draft continuity) · paper reader · needs-you push</span></td><td class="bp-table__td"><span>Everything except push is consumption of live endpoints; push is promoted because it is the mobile reason-to-exist; triage is in because the server explicitly fences it free</span></td></tr><tr><td class="bp-table__td"><span>v1.5</span></td><td class="bp-table__td"><span>Agent-grade task verbs as an explicit work mode: claim / release / close-with-evidence · needs-you inbox as optional home · session rename/archive (one-PR route adds; store functions already wait scoped) · rich question answers via the filed /answer route (ct-bl-question-updatedinput) · task creation (quick capture; the [read,write,chat] token already covers it)</span></td><td class="bp-table__td"><span>Every agent-grade verb drags worker-id identity, epoch-fencing UX, and fenced_off/stale_claim error states onto a touch screen — real design work; and a backgrounded phone will violate the 2,700 s lease, so the work mode must be honest about it</span></td></tr><tr><td class="bp-table__td"><span>v2</span></td><td class="bp-table__td"><span>Prose-only paper editing (patch-block ops + the per-user :write auth seam) · provider/model/effort + execution-host controls · multi-server fast switch · optionally the 15 field-family JS emitters if the corpus census demands them</span></td><td class="bp-table__td"><span>Editing is blocked today by the ops route&#39;s auth wall (ingest secret OR admin only) — a small, surgical server seam, but a seam nonetheless; declared now so the ambition is never a lie</span></td></tr></tbody></table><div class="bp-callout bp-callout--info"><strong>What v1 deliberately does not have</strong> <span>No agent-grade task verbs, no task creation, no paper editing, no host/provider controls, no multi-server fast-switch UI, no media browsing. Deliberate absences are the shape&#39;s identity — and every one of them is reachable by a deep link into Studio (the TUI already ships o → Studio task URL as its escape hatch; the app inherits the same move).</span></div><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">04 · The spine</p><h2>Login and the cascade: one hinge, then a port</h2><p>The wish&#39;s spine — Cloud login → select server → workspace → project → dataset, auto-selecting the only option at every level and remembering the last — is not an invention. It is a port. The RFC-8628 device flow is shipped and mobile-ready as-is: start/poll are unauthenticated but rate-limited, TTL 600 s, poll interval 5 s, and the session is minted AT POLL after atomically consuming the approved row (device_auth.ex:29-43, 219-257) — the token never touches the browser. The CLI already auto-connects a single-Barkpark fleet with no prompt (setup_cloud_login.go:142-146, ratified as bp-login-ux decision 19&#39;s n==1 fast path) and persists server/workspace/project/dataset plus a most-recent-first known-servers list (config.go:29-58). The phone replicates that state machine over Keychain/Keystore. Below Cloud, auto-select is entirely client-side — workspace/project/dataset rows are bare {id, slug, name}; the one real server hint is that the default-slug project sorts first (tenancy.ex:858-869). Datasets have no production-first equivalent (tenancy.ex:1045-1047) — a two-line courtesy the epic should add in passing.</p><figure style="margin:1.6rem 0;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px"><pre class="mermaid">flowchart TD
+  A["1 · Phone: POST /v1/auth/device/start"] --&gt; B["2 · System browser: Cloud /activate — approve user_code"]
+  A --&gt; C["3 · Poll /v1/auth/device/poll every 5 s — honor slow_down"]
+  B --&gt; C
+  C --&gt; D["4 · Cloud session token · 30 d · Keychain/Keystore"]
+  D --&gt; E["5 · GET /v1/barkparks?scope=all — auto-select if 1, cache last"]
+  E --&gt; F["6a ★ NEW: Cloud POST /v1/barkparks/:id/app-token — session-authed, ANY member"]
+  F --&gt; G["6b ★ NEW: instance POST /v1/auth/app-tokens — admin-gated, server-side call"]
+  G --&gt; H["7 · Per-user, workspace-bound api_token + expires_at — JIT MEMBER"]
+  H --&gt; I["8 · GET /api/workspaces → projects → datasets — auto-select on count==1"]
+  I --&gt; J["First screen: Tasks · Chat · Papers"]
+</pre><figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">The v1 login-to-first-screen. Steps 1-4 and 7-8 are shipped machinery; only the two starred endpoints are new — the epic&#39;s one hard server build.</figcaption></figure><div class="bp-callout bp-callout--info"><strong>The one hinge: a two-endpoint token exchange</strong> <span>Today&#39;s credential map dead-ends for a plain member from every direction: credentials reveal is team-admin-only and yields a root admin token the CLI itself refuses to store client-side; studio-link is member-reachable but consumes into a browser cookie with a Default-workspace OWNER grant — not a portable bearer; the bootstrap token is admin-gated and frozen at provision time; the chat-token mint is the right shape behind the wrong gate (instance owner/admin); Cloud PATs are structurally invisible to 68 of 74 gated Cloud routes (require_user only queries session rows, accounts.ex:548-570). The fix is small and precedented: Cloud POST /v1/barkparks/:id/app-token (user-session-authed, any team member) uses the registry&#39;s stored admin token server-side — the proven studio-link pattern, the admin token never travels — to call a NEW instance endpoint POST /v1/auth/app-tokens, which JIT-provisions the Cloud user by email via the idempotent Sso.find_or_create_user (sso.ex:69-80), grants MEMBER through create_membership/4 — the codebase&#39;s single Membership insertion point (tenancy/auth.ex:84-101), and the SSO/SCIM role precedent, explicitly NOT studio-link&#39;s OWNER — and mints a per-user, workspace-bound api_token with expires_at. Everything the mint needs already exists: expiry and revocation are enforced in the verify WHERE clause (auth.ex:44-53), and RequireChatAccess already honors a workspace token whose permissions include chat (require_chat_access.ex:55-58). Refresh is silent re-mint through the still-valid 30-day Cloud session. Lifetime is policy, not schema work.</span></div><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Cascade level</span></th><th class="bp-table__th"><span>Endpoint</span></th><th class="bp-table__th"><span>Row shape</span></th><th class="bp-table__th"><span>Auto-select signal</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>Identity</span></td><td class="bp-table__td"><span>Cloud GET /v1/me</span></td><td class="bp-table__td"><span>user + teams[]</span></td><td class="bp-table__td"><span>—</span></td></tr><tr><td class="bp-table__td"><span>1 · Server</span></td><td class="bp-table__td"><span>Cloud GET /v1/barkparks?scope=all (session-only; a PAT gets 401)</span></td><td class="bp-table__td"><span>RICH: url, health_status, agent_status, last_seen_at, team{role}, provision state …</span></td><td class="bp-table__td"><span>health hints yes; last-visited is the client&#39;s memory</span></td></tr><tr><td class="bp-table__td"><span>2 · Workspace</span></td><td class="bp-table__td"><span>GET /api/workspaces (api_token, membership-scoped)</span></td><td class="bp-table__td"><span>bare {id, slug, name}, alphabetical</span></td><td class="bp-table__td"><span>none — client counts and remembers</span></td></tr><tr><td class="bp-table__td"><span>3 · Project</span></td><td class="bp-table__td"><span>GET /api/workspaces/:ws/projects (404 no-leak)</span></td><td class="bp-table__td"><span>bare {id, slug, name}</span></td><td class="bp-table__td"><span>the ONE server hint: default-slug project sorts first (tenancy.ex:858-869)</span></td></tr><tr><td class="bp-table__td"><span>4 · Dataset</span></td><td class="bp-table__td"><span>GET .../projects/:proj/datasets</span></td><td class="bp-table__td"><span>bare {id, slug, name}, alphabetical</span></td><td class="bp-table__td"><span>none — client pins production (or add the 2-line ordering hint)</span></td></tr></tbody></table><div class="bp-callout bp-callout--warning"><strong>Two identity facts the epic must respect</strong> <span>First, a known defect the app inherits: behind Caddy in prod, conn.remote_ip collapses the device-start rate bucket to ONE GLOBAL 10-per-60 s budget for the whole fleet (cch-w1-peer-ip-pin, open) — a widely-installed app would exhaust it and starve every CLI login too; fixing peer-IP resolution is a hard prerequisite of wide rollout, scheduled in wave 1. Second, there is no attach-later for admin tokens: admin_token_encrypted is writable through exactly one changeset with two worker-gated one-shot callers — an instance adopted without --admin-token can never vend app tokens, and manual token paste (the CLI&#39;s existing fallback) stays the universal escape hatch.</span></div><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">05 · The shell bet</p><h2>Expo/React Native — and cache-for-instant-open</h2><p>The interview left the shell genuinely open; the evidence closed it. Three load-bearing discoveries make Expo/React Native nearly a transcription: (1) @barkpark/core is runtime-agnostic and injectable — its SSE transport deliberately avoids EventSource (which cannot carry Authorization) in favor of fetch + ReadableStream with Last-Event-ID resume; createClient({ fetch: expoFetch }) through the existing config.fetch hook (types.ts:114) plus a URL polyfill and a Hermes TextDecoder polyfill runs the whole ~21 KB typed client unmodified — no RN SSE library exists or is needed. (2) The “does @barkpark/react run in React Native?” question dissolves: renderPortableDocument() is a framework-free string emitter, byte-parity proven against the Elixir golden for 42 non-plugin types, skinned by one stylesheet (paper-surface.css, 80,451 B, all 18 once-unstyled families now covered on origin/main via PR #5651 with a compose-time coverage gate from #5656). A full-screen react-native-webview owning its own scroll, loaded via file/baseUrl — dodging both known Android traps by construction — inherits 66 of the 82-type union for free. (3) The server already prescribes the mobile lifecycle, as §01 established. PWA is refuted for v1 on four independently sufficient grounds: iOS storage is heuristic best-effort, not contractual — the wish&#39;s “instant open, remember where I was” promise would be conditional; Web Push is install-only with no silent push; SSE and all JS die seconds after backgrounding; and — found by this run — /v1/chat/* and /v1/tasks/* have NO per-app CORS knob, only a blunt instance-wide env var (DatasetCors covers /v1/data shapes only). Native Swift/Kotlin is refuted more simply: zero reuse of the typed client, the renderer, or the parity harness — everything rebuilt, forever drifting.</p><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Dimension</span></th><th class="bp-table__th"><span>Expo/React Native</span></th><th class="bp-table__th"><span>PWA</span></th><th class="bp-table__th"><span>Native Swift/Kotlin</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>@barkpark/core reuse (client + SSE)</span></td><td class="bp-table__td"><span>Full — fetch injection + 2 polyfills</span></td><td class="bp-table__td"><span>Full, zero shims</span></td><td class="bp-table__td"><span>None — full client rewrite</span></td></tr><tr><td class="bp-table__td"><span>PortableDoc papers</span></td><td class="bp-table__td"><span>WebView string HTML — inherits 66 types + parity proof</span></td><td class="bp-table__td"><span>Same renderer, native DOM</span></td><td class="bp-table__td"><span>Rebuild ~66 emitters + re-express 80 KB CSS; permanent drift</span></td></tr><tr><td class="bp-table__td"><span>SSE + backgrounding</span></td><td class="bp-table__td"><span>expo/fetch streams (SDK 52+); reconnect on foreground with native lifecycle hooks</span></td><td class="bp-table__td"><span>Suspended seconds after backgrounding</span></td><td class="bp-table__td"><span>Fine, but bespoke framing code</span></td></tr><tr><td class="bp-table__td"><span>Instant-open cache</span></td><td class="bp-table__td"><span>MMKV + SQLite, fully owned</span></td><td class="bp-table__td"><span>iOS best-effort quota; eviction risk</span></td><td class="bp-table__td"><span>Fully owned</span></td></tr><tr><td class="bp-table__td"><span>Push</span></td><td class="bp-table__td"><span>APNs/FCM path (server-side greenfield either way)</span></td><td class="bp-table__td"><span>Install-only Web Push, no silent push</span></td><td class="bp-table__td"><span>APNs/FCM native</span></td></tr><tr><td class="bp-table__td"><span>CORS</span></td><td class="bp-table__td"><span>None — not a browser</span></td><td class="bp-table__td"><span>Blocked on /v1/chat/* and /v1/tasks/* today</span></td><td class="bp-table__td"><span>None</span></td></tr><tr><td class="bp-table__td"><span>Chat input feel</span></td><td class="bp-table__td"><span>Native keyboard/haptics/share sheet</span></td><td class="bp-table__td"><span>Browser-grade — the weak flank for chat excellence</span></td><td class="bp-table__td"><span>Best-in-class</span></td></tr><tr><td class="bp-table__td"><span>Distribution</span></td><td class="bp-table__td"><span>App Store (guideline 4.8 exempts first-party-account apps; billing stays web-side) + EAS/OTA</span></td><td class="bp-table__td"><span>Zero review but 10-15x smaller install funnel</span></td><td class="bp-table__td"><span>App Store; slowest iteration</span></td></tr></tbody></table><figure style="margin:1.6rem 0;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px"><pre class="mermaid">flowchart TB
+  CLOUD["Barkpark Cloud — device flow + ★ app-token exchange + ★ push relay (APNs/FCM off chat_blocked webhook)"]
+  subgraph APP["Expo RN app — apps/mobile (ruling 8)"]
+    LOC["MMKV: last location cascade + per-feed cursors + tokens per (server, workspace)"]
+    DB["SQLite: task rows · paper blocks JSON · chat transcripts (session, seq)"]
+    CORE["@barkpark/core — createClient({fetch: expoFetch}), typed client + listen() SSE, unmodified"]
+    CHAT["Chat — native virtualized list: prose from source_markdown + 6 native chat-block components"]
+    TASKS["Tasks — native spine list + criteria-first detail + deck cards"]
+    PAPERS["Papers — full-screen WebView: renderPortableDocument() + paper-surface.css"]
+  end
+  SRV["Barkpark instance — /v1/chat · /v1/tasks + /events · /v1/data + /listen/:dataset"]
+  CLOUD --&gt;|"per-user workspace-bound bearer"| CORE
+  LOC --&gt; CORE
+  CORE --&gt;|"fetch + SSE, Last-Event-ID resume"| SRV
+  SRV --&gt; DB
+  DB --&gt; CHAT
+  DB --&gt; TASKS
+  DB --&gt; PAPERS
+  CLOUD -.-&gt;|"needs-you push, deep-link to approval card"| APP
+</pre><figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">The v1 architecture. Everything inside the app box is new; everything outside exists and is proven live. The starred token exchange is §04&#39;s build; the push relay is the one deliberate new subsystem.</figcaption></figure><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Store</span></th><th class="bp-table__th"><span>Holds</span></th><th class="bp-table__th"><span>Invalidated by</span></th><th class="bp-table__th"><span>Staleness UX</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>MMKV (sync key-value)</span></td><td class="bp-table__td"><span>Location cascade, per-feed cursors, tokens</span></td><td class="bp-table__td"><span>Overwritten on navigation / login</span></td><td class="bp-table__td"><span>Auto-select cascades exactly as the wish describes; selection always reachable</span></td></tr><tr><td class="bp-table__td"><span>SQLite: tasks</span></td><td class="bp-table__td"><span>Task rows per dataset</span></td><td class="bp-table__td"><span>Foreground replay of /v1/tasks/events?since=cursor; live task.* events while open</span></td><td class="bp-table__td"><span>Cached paints instantly; sync badge until replay settles</span></td></tr><tr><td class="bp-table__td"><span>SQLite: papers</span></td><td class="bp-table__td"><span>Blocks JSON per paper (render on read in the WebView)</span></td><td class="bp-table__td"><span>mutation events with type=paper on /v1/data/listen; refetch on rev change</span></td><td class="bp-table__td"><span>Cached reading always available offline; badge on stale rev</span></td></tr><tr><td class="bp-table__td"><span>SQLite: chat</span></td><td class="bp-table__td"><span>Transcript rows keyed (session_id, seq): blocks + source_markdown</span></td><td class="bp-table__td"><span>Last-Event-ID=seq replay; settled-truth refetch at turn boundary</span></td><td class="bp-table__td"><span>Transcript instant; live deltas only while foregrounded</span></td></tr></tbody></table><div class="bp-callout bp-callout--warning"><strong>The one gate before the shell verdict hardens</strong> <span>WebView performance on long papers (the 91-block showcase shape + the 80 KB stylesheet) is unprovable by reading — no published benchmark exists. The known Android traps (co-scroll collapse, react-native-webview#17; ~20 MB inline source.html ceiling, #3126) are dodged by design (full-screen WebView owning its scroll; file/baseUrl load), but the exact BP shape must be measured on real Android hardware on day 1: cold-load + frame drops on a ~100-block paper, memory with 3-4 warm WebViews, inline vs file-load delta. If it janks, the native prose fast-path (paragraph/heading/list/code — 78% of the corpus by measured usage) promotes from v2 upgrade to v1 requirement and renderer cost roughly doubles. This is the single biggest cost fork in the plan.</span></div><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">06 · Chat, excellently</p><h2>The third sibling client of an engine that is already multi-client</h2><p>The interview pinned mobile chat precisely: the existing Barkpark chat-sessions surface brought to the phone beside the bp chat TUI and the Studio GUI. The entire core loop — list, create, send, stream, interrupt, approve, resume — rides the frozen /v1/chat HTTP+SSE contract with zero new Elixir, live-verified on guerrilla. The client inherits the TUI reducer doctrine wholesale because it is accidentally a perfect mobile-backgrounding architecture: parse only three live frame shapes (system.init, text_delta, result); everything else settles at the turn boundary via GET ?since=maxSeq plus SSE re-attach with Last-Event-ID=maxSeq. No sync engine, no local write queue, no conflict resolution — the server owns truth, the phone owns a cursor. The session list folds one life-of-process fleet SSE (snapshot/state/heartbeat/title, opaque epoch:seq cursor, 256-flip ring, degrade-to-snapshot) through a pure herd reducer, and GET /v1/chat/rollup drives the app badge (blocked &gt; working &gt; idle &gt; unknown, byte-matched to the Go herdRank).</p><figure style="margin:1.6rem 0;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px"><pre class="mermaid">sequenceDiagram
+  participant P as "Phone"
+  participant A as "API"
+  participant R as "Recorder"
+  P-&gt;&gt;A: POST /sessions/:id/messages {content}
+  A--&gt;&gt;P: 202 accepted (queued badge is client-local, D12)
+  A-&gt;&gt;R: ensure → Runtime.open (first send spawns)
+  R--&gt;&gt;P: SSE — live text deltas (ephemeral by design)
+  R--&gt;&gt;P: SSE event permission — approval ask
+  P-&gt;&gt;A: POST /approval {request_id, allow}
+  R--&gt;&gt;P: terminal result frame — turn settles
+  P-&gt;&gt;A: GET /sessions/:id?since=maxSeq
+  A--&gt;&gt;P: settled rows: PortableDoc blocks + source_markdown
+</pre><figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">Tap-send to streamed reply. Backgrounding at ANY point resumes via the same last two arrows — the reconnect path IS the resume contract.</figcaption></figure><p>The excellence bar, ruled: TUI-grade plus three cheap upgrades the TUI lacks — a context/headroom indicator derived client-side from persisted last_context_tokens/context_window (no server work), the compaction notice reproduced from the live frame, and a static thinking shimmer that resolves into the settled chat-thinking block. Of the nine LiveView-only ChatLive surfaces, the chat lane ruled each one reproduce/proxy/scope-out — the load-bearing scope-outs for v1: MCP entity chips (no PortableDoc block exists — a candidate epic-add that benefits the TUI too), the slash menu (native pickers instead), and the bypass-arm ceremony (bypassPermissions is unrepresentable over the transport anyway, a good constraint to inherit). The needs-you triple — approval / question / plan — is unified server-side and all three ride POST .../approval {request_id, decision: allow|deny}; D22 forbids caller-supplied updatedInput, so rich question answers wait for the already-designed /answer route (ct-bl-question-updatedinput, open) in v1.5.</p><div class="bp-callout bp-callout--warning"><strong>The failure matrix was built for operators, not products</strong> <span>Four distinct host failures collapse into one undifferentiated 503 {error: chat_unavailable} (chat_controller.ex ensure_and_send ~L249-253), and a host silently lost mid-turn produces up to 30 minutes of silence before the idle reaper emits exit reason=idle_reaped (recorder.ex:29). A phone user WILL hit this before a terminal operator does. v1 ships a client-side turn timeout (30-60 s of frame silence → an honest ‘agent unreachable’ state), and the epic files the small server fix splitting the 503 into reason codes. Also live reality: all 38 guerrilla sessions are provider=claude, execution_target=managed — codex and registered_host are modeled but unexercised, so v1 treats them as render-tolerated, not feature-complete; and on a server with no managed runtime the chat tab needs the onboarding empty state no sibling surface has designed.</span></div><p>Push, decided (ruling 3): needs-you push ships in v1 as a Cloud-held APNs/FCM relay keyed off the instance&#39;s chat_blocked webhook / Notifier source (herd charter D57h/D58h — keyed on pending-ask rows, never agent_state), deep-linking straight into the transcript&#39;s approval card. For a Cloud-exclusive app, one Cloud push identity beats teaching every self-hosted instance to hold push certs. This is the app&#39;s only genuinely new distributed system — 100% greenfield (the repo greps clean for APNs/FCM; scc-w13-notify-channels is Web Push + webhook only) — and it is architected to be severable: if it slips, v1 ships without it and nothing else moves.</p><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">07 · Tasks and papers, excellently</p><h2>Two document-shaped surfaces on one read spine</h2><p>Tasks and papers share the same content API, the same invalidation stream, and the same PortableDoc payloads — which is why they are one section here. The read spine, every box live today: the app cold-starts from its cache, repaints from GET /v1/tasks/prime?view=brief (built as one-call agent rehydration — my claims + ready head + recent events + lifecycle counts, ≤5 KB; a phone cold-start is the same problem, already solved), catches up through the events keyset cursor, and stays live over the per-dataset SSE stream that carries ALL document types — one stream invalidates both surfaces. Task detail is a presentation-grade PortableDoc brief rendered criteria-first (shipped TUI law, detail_render.go D15); the deck&#39;s 9:19.5 phone-frame cards (the Studio board&#39;s default view since wave 18) are the ready-made card language. Human-grade triage — stage, relabel, move, papers-link — is fence-free by the server&#39;s own design and needs only a valid token; that is what a human does on a phone. Agent-grade claim/stamp/close (epoch CAS, 2,700 s leases) waits for the v1.5 work mode.</p><div class="bp-callout bp-callout--danger"><strong>The pagination law — state it in the epic brief as law</strong> <span>GET /v1/tasks default order is desc(updated_at), desc(id) — UNSTABLE under live mutation on a 3,400+ task ledger: offset paging skips and duplicates whenever any row is touched mid-walk, and no client has ever actually paged (the TUI pulls limit=1000 and confesses truncation, fetch.go:38-41). Mobile must never bulk-sync the default order. Page the stable orders that already exist (parent= uses asc(inserted_at), asc(id); /ready uses priority asc, inserted_at asc, id asc) or ride prime + events. A recency keyset cursor over (updated_at, id) is a genuine, optional server epic-add — only if prime + events proves insufficient.</span></div><h3>Reading excellently: the renderer bet</h3><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Option</span></th><th class="bp-table__th"><span>What it buys</span></th><th class="bp-table__th"><span>What it costs</span></th><th class="bp-table__th"><span>Verdict</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>WebView + canonical string emitter + paper-surface.css</span></td><td class="bp-table__td"><span>Guaranteed 4-surface parity, near-zero build; all 18 once-unstyled families styled on origin/main</span></td><td class="bp-table__td"><span>Web-feel scroll/selection; the day-1 Android spike gate; media landmine below</span></td><td class="bp-table__td"><span>v1 default — rendering cached blocks JSON locally (ruling 7)</span></td></tr><tr><td class="bp-table__td"><span>Native prose fast-path (paragraph/heading/list/code/callout)</span></td><td class="bp-table__td"><span>Best feel for the 77.6% prose corpus; no CSS payload; offline-native</span></td><td class="bp-table__td"><span>A fifth renderer to keep in parity forever; explicit long-tail fallback contract</span></td><td class="bp-table__td"><span>Sweet-spot upgrade — promotes to v1 only if the WebView spike janks</span></td></tr><tr><td class="bp-table__td"><span>pdrender wasm (bpRenderTUI)</span></td><td class="bp-table__td"><span>Terminal-fidelity rendering, zero new code</span></td><td class="bp-table__td"><span>2.93 MB gzip, wasm-unsafe-eval CSP, monospace-art output</span></td><td class="bp-table__td"><span>Rejected as primary; at most a later ‘view as terminal’ toggle, as Studio does</span></td></tr></tbody></table><p>Payload economics are settled and generous: 1.4 KB median metadata projection per paper, 33.9 KB blocks, 136.9 KB full — prefetch dozens of paper cards for offline browse, fetch blocks on open; fields= cuts a search response 25x (483.8 KB → 19.4 KB, measured). The public reader needs no token at all (/papers/:slug is an anonymous LiveView — the papers tab can render before the token exchange completes). Live-dashboard papers come free: ?resolve=tasks runs TaskResolver server-side with zero client logic, and author-pinned snapshots are the offline degrade. One landmine disciplines the WebView path: paper image src values are bare unsigned /media/files/&lt;path&gt; strings, public by default — but token/private visibility silently 403s because a WebView &lt;img&gt; cannot attach a Bearer header and nothing pre-signs at render time (the repo already names this leak class at studio_chat.ex:2441). Honest v1 promise: excellent reading for public-visibility media; a render-time signed src or fetch-to-blob shim is the named fix the day scoped/private papers carry media.</p><div class="bp-callout bp-callout--info"><strong>Eventual editing: a researched answer, not an ambition</strong> <span>The block-ops machinery is complete and good — five op kinds, atomic batches, ifRev CAS returning 412 before anything applies (bulldocs_ingest_controller.ex:78, 292-335) — and the editor semantics were already paid for by the pd-everything-editable epic (graded A-). What blocks mobile editing is exactly one thing: RequireIngestToken admits only the shared ingest secret or an admin api_token (require_ingest_token.ex:24-50) — no write path, no chat path, structurally exceeding every token this app should hold. The smallest respectable v2: one surgical per-user :write auth seam (Tenancy.Auth already models :write for user principals through the single authorize/3 chokepoint — a plug branch, not a new system) plus a prose-only patch-block client covering the 78% prose corpus. Never a Studio-parity canvas on a phone. The seam is declared in the epic backlog NOW so the app never promises a door it hasn&#39;t cut.</span></div><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">08 · Ground truth</p><h2>The consolidated map — permissions, transports, scopes</h2><p>Consolidated from all five lanes, deduplicated, and re-anchored: the three tables below are the app&#39;s physics. The first decides what the minted token must carry; the second IS the data layer&#39;s specification — the mobile client implements exactly these rows and nothing else; the third names the fact every tab must design around: the wish&#39;s five-level cascade is a NAVIGATION spine, not a uniform authorization spine.</p><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Route family</span></th><th class="bp-table__th"><span>Pipeline</span></th><th class="bp-table__th"><span>Required permission</span></th><th class="bp-table__th"><span>Anchor</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>/v1/tasks* (17 routes) + /v1/graph* + /v1/fleet/*</span></td><td class="bp-table__td"><span>[:api, :require_token]</span></td><td class="bp-table__td"><span>ANY valid token — claim/close are workflow ops, not doc mutations; no permission check</span></td><td class="bp-table__td"><span>tasks.ex:432-461</span></td></tr><tr><td class="bp-table__td"><span>/v1/data query/doc/search/backlinks/tags/counts</span></td><td class="bp-table__td"><span>[:api, :api_grant_read]</span></td><td class="bp-table__td"><span>read (or public-read, clamped)</span></td><td class="bp-table__td"><span>router.ex:1623-1642</span></td></tr><tr><td class="bp-table__td"><span>/papers/:slug reader (HTML)</span></td><td class="bp-table__td"><span>:public_root</span></td><td class="bp-table__td"><span>none — anonymous LiveView, real first-paint HTML</span></td><td class="bp-table__td"><span>bulldocs.ex:183-201</span></td></tr><tr><td class="bp-table__td"><span>/v1/chat/*</span></td><td class="bp-table__td"><span>[:api, :require_chat_access]</span></td><td class="bp-table__td"><span>workspace-bound chat (admin resolves :global; NULL-workspace chat token 403s fail-closed)</span></td><td class="bp-table__td"><span>require_chat_access.ex:55-58</span></td></tr><tr><td class="bp-table__td"><span>/v1/data/mutate/:dataset (task/doc creation, patches)</span></td><td class="bp-table__td"><span>[:api, :require_token, :require_write, :idempotent]</span></td><td class="bp-table__td"><span>write</span></td><td class="bp-table__td"><span>router.ex:1677-1680</span></td></tr><tr><td class="bp-table__td"><span>Paper block ops (ingest/apply_op/propose)</span></td><td class="bp-table__td"><span>:ingest</span></td><td class="bp-table__td"><span>ingest shared secret OR admin — NO per-user path exists (the v2 seam)</span></td><td class="bp-table__td"><span>require_ingest_token.ex:24-50</span></td></tr></tbody></table><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Stream / feed</span></th><th class="bp-table__th"><span>Path</span></th><th class="bp-table__th"><span>Cursor &amp; resume</span></th><th class="bp-table__th"><span>Degrade behavior</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>Document listen (SSE)</span></td><td class="bp-table__td"><span>GET /v1/data/listen/:dataset</span></td><td class="bp-table__td"><span>Last-Event-ID keyset replay; carries ALL doc types — one stream invalidates papers AND tasks</span></td><td class="bp-table__td"><span>mailbox cap → overloaded frame + close; client reconnects with cursor</span></td></tr><tr><td class="bp-table__td"><span>Chat session (SSE)</span></td><td class="bp-table__td"><span>GET /v1/chat/sessions/:id/events</span></td><td class="bp-table__td"><span>Last-Event-ID = persisted seq; replay rows seq&gt;cursor, then live</span></td><td class="bp-table__td"><span>never sheds; recovery = reconnect + refetch settled truth at turn boundary</span></td></tr><tr><td class="bp-table__td"><span>Chat fleet (SSE)</span></td><td class="bp-table__td"><span>GET /v1/chat/events</span></td><td class="bp-table__td"><span>opaque epoch:seq; in-ring replays flips, out-of-ring degrades to fresh snapshot</span></td><td class="bp-table__td"><span>never sheds; 256-flip ring</span></td></tr><tr><td class="bp-table__td"><span>Tasks pull feed (JSON, not SSE)</span></td><td class="bp-table__td"><span>GET /v1/tasks/events?since=&lt;id&gt;</span></td><td class="bp-table__td"><span>id-ASC keyset, ≤500/page, monotonic cursor — background-kill-safe, the mobile sync spine</span></td><td class="bp-table__td"><span>server clamps limit; client re-polls with returned cursor</span></td></tr><tr><td class="bp-table__td"><span>Keepalive (all SSE)</span></td><td class="bp-table__td"><span>—</span></td><td class="bp-table__td"><span>: keepalive every 30 s; client watchdog at 75 s (listen.ts)</span></td><td class="bp-table__td"><span>—</span></td></tr></tbody></table><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Surface</span></th><th class="bp-table__th"><span>Effective scope</span></th><th class="bp-table__th"><span>Consequence for the app</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>Chat</span></td><td class="bp-table__td"><span>WORKSPACE (token-bound; sessions have no project/dataset dimension)</span></td><td class="bp-table__td"><span>The chat tab pins at the cascade&#39;s workspace level and says so in its UI model — it must not fake deeper scoping</span></td></tr><tr><td class="bp-table__td"><span>Tasks</span></td><td class="bp-table__td"><span>FLAT host-root (/v1/tasks has no /w/:ws mirror; effectively Default-workspace-shaped)</span></td><td class="bp-table__td"><span>v1 accepts flat; workspace-scoped task routes are a possible later epic, not this one</span></td></tr><tr><td class="bp-table__td"><span>Papers / data / search</span></td><td class="bp-table__td"><span>DATASET</span></td><td class="bp-table__td"><span>The selected dataset scopes reads; the scope object carries all levels and each tab consumes the level it needs</span></td></tr></tbody></table><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">09 · Contradictions and resolutions</p><h2>Eleven rulings — where the lanes disagreed, and how the crown decides</h2><p>The lanes were cut to disagree — each argued its decision from its own evidence, and the capstone owns the collisions. Every ruling below names its rivals honestly; three are left genuinely open for the user and say so.</p><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>#</span></th><th class="bp-table__th"><span>The fork (who disagreed)</span></th><th class="bp-table__th"><span>Ruling</span></th><th class="bp-table__th"><span>Why</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>1</span></td><td class="bp-table__td"><span>App-token permission set: [read,write,chat] (identity-cascade) vs [read,chat] minimal (product-shapes, tasks-papers-reading)</span></td><td class="bp-table__td"><span>[read, write, chat]</span></td><td class="bp-table__td"><span>Write guards exactly one thing the app wants — creating tasks/docs via /v1/data/mutate. An app NAMED Barkpark Tasks that cannot file a task is a viewer; quick capture arrives in v1.5 without token migration. The blast radius is bounded (tenancy-scoped mutate), and paper editing is NOT covered by write anyway — the ingest wall makes over-granting for editing impossible. Least-privilege [read,chat] remains the documented fallback if the user prefers it.</span></td></tr><tr><td class="bp-table__td"><span>2</span></td><td class="bp-table__td"><span>Chat transcript rendering: native RN from source_markdown (shell-and-cache) vs persisted blocks through the shared renderer (chat-third-client, product-shapes)</span></td><td class="bp-table__td"><span>Both — native list, block-fed components</span></td><td class="bp-table__td"><span>The fork dissolves once medium and data source are separated. The MEDIUM is native: a virtualized RN list — per-row WebViews cannot deliver keyboard avoidance, 60 fps scroll, selection, haptics. The DATA is blocks: assistant prose renders natively from source_markdown, and the six structured families (tool-diff, todo, thinking, approval, question, plan) render as six small native components decoding their persisted block JSON — for tool rows, source_markdown is NOT the rich form. Drift is bounded: 6 families, each with an existing golden to parity-test against. Papers keep the WebView precisely because their surface is 82 types, not 6.</span></td></tr><tr><td class="bp-table__td"><span>3</span></td><td class="bp-table__td"><span>Push timing: v1 (product-shapes) vs ‘not optional for excellence’ (chat-third-client) vs ‘the strongest RN-only argument, decide early’ (shell-and-cache)</span></td><td class="bp-table__td"><span>Push IN v1, as a Cloud relay — severable</span></td><td class="bp-table__td"><span>Three lanes converged on the lock-screen approval as the app&#39;s reason to exist; deferring it ships an app without its killer moment. Cloud-held APNs/FCM identity relaying off the chat_blocked webhook keeps every instance untouched. Architected severable: if the relay slips, v1 ships as the Minimal and push is v1.1.</span></td></tr><tr><td class="bp-table__td"><span>4</span></td><td class="bp-table__td"><span>Paper editing vs the token design (identity-cascade flagged the contradiction; tasks-papers-reading proved the wall; shell-and-cache sketched two doors)</span></td><td class="bp-table__td"><span>v1 read-only; the per-user :write seam declared now, built as the v2 opener</span></td><td class="bp-table__td"><span>An app token can NEVER edit papers under today&#39;s pipelines — promising editing without the seam would ship a lie. The seam is small (Tenancy.Auth.authorize/3 branch on the ops route) and the client is prose-only patch-block, never a Studio-parity canvas. Door B (a WebView hosting the LiveView editor) is rejected: it couples to browser-session auth the app deliberately does not hold.</span></td></tr><tr><td class="bp-table__td"><span>5</span></td><td class="bp-table__td"><span>Tenancy depth per tab (identity-cascade and chat-third-client both flagged; tasks lane owns the task side)</span></td><td class="bp-table__td"><span>The cascade is a navigation spine, not an authorization spine</span></td><td class="bp-table__td"><span>Chat pins at workspace, tasks stay flat host-root for v1, papers scope by dataset. The app&#39;s scope object carries all levels; each tab consumes the level it needs. One cascade UI, three effective scopes — a design law, not a bug.</span></td></tr><tr><td class="bp-table__td"><span>6</span></td><td class="bp-table__td"><span>Token topology: per (user, server, workspace) mint-on-switch vs one broader token; one token vs two (chat lane&#39;s option table)</span></td><td class="bp-table__td"><span>One token per (user, server, workspace), mint-on-switch, cached</span></td><td class="bp-table__td"><span>Chat&#39;s owner_workspace_id = token.workspace_id forces workspace binding; the rival needs a chat-scope relaxation nobody has designed. One [read,write,chat] token serves all three tabs — RequireChatAccess already honors a workspace token whose permissions include chat, so the two-token split the chat lane hedged on is unnecessary. Sprawl is managed by an app-token list/revoke surface mirroring Cloud&#39;s /v1/account/sessions.</span></td></tr><tr><td class="bp-table__td"><span>7</span></td><td class="bp-table__td"><span>Paper render source: persisted body_html (tasks-papers-reading) vs client-rendered blocks JSON (shell-and-cache)</span></td><td class="bp-table__td"><span>Cache blocks JSON, render locally via renderPortableDocument()</span></td><td class="bp-table__td"><span>Same bytes by the parity proof, but the blocks cache decouples the reader from server render-version staleness (body_html is render-version-stamped and renderer changes have historically 422d stale papers), works fully offline, and is the substrate the native prose path and v2 editing both build on. body_html remains the spike-time shortcut and the degrade path.</span></td></tr><tr><td class="bp-table__td"><span>8</span></td><td class="bp-table__td"><span>App placement: apps/mobile at repo root vs js/apps/mobile (shell lane leaned, left open)</span></td><td class="bp-table__td"><span>apps/mobile at the repo root</span></td><td class="bp-table__td"><span>An app is not a package: the pnpm/changesets/size-budget regime in js/ was built for published npm artifacts, and EAS build metadata sits awkwardly there. apps/mobile keeps CI shape independent while consuming @barkpark/core and @barkpark/react as ordinary workspace deps. CI gets a new mobile lane.</span></td></tr><tr><td class="bp-table__td"><span>9</span></td><td class="bp-table__td"><span>Home surface: three tabs + badges vs needs-you inbox as home vs chat-as-home (product lane left open)</span></td><td class="bp-table__td"><span>Three tabs with a needs-you badge count in v1; the inbox may graduate to home in v1.5</span></td><td class="bp-table__td"><span>No existing surface has designed a cross-surface inbox, so it has no prior art to port — v1 should not pioneer its hardest UI question. Usage data from the badge decides the graduation. OPEN for the user to overrule — this is taste, and the evidence is neutral.</span></td></tr><tr><td class="bp-table__td"><span>10</span></td><td class="bp-table__td"><span>The v1 task-verb line: pure read (product lane) vs read + triage (tasks lane sweet spot)</span></td><td class="bp-table__td"><span>Read + fence-free human triage in v1; agent-grade verbs in the v1.5 work mode</span></td><td class="bp-table__td"><span>The server itself splits the grammar: stage/relabel/move/papers-link carry no epoch fence (“thought is not contended work”, tasks_controller.ex ~590-655) — triage costs no lease honesty and makes the app useful beyond reading on day one. Claim/close drag worker identity, epoch-fencing UX, and the 2,700 s lease a backgrounded phone violates — real design work, done once, in v1.5.</span></td></tr><tr><td class="bp-table__td"><span>11</span></td><td class="bp-table__td"><span>Chat richness bar: TUI-grade + upgrades vs Studio-grade live richness (chat lane recommended, left the bar to the user)</span></td><td class="bp-table__td"><span>TUI-grade + three cheap upgrades (context ring, compaction notice, thinking shimmer)</span></td><td class="bp-table__td"><span>The TUI proves the smaller set already feels excellent in a constrained medium, and the three upgrades cost zero server work. Studio-grade richness is the v3 horizon with the Maximal. OPEN for the user to raise — it fixes the client&#39;s parser budget.</span></td></tr></tbody></table><div class="bp-callout bp-callout--info"><strong>Stale-premise corrections the crown inherits and re-asserts</strong> <span>Facts several lanes initially believed and evidence killed — recorded so the epic never resurrects them: the ‘18 unstyled block families’ gap is CLOSED on origin/main (PR #5651 + coverage gate #5656 — the local checkout was stale); /papers/barkpark-cloud-goal does not exist — the ‘auth tunnel / five credential gates’ framing is session-memory folklore, and the binding prior art is the bp-login-ux charter; the chat charter&#39;s require_admin prose is stale — the live pipeline is require_chat_access (quote the code, not the charter); TASK-SYSTEM.md says sixteen task routes — the plugin registers 17; and fields= is server-honored but manifest-undeclared on search.query. Build waves must anchor to origin/main via git show, never the dirty working tree — two lanes lost premises to exactly that.</span></div><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">10 · Files likely to change</p><h2>The consolidated picture — merged across lanes, deduplicated</h2><p>The dominant fact survives consolidation: v1 is overwhelmingly a NEW client plus a handful of small, named server seams. Nothing in the existing surfaces restructures. Rows are grouped by plane and ordered by certainty; ‘conditional’ rows name the ruling that activates them.</p><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Path</span></th><th class="bp-table__th"><span>Why it changes</span></th><th class="bp-table__th"><span>Blast radius</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>apps/mobile/** (NEW — the entire Expo app)</span></td><td class="bp-table__td"><span>Cascade + login, three tabs, search, MMKV/SQLite cache, chat reducer (transliterate reduce.go + herd.go WITH the title-frame fold herd.go itself is missing), six native chat-block components, WebView reader host, push registration</span></td><td class="bp-table__td"><span>Greenfield — zero existing-surface blast; CI needs a new mobile lane (EAS build gate)</span></td></tr><tr><td class="bp-table__td"><span>cloud/lib/barkpark_cloud/web/router.ex</span></td><td class="bp-table__td"><span>NEW POST /v1/barkparks/:id/app-token (session-authed, team-scoped, next to studio-link ~1886); the lines 1-145 doc-comment index must stay truthful</span></td><td class="bp-table__td"><span>Additive route in a very large hot file</span></td></tr><tr><td class="bp-table__td"><span>cloud/lib/barkpark_cloud/registry.ex</span></td><td class="bp-table__td"><span>mint_app_token — the JSON-bearer sibling of mint_studio_link: decrypt stored admin token, call the instance, never return the admin token; mirror the credentials 404 no_admin_token leg</span></td><td class="bp-table__td"><span>Control-plane auth surface — highest-care change of the epic</span></td></tr><tr><td class="bp-table__td"><span>api/lib/barkpark_web/controllers/app_token_controller.ex (NEW)</span></td><td class="bp-table__td"><span>POST /v1/auth/app-tokens: JIT-provision by email (Sso.find_or_create_user) + MEMBER grant (create_membership/4) + mint workspace-bound [read,write,chat] token with expires_at</span></td><td class="bp-table__td"><span>New file; the security-review hot spot; needs cross-tenant negative tests (D19a pattern)</span></td></tr><tr><td class="bp-table__td"><span>api/lib/barkpark/auth.ex</span></td><td class="bp-table__td"><span>create_app_token mint path — do NOT widen create_chat_token (D48 keeps [chat] hardcoded)</span></td><td class="bp-table__td"><span>Core auth module; additive function; verify_token untouched</span></td></tr><tr><td class="bp-table__td"><span>api/lib/barkpark_web/router.ex</span></td><td class="bp-table__td"><span>Mount the app-token route + push-token registration; later archive/unarchive, /answer, and the v2 per-user ops route</span></td><td class="bp-table__td"><span>Additive scopes; mind the line-keyed .sobelow-skips trap</span></td></tr><tr><td class="bp-table__td"><span>cloud/lib/barkpark_cloud/workers/ (NEW worker)</span></td><td class="bp-table__td"><span>The push relay: APNs/FCM identity + device-token registry, fed by the instance&#39;s chat_blocked webhook</span></td><td class="bp-table__td"><span>New subsystem — the largest hidden server cost; isolated behind one worker; severable from v1</span></td></tr><tr><td class="bp-table__td"><span>cloud/.../device_auth/rate_limiter.ex + Caddy peer-IP forwarding</span></td><td class="bp-table__td"><span>Fix the global start:&lt;ip&gt; bucket (cch-w1-peer-ip-pin) — hard prerequisite of wide rollout</span></td><td class="bp-table__td"><span>Prod ingress config + limiter keying</span></td></tr><tr><td class="bp-table__td"><span>api/lib/barkpark/plugins/capabilities.ex</span></td><td class="bp-table__td"><span>D36 fix: tier_for_token/1 learns the chat permission (lines 167-178) so a chat-carrying token can discover its own noun; declare fields= on search.query (server already honors it)</span></td><td class="bp-table__td"><span>Hot connectors surface, charter-gated; flips the intentional pin at capabilities_manifest_test.exs:796-830; mandates openapi regen</span></td></tr><tr><td class="bp-table__td"><span>api/lib/barkpark_web/controllers/chat_controller.ex</span></td><td class="bp-table__td"><span>Split the collapsed 503 into distinct reason codes (host_offline / host_not_found / provider_not_ready); optional /answer validation in v1.5</span></td><td class="bp-table__td"><span>Medium — the single most contract-bearing chat file; its moduledoc IS the contract</span></td></tr><tr><td class="bp-table__td"><span>api/lib/barkpark/tenancy.ex</span></td><td class="bp-table__td"><span>Optional 2-line production-first dataset ordering (parity with the projects default-first hint)</span></td><td class="bp-table__td"><span>Trivial; every dataset picker benefits</span></td></tr><tr><td class="bp-table__td"><span>internal/cloudclient/client.go + internal/cli/setup_cloud_login.go</span></td><td class="bp-table__td"><span>AppToken exchange client method (CLI parity = the reference implementation for mobile); members stop dead-ending at LoggedInOnly (179-184) — a ratified-charter behavior change needing a charter decision, not a silent edit</span></td><td class="bp-table__td"><span>Additive client method; the login change is charter-gated</span></td></tr><tr><td class="bp-table__td"><span>internal/chat/herd.go</span></td><td class="bp-table__td"><span>Add the missing title-frame fold (co-benefit fix for the TUI — titles currently go stale on an open list)</span></td><td class="bp-table__td"><span>Tiny; pure reducer + test</span></td></tr><tr><td class="bp-table__td"><span>api/lib/barkpark_web/plugs/require_ingest_token.ex (+ router)</span></td><td class="bp-table__td"><span>CONDITIONAL on ruling 4 (v2): the per-user :write branch via Tenancy.Auth.authorize/3 on the paper ops route</span></td><td class="bp-table__td"><span>Auth-boundary change on the hot ingest path; guard decoupled from fixes per the guard+fix co-merge lesson; cross-tenant negative tests</span></td></tr><tr><td class="bp-table__td"><span>api/lib/barkpark/tasks/query.ex + tasks_controller.ex</span></td><td class="bp-table__td"><span>CONDITIONAL: recency keyset cursor over (updated_at, id) — only if prime + events proves insufficient</span></td><td class="bp-table__td"><span>Medium — new response envelope on a heavily-used endpoint; TUI unaffected</span></td></tr><tr><td class="bp-table__td"><span>js/packages/react/src/blocks/**</span></td><td class="bp-table__td"><span>CONDITIONAL on the corpus census: port the 15 missing field-family emitters; the CI count pin (66) moves</span></td><td class="bp-table__td"><span>Low — additive emitters + parity goldens in lockstep</span></td></tr><tr><td class="bp-table__td"><span>js/packages/core/</span></td><td class="bp-table__td"><span>Goal: ZERO source change; a documented RN entry recipe + .size-limit.json reconciliation (dist/ currently measures over its own budget — check whether the js gate is red on main before building on it)</span></td><td class="bp-table__td"><span>Any real change ripples to every SDK consumer</span></td></tr><tr><td class="bp-table__td"><span>api/lib/barkpark/media/storage/access.ex + render/compose.ex</span></td><td class="bp-table__td"><span>CONDITIONAL: render-time signed src (or reader signed-URL mint) the day non-public media must render on mobile</span></td><td class="bp-table__td"><span>Shared media path — the studio_chat leak-class history says tread carefully</span></td></tr><tr><td class="bp-table__td"><span>docs/auth.md · docs/setup/TASK-SYSTEM.md · docs/cards/*</span></td><td class="bp-table__td"><span>App-token mint flow + permission row; the 17-route correction + the pagination doctrine; the fourth client documented — the 7-card cap means mobile facts merge into existing owners, never a new card</span></td><td class="bp-table__td"><span>Doc-budget CI enforced</span></td></tr></tbody></table><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">11 · Risks, unknowns, judgment calls</p><h2>What could hurt, what we don&#39;t know, what only the user can decide</h2><div class="bp-callout bp-callout--warning"><strong>Held risks — accepted into the recommendation, with mitigations</strong> <span>(1) Push in v1 makes the first release depend on the one genuinely new backend build — mitigated by severability: v1 degrades to the Minimal and push becomes v1.1. (2) The WebView long-paper spike is a hard day-1 gate; its failure mode (native prose fast-path promoted to v1) roughly doubles renderer cost — budgeted as the plan&#39;s biggest cost fork, not discovered mid-epic. (3) The workspace chat token has NEVER had a first-party interactive client — the phone is its maiden voyage; wave 1 includes a scripted end-to-end smoke (mint → list → create → send → approve → resume) as a pure minted token against guerrilla. (4) The global device-start rate bucket would let a popular app DoS its own login fleet-wide — cch-w1-peer-ip-pin is scheduled in wave 1, not hoped about. (5) Mid-turn host loss means up to 30 minutes of silence — v1 ships the client turn timeout; the 503 reason-split is filed server work. (6) Chat-tab dead-on-arrival on servers without a managed runtime — the onboarding empty state is in v1 scope. (7) Token sprawl from per-workspace minting — managed by the app-token list/revoke surface. (8) Version skew: old or self-hosted instances lack the mint endpoint — capability detection + manual token paste everywhere, exactly as the CLI does. (9) find_or_create_user has a get-then-insert race under concurrent first logins — close with an upsert while in the file. (10) Expo SDK churn (the 56/57 ‘current’ discrepancy was unresolved at run time) — pin at epic start, budget one upgrade per quarter; external-physics citations (iOS PWA policy, App Store guidelines) re-verified at epic start, since policies move.</span></div><p>Known unknowns, named: corpus prevalence of the 15 JS-missing field-family types in production papers (one cheap query decides emitter-port vs placeholder); whether any production papers carry non-public media today (decides the signed-src urgency); the true @barkpark/react per-import bundle number (run pnpm size at epic start); body_html staleness policy for cached readers (no policy exists anywhere today — the blocks-JSON ruling sidesteps it for rendering but the refetch rule still needs writing); and the task dossier&#39;s purpose composite field evolving in a concurrent session — mobile renders dossier fields from schema/capabilities introspection, never hardcoding.</p><div class="bp-callout bp-callout--danger"><strong>Judgment calls left explicitly to the user</strong> <span>(1) RATIFY push-in-v1 — this report recommends yes; it is the one break in ‘new client only’ purity, and it is severable. (2) The token permission set — [read,write,chat] recommended (ruling 1); [read,chat] if you prefer least-privilege and accept re-minting when creation ships. (3) Home surface — three tabs + badges recommended for v1; overrule toward the needs-you inbox or chat-as-home if your taste differs, the evidence is neutral. (4) The chat excellence bar — TUI-grade + three upgrades recommended; raising it toward Studio-grade moves real client budget. (5) Whether the dataset level appears as a real cascade screen or lives only inside a scope switcher — auto-select hides it 99% of the time either way. (6) The editing schedule — the v2 seam is declared; pull it earlier only with eyes open about the auth boundary. (7) Whether to build the admin-token attach/rotate verb this epic (fixes the permanently-stuck no_admin_token instance class) or accept destructive re-adoption for now.</span></div><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">12 · The recommendation and the first wave</p><h2>Go — and what wave 1 takes if it goes</h2><p>The epic is founded the moment the user ratifies the rulings above. It should run as an epic cycle (epics always via bp-epic-cycle), and its first wave is chosen so that every subsequent wave builds on proven ground: the two highest-risk unknowns (the credential seam and the WebView spike) are retired first, the one prerequisite fix lands, and the skeleton exists to hang everything else on. A considering-state epic candidate is already filed on the ledger — the live view below tracks the funnel from this paper.</p><div class="bp-note"><span class="bp-note__k">W1·1</span><div class="bp-note__d"><b>The token exchange, end to end.</b> Cloud POST /v1/barkparks/:id/app-token + instance POST /v1/auth/app-tokens (JIT MEMBER, workspace-bound [read,write,chat], expires_at) + the app-token list/revoke surface — proven by a scripted smoke running mint → cascade walk → tasks prime → paper read → chat send/approve/resume as the minted token against guerrilla. This is the epic&#39;s security hot spot; it gets the cross-tenant negative tests and the security review.</div></div><div class="bp-note"><span class="bp-note__k">W1·2</span><div class="bp-note__d"><b>The WebView spike on real Android hardware.</b> Cold-load + frame budget on a ~100-block paper with the real 80 KB stylesheet, memory with 3-4 warm WebViews, inline vs file/baseUrl delta. Pass → the renderer bet hardens as ruled. Fail → the native prose fast-path promotes to v1 and the renderer budget re-plans BEFORE screens are built against the wrong bet.</div></div><div class="bp-note"><span class="bp-note__k">W1·3</span><div class="bp-note__d"><b>The Expo skeleton.</b> apps/mobile with the device flow + cascade + auto-select + MRU memory (port of setup_cloud_login.go + config.go semantics), MMKV/SQLite cache layer, @barkpark/core wired through expoFetch with the two polyfills, three stub tabs painting from cache, CI mobile lane. The skeleton is the proof the shell bet composes.</div></div><div class="bp-note"><span class="bp-note__k">W1·4</span><div class="bp-note__d"><b>The rate-limit prerequisite.</b> cch-w1-peer-ip-pin: real peer-IP keying for the device-start bucket (limiter + Caddy forwarding). Without it, a wide rollout DoSes its own front door.</div></div><div class="bp-note"><span class="bp-note__k">W1·5</span><div class="bp-note__d"><b>The push-relay design decision.</b> The Cloud APNs/FCM relay worker + device-token registry, keyed off the chat_blocked webhook — designed and spiked in wave 1, built in wave 2, severable throughout. Deep link lands on the transcript&#39;s approval card.</div></div><div class="bp-note"><span class="bp-note__k">W1·6</span><div class="bp-note__d"><b>The small unblocks.</b> D36: tier_for_token learns chat (+ flip the test pin) so the manifest-driven client can discover its own noun; declare fields= on search.query; the 2-line production-first dataset ordering; the herd.go title-frame fold; file the 503 reason-split and the /answer adoption as v1.5 tickets.</div></div><div class="bp-tasks bp-tasks--empty">No tasks yet.</div><p>Done, for the epic&#39;s founding wave, means: a plain team member on a phone-shaped client logs in through Cloud, lands in the right dataset without choosing anything they didn&#39;t have to, and reads live tasks, chats with a live session, and reads a real paper — all as themselves, on a token no admin had to hand them. Everything after that is excellence work on a proven spine.</p><div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)"><span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div><p class="bp-role-eyebrow">13 · The paper stack</p><h2>This report and its five supporting lanes</h2><p>This crown report stands on five lane papers, published and live. Read this paper for the whole story; descend into a lane only when you want that lane&#39;s full depth — each carries its own coverage appendix with the checked-and-NOT-found absences that this report compresses.</p><table role="presentation" class="bp-table"><thead><tr><th class="bp-table__th"><span>Paper (slug)</span></th><th class="bp-table__th"><span>Descend for</span></th></tr></thead><tbody><tr><td class="bp-table__td"><span>barkpark-tasks-mobile-product-shapes</span></td><td class="bp-table__td"><span>The three shapes at screen-by-endpoint depth; the fourteen storm probes and corrected premises; the full minimal-shape screen table</span></td></tr><tr><td class="bp-table__td"><span>barkpark-tasks-mobile-identity-cascade</span></td><td class="bp-table__td"><span>The device-flow client contract leg by leg; the complete credential-flow map with every dead end; the JIT machinery census; the design-fork table for the exchange</span></td></tr><tr><td class="bp-table__td"><span>barkpark-tasks-mobile-shell-and-cache</span></td><td class="bp-table__td"><span>The four-shell scorecard in full; the renderer matrix methodology; the streaming-endpoint specification table; the external-physics citations (iOS PWA, App Store, WebView issue base)</span></td></tr><tr><td class="bp-table__td"><span>barkpark-tasks-mobile-chat-third-client</span></td><td class="bp-table__td"><span>The /v1/chat contract endpoint by endpoint; the SSE grammar for both streams; the failure matrix with anchors; the nine LiveView-only surfaces with per-surface rulings; the credential option table</span></td></tr><tr><td class="bp-table__td"><span>barkpark-tasks-mobile-tasks-papers-reading</span></td><td class="bp-table__td"><span>The 17-route task census; the prime/events sync spine mechanics; the pagination truth in detail; the block-ops editing inventory; the payload measurement tables</span></td></tr></tbody></table><div class="bp-callout bp-callout--info"><strong>Provenance and method</strong> <span>Produced by the 2026-07-23 Barkpark Tasks deep-investigation run: five lanes over origin/main and the bp corpus, hardened by ~40 storm probes, with live measurements against guerrilla (chat 200s, search latency, payload medians). Facts carry file:line anchors on origin/main; the dirty local checkout was never trusted over git show — two lane premises died to exactly that discipline, and their corrections are recorded in ruling annex §09. The repo was read-only throughout; the only writes this run made are the six papers and one considering-state epic candidate (task-c31a4f0a6c5be3ea, label barkpark-tasks-mobile). Interview answers are senior to any inference; where a lane and the interview touched the same fact, the interview won.</span></div><p class="bp-role-pullquote" style="font-style:italic">The front door is built, the hallways are lit, and the renderer already speaks every language the app needs. The epic installs one lock that fits a member&#39;s key, wires one bell that rings when your agents need you — and ships the fourth client of a system that was accidentally built for it.</p>
+</div>
+</body>
+</html>

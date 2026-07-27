@@ -646,12 +646,62 @@ func (r *supportAddRun) stepDataset() (int, bool) {
 			exitGeneric)
 	}
 
+	// ws=="default" is the ONE slug whose import target is PRE-POLLUTED: the
+	// warm image's baked Postgres carries the seed lineage's docs forward
+	// (bake-server-image.sh snapshots the data dir), so the box's own "default"
+	// flunks the merge engine's fail-closed empty-shell proof (PDS-D9) and the
+	// import 409s workspace_slug_conflict. Reset: delete the seeded workspace
+	// (absent → no-op), then re-mint the box admin token the delete cascaded
+	// (api_tokens.workspace_id :delete_all; the mint's ensure_default_scope
+	// also recreates the empty default scope). Same latent bug as the worker
+	// chain — a laptop-added support serving a template-less main hits it too.
+	resetDefault := r.ws == cloud.SupportDefaultWorkspaceSlug
+	if resetDefault {
+		r.state("dataset", "resetting the box's seeded default workspace to an empty import target")
+		if err := r.runner.Run(supportCtx(), cloud.SupportResetDefaultWorkspaceStep()); err != nil {
+			return r.fail("dataset", "default-workspace reset on the box failed: "+err.Error(),
+				fmt.Sprintf("box %s bound at %s; bundle staged but not imported", r.host.Name, r.host.IP),
+				fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
+				exitGeneric)
+		}
+		r.state("dataset", "re-minting the box admin token (the reset delete cascaded it)")
+		if err := r.runner.Run(supportCtx(), cloud.SupportAdminTokenStep(r.secrets.AdminToken)); err != nil {
+			return r.fail("dataset", "admin-token re-mint after reset failed: "+err.Error(),
+				fmt.Sprintf("box %s bound at %s; default workspace reset but the box holds NO admin token", r.host.Name, r.host.IP),
+				fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
+				exitGeneric)
+		}
+	}
+
+	r.state("dataset", fmt.Sprintf("ensuring workspace %q exists on the box (already-exists is fine)", r.ws))
+	if err := r.runner.Run(supportCtx(), supportEnsureWorkspaceStep(r.ws, r.secrets.AdminToken)); err != nil {
+		return r.fail("dataset", "workspace ensure on the box failed: "+err.Error(),
+			fmt.Sprintf("box %s bound at %s; bundle staged but not imported", r.host.Name, r.host.IP),
+			fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
+			exitGeneric)
+	}
+
 	r.state("dataset", fmt.Sprintf("merge-importing %s into the box's local workspace %q", r.dataset, r.ws))
 	if err := r.runner.Run(supportCtx(), supportImportStep(r.ws, r.secrets.AdminToken)); err != nil {
 		return r.fail("dataset", "on-box import failed: "+err.Error(),
 			fmt.Sprintf("box %s bound at %s; bundle staged at /opt/barkpark-fleet/dataset.tar but not imported", r.host.Name, r.host.IP),
 			fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
 			exitGeneric)
+	}
+
+	if resetDefault {
+		// The import's adopt branch deleted the empty "default" shell
+		// IN-TRANSACTION (PDS-D9), cascading the token minted above a SECOND
+		// time. Restore it so the credential this chain reported to the CP at
+		// bind stays live; ensure_default_scope now resolves slug "default" to
+		// the IMPORTED workspace, scoping the token to the content it governs.
+		r.state("dataset", "restoring the box admin token (the import's adopt-delete cascaded it)")
+		if err := r.runner.Run(supportCtx(), cloud.SupportAdminTokenStep(r.secrets.AdminToken)); err != nil {
+			return r.fail("dataset", "admin-token restore after import failed: "+err.Error(),
+				fmt.Sprintf("box %s bound at %s; dataset imported but the box holds NO admin token", r.host.Name, r.host.IP),
+				fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
+				exitGeneric)
+		}
 	}
 	r.done("dataset", fmt.Sprintf("scrubbed %s/%s merged into the box", r.ws, r.dataset))
 	return exitOK, false
@@ -1344,18 +1394,46 @@ sh /opt/barkpark/scripts/install-cli.sh`
 	}
 }
 
-// supportImportStep merge-imports the staged bundle into the box's OWN
-// localhost API with the box's minted admin token (BP_TOK env — Argv only,
-// redacted; never in the narrated Title/Cmd).
-func supportImportStep(ws, adminToken string) cloud.CaddyStep {
-	script := `set -e; export BP_TOK='` + adminToken + `'; export PATH=/usr/local/bin:/usr/bin:$PATH
-bp -s http://localhost:4000 --token "$BP_TOK" cloud workspace import '` + ws + `' --file /opt/barkpark-fleet/dataset.tar --yes --merge`
+// supportEnsureWorkspaceStep creates the import's target workspace on the box
+// when it does not exist yet (task-2ba0270056e7da6e, mirrored from the worker
+// chain in internal/provisioner/support.go). A TEMPLATE-launched main's
+// bootstrap workspace slug exists on NO fresh box (only "default" is seeded),
+// and importing such a bundle live-failed box-side; pre-creating an empty
+// same-slug shell routes the merge-import through the live-proven PDS-D9
+// adopt branch (empty shell → delete → import). 409/422 (already exists) is
+// tolerated so a re-run converges. For ws=="default" this is a guaranteed 409
+// no-op — but only because stepDataset runs the reset bracket FIRST: the warm
+// image's baked Postgres carries seed docs, so the box's pre-existing
+// "default" was never the empty shell the old "byte-neutral" claim assumed
+// (three live 409s, 2026-07-26); the reset deletes it and the re-mint's
+// ensure_default_scope recreates it provably empty. ws is fenced by
+// supportSlugRe before any step builds.
+func supportEnsureWorkspaceStep(ws, adminToken string) cloud.CaddyStep {
+	script := `set -e; export BP_TOK='` + adminToken + `'
+code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://localhost:4000/api/workspaces \
+  -H "Authorization: Bearer $BP_TOK" -H 'Content-Type: application/json' \
+  --data '{"name":"` + ws + `","slug":"` + ws + `"}')
+case "$code" in
+  2*|409|422) exit 0 ;;
+  *) echo "workspace ensure: POST /api/workspaces answered HTTP $code" >&2; exit 1 ;;
+esac`
 	return cloud.CaddyStep{
-		Title:  "merge-import the scrubbed dataset bundle into the box (bp cloud workspace import --merge)",
-		Cmd:    "bp cloud workspace import " + ws + " --file /opt/barkpark-fleet/dataset.tar --yes --merge (token redacted)",
+		Title:  "ensure the target workspace '" + ws + "' exists on the box (POST /api/workspaces — already-exists is fine)",
+		Cmd:    "curl -X POST http://localhost:4000/api/workspaces {name/slug: " + ws + "} (token redacted)",
 		Argv:   []string{"bash", "-lc", script},
 		Redact: []string{adminToken},
 	}
+}
+
+// supportImportStep merge-imports the staged bundle into the box's OWN
+// localhost API with the box's minted admin token (BP_TOK env — Argv only,
+// redacted; never in the narrated Title/Cmd). Delegates to the ONE shared
+// builder (cloud.SupportMergeImportStep) so this chain and the worker chain
+// cannot drift, and so the on-box failure carries its evidence (bp's error
+// body + the box's barkpark journal tail — task-63a199c0a0ce2a06 fired blind
+// without them).
+func supportImportStep(ws, adminToken string) cloud.CaddyStep {
+	return cloud.SupportMergeImportStep(ws, adminToken)
 }
 
 // supportFleetFilesStep writes the fleet runtime from origin/main CONTENT:

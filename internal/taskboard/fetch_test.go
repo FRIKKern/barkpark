@@ -1,6 +1,7 @@
 package taskboard
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -160,6 +161,36 @@ func TestFetchSnapshot_ListError(t *testing.T) {
 	}
 }
 
+// TestFetchSnapshot_CorpusPastManifestCap — the 2026-07-24 incident: the
+// guerrilla corpus crossed apiclient's 8 MiB manifest cap and the board went
+// dark. The board's fetch now carries its own maxBoardFetchBytes bound, so a
+// list body past 8 MiB (padded with trailing whitespace, which json.Unmarshal
+// tolerates) must decode fine.
+func TestFetchSnapshot_CorpusPastManifestCap(t *testing.T) {
+	listBody, primeBody := fixtureParts(t)
+	pad := bytes.Repeat([]byte(" "), (9<<20)-len(listBody)) // total > 8 MiB
+	bigList := append(append([]byte{}, listBody...), pad...)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/tasks":
+			_, _ = w.Write(bigList)
+		case "/v1/tasks/prime":
+			_, _ = w.Write(primeBody)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	snap, err := FetchSnapshot(newClient(srv.URL))
+	if err != nil {
+		t.Fatalf("a corpus past the 8 MiB manifest cap must fetch under the board's own bound, got: %v", err)
+	}
+	if len(snap.Tasks) == 0 {
+		t.Fatal("padded corpus decoded to zero tasks")
+	}
+}
+
 func TestFetchSnapshot_PrimeError(t *testing.T) {
 	srv := fixtureServer(t, http.StatusOK, http.StatusInternalServerError)
 	defer srv.Close()
@@ -171,6 +202,27 @@ func TestFetchSnapshot_PrimeError(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("prime error %q should contain %q", err, want)
 		}
+	}
+}
+
+// The live corpus crossed the capabilities manifest's unrelated 8 MiB ceiling
+// in July 2026. Pin the taskboard seam itself so it cannot silently drift back
+// to Client.GetConditional and reproduce the permanent offline state.
+func TestGetJSONAcceptsTaskSnapshotAboveManifestLimit(t *testing.T) {
+	const payloadBytes = (8 << 20) + 1
+	body := strings.Repeat(" ", payloadBytes)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	got, err := getJSON(newClient(srv.URL), "/v1/tasks?limit=1000")
+	if err != nil {
+		t.Fatalf("task snapshot above 8 MiB was rejected: %v", err)
+	}
+	if len(got) != payloadBytes {
+		t.Fatalf("task snapshot bytes = %d, want %d", len(got), payloadBytes)
 	}
 }
 

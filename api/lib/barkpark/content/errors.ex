@@ -109,6 +109,20 @@ defmodule Barkpark.Content.Errors do
                          "missing_source",
                          "source_not_found",
                          "constraint",
+                         # Session-handoff (tasks 3-4) — the session legs of the
+                         # SAME controller. `missing_slug` (422, an upsert body
+                         # with no slug), `invalid_kind` (422, an event kind
+                         # outside `Content.Sessions.event_kinds/0` — the
+                         # envelope carries the allowed list) and
+                         # `conflict_retry` (409, the append-only trail's
+                         # CAS-on-rev lost a race; the caller retries the
+                         # append, nothing was written). Registered rather than
+                         # folded into the canonical `malformed`/`conflict`
+                         # because each names a distinct, actionable condition
+                         # the neighbours above already set the precedent for.
+                         "missing_slug",
+                         "invalid_kind",
+                         "conflict_retry",
                          # Sheets ops API — plugins/sheets/web/ops_controller.ex
                          "malformed_ops",
                          "batch_too_large",
@@ -131,9 +145,33 @@ defmodule Barkpark.Content.Errors do
                          "bundle_import_disabled",
                          "invalid_mode",
                          "workspace_slug_conflict",
+                         # A bundle row colliding with resident target content on
+                         # a constraint the merge arbiter does not cover (any
+                         # non-PK unique index) — 409 naming constraint + table
+                         # (task-63a199c0a0ce2a06; used to escape as a blind 500).
+                         "import_constraint_violation",
+                         # The import engine returned an {:error, term} no
+                         # clause names — a logged, NAMED 500 whose message
+                         # carries the term, replacing the silent internal_error
+                         # the round-3 live fire died on (task-96d8ab2b582818a4).
+                         "import_failed",
                          # Workspace bundle EXPORT (PDS W3) — v1/workspace_controller.ex:
                          # the export stream failed or timed out before the tar completed.
-                         "export_failed"
+                         "export_failed",
+                         # Chat transport send/create failures (chat_controller.ex,
+                         # charter D26 reason split — mobile/TUI clients branch on
+                         # these: 5xx → transient retry, 4xx → refused/permanent).
+                         # 503 + Retry-After: the managed runtime pool is full.
+                         "runtime_capacity",
+                         # 503: the runtime is not there right now (dead process,
+                         # closed port, runtime-gone) — retryable.
+                         "runtime_unavailable",
+                         # 422: the provider/operation combination can never
+                         # succeed as asked — permanent, do not retry.
+                         "chat_unsupported",
+                         # 503: creating the session row/spawn failed — a store
+                         # defect distinct from runtime availability.
+                         "chat_create_failed"
                        ])
 
   def to_envelope(reason), do: to_envelope(reason, nil)

@@ -29,7 +29,21 @@ defmodule Barkpark.Search.LightSelectTest do
   defp setup_scope do
     ws = create_workspace!()
     proj = create_project!(ws)
-    [workspace_id: ws.id, project_id: proj.id]
+    scope = [workspace_id: ws.id, project_id: proj.id]
+
+    # W10 schema-visibility gate: anonymous searches (no caller_context) are
+    # restricted to PUBLIC schema types — seed the types under test as public
+    # so the light/full select parity runs over admitted types.
+    for type <- ~w(post paper) do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => type, "title" => type, "visibility" => "public"},
+          @ds,
+          scope
+        )
+    end
+
+    scope
   end
 
   defp uid, do: "doc-#{System.unique_integer([:positive])}"

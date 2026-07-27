@@ -38,9 +38,13 @@ func runVersion(out *writer, g globals) int {
 	return exitOK
 }
 
-// runCapabilities prints the resolved manifest. With -o json it prints the
-// manifest JSON; otherwise a human summary (server identity, caller tier, and
-// the noun/verb tree). This is a CLI built-in, NOT a manifest command.
+// runCapabilities prints the resolved manifest. Machine output (-o json/yaml)
+// is BORN BRIEF: it renders the invoke-complete BRIEF-KEEP-LIST v1 projection
+// (capsbrief.go) unless --full asks for the complete server document — the
+// existing AXI opt-out predicate (machineOut && !g.full), so --full stays
+// byte-identical to the pre-brief output. The human summary (-o table /
+// minimal) is untouched. This is a CLI built-in, NOT a manifest command; the
+// fetch/cache path always carries the FULL manifest — only the print projects.
 func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 	m, err := loadManifest(g, ctx)
 	if err != nil {
@@ -48,12 +52,19 @@ func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 		return exitGeneric
 	}
 
+	// The machine payload: the brief projection by default, the full manifest
+	// under --full. Chosen once so json and yaml can never disagree.
+	var machine any = m
+	if out.machineOut() && !g.full {
+		machine = briefManifest(m)
+	}
+
 	switch out.output {
 	case "json":
-		out.renderJSON(m)
+		out.renderJSON(machine)
 	case "yaml":
 		// Round-trip through JSON to a generic value for the YAML emitter.
-		b, _ := json.Marshal(m)
+		b, _ := json.Marshal(machine)
 		var v any
 		_ = json.Unmarshal(b, &v)
 		out.renderYAML(v)

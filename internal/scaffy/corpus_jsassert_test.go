@@ -116,11 +116,18 @@ func TestCorpusJSAssertClassification(t *testing.T) {
 	}
 
 	// Census pin (distrust vacuous green): today's corpus carries exactly
-	// 8 JS-touching asserts (2 self-priming `pnpm install`, 6 order-
+	// 11 JS-touching asserts (3 self-priming `pnpm install`, 8 order-
 	// dependent) and 2 node --test exempt. A corpus edit that adds or
 	// removes a JS-touching gate updates these on purpose.
-	if totalJS != 8 || totalSelfPriming != 2 || totalExempt != 2 {
-		t.Errorf("JS-assert census drift: got %d JS-touching / %d self-priming / %d exempt, want 8 / 2 / 2",
+	//
+	// +3 JS-touching / +1 self-priming on 2026-07-27: add-block-type's
+	// Surface 6 (apps/mobile) leg. It carries its OWN `pnpm install`
+	// because the repo has TWO independent pnpm workspaces — the root one
+	// (web, js/packages/*, apps/mobile) and js/'s own (packages/*, docs) —
+	// so the earlier `cd js && pnpm install` hydrates the wrong tree and
+	// primes nothing for the mobile gates.
+	if totalJS != 11 || totalSelfPriming != 3 || totalExempt != 2 {
+		t.Errorf("JS-assert census drift: got %d JS-touching / %d self-priming / %d exempt, want 11 / 3 / 2",
 			totalJS, totalSelfPriming, totalExempt)
 	}
 }

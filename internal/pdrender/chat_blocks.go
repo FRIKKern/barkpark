@@ -70,20 +70,23 @@ func (chatToolDiffRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 
 	// The diff body: one styled row per op-line, budget-capped with an honest
-	// overflow footnote for the folded tail.
+	// overflow footnote for the folded tail. The budget is DRAWABLE-ONLY on
+	// every surface (charter D40): a gap hunk-separator never spends budget,
+	// and never draws once the budget is spent — a rule introducing rows the
+	// fold already discarded would be chrome for nothing.
 	shown := 0
 	for _, ln := range lines {
 		lm, ok := ln.(map[string]any)
 		if !ok {
 			continue
 		}
+		if shown >= chatDiffBudget {
+			continue
+		}
 		op := attrStr(lm, "op")
 		text := sanitizeCodeText(attrStr(lm, "text"))
 		if op == "gap" {
 			out = append(out, ctxStyle.Render(strings.Repeat("─", clampWidth(w/3))))
-			continue
-		}
-		if shown >= chatDiffBudget {
 			continue
 		}
 		prefix, style := diffLineStyle(op, addStyle, delStyle, ctxStyle)

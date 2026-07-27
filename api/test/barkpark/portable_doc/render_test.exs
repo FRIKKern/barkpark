@@ -1482,11 +1482,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
-  # Article mode emits semantic <ul>/<ol>/<li> via PdList/PdListItem so the
-  # rendered paper is real HTML lists (a11y, copy-paste, native indentation).
-  # Email mode keeps the byte-stable flex-row scaffold with literal "• " /
-  # "1. " prefix spans — Outlook strips <ul> padding, and that scaffold is
-  # the historical Outlook-safe target.
+  # Every style emits semantic <ul>/<ol>/<li> via PdList/PdListItem so rendered
+  # papers and email retain list structure for assistive technology and
+  # copy-paste. Article structure stays bare for the paper stylesheet; email
+  # keeps its Outlook-safe spacing inline on the semantic elements.
   describe "render_block/2 — list" do
     @list_items [
       [%{"type" => "text", "value" => "a"}],
@@ -1527,21 +1526,24 @@ defmodule Barkpark.PortableDoc.RenderTest do
       refute html =~ "flex-direction"
     end
 
-    test "email/default mode is byte-unchanged (frozen prefix scaffold)" do
+    test "email/default mode emits inline-styled semantic list elements" do
       block = %{"id" => "L", "type" => "list", "items" => @list_items}
 
       expected =
-        ~s(<div style="display:flex;flex-direction:column">) <>
-          ~s(<div style="display:flex;flex-direction:row"><span>• </span><span>a</span></div>) <>
-          ~s(<div style="display:flex;flex-direction:row"><span>• </span><span>b</span></div>) <>
-          ~s(<div style="display:flex;flex-direction:row"><span>• </span><span>c</span></div>) <>
-          ~s(</div>)
+        ~s(<ul style="margin:0 0 24px;padding-left:24px;) <>
+          ~s(font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;) <>
+          ~s(color:#15211d;line-height:1.7">) <>
+          ~s(<li style="margin:4pt 0 0"><span>a</span></li>) <>
+          ~s(<li style="margin:4pt 0 0"><span>b</span></li>) <>
+          ~s(<li style="margin:4pt 0 0"><span>c</span></li></ul>)
 
       assert Render.render_block(block) == expected
       assert Render.render_block(block, %{style: :email}) == expected
+      refute expected =~ "• "
+      refute expected =~ "flex-direction"
     end
 
-    test "empty items: <ul></ul> in article, empty flex-column div in email" do
+    test "empty items remain semantic empty lists in article and email" do
       empty = %{"id" => "L", "type" => "list", "items" => []}
 
       article = Render.render_block(empty, %{style: :article})
@@ -1549,8 +1551,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert String.ends_with?(article, "></ul>")
       refute article =~ "<li"
 
-      assert Render.render_block(empty) ==
-               ~s(<div style="display:flex;flex-direction:column"></div>)
+      email = Render.render_block(empty)
+      assert email =~ "<ul"
+      assert String.ends_with?(email, "></ul>")
+      refute email =~ "<li"
+      refute email =~ "flex-direction"
     end
 
     test "inline marks (bold) inside an item survive inside <li> in article mode" do

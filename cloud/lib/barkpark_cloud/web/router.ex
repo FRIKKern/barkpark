@@ -69,6 +69,12 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
+      POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
+      DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, EMPTY (never {token:""}) for logout-everywhere (wave 2; admin token stays server-side)
+      POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
+      POST    /v1/barkparks/:id/push-relay admin  provision the instance chat_blocked webhook that drives the push relay (D15; idempotent, converges)
+      POST    /v1/fleet/supports   user      register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
+      DELETE  /v1/fleet/supports/:id user    unbind + delete a SUPPORT fleet row (PDF-D61; mains refused 409)
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
       GET     /v1/barkparks/:id/bootstrap admin  reveal the dwb-4 content-bootstrap outputs (team-admin only)
       PATCH   /v1/barkparks/:id/autoupdate admin  set fleet-autoupdate policy (isu-w4 opt-out/pause/pin)
@@ -150,6 +156,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/attach-domain-jobs/:id/succeed worker  mark an attach-domain done
       POST    /v1/internal/attach-domain-jobs/:id/fail worker  mark an attach-domain failed {error}
       POST    /v1/internal/resurrect-jobs/claim worker  claim oldest pending resurrect job
+      POST    /v1/internal/support-jobs/claim worker  claim oldest pending provision_support job (+pinned support map)
       GET     /v1/internal/barkparks worker  list registry rows for the provisioner
       POST    /v1/internal/barkparks worker  create a registry row (provisioner-side)
       POST    /v1/internal/barkparks/:id/deprovision worker  enqueue a deprovision for one box
@@ -180,6 +187,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/sites/:id/github  admin  disconnect a Site's GitHub link (gh-4)
       POST    /v1/webhooks/github/:site_id —  GitHub push → enqueue Deployment (HMAC)
       POST    /v1/sites/webhooks/content-publish/:site_id —*  content-publish webhook → ISR revalidate (signed)
+      POST    /v1/relay/chat-blocked/:barkpark_id —*  instance chat_blocked webhook → member-device push fan-out (signed; D15)
       GET     /v1/tls/ask          —         on-demand-TLS gate (200/404 by domain)
       POST    /v1/builder/claim    worker    atomic next-queued deployment claim
       POST    /v1/builder/deployments/:id/transition worker fenced status update
@@ -222,12 +230,14 @@ defmodule BarkparkCloud.Web.Router do
     Metrics,
     Notifications,
     OAuth,
+    Push,
     Registry,
     Repo,
     Telemetry,
     Usage,
     Vercel,
-    Verify
+    Verify,
+    Webhooks
   }
 
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
@@ -367,7 +377,13 @@ defmodule BarkparkCloud.Web.Router do
   # site-spawner W5 (charter D46): the content-publish receiver verifies an HMAC
   # over the EXACT bytes the box signed, so its raw body must be cached too
   # (the parsed JSON map is not stable enough to re-derive the signature).
-  @raw_body_path_prefixes ["/v1/webhooks/github/", "/v1/sites/webhooks/content-publish/"]
+  # push-relay spike (charter D15b): the chat_blocked relay receiver verifies the
+  # instance's HMAC over the exact signed bytes, so its raw body is cached too.
+  @raw_body_path_prefixes [
+    "/v1/webhooks/github/",
+    "/v1/sites/webhooks/content-publish/",
+    "/v1/relay/chat-blocked/"
+  ]
 
   # RemoteIp resolver options, built once at compile time. Only X-Forwarded-For
   # is honored (Caddy's forwarding header); `proxies` lists the loopback CIDRs of
@@ -1841,6 +1857,12 @@ defmodule BarkparkCloud.Web.Router do
       not (is_binary(conn.body_params["name"]) and conn.body_params["name"] != "") ->
         json(conn, 422, %{error: "invalid", details: %{name: ["can't be blank"]}})
 
+      # PDF-D83: mode:"provision" is the CP-provisioned add-support path — register
+      # a host-nil support row, then enqueue a provision_support job (202). The
+      # register-only mode (no `mode` param) falls through unchanged.
+      conn.body_params["mode"] == "provision" ->
+        fleet_provision_support(conn)
+
       not is_binary(conn.body_params["parent_id"]) ->
         json(conn, 422, %{error: "invalid", details: %{parent_id: ["can't be blank"]}})
 
@@ -1867,17 +1889,12 @@ defmodule BarkparkCloud.Web.Router do
               token_id: string_param_or_nil(conn.body_params["token_id"])
             }
 
+            # PDF-D86: register_support_barkpark/2 is quota-exempt — a support
+            # never returns :limit_reached, so a saturated ceiling can't 403 here.
             case Registry.register_support_barkpark(team, attrs) do
               {:ok, support} ->
                 push_event(team.id, "fleet")
                 json(conn, 201, %{barkpark: barkpark_json(support)})
-
-              {:error, :limit_reached} ->
-                json(conn, 403, %{
-                  error: "limit_reached",
-                  limit: Billing.barkpark_limit(team),
-                  upgrade_path: "/v1/billing/checkout"
-                })
 
               {:error, %Ecto.Changeset{} = cs} ->
                 json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -1887,6 +1904,88 @@ defmodule BarkparkCloud.Web.Router do
           _ ->
             json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # PDF-D83/D86 (Personal Dev Fleet MVP-0) — the mode:"provision" arm of POST
+  # /v1/fleet/supports. Body {name, barkpark_id: <parent main id>, mode:
+  # "provision", server_type?}. Sequence: resolve the parent main (team-scoped) →
+  # require its admin token (409 no_admin_token — the token is the credential
+  # spine of the claim payload, D93; mirrors the mint_app_token arm) → register a
+  # host-NIL support row FIRST (quota-exempt, D86) → enqueue the provision_support
+  # job → push a fleet tick → 202 {barkpark, job_id}. `barkpark_id` names the
+  # parent (a `parent_id` alias is accepted so the register-only body shape still
+  # works). Name validity + auth were already gated by the route's cond.
+  defp fleet_provision_support(conn) do
+    team = conn.assigns.current_team
+    parent_id = conn.body_params["barkpark_id"] || conn.body_params["parent_id"]
+
+    case Registry.get_barkpark(parent_id) do
+      # A support may never be a parent — two-tier is the whole shape (mirror the
+      # register-only refusal so an in-team support parent gets a clear 422).
+      %Barkpark{team_id: tid, fleet_role: "support"} when tid == team.id ->
+        json(conn, 422, %{
+          error: "invalid_parent",
+          detail: "a support cannot be a parent (fleets are two-tier: main -> supports)"
+        })
+
+      %Barkpark{team_id: tid} = parent when tid == team.id ->
+        case Registry.reveal_admin_token(parent) do
+          {:ok, admin_token} when is_binary(admin_token) and admin_token != "" ->
+            do_fleet_provision_support(conn, team, parent)
+
+          # The parent has no admin token → the provision_support claim payload
+          # would carry a null credential and the worker could never bind/roster
+          # the box. Refuse at ENQUEUE (409) so the job never exists in a broken
+          # state (PDF-D83), mirroring mint_app_token's no_admin_token arm.
+          {:ok, nil} ->
+            json(conn, 409, %{
+              error: "no_admin_token",
+              detail:
+                "the parent main has no admin token yet — it must be live before a support can be provisioned"
+            })
+
+          :error ->
+            json(conn, 500, %{error: "decrypt_failed"})
+        end
+
+      # Cross-team, unknown, or malformed parent id → 404 (no existence leak).
+      _ ->
+        json(conn, 404, %{error: "not_found"})
+    end
+  end
+
+  # Register the host-nil support row FIRST, then enqueue its provision_support
+  # job (PDF-D83 ordering — the row must exist before the worker can claim it).
+  defp do_fleet_provision_support(conn, team, parent) do
+    attrs = %{
+      name: conn.body_params["name"],
+      slug: slugify(conn.body_params["name"]),
+      # host NIL — the CP provisioner fills the box in.
+      host: nil,
+      parent_id: parent.id,
+      token_id: nil,
+      server_type: string_param_or_nil(conn.body_params["server_type"])
+    }
+
+    case Registry.register_support_barkpark(team, attrs) do
+      {:ok, support} ->
+        case Registry.enqueue_support_provision_job(support) do
+          {:ok, job} ->
+            push_event(team.id, "fleet")
+            json(conn, 202, %{barkpark: barkpark_json(support), job_id: job.id})
+
+          # A brand-new row can't already hold an active job, but stay honest
+          # rather than 500 if a race ever produces one.
+          {:error, :already_provisioning} ->
+            json(conn, 409, %{error: "already_provisioning", barkpark: barkpark_json(support)})
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        end
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        json(conn, 422, %{error: "invalid", details: errors(cs)})
     end
   end
 
@@ -2244,6 +2343,314 @@ defmodule BarkparkCloud.Web.Router do
 
               {:error, :instance_error} ->
                 json(conn, 502, %{error: "instance_unreachable"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # POST /v1/barkparks/:id/app-token → 200 {token, workspace_id, permissions,
+  # expires_at} — the member-reachable app-token exchange (mobile charter D4).
+  # The control plane uses the STORED per-instance admin token server-side to
+  # mint a workspace-bound [read,write,chat] instance token AS the calling
+  # cloud user (JIT member on the instance) via POST /v1/auth/app-tokens.
+  # The admin token never travels; unlike studio-link the PLAINTEXT minted app
+  # token IS the payload (returned ONCE, never audited, never logged).
+  #
+  # USER-authed + TEAM-SCOPED, fail-closed: any member of the owning team may
+  # mint their own app token; a wrong-team / nonexistent / malformed id is the
+  # SAME 404 (no existence leak). Rate-limited per IP (`app_token:<ip>` bucket,
+  # 10/min — each hit costs a server-side admin-authed instance call; peer-ip
+  # physics fixed by cch-w1-peer-ip-pin, PR #5305). 409 not_live while
+  # provisioning; 409 app_token_unsupported when the instance predates the
+  # mint route (charter D8 — the client maps it to manual token paste);
+  # 404 no_admin_token for pre-feature instances; 502 when the instance call
+  # fails; 500 on tampered ciphertext.
+  post "/v1/barkparks/:id/app-token" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      match?(
+        {:error, :rate_limited},
+        DeviceAuthRateLimiter.check("app_token:" <> (peer_ip(conn) || "unknown"))
+      ) ->
+        json(conn, 429, %{error: "rate_limited"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Registry.mint_app_token(bp, conn.assigns.current_user.email) do
+              {:ok, payload} ->
+                # OC24: audit THAT an app token was minted — NEVER the token
+                # value (it is a live credential) and never the admin token.
+                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.app_token_minted", %{
+                  name: bp.name
+                })
+
+                json(conn, 200, payload)
+
+              {:error, :not_live} ->
+                json(conn, 409, %{error: "not_live"})
+
+              {:error, :app_token_unsupported} ->
+                json(conn, 409, %{error: "app_token_unsupported"})
+
+              {:error, :no_admin_token} ->
+                json(conn, 404, %{
+                  error: "no_admin_token",
+                  detail:
+                    "No admin token is stored for this instance yet. It is captured at " <>
+                      "provision time — a pre-existing instance may need a re-provision."
+                })
+
+              {:error, :decrypt_failed} ->
+                json(conn, 500, %{error: "decrypt_failed"})
+
+              {:error, :instance_error} ->
+                json(conn, 502, %{error: "instance_unreachable"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # DELETE /v1/barkparks/:id/app-token → 200 — the revoke half of the
+  # member-reachable app-token exchange (wave 2, mob-w2-app-token-revoke).
+  # Body {"token": raw} kills exactly that token (logout on THIS device — the
+  # phone presents the credential it wants dead; relayed once, never stored);
+  # an EMPTY body means logout-everywhere: the instance revokes every live
+  # app:<email> token for the CALLING user, email derived SERVER-SIDE from the
+  # session — a caller can never aim this at another user's tokens. Same
+  # custody physics as the mint above: the stored admin token is decrypted and
+  # used server-side only, never serialized into any response. USER-authed +
+  # TEAM-SCOPED fail-closed: wrong-team / nonexistent / malformed id is the
+  # SAME 404. Rate-limited per IP (`app_token_revoke:<ip>` bucket, 10/min, D7) —
+  # and the caller's IP is RELAYED to the instance as X-Forwarded-For, so the
+  # instance's sibling bucket keys per phone rather than lumping a whole team
+  # behind the single Cloud egress address.
+  # Body validation is EXACTLY-ONE-OF, enforced: `{"token": ""}` is a 422
+  # naming the field (it must never fall through to logout-everywhere) and a
+  # body carrying both "token" and "email" is a 422 (email is server-derived
+  # here, so "token wins" would be a silent wrong answer).
+  # 404 not_found when the instance knows no such token; 409 revoke_unsupported
+  # when the instance predates the revoke route (D8 capability-vs-absence);
+  # 422 revoke_refused and 429 instance_rate_limited are the instance's own
+  # deliberate verdicts kept out of the 502 collapse; the rest mirror the mint
+  # arm. Audited as "barkpark.app_token_revoked" — the mode and count, NEVER a
+  # token value.
+  delete "/v1/barkparks/:id/app-token" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      match?(
+        {:error, :rate_limited},
+        DeviceAuthRateLimiter.check("app_token_revoke:" <> (peer_ip(conn) || "unknown"))
+      ) ->
+        json(conn, 429, %{error: "rate_limited"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            mode =
+              case conn.body_params do
+                # EXACTLY-ONE-OF, enforced (not merely documented). The proxy
+                # derives the email SERVER-SIDE, so a body naming both a token
+                # and an email is a caller confusion about which credential dies
+                # — refuse it instead of letting "token" silently win.
+                %{"token" => _, "email" => _} ->
+                  {:invalid, "exactly_one_of",
+                   ~s|send exactly one of: "token" to log out THIS device, or an | <>
+                     ~s|empty body to log out everywhere. "email" is derived | <>
+                     ~s|server-side and is never accepted in the body.|}
+
+                %{"token" => raw} when is_binary(raw) and raw != "" ->
+                  {:token, raw}
+
+                # A present-but-EMPTY (or non-string) token used to fall through
+                # to logout-everywhere: an unset variable on the phone signed the
+                # user out on every device. Now a 422 naming the field.
+                %{"token" => _} ->
+                  {:invalid, "invalid_token",
+                   ~s|"token" must be a non-empty string; omit it entirely to log | <>
+                     ~s|out everywhere.|}
+
+                _ ->
+                  {:email, conn.assigns.current_user.email}
+              end
+
+            case mode do
+              {:invalid, code, detail} ->
+                json(conn, 422, %{error: code, detail: detail})
+
+              mode ->
+                revoke_app_token_on_instance(conn, team, bp, mode)
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # POST /v1/push/device-tokens {platform, token, metadata?} → 201 — register
+  # THIS device for needs-you push (push-relay spike, mobile charter D15a).
+  # USER-authed: the row binds to the calling user; per-user × per-device rows
+  # (see Push.DevicePushToken). Idempotent: re-registering the same
+  # (platform, token) upserts — clears revoked_at, refreshes metadata — so the
+  # app can register on every launch. The registered token is NOT echoed back
+  # (the client already holds it; keep responses minimal). 422 on an unknown
+  # platform / missing-short-oversize token (token capped at 1024 bytes — the
+  # unique-index row cap would otherwise turn oversize into a raw 500).
+  # Rate-limited per USER (`push_register:<user_id>` bucket, 10/min — the
+  # approve:<user_id> idiom, not per-IP: mobile clients share carrier-NAT IPs)
+  # and capped at Push.max_devices_per_user/0 rows per user with
+  # revoked-first/stalest-next eviction (mob-bl-push-hardening). Registration
+  # rows are the relay's ONLY switch: zero rows → the chat_blocked receiver
+  # fans out to nothing.
+  post "/v1/push/device-tokens" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      match?(
+        {:error, :rate_limited},
+        DeviceAuthRateLimiter.check("push_register:" <> conn.assigns.current_user.id)
+      ) ->
+        json(conn, 429, %{error: "rate_limited"})
+
+      true ->
+        case Push.register_device_token(conn.assigns.current_user, conn.body_params) do
+          {:ok, device} ->
+            json(conn, 201, %{
+              id: device.id,
+              platform: device.platform,
+              registered: true
+            })
+
+          {:error, %Ecto.Changeset{}} ->
+            json(conn, 422, %{error: "invalid"})
+        end
+    end
+  end
+
+  # POST /v1/barkparks/:id/push-relay → 200 {status, webhook_id, url, workspace,
+  # project, dataset} — turn ON needs-you push for this instance (mobile charter
+  # D15). The ONE operator action that closes the relay's loop: it provisions the
+  # box's workspace-scoped `chat_blocked` webhook row pointed at Cloud's
+  # /v1/relay/chat-blocked/:id receiver, and agrees a shared signing secret.
+  # Until it runs, Cloud's receiver is a door nobody knocks on.
+  #
+  # TEAM-ADMIN gated (`/credentials`' RBAC, not `/site-url`'s member gate): it
+  # spends the stored admin token to WRITE instance config and ROTATES a signing
+  # secret. Team-scoped fail-closed — a wrong-team / nonexistent / malformed id
+  # is the SAME 404 (no existence leak). Idempotent: re-running converges an
+  # existing row (re-enable + rotate + adopt) instead of duplicating it.
+  #
+  # NOTE this route is orthogonal to the CREDENTIAL gate: with the row
+  # provisioned and no APNs/FCM credentials, deliveries enqueue and cancel
+  # terminally at the adapter — honest, inert, zero dead code. See
+  # BarkparkCloud.Push.Adapters.NotConfigured for exactly what a human must
+  # supply to open that half.
+  #
+  # Body (all optional): {workspace, project, dataset, blocked_threshold_s}.
+  # Defaults come from the barkpark's bootstrap_* triple.
+  post "/v1/barkparks/:id/push-relay" do
+    conn = Auth.require_team_admin(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            opts = push_relay_opts(conn.body_params)
+
+            # OC24: the audit row commits with the success verdict and never
+            # lands on a failed wire. Metadata carries the receiver URL and the
+            # scope — public facts. NEVER the secret and never the admin token.
+            audit_attrs = %{
+              team_id: team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "barkpark.push_relay_provisioned",
+              target_type: "barkpark",
+              target_id: bp.id
+            }
+
+            result =
+              Accounts.audit(
+                audit_attrs,
+                fn -> Registry.provision_push_relay_webhook(bp, opts) end,
+                fn payload ->
+                  %{
+                    metadata: %{
+                      status: payload.status,
+                      webhook_id: payload.webhook_id,
+                      receiver_url: payload.url,
+                      workspace: payload.workspace,
+                      dataset: payload.dataset
+                    }
+                  }
+                end
+              )
+
+            case result do
+              {:ok, payload} ->
+                push_event(team.id, "audit")
+                json(conn, 200, payload)
+
+              {:error, :not_live} ->
+                json(conn, 409, %{error: "not_live"})
+
+              {:error, :no_admin_token} ->
+                json(conn, 404, %{error: "no_admin_token"})
+
+              {:error, :decrypt_failed} ->
+                json(conn, 500, %{error: "decrypt_failed"})
+
+              {:error, :instance_error} ->
+                json(conn, 502, %{error: "instance_unreachable"})
+
+              {:error, {:instance, status, _body}} ->
+                # The box answered and refused. 404 there means this instance is
+                # too old to carry the scoped webhook route — the same
+                # capability-detection shape as the app-token exchange's D8
+                # `app_token_unsupported`, so a client can branch on it.
+                if status == 404 do
+                  json(conn, 409, %{error: "push_relay_unsupported"})
+                else
+                  json(conn, 502, %{error: "instance_refused", status: status})
+                end
+
+              {:error, _other} ->
+                json(conn, 500, %{error: "provision_failed"})
             end
 
           _ ->
@@ -4601,11 +5008,18 @@ defmodule BarkparkCloud.Web.Router do
         # absent is fine (back-compat — the ip-only succeed path is unchanged).
         # dwb-4: the worker MAY also report the content-bootstrap outputs
         # alongside — stored (secrets Vault-encrypted) in the same transaction.
+        # task-5866ec745efcd7f7: a provision_support worker MAY report the OPAQUE
+        # id of the ledger token it minted on the parent main as `token_id`; the
+        # Registry persists it as the SUPPORT row's fleet_token_id (the sole
+        # durable token-id holder, PDF-D68 — what `bp cloud support remove`
+        # revokes). Additive + tolerant both ways: absent → the ip-only path is
+        # byte-unchanged (older workers), and a non-support row never takes it.
         # claim-fence (bp-c55): the worker MAY echo the claim_token it holds; when
         # present the Registry fences a stale re-claim, when absent behavior is
         # unchanged (the deployed Go fleet doesn't echo it yet — Stage 1 compat).
         opts =
           succeed_opts(conn.body_params["admin_token"], conn.body_params["bootstrap"]) ++
+            fleet_token_id_opts(conn.body_params["token_id"]) ++
             claim_token_opts(conn)
 
         case Registry.succeed_job(conn.path_params["id"], conn.body_params["ip"], opts) do
@@ -4926,6 +5340,28 @@ defmodule BarkparkCloud.Web.Router do
 
         {job, barkpark} ->
           json(conn, 200, resurrect_claim_json(job, barkpark))
+      end
+    end
+  end
+
+  # POST /v1/internal/support-jobs/claim → claim the oldest pending
+  # `provision_support` job (FOR UPDATE SKIP LOCKED). 200 with the provision claim
+  # payload PLUS the PINNED `support` map (parent url + admin token, dataset,
+  # workspace, name — the credential spine the Go fleet provisioner binds the box
+  # with, PDF-D83/D89/D93), or 204 when none is pending. Kind-filtered so a
+  # support job is never handed to a main-provision worker.
+  post "/v1/internal/support-jobs/claim" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_next_support_provision_job(generate_claim_token()) do
+        nil ->
+          send_resp(conn, 204, "")
+
+        {job, barkpark} ->
+          json(conn, 200, support_provision_claim_json(job, barkpark))
       end
     end
   end
@@ -6129,11 +6565,71 @@ defmodule BarkparkCloud.Web.Router do
             raw = raw_request_body(conn)
             sig = get_first_header(conn, "x-barkpark-signature")
 
-            case Sites.ContentPublishVerifier.verify(raw, sig, [secret]) do
+            case Webhooks.InboundSignature.verify(raw, sig, [secret]) do
               :ok ->
                 # Debounced (charter D44): N publishes in the window = ONE rebuild.
                 _ = Sites.AutoDeployWorker.enqueue(site.id)
                 json(conn, 202, %{ok: true, trigger: "content-auto"})
+
+              {:error, _reason} ->
+                # A bad OR expired signature is the same 401 — never leak which.
+                json(conn, 401, %{error: "bad_signature"})
+            end
+        end
+    end
+  end
+
+  # POST /v1/relay/chat-blocked/:barkpark_id — NO bearer auth (HMAC IS the auth).
+  # Push-relay spike (mobile charter D15b/D15c): Cloud's inbound receiver for the
+  # INSTANCE-originated chat_blocked webhook — the box's Webhooks.Dispatcher
+  # signs every delivery `x-barkpark-signature: t=<unix>,v1=<hex>` (HMAC-SHA256
+  # over "<t>.<raw-body>", ±300s replay window); verification reuses
+  # Webhooks.InboundSignature, the byte-for-byte CP-side twin of that signing
+  # (same scheme, same tolerance, constant-time compare).
+  #
+  # Per-BARKPARK route on purpose: the D59h payload identifies no user and its
+  # workspace_id is an instance-side value Cloud cannot uniquely resolve (the
+  # charter-D45 ambiguity that made content-publish per-site). The opaque
+  # :barkpark_id names the instance; its OWN Vault-stored secret
+  # (Registry.reveal_push_relay_secret/1) proves the sender. The route:
+  #   1. Loads the barkpark (404 silently when missing or no relay secret is
+  #      configured — a probe cannot tell them apart).
+  #   2. Verifies the signature over the cached raw bytes. 401 on a forged OR
+  #      stale signature (no detail).
+  #   3. Fans out via Push.enqueue_chat_blocked_fanout/2 — one Oban job per
+  #      registered member device (row-absence severable: zero registrations →
+  #      202 {enqueued: 0}, nothing fires). 422 when session_id is absent
+  #      (nothing to deep-link to).
+  post "/v1/relay/chat-blocked/:barkpark_id" do
+    bp = Registry.get_barkpark(conn.path_params["barkpark_id"])
+
+    cond do
+      is_nil(bp) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.reveal_push_relay_secret(bp) do
+          {:ok, nil} ->
+            # No relay configured — same shape as "not found" so a probe cannot
+            # distinguish unconfigured from nonexistent.
+            json(conn, 404, %{error: "not_found"})
+
+          :error ->
+            json(conn, 500, %{error: "secret_unreadable"})
+
+          {:ok, secret} when is_binary(secret) ->
+            raw = raw_request_body(conn)
+            sig = get_first_header(conn, "x-barkpark-signature")
+
+            case Webhooks.InboundSignature.verify(raw, sig, [secret]) do
+              :ok ->
+                case Push.enqueue_chat_blocked_fanout(bp, conn.body_params) do
+                  {:ok, enqueued} ->
+                    json(conn, 202, %{ok: true, enqueued: enqueued})
+
+                  {:error, :invalid_payload} ->
+                    json(conn, 422, %{error: "invalid_payload"})
+                end
 
               {:error, _reason} ->
                 # A bad OR expired signature is the same 401 — never leak which.
@@ -7452,6 +7948,15 @@ defmodule BarkparkCloud.Web.Router do
   # malformed/absent field preserves the pre-bootstrap succeed path.
   defp succeed_opts(token, %{} = bootstrap), do: succeed_opts(token) ++ [bootstrap: bootstrap]
   defp succeed_opts(token, _bootstrap), do: succeed_opts(token)
+
+  # task-5866ec745efcd7f7: build the succeed_job opts from the (optional)
+  # reported ledger-token id. A non-empty binary becomes `[token_id: t]`;
+  # anything else (missing/blank/non-string — every pre-fix worker) yields `[]`,
+  # preserving the ip-only succeed path byte-for-byte.
+  defp fleet_token_id_opts(token_id) when is_binary(token_id) and token_id != "",
+    do: [token_id: token_id]
+
+  defp fleet_token_id_opts(_), do: []
 
   # dwb-4 launch validation: nil/blank means "no template" (valid — the
   # pre-template path); a non-empty string must be in the known catalog; any
@@ -8933,6 +9438,53 @@ defmodule BarkparkCloud.Web.Router do
     |> Map.put(:bundle_ref, job.bundle_ref)
   end
 
+  # PDF-D83/D89/D93: the support provisioner's claim payload = the FULL provision
+  # claim (region/size off the support row, env/agent-token as usual) PLUS the
+  # PINNED `support` map. The Go slice binds the box + joins the fleet from these
+  # exact keys — DO NOT rename them:
+  #   parent_url         — the parent MAIN's public url (the box beats/rosters home)
+  #   parent_admin_token — the main's DECRYPTED admin token (roster is :token_root;
+  #                        the credential spine, minted-once server-to-box crossing)
+  #   dataset            — always "production" (the support serves the main's prod)
+  #   workspace          — the main's bootstrap_workspace (scope the support binds to)
+  #   name               — the support row's SLUG (task-314de6aa36248bea: the Go
+  #                        worker uses it as its DNS-shaped worker identity — the
+  #                        free-form display name ("My Helper") is never sent)
+  # The parent is resolved off the support's `fleet_parent_id`. A vanished parent
+  # or a stripped admin token degrades to nil (the enqueue-time 409 guard makes
+  # that path near-impossible; the worker then fails the job honestly rather than
+  # the CP crashing).
+  defp support_provision_claim_json(job, barkpark) do
+    claim_json(job, barkpark)
+    |> Map.put(:support, support_claim_map(barkpark))
+  end
+
+  defp support_claim_map(%Barkpark{fleet_parent_id: parent_id, slug: slug}) do
+    parent = parent_id && Registry.get_barkpark(parent_id)
+
+    %{
+      parent_url: parent && parent.url,
+      parent_admin_token: reveal_parent_admin_token(parent),
+      dataset: "production",
+      # Template-less mains never get bootstrap_workspace written; "" would die
+      # at the Go slug fence, so default like every other consumer of the column.
+      workspace: parent && (parent.bootstrap_workspace || "default"),
+      # The SLUG, deliberately under the pinned `name` key (the Go slice binds
+      # against these exact keys) — DNS-shaped worker identity, never the
+      # display name.
+      name: slug
+    }
+  end
+
+  defp reveal_parent_admin_token(%Barkpark{} = parent) do
+    case Registry.reveal_admin_token(parent) do
+      {:ok, token} -> token
+      :error -> nil
+    end
+  end
+
+  defp reveal_parent_admin_token(_), do: nil
+
   # Charter Decision 33 — the monitoring beat goes live. Mint a per-instance agent
   # token (scope "report") at CLAIM time and thread the PLAINTEXT into the claim
   # payload for EVERY provider, mirroring env-at-claim above: the single sanctioned
@@ -9066,6 +9618,10 @@ defmodule BarkparkCloud.Web.Router do
       # search-template W2/W6/W8: the starter + palette this site deploys with.
       template: s.template,
       theme: s.theme,
+      # search-template W10: the featured content type the shipped site reads
+      # (injected as BARKPARK_DOC_TYPE at deploy). Writable at create and via
+      # PATCH since W8 — serialized here so every surface can read it back.
+      doc_type: s.doc_type,
       domains: s.domains,
       scale_mode: s.scale_mode,
       port: s.port,
@@ -9899,6 +10455,28 @@ defmodule BarkparkCloud.Web.Router do
     |> send_resp(302, "")
   end
 
+  # Narrow the push-relay provisioning body to the four options
+  # Registry.provision_push_relay_webhook/2 accepts. An ALLOWLIST, not a
+  # pass-through: the keyword list reaches a function that talks to the
+  # instance with the admin token, so an unrecognised key must never ride
+  # along. Absent/blank values are dropped so the barkpark's bootstrap_*
+  # defaults win, and a non-integer threshold is ignored rather than crashing
+  # the box's changeset.
+  defp push_relay_opts(params) when is_map(params) do
+    slugs =
+      for key <- [:workspace, :project, :dataset],
+          value = params[Atom.to_string(key)],
+          is_binary(value) and value != "",
+          do: {key, value}
+
+    case params["blocked_threshold_s"] do
+      n when is_integer(n) and n > 0 -> [{:blocked_threshold_s, n} | slugs]
+      _ -> slugs
+    end
+  end
+
+  defp push_relay_opts(_params), do: []
+
   ## Live events (SSE) helpers
 
   # Broadcast a coarse invalidation `type` to a team's connected dashboards.
@@ -10158,6 +10736,65 @@ defmodule BarkparkCloud.Web.Router do
     case conn.remote_ip do
       nil -> nil
       ip -> ip |> :inet.ntoa() |> to_string()
+    end
+  end
+
+  # The instance leg of DELETE /v1/barkparks/:id/app-token, once the body has
+  # resolved to exactly ONE revoke mode. Every verdict the instance reaches
+  # deliberately keeps its OWN status — its 422 (this token is an admin token,
+  # unkillable here) is a 422 and its 429 (its per-IP revoke bucket) is a 429.
+  # Only a transport failure, or a status this route does not model, is the 502
+  # `instance_unreachable`: telling a phone "your instance is down" about an
+  # answer the instance gave on purpose sends it into a pointless retry loop.
+  # The caller's IP rides along as X-Forwarded-For so the instance buckets per
+  # phone instead of per control plane (see Registry.revoke_app_token/3).
+  defp revoke_app_token_on_instance(conn, team, bp, mode) do
+    case Registry.revoke_app_token(bp, mode, client_ip: peer_ip(conn)) do
+      {:ok, payload} ->
+        audit_lifecycle_trigger(conn, team, bp.id, "barkpark.app_token_revoked", %{
+          name: bp.name,
+          mode: elem(mode, 0),
+          revoked_count: payload["revoked_count"]
+        })
+
+        json(conn, 200, payload)
+
+      {:error, :not_found} ->
+        json(conn, 404, %{error: "not_found"})
+
+      {:error, :not_live} ->
+        json(conn, 409, %{error: "not_live"})
+
+      {:error, :revoke_unsupported} ->
+        json(conn, 409, %{error: "revoke_unsupported"})
+
+      {:error, :revoke_refused} ->
+        json(conn, 422, %{
+          error: "revoke_refused",
+          detail:
+            "The instance refused to revoke that token: admin tokens cannot be " <>
+              "revoked through the app-token path."
+        })
+
+      {:error, :instance_rate_limited} ->
+        json(conn, 429, %{
+          error: "instance_rate_limited",
+          detail: "The instance's own revoke rate limit tripped. Retry in a minute."
+        })
+
+      {:error, :no_admin_token} ->
+        json(conn, 404, %{
+          error: "no_admin_token",
+          detail:
+            "No admin token is stored for this instance yet. It is captured at " <>
+              "provision time — a pre-existing instance may need a re-provision."
+        })
+
+      {:error, :decrypt_failed} ->
+        json(conn, 500, %{error: "decrypt_failed"})
+
+      {:error, :instance_error} ->
+        json(conn, 502, %{error: "instance_unreachable"})
     end
   end
 

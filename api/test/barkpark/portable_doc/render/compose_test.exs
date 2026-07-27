@@ -115,14 +115,15 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
                %{"kind" => "PdEmbed", "target" => ""}
     end
 
-    test "list in email mode uses prefix-as-text scaffold" do
+    test "list in email mode preserves semantic PdList/PdListItem structure" do
       b = %{"type" => "list", "ordered" => false, "items" => [["Apple"], ["Banana"]]}
       result = Compose.compose_block(b)
-      assert result["kind"] == "PdBox"
+      assert result["kind"] == "PdList"
+      assert result["ordered"] == false
       [first | _] = result["children"]
-      assert first["kind"] == "PdBox"
-      [prefix_node | _] = first["children"]
-      assert prefix_node["children"] == ["• "]
+      assert first["kind"] == "PdListItem"
+      [text_node] = first["children"]
+      assert text_node["children"] == ["Apple"]
     end
 
     test "list in article mode emits PdList with PdListItem children" do

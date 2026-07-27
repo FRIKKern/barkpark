@@ -383,10 +383,28 @@ function valuerefHtml(v: {
   return `<span data-valueref="${escapeHtml(v.target)}" data-field="${escapeHtml(v.field)}" data-valueref-state="${state}">${escapeHtml(text)}</span>`
 }
 
+/** The concatenated, UNESCAPED text of an inline-node tree — no markup. Used by
+ * text-leaf emitters (inline code) that must fold nested `children` into a flat
+ * string rather than nested elements. */
+function inlineText(nodes: unknown): string {
+  if (typeof nodes === 'string' || typeof nodes === 'number') return String(nodes)
+  if (!Array.isArray(nodes)) return ''
+  return nodes
+    .map((n) => (isMap(n) ? str(n.value) || inlineText(n.children) : inlineText(n)))
+    .join('')
+}
+
 /** Render one inline node to an HTML string. */
 export function renderInline(node: Inline): string {
   if (typeof node === 'string') return escapeHtml(node)
   if (typeof node === 'number') return escapeHtml(String(node))
+  // A bare ARRAY where an inline node was expected (`content: [[{text…}]]` —
+  // flattened one level too shallow by an upstream author path). This is the
+  // js-only divergence from the Elixir twin: inline.ex `compose_inline(l) when
+  // is_list(l)` wraps the composed children in a PdText, which walk.ex `text/3`
+  // emits as a bare `<span>`; js returned '' and the text VANISHED. 59 live
+  // paragraphs + 18 list blocks carry the shape.
+  if (Array.isArray(node)) return `<span>${renderInlines(node)}</span>`
   if (!isMap(node)) return ''
 
   switch (str(node.type)) {
@@ -408,7 +426,13 @@ export function renderInline(node: Inline): string {
     case 'strikethrough':
       return `<span style="text-decoration:line-through">${renderInlines(node.children)}</span>`
     case 'code':
-      return `<code>${escapeHtml(str(node.value))}</code>`
+      // Swept sibling of the block-level content[] defect, at inline level: an
+      // inline code node authored with `children` inline nodes (rather than a
+      // flat `value`) rendered an empty `<code></code>`. 66 live paragraphs
+      // carry that shape. Inline code is a TEXT leaf — the children are folded
+      // to their concatenated text, never to nested markup, so the emitted
+      // `<code>` body stays escaped plain text exactly as the `value` path.
+      return `<code>${escapeHtml(str(node.value) || inlineText(node.children))}</code>`
     case 'link':
       return `<a href="${safeUrl(str(node.href))}" style="${LINK_STYLE}">${renderInlines(node.children)}</a>`
     case 'wikilink': {

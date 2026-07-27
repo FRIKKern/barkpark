@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -123,16 +124,21 @@ func (s GoLiveSpec) healthTarget() string {
 //     encryption key opens another's.
 //   - PreviewJWTSecret is PREVIEW_JWT_SECRET, the draft-preview JWT signing key. A
 //     shared value lets one tenant mint valid preview tokens for another.
+//   - ReleaseCaptureHMAC is BARKPARK_RELEASE_CAPTURE_HMAC_SECRET, the
+//     release-capture HMAC signing secret. runtime.exs REQUIRES at least 32 bytes
+//     of it in prod (migrate dies without it) — and a shared value lets one
+//     tenant forge another's release-capture signatures.
 //
 // AdminToken is the clean-profile admin bearer (reused from
 // setup.GenerateAdminToken). They are NEVER logged or returned to the caller in
 // the clear beyond the LiveServer hand-off.
 type Secrets struct {
-	SecretKeyBase    string
-	Kek              string
-	CloakKey         string
-	PreviewJWTSecret string
-	AdminToken       string
+	SecretKeyBase      string
+	Kek                string
+	CloakKey           string
+	PreviewJWTSecret   string
+	ReleaseCaptureHMAC string
+	AdminToken         string
 }
 
 // LiveServer is the verified, registered outcome of a go-live: the popped host,
@@ -386,6 +392,20 @@ type WarmPool struct {
 	// so Barkpark.Mailer stays on the Local adapter (no delivery) exactly as
 	// before this field existed. Populated from the worker's SMTP_RELAY_* env.
 	Mail MailRelay
+
+	// TrustedProxies is the control plane's EGRESS address (or a comma-separated
+	// list, e.g. an IPv4 + an IPv6 egress), written into the instance's
+	// BARKPARK_TRUSTED_PROXIES so the box BELIEVES the caller address the control
+	// plane relays on a proxied request. Barkpark.RateLimiter.client_ip walks
+	// x-forwarded-for right-to-left and skips only LISTED hops, so on a
+	// cloud-managed instance the rightmost hop is the control plane's egress: unset
+	// here, every proxied revoke keys on ONE bucket (the whole team shares
+	// 10/minute) instead of one per phone. Not a forgery and not a 5xx — a SILENT
+	// loss of the per-caller bucketing. Zero value → the step is skipped and the
+	// instance keeps loopback-only trust, exactly as before this field existed.
+	// Populated from the worker's BARKPARK_CLOUD_EGRESS_IPS env (the SAME address
+	// as the CP_HOST deploy secret — see deploy/README.md).
+	TrustedProxies string
 
 	// MigrateArgv is the `mix ecto.migrate` argv the migrate step carries. It is
 	// NOT executed in tests (the fake runner records it); the real runner shells
@@ -649,7 +669,7 @@ func validateSecretKeyBase(secret string) error {
 	return nil
 }
 
-// validateSecrets guards ALL four per-instance secret VALUES the install step
+// validateSecrets guards ALL five per-instance secret VALUES the install step
 // single-quotes into its shell. It runs before secretsInstallStep so a malformed
 // draw fails the chain closed rather than shelling out a broken command.
 func validateSecrets(s Secrets) error {
@@ -658,10 +678,17 @@ func validateSecrets(s Secrets) error {
 		{"BARKPARK_KEK", s.Kek},
 		{"BARKPARK_CLOAK_KEY", s.CloakKey},
 		{"PREVIEW_JWT_SECRET", s.PreviewJWTSecret},
+		{"BARKPARK_RELEASE_CAPTURE_HMAC_SECRET", s.ReleaseCaptureHMAC},
 	} {
 		if err := validateSecretValue(kv.name, kv.val); err != nil {
 			return err
 		}
+	}
+	// runtime.exs raises in prod below 32 bytes (byte_size on the STRING) — a
+	// short draw must fail the provision chain closed HERE, not at migrate on
+	// the shipped box.
+	if len(s.ReleaseCaptureHMAC) < 32 {
+		return fmt.Errorf("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET is %d bytes; runtime.exs requires at least 32", len(s.ReleaseCaptureHMAC))
 	}
 	return nil
 }
@@ -740,11 +767,12 @@ func (m MailRelay) Validate() error {
 // signing/encryption key (cross-tenant session/token forgery + content
 // decryption) or dies at `mix ecto.migrate` when runtime.exs raises "BARKPARK_KEK
 // is not set". This step MUST run BEFORE migrate: migrate sources .env, and
-// runtime.exs REQUIRES the KEK (+ cloak key + preview secret + signing secret) in
-// prod. Each value rides in via its own BP_* env so it never lands in the step
-// Title/Cmd (which may be narrated/logged) — only in the Argv the SSH runner
-// base64-encodes and sends, mirroring adminTokenStep. The .env edit is idempotent:
-// one grep -v strips any existing line for ALL four keys, each minted value is
+// runtime.exs REQUIRES the KEK (+ cloak key + preview secret + release-capture
+// HMAC + signing secret) in prod. Each value rides in via its own BP_* env so it
+// never lands in the step Title/Cmd (which may be narrated/logged) — only in the
+// Argv the SSH runner base64-encodes and sends, mirroring adminTokenStep. The
+// .env edit is idempotent:
+// one grep -v strips any existing line for ALL five keys, each minted value is
 // appended from its $BP_* via printf "%s" (never interpolated into the script
 // TEXT), and the file is swapped in with mv — so re-running the chain never
 // duplicates a line. The single restart makes Phoenix re-read every key at boot (it
@@ -754,19 +782,21 @@ func secretsInstallStep(s Secrets, mail MailRelay) CaddyStep {
 	script := `export BP_SKB='` + s.SecretKeyBase + `'; ` +
 		`export BP_KEK='` + s.Kek + `'; ` +
 		`export BP_CLOAK='` + s.CloakKey + `'; ` +
-		`export BP_PREVIEW='` + s.PreviewJWTSecret + `'; `
+		`export BP_PREVIEW='` + s.PreviewJWTSecret + `'; ` +
+		`export BP_RCH='` + s.ReleaseCaptureHMAC + `'; `
 
 	// grep -v strip list (idempotency) + the append block, both grown when the
 	// shared mail relay is injected. The strip removes any prior line for a key
 	// so a re-run never duplicates.
-	strip := `-e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET='`
+	strip := `-e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET=' -e '^BARKPARK_RELEASE_CAPTURE_HMAC_SECRET='`
 	appends := `printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB" >> ` + envFile + `.bpnew; ` +
 		`printf 'BARKPARK_KEK=%s\n' "$BP_KEK" >> ` + envFile + `.bpnew; ` +
 		`printf 'BARKPARK_CLOAK_KEY=%s\n' "$BP_CLOAK" >> ` + envFile + `.bpnew; ` +
-		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW" >> ` + envFile + `.bpnew; `
+		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW" >> ` + envFile + `.bpnew; ` +
+		`printf 'BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=%s\n' "$BP_RCH" >> ` + envFile + `.bpnew; `
 
-	redact := []string{s.SecretKeyBase, s.Kek, s.CloakKey, s.PreviewJWTSecret}
-	cmd := "install per-instance SECRET_KEY_BASE + BARKPARK_KEK + BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET (values redacted)"
+	redact := []string{s.SecretKeyBase, s.Kek, s.CloakKey, s.PreviewJWTSecret, s.ReleaseCaptureHMAC}
+	cmd := "install per-instance SECRET_KEY_BASE + BARKPARK_KEK + BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET + BARKPARK_RELEASE_CAPTURE_HMAC_SECRET (values redacted)"
 
 	// Point the instance at the shared transactional-mail relay so magic-link /
 	// password-reset / verify-email actually deliver (else Barkpark.Mailer stays
@@ -805,6 +835,74 @@ func secretsInstallStep(s Secrets, mail MailRelay) CaddyStep {
 	}
 }
 
+// NormalizeTrustedProxies validates + canonicalizes a comma-separated egress list
+// into the exact shape api/config/runtime.exs accepts for
+// BARKPARK_TRUSTED_PROXIES: individual IP literals, comma-joined, no ranges.
+//
+// It is deliberately STRICTER than "write whatever the operator typed": runtime.
+// exs RAISES on a malformed entry, so a fat-fingered value would not degrade the
+// bucket key — it would refuse to boot the instance at the next restart (and this
+// step's own restart is that restart). A CIDR range is rejected with its own
+// message because it is the tempting wrong answer: trusting a whole range lets
+// any host in it forge every client's bucket key via x-forwarded-for, which is
+// why the Elixir side refuses ranges outright.
+//
+// Empty/whitespace input is NOT an error — it is the "not configured" state, and
+// returns ("", nil) so the caller skips the step and the instance keeps
+// loopback-only trust.
+func NormalizeTrustedProxies(raw string) (string, error) {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
+		}
+		// ParseCIDR, not a bare "/" check: the range case earns its OWN message (it is
+		// the tempting wrong answer), while anything else that merely contains a slash
+		// — a URL, say — falls through to the plain not-an-IP message instead of being
+		// mislabeled a range.
+		if _, _, err := net.ParseCIDR(entry); err == nil {
+			return "", fmt.Errorf("%q is a CIDR range; BARKPARK_TRUSTED_PROXIES takes individual addresses only (a trusted range lets any host in it forge every client's rate-limit bucket key)", entry)
+		}
+		ip := net.ParseIP(entry)
+		if ip == nil {
+			return "", fmt.Errorf("%q is not a valid IP address", entry)
+		}
+		out = append(out, ip.String())
+	}
+	return strings.Join(out, ","), nil
+}
+
+// trustedProxiesStep writes BARKPARK_TRUSTED_PROXIES=<control plane egress> into
+// the instance's /opt/barkpark/.env, idempotently (strip any prior line, append
+// the current value, mv) — the same grep -v/printf/mv idiom secretsInstallStep
+// uses, so re-running the go-live chain never duplicates the line.
+//
+// It carries NO restart of its own: the caller runs it immediately BEFORE
+// secretsInstallStep, whose single `systemctl restart barkpark` picks up this
+// value together with the minted secrets (Phoenix reads the trust list once at
+// boot, exactly like PHX_HOST). Ordering the other way round would leave the box
+// running WITHOUT the trust list until some later restart.
+//
+// The value is non-secret (a public server address), so it appears in the Title/
+// Cmd — an operator reading the narrated step should be able to SEE which
+// address the instance was told to believe.
+func trustedProxiesStep(egress string) CaddyStep {
+	const envFile = "/opt/barkpark/.env"
+	script := `touch ` + envFile + `; ` +
+		`grep -v -e '^BARKPARK_TRUSTED_PROXIES=' ` + envFile + ` > ` + envFile + `.bpnew || true; ` +
+		`printf 'BARKPARK_TRUSTED_PROXIES=%s\n' '` + egress + `' >> ` + envFile + `.bpnew; ` +
+		`mv ` + envFile + `.bpnew ` + envFile
+	return CaddyStep{
+		Title: "trust the control plane's relayed caller address (BARKPARK_TRUSTED_PROXIES=" + egress + ")",
+		Cmd:   "set BARKPARK_TRUSTED_PROXIES=" + egress + " in " + envFile,
+		Argv:  []string{"bash", "-lc", script},
+		// The step rewrites .env; a failure could echo neighbouring secret-shaped
+		// lines (DATABASE_URL, SECRET_KEY_BASE) from grep/printf into captured output.
+		RedactEnvSecrets: true,
+	}
+}
+
 // generateBase64Key mints a fresh standard-base64 (padded) string of 32 random
 // bytes — the shape BARKPARK_KEK REQUIRES (runtime.exs Base.decode64's it to
 // EXACTLY 32 bytes) and a clean, independent 32-byte draw for the cloak key and
@@ -825,8 +923,11 @@ func generateBase64Key() (string, error) {
 //     (Studio/login) on fresh instances while the stateless API stayed green.
 //     64 raw bytes ≈ 86 chars, matching deploy.sh's `mix phx.gen.secret`.
 //   - admin token: setup.GenerateAdminToken (base64url of 24 bytes + prefix).
-//   - BARKPARK_KEK / BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET: base64 of 32 random
-//     bytes each (generateBase64Key) — the KEK MUST Base.decode64 to 32 bytes.
+//   - BARKPARK_KEK / BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET /
+//     BARKPARK_RELEASE_CAPTURE_HMAC_SECRET: base64 of 32 random bytes each
+//     (generateBase64Key) — the KEK MUST Base.decode64 to 32 bytes, and the
+//     release-capture HMAC's 44-char encoding clears runtime.exs's 32-byte
+//     floor on the STRING.
 func defaultSecretGen() (Secrets, error) {
 	kb := make([]byte, 64)
 	if _, err := rand.Read(kb); err != nil {
@@ -845,16 +946,21 @@ func defaultSecretGen() (Secrets, error) {
 	if err != nil {
 		return Secrets{}, fmt.Errorf("generate PREVIEW_JWT_SECRET: %w", err)
 	}
+	releaseCapture, err := generateBase64Key()
+	if err != nil {
+		return Secrets{}, fmt.Errorf("generate BARKPARK_RELEASE_CAPTURE_HMAC_SECRET: %w", err)
+	}
 	tok, err := setup.GenerateAdminToken()
 	if err != nil {
 		return Secrets{}, fmt.Errorf("generate admin token: %w", err)
 	}
 	return Secrets{
-		SecretKeyBase:    skb,
-		Kek:              kek,
-		CloakKey:         cloak,
-		PreviewJWTSecret: preview,
-		AdminToken:       tok,
+		SecretKeyBase:      skb,
+		Kek:                kek,
+		CloakKey:           cloak,
+		PreviewJWTSecret:   preview,
+		ReleaseCaptureHMAC: releaseCapture,
+		AdminToken:         tok,
 	}, nil
 }
 
@@ -885,6 +991,32 @@ func (defaultCaddySteps) Steps(name, zone string, appPort int) []CaddyStep {
 		out[i] = CaddyStep{Title: s.Title, Cmd: s.Cmd, Argv: s.Argv}
 	}
 	return out
+}
+
+// DefaultCaddyStepper / DefaultHealthGate expose the go-live chain's production
+// secure-leg defaults to callers OUTSIDE the WarmPool (the provisioner's
+// support chain runs the same DNS → Caddy/TLS → public-health sequence without
+// a WarmPool now that supports carry a full public identity). They are exactly
+// what withDefaults fills — one truth, no duplicated step list or gate options.
+func DefaultCaddyStepper() CaddyStepper { return defaultCaddySteps{} }
+
+var DefaultHealthGate HealthChecker = defaultHealthChecker
+
+// PinnedHealthGate is DefaultHealthGate with the gate's dialing pinned to a
+// KNOWN box IP (setup.HealthGate.PinnedIP): every probe against base's
+// hostname connects straight to ip:<port> instead of resolving the name,
+// while Host header, TLS SNI, and cert verification keep using the public
+// hostname. The support chain's configure-step gate uses it because it runs
+// on the CP box, whose resolver negative-caches a failed chain's deleted A
+// record for up to the barkpark.cloud SOA minimum (3600s) — a retry reusing
+// the slug then fails the WHOLE gate deadline against a perfectly healthy
+// box (live-reproduced twice, 2026-07-26) — and serves a repointed name's
+// old IP for the positive TTL. The mains/warm-pool go-live keeps
+// DefaultHealthGate's resolver-based dialing for now.
+func PinnedHealthGate(ip string) HealthChecker {
+	return func(_ context.Context, base, token string) (setup.HealthReport, error) {
+		return setup.RunHealthGate(base, token, setup.HealthGate{StubsOptional: true, PinnedIP: ip})
+	}
 }
 
 // withDefaults fills any nil injected seam with its default. The Pool, DNS, and
@@ -937,10 +1069,11 @@ func (realStepRunner) Run(ctx context.Context, s CaddyStep) error {
 //
 //  1. assign      — pop a ready host from the warm pool (triggers a refill).
 //  2. secrets     — mint per-instance SECRET_KEY_BASE, BARKPARK_KEK,
-//     BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET + admin token.
+//     BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET,
+//     BARKPARK_RELEASE_CAPTURE_HMAC_SECRET + admin token.
 //  3. dns         — UpsertRecord an A record <name>.<zone> → the host IP.
 //  4. caddy       — run the Caddy/TLS steps (sets PHX_HOST/PHX_SCHEME).
-//  5. secrets-install — write the four per-instance secrets into .env + restart
+//  5. secrets-install — write the five per-instance secrets into .env + restart
 //     (BEFORE migrate — runtime.exs requires BARKPARK_KEK in prod).
 //  6. migrate     — run the mix ecto.migrate step.
 //  7. admin-token — install the minted admin token (after migrate).
@@ -1195,6 +1328,24 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		wp.progress("configure", "failed", "secrets")
 		return LiveServer{}, fmt.Errorf("secrets: %w", err)
 	}
+
+	// 5a. trusted proxies — tell the box to BELIEVE the caller address the control
+	// plane relays (BARKPARK_TRUSTED_PROXIES = the CP's egress). Runs BEFORE
+	// secrets-install so that step's single restart loads it (Phoenix reads the
+	// trust list once at boot). Unset → skipped, and the instance keeps
+	// loopback-only trust: proxied revokes then all key on ONE bucket per team
+	// instead of one per phone. A MALFORMED value fails the chain CLOSED rather
+	// than shipping a .env that raises at the very restart two lines below.
+	if egress, err := NormalizeTrustedProxies(wp.TrustedProxies); err != nil {
+		wp.progress("configure", "failed", "trusted-proxies")
+		return LiveServer{}, fmt.Errorf("trusted-proxies: BARKPARK_CLOUD_EGRESS_IPS is malformed: %w", err)
+	} else if egress != "" {
+		if err := runner.Run(ctx, trustedProxiesStep(egress)); err != nil {
+			wp.progress("configure", "failed", "trusted-proxies")
+			return LiveServer{}, fmt.Errorf("trusted-proxies: %w", err)
+		}
+	}
+
 	if err := runner.Run(ctx, secretsInstallStep(secrets, wp.Mail)); err != nil {
 		wp.progress("configure", "failed", "secrets")
 		return LiveServer{}, fmt.Errorf("secrets: %w", err)

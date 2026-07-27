@@ -98,6 +98,26 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       types_flag = Enum.find(cmd["flags"], &(&1["name"] == "types"))
       assert types_flag["type"] == "string"
     end
+
+    test "search declares the `fields` projection flag (controller already threads it)",
+         %{conn: conn} do
+      # The search controller (search/2 + search_local/2) already projects each
+      # hit through `params["fields"]`, but the flag was undeclared — an agent
+      # reading the manifest could not discover the token-thrifty projection.
+      # This closes that pure declaration gap.
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "search.query")
+
+      assert cmd != nil, "search.query command not found in manifest"
+
+      fields_flag = Enum.find(cmd["flags"], &(&1["name"] == "fields"))
+
+      assert fields_flag != nil,
+             "search.query must declare a `fields` flag; got: " <>
+               "#{inspect(Enum.map(cmd["flags"], & &1["name"]))}"
+
+      assert fields_flag["type"] == "string"
+    end
   end
 
   describe "media.upload path contract (BUG 2)" do
@@ -681,13 +701,13 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "chat transport commands (charter bp-chat-tui, ct-bl-manifest-commands)" do
     # bp chat was invisible to the capabilities manifest — the MCP bridge
     # (--tools all), SDK codegen, and headless harnesses could not discover it.
-    # These pin the `chat` noun + the seven non-streaming admin verbs mapped to
+    # These pin the `chat` noun + the nine non-streaming admin verbs mapped to
     # the already-shipped /v1/chat routes (the eighth, SSE events, is a builtin
     # carve-out with no manifest verb). StudioChat is core-embedded, NOT a
     # Barkpark.Plugin, so the noun is declared in core_nouns/0, not plugin_nouns/2.
     @chat_commands ~w(
       chat.create_session chat.list_sessions chat.get_session chat.update_session
-      chat.send_message chat.interrupt chat.approve
+      chat.send_message chat.interrupt chat.approve chat.archive chat.unarchive
     )
 
     test "the `chat` noun is declared and names the SSE streaming carve-out", %{conn: conn} do
@@ -704,7 +724,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "chat noun summary must name the SSE streaming carve-out; got: #{inspect(noun["summary"])}"
     end
 
-    test "exactly the seven non-streaming chat verbs are registered (events stays absent)",
+    test "exactly the nine non-streaming chat verbs are registered (events stays absent)",
          %{conn: conn} do
       manifest = capabilities(conn)
 
@@ -747,7 +767,9 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         "chat.update_session" => {"PATCH", "/v1/chat/sessions/:id"},
         "chat.send_message" => {"POST", "/v1/chat/sessions/:id/messages"},
         "chat.interrupt" => {"POST", "/v1/chat/sessions/:id/interrupt"},
-        "chat.approve" => {"POST", "/v1/chat/sessions/:id/approval"}
+        "chat.approve" => {"POST", "/v1/chat/sessions/:id/approval"},
+        "chat.archive" => {"POST", "/v1/chat/sessions/:id/archive"},
+        "chat.unarchive" => {"POST", "/v1/chat/sessions/:id/unarchive"}
       }
 
       for {id, {method, path}} <- expected do
@@ -793,18 +815,14 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "anon manifest leaked the chat noun name"
     end
 
-    # DOCUMENTING pin, not a fix — see the "OPEN D36 GAP" comment above the
-    # chat core_cmd block in capabilities.ex. RequireChatAccess.chat_scope/1
-    # (require_chat_access.ex) DOES authorize a workspace-bound
+    # D36 CLOSED (charter D16): `chat` is an ORTHOGONAL capability, not a rank.
+    # RequireChatAccess.chat_scope/1 authorizes a workspace-bound
     # `permissions: ["chat"]` Connector token at `/v1/chat/*` (resolves to
-    # `{:workspace, ws}`), but tier_for_token/1 here only recognizes
-    # admin/write/read, so that same token projects at manifest tier "none"
-    # and existence-hiding strips the whole `chat` noun from its own manifest.
-    # Remapping `chat` into tier_for_token/1 is D36-gated (chat_* is a HOT
-    # connectors surface) — this test intentionally PINS the current
-    # (stripped) behavior so a future D36-confirmed remap changes this
-    # assertion on purpose, not by accident.
-    test "a workspace token carrying only `chat` (no admin/write/read) still gets chat stripped (D36 open)",
+    # `{:workspace, ws}`), and tier_for_token/1 now mirrors that grant: the
+    # token's base tier stays "none" (chat lifts no rank), but a `+chat`
+    # capability rides alongside so project/2's chat_visible?/2 side-branch
+    # projects the `chat` noun + its seven verbs — and ONLY the chat noun.
+    test "a workspace token carrying only `chat` sees the chat noun WITHOUT any rank lift (D36 orthogonal)",
          %{conn: conn} do
       ws = Barkpark.TenancyFixtures.create_workspace!()
       raw_token = "chat-only-#{System.unique_integer([:positive])}"
@@ -816,17 +834,65 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         |> get("/v1/capabilities")
         |> json_response(200)
 
+      # Orthogonal, not a rank: the echoed tier stays "none" — chat grants
+      # discovery of its own noun, never a doc/task rank.
       assert manifest["auth_tier"] == "none",
-             "chat-only workspace token currently projects at tier \"none\" (D36 open); " <>
+             "chat is orthogonal — a chat-only token must still echo base tier \"none\"; " <>
                "got: #{inspect(manifest["auth_tier"])}"
 
+      # The whole chat noun + its seven verbs are now discoverable by their
+      # own token.
+      assert Enum.any?(manifest["nouns"], &(&1["name"] == "chat")),
+             "chat-capability workspace token must discover the chat noun"
+
+      chat_ids =
+        manifest["commands"]
+        |> Enum.filter(&(&1["noun"] == "chat"))
+        |> Enum.map(& &1["id"])
+        |> Enum.sort()
+
+      assert chat_ids == Enum.sort(@chat_commands),
+             "chat-capability token must see exactly the seven chat verbs; got: #{inspect(chat_ids)}"
+
+      # GUARD — chat lifts NO other noun's tier. The base tier stays "none", so
+      # the chat-only token must see EXACTLY the anonymous (tier-none) noun set
+      # PLUS the chat noun — nothing from a higher rank leaks in. The delta
+      # against the anon baseline is precisely {"chat"}.
+      anon = conn |> get("/v1/capabilities") |> json_response(200)
+      anon_nouns = anon["nouns"] |> Enum.map(& &1["name"]) |> MapSet.new()
+      chat_only_nouns = manifest["nouns"] |> Enum.map(& &1["name"]) |> MapSet.new()
+
+      assert MapSet.difference(chat_only_nouns, anon_nouns) == MapSet.new(["chat"]),
+             "chat capability must add ONLY the chat noun over the anon baseline; delta: " <>
+               "#{inspect(MapSet.difference(chat_only_nouns, anon_nouns) |> MapSet.to_list())}"
+
+      # And the reverse: the chat token loses none of the anon-visible nouns.
+      assert MapSet.subset?(anon_nouns, chat_only_nouns),
+             "chat capability must not drop any anon-visible noun"
+    end
+
+    # GUARD — the orthogonal grant is chat-ONLY: a plain [read, write] token
+    # (no chat permission) still gets the whole chat noun existence-hidden.
+    test "a [read, write] token (no chat permission) still gets chat stripped", %{conn: conn} do
+      ws = Barkpark.TenancyFixtures.create_workspace!()
+      raw_token = "rw-nochat-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Barkpark.Auth.create_token(raw_token, "rw-nochat", "test", ["read", "write"], ws.id)
+
+      manifest =
+        conn
+        |> put_req_header("authorization", "Bearer #{raw_token}")
+        |> get("/v1/capabilities")
+        |> json_response(200)
+
+      assert manifest["auth_tier"] == "write"
+
       refute Enum.any?(manifest["commands"], &(&1["noun"] == "chat")),
-             "chat-only token unexpectedly sees a chat command — if D36 shipped the tier " <>
-               "remap, update this pin instead of leaving it red"
+             "a [read, write] token must not see any chat command"
 
       refute Enum.any?(manifest["nouns"], &(&1["name"] == "chat")),
-             "chat-only token unexpectedly sees the chat noun — if D36 shipped the tier " <>
-               "remap, update this pin instead of leaving it red"
+             "a [read, write] token must not see the chat noun"
     end
   end
 
@@ -1096,6 +1162,93 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       assert resp.status == 200,
              "the non-views etag must not 304 the views body; got status #{resp.status}"
+    end
+  end
+
+  describe "root `chat` discovery block (charter D27, ?chat=1 opt-in)" do
+    # Opt-in by contract, exactly like ?build=1/?views=1: released bp binaries
+    # strict-decode the manifest ROOT with DisallowUnknownFields, so the
+    # DEFAULT response must NEVER grow a new root key. There is no
+    # whole-manifest root-key freeze elsewhere — these negative tests ARE the
+    # guard.
+    test "default manifest carries NO root chat key — byte-identical incl etag",
+         %{conn: conn} do
+      plain = caps_conn(conn)
+      body = json_response(plain, 200)
+
+      refute Map.has_key?(body, "chat"),
+             "default manifest leaked the root chat key — it must be withheld unless ?chat=1"
+
+      # The default body and its etag must be exactly what a chat-oblivious
+      # request gets — the chat gate must not perturb the ungated pipeline.
+      # etag is content-addressed off the final map (generated_at excluded), so
+      # etag equality IS body identity minus the per-request timestamp.
+      twin = caps_conn(build_conn())
+      twin_body = json_response(twin, 200)
+
+      assert Map.delete(body, "generated_at") == Map.delete(twin_body, "generated_at")
+      assert get_resp_header(plain, "etag") == get_resp_header(twin, "etag")
+    end
+
+    test "?chat=1 carries claude caps and empty-array codex (the degrade signal)",
+         %{conn: conn} do
+      body = caps_conn(conn, "?chat=1") |> json_response(200)
+
+      assert %{"providers" => providers} = body["chat"]
+
+      # claude: the transport-ACCEPTED vocabulary — Runtime.capabilities/1
+      # minus the danger mode (bypassPermissions is categorically rejected on
+      # /v1/chat, D22; advertising it would bait a guaranteed 400).
+      claude = providers["claude"]
+      caps = Barkpark.StudioChat.Runtime.capabilities("claude")
+
+      assert claude["modes"] == caps.modes -- [caps.danger_mode]
+      refute "bypassPermissions" in claude["modes"]
+      assert claude["models"] == caps.models
+      assert claude["efforts"] == caps.efforts
+
+      # codex ships all-empty TODAY — pickers must degrade, never invent.
+      assert providers["codex"] == %{"modes" => [], "models" => [], "efforts" => []}
+    end
+
+    test "anonymous ?chat=1 gets nothing (tier none — mirrors the build gate)", %{conn: conn} do
+      body =
+        conn
+        |> get("/v1/capabilities?chat=1")
+        |> json_response(200)
+
+      assert body["auth_tier"] == "none"
+
+      refute Map.has_key?(body, "chat"),
+             "an anonymous caller must not discover the chat surface via ?chat=1"
+    end
+
+    test "chat and non-chat bodies get DISTINCT etags; the plain etag does NOT 304 ?chat=1",
+         %{conn: conn} do
+      plain = caps_conn(conn)
+      with_chat = caps_conn(build_conn(), "?chat=1")
+
+      plain_etag = plain |> get_resp_header("etag") |> List.first()
+      chat_etag = with_chat |> get_resp_header("etag") |> List.first()
+
+      assert is_binary(plain_etag) and plain_etag != ""
+      assert is_binary(chat_etag) and chat_etag != ""
+
+      assert plain_etag != chat_etag,
+             "chat and non-chat manifests must have distinct etags (maybe_gate_chat sits BEFORE etag_for)"
+
+      # The body echoes the same etag the header carries.
+      assert json_response(with_chat, 200)["etag"] == chat_etag
+
+      # Presenting the plain etag against the chat request must re-render (200).
+      resp =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", plain_etag)
+        |> get("/v1/capabilities?chat=1")
+
+      assert resp.status == 200,
+             "the non-chat etag must not 304 the chat body; got status #{resp.status}"
     end
   end
 end

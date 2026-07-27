@@ -10,8 +10,9 @@ import type {
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  curatePopularQueries,
+  DEFAULT_ENGINE,
   DOC_TYPES,
-  ENGINES,
   FACET_DIMENSIONS,
   SORTS,
   typeLabel,
@@ -21,6 +22,7 @@ import {
   type SearchEngine,
   type SortId,
 } from "@/lib/find";
+import { SITE_EYEBROW, SITE_TAGLINE, SITE_TITLE } from "@/lib/config";
 import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
 import { useFinderNav } from "@/lib/finder-nav-context";
 import { useLiveSearch } from "@/lib/use-live-search";
@@ -35,15 +37,6 @@ import { stemToken, queryStems } from "@/lib/stem";
 import { highlightSegments, words, termHitsWords } from "@/lib/fuzzy";
 import { matchQuality } from "@/lib/tokens.gen";
 import { apiPath } from "@/lib/base-path";
-
-/** Frontpage hero copy — config-driven so the template ships generic + premium
- * out of the box and any site brands it without touching code. All `NEXT_PUBLIC_`
- * so they inline into this client component. */
-const SITE_EYEBROW = process.env.NEXT_PUBLIC_SITE_EYEBROW || "Search";
-const SITE_TITLE = process.env.NEXT_PUBLIC_SITE_TITLE || "Search everything.";
-const SITE_TAGLINE =
-  process.env.NEXT_PUBLIC_SITE_TAGLINE ||
-  "Instant, typo-tolerant search across every document — with a live graph of how it all connects.";
 
 /** Fire-and-forget feedback POST — never throws, never blocks the caller. */
 function recordFindEvent(body: {
@@ -484,7 +477,7 @@ export function Finder({
   variant = "page",
   initialData = null,
   initialSeed = null,
-  initialEngine = "indx",
+  initialEngine = DEFAULT_ENGINE,
 }: {
   variant?: "page" | "home" | "master";
   /** Server-rendered browse result for the landing — seeds the first paint so
@@ -535,8 +528,11 @@ export function Finder({
   const currentQueryString = sp.toString();
 
   const q = sp.get("q") ?? "";
-  // Default to Indx — the landing then showcases native facets + fuzzy recall.
-  const engine: SearchEngine = sp.get("engine") === "postgres" ? "postgres" : "indx";
+  // Unbiased URL reader: an explicit `engine=indx` opts into fuzzy recall;
+  // anything else resolves to the ONE shared default (postgres — see
+  // DEFAULT_ENGINE), matching the SSR seed and the /api/find route.
+  const engine: SearchEngine =
+    sp.get("engine") === "indx" ? "indx" : DEFAULT_ENGINE;
   const sort: SortId = SORTS.some((s) => s.id === sp.get("sort"))
     ? (sp.get("sort") as SortId)
     : "relevance";
@@ -602,9 +598,6 @@ export function Finder({
   // Identity of the current view: engine + query. No cache/bust dimension —
   // every search goes straight to the engine, always fresh.
   const reqKey = `${engine} ${q}`;
-  // Manual refetch trigger (the reindex button) — not a cache; bumping it re-runs
-  // the fetch effect for the SAME view to pull freshly-reindexed data.
-  const [refreshNonce, setRefreshNonce] = useState(0);
   // Key the server-rendered seed corresponds to: the landing (empty query) on
   // the page's engine. When it matches `reqKey` on mount we use the seed instead
   // of refetching — the first paint already has the results.
@@ -686,7 +679,6 @@ export function Finder({
     q,
     seedKey,
     sessionId,
-    refreshNonce,
     liveEnabled,
     liveReady,
     liveSearch,
@@ -696,12 +688,15 @@ export function Finder({
   const prerendered = result?.key === reqKey && result.prerendered === true;
 
   // Popular past queries (search-intelligence) — shown when the box is empty.
+  // The raw pool is the query LOG, so it is curated down to human-shaped chips
+  // before it reaches the UI (see `curatePopularQueries`); an empty result means
+  // no chip row at all, which is the correct answer for a fresh dataset.
   const [popular, setPopular] = useState<PopularQuery[]>([]);
   useEffect(() => {
     fetch(apiPath("/api/find?suggest=1"))
       .then((r) => r.json())
       .then((d: { popular?: PopularQuery[] }) =>
-        setPopular((d.popular ?? []).filter((p) => p.query).slice(0, 6)),
+        setPopular(curatePopularQueries(d.popular)),
       )
       .catch(() => {});
   }, []);
@@ -1034,30 +1029,7 @@ export function Finder({
     setParams(patch);
   };
 
-  const [reindexMsg, setReindexMsg] = useState<string | null>(null);
-  const reindexNow = async () => {
-    setReindexMsg("queuing…");
-    try {
-      const r = await fetch(apiPath("/api/admin/reindex"), { method: "POST" });
-      const d = (await r.json()) as { ok?: boolean; error?: string };
-      if (d.ok) {
-        setReindexMsg("rebuilding ~30s…");
-        // The rebuild runs async on the API node; refetch once it should be live.
-        setTimeout(() => {
-          setRefreshNonce((n) => n + 1);
-          setReindexMsg(null);
-        }, 32000);
-      } else {
-        setReindexMsg(d.error ?? "reindex failed");
-        setTimeout(() => setReindexMsg(null), 4000);
-      }
-    } catch (e) {
-      setReindexMsg((e as Error).message);
-      setTimeout(() => setReindexMsg(null), 4000);
-    }
-  };
-
-  // Advanced options panel (cache/reindex/syntax) — a stateful toggle rather
+  // Advanced options panel (query syntax) — a stateful toggle rather
   // than <details>, so the interactive Popular chips can share its header row
   // without a click also toggling the panel.
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -1066,19 +1038,23 @@ export function Finder({
     <main
       ref={rootRef}
       className={
+        // Below `md` the finder owns the whole screen, so the frame tightens:
+        // half the vertical padding and a narrower gutter, which is what buys
+        // the search input (and the first results) a place in the first phone
+        // viewport. The `md:` half restores the desktop frame verbatim.
         master
           ? // Left frontpage column (the ~1080px aside, which scrolls). Cap +
             // centre the content at max-w-4xl so it keeps the original landing
             // page's proportions inside the wide column — spacious, not sprawled.
-            "mx-auto flex w-full max-w-4xl flex-col gap-8 px-8 py-12"
-          : "mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-8 px-6 py-12"
+            "mx-auto flex w-full max-w-4xl flex-col gap-6 px-5 py-6 md:gap-8 md:px-8 md:py-12"
+          : "mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 px-5 py-6 md:gap-8 md:px-6 md:py-12"
       }
     >
       {variant === "page" ? (
         <header className="flex flex-col gap-3 border-b border-zinc-200 pb-6 dark:border-zinc-800">
           <Link
             href="/"
-            className="text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-200"
+            className="inline-flex min-h-11 items-center self-start text-sm text-zinc-500 transition-colors hover:text-zinc-900 md:min-h-0 dark:hover:text-zinc-200"
           >
             ← Barkpark
           </Link>
@@ -1093,15 +1069,18 @@ export function Finder({
         </header>
       ) : (
         // Frontpage hero — shown for the home AND the master split, so the left
-        // column reads like the landing page it replaced.
-        <header className="flex flex-col gap-4 border-b border-zinc-200 pb-8 dark:border-zinc-800">
+        // column reads like the landing page it replaced. On a phone the hero
+        // steps DOWN a size (tighter gaps, 3xl headline, base-size tagline): the
+        // same words, but the search box — the only thing a visitor came for —
+        // stays above the fold instead of being pushed out by display type.
+        <header className="flex flex-col gap-2 border-b border-zinc-200 pb-5 md:gap-4 md:pb-8 dark:border-zinc-800">
           <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
             {SITE_EYEBROW}
           </span>
-          <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">
             {SITE_TITLE}
           </h1>
-          <p className="max-w-2xl text-lg leading-relaxed text-zinc-600 dark:text-zinc-300">
+          <p className="max-w-2xl text-base leading-relaxed text-zinc-600 sm:text-lg dark:text-zinc-300">
             {SITE_TAGLINE}
           </p>
         </header>
@@ -1142,46 +1121,32 @@ export function Finder({
               className="w-full rounded-lg border border-zinc-300 bg-transparent py-2.5 pl-9 pr-3 text-base outline-none transition-colors focus:border-zinc-500 dark:border-zinc-700 dark:focus:border-zinc-400"
             />
           </div>
-          <div
-            role="radiogroup"
-            aria-label="Search engine"
-            className="flex shrink-0 rounded-lg border border-zinc-300 p-0.5 dark:border-zinc-700"
-          >
-            {ENGINES.map((e) => (
-              <button
-                key={e.id}
-                role="radio"
-                aria-checked={engine === e.id}
-                onClick={() => setParams({ engine: e.id })}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  engine === e.id
-                    ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
-                    : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200"
-                }`}
-              >
-                {e.label}
-              </button>
-            ))}
-          </div>
+          {/* The engine pill is RETIRED: the demo no longer advertises an
+              engine it cannot promise is provisioned. `?engine=indx` in the
+              URL still opts in, and the server-reported `engineUsed` keeps
+              the readout honest either way. */}
         </div>
         {/* Status row (fixed height): Popular shortcuts when idle, parsed-query
             chips when searching, + the fuzzy pill — with the Options toggle on
             the right. The benchmark/advanced controls tuck into the panel below,
             collapsed by default so the primary surface stays clean. */}
-        <div className="flex min-h-7 items-center justify-between gap-3 text-sm text-zinc-500 dark:text-zinc-400">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="flex min-h-11 items-center justify-between gap-3 text-sm text-zinc-500 md:min-h-7 dark:text-zinc-400">
+          {/* Phone: ONE scrollable strip rather than a wrapping block — the
+              chips are 44px tall here, and six of them wrapped would bury the
+              results under a wall of pills. Desktop wraps exactly as before. */}
+          <div className="flex min-w-0 flex-nowrap items-center gap-x-2 gap-y-1 overflow-x-auto md:flex-wrap md:overflow-x-visible">
             {highlightTerms.length > 0 ? (
               <HighlightLegend />
             ) : popular.length > 0 ? (
               // Default (idle) state: Popular shortcuts live HERE instead of the
               // old engine tagline.
               <>
-                <span className="text-zinc-400">Popular:</span>
+                <span className="shrink-0 text-zinc-400">Popular:</span>
                 {popular.map((p) => (
                   <button
                     key={p.query}
                     onClick={() => setParams({ q: p.query })}
-                    className="rounded-full border border-zinc-300 px-2.5 py-0.5 text-xs text-zinc-600 transition-colors hover:border-zinc-500 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-300 dark:hover:text-zinc-100"
+                    className="inline-flex min-h-11 shrink-0 items-center rounded-full border border-zinc-300 px-3 py-0.5 text-xs text-zinc-600 transition-colors hover:border-zinc-500 hover:text-zinc-900 md:min-h-0 md:px-2.5 dark:border-zinc-700 dark:text-zinc-300 dark:hover:text-zinc-100"
                   >
                     {p.query}
                   </button>
@@ -1213,7 +1178,7 @@ export function Finder({
             type="button"
             onClick={() => setOptionsOpen((o) => !o)}
             aria-expanded={optionsOpen}
-            className="flex shrink-0 items-center gap-1 text-xs text-zinc-400 transition-colors hover:text-zinc-600 dark:hover:text-zinc-300"
+            className="flex min-h-11 shrink-0 items-center gap-1 pl-2 text-xs text-zinc-400 transition-colors hover:text-zinc-600 md:min-h-0 md:pl-0 dark:hover:text-zinc-300"
           >
             Options
             <svg
@@ -1234,22 +1199,6 @@ export function Finder({
         </div>
         {optionsOpen ? (
           <div className="flex flex-col gap-3 border-l-2 border-zinc-200 pl-3 dark:border-zinc-800">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-zinc-400">
-                Every query hits {engine === "indx" ? "Indx" : "Postgres"}{" "}
-                directly — always fresh, no cache.
-              </span>
-              {engine === "indx" ? (
-                <button
-                  onClick={reindexNow}
-                  disabled={!!reindexMsg}
-                  title="Trigger an Indx blue/green rebuild"
-                  className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:hover:text-zinc-200"
-                >
-                  {reindexMsg ?? "reindex"}
-                </button>
-              ) : null}
-            </div>
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
               <span>
                 <code className="font-mono">&quot;exact phrase&quot;</code> phrase
@@ -1268,19 +1217,25 @@ export function Finder({
       {/* Popular shortcuts now live in the status row above (idle state),
           replacing the old engine tagline — no separate line. */}
 
-      {/* banners */}
+      {/* banners — total failure is HUMAN copy (the server already folds the
+          upstream error through humanUpstreamMessage), never a raw upstream
+          dump; the honest recovery hint is that the next keystroke retries.
+          `data-search-error` is a STRUCTURAL oracle for the journey-smoke
+          harness (tooling/search-smoke) — keep it when editing the copy. */}
       {data?.error ? (
-        <section className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
-          <strong className="font-medium">Search failed.</strong>
-          <pre className="mt-2 whitespace-pre-wrap text-xs">{data.error}</pre>
+        <section
+          data-search-error
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200"
+        >
+          <strong className="font-medium">Search is unavailable right now.</strong>{" "}
+          The search service didn&apos;t answer — it may be restarting. Searching
+          again retries automatically.
         </section>
       ) : null}
       {data?.indxUnavailable ? (
         <section className="rounded-lg border border-amber-300/70 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-          Indx needs a scoped read token, which isn&apos;t configured in this
-          deployment — showing <strong>Postgres</strong> results. Set{" "}
-          <code className="font-mono">BARKPARK_TOKEN</code> to enable
-          fuzzy/typo search.
+          Live Indx engine unavailable — showing <strong>Postgres</strong>{" "}
+          results.
         </section>
       ) : null}
       {/* Recovery/fuzzy-widen is now a compact pill in the engine row above
@@ -1297,7 +1252,7 @@ export function Finder({
           {" · "}
           <button
             onClick={() => setParams({ q })}
-            className="text-zinc-500 underline decoration-dotted underline-offset-2 transition-colors hover:text-zinc-900 hover:decoration-solid dark:hover:text-zinc-200"
+            className="inline-flex min-h-11 items-center text-zinc-500 underline decoration-dotted underline-offset-2 transition-colors hover:text-zinc-900 hover:decoration-solid md:min-h-0 dark:hover:text-zinc-200"
           >
             search {q} instead
           </button>
@@ -1318,7 +1273,7 @@ export function Finder({
               });
               setParams({ q: suggestion });
             }}
-            className="font-medium text-zinc-900 underline decoration-dotted underline-offset-2 transition-colors hover:decoration-solid dark:text-zinc-50"
+            className="inline-flex min-h-11 items-center font-medium text-zinc-900 underline decoration-dotted underline-offset-2 transition-colors hover:decoration-solid md:min-h-0 dark:text-zinc-50"
           >
             {suggestion}
           </button>
@@ -1341,7 +1296,7 @@ export function Finder({
           {facetCount > 0 ? (
             <button
               onClick={resetFacets}
-              className="self-start text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+              className="inline-flex min-h-11 items-center self-start text-xs text-zinc-400 transition-colors hover:text-zinc-700 md:min-h-0 dark:hover:text-zinc-200"
             >
               clear filters ({facetCount})
             </button>
@@ -1362,7 +1317,7 @@ export function Finder({
                         data-nav-facet=""
                         aria-pressed={on}
                         onClick={() => toggleFacet(g.key, b.label)}
-                        className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${
+                        className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 md:min-h-0 ${
                           on
                             ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
                             : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900/60"
@@ -1461,7 +1416,7 @@ export function Finder({
                     onClick={() =>
                       setParams({ sort: s.id === "relevance" ? null : s.id })
                     }
-                    className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                    className={`inline-flex min-h-11 items-center justify-center rounded px-3 py-1 text-xs font-medium transition-colors md:min-h-0 md:px-2 ${
                       sort === s.id
                         ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
                         : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200"
@@ -1537,7 +1492,7 @@ export function Finder({
                   <button
                     type="button"
                     onClick={() => setShowAllResults(true)}
-                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-zinc-400 hover:text-zinc-900 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:text-zinc-100"
+                    className="min-h-11 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:border-zinc-400 hover:text-zinc-900 md:min-h-0 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:text-zinc-100"
                   >
                     Show {visibleHits.length - RESULT_RENDER_CAP} more
                   </button>

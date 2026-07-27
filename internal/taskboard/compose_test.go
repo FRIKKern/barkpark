@@ -91,8 +91,9 @@ func composeFixture() Model {
 				BlocksRaw: []byte(fixtureBlocks),
 			},
 		},
-		now:   func() time.Time { return detailNow },
-		stack: []Frame{{Kind: FrameBoard, Title: "tasks"}},
+		now:           func() time.Time { return detailNow },
+		stack:         []Frame{{Kind: FrameBoard, Title: "tasks"}},
+		wideBoardCols: boardPaneWidth,
 	}
 }
 
@@ -162,8 +163,8 @@ func TestComposeWideGolden(t *testing.T) {
 }
 
 // TestEnterChecksOpenTaskRow — the picker vocabulary: entering a task CHECKS
-// its radio. While a FrameTask is on the navigation stack its board row wears
-// the ● checked glyph (in place of the lifecycle glyph, same color), and
+// its reader marker. While a FrameTask is on the navigation stack its board row
+// wears ◆ (in place of the lifecycle glyph, same color), and
 // popping the frame (esc) reverts it. Exercised in WIDE mode, where the board
 // stays pinned beside the reading frame so the check is actually visible.
 func TestEnterChecksOpenTaskRow(t *testing.T) {
@@ -195,19 +196,19 @@ func TestEnterChecksOpenTaskRow(t *testing.T) {
 	}
 
 	before := subjectRow(ansi.Strip(Compose(m)))
-	if strings.Contains(before, "●") {
+	if strings.Contains(before, "◆") {
 		t.Fatalf("subject row is checked before enter: %q", before)
 	}
 
 	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "Wire the SSE live bridge"})
 	during := subjectRow(ansi.Strip(Compose(m)))
-	if !strings.Contains(during, "●") {
+	if !strings.Contains(during, "◆") {
 		t.Fatalf("entered task's board row is not checked: %q", during)
 	}
 
 	(&m).popFrame()
 	after := subjectRow(ansi.Strip(Compose(m)))
-	if strings.Contains(after, "●") {
+	if strings.Contains(after, "◆") {
 		t.Fatalf("escaped task's board row is still checked: %q", after)
 	}
 }
@@ -625,11 +626,9 @@ func wideWheel(x, y int, up bool) tea.MouseMsg {
 	return tea.MouseMsg{X: x + 1, Y: y + 1, Button: b, Action: tea.MouseActionPress}
 }
 
-// A left click on a board row selects it — the SAME cursor arrowing to it would
-// land on (charter/wish: "click a task row to select it, same effect as arrowing
-// to it"), and the FULL row is the target (the X is deep in the row, not on the
-// glyph).
-func TestWideMouseBoardRowClickSelects(t *testing.T) {
+// A left click on a board task moves the cursor there and activates it in one
+// gesture — exactly the state reached by moving there and pressing Enter.
+func TestWideMouseBoardRowClickMatchesEnter(t *testing.T) {
 	withChrome(t)
 	m := composeFixture()
 	m.width, m.height, m.wide = 120, 40, true
@@ -648,19 +647,14 @@ func TestWideMouseBoardRowClickSelects(t *testing.T) {
 	m2, cmd := m.handleWideMouse(wideClick(20, pl+1))
 	nm := m2
 	if cmd != nil {
-		t.Errorf("a board select fired a command: %v", cmd)
+		t.Errorf("a board click fired a command: %v", cmd)
 	}
 	if nm.ui.Cursor != want {
 		t.Fatalf("board click selected cursor %d, want %d (the subject)", nm.ui.Cursor, want)
 	}
-
-	// A second click on the now-selected row ACTIVATES it — the narrow board's
-	// select-then-activate grammar (wish: "click again / double-click to expand"):
-	// a task row descends into its FrameTask.
-	m3, _ := nm.handleWideMouse(wideClick(20, pl+1))
-	if len(m3.stack) != 2 || m3.topFrame().Kind != FrameTask || m3.topFrame().Ref != composeSubjectID {
-		t.Fatalf("second click on the selected task row did not descend: depth=%d kind=%v ref=%q",
-			len(m3.stack), m3.topFrame().Kind, m3.topFrame().Ref)
+	if len(nm.stack) != 2 || nm.topFrame().Kind != FrameTask || nm.topFrame().Ref != composeSubjectID {
+		t.Fatalf("single click did not match Enter: depth=%d kind=%v ref=%q",
+			len(nm.stack), nm.topFrame().Kind, nm.topFrame().Ref)
 	}
 }
 
@@ -679,10 +673,9 @@ func TestWideMouseInertRegionsNoOp(t *testing.T) {
 		name string
 		ev   tea.MouseMsg
 	}{
-		{"identity-strip", wideClick(20, 1)},          // composeAt Y=1 → board pane line 0 (identity top)
-		{"dead-gutter", wideClick(boardPaneWidth, 3)}, // x=46 → the 2-col gutter
-		{"crumb-row", wideClick(20, 0)},               // composeAt Y=0 → the breadcrumb
-		{"below-frame", wideClick(20, inner+5)},       // past the last pane row
+		{"identity-strip", wideClick(20, 1)},    // composeAt Y=1 → board pane line 0 (identity top)
+		{"crumb-row", wideClick(20, 0)},         // composeAt Y=0 → the breadcrumb
+		{"below-frame", wideClick(20, inner+5)}, // past the last pane row
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -731,6 +724,13 @@ func TestWideMouseDepth0PreviewWheelScrolls(t *testing.T) {
 		t.Fatalf("wheel-down scrolled preview to (%q, %d), want (%q, 1)",
 			m2.previewRef, m2.previewScroll, composeSubjectID)
 	}
+	if m2.wideFocus != wideFocusReader {
+		t.Fatal("wheel inside preview did not focus the right pane")
+	}
+	keyed, _ := m2.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if got := keyed.(Model).previewScroll; got != 2 {
+		t.Fatalf("focused preview did not own keyboard scroll: got %d, want 2", got)
+	}
 	if m2.ui.Cursor != m.ui.Cursor || len(m2.stack) != 1 {
 		t.Fatalf("preview scroll moved the board: cursor=%d depth=%d", m2.ui.Cursor, len(m2.stack))
 	}
@@ -758,9 +758,13 @@ func TestWideMouseDepth0PreviewClickEnters(t *testing.T) {
 		t.Fatal("subject is not a visible board row")
 	}
 	rightX := boardPaneWidth + paneGutter2 + 4
+	// The activation click also transfers focus to the right column.
 	m2, cmd := m.handleWideMouse(wideClick(rightX, 3))
 	if cmd != nil {
 		t.Errorf("a preview click fired a command: %v", cmd)
+	}
+	if m2.wideFocus != wideFocusReader {
+		t.Fatalf("preview click did not focus the reader: focus=%v", m2.wideFocus)
 	}
 	if len(m2.stack) != 2 || m2.topFrame().Kind != FrameTask || m2.topFrame().Ref != composeSubjectID {
 		t.Fatalf("preview click did not enter the previewed task: depth=%d kind=%v ref=%q",
@@ -814,7 +818,7 @@ func TestWideHoverPreviewsHoveredRow(t *testing.T) {
 
 // Entering a task from the board while ANOTHER task frame is open REPLACES it
 // (single-open): the stack never accumulates board-entered FrameTasks, and the
-// checked radio marks exactly one row — the deepest open task.
+// reader-open ◆ marks exactly one row — the deepest open task.
 func TestSingleOpenTaskEntry(t *testing.T) {
 	m := composeFixture()
 	m = m.enterTask("a")
@@ -839,14 +843,14 @@ func TestSingleOpenTaskEntry(t *testing.T) {
 	}
 }
 
-// Depth>0: a click on a rail stop in the right pane selects that stop (the frame
-// cursor moves, viewport follows) — resolved via Stop.Line + the painted window
-// offset, the FULL row a target.
-func TestWideMouseRightRailClickSelectsStop(t *testing.T) {
+// Depth>0: a click on a rail stop selects and descends in one gesture, matching
+// moving the stop cursor there and pressing Enter.
+func TestWideMouseRightRailClickMatchesEnter(t *testing.T) {
 	withChrome(t)
 	m := composeFixture()
 	m.width, m.height, m.wide = 120, 60, true // tall enough that the detail body fits
 	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	m.wideFocus = wideFocusReader
 	_, _, inner := m.wideGeom()
 	rightW := 120 - 1 - 3 - boardPaneWidth - paneGutter2
 	body, stops := m.frameContent(m.topFrame(), rightW, m.now())
@@ -863,16 +867,66 @@ func TestWideMouseRightRailClickSelectsStop(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("a rail select fired a command: %v", cmd)
 	}
-	if got := m2.topFrame().Cursor; got != 1 {
-		t.Fatalf("rail click selected stop %d, want 1", got)
+	if len(m2.stack) != 3 || m2.topFrame().Ref != target.Ref {
+		t.Fatalf("single rail click did not match Enter: depth=%d ref=%q want ref=%q",
+			len(m2.stack), m2.topFrame().Ref, target.Ref)
 	}
+}
 
-	// A second click on the now-selected stop DESCENDS onto it, exactly like
-	// enter — the narrow reading grammar (select, then click-again opens).
-	m3, _ := m2.handleWideMouse(wideClick(boardPaneWidth+paneGutter2+3, target.Line+1))
-	if len(m3.stack) != 3 || m3.topFrame().Ref != target.Ref {
-		t.Fatalf("second click on the selected stop did not descend: depth=%d ref=%q want ref=%q",
-			len(m3.stack), m3.topFrame().Ref, target.Ref)
+func TestWideDividerIsVisibleAndDraggable(t *testing.T) {
+	withChrome(t)
+	oldProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldProfile) })
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	restStyled := Compose(m)
+	frame := ansi.Strip(restStyled)
+	if !strings.Contains(frame, "↔") || !strings.Contains(frame, "│") {
+		t.Fatalf("wide frame has no visible resize rail:\n%s", frame)
+	}
+	if !strings.Contains(restStyled, dividerRestStyle.Render("↔ ")) {
+		t.Fatal("divider at rest did not use the low-emphasis style")
+	}
+	hover := tea.MouseMsg{X: boardPaneWidth + 1, Y: 4, Action: tea.MouseActionMotion}
+	mHover, _ := m.handleWideMouse(hover)
+	if !mHover.wideDividerHover || mHover.wideDragging {
+		t.Fatalf("divider hover state = hover %v, dragging %v; want true, false", mHover.wideDividerHover, mHover.wideDragging)
+	}
+	if styled := Compose(mHover); !strings.Contains(styled, dividerHoverStyle.Render("↔ ")) {
+		t.Fatal("hovered divider did not use the brighter hover style")
+	}
+	press := tea.MouseMsg{X: boardPaneWidth + 1, Y: 4, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}
+	m2, _ := mHover.handleWideMouse(press)
+	if !m2.wideDragging {
+		t.Fatal("divider press did not begin a drag")
+	}
+	if styled := Compose(m2); !strings.Contains(styled, dividerGrabbedStyle.Render("↔↔")) {
+		t.Fatal("grabbed divider did not use the strongest accent style")
+	}
+	motion := tea.MouseMsg{X: 61, Y: 4, Action: tea.MouseActionMotion}
+	m3, _ := m2.handleWideMouse(motion)
+	if got := m3.boardPaneCols(m3.wideInnerWidth()); got != 60 {
+		t.Fatalf("divider drag resized board pane to %d, want 60", got)
+	}
+	release := tea.MouseMsg{X: 61, Y: 4, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease}
+	m4, _ := m3.handleWideMouse(release)
+	if m4.wideDragging {
+		t.Fatal("divider release left drag armed")
+	}
+	if !m4.wideDividerHover {
+		t.Fatal("divider release over the rail did not return to hover state")
+	}
+	away := tea.MouseMsg{X: 10, Y: 4, Action: tea.MouseActionMotion}
+	m5, _ := m4.handleWideMouse(away)
+	if m5.wideDividerHover {
+		t.Fatal("divider hover remained active after the pointer left the rail")
+	}
+	if dividerRestStyle.GetForeground() == dividerHoverStyle.GetForeground() || dividerHoverStyle.GetForeground() == dividerGrabbedStyle.GetForeground() {
+		t.Fatal("divider rest, hover, and grabbed states must use distinct brightness roles")
+	}
+	if !dividerGrabbedStyle.GetBold() {
+		t.Fatal("grabbed divider must add bold emphasis")
 	}
 }
 

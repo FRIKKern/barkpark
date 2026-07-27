@@ -675,9 +675,13 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       # the box's webhook changeset validate_required([:name, :url]), so a body
       # without a name 422s and the registration silently fails (the site never
       # auto-rebuilds on publish). Regression guard for that gap.
+      # stw9 (charter D56): registration is now list-then-create-by-name, so the
+      # webhook traffic is a GET (the lookup, empty body) followed by the WRITE.
+      # Match the write specifically — matching any /v1/webhooks/ request would
+      # pick the lookup and decode an empty body.
       wh_req =
         Enum.find(StudioLinkFakeHttpClient.requests(), fn r ->
-          String.contains?(r.url, "/v1/webhooks/")
+          r.method in [:post, :put] and String.contains?(r.url, "/v1/webhooks/")
         end)
 
       assert wh_req, "create must register the content-publish webhook on the box"
@@ -1138,6 +1142,10 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert conn.status == 200
       body = json_body(conn)
       assert body["site"]["theme"] == "ember"
+      # W10: the RESPONSE BODY carries doc_type. Asserting the DB reload alone
+      # (below) routed around the missing echo — every reader downstream (the Go
+      # CLI, the console rail) sees this body, not the row.
+      assert body["site"]["doc_type"] == "paper"
       assert body["note"] =~ "next deploy"
 
       reloaded = Registry.get_site(site.id)

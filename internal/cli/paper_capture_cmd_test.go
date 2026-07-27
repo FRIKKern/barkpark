@@ -12,12 +12,17 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestPaperCaptureFetchesOnceAndEmitsRealPinnedReaders(t *testing.T) {
 	requests := 0
-	body := fmt.Sprintf(`{"release_gate_id":%q,"wave_revision":%q,"candidate_id":%q,"role":"campaign","document_id":%q,"doc_id":"campaign-paper","title":"Campaign proof","content_digest":%q,"source":{"kind":"blocks","blocks":[{"type":"heading","level":1,"content":[{"type":"text","value":"Immutable campaign"}]},{"type":"paragraph","content":[{"type":"text","value":"candidate proof"}]}]}}`,
-		cliReleaseGate, cliWaveRev, cliCandidate, cliDocument, strings.Repeat("b", 64))
+	const evidenceHref = "https://evidence.example/papers/candidate"
+	const evidenceLabel = "Open candidate evidence"
+	body := fmt.Sprintf(`{"release_gate_id":%q,"wave_revision":%q,"candidate_id":%q,"role":"campaign","document_id":%q,"doc_id":"campaign-paper","title":"Campaign proof","content_digest":%q,"source":{"kind":"blocks","blocks":[{"type":"heading","level":1,"content":[{"type":"text","value":"Immutable campaign"}]},{"type":"paragraph","content":[{"type":"text","value":"candidate proof"},{"type":"text","value":" — "},{"type":"link","href":%q,"children":[{"type":"text","value":%q}]}]}]}}`,
+		cliReleaseGate, cliWaveRev, cliCandidate, cliDocument, strings.Repeat("b", 64),
+		evidenceHref, evidenceLabel)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		if got := r.URL.Query(); got.Get("wave_revision") != cliWaveRev || got.Get("candidate_id") != cliCandidate || len(got) != 2 {
@@ -67,8 +72,10 @@ func TestPaperCaptureFetchesOnceAndEmitsRealPinnedReaders(t *testing.T) {
 	sourceSum := sha256.Sum256([]byte(body))
 	for _, name := range []string{"cli", "task_board", "tui"} {
 		got := first.Readers[name]
+		visible := ansi.Strip(got.RawUTF8)
 		if got.RawUTF8 == "" || !utf8.ValidString(got.RawUTF8) || !strings.Contains(got.RawUTF8, "candidate proof") ||
-			!strings.Contains(got.RawUTF8, "Campaign proof") {
+			!strings.Contains(got.RawUTF8, "Campaign proof") || !strings.Contains(visible, evidenceLabel) ||
+			!strings.Contains(got.RawUTF8, evidenceHref) {
 			t.Errorf("%s raw output is not the real candidate render: %q", name, got.RawUTF8)
 		}
 		p := got.Provenance

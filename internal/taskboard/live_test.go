@@ -97,14 +97,45 @@ func TestApplySnapshotConnStates(t2 *testing.T) {
 		t2.Fatalf("board not swapped: %d orphans, want 1", len(m.board.Orphans))
 	}
 
-	// A failed refetch → ConnOffline, board preserved.
+	// A failed refetch → ConnOffline, board preserved, and the strip says WHY
+	// (a silently dark board reads as "no tasks" — the 8 MiB cap incident).
 	good := m.board
 	m, _ = m.applySnapshot(snapshotMsg{err: errors.New("dial tcp: refused")})
 	if m.ui.Conn != ConnOffline {
 		t2.Fatalf("failed refetch conn = %v, want ConnOffline", m.ui.Conn)
 	}
+	if m.ui.ConnProblem != "offline" {
+		t2.Fatalf("transport failure label = %q, want offline", m.ui.ConnProblem)
+	}
 	if len(m.board.Orphans) != len(good.Orphans) {
 		t2.Fatal("failed refetch clobbered the last good board")
+	}
+
+	// Recovery clears the stale failure reason as well as the degraded state.
+	m.lastLiveEvent = clk.now()
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{Tasks: []Task{t("b")}, FetchedAt: clk.now()}})
+	if m.ui.ConnProblem != "" {
+		t2.Fatalf("successful recovery retained stale problem %q", m.ui.ConnProblem)
+	}
+}
+
+func TestSnapshotErrorLabelsAreTruthful(t *testing.T) {
+	cases := []struct {
+		err  string
+		want string
+	}{
+		{"response exceeds 33554432 bytes", "snapshot too large"},
+		{"GET /v1/tasks: status 401", "unauthorized"},
+		{"GET /v1/tasks: status 403", "forbidden"},
+		{"GET /v1/tasks: status 404", "snapshot unavailable"},
+		{"decode tasks list: invalid character", "invalid snapshot"},
+		{"GET /v1/tasks: status 503", "server error"},
+		{"dial tcp: connection refused", "offline"},
+	}
+	for _, tc := range cases {
+		if got := snapshotErrorLabel(errors.New(tc.err)); got != tc.want {
+			t.Errorf("snapshotErrorLabel(%q) = %q, want %q", tc.err, got, tc.want)
+		}
 	}
 }
 

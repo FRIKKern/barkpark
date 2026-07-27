@@ -76,14 +76,23 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 	}
 }
 
+// maxBoardFetchBytes bounds the board's task-corpus fetch. The generic
+// GetConditional cap (8 MiB, sized for the capabilities manifest) went dark on
+// guerrilla when /v1/tasks?limit=1000 crossed 9.1 MB (2026-07-24). 32 MiB buys
+// ~3× corpus growth of headroom; the real fix is the two-level board (brief
+// tier on the board, detail on focus — /papers/ctx-compression-taskboard-
+// flagship), which shrinks this fetch instead of chasing it with a bigger cap.
+const maxBoardFetchBytes = 32 << 20
+
 // getJSON issues an authenticated GET to a top-level path, reusing the Client's
-// configured http.Client and bearer token (via the public GetConditional
-// helper, called with no If-None-Match so it always fetches the body). It does
-// not modify apiclient. Every error carries the path, and a non-200 carries the
-// status plus a one-line body hint, so the shell's degraded banner can say
-// WHICH call failed and why ("GET /v1/tasks/prime: status 401: …").
+// configured http.Client and bearer token (via the public GetConditionalBounded
+// helper, called with no If-None-Match so it always fetches the body, and the
+// board's own maxBoardFetchBytes cap). It does not modify apiclient. Every
+// error carries the path, and a non-200 carries the status plus a one-line body
+// hint, so the shell's degraded banner can say WHICH call failed and why
+// ("GET /v1/tasks/prime: status 401: …").
 func getJSON(c *apiclient.Client, path string) ([]byte, error) {
-	res, err := c.GetConditional(c.BaseURL()+path, "")
+	res, err := c.GetConditionalBounded(c.BaseURL()+path, "", maxBoardFetchBytes)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
@@ -441,11 +450,57 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	d.CodeRefs = flattenCodeRefs(m["code_refs"])
 	d.Assignee = strField(m, "assignee")
 	d.LastWorkedAt = timeField(m, "last_worked_at")
+	d.Purpose = decodeTaskPurpose(m["purpose"])
 	if w.Claim != nil {
 		d.PreviousWorker = rawString(w.Claim.PreviousWorker)
 		d.ClaimExpiredAt = rawTime(w.Claim.ExpiredAt)
 	}
 	return d
+}
+
+func decodeTaskPurpose(v any) TaskPurpose {
+	m, _ := v.(map[string]any)
+	if m == nil {
+		return TaskPurpose{}
+	}
+	return TaskPurpose{
+		PartOf:     strField(m, "part_of"),
+		Impact:     strField(m, "impact"),
+		Statement:  strField(m, "statement"),
+		Why:        strField(m, "why"),
+		Endgame:    strField(m, "endgame"),
+		Importance: decodePurposeScore(m["importance"]),
+		Relevance:  decodePurposeScore(m["relevance"]),
+		Proof:      decodePurposeProof(m["proof"]),
+	}
+}
+
+func decodePurposeScore(v any) PurposeScore {
+	m, _ := v.(map[string]any)
+	if m == nil {
+		return PurposeScore{}
+	}
+	score, set := 0, false
+	if n, ok := m["score"].(float64); ok && n >= 0 && n <= 100 {
+		score, set = int(n), true
+	}
+	return PurposeScore{Score: score, Reason: strField(m, "reason"), Set: set}
+}
+
+func decodePurposeProof(v any) []PurposeProof {
+	rows, _ := v.([]any)
+	out := make([]PurposeProof, 0, len(rows))
+	for _, row := range rows {
+		m, _ := row.(map[string]any)
+		if m == nil {
+			continue
+		}
+		p := PurposeProof{Claim: strField(m, "claim"), Evidence: strField(m, "evidence"), Source: strField(m, "source")}
+		if p.Claim != "" || p.Evidence != "" || p.Source != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // rawPortableDoc preserves a task's inline PortableDoc value for pdrender.

@@ -4597,3 +4597,62 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    same pin, same need for [hidden] to actually hide. */
 .modal-x[hidden] { display: none; }
 #modal-body [data-close][hidden] { display: none; }
+
+/* ═══ MVP-0 Personal Dev Fleet (PDF-D84/D88/D92) — the fleet card, support
+   nesting, presence chips and the BYO-key step. Appended at the tail per the
+   OC9 slice law; the generated token block above is machine-owned. ═══ */
+
+/* The fleet card on a main's Overview. */
+.fleet-support-card { display: flex; flex-direction: column; gap: 12px; }
+.fleet-support-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fleet-support-head h2 { margin: 0; }
+.fleet-support-empty p { margin: 0 0 10px; color: var(--muted-text); font-size: 13.5px; }
+.fleet-support-empty p.dim { margin: 0; }
+
+/* One nested support row inside the card. */
+.fleet-support-row { border-top: 1px solid var(--border); padding: 12px 0 4px; display: flex; flex-direction: column; gap: 10px; }
+.fleet-support-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.fleet-support-name { font-weight: 600; color: var(--text); text-decoration: none; }
+.fleet-support-name:hover { text-decoration: underline; }
+.fleet-support-slot { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fleet-support-theater { padding: 2px 0 6px; }
+
+/* Presence chip — status vocabulary idle|working|blocked|provisioning, offline
+   computed server-side, "online" DERIVED (status !== offline). One static class
+   per state (__css_check E3). */
+.fleet-presence {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; padding: 2px 8px;
+  border-radius: 999px; border: 1px solid var(--border);
+}
+.fleet-presence::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.fleet-presence--online { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+.fleet-presence--working { color: var(--info); background: var(--info-soft); border-color: transparent; }
+.fleet-presence--blocked { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.fleet-presence--provisioning { color: var(--info); background: var(--info-soft); border-color: transparent; }
+.fleet-presence--offline { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+.fleet-presence--unknown { color: var(--muted-text); }
+.fleet-presence-cap { font-family: var(--mono); font-size: 11.5px; color: var(--muted-text); }
+
+/* BYO model key — a visible named step, never a hidden afterthought (PDF-D88). */
+.support-key-step { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 6px; }
+.support-key-title { font-weight: 600; font-size: 13.5px; }
+.support-key-sub { margin: 0; color: var(--muted-text); font-size: 12.5px; }
+
+/* #fleet nesting: a support rides indented under its main (PDF-D92). */
+.fleet-row--support { margin-left: 28px; }
+.fleet-role-chip {
+  display: inline-block; margin-left: 8px; padding: 1px 7px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--muted-text); border: 1px solid var(--border); border-radius: 999px;
+  vertical-align: 1px;
+}
+
+/* MVP-0 offload: file an order to a support + watch it (pdf-mvp0-offload-spa).
+   The action + the live watch ladder (the SHARED .new-steps grammar) sit under
+   a live support's BYO-key step. Appended at the app.css tail only (OC9). */
+.offload-action { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 2px; }
+.offload-slot:empty { display: none; }
+.offload-watch { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.offload-watch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.offload-watch-title { font-weight: 600; font-size: 13px; color: var(--text); }

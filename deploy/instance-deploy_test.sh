@@ -197,6 +197,7 @@ run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NOD
     BARKPARK_SANDBOX_RUNNER_BIN="$TMP/cloud-sandbox-runner" \
     BARKPARK_SANDBOX_RUNNER_MJS="$TMP/cloud-sandbox-runner.mjs" \
     HOME="$TMP/home" FAKE_SHA="$2" HEALTH_CODE="$1" \
+    BARKPARK_CLOUD_EGRESS_IPS="${BARKPARK_CLOUD_EGRESS_IPS:-}" \
     DEPLOY_REF="${DEPLOY_REF:-}" DEPLOY_REMOTE="${DEPLOY_REMOTE:-}" \
     GO_HTTP="${GO_HTTP:-}" GO_FAIL="${GO_FAIL:-}" \
     NODE_MISSING="${NODE_MISSING:-}" NPM_FAIL="${NPM_FAIL:-}" NPM_NO_TSX="${NPM_NO_TSX:-}" \
@@ -677,6 +678,75 @@ rc="$(run_deploy 200 norunnersha)"
 check "no runner source: deploy still exit 0 (non-fatal)" "[ '$rc' = '0' ]"
 check "no runner source: nothing installed"               "[ ! -e '$TMP/cloud-sandbox-runner' ]"
 check "no runner source: refused honestly (binary_not_found until next deploy)" "grep -q 'cloud-sandbox-runner NOT installed' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo "== Case 16: BARKPARK_TRUSTED_PROXIES backfill — the x-forwarded-for trust boundary =="
+# The control plane's egress address must reach the box's .env or the caller
+# address it relays is DISBELIEVED and every proxied request keys on ONE bucket per
+# team (the pre-#6224 coarseness). Four states, all of them here: configured,
+# already-set (never clobbered), malformed (refused — runtime.exs would raise at
+# boot), absent (commented placeholder + a loud log, deploy still green).
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=203.0.113.7 run_deploy 200 xffsha)"
+check "configured: exit 0"                        "[ '$rc' = '0' ]"
+check "configured: exact line written"            "grep -q '^BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env'"
+check "configured: logged honestly"               "grep -q 'added BARKPARK_TRUSTED_PROXIES=203.0.113.7' '$TMP/out.log'"
+check "configured: no placeholder comment"        "! grep -q '^# BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+# A second deploy must NOT duplicate or rewrite the line — provisioning may have
+# written it, and an operator may trust a different front.
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rm -f "$APP/.instance-deploy-last"
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=198.51.100.9 run_deploy 200 xffsha2)"
+check "existing line: exit 0"                     "[ '$rc' = '0' ]"
+check "existing line: NEVER overwritten"          "grep -q '^BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env'"
+check "existing line: exactly one, no duplicate"  "[ \"\$(grep -c '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env')\" = '1' ]"
+check "existing line: left-untouched logged"      "grep -q 'BARKPARK_TRUSTED_PROXIES already set' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# Malformed: a CIDR range (the tempting wrong answer — the Elixir side REFUSES it
+# because trusting a range lets any host in it forge every bucket key) and a
+# hostname. Neither may be written: runtime.exs raises on a non-IP entry, so the
+# write would brick the app at the slot restart later in this very run.
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=10.0.0.0/8 run_deploy 200 cidrsha)"
+check "CIDR: deploy still exit 0 (non-fatal)"     "[ '$rc' = '0' ]"
+check "CIDR: NOT written"                         "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "CIDR: refused loudly"                      "grep -q 'WARN: BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+rm -rf "$TMP"
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=barkpark.cloud run_deploy 200 hostsha)"
+check "hostname: NOT written (runtime.exs takes IPs only)" "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "hostname: refused loudly"                  "grep -q 'WARN: BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+rm -rf "$TMP"
+# A mixed list must be refused WHOLE — one good hop does not license a bad one.
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS='203.0.113.7,notanip' run_deploy 200 mixedsha)"
+check "mixed list: refused whole (no partial write)" "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+rm -rf "$TMP"
+# A valid v4+v6 pair IS accepted (a CP that reaches instances over both).
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS='203.0.113.7, 2a01:4f9::1' run_deploy 200 v6sha)"
+check "v4+v6 pair accepted verbatim"              "grep -q '^BARKPARK_TRUSTED_PROXIES=203.0.113.7, 2a01:4f9::1\$' '$APP/.env'"
+rm -rf "$TMP"
+
+# Absent: the honest gap. A commented placeholder lands in .env, the log names the
+# cost, and the deploy stays green — a missing trust list is coarse bucketing, not
+# an outage, so it must never fail a deploy.
+setup_case
+rc="$(run_deploy 200 noxffsha)"
+check "absent: exit 0"                            "[ '$rc' = '0' ]"
+check "absent: no live line written"              "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "absent: commented placeholder written"     "grep -q '^# BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env'"
+check "absent: gap logged loudly"                 "grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+# The placeholder must survive being SOURCED (the script does `set -a; . ./.env`)
+# and must not become a live value on the next deploy either.
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 noxffsha2)"
+check "absent redeploy: exit 0 (comment is sourceable)" "[ '$rc' = '0' ]"
+check "absent redeploy: still no live line"       "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "absent redeploy: placeholder NOT re-appended (.env does not grow)" "[ \"\$(grep -c '^# BARKPARK_TRUSTED_PROXIES=' '$APP/.env')\" = '1' ]"
+check "absent redeploy: gap still logged (visible every deploy)" "grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
 rm -rf "$TMP"
 
 echo

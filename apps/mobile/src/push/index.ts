@@ -1,0 +1,95 @@
+// The push registration engine, composed: OS token → Cloud registration.
+//
+// Kept as ONE pure async function plus a thin hook so the whole policy is
+// testable without React and without a device — the parts that can actually be
+// wrong (the outcome mapping, the "register at most once per session" rule,
+// the silence-on-unavailable rule) are all in `runPushRegistration`.
+import { useEffect, useRef, useState } from 'react'
+
+import {
+  getDevicePushToken,
+  type DeviceTokenOptions,
+  type DeviceTokenResult,
+} from './deviceToken'
+import {
+  registerDeviceToken,
+  type CloudSessionRef,
+  type RegisterPushOptions,
+  type RegisterPushResult,
+} from './registerDevice'
+
+export type { DeviceTokenResult, RegisterPushResult, CloudSessionRef }
+export { getDevicePushToken, registerDeviceToken }
+
+export interface PushRegistrationOptions extends DeviceTokenOptions, RegisterPushOptions {
+  /** Display-only device descriptors stored alongside the row. */
+  metadata?: Record<string, string>
+}
+
+/**
+ * Ask the OS for a token; if there is one, register it with Cloud. Returns the
+ * registration outcome — `unavailable` (with the OS's reason) when there is no
+ * token to register, which is today's expected state on every build.
+ *
+ * Never throws.
+ */
+export async function runPushRegistration(
+  session: CloudSessionRef,
+  options: PushRegistrationOptions = {},
+): Promise<RegisterPushResult> {
+  const device = await getDevicePushToken(options)
+  if (device.status !== 'ok') {
+    return { status: 'unavailable', reason: device.reason, detail: device.detail }
+  }
+
+  return registerDeviceToken(
+    session,
+    { platform: device.platform, token: device.token, metadata: options.metadata },
+    options,
+  )
+}
+
+/**
+ * The app-side call site: register this device once per Cloud session.
+ *
+ * Keyed on `session.url + session.token` and guarded by a ref, so a re-render
+ * (or the rollup poll's setState, which fires every 60s) cannot re-drive
+ * registration. That guard is not cosmetic — the server's
+ * `push_register:<user_id>` bucket is 10/60s, and the chat tab already shipped
+ * one bug of exactly this family (`connectionFromConfig` re-created per render
+ * → a welcome-frame storm). One attempt per session, and the next cold start
+ * re-registers for free via the idempotent upsert.
+ *
+ * Returns the last outcome for a future debug surface; nothing renders from it
+ * today and nothing should — a device without push is not an error state.
+ */
+export function usePushRegistration(
+  session: CloudSessionRef | undefined,
+  options: PushRegistrationOptions = {},
+): RegisterPushResult | undefined {
+  const [result, setResult] = useState<RegisterPushResult | undefined>(undefined)
+  const attempted = useRef<string | undefined>(undefined)
+
+  const key = session ? `${session.url}\n${session.token}` : undefined
+
+  useEffect(() => {
+    if (!session || !key) return
+    if (attempted.current === key) return
+    attempted.current = key
+
+    let cancelled = false
+    void runPushRegistration(session, options).then((outcome) => {
+      if (!cancelled) setResult(outcome)
+    })
+    return () => {
+      cancelled = true
+    }
+    // `options` is deliberately NOT a dependency: it is an inline object at the
+    // call site, so depending on it would re-run this effect on every render —
+    // the exact re-subscription bug the ref above exists to prevent. The key is
+    // the session, which is what registration is actually about.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+
+  return result
+}

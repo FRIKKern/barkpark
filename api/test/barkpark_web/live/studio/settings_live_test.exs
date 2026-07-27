@@ -673,15 +673,20 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
 
     test "an enabled plugin whose owned types are UNREGISTERED shows the 'no content types' truth",
          %{conn: conn} do
-      # Remove BOTH globally-registered bulldocs schemas for this test's scope,
-      # so bulldocs — enabled by declaration default, owner of the `paper` and
-      # `form_response` types — owns a type registered NOWHERE in this
-      # workspace. Enabling it surfaced nothing, and the row says so honestly
-      # (the common Default-stamp case). One unregister per owned type: leaving
-      # any of them registered flips the hint to the softer "types registered"
-      # truth (exactly what this assertion exists to distinguish).
-      unregister_type!("paper")
-      unregister_type!("form_response")
+      # Remove EVERY globally-registered bulldocs schema for this test's scope,
+      # so bulldocs — enabled by declaration default — owns a type registered
+      # NOWHERE in this workspace. Enabling it surfaced nothing, and the row
+      # says so honestly (the common Default-stamp case). One unregister per
+      # owned type: leaving ANY of them registered flips the hint to the softer
+      # "types registered" truth (exactly what this assertion exists to
+      # distinguish).
+      #
+      # The list is DERIVED from `Bulldocs.register_schemas/1` — the same source
+      # the LV's `Structure.owned_schema_types_map/0` reads — rather than
+      # hardcoded. A hardcoded pair went stale the moment bulldocs grew a third
+      # schema (`session`, session-handoff task 3) and this test failed with the
+      # softer hint; deriving it means the next schema added can never do that.
+      unregister_bulldocs_owned_types!()
 
       {:ok, view, _html} = live(conn, scoped_settings_path())
 
@@ -735,6 +740,14 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
 
   defp unregister_type!(name) do
     Repo.delete_all(from(s in Barkpark.Content.SchemaDefinition, where: s.name == ^name))
+  end
+
+  # Every type bulldocs OWNS, straight off the plugin's own schema declaration
+  # (`register_schemas/1` returns one `%SchemaDefinition{}` per shipped
+  # schema JSON). Adding a schema to the plugin automatically widens this.
+  defp unregister_bulldocs_owned_types! do
+    Barkpark.Plugins.Bulldocs.register_schemas([])
+    |> Enum.each(&unregister_type!(&1.name))
   end
 
   defp insert_type_doc!(type) do

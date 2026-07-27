@@ -16,6 +16,17 @@ defmodule BarkparkWeb.AnonPerspective do
   exempt because it is an anonymous *editing* surface whose draft visibility is
   part of that contract.
 
+  EXCEPTION to the token fall-through (stw7-backlog-drafts-clamp-gap, charter
+  D60/D61): a token whose permissions CARRY `"public-read"` is pinned exactly
+  like an anonymous caller. Public-read is the browser-shipped site credential —
+  it exists to read the published corpus, never drafts. The membership check
+  (`"public-read" in permissions`) is load-bearing: `TokenController` allowlists
+  `~w(public-read read)` and returns the caller's list VERBATIM and UNORDERED,
+  so `["public-read", "read"]` mints through the public site-provisioning path —
+  a `permissions == ["public-read"]` equality pin is escapable by construction.
+  The pin is a SILENT downgrade to `:published`, not a 403, so a public-read
+  caller that never asks for drafts is byte-identical before and after.
+
   Returns an ATOM (`:published | :drafts | :raw`) — never a string — so the
   retriever's atom-keyed `perspective_filter/2` matches (a string silently fell
   through its catch-all and disabled the filter entirely).
@@ -35,12 +46,28 @@ defmodule BarkparkWeb.AnonPerspective do
 
   @doc """
   True when the caller is pinned to published-only reads: no token, no preview
-  token, and not an `:edit` share.
+  token, and not an `:edit` share — OR a token whose permissions carry
+  `"public-read"` (the browser-shipped site credential; see @moduledoc).
   """
   @spec anon_pinned?(Plug.Conn.t()) :: boolean()
   def anon_pinned?(conn) do
-    not authed?(conn) and not preview?(conn) and
-      not (conn.assigns[:share_public] == true and conn.assigns[:share_access] == :edit)
+    public_read_token?(conn) or
+      (not authed?(conn) and not preview?(conn) and
+         not (conn.assigns[:share_public] == true and conn.assigns[:share_access] == :edit))
+  end
+
+  # MEMBERSHIP, never list equality (`== ["public-read"]` misses the unordered
+  # mixed list the public mint path emits — see @moduledoc). The map pattern
+  # requires the `:permissions` key: a token struct without it (e.g. the unit
+  # suite's `%{tier: :member}` canary) is NOT pinned — absence of the key is
+  # not evidence of the public-read class, and over-clamping every token would
+  # break preview/member reads. A non-list `permissions` value also falls
+  # through unpinned: only a list can carry the public-read grant.
+  defp public_read_token?(conn) do
+    case conn.assigns[:api_token] do
+      %{permissions: perms} when is_list(perms) -> "public-read" in perms
+      _ -> false
+    end
   end
 
   @spec parse(term()) :: :published | :drafts | :raw

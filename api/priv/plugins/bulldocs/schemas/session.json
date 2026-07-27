@@ -1,0 +1,46 @@
+{
+  "name": "session",
+  "title": "Session",
+  "icon": "🧵",
+  "visibility": "private",
+  "fields": [
+    {"name": "title", "title": "Title", "type": "string", "group": "meta",
+     "description": "Human-readable session title."},
+    {"name": "harness", "title": "Harness", "type": "select", "group": "meta",
+     "options": ["claude-code", "codex", "other"],
+     "description": "Which agent harness produced this session."},
+    {"name": "session_uuid", "title": "Session UUID", "type": "string", "group": "meta",
+     "description": "Harness-native session id (transcript lookup key)."},
+    {"name": "cwd", "title": "Working directory", "type": "string", "group": "meta",
+     "description": "Working directory on the origin machine."},
+    {"name": "machine", "title": "Machine", "type": "string", "group": "meta",
+     "description": "Hostname of the origin machine."},
+    {"name": "git_head", "title": "Git HEAD", "type": "string", "group": "meta",
+     "description": "Commit SHA at last update."},
+    {"name": "git_branch", "title": "Git branch", "type": "string", "group": "meta",
+     "description": "Branch at last update."},
+    {"name": "started_at", "title": "Started", "type": "datetime", "group": "meta",
+     "description": "Session start."},
+    {"name": "ended_at", "title": "Ended", "type": "datetime", "group": "meta",
+     "description": "Session end (set on close)."},
+    {"name": "transcript", "title": "Transcript", "type": "reference", "refType": "mediaAsset",
+     "group": "meta",
+     "description": "Scrubbed transcript JSONL media asset. Optional — synthesis-only sessions allowed."},
+    {"name": "status", "title": "Status", "type": "select", "group": "meta",
+     "options": ["open", "closed", "resumed", "superseded"],
+     "description": "Lifecycle state. open → closed on final checkpoint; resumed when picked up elsewhere."},
+    {"name": "events", "title": "Events", "type": "arrayOf", "ordered": true, "group": "trail",
+     "description": "Append-only milestone trail. Server-stamped ts; appended via POST /v1/plugins/bulldocs/sessions/:slug/events.",
+     "of": {
+       "name": "event",
+       "type": "composite",
+       "fields": [
+         {"name": "ts", "title": "At", "type": "datetime"},
+         {"name": "kind", "title": "Kind", "type": "select",
+          "options": ["paper-published", "task-closed", "epic-wave-complete", "push", "note"]},
+         {"name": "ref", "title": "Ref", "type": "string"},
+         {"name": "note", "title": "Note", "type": "text", "rows": 2}
+       ]
+     }}
+  ]
+}

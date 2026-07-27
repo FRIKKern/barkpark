@@ -46,6 +46,9 @@ type siteCP struct {
 	getResp    fakeResp
 	rollResp   fakeResp
 	deleteResp fakeResp
+	// PATCH /v1/sites/:id — `bp cloud site settings` (search-template W8/W10).
+	patchResp fakeResp
+	patchBody []byte
 }
 
 type fakeResp struct {
@@ -78,6 +81,9 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.write(w, cp.rollResp)
 		case r.Method == "DELETE" && path == "/v1/sites/"+testSiteID:
 			cp.write(w, cp.deleteResp)
+		case r.Method == "PATCH" && path == "/v1/sites/"+testSiteID:
+			cp.patchBody, _ = io.ReadAll(r.Body)
+			cp.write(w, cp.patchResp)
 		case r.Method == "GET" && path == "/v1/sites/"+testSiteID:
 			cp.write(w, cp.getResp)
 		default:
@@ -305,6 +311,99 @@ func TestRunCloudSiteStatusNodeFields(t *testing.T) {
 	}
 	if env.Deployment.RuntimeTarget != "node-slot" || env.Deployment.Port != 4301 {
 		t.Fatalf("status -o json dropped the node deployment fields: %+v\n%s", env.Deployment, jstdout)
+	}
+}
+
+// TestRunCloudSiteDocTypeReadback is the W10 readback proof, modelled on
+// TestRunCloudSiteStatusNodeFields: doc_type is writable at create and at
+// PATCH, and until now no CLI surface echoed it. It must land on ALL THREE
+// projections — `-o json`, the human status table, and the settings narration.
+// A json-only assertion would pass while the other two stayed blind, which is
+// exactly how the gap survived.
+func TestRunCloudSiteDocTypeReadback(t *testing.T) {
+	const siteJSON = `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","template":"search","theme":"ember","doc_type":"paper","workspace":"acme","project":"blog","dataset":"production","url":"https://acme.barkpark.cloud/sites/blog/"}}`
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, siteJSON}
+	cp.patchResp = fakeResp{200, siteJSON}
+	cp.serve()
+
+	// 1. `-o json` — the key exists and carries the value (SpawnSite.DocType must
+	// be declared or json.Unmarshal drops it here, silently, with exit 0).
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	var env struct {
+		Site struct {
+			DocType *string `json:"doc_type"`
+		} `json:"site"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Site.DocType == nil {
+		t.Fatalf("status -o json omitted doc_type entirely (silent drop):\n%s", jstdout)
+	}
+	if *env.Site.DocType != "paper" {
+		t.Fatalf("status -o json doc_type=%q want %q\n%s", *env.Site.DocType, "paper", jstdout)
+	}
+
+	// 2. The human status table — a separate map (spawnSiteStatusMap) that
+	// carries neither template nor theme, so json alone leaves it blank.
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("status exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "doc type") || !strings.Contains(stdout, "paper") {
+		t.Fatalf("status table must show the doc type row:\n%s", stdout)
+	}
+
+	// 3. The settings narration — `--doc-type` echoed theme and starter and never
+	// the field it just set.
+	sstdout, sstderr, scode := runSite(t, "table", "settings", testSiteID, "--doc-type", "paper")
+	if scode != exitOK {
+		t.Fatalf("settings exit=%d want 0\n%s", scode, sstderr)
+	}
+	if !bytes.Contains(cp.patchBody, []byte(`"doc_type":"paper"`)) {
+		t.Fatalf("settings must PATCH doc_type: %s", cp.patchBody)
+	}
+	if !strings.Contains(sstdout, "paper") {
+		t.Fatalf("settings narration must echo the doc_type it just set:\n%s", sstdout)
+	}
+}
+
+// TestRunCloudSiteDocTypeAbsent proves the guarded surfaces stay silent against a
+// pre-W10 control plane (no doc_type key at all): no invented default in the
+// table or the narration, while `-o json` still always-echoes the key like
+// template/theme do — an empty string, honestly.
+func TestRunCloudSiteDocTypeAbsent(t *testing.T) {
+	const siteJSON = `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, siteJSON}
+	cp.serve()
+
+	stdout, _, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("status exit=%d want 0", code)
+	}
+	if strings.Contains(stdout, "doc type") {
+		t.Fatalf("a pre-W10 control plane must not grow a doc type row:\n%s", stdout)
+	}
+
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	var env struct {
+		Site struct {
+			DocType *string `json:"doc_type"`
+		} `json:"site"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Site.DocType == nil || *env.Site.DocType != "" {
+		t.Fatalf("json must always-echo doc_type as an honest empty string: %+v\n%s", env.Site, jstdout)
 	}
 }
 

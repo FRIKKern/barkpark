@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
+.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -27,6 +27,14 @@ logs: ## Tail Phoenix service logs
 
 seed: ## Re-seed the database
 	cd api && bash start.sh mix run priv/repo/seeds.exs
+
+seed-check: ## Audit the served scaffy catalog vs the main corpus (tokenless drift tripwire)
+	@# Tokenless: reads the PUBLISHED perspective with a plain GET — no creds.
+	@# Exits nonzero on ANY drift OR on a fetch failure (a check that cannot
+	@# check must never report clean). Remediation is a HUMAN re-seed, never a
+	@# CI mutation — see scaffy/seed/README.md. Mirrored by
+	@# .github/workflows/scaffy-catalog-drift.yml as an advisory CI tripwire.
+	go run ./scaffy/seed --check
 
 migrate: ## Run database migrations
 	cd api && bash start.sh mix ecto.migrate

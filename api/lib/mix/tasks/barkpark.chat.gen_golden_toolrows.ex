@@ -81,6 +81,32 @@ defmodule Mix.Tasks.Barkpark.Chat.GenGoldenToolrows do
     ]
   }
 
+  # The ADJUDICATING budget variant (charter D40): three all-added hunks of 8
+  # lines each — 24 drawable rows + 2 gap separators, BOTH gaps inside the first
+  # 20 RAW elements (raw indices 8 and 17). The two fold readings therefore
+  # disagree on the literal overflow number: drawable-only (the D40 ruling)
+  # folds 4 rows ("+4 more lines"), a raw-element budget folds 6 ("+6 more
+  # lines"). Every consumer asserts the NUMBER, so the non-ratified reading
+  # cannot pass on word-presence alone. Each line is one distinct alnum token so
+  # the projection's significant-word check bites per row.
+  @budget_edit_lines %{
+    "one" =>
+      ~w(hunkalpha1 hunkalpha2 hunkalpha3 hunkalpha4 hunkalpha5 hunkalpha6 hunkalpha7 hunkalpha8),
+    "two" =>
+      ~w(hunkbravo1 hunkbravo2 hunkbravo3 hunkbravo4 hunkbravo5 hunkbravo6 hunkbravo7 hunkbravo8),
+    "three" =>
+      ~w(hunkcharlie1 hunkcharlie2 hunkcharlie3 hunkcharlie4 hunkcharlie5 hunkcharlie6 hunkcharlie7 hunkcharlie8)
+  }
+
+  @multi_edit_budget_input %{
+    "file_path" => "lib/barkpark/budget.ex",
+    "edits" => [
+      %{"old_string" => "", "new_string" => Enum.join(@budget_edit_lines["one"], "\n")},
+      %{"old_string" => "", "new_string" => Enum.join(@budget_edit_lines["two"], "\n")},
+      %{"old_string" => "", "new_string" => Enum.join(@budget_edit_lines["three"], "\n")}
+    ]
+  }
+
   @todo_input %{
     "todos" => [
       %{"content" => "Wire the transport", "status" => "completed"},
@@ -135,6 +161,7 @@ defmodule Mix.Tasks.Barkpark.Chat.GenGoldenToolrows do
     %{name: "edit_diff", kind: "tool-diff", source: @edit_input},
     %{name: "write_diff", kind: "tool-diff", source: @write_input},
     %{name: "multi_edit_diff", kind: "tool-diff", source: @multi_edit_input},
+    %{name: "multi_edit_budget_diff", kind: "tool-diff", source: @multi_edit_budget_input},
     %{name: "todo_card", kind: "todo", source: @todo_input},
     %{name: "thinking_bout", kind: "thinking", source: 1280},
     %{name: "approval_card", kind: "approval", source: @approval_meta},
@@ -222,15 +249,33 @@ defmodule Mix.Tasks.Barkpark.Chat.GenGoldenToolrows do
   # Each renderer surfaces it in its own native form (HEEx run / ANSI run), so the
   # Go leg asserts realization by stripped-ANSI presence, not a byte-diff.
 
+  # The shared fold budget — the sixth hand-synced copy of components.ex
+  # `@chat_diff_budget` (chat_tool_renderer.ex @collapsed_budget, chat_blocks.go
+  # chatDiffBudget, react + mobile CHAT_DIFF_BUDGET). The projection must be
+  # BUDGET-AWARE (D40): terminal/mobile DISCARD the folded tail, so projecting a
+  # word past the fold would false-red the Go leg (only the web keeps the tail
+  # inside `<details>`).
+  @chat_diff_budget 20
+
   defp project_block(%{"type" => "chat-tool-diff", "lines" => lines}) do
+    drawable = Enum.reject(lines, &(&1["op"] == "gap"))
+
+    # Key text confined to the first @chat_diff_budget DRAWABLE rows — exactly
+    # what every surface draws — plus the literal overflow count each consumer
+    # asserts as a NUMBER ("+4 more lines"), the fact that adjudicates the
+    # drawable-only reading against a raw-element budget (D40).
     text =
-      lines
-      |> Enum.reject(&(&1["op"] == "gap"))
+      drawable
+      |> Enum.take(@chat_diff_budget)
       |> Enum.map(& &1["text"])
       |> Enum.reject(&(&1 == ""))
       |> Enum.join(" ")
 
-    %{"type" => "chat-tool-diff", "text" => text}
+    %{
+      "type" => "chat-tool-diff",
+      "text" => text,
+      "overflow" => max(length(drawable) - @chat_diff_budget, 0)
+    }
   end
 
   defp project_block(%{"type" => "chat-todo", "todos" => todos}) do

@@ -267,6 +267,252 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
+  # ── Sessions (session-handoff Task 3) ──────────────────────────────────────
+  # A "session" is the second member of the blocks-doc whitelist
+  # (`Content.blocks_type?/1` — `["paper", "session"]`), so its ingest/show/ops
+  # actions mirror the paper leg above but call the GENERALIZED
+  # `Content.upsert_blocks_doc/3`, `get_blocks_doc/4`, `apply_document_block_op/5`
+  # instead of the paper-only functions. Unlike a paper, a session write is
+  # NEVER walled (`AuthoringWall`'s `@walled_types` is `~w(paper task)`), so the
+  # {:label_spine,_}/{:unknown_tag,_}/{:duplicate_of,_}/{:halted,_} tuples
+  # below are dead code for "session" today — kept for shape-parity with the
+  # paper leg so a future walled non-paper type costs nothing here.
+  #
+  # ONLY these keys are ever taken from the request body (never raw params) —
+  # this whitelist is the mitigation for the fact that `@blocks_doc_reserved_attrs`
+  # (block_ops.ex) does not itself reserve derived keys (`body_html`,
+  # `body_html_sv`, `preview`, `main_tag`); none of those appear here.
+  @session_keys ~w(slug title blocks style tags description harness session_uuid cwd
+                    machine git_head git_branch started_at ended_at transcript status)
+
+  @doc """
+  Upsert (create or update) a session — the metadata-only-allowed blocks-doc
+  twin of `ingest/2`. `blocks` is OPTIONAL: on create a missing `blocks` key
+  defaults to `[]` inside `Content.upsert_blocks_doc/3`; on update a missing
+  key preserves the existing blocks/body_html (session-handoff Task 2's
+  contract) — this controller must NOT pre-seed a `"blocks"` default itself,
+  or every metadata-only update would wipe the stored blocks to `[]`.
+  """
+  def ingest_session(conn, %{"slug" => slug} = params) when is_binary(slug) and slug != "" do
+    attrs =
+      params
+      |> Map.take(@session_keys)
+      |> put_scope(conn, params)
+
+    Warnings.reset()
+
+    case Content.upsert_blocks_doc("session", attrs) do
+      {:ok, doc} ->
+        conn
+        |> put_status(:ok)
+        |> json(with_warnings(%{ok: true, slug: doc.doc_id}))
+
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: %{code: "halted", message: reason}})
+
+      {:error, {:label_spine, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:unknown_tag, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:duplicate_of, _}} = err ->
+        render_error(conn, err)
+
+      {:error, changeset} ->
+        invalid_paper_error(conn, changeset)
+    end
+  end
+
+  def ingest_session(conn, _params) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: %{code: "missing_slug", message: "slug required"}})
+  end
+
+  @doc """
+  Read a session by slug — the same visibility tier as the writes
+  (`auth: :ingest`). This is the ONLY session reader: there is no public
+  session route (`/papers/:slug` resolves `type: "paper"` only) and the query
+  API refuses `type=session` to an anonymous caller because session.json is
+  `visibility: "private"` (sessions carry cwd/hostname/git state). 404 when
+  the slug doesn't resolve to a "session" row in scope.
+
+  Scoped by the SAME workspace/project resolution `ingest_session/2` threads
+  via `put_scope/3` (`resolve_scope/2` below) — two workspaces can each hold
+  their own row at the SAME slug (`upsert_blocks_doc/3` disambiguates writes
+  by scope), so an unscoped read here would either return the wrong tenant's
+  session or blow up `Repo.one()` with `Ecto.MultipleResultsError` once more
+  than one workspace has written the slug.
+  """
+  def show_session(conn, %{"slug" => slug} = params) do
+    dataset = params["dataset"] || Content.paper_default_dataset()
+
+    case Content.get_blocks_doc(slug, "session", dataset, session_scope_opts(conn, params)) do
+      nil ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+
+      doc ->
+        json(
+          conn,
+          Map.merge(
+            Map.take(doc.content || %{}, @session_keys ++ ["events"]),
+            %{"slug" => slug, "rev" => doc.rev}
+          )
+        )
+    end
+  end
+
+  @doc """
+  Apply a single block op to a session's block list, via the GENERALIZED
+  `Content.apply_document_block_op/5` (block_ops.ex — the pre-existing
+  document-editor write path Task 2 reused rather than duplicating). Unlike
+  the paper-only `apply_paper_block_op/3`, this returns NO `rev`/
+  `fragment_html` in its `{:ok, %{block, block_id, op_kind, position}}`
+  result — the receipt below reflects that shape exactly.
+
+  DRAFT SEMANTICS (session-handoff final review, F5). The generic block-op path
+  writes its patched content to the `drafts.<slug>` TWIN, never to the
+  published `<slug>` row that `show_session/2` (and `bp session view`) reads.
+  So an op applied here is INVISIBLE to every session reader until a
+  `POST /v1/plugins/bulldocs/sessions` upsert republishes the slug. That is
+  not hidden: the receipt names the row it actually wrote (`written_doc_id`)
+  and carries a `note` saying so. Publish-through (ops landing straight on the
+  published row) is deliberately DEFERRED — `bp session publish` is the
+  supported way to change a session's blocks, and it is what the session skill
+  uses.
+  """
+  def apply_session_op(conn, %{"slug" => slug} = params) do
+    op = Map.delete(params, "slug")
+
+    cond do
+      not valid_op_shape?(op) ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
+
+      true ->
+        dataset = params["dataset"] || Content.paper_default_dataset()
+
+        case Content.apply_document_block_op(
+               slug,
+               "session",
+               op,
+               dataset,
+               session_scope_opts(conn, params)
+             ) do
+          {:ok,
+           %{
+             block_id: block_id,
+             op_kind: op_kind,
+             position: position,
+             written_doc_id: written_doc_id
+           }} ->
+            conn
+            |> put_status(:ok)
+            |> json(%{
+              ok: true,
+              slug: slug,
+              op: op_kind,
+              block_id: block_id,
+              position: position,
+              # F5: name the row that was ACTUALLY written (the draft twin) and
+              # say plainly that it is not yet the row a reader sees.
+              written_doc_id: written_doc_id,
+              note: "ops write the draft twin; publish to make visible"
+            })
+
+          {:error, :not_found} ->
+            conn
+            |> put_status(:not_found)
+            |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+
+          {:error, {:constraint, message, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+
+          {:error, {code, target, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: to_string(code),
+                message: "#{op_kind} failed on #{inspect(target)}",
+                op: op_kind,
+                target: target
+              }
+            })
+
+          {:error, {:invalid_op, _}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+
+          {:error, {:halted, reason}} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{error: %{code: "halted", message: reason}})
+
+          {:error, _other} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+        end
+    end
+  end
+
+  @doc """
+  Append one server-stamped event to a session's trail (session-handoff
+  Task 4), via `Barkpark.Content.Sessions.append_event/5`. `params` may carry
+  `"ref"` and/or `"note"`; `ts` is always server-minted. Scoped by the SAME
+  `session_scope_opts/2` the read/op actions above thread, so two workspaces
+  holding their own row at the same slug each append to their OWN trail.
+  """
+  def append_session_event(conn, %{"slug" => slug} = params) do
+    dataset = params["dataset"] || Content.paper_default_dataset()
+
+    case Barkpark.Content.Sessions.append_event(
+           slug,
+           params["kind"],
+           params,
+           dataset,
+           session_scope_opts(conn, params)
+         ) do
+      {:ok, %{count: count}} ->
+        conn
+        |> put_status(:ok)
+        |> json(%{ok: true, slug: slug, count: count})
+
+      {:error, :invalid_kind} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{
+            code: "invalid_kind",
+            message: "kind must be one of the allowed session event kinds",
+            allowed: Barkpark.Content.Sessions.event_kinds()
+          }
+        })
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+
+      {:error, :stale} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{
+          error: %{code: "conflict_retry", message: "session was updated concurrently; retry"}
+        })
+    end
+  end
+
   @doc """
   Apply ops to the paper at `:slug`. The endpoint accepts EITHER shape on the
   same route — the request body discriminates them:
@@ -678,6 +924,22 @@ defmodule BarkparkWeb.BulldocsIngestController do
       true ->
         ws_slug = scope_value(conn, params, "workspace", "x-barkpark-workspace")
         resolve_from_slug(ws_slug, scope_value(conn, params, "project", "x-barkpark-project"))
+    end
+  end
+
+  # Read-side twin of `put_scope/3`: the SAME `resolve_scope/2` resolution
+  # (explicit `workspace_id`/`project_id`, else a `workspace`/`project` slug
+  # from the body or the `x-barkpark-workspace`/`x-barkpark-project` header),
+  # reshaped into the `Content.get_blocks_doc/4` / `apply_document_block_op/5`
+  # opts keyword list. `{nil, nil}` (no scope given at all) yields `[]`, which
+  # `Content.Scope.scope_to_workspace_or_global/3` treats as an EXPLICIT
+  # global read — matching the write side's own Default-workspace fallback
+  # posture (a scope-less write still stamps a real workspace_id; a
+  # scope-less read here just doesn't narrow by one).
+  defp session_scope_opts(conn, params) do
+    case resolve_scope(conn, params) do
+      {nil, nil} -> []
+      {ws_id, project_id} -> [workspace_id: ws_id, project_id: project_id]
     end
   end
 

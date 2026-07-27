@@ -319,7 +319,7 @@ func TestCursorParityWithClusters(t2 *testing.T) {
 }
 
 // phaseBoard is the nesting-parity fixture: ONE epic whose children form a real
-// nested tree, so the spine exercises arbitrary-depth ↳ rows — the one non-flat
+// nested tree, so the spine exercises arbitrary-depth branch rails — the one non-flat
 // structure on the board (the clusterBoard/sampleBoard fixtures are entirely
 // FLAT). Titles stay == docID so the ▎-marker check still names the acted-on row.
 // The phase: labels survive from the wave-9 fixture but no longer open sub-bands:
@@ -350,7 +350,7 @@ func phaseBoard() Board {
 }
 
 // TestVisibleRowsWithPhaseAndNesting pins the spine producer for the redesign's
-// new structure: the phase-band lines and the ↳ nesting add NO selectable rows
+// new structure: the phase-band lines and the tree outline add NO selectable rows
 // (they are Selectable:false), so the navigable list is exactly the header + the
 // five tasks in tree order — never a band or a fold line.
 func TestVisibleRowsWithPhaseAndNesting(t2 *testing.T) {
@@ -485,11 +485,11 @@ func TestCursorParityBandedEpic(t2 *testing.T) {
 }
 
 // TestCursorParityWithPhaseAndNesting is the shell↔render tripwire on a NON-flat
-// board: with arbitrary-depth ↳ rows, the ▎ marker in the painted frame must sit
+// board: with arbitrary-depth outline rows, the ▎ marker in the painted frame must sit
 // on exactly the row visibleRows says the cursor is on — proving the display-only
-// ↳ guides never shift the selection index space (charter D42 structural parity).
+// tree rails never shift the selection index space (charter D42 structural parity).
 // (wave-9b removed within-epic phase sub-bands per D-B, so this no longer asserts
-// a band renders — the ↳ nesting is the structure under test.)
+// a band renders — the tree outline is the structure under test.)
 func TestCursorParityWithPhaseAndNesting(t2 *testing.T) {
 	m := testModel(phaseBoard())
 	m.ui.Conn = ConnLive
@@ -497,10 +497,10 @@ func TestCursorParityWithPhaseAndNesting(t2 *testing.T) {
 	m.now = func() time.Time { return time.Unix(2, 0) }
 	m.width, m.height = 80, 60
 
-	// The ↳ guide must be present, proving depth>0 rows render nested.
+	// Branch and continuation rails must be present, proving real tree structure.
 	frame0 := ansi.Strip(m.View())
-	if !strings.Contains(frame0, "↳") {
-		t2.Fatalf("nesting guide ↳ missing — fixture no longer exercises depth>0:\n%s", frame0)
+	if !strings.Contains(frame0, "├─") || !strings.Contains(frame0, "└─") || !strings.Contains(frame0, "│ ") {
+		t2.Fatalf("tree outline incomplete — want branch, final branch, and continuation rail:\n%s", frame0)
 	}
 
 	rows := m.visibleRows()

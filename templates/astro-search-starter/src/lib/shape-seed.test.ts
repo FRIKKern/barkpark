@@ -42,6 +42,31 @@ test('lookupPrefix does not throw and returns docs for 1- and 2-char queries', (
   assert.ok(two.length >= 1, '"de" must match Deploy/design')
 })
 
+test('shapeSeed bakes the browse as postgres, not the retired indx literal', () => {
+  // The seed is baked with engine=postgres (bp.ts → browseSeed); the old
+  // hard-coded engineUsed:'indx' literal claimed an engine no instance
+  // provisions. Without a server-reported engineUsed the fallback is postgres…
+  const { initialData } = shapeSeed({
+    initialData: { documents: [], count: 0 },
+    initialSeed: null,
+  })
+  assert.ok(initialData, 'initialData must shape when raw browse JSON exists')
+  assert.equal(initialData.engine, 'postgres')
+  assert.equal(initialData.engineUsed, 'postgres')
+  assert.equal(initialData.indxUnavailable, false)
+})
+
+test('shapeSeed lets the server-reported engineUsed win over the fallback', () => {
+  // …and when the baked payload carries the pipeline's own engineUsed, that
+  // server truth wins over the shaping fallback (find-shape contract).
+  const { initialData } = shapeSeed({
+    initialData: { documents: [], count: 0, engineUsed: 'indx' },
+    initialSeed: null,
+  })
+  assert.ok(initialData)
+  assert.equal(initialData.engineUsed, 'indx')
+})
+
 test('shapeSeed degrades safely on an absent or empty seed', () => {
   assert.deepEqual(shapeSeed(null), { initialData: null, initialSeed: null })
   assert.equal(shapeSeed({ initialData: null, initialSeed: [] }).initialSeed, null)

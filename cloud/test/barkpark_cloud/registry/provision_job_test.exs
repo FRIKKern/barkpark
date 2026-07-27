@@ -15,12 +15,18 @@ defmodule BarkparkCloud.Registry.ProvisionJobTest do
   end
 
   describe "kinds" do
-    test "resurrect is the 4th kind, alongside the pre-existing three" do
-      assert ProvisionJob.kinds() == ~w(provision deprovision attach_domain resurrect)
+    test "the exact kind list — provision_support is the 5th (PDF-D83)" do
+      assert ProvisionJob.kinds() ==
+               ~w(provision deprovision attach_domain resurrect provision_support)
+    end
+
+    test "a provision_support job changeset is valid (needs no bundle_ref)" do
+      cs = changeset(%{barkpark_id: @bp_id, kind: "provision_support", status: "pending"})
+      assert cs.valid?
     end
   end
 
-  describe "step vocabulary (D40 — resurrect adds NO step kind)" do
+  describe "step vocabulary (D40/D84 — no new step kind for resurrect OR support)" do
     test "the canonical 7 steps are unchanged" do
       assert ProvisionJob.step_names() ==
                ~w(create freshen secure configure content verify ready)

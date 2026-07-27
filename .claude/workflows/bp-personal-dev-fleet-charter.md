@@ -481,6 +481,155 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   one `status:offline` row to capture the PDF-D38 exclusion print (the one dry-run gap).
   (8) Budget the charter's COLD figure — 311.7s boot (D29), never the in-checkout ~25s number.
 
+## Wave C decisions (RECONSTRUCTED at MVP-0 Decide, 2026-07-24 — Wave C's code MERGED (#5930/#5932/#5933/#5973) but its charter content never landed: every cited landing commit (58e019937, 296efabee, a27aeed5e, 1741e7b7e) is a PHANTOM — `git cat-file -t` fails on all four. D55-D75 transcribed verbatim from the wave-c Papers (r1 lines 448-473, r2 lines 349-383); treat any commit hash cited inside those Papers as untrusted until re-verified.)
+
+- **PDF-D55** — Wave C before MVP-0: Screen 2's moments ARE this machinery; MVP-0 substrate audit
+  says Screens 0-1 are composition once the data exists.
+- **PDF-D56** — D51 corrected: provisioner writes published `listener-<name>`
+  `content.status=provisioning` via doc-mutate, exact vocab, `ttl_s`=provisioning budget.
+- **PDF-D57** — No token-scope machinery; ledger token minted server-side on the main via a new
+  admin-gated mint/revoke pair (`POST|DELETE /v1/fleet/support-tokens`); claim-probe law recorded
+  (403 while valid, 401 after revoke).
+- **PDF-D58** — ARM out, x86 pinned (cx23 default); size-class from FIRST MEASURED BEAT never SKU;
+  create-time placement failure = named CLI failure, writes nothing.
+- **PDF-D59** — Support box = warm-image + reduced configure subset, LOCAL health probe (no public
+  FQDN — dns/caddy/public-health/tenant-register steps DROPPED); dataset leg ships (merge import
+  into localhost:4000 after allow_bundle_import).
+- **PDF-D60** — Surface = Go-native `bp cloud support add|remove`; roster IS the progress model;
+  Kinsta bar on every terminal state.
+- **PDF-D61** — Group = three additive nullable barkparks columns (`fleet_role`,
+  `fleet_parent_id` self-FK, `fleet_token_id`) + CP `/v1/fleet/supports` endpoints; guerrilla's
+  row ratified as the main.
+- **PDF-D62** — Runtime install automatic + fail-open agent CLI; **provider keys never copied** —
+  exact SSH one-liner printed for the developer; `barkpark-fleet-listener.service` supervises the
+  foreground loop (not a sidecar).
+- **PDF-D63** — Remove = mirror with a FOUR-surface verify-gone census (token, box, roster row,
+  CP row), non-zero exit on any survivor.
+- **PDF-D64** — Local fleet artifacts superseded — discard; 16-GiB host = heavy is correct.
+- **PDF-D65** — Riders: adapter remote leg rides the proof; deadlock + doctor regex are round-1
+  riders; epic-crit2-stamp + presence-honesty AC1 stay Wave B sweeps; janitor stays filed.
+- **PDF-D66** — Proof law: R0 preconditions → R1 clean census → R2 one action →
+  online-with-measured-capacity from the LIVE roster → R3 scrub zero with firing control → R4
+  stuck-provisioning never lies online → R5 adapter probes → R6 four-surface census delta zero.
+- **PDF-D67** — CP wedge is a named prerequisite slice (one-time network recreate + rebuild from
+  origin/main). WHY: round 3 and the rewired bind's live leg are dead until 401-not-404.
+- **PDF-D68** — Remove ordering: READ CP row FIRST, revoke token FIRST among deletes, CP row LAST;
+  no token_id copy on the roster row. WHY: the CP row is the sole token_id holder — the old order
+  bakes an unrecoverable orphan-token window.
+- **PDF-D69** — Bind rewire: register leg → control plane via requireCloud/CloudClient; mint stays
+  on the main; HasCloudToken checked BEFORE the box create. WHY: verified 404-by-construction
+  defect; a missing credential must never bill a box.
+- **PDF-D70** — Parent auto-resolve matches hostname-of(row.url) vs hostname-of(Config.Server);
+  NEVER row.host; refuse-with-candidates on zero/many; `--parent` wins. WHY: host is a raw IP on
+  every real row.
+- **PDF-D71** — DELETE PAT symmetry: a credential that can bind can unbind. WHY: fail-first-proven
+  asymmetry lets a PAT create an orphan it cannot clean.
+- **PDF-D72** — Two-host test law: second httptest CP server seeded via SaveConfig(CloudURL),
+  which-host assertions. WHY: the single-host harness is why the bind bug passed 9/9 green.
+- **PDF-D73** — R4 = row-only short-TTL negctl (~30s ttl, ≥4-min observation), R2 box concurrently
+  online; claim scoped to "a withheld listener's row never onlines". WHY: the online gate is
+  box-blind — a second box violates the one-box budget and adds zero proof.
+- **PDF-D74** — Ledger rulings: crit2-stamp reconcile-closed at Decide; presence-honesty
+  stamp-without-evidence REFUSED. WHY: never seal a criterion without evidence.
+- **PDF-D75** — Proof reality pins: HCLOUD_TOKEN exported explicitly (Darwin context-blindness),
+  R0 asserts existence-not-stock (412 = stock probe), emergency raw hcloud delete-by-label in the
+  trap, R5 = free captures + ONE env-var-keyed call. WHY: each pin is a verified false-ABORT or
+  leak path.
+- **PDF-D76..D82 — VOID.** The wave-c-r3 Paper's decisions section is SEVEN EMPTY BULLETS pointing
+  at phantom commit 1741e7b7e; no decision text exists anywhere (papers, git, worktrees — proven
+  by per-D grep + `git cat-file` on 8370 commits). The numbering is retired unfilled; the
+  substance survives only in the r3 harness itself (`scripts/pdf-support-proof.sh` at stranded
+  local commit 6c24833a4, folded into MVP-0's proof per PDF-D90). Lesson: a decision that lives
+  only in an unpushed local commit does not exist.
+
+## MVP-0 decisions (Decide, 2026-07-24 — the console journey wave; 16 survey lanes + 10 verify lanes; every load-bearing claim below carries run output from the verify round or a Decide spot-check)
+
+- **PDF-D83 — THE INVERSION IS THE WAVE.** Support provisioning becomes a CP provision job:
+  `@kinds` grows ONE word — `provision_support` — executed by the shipped Go provisioner worker.
+  Claim shape follows the RESURRECT precedent exactly (its own claim route
+  `POST /v1/internal/support-jobs/claim`; REUSES the generic provision-jobs
+  succeed/fail/step/console routes). The direction's "kind-filtered claim endpoint" is REJECTED:
+  no such pattern exists anywhere (all 4 kinds have dedicated routes — verified in worker.go +
+  router.ex). The worker must NOT import package `cli` (laptop-shaped resolveContext/CloudClient);
+  it reuses `cloud.CreateSupportServer`/`ConfigureSupportHost`/`SupportRunner` (free — the
+  provisioner already imports `internal/cli/cloud`) and REIMPLEMENTS bind/dataset/runtime/online
+  in `internal/provisioner/support.go` from claim-payload credentials.
+- **PDF-D84 — SUPPORT STEPS FIT THE EXISTING ENUM; the console gets a parallel table.** The
+  support job emits ONLY `create → configure → content → verify → ready` (freshen/secure never
+  emitted; `@steps` unchanged — validate_step 422s anything else). Console-side, a support job
+  must NEVER render through SERVER_STEP_ORDER: its required `secure` row would hang forever
+  (verified — only freshen/content are optional). The SPA adds an additive `SUPPORT_STEP_ORDER`
+  (5 steps) + kind-aware labels selected where `bp.fleet_role === "support"`; SERVER_STEP_ORDER
+  stays byte-identical (3 test sites byte-lock it).
+- **PDF-D85 — READ-SIDE KIND FILTER WIDENS; SSE transport untouched.**
+  `latest_provision_status_map/1` hard-filters `j.kind == "provision"` (registry.ex:1880) — a
+  support job's steps would be silently absent from GET /v1/barkparks. Widen to
+  `j.kind in ["provision", "provision_support"]`. The SSE layer needs ZERO change: broadcast is
+  a coarse team-wide kind-blind tick and POST /v1/fleet/supports already fires
+  `push_event(team, "fleet")` (proven). No new event type (closed vocabulary raises).
+- **PDF-D86 — SUPPORTS ARE QUOTA-EXEMPT (deliberate exception to the un-bypassable backstop).**
+  The trial ceiling (1) is saturated by the main, so the stranger 403s at add-support
+  (router.ex:1887 — proven). Bumping LIMIT_TRIAL is REJECTED: it is role-blind (admits a 2nd
+  MAIN), and the env knob is UNREACHABLE in prod anyway (docker-compose passthrough lists no
+  LIMIT_* key — a silent no-op, filed as backlog). Instead `register_support_barkpark/2` skips
+  `Billing.barkpark_limit_reached?` for `fleet_role:"support"` inserts — a NAMED, documented
+  exception: both docstrings ("un-bypassable backstop", "counts ALL instances") are rewritten in
+  the same commit, and a NEW test pins the target behavior (subscribed trial team + 1 main at
+  ceiling → add-support SUCCEEDS; a 2nd main still 403s). The quota branch of
+  register_support_barkpark is untested today — the test is mandatory, not optional. Supersedes
+  the count when PDF-D10's per-support billing ships.
+- **PDF-D87 — OFFLOAD DATA PLANE = APP-TOKEN-DIRECT (#6007); the catalog proxy is NOT extended.**
+  CORS is RESOLVED in app-token-direct's favor: DatasetCors runs endpoint-level and
+  `https://barkpark.cloud` is always-allowed on EVERY instance route (live-proven: OPTIONS 204 +
+  authed GET with ACAO on guerrilla). A `[read,write,chat]` member token passes the ENTIRE order
+  lifecycle: create rides the `write` gate (mutate), claim/next/close/pulse/roster ride
+  `:token_root` (any valid bearer — verified plug-by-plug + pinning tests). `task.create` as a
+  catalog row is REJECTED: the proxy forwards bodies VERBATIM under the instance's full admin
+  token — arbitrary-mutation over-privilege. The browser mints its member token via the shipped
+  `POST /v1/barkparks/:id/app-token` and talks straight to the main.
+- **PDF-D88 — D62 STANDS; the model key is a VISIBLE NAMED STEP, not a hidden afterthought.**
+  A keyless order can NEVER execute: every order is an LLM turn (`agent_exec` → `claude -p` /
+  `codex exec`) and the provisioner deliberately never writes provider keys (D62, proven in code
+  + systemd unit). The wish's literal clause — "no local HETZNER token" — is fully satisfied; the
+  model key is the developer's own BY DESIGN. The add-support UI renders the key hand-off as an
+  explicit journey step (the exact SSH one-liner, copy button, "bring your own model key" copy);
+  the proof PRE-SEEDS the key on the box as a NAMED rung. Console-managed key custody (CP writes
+  the key server-side) = backlog behind an explicit owner sign-off to amend D62.
+- **PDF-D89 — ONLINE TRUTH: the job's last step ports the roster poll server-side.** The roster
+  lives on the MAIN (beats go box→main directly; the CP is not in the data path). The
+  `provision_support` job's `verify` step polls `GET {main}/v1/fleet/roster` (Bearer = the main's
+  admin token; roster is `:token_root`) until the listener row reads idle|working|blocked with a
+  non-empty capacity map — exactly stepOnline's proven client-side loop, re-hosted. Timeout →
+  `fail_job` (terminal, honest — PDF-D10: stuck-provisioning renders honestly and never bills).
+  UI "Online" = `status != "offline"` DERIVED — no literal "online" string exists in the vocab.
+- **PDF-D90 — R3 HARNESS FOLDED, NOT LANDED-FIRST.** The stranded harness (6c24833a4,
+  `scripts/pdf-support-proof.sh`, 1590 lines) rebases clean (0 conflicts) but is UNFIRED (0/8
+  criteria) and its charter-custody recipe cites phantom commits — landing it alone closes
+  nothing. This wave's proof slice EXTRACTS the file (`git show 6c24833a4:scripts/…`), inherits
+  its dialect (PASS/ABORT/FAIL ladder, --plan, negctl, census), and extends it into the
+  browser-journey proof. `pdf-wc-support-proof` is annotated superseded-by-fold. External dep,
+  hands off: task-2452b8d24005429e + PR #6038 (CP deploy filter misses internal/+cmd/ — the
+  provisioner binary does NOT auto-redeploy until it merges) are ACTIVELY held by
+  fable-r3-live-fire; the proof's R0 asserts #6038 merged + provisioner redeployed.
+- **PDF-D91 — CUSTODY CLOSED BY TRANSCRIPTION AT DECIDE.** D55-D75 transcribed into this file
+  from the Papers (this commit); D76-D82 declared void (see above). Rule forward (D49 extended):
+  a charter edit is real only when it is on origin/main — commit AND push in the same session.
+- **PDF-D92 — MINIMAL GROUP NESTING IS THE FLEET CARD ITSELF.** "Group = two rows and a
+  parent_id" renders as support rows nested under their main in the fleet card / instance page
+  (barkpark_json already exposes fleet_role + fleet_parent_id — verified router.ex:7723). No
+  separate Screen 4 slice; a full group view is backlog. One SPA slice per region under
+  OC9/D13/GR merge-train law: fleet-card+add-support = ONE slice; offload = a SECOND slice
+  sequenced AFTER it merges (same-file train).
+- **PDF-D93 — VERIFIER-CONTRADICTION RULING (spot-checked at Decide).** The
+  main-admin-token-scope verifier's claim that `reveal_admin_token`/`admin_token_encrypted`/
+  `mint_app_token` "do not exist in-tree" was a MIS-SCOPED GREP — all three exist and are proven
+  live (registry.ex:1328/2486/2661; mint_app_token + mint_studio_link both decrypt-and-Bearer to
+  the instance). The CP custody chain for the parent main's admin token is REAL and is the
+  credential spine of the provision_support claim payload. Its auth SCOPE is green: the admin
+  token passes all four main-side calls (export require_admin, mutate require_write,
+  support-token mint require_admin, roster token_root) — verified route-by-route with pinning
+  tests.
+
 ## Roadmap (waves; interleaved with MVP stages per the build plan)
 
 - **Wave A — Presence & roster** (FIRST): `listener` presence record (worker · status · scope ·
@@ -490,8 +639,13 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   measured capacity heartbeats feed route.py live; cap halts dispatch. Decisions PDF-D34..D54;
   proof `pdf-efficiency-proof.sh` (R0-R7 + negctl) is the wave's seal — its merged transcript
   stamps epic criterion 2. Next after seal: MVP-0, then Wave C.
-- **MVP-0 — Visual setup + first offload** (console journey; Screens 0-2 of the GUI plan).
-- **Wave C — Cloud add-support, one action** (provision + bind + scrubbed pull + listener).
+- **Wave C — Cloud add-support, one action** (CODE SHIPPED 2026-07-23: #5930 mint/revoke, #5932
+  support add, #5933 group columns/CP endpoints, #5973 remove+census — CLI-driven, local creds;
+  decisions D55-D75 reconstructed 2026-07-24, D76-D82 void; r3 live-fire harness folded into
+  MVP-0's proof per PDF-D90).
+- **MVP-0 — Visual setup + first offload** (IN FLIGHT 2026-07-24: the console journey
+  create-main → add-support → offload, CP-provisioned server-side — decisions PDF-D83..D93;
+  wave Paper `personal-dev-fleet-wave-mvp0-2026-07-24`).
 - **Wave D — Durability**: fence-lifecycle fix; lease-lapse recovery; runner robustness.
 - **Wave E — Orchestrator at scale**: dials live; gate hardening for full-auto.
 - **Wave F — The seal**: one unattended mixed-agent, mixed-size real run; epic closes on it.
@@ -614,3 +768,52 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   env-override seam — a later simplification could point file-order.sh at scratch via
   BP_FLEET_*, but D42's inline-curl pin stands for this transcript. Wave Paper closed as the
   debrief: `personal-dev-fleet-wave-b-2026-07-22-r2`.
+- **2026-07-24 · MVP-0 DECIDE (the console journey — invert the provisioning).** 16 survey lanes
+  + 10 verify lanes; three direction corrections absorbed on evidence: (1) "already-shipped
+  worker reusing the exact chain" overstated — bind/dataset/runtime/online are laptop-shaped CLI
+  code needing a precedented reimplementation in `internal/provisioner/support.go`; (2) "trial
+  keeps the journey walkable" was FALSE — the trial ceiling 403s add-support (fixed by the D86
+  quota exception, never Stripe); (3) D82 custody was impossible verbatim — every cited landing
+  commit is a phantom; D55-D75 transcribed at Decide, D76-D82 void. Also ruled: app-token-direct
+  wins the offload data plane (CORS live-proven, catalog task.create = over-privilege, D87);
+  keyless order execution is structurally impossible → D62 stands with the model key as a
+  visible named step (D88); the r3 harness is folded, not landed-first (D90). Decisions
+  PDF-D83..D93. Wave = 5 slices: `pdf-mvp0-cp-support-job` (r1, opus, cloud/** kind + quota
+  exception + provision mode + claim json) · `pdf-mvp0-provisioner-support` (r1, fable,
+  internal/provisioner support chain re-host, HIGH-FLIP-RISK credential custody) ·
+  `pdf-mvp0-fleet-card-spa` (r1, fable, fleet card + add-support flow + SUPPORT_STEP_ORDER,
+  one OC9 slice) · `pdf-mvp0-offload-spa` (r2 AFTER fleet-card merges, opus, order file + watch
+  via app-token-direct) · `pdf-mvp0-journey-proof` (r2 AFTER all four merge, fable, the
+  browser-journey proof-that-must-fire inheriting the folded r3 dialect). Backlog filed
+  (published ids, Decide close 2026-07-24): `pdf-bl-console-key-custody` (D62 amendment,
+  owner-sign-off gated) · `pdf-bl-support-remove-serverside` · `pdf-bl-catalog-generalization` ·
+  `pdf-bl-limit-env-passthrough` · `pdf-bl-nonadmin-task-tests` · `pdf-bl-fleet-group-view`.
+  Also at Decide close: `pdf-wc-support-proof` annotated SUPERSEDED-BY-FOLD (per D90 — its
+  dialect lives on via `git show 6c24833a4:scripts/pdf-support-proof.sh`, reachable from any
+  worktree of this repo); the epic heartbeat reads building; the wave Paper carries the full
+  verification digest + decisions + plan. Wave Paper: `personal-dev-fleet-wave-mvp0-2026-07-24`.
+- **2026-07-24 · MVP-0 round-1 REVIEW (grade A−).** All 3 round-1 slices built; the two green
+  ones adversarially re-verified and fixed in place; the CP slice's gate is CI-bound (no local
+  BEAM) and its ledger says so honestly. THE find: the Go↔CP claim envelope MISMATCHED — the CP's
+  `support_provision_claim_json` reuses the FLAT `claim_json` dialect (`job_id`/`claim_token`
+  top-level) while the Go slice decoded only the PDF-D83 nested pin (`job:{id,claim_token}`);
+  strictly decoded, every claim would have failed "missing job.id" and the halves would never
+  meet. FIXED Go-side: `claimSupport` now tolerates BOTH dialects (nested first, flat fallback),
+  end-to-end test pins the flat drain (`loop-epic/provisioner-worker-executes-provision-su-1-r`,
+  fcb309166). SPA fixes (`loop-epic/console-fleet-card-add-support-flow-supp-2-r`, 949e9efdc):
+  the add-support name is now fenced in the modal to the provisioner's DNS-label shape (an
+  off-shape name would queue, spin, and fail minutes later at `validateSupportSpec`), and the
+  presence-slot lookup is attribute-scan (no throwable interpolated selector). SPA↔CP contract
+  CROSS-CHECKED GREEN: the CP reads `barkpark_id` (parent_id alias) and answers 202. Re-derived
+  independently (HIGH-FLIP-RISK custody): parent admin token is header-only, redaction-registered
+  from line zero, claim/mint bodies withheld from errors — holds; note the step-report path
+  bypasses console redaction and relies on message discipline (a genuinely independent second
+  reviewer is warranted before merge per the flip-risk protocol). TWO CP-side defects for the
+  lead, NOT fixable on a green slice: (1) `reap_stale_provision_jobs` is KIND-BLIND at 12 min
+  default while the support chain legitimately runs to 30 (verify budget alone is 10) — a healthy
+  support job gets re-pended mid-flight; the CP needs a per-kind stale threshold ≥ 30 min for
+  `provision_support`. (2) The CP claim map sends the row NAME as `support.name`; the SPA fence
+  makes name==slug for new rows, but the CP should send the SLUG for defense in depth. Merge
+  order: CP branch (CI green first — its gate never ran) → provisioner `-r` → SPA `-r`; then
+  dispatch round-2 `pdf-mvp0-offload-spa` (after the SPA train merges) and
+  `pdf-mvp0-journey-proof` (after all four + deploy + #6038; closes epic criterion 1 per D33/D90).

@@ -176,6 +176,12 @@ type ChatSessionSummary struct {
 	LastActiveAt     string `json:"last_active_at,omitempty"`
 	InsertedAt       string `json:"inserted_at,omitempty"`
 	UpdatedAt        string `json:"updated_at,omitempty"`
+	// ArchivedAt is the DISMISSAL stamp (charter D28) — sidebar_json has always
+	// emitted it; only this client type discarded it. Its reader is the TUI shelf
+	// screen's "shelved <age>" tail. It is NOT the answer to "is this archived":
+	// that is answered by WHICH list you asked for (?archived=), the same law the
+	// mobile client's shelf follows — a stale row can contradict its own stamp.
+	ArchivedAt string `json:"archived_at,omitempty"`
 
 	// AgentState/AgentStateAt are the herd cold-mount fields (herd charter
 	// D50h): the four-state autopilot truth (working|blocked|idle|unknown) the
@@ -465,6 +471,46 @@ func (c *Client) InterruptChat(id string) (string, error) {
 	}
 	_ = json.Unmarshal(body, &out) // empty/omitted request_id is fine (D11)
 	return out.RequestID, nil
+}
+
+// ArchiveChatSession shelves a session: POST /v1/chat/sessions/:id/archive →
+// 200 {session}. Idempotent (re-archiving re-stamps archived_at).
+//
+// Archive is a lifecycle ACTION, not a continuity field — which is why it is a
+// POST verb and NOT a key on UpdateChatSession's patch: the server's PATCH
+// allowlist deliberately excludes `archived`, and routing it through the patch
+// would mix a dismissal into the continuity-keys allowlist.
+//
+// Orthogonal to `status` (liveness) and to `agent_state` (attention): a running
+// session keeps running when archived, and a blocked one keeps needing you.
+// Only which LIST it appears in changes.
+//
+// The 404 is the not-found ORACLE: a foreign tenant's session and a missing id
+// are deliberately indistinguishable, so callers must not read a 404 as "it
+// exists but you may not touch it".
+func (c *Client) ArchiveChatSession(id string) (ChatSession, error) {
+	return c.chatArchiveFlip(id, "archive")
+}
+
+// UnarchiveChatSession clears archived_at: POST /v1/chat/sessions/:id/unarchive
+// → 200 {session}. Same oracle, same idempotency (unarchiving a live session is
+// a no-op that still 200s).
+func (c *Client) UnarchiveChatSession(id string) (ChatSession, error) {
+	return c.chatArchiveFlip(id, "unarchive")
+}
+
+// chatArchiveFlip is the shared body of the two archive verbs — they differ by
+// one path segment and nothing else, so they are one implementation.
+func (c *Client) chatArchiveFlip(id, verb string) (ChatSession, error) {
+	body, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/"+verb), nil, http.StatusOK)
+	if err != nil {
+		return ChatSession{}, err
+	}
+	var s ChatSession
+	if err := json.Unmarshal(body, &s); err != nil {
+		return ChatSession{}, fmt.Errorf("decode %s response: %w", verb, err)
+	}
+	return s, nil
 }
 
 // RespondChatApproval answers a pending permission request (204). decision is

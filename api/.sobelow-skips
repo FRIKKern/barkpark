@@ -115,7 +115,7 @@ Traversal.SendFile: Directory Traversal in `send_file`,lib/barkpark_web/controll
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:117,31116C2
 XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark_web/controllers/share_link_controller.ex:141,4684663
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:252,2F231DA
-Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:2530,18ED697
+Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:2550,18ED697
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:215,2CA5D00
 Traversal.FileModule: Directory Traversal in `File.stream!`,lib/barkpark/codelists/editeur.ex:122,107C442
 XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark/plugins/sheets/web/export_controller.ex:99,66F26D0

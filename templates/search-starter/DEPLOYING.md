@@ -79,9 +79,24 @@ curl -X POST "$SCOPED/v1/tokens" -H "Authorization: Bearer $TOKEN" \
      --data '{"label":"public-read","permissions":"public-read"}'
 ```
 
-The deploy engine wires this into `NEXT_PUBLIC_BARKPARK_WS_TOKEN`. Without both
-`NEXT_PUBLIC_BARKPARK_WS_URL` and `NEXT_PUBLIC_BARKPARK_WS_TOKEN`, live search
-degrades to server-side search (no crash — it fails soft).
+Pass that token as **`BARKPARK_TOKEN`**. The engine does *not* — and structurally
+*cannot* — set `NEXT_PUBLIC_BARKPARK_WS_TOKEN`: its env allowlist is closed over
+`BARKPARK_*` names at all three layers. Instead `next.config.mjs` **derives** the
+three browser values at build time and Next inlines them into the client bundle:
+
+| Derived | From |
+|---|---|
+| `NEXT_PUBLIC_BARKPARK_WS_URL` | `origin(BARKPARK_API_URL)` + `/socket` (the scoped `/w/:ws/p/:proj` suffix is stripped) |
+| `NEXT_PUBLIC_BARKPARK_WS_TOKEN` | `BARKPARK_TOKEN` |
+| `NEXT_PUBLIC_BARKPARK_DATASET` (+ `_WORKSPACE`, `_PROJECT`) | `BARKPARK_DATASET` / `_WORKSPACE` / `_PROJECT` |
+
+All three matter. The channel topic is `search:<ws>:<proj>:<dataset>`, so a build
+that inlines the URL and token but not the dataset joins
+`search:default:default:docs` — the join **succeeds**, the LIVE badge lights, and
+every keystroke returns zero hits with no error surfaced anywhere.
+
+With `BARKPARK_TOKEN` unset, live search degrades to the server-side HTTP path
+(no crash — it fails soft, and the socket isn't even built into the bundle).
 
 ## The six stages, and rollback
 

@@ -4,7 +4,7 @@ package taskboard
 // RenderTaskDetail (charter D15/D16/D24). Goldens are ANSI-stripped WHOLE
 // frames (never substrings) at 60/80/100 cols. Each width golden concatenates
 // THREE fixtures — RICH (every section, real mdlite headings/bullets/code),
-// THIN (title+meta only — proves conditional sections), and BLOCKED (reason
+// THIN (sparse authored data with an honest derived purpose), and BLOCKED (reason
 // strip + a single paper stop) — so one file per width shows the reader the
 // whole vocabulary at once. The DONE fixture drives targeted behavioral tests
 // (lease-alarm suppression, inline close_reason) without a golden. Deterministic
@@ -395,14 +395,11 @@ func TestDetailCursorSelection(t *testing.T) {
 	}
 }
 
-// TestDetailThinIsThin pins the conditional-section promise: a task with only
-// a title and lifecycle renders exactly two lines and zero stops.
+// Even a sparse legacy task must explain itself: the reader derives and labels
+// purpose from recorded facts while keeping the frame free of selectable rails.
 func TestDetailThinIsThin(t *testing.T) {
 	d, children := thinDetail()
 	lines, stops := RenderTaskDetail(d, children, 0, 80, detailNow)
-	if len(lines) != 2 {
-		t.Fatalf("thin task rendered %d lines, want 2:\n%s", len(lines), strings.Join(lines, "\n"))
-	}
 	if len(stops) != 0 {
 		t.Fatalf("thin task produced %d stops, want 0", len(stops))
 	}
@@ -411,6 +408,88 @@ func TestDetailThinIsThin(t *testing.T) {
 	}
 	if got := ansi.Strip(lines[1]); !strings.Contains(got, "open") {
 		t.Errorf("line 1 is not the meta line: %q", got)
+	}
+	frame := ansi.Strip(strings.Join(lines, "\n"))
+	for _, want := range []string{"purpose · derived", "part of", "endgame", "important", "relevant", "proof"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("sparse task missing %q:\n%s", want, frame)
+		}
+	}
+	for _, awkward := range []string{"criteria 0/0", "root mission", "0 direct child"} {
+		if strings.Contains(frame, awkward) {
+			t.Errorf("sparse task retained mechanical placeholder %q:\n%s", awkward, frame)
+		}
+	}
+	for _, want := range []string{"criteria · missing", "standalone task", "Define acceptance criteria"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("sparse task missing intentional fallback %q:\n%s", want, frame)
+		}
+	}
+}
+
+func TestDerivedWhyNeverMistakesCriteriaForRationale(t *testing.T) {
+	d, _ := richDetail()
+	purpose := taskPurposeView(d, nil)
+
+	if strings.Contains(purpose.Why, "acceptance") || strings.Contains(purpose.Why, "criteria") {
+		t.Fatalf("derived why restated the completion contract instead of identifying missing rationale: %q", purpose.Why)
+	}
+	if want := "Why this task is necessary within task-tui-epic is not recorded."; purpose.Why != want {
+		t.Fatalf("derived why = %q, want %q", purpose.Why, want)
+	}
+}
+
+func TestCriteriaLeadEverySubstantiveDetailSection(t *testing.T) {
+	d, children := richDetail()
+	lines, _ := RenderTaskDetail(d, children, 0, 80, detailNow)
+	frame := ansi.Strip(strings.Join(lines, "\n"))
+	criteria := strings.Index(frame, "criteria 2/3")
+	if criteria < 0 {
+		t.Fatal("criteria section missing")
+	}
+	for _, later := range []string{"purpose · derived", "created 2d ago", "The board must repaint", "labels  "} {
+		at := strings.Index(frame, later)
+		if at < 0 || criteria >= at {
+			t.Errorf("criteria must precede %q (criteria=%d later=%d)", later, criteria, at)
+		}
+	}
+}
+
+func TestEveryTaskDetailVariantHasACompleteEarlyOutline(t *testing.T) {
+	for _, fixture := range detailFixtures() {
+		t.Run(fixture.name, func(t *testing.T) {
+			frame := plainDetailFrame(fixture, 80)
+			criteriaAt := strings.Index(frame, "criteria")
+			purposeAt := strings.Index(frame, "purpose")
+			if criteriaAt < 0 || purposeAt < 0 || criteriaAt >= purposeAt {
+				t.Fatalf("criteria/purpose outline missing or out of order (criteria=%d purpose=%d):\n%s", criteriaAt, purposeAt, frame)
+			}
+			for _, field := range []string{"part of", "impact", "does", "why", "endgame", "important", "relevant", "proof"} {
+				if !strings.Contains(frame, field) {
+					t.Errorf("task detail missing outline field %q:\n%s", field, frame)
+				}
+			}
+		})
+	}
+}
+
+func TestPurposeOutlineUsesDistinctSemanticColorRoles(t *testing.T) {
+	partLabel, _ := purposeFactStyles("part of")
+	impactLabel, _ := purposeFactStyles("impact")
+	proofLabel, _ := purposeFactStyles("proof")
+	whyLabel, _ := purposeFactStyles("why")
+	colors := []lipgloss.TerminalColor{
+		partLabel.GetForeground(), impactLabel.GetForeground(), proofLabel.GetForeground(), whyLabel.GetForeground(),
+	}
+	for i := range colors {
+		if colors[i] == (lipgloss.NoColor{}) {
+			t.Fatalf("purpose semantic role %d has no foreground color", i)
+		}
+		for j := 0; j < i; j++ {
+			if colors[i] == colors[j] {
+				t.Fatalf("purpose semantic roles %d and %d collapsed to the same color", i, j)
+			}
+		}
 	}
 }
 

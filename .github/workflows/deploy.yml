@@ -11,6 +11,7 @@ on:
       - "cloud/**"
       - "api/**"
       - "internal/**"
+      - "cmd/**"
       - "deploy/**"
       # Shipped starter templates: the box builds sites FROM these trees, so a
       # templates-only merge (e.g. a search-starter fix) must roll the box too —
@@ -21,6 +22,10 @@ on:
       # instance, behind Caddy's /connectors path route). Without this, merging
       # bridge code would deploy NOTHING.
       - "connectors/**"
+      # deploy-filter-exempt: editing THIS workflow deploys nothing by itself —
+      # the next real code merge carries it. Marked explicitly so
+      # scripts/check-deployyml-filters.sh can tell "deliberately targetless"
+      # from "silently dropped".
       - ".github/workflows/deploy.yml"
 
 concurrency:
@@ -66,10 +71,22 @@ jobs:
           echo "diff base: $base"
           changed="$(git diff --name-only "$base" "${{ github.sha }}")"
           echo "changed files:"; echo "$changed"
-          if echo "$changed" | grep -qE '^(cloud|deploy)/'; then echo "cp=true" >> "$GITHUB_OUTPUT"; else echo "cp=false" >> "$GITHUB_OUTPUT"; fi
+          # internal/ + cmd/ ride the control plane too: bp-provisioner is
+          # cross-built from ./cmd/barkpark-provisioner (code under
+          # internal/cli/cloud), so an internal-only worker fix must roll the
+          # CP or the stale binary keeps provisioning (bit us 2026-07-24: the
+          # secrets-chain fix deployed guerrilla but left the CP worker broken).
+          if echo "$changed" | grep -qE '^(cloud|deploy|internal|cmd)/'; then echo "cp=true" >> "$GITHUB_OUTPUT"; else echo "cp=false" >> "$GITHUB_OUTPUT"; fi
           # connectors/ rides the content instance: instance-deploy.sh npm-installs
           # it and restarts barkpark-connectors behind the /connectors route.
-          if echo "$changed" | grep -qE '^(api|internal|deploy|connectors)/'; then echo "instance=true" >> "$GITHUB_OUTPUT"; else echo "instance=false" >> "$GITHUB_OUTPUT"; fi
+          # templates/ rides it too (stw9, charter D57a): the box builds sites FROM
+          # those trees, and templates/** was listed in on.push.paths while matching
+          # NEITHER job regex — so a templates-only merge ran this workflow, deployed
+          # NOTHING, and reported GREEN. check-deployyml-filters.sh below is the
+          # tripwire that stops that pair of lists drifting again.
+          if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates)/'; then echo "instance=true" >> "$GITHUB_OUTPUT"; else echo "instance=false" >> "$GITHUB_OUTPUT"; fi
+      - name: Assert every on.push.paths entry has a deploy target
+        run: bash scripts/check-deployyml-filters.sh
 
   control-plane:
     needs: changes
@@ -113,13 +130,25 @@ jobs:
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
+          # The control plane's egress address, reusing the SAME secret this
+          # workflow already SSHes the control plane with — so the address is
+          # authored ONCE. instance-deploy.sh writes it as BARKPARK_TRUSTED_PROXIES
+          # (only when .env has no line yet, and only if it parses as bare IPs), so
+          # the box BELIEVES the caller address the control plane relays on a
+          # proxied revoke instead of collapsing every caller onto one rate-limit
+          # bucket. Secret unset ⇒ empty ⇒ the script writes a commented
+          # placeholder and logs the gap; the deploy is never blocked on it.
+          CP_HOST: ${{ secrets.CP_HOST }}
         run: |
           install -m 600 /dev/null /tmp/deploy_key
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
           SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
           $SCP deploy/instance-deploy.sh "root@${GUERRILLA_HOST}:/tmp/"
-          $SSH "root@${GUERRILLA_HOST}" 'bash /tmp/instance-deploy.sh'
+          # The remote env assignment is quoted on the REMOTE side too, so a
+          # malformed secret can only ever land in the script's validated variable
+          # — never split into extra words of the remote command line.
+          $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' bash /tmp/instance-deploy.sh"
       - name: Smoke test
         env:
           GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}

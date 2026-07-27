@@ -3,7 +3,7 @@ defmodule BarkparkWeb.MediaController do
 
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Delivery, Renditions}
+  alias Barkpark.Media.{Blobstore, Delivery, Renditions}
   alias Barkpark.Media.Storage.{Access, MediaFile}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -70,38 +70,49 @@ defmodule BarkparkWeb.MediaController do
     end
   end
 
-  @doc "Serve a file from disk."
+  @doc "Serve a file — from disk, or via redirect to the object-storage backend."
   def serve(conn, %{"path" => path_parts}) do
     relative_path = Enum.join(path_parts, "/")
 
     with {:ok, file} <- Media.get_file_by_path(relative_path, scope_opts(conn)),
          doc <- Media.asset_doc_for_file(file, file.dataset),
-         true <- Access.allowed?(conn, file, doc, :original),
-         # Serve the path off the RESOLVED record, not the raw URL segment. The
-         # lookup already matched on `path == relative_path`, but deriving the disk
-         # path from `file.path` (a server-generated `uploads/YYYY/MM/slug-rand.ext`
-         # — `Media.unique_filename/1` strips directory parts and non-`[a-z0-9-]`) —
-         # instead of the attacker-typed segment removes any raw-input flow into
-         # `send_file`. A `../…` URL never matches a stored row → {:error,:not_found}.
-         full_path = Media.file_path(file.path),
-         # HONEST missing-blob 404: a media_files ROW can outlive its blob — most
-         # notably right after a workspace bundle import copies the DB rows but the
-         # blobs have not been re-pointed/pushed yet (pds W1 G2). Without this guard
-         # send_file's internal `{:ok, %File.Stat{}} = File.stat(path)` raises a
-         # MatchError on :enoent → a bare 500. Probe the blob first and answer a
-         # truthful 404 instead.
-         {:blob, true} <- {:blob, File.regular?(full_path)} do
-      mime = MIME.from_path(full_path)
+         true <- Access.allowed?(conn, file, doc, :original) do
+      # Serve the path off the RESOLVED record, not the raw URL segment. The
+      # lookup already matched on `path == relative_path`, but deriving the blob
+      # key from `file.path` (a server-generated `uploads/YYYY/MM/slug-rand.ext`
+      # — `Media.unique_filename/1` strips directory parts and non-`[a-z0-9-]`) —
+      # instead of the attacker-typed segment removes any raw-input flow into
+      # `send_file` / the presigned key. A `../…` URL never matches a stored row
+      # → {:error, :not_found}.
+      mime = MIME.from_path(file.path)
 
-      conn
-      |> Delivery.put_file_cache_headers(full_path)
-      |> maybe_send_file(full_path, mime)
+      # The stored-XSS defense travels with the strategy: the LOCAL branch sets
+      # collapse/nosniff/disposition headers itself (maybe_send_file), and the
+      # REDIRECT branch bakes the SAME collapsed type + disposition into the
+      # presigned query (response-content-*) so the bucket echoes them.
+      case Blobstore.serve_strategy(file.path,
+             response_content_type: MediaFile.serve_content_type(mime),
+             response_content_disposition: disposition(mime)
+           ) do
+        {:file, full_path} ->
+          conn
+          |> Delivery.put_file_cache_headers(full_path)
+          |> maybe_send_file(full_path, mime)
+
+        {:redirect, url} ->
+          redirect_to_blob(conn, url)
+
+        # HONEST missing-blob 404: a media_files ROW can outlive its blob — most
+        # notably right after a workspace bundle import copies the DB rows but the
+        # blobs have not been re-pointed/pushed yet (pds W1 G2). Without this guard
+        # send_file's internal `{:ok, %File.Stat{}} = File.stat(path)` raises a
+        # MatchError on :enoent → a bare 500. Answer a truthful 404 instead.
+        {:error, :not_found} ->
+          not_found(conn, "media blob missing")
+      end
     else
       {:error, :not_found} ->
         not_found(conn, "file not found")
-
-      {:blob, false} ->
-        not_found(conn, "media blob missing")
 
       false ->
         forbidden(conn)
@@ -179,6 +190,16 @@ defmodule BarkparkWeb.MediaController do
 
   defp disposition(mime) do
     if MediaFile.dangerous_mime?(mime), do: "attachment", else: "inline"
+  end
+
+  # 302 to a presigned object-storage URL. `cache-control: private` — the
+  # redirect embeds a time-limited signature and may be access-gated, so a
+  # shared cache must never serve it to another principal; the blob response
+  # itself carries the bucket/CDN cache policy.
+  defp redirect_to_blob(conn, url) do
+    conn
+    |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
+    |> redirect(external: url)
   end
 
   defp not_found(conn, message) do

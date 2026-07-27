@@ -1,0 +1,7 @@
+model=Pixel 6a
+device=bluejay
+android=15
+sdk=35
+webview=Current WebView package (name, version): (com.google.android.webview, 131.0.6778.39)
+emulator=0
+build=release

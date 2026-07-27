@@ -451,6 +451,8 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
+      {:post, "/tasks/:doc_id/sessions", BarkparkWeb.TasksController, :sessions,
+       auth: :token_root},
       {:post, "/tasks/:doc_id/move", BarkparkWeb.TasksController, :move, auth: :token_root},
       {:post, "/tasks/:doc_id/stage", BarkparkWeb.TasksController, :stage, auth: :token_root},
       # Personal Dev Fleet presence (Wave A) — literal paths mount at

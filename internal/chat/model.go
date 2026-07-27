@@ -28,6 +28,7 @@ type screen int
 const (
 	screenPicker screen = iota // launch: list / resume / new (charter: sessions picker)
 	screenChat                 // an open conversation
+	screenShelf                // the ARCHIVED shelf (dismissed sessions + the way back)
 )
 
 // focusZone is which conversation zone owns the arrow keys (wave session-card
@@ -65,6 +66,18 @@ type Model struct {
 	loading     bool
 	herd        HerdState
 	fleetNotice string // the fleet stream's terminal give-up (D54h: a notice, never a crash)
+
+	// shelf — the ARCHIVED screen (charter D28). Its own roster, cursor and
+	// viewport top, deliberately NOT the picker's: the two lists hold different
+	// sessions, and sharing one cursor would move the herd highlight every time
+	// the shelf was browsed. There is no "+ new" row here (nothing is created on
+	// a shelf), so shelfCursor indexes the archived rows DIRECTLY — index 0 is a
+	// session, unlike pickCursor.
+	shelf        []SessionSummary
+	shelfCursor  int
+	shelfTop     int
+	shelfErr     string
+	shelfLoading bool
 
 	// conversation
 	st         State  // the pure reducer's state
@@ -198,7 +211,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tailFetchedMsg:
-		return m.apply(TailFetchedEvent{Session: msg.session, Err: msg.err})
+		return m.apply(TailFetchedEvent{Session: msg.session, Err: msg.err, Gen: msg.gen})
 	case sendDoneMsg:
 		if msg.err != nil {
 			m.st.Notice = "send failed — " + msg.err.Error()
@@ -215,6 +228,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The POST landed; the reducer turns success into a full refetch (so the
 		// server-resolved card flips) or an honest error notice.
 		return m.apply(AnsweredEvent{RequestID: msg.requestID, Err: msg.err})
+	case shelfLoadedMsg:
+		m.shelfLoading = false
+		if msg.err != nil {
+			// Prefixed AT THE SOURCE, like the unarchive failure below: the shelf
+			// paints m.shelfErr verbatim (under stale rows it is the only context
+			// the line has), so every writer here owns its own wording.
+			m.shelfErr = "could not read the shelf — " + msg.err.Error()
+			return m, nil
+		}
+		m.shelfErr = ""
+		m.shelf = msg.sessions
+		return m.clampShelfCursor(m.shelfCursor), nil
+	case unarchivedMsg:
+		// The mirror image of archivedMsg. Success is NOT silent here: the row
+		// left the shelf optimistically, but it has to APPEAR on the herd home,
+		// and only a roster re-read can put it there honestly (no fleet frame is
+		// emitted for an archive/unarchive flip). A failure surfaces honestly and
+		// re-reads the SHELF, which is what puts the row back — re-inserting a
+		// remembered row at a guessed position would paint a state the server
+		// never confirmed.
+		if msg.err != nil {
+			m.shelfErr = "unarchive failed — " + msg.err.Error()
+			return m, m.loadShelfCmd()
+		}
+		return m, m.loadSessionsCmd()
+	case archivedMsg:
+		// Success is silent: the row is already gone. A failure surfaces
+		// honestly AND re-reads the roster, which is what puts the row back —
+		// re-inserting a remembered row at a guessed position would fight the
+		// attention sort and paint a stale state.
+		if msg.err != nil {
+			m.pickErr = "archive failed — " + msg.err.Error()
+			return m, m.loadSessionsCmd()
+		}
+		return m, nil
 	case patchedMsg:
 		return m, nil
 	}
@@ -229,8 +277,11 @@ func (m Model) View() string {
 	if m.helpOpen {
 		return m.renderHelpOverlay(m.width, m.height)
 	}
-	if m.screen == screenPicker {
+	switch m.screen {
+	case screenPicker:
 		return m.renderPicker()
+	case screenShelf:
+		return m.renderShelf()
 	}
 	return m.renderChat()
 }
@@ -263,9 +314,10 @@ func (m Model) execEffect(e Effect) tea.Cmd {
 	switch e := e.(type) {
 	case FetchTailEffect:
 		since := e.SinceSeq
+		gen := e.Gen // the issuing generation (charter D77 settle-race token)
 		return func() tea.Msg {
 			s, err := tr.GetSession(id, since)
-			return tailFetchedMsg{session: s, err: err}
+			return tailFetchedMsg{session: s, err: err, gen: gen}
 		}
 	case SendEffect:
 		content := e.Content
@@ -542,10 +594,14 @@ type sessionOpenedMsg struct {
 	err     error
 }
 
-// tailFetchedMsg carries the turn-boundary GET (?since=) result.
+// tailFetchedMsg carries the turn-boundary GET (?since=) result. gen is the
+// generation of the FetchTailEffect that issued it (charter D77) — threaded
+// verbatim into TailFetchedEvent.Gen so the settle guard can prove the fetch
+// still owns the live tail.
 type tailFetchedMsg struct {
 	session Session
 	err     error
+	gen     int
 }
 
 // streamFrameMsg is one SSE frame pushed from the stream goroutine.
@@ -566,6 +622,29 @@ type fleetFrameMsg struct {
 
 // fleetErrMsg is the fleet stream's terminal give-up (degrades to a notice).
 type fleetErrMsg struct{ err error }
+
+// archivedMsg is the archive POST's completion. Success is silent — the row
+// left the picker the instant the key was pressed; only a failure has anything
+// to say.
+type archivedMsg struct {
+	id  string
+	err error
+}
+
+// shelfLoadedMsg carries the ARCHIVED roster (or its load error) — a separate
+// message from sessionsLoadedMsg because the two lists are separate truths: a
+// shelf read must never overwrite the herd roster the fleet stream is folding
+// into.
+type shelfLoadedMsg struct {
+	sessions []SessionSummary
+	err      error
+}
+
+// unarchivedMsg is the unarchive POST's completion — the twin of archivedMsg.
+type unarchivedMsg struct {
+	id  string
+	err error
+}
 
 // sendDoneMsg / interruptDoneMsg / patchedMsg are verb-call completions (their
 // only job is to surface a transport error honestly; the truth is elsewhere).
@@ -588,6 +667,30 @@ func (m Model) loadSessionsCmd() tea.Cmd {
 	}
 }
 
+// loadShelfCmd fetches the ARCHIVED roster off the update loop — the shelf
+// screen's only read, and the caller that earns Transport.ListArchivedSessions
+// its place back on the interface.
+func (m Model) loadShelfCmd() tea.Cmd {
+	tr := m.tr
+	return func() tea.Msg {
+		ss, err := tr.ListArchivedSessions()
+		return shelfLoadedMsg{sessions: ss, err: err}
+	}
+}
+
+// unarchiveSessionCmd puts one shelved session back on the active herd. The row
+// is already gone from m.shelf by the time this runs (the optimistic removal
+// happens in the key handler), exactly as archiveSessionCmd's row is: no fleet
+// frame is emitted for the flip in EITHER direction, so optimism is the only
+// signal that will ever arrive, and the failure branch's shelf re-read is what
+// reconciles a refused flip back into view.
+func (m Model) unarchiveSessionCmd(id string) tea.Cmd {
+	tr := m.tr
+	return func() tea.Msg {
+		return unarchivedMsg{id: id, err: tr.Unarchive(id)}
+	}
+}
+
 // createSessionCmd creates a new session and opens it.
 func (m Model) createSessionCmd() tea.Cmd {
 	tr := m.tr
@@ -604,5 +707,17 @@ func (m Model) resumeSessionCmd(id string) tea.Cmd {
 	return func() tea.Msg {
 		s, err := tr.GetSession(id, 0)
 		return sessionOpenedMsg{session: s, err: err}
+	}
+}
+
+// archiveSessionCmd shelves one session off the update loop. The row is already
+// gone from m.sessions by the time this runs (the optimistic removal happens in
+// the key handler): there is no fleet frame for an archive flip, so optimism is
+// the only removal signal that will ever arrive, and the refresh this batches
+// with is what reconciles a failed flip back into view.
+func (m Model) archiveSessionCmd(id string) tea.Cmd {
+	tr := m.tr
+	return func() tea.Msg {
+		return archivedMsg{id: id, err: tr.Archive(id)}
 	}
 }

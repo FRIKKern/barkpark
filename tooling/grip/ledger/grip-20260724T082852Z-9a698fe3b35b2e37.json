@@ -1,0 +1,55 @@
+{
+  "run_id": "grip-20260724T082852Z",
+  "recipes": [
+    {
+      "subject": "cloud/lib/barkpark_cloud/web/router.ex",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '1,7p' cloud/lib/barkpark_cloud/web/router.ex",
+      "derived_level": "L3",
+      "deps": [
+        "cloud/lib/barkpark_cloud/web/router.ex"
+      ],
+      "observed_at": "2026-07-24T08:28:52Z"
+    },
+    {
+      "subject": "cloud/lib/barkpark_cloud/events.ex",
+      "quantity": "grep:-n:@event_types\\|def broadcast",
+      "rerun": "grep -n '@event_types\\|def broadcast' cloud/lib/barkpark_cloud/events.ex",
+      "derived_level": "L3",
+      "deps": [
+        "cloud/lib/barkpark_cloud/events.ex"
+      ],
+      "observed_at": "2026-07-24T08:28:52Z"
+    },
+    {
+      "subject": "cloud/lib/barkpark_cloud/registry.ex",
+      "quantity": "grep:-n:kind == \"provision\"",
+      "rerun": "grep -n 'kind == \"provision\"' cloud/lib/barkpark_cloud/registry.ex",
+      "derived_level": "L3",
+      "deps": [
+        "cloud/lib/barkpark_cloud/registry.ex"
+      ],
+      "observed_at": "2026-07-24T08:28:52Z"
+    },
+    {
+      "subject": "cloud/lib/barkpark_cloud/web/router.ex",
+      "quantity": "grep:-n:register_support_barkpark",
+      "rerun": "grep -n 'register_support_barkpark' -A 4 cloud/lib/barkpark_cloud/web/router.ex",
+      "derived_level": "L3",
+      "deps": [
+        "cloud/lib/barkpark_cloud/web/router.ex"
+      ],
+      "observed_at": "2026-07-24T08:28:52Z"
+    },
+    {
+      "subject": "cloud/priv/static/app.js",
+      "quantity": "grep:-n:source of truth\\|TYPE_ACTIONS = {",
+      "rerun": "grep -n 'source of truth\\|TYPE_ACTIONS = {' -A2 cloud/priv/static/app.js",
+      "derived_level": "L3",
+      "deps": [
+        "cloud/priv/static/app.js"
+      ],
+      "observed_at": "2026-07-24T08:28:52Z"
+    }
+  ]
+}

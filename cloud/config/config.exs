@@ -178,6 +178,25 @@ config :barkpark_cloud, BarkparkCloud.ArchiveStore,
   bucket: nil,
   location: "fsn1"
 
+# push relay (mobile charter D15): how one notification's adapter is chosen.
+#
+# `:auto` = resolve PER PLATFORM at send time (BarkparkCloud.Push.adapter_for/1):
+# apns → Adapters.APNS iff its credentials are configured, fcm → Adapters.FCM
+# iff its service-account key is, otherwise Adapters.NotConfigured (honest
+# terminal cancel — never retried, never faked). No APNs/FCM credentials exist
+# in any environment yet, so today every send still cancels; the relay turns
+# itself on when a credential appears, with no flag to flip. The exact
+# credentials a human must supply are in the Adapters.NotConfigured moduledoc.
+#
+# Setting a MODULE here instead overrides the resolution for every platform —
+# that is how config/test.exs pins BarkparkCloud.PushFakeAdapter.
+config :barkpark_cloud, :push_adapter, :auto
+
+# The push relay's HTTP boundary (BarkparkCloud.Push.HTTP) — the one seam the
+# real APNs/FCM adapters put bytes through, and the one the adapter tests fake.
+# Mint, not :httpc, because the APNs provider API is HTTP/2-only.
+config :barkpark_cloud, :push_http_client, BarkparkCloud.Push.HTTP.Mint
+
 # oban-substrate: the cloud control plane's job + cron engine. Postgres-backed
 # on BarkparkCloud.Repo (no Redis). A near-verbatim port of the proven api/ Oban
 # setup (api/config/config.exs:81-118), trimmed to what the control plane needs
@@ -273,7 +292,19 @@ config :barkpark_cloud, Oban,
        # fleet has seen (curator judgment → a human inbox). Runs at 06:00 (quiet,
        # off every on-the-hour + off-peak sweep). max_attempts: 1 + unique daily —
        # a missed tick is harmless and a double-enqueue must not double-send.
-       {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker}
+       {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker},
+       # stw9 (charter D57b): the hourly TEMPLATE-freshness sweep — re-enqueue an
+       # UNFORCED "template-auto" build for every deployed content-bound site, so
+       # a merged template change reaches live sites with no human in the loop.
+       # Unforced means an unchanged site collapses to the (site_id, build_id)
+       # no-op, so a quiet fleet costs one analytics read per site per hour; the
+       # worker additionally SKIPS any site whose content_rev it cannot read (the
+       # fail-open would otherwise mint a fresh build every tick — a build storm
+       # on a 2-core box). Offset to :41 so it never stampedes the :00 / :17 / :07
+       # sweeps, and it rides :site_deploy (concurrency 1) rather than
+       # :maintenance — a sweep that starts builds belongs behind the same serial
+       # gate the debounced auto-deploy uses.
+       {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker}
      ]}
   ]
 

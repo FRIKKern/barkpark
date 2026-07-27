@@ -313,6 +313,20 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
       is_nil(type) ->
         {:cancel, :no_type_for_upsert}
 
+      # Schema-visibility gate (search-template W10 / D62) — the incremental
+      # twin of the rebuild path's public-only corpus (`indexed_types/2`
+      # below). Without it, a private-type save with `incremental_upsert` ON
+      # re-contaminates the live index the rebuild deliberately kept clean
+      # ("never index a type a public reader can't fetch"). Same derivation,
+      # same predicate, same seam — one invariant, two enforcement points.
+      type not in indexed_types(scope, args) ->
+        Logger.info(
+          "Indx.IndexerWorker: refusing upsert of _id=#{id} type=#{type} scope=#{scope} — " <>
+            "type is not a public schema type (never index a type a public reader can't fetch)"
+        )
+
+        {:cancel, :non_public_type}
+
       true ->
         case content_mod(args).get_document(id, type, scope) do
           {:ok, doc} ->
@@ -489,12 +503,18 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
       end
   end
 
-  # A schema is public unless it explicitly declares `visibility: "private"`.
-  # Handles both the %SchemaDefinition{} struct (atom key) and a plain map
-  # (string key) so the `content` test seam can return either shape.
-  defp schema_public?(%{visibility: v}), do: v != "private"
-  defp schema_public?(%{"visibility" => v}), do: v != "private"
-  defp schema_public?(_), do: true
+  # A schema is public ONLY when it EXPLICITLY declares `visibility: "public"`
+  # — ALLOWLIST, not denylist (search-template W10 / D62): unified with the
+  # query route's `Content.schema_public?/3` and the search read path's
+  # anonymous allowlist (`DocumentsRetriever`), so a nil/unknown/future
+  # visibility value fails CLOSED everywhere instead of indexing here while
+  # 404ing there. Real `%SchemaDefinition{}` rows default `"public"`, so only
+  # explicitly-non-public (or legacy nil-visibility) rows change. Handles both
+  # the struct (atom key) and a plain map (string key) so the `content` test
+  # seam can return either shape.
+  defp schema_public?(%{visibility: v}), do: v == "public"
+  defp schema_public?(%{"visibility" => v}), do: v == "public"
+  defp schema_public?(_), do: false
 
   defp schema_name(%{name: n}), do: n
   defp schema_name(%{"name" => n}), do: n

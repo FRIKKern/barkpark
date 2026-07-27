@@ -297,6 +297,56 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert Registry.claim_next_job("ct-2") == nil
     end
 
+    test "a claimed provision_support job past the GENERIC threshold is NOT re-claimable " <>
+           "(per-kind staleness, task-314de6aa36248bea)" do
+      {_user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      {:ok, main} = main |> Barkpark.fleet_changeset(%{fleet_role: "main"}) |> Repo.update()
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Support Lazy",
+          slug: "support-lazy",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      {:ok, job} = Registry.enqueue_support_provision_job(support)
+      {%ProvisionJob{} = claimed, _} = Registry.claim_next_support_provision_job("sup-A")
+      assert claimed.id == job.id
+
+      # Age the claim past the generic (~12m) threshold but under the support
+      # (35m) budget — the Go support chain legitimately runs to 30 minutes, so
+      # a second worker polling must NOT be handed the still-healthy job.
+      mid_flight_at =
+        DateTime.utc_now()
+        |> DateTime.add(-(Registry.stale_after_seconds() + 60), :second)
+        |> DateTime.truncate(:microsecond)
+
+      _ =
+        from(j in ProvisionJob, where: j.id == ^job.id)
+        |> Repo.update_all(set: [claimed_at: mid_flight_at])
+
+      assert Registry.claim_next_support_provision_job("sup-B") == nil
+      assert Repo.get(ProvisionJob, job.id).claim_token == "sup-A"
+
+      # Past the SUPPORT threshold the claim is honestly abandoned → re-claimable.
+      stale_at =
+        DateTime.utc_now()
+        |> DateTime.add(-(Registry.support_stale_after_seconds() + 60), :second)
+        |> DateTime.truncate(:microsecond)
+
+      _ =
+        from(j in ProvisionJob, where: j.id == ^job.id)
+        |> Repo.update_all(set: [claimed_at: stale_at])
+
+      assert {%ProvisionJob{} = reclaimed, %Barkpark{}} =
+               Registry.claim_next_support_provision_job("sup-B")
+
+      assert reclaimed.id == job.id
+      assert reclaimed.claim_token == "sup-B"
+    end
+
     test "a stale claim past the attempt cap is FAILED instead of re-handed-out" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
@@ -501,6 +551,69 @@ defmodule BarkparkCloud.ProvisioningTest do
       reloaded = Registry.get_barkpark(bp.id)
       assert reloaded.admin_token_encrypted == nil
       assert {:ok, nil} = Registry.reveal_admin_token(reloaded)
+      assert reloaded.host == "203.0.113.7"
+    end
+
+    test "provision_support token_id: persists fleet_token_id on the SUPPORT row (task-5866ec745efcd7f7)" do
+      {_user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      n = System.unique_integer([:positive])
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Helper #{n}",
+          slug: "helper-#{n}",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      {:ok, job} = Registry.enqueue_support_provision_job(support)
+
+      assert {:ok, %ProvisionJob{status: "succeeded"}} =
+               Registry.succeed_job(job.id, "203.0.113.7", token_id: "tok_opaque_42")
+
+      reloaded = Registry.get_barkpark(support.id)
+      # The CP row is now the durable token-id holder (PDF-D68) — what
+      # `bp cloud support remove` reads to revoke the support's ledger token.
+      assert reloaded.fleet_token_id == "tok_opaque_42"
+      # The host/health flip happened in the SAME write.
+      assert reloaded.host == "203.0.113.7"
+      assert reloaded.health_status == "up"
+    end
+
+    test "ip-only support succeed (no token_id) leaves fleet_token_id nil (older workers, back-compat)" do
+      {_user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      n = System.unique_integer([:positive])
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Helper #{n}",
+          slug: "helper-#{n}",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      {:ok, job} = Registry.enqueue_support_provision_job(support)
+
+      assert {:ok, %ProvisionJob{status: "succeeded"}} =
+               Registry.succeed_job(job.id, "203.0.113.7")
+
+      reloaded = Registry.get_barkpark(support.id)
+      assert reloaded.fleet_token_id == nil
+      assert reloaded.host == "203.0.113.7"
+    end
+
+    test "token_id on a NON-support row is ignored — a main never carries a token id" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, %ProvisionJob{status: "succeeded"}} =
+               Registry.succeed_job(job.id, "203.0.113.7", token_id: "tok_should_not_land")
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.fleet_token_id == nil
       assert reloaded.host == "203.0.113.7"
     end
 
@@ -1308,6 +1421,38 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert reloaded.admin_token_encrypted != token
       assert {:ok, ^token} = Registry.reveal_admin_token(reloaded)
       assert reloaded.host == "198.51.100.9"
+    end
+
+    test "provision_support token_id: {ip, token_id} over HTTP persists fleet_token_id on the support row (task-5866ec745efcd7f7)" do
+      {_user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      n = System.unique_integer([:positive])
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Helper #{n}",
+          slug: "helper-#{n}",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      {:ok, job} = Registry.enqueue_support_provision_job(support)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/succeed",
+          %{ip: "198.51.100.9", token_id: "tok_http_reported_1"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+
+      reloaded = Registry.get_barkpark(support.id)
+      assert reloaded.fleet_token_id == "tok_http_reported_1"
+      assert reloaded.host == "198.51.100.9"
+      assert reloaded.health_status == "up"
     end
 
     test "dwb (charter D9): the update-status kick is fire-and-forget — succeed 200s and flips the box live regardless of the probe's fate" do

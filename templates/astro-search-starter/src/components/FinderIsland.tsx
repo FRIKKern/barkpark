@@ -101,8 +101,10 @@ async function handleFind(reqUrl: URL): Promise<Response> {
   }
 
   const q = (reqUrl.searchParams.get('q') ?? '').trim()
+  // Same unbiased reader as the Next editions: explicit `engine=indx` opts in,
+  // anything else is postgres (the engine every instance actually provisions).
   const engine: SearchEngine =
-    reqUrl.searchParams.get('engine') === 'postgres' ? 'postgres' : 'indx'
+    reqUrl.searchParams.get('engine') === 'indx' ? 'indx' : 'postgres'
   const sid = reqUrl.searchParams.get('sid')
   const browse = !q
 
@@ -127,8 +129,9 @@ async function handleFind(reqUrl: URL): Promise<Response> {
     })
     const json = await r.json()
     const upstreamMs = Math.round(performance.now() - t0)
-    // The engine actually served IS what was asked for on the flat route (indx
-    // retrieval is anonymous); shape identically to the Next route.
+    // Shape identically to the Next route. `engineUsed: engine` is only the
+    // fallback — the server-reported `engineUsed` in the payload wins in the
+    // shaper (the pipeline is the only place that knows what actually served).
     return jsonResponse(
       shapeFindResponse(json, {
         engine,
@@ -275,7 +278,7 @@ export default function FinderIsland() {
                 variant="master"
                 initialData={seed.initialData}
                 initialSeed={seed.initialSeed}
-                initialEngine="indx"
+                initialEngine="postgres"
               />
             </aside>
             <div className="hidden min-w-0 flex-1 md:block">

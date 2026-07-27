@@ -9276,6 +9276,19 @@ test("gr-p3: siteDetailHtml — domains mount present, Scale stays read-only, re
   assert.match(html, /dep-pill dep-live/);
 });
 
+test("stw9: siteDetailHtml — the rail reads doc_type back, and a site without one shows an em dash, never an invented default", () => {
+  const base = {
+    id: "s1", framework: "astro", theme: "ember", scale_mode: "always_on",
+    inserted_at: "2026-07-01T10:00:00Z",
+  };
+  const withType = hooks.siteDetailHtml({ ...base, doc_type: "paper" }, null, [], "", []);
+  assert.match(withType, /Content type<\/span><span class="v">paper/);
+  // A pre-W10 control plane sends no doc_type: the row is honest, not "post".
+  const without = hooks.siteDetailHtml(base, null, [], "", []);
+  assert.match(without, /Content type<\/span><span class="v">—/);
+  assert.doesNotMatch(without, /Content type<\/span><span class="v">post/);
+});
+
 test("gr-p3: siteStatusChip — Deploying while in flight, Live only when the pointer names a live row, else nothing", () => {
   const site = { current_deployment_id: "d1" };
   const live = [{ id: "d1", status: "live" }];
@@ -9692,4 +9705,445 @@ test("GR79: the filter chips are static per-branch class literals in the shared 
   // E3 discipline: full literal heads only, exactly two lit chips (one per axis).
   assert.equal((html.match(/actfilter-chip is-active/g) || []).length, 2);
   assert.ok(!/actfilter-chip"\s*\+/.test(html), "no concat modifier leaked into a class");
+});
+
+// ═══ MVP-0 Personal Dev Fleet (pdf-mvp0-fleet-card-spa) ═════════════════════
+// PDF-D84/D87/D88/D92: the SUPPORT step vocabulary (additive beside the
+// byte-locked SERVER tables), the kind-aware provision fold, the fleet card +
+// nested support rows, the add-support reducer with its honest error states,
+// the roster presence chip (online DERIVED, both capacity shapes), the BYO
+// model-key step, and #fleet nesting.
+
+const FLEET_MAIN = {
+  id: "main-1", name: "Production", slug: "production", host: "production.barkpark.cloud",
+  url: "https://production.barkpark.cloud", provision_status: "succeeded",
+};
+const FLEET_SUPPORT_LIVE = {
+  id: "sup-1", name: "muscle-1", slug: "muscle-1", host: "muscle-1.fleet.internal",
+  fleet_role: "support", fleet_parent_id: "main-1", provision_status: "succeeded",
+};
+const FLEET_SUPPORT_PROV = {
+  id: "sup-2", name: "muscle-2", slug: "muscle-2", host: null,
+  fleet_role: "support", fleet_parent_id: "main-1",
+  provision_steps: [
+    { step: "create", status: "started", at: "2026-07-24T10:00:00Z" },
+    { step: "create", status: "done", at: "2026-07-24T10:00:20Z" },
+    { step: "configure", status: "started", at: "2026-07-24T10:00:20Z" },
+  ],
+};
+
+test("PDF-D84: SUPPORT_STEP_ORDER is the 6-step support vocabulary (secure joined with full public identity), ADDITIVE beside the untouched SERVER order", () => {
+  assert.deepEqual([...hooks.supportStepOrder], ["create", "secure", "configure", "content", "verify", "ready"]);
+  // The server table still carries freshen — the lock above holds, and the
+  // two arrays are distinct objects (no aliasing that could drift both).
+  assert.deepEqual([...hooks.serverStepOrder], [
+    "create", "freshen", "secure", "configure", "content", "verify", "ready",
+  ]);
+  assert.notEqual(hooks.supportStepOrder, hooks.serverStepOrder);
+  // secure paces by the SAME expectation as the main chain's secure — one DNS
+  // + ACME wait, one estimate.
+  assert.equal(hooks.supportStepExpectedMs.secure, hooks.SERVER_STEP_EXPECTED_MS.secure);
+});
+
+test("every support step has a label AND a pacing estimate (no orphans either way)", () => {
+  assert.deepEqual(Object.keys(hooks.supportStepLabels).sort(), [...hooks.supportStepOrder].sort());
+  assert.deepEqual(Object.keys(hooks.supportStepExpectedMs).sort(), [...hooks.supportStepOrder].sort());
+  for (const s of hooks.supportStepOrder) {
+    assert.ok(hooks.supportStepLabels[s].length > 0, s + " must have a non-empty label");
+    assert.ok(hooks.supportStepExpectedMs[s] > 0, s + " must have a positive estimate");
+  }
+});
+
+test("provisionSteps folds a support over the SUPPORT tables: 6 planned rows, support labels, own estimates", () => {
+  const rows = hooks.provisionSteps({ fleet_role: "support", provision_steps: [] }, Date.now());
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "content", "verify", "ready"]);
+  assert.equal(rows[0].label, hooks.supportStepLabels.create);
+  // secure is a PLANNED rung — full public identity: DNS + Caddy/TLS ship on
+  // every provisioned support now, so the row renders pending from the start.
+  assert.equal(rows[1].step, "secure");
+  assert.equal(rows[1].role, "pending");
+  // content is a PLANNED rung for a support (the dataset leg always ships) —
+  // never the server-side optional that hides until reported.
+  assert.equal(rows[3].step, "content");
+  assert.equal(rows[3].role, "pending");
+  // rows carry the SUPPORT estimate so ring/pace/overall pace by it.
+  assert.equal(rows[0].expectedMs, hooks.supportStepExpectedMs.create);
+});
+
+test("a support renders a REPORTED secure step but NEVER freshen — even from a rogue payload", () => {
+  const rows = hooks.provisionSteps({
+    fleet_role: "support",
+    provision_steps: [
+      { step: "create", status: "done", at: "2026-07-24T10:00:00Z" },
+      { step: "secure", status: "started", at: "2026-07-24T10:00:10Z" },
+      { step: "freshen", status: "started", at: "2026-07-24T10:00:11Z" },
+    ],
+  }, Date.now());
+  const secure = rows.filter((r) => r.step === "secure")[0];
+  assert.ok(secure, "secure is a real support rung now (full public identity)");
+  assert.equal(secure.role, "active");
+  assert.ok(!rows.some((r) => r.step === "freshen"),
+    "freshen stays main-only and must be dropped from a support fold, whatever the server says");
+});
+
+test("a MAIN's fold is byte-compatible with before: server labels, optional rungs hidden until reported", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [] }, Date.now());
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "verify", "ready"]);
+  assert.equal(rows[0].label, "Creating your server");
+  assert.equal(rows[0].expectedMs, hooks.SERVER_STEP_EXPECTED_MS.create);
+});
+
+test("supportsOf picks exactly this main's supports — 0, 1 and 2; id types coerced; foreign rows excluded", () => {
+  const other = { id: "sup-9", fleet_role: "support", fleet_parent_id: "main-2" };
+  assert.deepEqual([...hooks.supportsOf([FLEET_MAIN, other], "main-1")], []);
+  assert.deepEqual(
+    [...hooks.supportsOf([FLEET_MAIN, FLEET_SUPPORT_LIVE, other], "main-1").map((s) => s.id)],
+    ["sup-1"],
+  );
+  assert.deepEqual(
+    [...hooks.supportsOf([FLEET_MAIN, FLEET_SUPPORT_LIVE, FLEET_SUPPORT_PROV, other], "main-1").map((s) => s.id)],
+    ["sup-1", "sup-2"],
+  );
+  // A main is never its own support; null mainId never matches null parents.
+  assert.deepEqual([...hooks.supportsOf([FLEET_MAIN], "main-1")], []);
+  assert.deepEqual([...hooks.supportsOf([FLEET_MAIN, FLEET_SUPPORT_LIVE], null)], []);
+});
+
+test("fleetSupportCardHtml renders ONLY on a main — a support row never gets its own card", () => {
+  assert.equal(hooks.fleetSupportCardHtml(FLEET_SUPPORT_LIVE, [], Date.now()), "");
+  const html = hooks.fleetSupportCardHtml(FLEET_MAIN, [], Date.now());
+  assert.match(html, /fleet-support-card/);
+});
+
+test("fleet card empty state: the CTA on a live main; the honest hint (no CTA) pre-live", () => {
+  const live = hooks.fleetSupportCardHtml(FLEET_MAIN, [], Date.now());
+  assert.match(live, /id="fleet-add-support-cta"/);
+  assert.match(live, /id="fleet-add-support"/);
+  const proving = hooks.fleetSupportCardHtml(
+    { id: "m2", name: "Fresh", host: null, provision_status: null }, [], Date.now());
+  assert.match(proving, /Available once this server is live/);
+  assert.ok(!/fleet-add-support/.test(proving), "no add affordance before the main is live");
+});
+
+test("fleet card with supports: one nested row each, deep-linked, never a second card", () => {
+  const html = hooks.fleetSupportCardHtml(FLEET_MAIN, [FLEET_SUPPORT_LIVE, FLEET_SUPPORT_PROV], Date.now());
+  assert.equal((html.match(/fleet-support-row-head/g) || []).length, 2);
+  assert.match(html, /href="#instance\/sup-1"/);
+  assert.match(html, /href="#instance\/sup-2"/);
+  assert.equal((html.match(/fleet-support-card/g) || []).length, 1);
+});
+
+test("supportRowHtml per state: provisioning → the SUPPORT theater through newStepsHtml (secure planned, freshen never)", () => {
+  const html = hooks.supportRowHtml(FLEET_SUPPORT_PROV, Date.parse("2026-07-24T10:01:00Z"));
+  assert.match(html, /fleet-support-theater/);
+  assert.match(html, /new-steps/); // the SHARED step component, not a bespoke list
+  assert.match(html, /data-step="configure"/);
+  // Full public identity: secure is a planned support rung now (DNS + TLS).
+  assert.match(html, /data-step="secure"/);
+  assert.ok(!/data-step="freshen"/.test(html), "freshen stays main-only in the support theater");
+  assert.match(html, /Configuring the runtime/); // support label, not "Configuring Barkpark"
+});
+
+test("supportRowHtml per state: failed is HONEST (alert + verbatim error), live carries the key step", () => {
+  const failed = hooks.supportRowHtml({
+    id: "sup-3", name: "muscle-3", fleet_role: "support", fleet_parent_id: "main-1",
+    host: null, provision_status: "failed", provision_error: "verify: no heartbeat within budget",
+  }, Date.now());
+  assert.match(failed, /role="alert"/);
+  assert.match(failed, /verify: no heartbeat within budget/);
+  assert.ok(!/fleet-presence--online/.test(failed), "stuck-provisioning never lies online");
+  const live = hooks.supportRowHtml(FLEET_SUPPORT_LIVE, Date.now());
+  assert.match(live, /support-key-step/);
+  assert.match(live, /data-support-presence="sup-1"/);
+});
+
+test("addSupportFlowReducer: name → submitting → submitted on 202 (201 tolerated); errors return to name", () => {
+  const r = hooks.addSupportFlowReducer;
+  assert.equal(r("name", { type: "submit" }), "submitting");
+  assert.equal(r("submitting", { type: "result", status: 202 }), "submitted");
+  assert.equal(r("submitting", { type: "result", status: 201 }), "submitted");
+  assert.equal(r("submitting", { type: "result", status: 409 }), "name");
+  assert.equal(r("submitting", { type: "result", status: 403 }), "name");
+  assert.equal(r("submitting", { type: "result", status: 422 }), "name");
+  // Total over junk: unknown events/states never move or throw.
+  assert.equal(r("name", { type: "result", status: 202 }), "name");
+  assert.equal(r("submitting", { type: "submit" }), "submitting");
+  assert.equal(r("weird", { type: "submit" }), "weird");
+  assert.equal(r("name", null), "name");
+});
+
+test("addSupportErrorCopy: honest 409 no_admin_token and 403 limit_reached states", () => {
+  const noTok = hooks.addSupportErrorCopy(409, { error: "no_admin_token" });
+  assert.match(noTok, /no stored admin credentials/i);
+  const limit = hooks.addSupportErrorCopy(403, { error: "limit_reached" });
+  assert.match(limit, /support-server limit/);
+  // Anything else flows through friendly() to the designed fallback.
+  assert.match(hooks.addSupportErrorCopy(0, { error: "network_error" }), /Network error/);
+  assert.match(hooks.addSupportErrorCopy(500, {}), /Couldn't add the support server/);
+});
+
+test("supportNameValid mirrors the provisioner's DNS-label fence — the trap never leaves the modal", () => {
+  for (const good of ["muscle-1", "a", "worker9", "a-b-c", "x".repeat(63)]) {
+    assert.equal(hooks.supportNameValid(good), true, good + " must be accepted");
+  }
+  for (const bad of ["My Support", "Muscle_1", "-lead", "trail-", "UPPER", "", "x".repeat(64), "a.b"]) {
+    assert.equal(hooks.supportNameValid(bad), false, JSON.stringify(bad) + " must be refused (the Go chain would fail it after queueing)");
+  }
+});
+
+test("presenceChip: online is DERIVED (status !== \"offline\") — never a stored literal", () => {
+  assert.deepEqual({ ...hooks.presenceChip({ status: "idle" }) },
+    { state: "idle", online: true, label: "Online · idle" });
+  assert.equal(hooks.presenceChip({ status: "working" }).online, true);
+  assert.equal(hooks.presenceChip({ status: "blocked" }).online, true);
+  assert.equal(hooks.presenceChip({ status: "provisioning" }).online, true);
+  assert.deepEqual({ ...hooks.presenceChip({ status: "offline" }) },
+    { state: "offline", online: false, label: "Offline" });
+  // A missing row / garbled status is the honest unknown, never a fake Offline.
+  assert.equal(hooks.presenceChip(null).state, "unknown");
+  assert.equal(hooks.presenceChip({ status: 7 }).state, "unknown");
+});
+
+test("presenceChipHtml: one STATIC class literal per state (E3), unknown future statuses land on --online", () => {
+  assert.match(hooks.presenceChipHtml({ status: "idle" }), /fleet-presence--online/);
+  assert.match(hooks.presenceChipHtml({ status: "working" }), /fleet-presence--working/);
+  assert.match(hooks.presenceChipHtml({ status: "blocked" }), /fleet-presence--blocked/);
+  assert.match(hooks.presenceChipHtml({ status: "provisioning" }), /fleet-presence--provisioning/);
+  assert.match(hooks.presenceChipHtml({ status: "offline" }), /fleet-presence--offline/);
+  assert.match(hooks.presenceChipHtml(null), /fleet-presence--unknown/);
+  assert.ok(!/fleet-presence--"\s*\+/.test(hooks.presenceChipHtml({ status: "idle" })),
+    "no concat modifier leaked into a class");
+});
+
+test("rosterCapacityText handles BOTH shapes: the validated object AND the legacy string (junk → \"\")", () => {
+  assert.equal(hooks.rosterCapacityText({ size_class: "standard", slots_total: 2, slots_free: 1 }),
+    "standard · 1/2 slots free");
+  assert.equal(hooks.rosterCapacityText({ size_class: "heavy", slots_total: 1, slots_free: 0, budget: 5 }),
+    "heavy · 0/1 slots free · $5 budget");
+  assert.equal(hooks.rosterCapacityText("1 task"), "1 task"); // legacy stored as-is
+  assert.equal(hooks.rosterCapacityText(null), "");
+  assert.equal(hooks.rosterCapacityText(42), "");
+  // slots_free 0 must render 0, never "?" (falsy-vs-missing trap).
+  assert.equal(hooks.rosterCapacityText({ slots_total: 1, slots_free: 0 }), "0/1 slots free");
+});
+
+test("rosterRowFor matches the listener by slug OR name; presenceSlotHtml separates read-failed from no-beat", () => {
+  const docs = [{ worker: "muscle-1", status: "idle" }, { worker: "other", status: "working" }];
+  assert.equal(hooks.rosterRowFor(docs, FLEET_SUPPORT_LIVE).worker, "muscle-1");
+  assert.equal(hooks.rosterRowFor(docs, { name: "muscle-1" }).worker, "muscle-1");
+  assert.equal(hooks.rosterRowFor(docs, { slug: "ghost" }), null);
+  // null documents = the READ failed — say so; a missing row = no beat yet.
+  assert.match(hooks.presenceSlotHtml(null, FLEET_SUPPORT_LIVE), /Roster unreachable/);
+  assert.match(hooks.presenceSlotHtml([], FLEET_SUPPORT_LIVE), /No heartbeat yet/);
+  assert.match(hooks.presenceSlotHtml(docs, FLEET_SUPPORT_LIVE), /fleet-presence--online/);
+});
+
+test("rosterUrl: scheme-less rows get https://, schemed rows pass through, trailing slashes trimmed", () => {
+  assert.equal(hooks.rosterUrl("https://main.example"), "https://main.example/v1/fleet/roster");
+  assert.equal(hooks.rosterUrl("main.example/"), "https://main.example/v1/fleet/roster");
+  assert.equal(hooks.rosterUrl("http://localhost:4000"), "http://localhost:4000/v1/fleet/roster");
+});
+
+test("PDF-D88: the BYO model key is a VISIBLE NAMED step with the exact SSH one-liner + copy affordance", () => {
+  const cmd = hooks.supportKeyCommand(FLEET_SUPPORT_LIVE);
+  assert.ok(cmd.startsWith("ssh root@muscle-1.fleet.internal "), cmd);
+  assert.ok(cmd.includes(">> /etc/barkpark/fleet-listener.env && systemctl restart barkpark-fleet-listener"),
+    "the exact hand-off one-liner (PDF-D62/D88) must be verbatim");
+  assert.ok(cmd.includes("ANTHROPIC_API_KEY="));
+  const html = hooks.supportKeyStepHtml(FLEET_SUPPORT_LIVE);
+  assert.match(html, /Hand your box its model key/);
+  assert.match(html, /never stored by Barkpark/);
+  assert.match(html, /data-copy="/); // the shared clipboard affordance
+  // A hostless row still renders an honest placeholder, never "root@null".
+  assert.match(hooks.supportKeyCommand({ host: null }), /ssh root@<support-host> /);
+});
+
+test("PDF-D92: fleetNest rides supports under their main; orphans fall back to flat rows, never dropped", () => {
+  const orphan = { id: "sup-8", fleet_role: "support", fleet_parent_id: "gone" };
+  const nested = hooks.fleetNest([FLEET_MAIN, orphan, FLEET_SUPPORT_LIVE, FLEET_SUPPORT_PROV]);
+  assert.deepEqual([...nested.map((r) => r.bp.id)], ["main-1", "sup-1", "sup-2", "sup-8"]);
+  assert.deepEqual([...nested.map((r) => r.support)], [false, true, true, false]);
+  // No fleets at all → byte-order passthrough, all flat.
+  const flat = hooks.fleetNest([FLEET_MAIN, { id: "m2" }]);
+  assert.deepEqual([...flat.map((r) => r.support)], [false, false]);
+});
+
+test("nested support rows carry fleet-row--support + the role chip; a bare fleetRow(bp) is unchanged", () => {
+  const html = hooks.fleetNestedRowsHtml([FLEET_MAIN, FLEET_SUPPORT_LIVE]);
+  assert.equal((html.match(/fleet-row--support/g) || []).length, 1);
+  assert.match(html, /fleet-role-chip/);
+  // Arity safety: existing single-arg callers (Overview attention queue,
+  // filtered lists) render byte-identically to an explicit no-opts call.
+  assert.equal(hooks.fleetRow(FLEET_MAIN), hooks.fleetRow(FLEET_MAIN, undefined));
+  assert.ok(!/fleet-row--support/.test(hooks.fleetRow(FLEET_MAIN)));
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// MVP-0 OFFLOAD (pdf-mvp0-offload-spa, PDF-D87/D92): file an assignee-routed
+// order to a support and watch it claim -> working -> done, app-token-direct.
+// Appended at the tail (OC9 append-only law). Pure helpers only; the DOM mounts
+// (startOffload / submitOffload / pollOffloadWatch) are browser-verified.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Cross-realm normalise: hooks return objects built inside the node:vm
+// sandbox (a different Object/Array prototype), so deepEqual's strict
+// prototype check fails on them — JSON round-trip them into this realm first
+// (the same reason the fleet tests spread `[...x.map(...)]`).
+const J = (x) => JSON.parse(JSON.stringify(x));
+
+test("mainDirectUrl: scheme-less rows get https://, schemed pass through, trailing slashes trimmed, path joined", () => {
+  assert.equal(hooks.mainDirectUrl("https://main.example", "/v1/tasks/x"), "https://main.example/v1/tasks/x");
+  assert.equal(hooks.mainDirectUrl("main.example/", "/v1/fleet/roster"), "https://main.example/v1/fleet/roster");
+  assert.equal(hooks.mainDirectUrl("http://localhost:4000", "/v1/data/mutate/production"), "http://localhost:4000/v1/data/mutate/production");
+  assert.equal(hooks.mainDirectUrl("", "/x"), "https:///x"); // total: never throws on junk
+});
+
+test("offloadWorkerName: the listener identity — slug preferred (box identity), name the fallback", () => {
+  assert.equal(hooks.offloadWorkerName({ slug: "muscle-1", name: "Muscle One" }), "muscle-1");
+  assert.equal(hooks.offloadWorkerName({ name: "muscle-2" }), "muscle-2");
+  assert.equal(hooks.offloadWorkerName({}), "");
+  assert.equal(hooks.offloadWorkerName(null), "");
+});
+
+test("offloadDataset: the listener's scope — dataset > scope > the fleet default production", () => {
+  assert.equal(hooks.offloadDataset({ dataset: "staging" }), "staging");
+  assert.equal(hooks.offloadDataset({ scope: "production" }), "production");
+  assert.equal(hooks.offloadDataset({}), "production");
+});
+
+test("offloadOrderDoc: assignee = the support worker name, filed OPEN, and the PUBLISH mutation is included", () => {
+  const support = { slug: "muscle-1", name: "muscle-1" };
+  const o = hooks.offloadOrderDoc("ord-1", support, { title: "Summarise notes", description: "the brief" });
+  const cor = o.create.mutations[0].createOrReplace;
+  assert.equal(cor._id, "ord-1");
+  assert.equal(cor._type, "task");
+  assert.equal(cor.kind, "task");
+  assert.equal(cor.lifecycle_status, "open");
+  assert.equal(cor.assignee, "muscle-1"); // routed by assignee → the listener claims it
+  assert.equal(cor.priority, 2);
+  assert.equal(cor.title, "Summarise notes");
+  assert.equal(cor.description, "the brief");
+  assert.ok(!("tags" in cor), "the first-pass order carries NO tags (the tag arm is the contingency)");
+  // The publish mutation MUST accompany the create — an unpublished order is
+  // invisible to the claim queue.
+  assert.deepEqual(J(o.publish.mutations[0]), { publish: { id: "ord-1", type: "task" } });
+});
+
+test("offloadOrderDoc {tagged}: the contingency retry seeds tags:=[{tag:order,...}]", () => {
+  const o = hooks.offloadOrderDoc("ord-2", { slug: "m" }, { title: "t" }, { tagged: true });
+  assert.deepEqual(J(o.create.mutations[0].createOrReplace.tags), [{ tag: "order", strength: 80, rationale: "fleet order" }]);
+});
+
+test("offloadOrderTagSeed: createOrReplace a minimal type:tag order doc, then publish it", () => {
+  const s = hooks.offloadOrderTagSeed();
+  assert.deepEqual(J(s.create.mutations[0].createOrReplace), { _id: "order", _type: "tag", title: "order" });
+  assert.deepEqual(J(s.publish.mutations[0]), { publish: { id: "order", type: "tag" } });
+});
+
+test("offloadPublishNeedsTag: ONLY a 422 label_spine/unknown_tag arms the tag seed (env code AND bare-string shapes)", () => {
+  assert.equal(hooks.offloadPublishNeedsTag(422, { error: { code: "label_spine" } }), true);
+  assert.equal(hooks.offloadPublishNeedsTag(422, { error: { code: "unknown_tag" } }), true);
+  assert.equal(hooks.offloadPublishNeedsTag(422, { error: "unknown_tag" }), true);
+  assert.equal(hooks.offloadPublishNeedsTag(422, { error: { code: "duplicate_of" } }), false); // a real refusal, not retried
+  assert.equal(hooks.offloadPublishNeedsTag(409, { error: { code: "label_spine" } }), false); // wrong status
+  assert.equal(hooks.offloadPublishNeedsTag(422, null), false);
+});
+
+test("offloadEligibility: ONLY an ONLINE support may take an order; every refusal points at the key step", () => {
+  const live = FLEET_SUPPORT_LIVE;
+  const online = hooks.offloadEligibility(live, { worker: "muscle-1", status: "idle" });
+  assert.equal(online.allowed, true);
+  // Offline / no-heartbeat / provisioning / failed all REFUSE, and the copy
+  // steers the operator at the BYO key step (PDF-D88).
+  const offline = hooks.offloadEligibility(live, { worker: "muscle-1", status: "offline" });
+  assert.equal(offline.allowed, false);
+  assert.equal(offline.reason, "offline");
+  assert.match(offline.copy, /model key|the step above/i);
+  const noBeat = hooks.offloadEligibility(live, null);
+  assert.equal(noBeat.allowed, false);
+  assert.equal(noBeat.reason, "no_heartbeat");
+  assert.match(noBeat.copy, /model key|the step above/i);
+  const prov = hooks.offloadEligibility({ id: "s", host: null, provision_status: null }, { status: "idle" });
+  assert.equal(prov.allowed, false);
+  assert.equal(prov.reason, "provisioning");
+  const failed = hooks.offloadEligibility({ id: "s", host: null, provision_status: "failed" }, { status: "idle" });
+  assert.equal(failed.allowed, false);
+  assert.equal(failed.reason, "failed");
+});
+
+test("offloadTaskFields: reads lifecycle/claim/assignee off BOTH the doc top-level AND doc.content", () => {
+  assert.deepEqual(J(hooks.offloadTaskFields({ lifecycle_status: "open", assignee: "m" })),
+    { lifecycle: "open", claim: null, assignee: "m" });
+  assert.deepEqual(J(hooks.offloadTaskFields({ content: { lifecycle_status: "in_progress", claim: { worker: "m" }, assignee: "m" } })),
+    { lifecycle: "in_progress", claim: { worker: "m" }, assignee: "m" });
+  assert.deepEqual(J(hooks.offloadTaskFields(null)), { lifecycle: null, claim: null, assignee: null });
+});
+
+test("offloadWatchStage: fold task + roster into the filed→claimed→working→done ladder with honest terminals", () => {
+  const w = "muscle-1";
+  // filed: published + open, no worker beating.
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "open" }, [], w)),
+    { stage: "filed", terminal: false, failed: false });
+  // claimed: in_progress but the worker is idle (claimed, not yet beating working).
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "in_progress" }, [{ worker: "muscle-1", status: "idle" }], w)),
+    { stage: "claimed", terminal: false, failed: false });
+  // working: in_progress AND the roster shows the worker WORKING.
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "in_progress" }, [{ worker: "muscle-1", status: "working" }], w)),
+    { stage: "working", terminal: false, failed: false });
+  // done: terminal success — the poll stops.
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "done" }, [], w)),
+    { stage: "done", terminal: true, failed: false });
+  // blocked: honest terminal (from the task doc OR a blocked roster beat).
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "blocked" }, [], w)),
+    { stage: "blocked", terminal: true, failed: true });
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "in_progress" }, [{ worker: "muscle-1", status: "blocked" }], w)),
+    { stage: "blocked", terminal: true, failed: true });
+  // cancelled → failed terminal.
+  assert.deepEqual(J(hooks.offloadWatchStage({ lifecycle_status: "cancelled" }, [], w)),
+    { stage: "failed", terminal: true, failed: true });
+  // total over junk: a null doc reads filed, never throws.
+  assert.equal(hooks.offloadWatchStage(null, null, w).stage, "filed");
+});
+
+test("offloadWatchRows: the ladder roles per stage; a blocked/failed terminal SNAPS the rungs behind it", () => {
+  const step = (rows, s) => rows.find((r) => r.step === s).role;
+  const filed = hooks.offloadWatchRows({ stage: "filed" });
+  assert.deepEqual([...filed.map((r) => r.role)], ["active", "pending", "pending", "pending"]);
+  const claimed = hooks.offloadWatchRows({ stage: "claimed" });
+  assert.deepEqual([...claimed.map((r) => r.role)], ["ok", "active", "pending", "pending"]);
+  const working = hooks.offloadWatchRows({ stage: "working" }, 12000);
+  assert.deepEqual([...working.map((r) => r.role)], ["ok", "ok", "active", "pending"]);
+  assert.equal(working.find((r) => r.step === "working").elapsedMs, 12000); // paces the active rung
+  const done = hooks.offloadWatchRows({ stage: "done", terminal: true });
+  assert.deepEqual([...done.map((r) => r.role)], ["ok", "ok", "ok", "ok"]);
+  const blocked = hooks.offloadWatchRows({ stage: "blocked", terminal: true, failed: true });
+  assert.deepEqual([...blocked.map((r) => r.role)], ["ok", "ok", "failed", "pending"]);
+  assert.equal(step(blocked, "working"), "failed");
+});
+
+test("offloadWatchPanelHtml: renders the shared step ladder + honest terminal banners; the title is esc'd", () => {
+  const filed = hooks.offloadWatchPanelHtml({ id: "ord-1", title: "Ship it" }, { stage: "filed" });
+  assert.match(filed, /new-steps/); // the SHARED step-row grammar
+  assert.match(filed, /data-offload-watch="ord-1"/);
+  assert.match(filed, /Ship it/);
+  assert.match(hooks.offloadWatchPanelHtml({ id: "d", title: "x" }, { stage: "done" }), /notice-ok/);
+  assert.match(hooks.offloadWatchPanelHtml({ id: "b", title: "x" }, { stage: "blocked" }), /notice-warn/);
+  assert.match(hooks.offloadWatchPanelHtml({ id: "f", title: "x" }, { stage: "failed" }), /notice-error/);
+  // XSS: a hostile order title renders as TEXT, never markup.
+  const evil = hooks.offloadWatchPanelHtml({ id: "e", title: "<img src=x onerror=alert(1)>" }, { stage: "filed" });
+  assert.ok(!evil.includes("<img src=x"), "the order title must be escaped");
+});
+
+test("offloadSupportActionHtml: the Offload button + the watch slot, both keyed on the support id", () => {
+  const html = hooks.offloadSupportActionHtml({ id: "sup-1" });
+  assert.match(html, /data-offload-support="sup-1"/);
+  assert.match(html, /data-offload-slot="sup-1"/);
+  assert.match(html, /Offload a task/);
+});
+
+test("offloadFileErrorCopy: honest transport steers (0 / 401 / 403) else the friendly envelope", () => {
+  assert.match(hooks.offloadFileErrorCopy(0, null), /reach the Barkpark/);
+  assert.match(hooks.offloadFileErrorCopy(401, null), /token/);
+  assert.match(hooks.offloadFileErrorCopy(403, null), /token/);
+  assert.equal(typeof hooks.offloadFileErrorCopy(500, { error: "boom" }), "string");
 });

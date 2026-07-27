@@ -1,0 +1,42 @@
+{
+  "id": "grip-20260726T103500Z-v-stw9-freshness-gates",
+  "wave": "search-template-wave-9-2026-07-26",
+  "role": "verifier",
+  "assignment": "freshness-gates",
+  "recorded_at": "2026-07-26T10:35:00Z",
+  "recipes": [
+    {
+      "claim": "deploy.yml vacuous green — templates/** triggers the workflow but neither changes-job regex matches it, so both deploy jobs are skipped.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && for c in 3a4d213bf 8cdcefb81 1dde75820; do changed=$(git show --name-only --format= $c); echo \"$changed\" | grep -qE '^(cloud|deploy|internal|cmd)/' && echo \"$c cp=true\" || echo \"$c cp=false\"; echo \"$changed\" | grep -qE '^(api|internal|deploy|connectors)/' && echo \"$c instance=true\" || echo \"$c instance=false\"; done",
+      "expected": "3a4d213bf cp=false instance=false; 8cdcefb81 cp=false instance=false; 1dde75820 cp=false instance=true"
+    },
+    {
+      "claim": "The regexes live in .github/workflows/deploy.yml changes job and omit templates/ (and .github/).",
+      "rerun": "git show origin/main:.github/workflows/deploy.yml | grep -n \"grep -qE\""
+    },
+    {
+      "claim": "cloud content-publish receiver suite is green and has NO kind=node case (only static + container fixtures).",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/cloud && CC=clang mix test test/barkpark_cloud/sites/content_publish_receiver_test.exs 2>&1 | tail -5; grep -n 'kind:' test/barkpark_cloud/sites/content_publish_receiver_test.exs"
+    },
+    {
+      "claim": "The content-webhook secret mint gate is kind==\"static\" only; the queued-deployment reaper's content-binding pass is also kind==\"static\" only.",
+      "rerun": "grep -n 'kind == \"static\"' /Volumes/SATECHI/github/barkpark/cloud/lib/barkpark_cloud/registry.ex"
+    },
+    {
+      "claim": "Provisioner template_digest re-materialization DOES apply to kind/runtime_target=node — provision/1 is called unconditionally for mode :deploy and resolve_template(nil, :node) -> :next_starter.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && CC=clang mix test test/barkpark/sites/provisioner_test.exs 2>&1 | tail -5"
+    },
+    {
+      "claim": "build_id = hash(code_rev(box git_commit) | content_rev | config) — the config map has NO template-digest input; content_rev fails OPEN to a random 'u'+hex value.",
+      "rerun": "git show origin/main:cloud/lib/barkpark_cloud/sites/deploy.ex | sed -n '143,205p'"
+    },
+    {
+      "claim": "site-deploy-node.sh PLAN no-ops when the ACTIVE slot already serves this build_id — BUILD never runs even if Provisioner re-materialized src.",
+      "rerun": "git show origin/main:deploy/site-deploy-node.sh | sed -n '1133,1157p'"
+    },
+    {
+      "claim": "The live search-ember bundle does NOT contain the #4189 HIT_FIELDS allowlist, while it DOES contain unreplaced NEXT_PUBLIC_BARKPARK_WS_URL/_TOKEN identifiers.",
+      "rerun": "d=$(mktemp -d); curl -s https://guerrilla.barkpark.cloud/sites/search-ember > $d/p.html; for u in $(grep -oE '/sites/search-ember/_next/static/chunks/[A-Za-z0-9._-]+\\.js' $d/p.html | sort -u); do curl -s \"https://guerrilla.barkpark.cloud$u\" -o \"$d/$(basename $u)\"; done; grep -c 'title,name,excerpt' $d/*.js; grep -oE 'NEXT_PUBLIC_BARKPARK_WS_[A-Z]*' $d/*.js | sort -u"
+    }
+  ]
+}

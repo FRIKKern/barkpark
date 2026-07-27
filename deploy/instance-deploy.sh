@@ -329,6 +329,75 @@ if ! grep -q '^BARKPARK_CLOUD_URL=' .env 2>/dev/null; then
   log "added BARKPARK_CLOUD_URL to .env"
 fi
 
+# ---- The x-forwarded-for trust boundary (BARKPARK_TRUSTED_PROXIES) ----------
+# Barkpark.RateLimiter.client_ip believes x-forwarded-for ONLY from loopback or a
+# peer LISTED here, and walks the chain right-to-left skipping listed hops. On a
+# cloud-managed box the chain on a proxied revoke is "<phone>, <control plane
+# egress>" — so until the control plane's egress address is listed, the rightmost
+# non-listed hop IS that egress address and every proxied revoke keys on ONE
+# bucket (the whole team shares 10/minute). Not a forgery and not a 5xx: a SILENT
+# loss of the per-phone bucketing.
+#
+# The address is CONFIGURATION, never a literal in this script: it comes from
+# $BARKPARK_CLOUD_EGRESS_IPS, which the CD workflow fills from the SAME `CP_HOST`
+# secret it SSHes the control plane with (deploy/README.md), and which the
+# provisioner reads from its own worker env for freshly-provisioned boxes. One
+# authored value, two readers.
+#
+# NEVER overwrites an existing line: provisioning already wrote the right value on
+# a managed box, and a self-hosted operator may legitimately trust a different
+# front. Absent value + absent line ⇒ a commented placeholder + a LOUD log, so the
+# gap is visible on the box instead of silently costing per-caller buckets.
+#
+# The shape is VALIDATED before writing, because runtime.exs RAISES on a malformed
+# entry — writing an unvalidated value here would not degrade a bucket key, it
+# would refuse to boot the app at the slot restart later in this very run.
+egress_ips_ok() { # $1=comma-separated candidate; true only if EVERY entry is a bare IP literal
+  printf '%s' "$1" | awk -F, '
+    function ipv4(s,   p, i) {
+      if (s !~ /^[0-9]+(\.[0-9]+){3}$/) return 0
+      split(s, p, ".")
+      for (i = 1; i <= 4; i++) if (p[i] + 0 > 255) return 0
+      return 1
+    }
+    function ipv6(s) { return (s ~ /^[0-9a-fA-F:]+$/ && s ~ /:/ && s !~ /:::/) }
+    {
+      for (i = 1; i <= NF; i++) {
+        gsub(/^[ \t]+|[ \t]+$/, "", $i)
+        if ($i == "") continue
+        if (!ipv4($i) && !ipv6($i)) exit 1
+        n++
+      }
+    }
+    END { if (n == 0) exit 1 }
+  '
+}
+if grep -q '^BARKPARK_TRUSTED_PROXIES=' .env 2>/dev/null; then
+  log "BARKPARK_TRUSTED_PROXIES already set in .env — left untouched"
+elif [ -n "${BARKPARK_CLOUD_EGRESS_IPS:-}" ]; then
+  if egress_ips_ok "${BARKPARK_CLOUD_EGRESS_IPS}"; then
+    echo "BARKPARK_TRUSTED_PROXIES=${BARKPARK_CLOUD_EGRESS_IPS}" >> .env
+    log "added BARKPARK_TRUSTED_PROXIES=${BARKPARK_CLOUD_EGRESS_IPS} to .env (the control plane's relayed caller address is now believed)"
+  else
+    log "WARN: BARKPARK_CLOUD_EGRESS_IPS='${BARKPARK_CLOUD_EGRESS_IPS}' is not a comma-separated list of bare IP addresses (CIDR ranges are REFUSED — trusting a range lets any host in it forge every client's bucket key) — NOT written; runtime.exs would raise at boot on it"
+  fi
+else
+  # The placeholder is written ONCE (guarded on its own commented marker) — an
+  # unguarded append would grow .env by five lines on every single deploy. The WARN
+  # fires either way: the gap must stay visible in every deploy log, not only the
+  # first one.
+  if ! grep -q '^# BARKPARK_TRUSTED_PROXIES=' .env 2>/dev/null; then
+    {
+      echo '# BARKPARK_TRUSTED_PROXIES: individual IPs of every front whose x-forwarded-for'
+      echo '# this box should believe (comma-separated, NO CIDR ranges). On a barkpark.cloud-'
+      echo '# managed instance this is the control plane EGRESS address; unset, proxied'
+      echo '# requests all share ONE rate-limit bucket per team instead of one per caller.'
+      echo '# BARKPARK_TRUSTED_PROXIES=203.0.113.7'
+    } >> .env
+  fi
+  log "WARN: no BARKPARK_CLOUD_EGRESS_IPS in the deploy env and no BARKPARK_TRUSTED_PROXIES in .env — see the commented placeholder in .env; proxied requests will key on ONE bucket per team until an operator fills it in (deploy/README.md)"
+fi
+
 # The Connectors bridge ciphers each install's per-workspace credentials with
 # this key (the KEK — every row is sealed under an HKDF-derived per-workspace
 # subkey, never the KEK directly). It is backfilled ONCE into .env and only

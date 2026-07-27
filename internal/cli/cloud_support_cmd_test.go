@@ -636,6 +636,11 @@ func TestCloudSupportAddHappyPath(t *testing.T) {
 	for _, want := range []string{
 		"BARKPARK_ALLOW_BUNDLE_IMPORT=1",
 		"install-cli.sh",
+		// task-2ba0270056e7da6e: the target workspace is ensured on the box
+		// BEFORE the merge-import (create tolerates already-exists), so a
+		// template-workspace bundle lands on the proven adopt branch.
+		"POST http://localhost:4000/api/workspaces",
+		`"slug":"default"`,
 		"--file /opt/barkpark-fleet/dataset.tar --yes --merge",
 		"http://localhost:4000",
 		"fleet-run.sh",
@@ -650,6 +655,46 @@ func TestCloudSupportAddHappyPath(t *testing.T) {
 		if !strings.Contains(scripts, want) {
 			t.Fatalf("no on-box step contains %q\nscripts:\n%s", want, scripts)
 		}
+	}
+
+	// Ordering: this run's workspace IS "default" (no --workspace, no context),
+	// so the seeded-workspace reset bracket must fire — the warm image's baked
+	// Postgres carries seed docs, so without the reset the box's own "default"
+	// flunks the merge engine's empty-shell proof and the import 409s
+	// workspace_slug_conflict. Strict order:
+	// reset < re-mint#1 < ensure < import < re-mint#2 (both default-workspace
+	// deletes — the reset's and the import's PDS-D9 adopt-delete — cascade the
+	// box admin token, api_tokens.workspace_id :delete_all).
+	resetIdx, ensureIdx, importIdx := -1, -1, -1
+	var mintIdxs []int
+	for i, s := range runner.steps {
+		joined := strings.Join(s.Argv, " ")
+		if strings.Contains(joined, "Barkpark.Tenancy.delete_workspace") {
+			resetIdx = i
+		}
+		if strings.Contains(joined, "Barkpark.Auth.create_token") {
+			mintIdxs = append(mintIdxs, i)
+			if !strings.Contains(joined, "box-admin-tok-xyz") {
+				t.Fatal("the re-mint must restore the chain's own admin token value verbatim")
+			}
+		}
+		if strings.Contains(joined, "POST http://localhost:4000/api/workspaces") {
+			ensureIdx = i
+		}
+		if strings.Contains(joined, "workspace import") {
+			importIdx = i
+		}
+	}
+	if resetIdx == -1 {
+		t.Fatal("the default-workspace reset step never ran on a ws=default add")
+	}
+	if len(mintIdxs) != 2 {
+		t.Fatalf("want exactly 2 admin-token re-mints (post-reset + post-import), got %d", len(mintIdxs))
+	}
+	if ensureIdx == -1 || importIdx == -1 ||
+		!(resetIdx < mintIdxs[0] && mintIdxs[0] < ensureIdx && ensureIdx < importIdx && importIdx < mintIdxs[1]) {
+		t.Fatalf("default-workspace bracket out of order: reset=%d mint1=%d ensure=%d import=%d mint2=%d",
+			resetIdx, mintIdxs[0], ensureIdx, importIdx, mintIdxs[1])
 	}
 
 	// The minted ledger token rides ONLY inside the redacted env step — it is

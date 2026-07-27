@@ -221,6 +221,9 @@ func TestNarrowMotionBoardPathUnchanged(t2 *testing.T) {
 	wantRef := m.visibleRows()[target].docID
 
 	m2, _ := step(t2, m, motionAt(5, y))
+	// The board target rides queueHover's settle timer — pump the debounce the
+	// way the runtime tick would before asserting the committed tint.
+	m2, _ = step(t2, m2, hoverDebounceMsg{gen: m2.hoverGen})
 	if m2.ui.HoverTarget != wantRef {
 		t2.Fatalf("board motion set HoverTarget %q, want %q", m2.ui.HoverTarget, wantRef)
 	}

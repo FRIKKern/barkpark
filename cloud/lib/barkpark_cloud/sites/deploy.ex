@@ -67,6 +67,11 @@ defmodule BarkparkCloud.Sites.Deploy do
   # for "on the box, going live"), and only then `live`.
   @switch_stage "SWITCH"
 
+  # The `code_rev` a box that has reported NEITHER a git commit NOR a version
+  # falls back to. It is a constant, so it freezes that half of `build_id` — see
+  # `code_rev_known?/1`, which exists so a scheduled caller can SEE that.
+  @unknown_code_rev "unknown"
+
   @doc "The six visible deploy stages, in order."
   @spec stages() :: [String.t()]
   def stages, do: @stages
@@ -97,10 +102,25 @@ defmodule BarkparkCloud.Sites.Deploy do
   # every `bp cloud site deploy`) or "content-auto" (the publish-to-live receiver
   # via AutoDeployWorker). It rides straight onto the Deployment row so the
   # deployment stream can show WHY the build ran (the wish's "observable" bar).
-  @spec enqueue(Site.t(), Barkpark.t(), boolean(), String.t()) ::
+  #
+  # `probed_rev` (stw9 residue 2a) lets a caller that ALREADY read the box's
+  # content revision hand it in instead of paying a second analytics read.
+  # `TemplateFreshnessWorker` probes with `content_rev_probe/2` before deciding
+  # whether to enqueue at all, so without this the sweep costs TWO reads per site
+  # per tick where one suffices. `nil` (the default, and every other call site)
+  # keeps the pre-existing behaviour EXACTLY: read it here, fail-open included.
+  # A handed-in rev is by construction the honest `{:ok, rev}` value, so the
+  # fail-open is not bypassed — it simply already happened, or didn't need to.
+  @spec enqueue(Site.t(), Barkpark.t(), boolean(), String.t(), String.t() | nil) ::
           {:ok, Deployment.t()} | {:duplicate, Deployment.t()} | {:error, Ecto.Changeset.t()}
-  def enqueue(%Site{} = site, %Barkpark{} = bp, force \\ false, trigger \\ "manual") do
-    content_rev = content_rev(site, bp)
+  def enqueue(
+        %Site{} = site,
+        %Barkpark{} = bp,
+        force \\ false,
+        trigger \\ "manual",
+        probed_rev \\ nil
+      ) do
+    content_rev = probed_rev || content_rev(site, bp)
     build_id = build_id(site, bp, content_rev, force)
 
     case Registry.create_deployment(site, %{
@@ -175,7 +195,24 @@ defmodule BarkparkCloud.Sites.Deploy do
   # so a build is never wrongly deduped.
   defp code_rev(%Barkpark{git_commit: c}) when is_binary(c) and c != "", do: c
   defp code_rev(%Barkpark{version: v}) when is_binary(v) and v != "", do: v
-  defp code_rev(_bp), do: "unknown"
+  defp code_rev(_bp), do: @unknown_code_rev
+
+  @doc """
+  Does this box report a REAL code revision, or is `build_id` riding the
+  `"#{@unknown_code_rev}"` constant?
+
+  stw9 residue 1: a box with neither `git_commit` nor `version` freezes the
+  `code_rev` half of `build_id`, so `TemplateFreshnessWorker`'s unforced sweep
+  can NEVER mint a new build for a code roll on that box — it returns
+  `:duplicate` every tick, forever, indistinguishable from a healthy quiet
+  fleet. The sweep counts this so an inert sweep is visible instead of silent.
+
+  This is a SEAM, not a copy: `code_rev/1`'s three clauses stay the single owner
+  of "what counts as a revision". Duplicating that predicate into the worker is
+  exactly how two clause sets drift apart.
+  """
+  @spec code_rev_known?(Barkpark.t()) :: boolean()
+  def code_rev_known?(%Barkpark{} = bp), do: code_rev(bp) != @unknown_code_rev
 
   # The content revision baked into the build (and into the `bp-content-rev`
   # marker HEALTH asserts). Only the box can see the dataset, so we ask it — over
@@ -187,18 +224,44 @@ defmodule BarkparkCloud.Sites.Deploy do
   # make PLAN a no-op — silently serving stale content forever, the worst possible
   # failure for a content-bound site. Distrust vacuous green.
   defp content_rev(%Site{} = site, %Barkpark{} = bp) do
+    case content_rev_probe(site, bp) do
+      {:ok, rev} -> rev
+      :error -> "u" <> (:crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower))
+    end
+  end
+
+  @doc """
+  READ the site's content revision from its box, WITHOUT the fail-open — the
+  honest half of `content_rev/2`.
+
+  `{:ok, rev}` when the box answered its scoped analytics read; `:error` when it
+  did not (box down, no admin token, non-2xx, unbound triple).
+
+  stw9 (charter D57): this exists so a SCHEDULED caller can tell "content
+  unchanged" from "I could not look". `content_rev/2` fail-opens an unreadable
+  revision to a fresh random `"u…"` marker — correct for a human-triggered
+  deploy (never serve stale content), but catastrophic on a timer: a sick box
+  would mint a brand-new `build_id` on EVERY tick, so the idempotent no-op that
+  makes an unforced sweep cheap never fires and the box builds forever.
+  `TemplateFreshnessWorker` probes first and SKIPS the site on `:error`.
+  """
+  @spec content_rev_probe(Site.t(), Barkpark.t()) :: {:ok, String.t()} | :error
+  def content_rev_probe(%Site{} = site, %Barkpark{} = bp) do
     with ws when is_binary(ws) <- site.bootstrap_workspace,
          proj when is_binary(proj) <- site.bootstrap_project,
          ds when is_binary(ds) <- site.bootstrap_dataset,
          path <-
            "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/analytics/#{URI.encode(ds)}",
          {:ok, status, body} when status in 200..299 <- Registry.relay_admin(bp, :get, path, nil) do
-      :sha256
-      |> :crypto.hash(Jason.encode!(body))
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 12)
+      rev =
+        :sha256
+        |> :crypto.hash(Jason.encode!(body))
+        |> Base.encode16(case: :lower)
+        |> binary_part(0, 12)
+
+      {:ok, rev}
     else
-      _ -> "u" <> (:crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower))
+      _ -> :error
     end
   end
 

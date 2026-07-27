@@ -145,6 +145,14 @@ defmodule BarkparkCloud.Registry.Barkpark do
     # the owner retrieves it only through the team-admin-gated /credentials route.
     field :admin_token_encrypted, :string
 
+    # push-relay spike (mobile charter D15b) — the per-barkpark shared secret the
+    # instance signs chat_blocked webhook deliveries with and Cloud's
+    # /v1/relay/chat-blocked/:barkpark_id receiver verifies against. SAME custody
+    # as admin_token_encrypted (Registry.Vault AES-256-GCM, never plaintext,
+    # never serialized in barkpark_json). Nil = no relay configured — the
+    # receiver answers a silent 404 (severable by absence).
+    field :push_relay_secret_encrypted, :string
+
     # dwb-4 content-template bootstrap. `template` is the deploy-template slug
     # picked at launch (validated in the go-live handler against
     # `Registry.known_templates/0`); the bootstrap_* columns are the outputs the
@@ -472,6 +480,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
   under the same containment: they land ONLY in the provision-success write
   (`Registry.succeed_job/3`, secrets already Vault-encrypted at the call site),
   and the agent report path never builds them into its attrs.
+
+  `fleet_token_id` (task-5866ec745efcd7f7) is castable here under the same
+  containment: it lands ONLY in the provision-success write for a
+  `provision_support` job (`Registry.succeed_job/3` guards it to
+  `fleet_role: "support"` rows), the agent report path never builds it, and it
+  is an OPAQUE revocation handle — never the token value itself.
   """
   def health_changeset(barkpark, attrs) do
     barkpark
@@ -487,12 +501,14 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :bootstrap_project,
       :bootstrap_dataset,
       :bootstrap_read_token_encrypted,
-      :bootstrap_env_encrypted
+      :bootstrap_env_encrypted,
+      :fleet_token_id
     ])
     |> validate_length(:host, max: 255)
     |> validate_format(:host, @host_format)
     |> validate_inclusion(:health_status, @health_statuses)
     |> validate_inclusion(:agent_status, @agent_statuses)
+    |> validate_length(:fleet_token_id, max: 255)
   end
 
   @doc """

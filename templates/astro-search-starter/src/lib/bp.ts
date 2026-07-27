@@ -111,9 +111,11 @@ export async function browseSeed(): Promise<BrowseSeed> {
   // origin-derivation as graphCorpus (a scoped apiUrl + flat route 404s). A
   // missing/failed browse must NOT fail the build: the island falls back to the
   // seed's prefix index and its own live fetch. Empty q (' ') = ranked browse.
+  // engine=postgres: the one engine every instance actually provisions (the
+  // indx claim is retired); the served engine rides back as `engineUsed`.
   const params = new URLSearchParams({
     q: ' ',
-    engine: 'indx',
+    engine: 'postgres',
     types: env.docType,
     perspective: 'published',
     limit: '100',

@@ -286,6 +286,25 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   def compose_block(%{"type" => t} = b, style) when t == "numbered_list",
     do: compose_block(b |> Map.put("type", "list") |> Map.put("ordered", true), style)
 
+  def compose_block(%{"type" => t} = b, style) when t == "ordered-list",
+    do: compose_block(b |> Map.put("type", "list") |> Map.put("ordered", true), style)
+
+  # h-tag spellings → heading at the level the TYPE names (charter D57): 18 live
+  # blocks composed to `unknown_block_node/1` on the View and Email surfaces.
+  # The level is taken from the TYPE, overwriting any stored `level` — SIX of
+  # the 18 drifted headings (1 h2 + all 5 h3s) carry no `level` key, so
+  # borrowing the heading clause without forcing the level would render an `h3`
+  # as an `<h2>`. Zero live blocks contradict their type. Same
+  # VARIABLE-guard form as the list aliases above, and for the same reason: it
+  # keeps these spellings OUT of the tiers-completeness / parity-census
+  # extractors (both grep quoted string type heads and `t in [...]` literals),
+  # because an alias has no tier or golden of its own — it borrows its target's.
+  @heading_aliases ~w(h1 h2 h3)
+  def compose_block(%{"type" => t} = b, style) when t in @heading_aliases do
+    level = String.to_integer(String.trim_leading(t, "h"))
+    compose_block(b |> Map.put("type", "heading") |> Map.put("level", level), style)
+  end
+
   def compose_block(%{"type" => t} = b, style) when t == "quote",
     do: compose_block(Map.put(b, "type", "blockquote"), style)
 
@@ -307,12 +326,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     }
   end
 
-  # Article mode emits semantic `<ul>` / `<ol>` via PdList / PdListItem so
-  # browsers / readers get real list semantics (a11y, copy-paste, default
-  # spacing). Email / default mode keeps the flex-row PdBox scaffold below
-  # with literal "• " / "1. " prefix spans — Outlook strips `<ul>` padding,
-  # so the prefix-as-text scaffold is the byte-stable email target.
-  def compose_block(%{"type" => "list"} = b, :article) do
+  # Lists stay semantic in every style. Article mode leaves the resulting
+  # PdList/PdListItem frame bare for the paper stylesheet; email/default mode
+  # applies its Outlook-safe spacing inline in Walk.
+  def compose_block(%{"type" => "list"} = b, _style) do
     ordered = Map.get(b, "ordered") == true
 
     items =
@@ -331,32 +348,6 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       end)
 
     %{"kind" => "PdList", "ordered" => ordered, "children" => items}
-  end
-
-  def compose_block(%{"type" => "list"} = b, _style) do
-    ordered = Map.get(b, "ordered") == true
-
-    item_rows =
-      Map.get(b, "items", [])
-      |> List.wrap()
-      |> Enum.with_index()
-      |> Enum.map(fn {item, idx} ->
-        prefix = if ordered, do: "#{idx + 1}. ", else: "• "
-
-        %{
-          "kind" => "PdBox",
-          "style" => %{"flexDirection" => "row"},
-          "children" => [
-            %{"kind" => "PdText", "children" => [prefix]},
-            %{
-              "kind" => "PdText",
-              "children" => compose_inline_children(normalize_list_item(item))
-            }
-          ]
-        }
-      end)
-
-    %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => item_rows}
   end
 
   def compose_block(%{"type" => "callout"} = b, style) do

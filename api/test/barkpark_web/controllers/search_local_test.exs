@@ -23,6 +23,16 @@ defmodule BarkparkWeb.SearchLocalTest do
   @ds "search-local-test"
 
   setup do
+    # W10 schema-visibility gate: the loopback route carries no token, so its
+    # searches are ANONYMOUS and restricted to PUBLIC schema types (the route
+    # stays deliberately NARROWED — it has zero shipped consumers). Seed "post"
+    # as a public schema so the shape tests below have an admitted type.
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => "post", "title" => "post", "visibility" => "public"},
+        @ds
+      )
+
     # Seed one doc so search has something to match.
     {:ok, _} =
       Content.create_document(

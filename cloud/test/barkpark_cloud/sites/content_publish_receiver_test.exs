@@ -72,6 +72,31 @@ defmodule BarkparkCloud.Sites.ContentPublishReceiverTest do
     site
   end
 
+  # stw9 (charter D56): the NODE twin of `static_site/2` — an SSR Next.js site
+  # bound to the SAME content triple. The Next search demo is exactly this shape,
+  # and before D56 it could never content-auto-deploy (the mint gate was
+  # `kind == "static"` only).
+  defp node_site(bp, attrs \\ %{}) do
+    n = System.unique_integer([:positive])
+
+    {:ok, site} =
+      Registry.create_site(
+        bp,
+        Enum.into(attrs, %{
+          name: "Next Demo #{n}",
+          slug: "next-#{n}",
+          kind: "node",
+          framework: "nextjs",
+          bootstrap_workspace: "acme",
+          bootstrap_project: "blog",
+          bootstrap_dataset: "production",
+          read_token: "bpt_read_#{n}"
+        })
+      )
+
+    site
+  end
+
   # Sign a body the way the box's Webhooks.Dispatcher does: HMAC-SHA256 over
   # "<timestamp>.<body>", lower-hex, in a `t=<unix>,v1=<hex>` header.
   defp sign(secret, ts, body) do
@@ -211,6 +236,163 @@ defmodule BarkparkCloud.Sites.ContentPublishReceiverTest do
       assert payload["events"] == ["publish", "unpublish", "delete"]
       assert payload["secret"] == secret
       assert String.ends_with?(payload["url"], "/v1/sites/webhooks/content-publish/#{site.id}")
+    end
+
+    test "a content-bound NODE site (the Next demo) mints a secret and registers the box webhook" do
+      bp = team_fixture() |> live_barkpark()
+      StudioLinkFakeHttpClient.program([])
+
+      site = node_site(bp)
+
+      # THE D56 DEFECT: the mint gate was `kind == "static"`, so a node site got
+      # NO secret — its receiver 404s forever and content-auto is impossible.
+      assert is_binary(site.content_webhook_secret_encrypted)
+      {:ok, secret} = Registry.reveal_site_content_secret(site)
+      assert is_binary(secret)
+
+      reg =
+        StudioLinkFakeHttpClient.requests()
+        |> Enum.find(fn r ->
+          r.method == :post and String.ends_with?(r.url, "/v1/webhooks/production")
+        end)
+
+      assert reg, "expected a POST /v1/webhooks/production registration call for the node site"
+      payload = Jason.decode!(reg.body)
+      assert payload["name"] == "site-autodeploy-#{site.id}"
+      assert payload["events"] == ["publish", "unpublish", "delete"]
+      assert payload["secret"] == secret
+    end
+
+    test "a NODE site's valid publish delivery 202s AND enqueues the debounced auto-deploy" do
+      site = team_fixture() |> live_barkpark() |> node_site()
+      {:ok, secret} = Registry.reveal_site_content_secret(site)
+      assert is_binary(secret)
+
+      body = Jason.encode!(%{"event" => "publish", "documentId" => "p42"})
+      ts = System.system_time(:second)
+
+      conn = deliver(site.id, body, sign(secret, ts, body))
+
+      assert conn.status == 202
+      assert json_body(conn)["trigger"] == "content-auto"
+      assert_enqueued(worker: AutoDeployWorker, args: %{site_id: site.id})
+    end
+
+    test "a node site WITHOUT a content binding mints nothing (an unbound app is not content-auto)" do
+      bp = team_fixture() |> live_barkpark()
+      StudioLinkFakeHttpClient.program([])
+
+      {:ok, unbound} =
+        Registry.create_site(bp, %{
+          name: "Bare App",
+          slug: "bare-app",
+          kind: "node",
+          framework: "nextjs"
+        })
+
+      assert is_nil(unbound.content_webhook_secret_encrypted)
+
+      refute Enum.any?(StudioLinkFakeHttpClient.requests(), fn r ->
+               String.contains?(r.url, "/v1/webhooks/")
+             end)
+    end
+
+    test "ensure_content_webhook is IDEMPOTENT: an existing row by name is UPDATED, never re-POSTed" do
+      bp = team_fixture() |> live_barkpark()
+      StudioLinkFakeHttpClient.program([])
+
+      site = static_site(bp)
+      hook_id = Ecto.UUID.generate()
+
+      # Second pass: the box now REPORTS the row this site already registered.
+      # webhooks.name has no unique constraint, so a blind re-POST would silently
+      # duplicate it — list-then-match-by-name is what prevents that.
+      StudioLinkFakeHttpClient.program(%{
+        "/v1/webhooks/production" =>
+          {:ok,
+           %{
+             status: 200,
+             body:
+               Jason.encode!(%{
+                 "webhooks" => [
+                   %{"id" => Ecto.UUID.generate(), "name" => "site-autodeploy-someone-else"},
+                   %{"id" => hook_id, "name" => "site-autodeploy-#{site.id}"}
+                 ]
+               })
+           }},
+        "/v1/webhooks/production/#{hook_id}" => {:ok, %{status: 200, body: "{}"}}
+      })
+
+      assert :ok = Registry.ensure_content_webhook(bp, site)
+
+      reqs = StudioLinkFakeHttpClient.requests()
+
+      refute Enum.any?(reqs, &(&1.method == :post)),
+             "a second registration must NEVER POST a duplicate webhook row"
+
+      put =
+        Enum.find(reqs, fn r ->
+          r.method == :put and String.ends_with?(r.url, "/v1/webhooks/production/#{hook_id}")
+        end)
+
+      assert put, "expected a PUT update of the EXISTING webhook row by id"
+
+      # The REPAIR half: guerrilla's rows were all auto-disabled, and a PUT
+      # without `active: true` returns 200 while content-auto stays dead. The
+      # box folds full re-enable (zeroed streak, cleared stamps) into this write.
+      assert Jason.decode!(put.body)["active"] == true,
+             "the reconciler's PUT must re-enable an auto-disabled row"
+    end
+
+    test "backfill REFUSES to write when the box webhook list is unreadable (:unknown is not :absent)" do
+      bp = team_fixture() |> live_barkpark()
+      StudioLinkFakeHttpClient.program([])
+
+      site = static_site(bp)
+
+      # The list GET fails. On the backfill path "I could not look" must never
+      # authorize a POST — webhooks.name has no unique constraint, so a write
+      # here could duplicate a row that actually exists, and the operator would
+      # see :ok on a run that made things worse.
+      StudioLinkFakeHttpClient.program(%{
+        "/v1/webhooks/production" => {:ok, %{status: 502, body: "box down"}}
+      })
+
+      assert :error = Registry.ensure_content_webhook(bp, site)
+
+      refute Enum.any?(StudioLinkFakeHttpClient.requests(), fn r ->
+               r.method in [:post, :put] and String.contains?(r.url, "/v1/webhooks/")
+             end),
+             "an unreadable list must produce NO webhook write on the backfill path"
+    end
+
+    test "deleting a site DEREGISTERS its box webhook (no orphan rows to auto-disable the endpoint)" do
+      bp = team_fixture() |> live_barkpark()
+      StudioLinkFakeHttpClient.program([])
+
+      site = static_site(bp)
+      hook_id = Ecto.UUID.generate()
+
+      StudioLinkFakeHttpClient.program(%{
+        "/v1/webhooks/production" =>
+          {:ok,
+           %{
+             status: 200,
+             body:
+               Jason.encode!(%{
+                 "webhooks" => [%{"id" => hook_id, "name" => "site-autodeploy-#{site.id}"}]
+               })
+           }},
+        "/v1/webhooks/production/#{hook_id}" => {:ok, %{status: 200, body: "{}"}}
+      })
+
+      assert {:ok, _} = Registry.delete_site(site)
+
+      assert Enum.any?(StudioLinkFakeHttpClient.requests(), fn r ->
+               r.method == :delete and
+                 String.ends_with?(r.url, "/v1/webhooks/production/#{hook_id}")
+             end),
+             "expected DELETE /v1/webhooks/production/<id> for the site's own webhook"
     end
 
     test "a container site mints no secret and registers nothing" do

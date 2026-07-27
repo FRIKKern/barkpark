@@ -436,6 +436,58 @@ case System.get_env("BARKPARK_MEDIA_DIR") do
     :ok
 end
 
+# Media blob STORAGE BACKEND (see `Barkpark.Media.Blobstore`). Unset ⇒ :local,
+# byte-identical to before — originals under the media blob root above.
+# BARKPARK_MEDIA_STORAGE=s3 moves originals to any S3-compatible bucket
+# (Cloudflare R2, AWS S3, MinIO, Backblaze B2, …); local disk becomes a
+# regenerable write-through cache (renditions + probe/rendition source blobs),
+# so the bucket is the source of truth and the disk can be lost without data
+# loss. The five required keys FAIL LOUDLY at boot when the backend is
+# selected — a half-configured bucket must not silently fall back to local
+# and split the blob set across two stores. Applies in ALL envs (same idiom
+# as BARKPARK_MEDIA_DIR above).
+case System.get_env("BARKPARK_MEDIA_STORAGE") do
+  "s3" ->
+    require_s3 = fn name ->
+      case System.get_env(name) do
+        value when is_binary(value) and value != "" ->
+          value
+
+        _ ->
+          raise """
+          BARKPARK_MEDIA_STORAGE=s3 is set but #{name} is missing.
+
+          The s3 media backend requires:
+              BARKPARK_S3_ENDPOINT           e.g. https://<account>.r2.cloudflarestorage.com
+              BARKPARK_S3_BUCKET             the bucket name
+              BARKPARK_S3_ACCESS_KEY_ID
+              BARKPARK_S3_SECRET_ACCESS_KEY
+          Optional:
+              BARKPARK_S3_REGION             default "auto" (R2); AWS needs a real region
+              BARKPARK_S3_KEY_PREFIX         namespace inside the bucket, default ""
+              BARKPARK_S3_PRESIGN_TTL        presigned-URL lifetime in seconds, default 3600
+              BARKPARK_S3_PUBLIC_BASE_URL    public/CDN origin for unsigned delivery
+          """
+      end
+    end
+
+    config :barkpark, :media_storage,
+      backend: :s3,
+      s3: [
+        endpoint: require_s3.("BARKPARK_S3_ENDPOINT"),
+        bucket: require_s3.("BARKPARK_S3_BUCKET"),
+        region: System.get_env("BARKPARK_S3_REGION") || "auto",
+        access_key_id: require_s3.("BARKPARK_S3_ACCESS_KEY_ID"),
+        secret_access_key: require_s3.("BARKPARK_S3_SECRET_ACCESS_KEY"),
+        key_prefix: System.get_env("BARKPARK_S3_KEY_PREFIX") || "",
+        presign_ttl: String.to_integer(System.get_env("BARKPARK_S3_PRESIGN_TTL") || "3600"),
+        public_base_url: System.get_env("BARKPARK_S3_PUBLIC_BASE_URL")
+      ]
+
+  _ ->
+    :ok
+end
+
 # Workspace-bundle export SPILL root (pds W11). The streamed export writes one
 # per-table spill file plus the assembled tar here; peak transient disk is
 # `tar-so-far + the largest single table`. Relocate it when the default lives
@@ -600,6 +652,45 @@ case System.get_env("SMTP_HOST") do
 
   _ ->
     :ok
+end
+
+# Trust boundary for x-forwarded-for on every IP-keyed rate bucket
+# (Barkpark.RateLimiter.client_ip/1). NOT prod-gated: which fronts sit in front
+# of this box is a property of the DEPLOYMENT, not of MIX_ENV, and a self-hoster
+# running MIX_ENV=dev behind a relay needs the same knob.
+#
+# Unset keeps the config.exs default (empty — loopback is trusted
+# unconditionally and is never listed here), so a plain self-host needs nothing.
+# Set it to the Barkpark Cloud control plane's egress address to let its relayed
+# caller IP be believed on the revoke DELETE; unlisted, that relay is
+# disbelieved and the whole team shares one bucket keyed on the egress IP.
+#
+# INDIVIDUAL ADDRESSES ONLY (mirrors cloud/config/runtime.exs TRUSTED_PROXY_PEERS
+# and its charter D5 reasoning). A CIDR range re-opens the forgery hole: an
+# attacker inside the range has its real appended hop SKIPPED and its forged
+# left-hand hop believed. A malformed entry raises at boot rather than silently
+# degrading the boundary to a no-op.
+if proxies = System.get_env("BARKPARK_TRUSTED_PROXIES") do
+  config :barkpark,
+         :trusted_proxies,
+         proxies
+         |> String.split(",")
+         |> Enum.map(&String.trim/1)
+         |> Enum.reject(&(&1 == ""))
+         |> Enum.map(fn proxy ->
+           case :inet.parse_address(String.to_charlist(proxy)) do
+             {:ok, address} ->
+               address
+
+             {:error, _} ->
+               raise """
+               BARKPARK_TRUSTED_PROXIES contains #{inspect(proxy)}, which is not a valid IP address.
+               Expected a comma-separated list of individual addresses, e.g. "203.0.113.7".
+               CIDR ranges are NOT supported: trusting a whole range lets any host in it forge
+               every client's rate-limit bucket key via X-Forwarded-For.
+               """
+           end
+         end)
 end
 
 if config_env() == :prod do

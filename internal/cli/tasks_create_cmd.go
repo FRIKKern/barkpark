@@ -147,18 +147,17 @@ func ensureTaskPortableBrief(body map[string]any) {
 	if description == "" {
 		description = "Complete the work described by “" + strings.TrimSpace(title) + "” and record verifiable evidence."
 	}
-	blocks := []any{
-		map[string]any{"id": "purpose", "type": "heading", "level": 2, "text": "Purpose"},
-		map[string]any{"id": "purpose-copy", "type": "paragraph", "content": []any{map[string]any{"type": "text", "value": description}}},
-		map[string]any{"id": "state", "type": "heading", "level": 2, "text": "Current state"},
-		map[string]any{"id": "state-callout", "type": "callout", "tone": "info", "title": "Ready to begin", "content": []any{map[string]any{"type": "text", "value": "This task is open and has not yet recorded completion evidence."}}},
-	}
+	blocks := make([]any, 0, 4)
 	if items := taskCriterionTexts(body["acceptance_criteria"]); len(items) > 0 {
 		blocks = append(blocks,
-			map[string]any{"id": "done", "type": "heading", "level": 2, "text": "Definition of done"},
-			map[string]any{"id": "done-list", "type": "list", "ordered": false, "items": items},
+			map[string]any{"id": "criteria", "type": "heading", "level": 2, "text": "Criteria"},
+			map[string]any{"id": "criteria-list", "type": "list", "ordered": false, "items": items},
 		)
 	}
+	blocks = append(blocks,
+		map[string]any{"id": "purpose", "type": "heading", "level": 2, "text": "Purpose"},
+		map[string]any{"id": "purpose-copy", "type": "paragraph", "content": []any{map[string]any{"type": "text", "value": description}}},
+	)
 	body["brief"] = map[string]any{"version": 1, "blocks": blocks}
 }
 

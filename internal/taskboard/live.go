@@ -2,6 +2,7 @@ package taskboard
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -169,8 +170,15 @@ func (m Model) handleBackstop() (Model, tea.Cmd) {
 func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	if msg.err != nil {
 		m.ui.Conn = ConnOffline
+		// Surface WHY — getJSON builds its errors precisely so the status chrome
+		// can name the failure truthfully (snapshotErrorLabel maps it to a short
+		// honest label). Without this line the board goes silently dark on a fetch
+		// error, which reads as "no tasks" instead of "sync failed" (the 8 MiB cap
+		// incident). The next landed snapshot clears it on the success path below.
+		m.ui.ConnProblem = snapshotErrorLabel(msg.err)
 		return m, nil
 	}
+	m.ui.ConnProblem = ""
 	// Out-of-order guard: compare against the newest snapshot APPLIED this
 	// session (lastAppliedFetch), NOT ui.LastSync — a cache-primed start seeds
 	// LastSync from the on-disk FetchedAt, and if the wall clock jumped
@@ -304,6 +312,33 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 		m.ui.Frame = 0
 	}
 	return m, nil
+}
+
+// snapshotErrorLabel keeps the identity strip accurate without dumping a long
+// transport/decode error into the fixed-width header. The full error remains at
+// the fetch boundary for tests and diagnostics; this is the operator-facing
+// classification.
+func snapshotErrorLabel(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(s, "exceeds") && strings.Contains(s, "bytes"):
+		return "snapshot too large"
+	case strings.Contains(s, "status 401"):
+		return "unauthorized"
+	case strings.Contains(s, "status 403"):
+		return "forbidden"
+	case strings.Contains(s, "status 404"):
+		return "snapshot unavailable"
+	case strings.Contains(s, "decode"):
+		return "invalid snapshot"
+	case strings.Contains(s, "status 5"):
+		return "server error"
+	default:
+		return "offline"
+	}
 }
 
 // liveIsFresh reports whether a live SSE event has been seen recently enough to

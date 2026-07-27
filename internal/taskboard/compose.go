@@ -10,6 +10,7 @@ package taskboard
 // Compose, Breadcrumb, and the reading-frame windowing.
 
 import (
+	"math"
 	"strings"
 	"time"
 
@@ -17,8 +18,11 @@ import (
 )
 
 const (
-	// boardPaneWidth is the wide-mode left board pane (charter D12).
+	// boardPaneWidth keeps the original fixed-width test fixture available for
+	// focused compositor tests. Real sessions use defaultDetailsPaneRatio.
 	boardPaneWidth = 46
+	// A fresh wide task board gives the detail pane one third of the terminal.
+	defaultDetailsPaneRatio = 1.0 / 3.0
 	// paneGutter2 is the breathing gap between the two wide panes.
 	paneGutter2 = 2
 	// wideEnter/wideExit are the ±4 hysteresis boundaries (charter D12/D27):
@@ -27,6 +31,7 @@ const (
 	wideExit  = 106
 	// minReadingWidth is the pathological floor for the wide right pane.
 	minReadingWidth = 24
+	minBoardWidth   = 24
 	// scrollFollow is the Frame.Scroll sentinel for "follow the cursor stop"
 	// (charter D18). A frame's zero-value Scroll is 0 — a real absolute offset
 	// (the top of the frame), so a freshly opened frame shows its title, never a
@@ -37,6 +42,56 @@ const (
 	// allowlisted in glyph_budget_test.go's reading set).
 	crumbSep = " › "
 )
+
+type widePaneFocus uint8
+
+const (
+	wideFocusBoard widePaneFocus = iota
+	wideFocusReader
+)
+
+// boardPaneCols returns the active split, clamped so both panes remain useful
+// after any terminal resize. A fresh session gives the details pane one third
+// of the full inner width; a persisted ratio replaces that default.
+func (m Model) boardPaneCols(innerW int) int {
+	w := m.wideBoardCols
+	if w == 0 {
+		ratio := m.wideDetailsRatio
+		if ratio <= 0 || ratio >= 1 {
+			ratio = defaultDetailsPaneRatio
+		}
+		detailsW := int(math.Round(float64(innerW) * ratio))
+		w = innerW - paneGutter2 - detailsW
+	}
+	max := innerW - paneGutter2 - minReadingWidth
+	if max < minBoardWidth {
+		max = minBoardWidth
+	}
+	if w < minBoardWidth {
+		w = minBoardWidth
+	}
+	if w > max {
+		w = max
+	}
+	return w
+}
+
+func (m *Model) resizeWidePanes(x, innerW int) {
+	if x < minBoardWidth {
+		x = minBoardWidth
+	}
+	max := innerW - paneGutter2 - minReadingWidth
+	if x > max {
+		x = max
+	}
+	m.wideBoardCols = x
+	m.wideDetailsRatio = float64(innerW-paneGutter2-x) / float64(innerW)
+}
+
+func (m Model) wideInnerWidth() int {
+	_, w, _ := m.wideGeom()
+	return w
+}
 
 // Compose paints the whole frame. It is the one impure-ish shell seam (it reads
 // Model), but it delegates every pixel to pure renderers, so it holds no layout
@@ -107,7 +162,7 @@ func (m Model) boardGeometry() (int, int) {
 		height = 8
 	}
 	if m.wide {
-		return boardPaneWidth, height - 1 // left pane, under the breadcrumb
+		return m.boardPaneCols(width), height - 1 // left pane, under the breadcrumb
 	}
 	return width, height
 }
@@ -122,8 +177,8 @@ func composeAt(m Model, width, height int) string {
 	now := m.now()
 	top := m.topFrame()
 	// The board pane reads the breadcrumb trail as render state: OpenTasks is
-	// derived from the stack HERE, at paint time (never stored), so the checked
-	// radio on an entered task can never desync from the frames actually open.
+	// derived from the stack HERE, at paint time (never stored), so the ◆ marker on
+	// an entered task can never desync from the frames actually open.
 	ui := m.ui
 	ui.OpenTasks = openTaskRefs(m.stack)
 
@@ -166,9 +221,10 @@ func composeAt(m Model, width, height int) string {
 	if inner < 1 {
 		inner = 1
 	}
-	leftLines := strings.Split(Render(m.board, ui, boardPaneWidth, inner, now), "\n")
+	boardW := m.boardPaneCols(width)
+	leftLines := strings.Split(Render(m.board, ui, boardW, inner, now), "\n")
 
-	rightW := width - boardPaneWidth - paneGutter2
+	rightW := width - boardW - paneGutter2
 	if rightW < minReadingWidth {
 		rightW = minReadingWidth
 	}
@@ -203,7 +259,30 @@ func composeAt(m Model, width, height int) string {
 		if i < len(rightLines) {
 			r = rightLines[i]
 		}
-		rows = append(rows, padTo(l, boardPaneWidth)+strings.Repeat(" ", paneGutter2)+r)
+		divider := "│ "
+		if m.wideFocus == wideFocusReader {
+			divider = " │"
+		}
+		if i == 0 {
+			divider = "↔ "
+			if m.wideFocus == wideFocusReader {
+				divider = " ↔"
+			}
+			if m.wideDragging {
+				divider = "↔↔"
+			}
+		}
+		if r == "" {
+			divider = strings.TrimRight(divider, " ")
+		}
+		dividerStyle := dividerRestStyle
+		if m.wideDividerHover {
+			dividerStyle = dividerHoverStyle
+		}
+		if m.wideDragging {
+			dividerStyle = dividerGrabbedStyle
+		}
+		rows = append(rows, padTo(l, boardW)+dividerStyle.Render(divider)+r)
 	}
 	return strings.Join(rows, "\n")
 }
@@ -279,7 +358,7 @@ func Breadcrumb(stack []Frame, width int) string {
 }
 
 // openTaskRefs marks the ONE task the user is currently inside: the DEEPEST
-// FrameTask on the navigation stack. The board wears the checked radio on
+// FrameTask on the navigation stack. The board wears the ◆ reader-open marker on
 // exactly this row (UIState.OpenTasks) — never more than one at a time, even on
 // a deep trail (task → paper → child task marks only the child; the breadcrumb
 // still shows the full trail). Returns nil when no task is open, so the zero
@@ -468,16 +547,30 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 	}
 	now := m.now()
 	gl, innerW, inner := m.wideGeom()
+	boardW := m.boardPaneCols(innerW)
 
 	// Screen (X,Y) → composeAt (x,y): strip the leading blank row and the gl pad.
 	cx, cy := ev.X-gl, ev.Y-1
 	// Motion = HOVER (ttm-s3), resolved BEFORE the pane-row early-outs so a
 	// pointer leaving the panes (chrome, crumb, gutter) clears the tint instead
 	// of leaving it stale.
+	if ev.Action == tea.MouseActionMotion && m.wideDragging {
+		m.wideDividerHover = true
+		m.resizeWidePanes(cx, innerW)
+		return m, nil
+	}
 	if ev.Action == tea.MouseActionMotion {
 		return m.wideMouseMotion(cx, cy, innerW, inner, now)
 	}
 	if ev.Action == tea.MouseActionRelease {
+		wasDragging := m.wideDragging
+		m.wideDragging = false
+		m.wideDividerHover = cx >= boardW && cx < boardW+paneGutter2 && cy >= 1 && cy <= inner
+		if wasDragging && m.wideDetailsRatio > 0 {
+			saveTaskboardPreferences(m.cacheDir, taskboardPreferences{
+				DetailsPaneRatio: m.wideDetailsRatio,
+			})
+		}
 		return m, nil // the press acted; the release is not an input of its own
 	}
 	if cx < 0 || cy < 0 {
@@ -499,17 +592,24 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 	m.ui.Strip = ActionStrip{}
 	// X: pure threshold over the assembled row.
 	switch {
-	case cx < boardPaneWidth:
+	case cx < boardW:
+		m.wideFocus = wideFocusBoard
 		return m.boardPaneMouse(ev, pl, inner, now)
-	case cx < boardPaneWidth+paneGutter2:
-		return m, nil // the dead inter-pane gutter — an honest no-op
+	case cx < boardW+paneGutter2:
+		if ev.Button == tea.MouseButtonLeft && ev.Action == tea.MouseActionPress {
+			m.wideDragging = true
+			m.wideDividerHover = true
+		}
+		return m, nil
 	default:
+		m.wideFocus = wideFocusReader
 		return m.rightPaneMouse(ev, pl, innerW, inner, now)
 	}
 }
 
 // wideMouseMotion is wide-mode hover (ttm-s3 fused into ttm-s5's router). Two
-// mutually-exclusive tints, one per pane, keyed on the X threshold:
+// mutually-exclusive tints, one per pane, keyed on the X threshold against the
+// user-resizable divider (boardPaneCols):
 //
 //   - the LEFT board pane's spine rows tint through HoverTarget — the wide pane
 //     shares flattenSpine's hover paint with the narrow board, so resolving the
@@ -519,31 +619,29 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 //     reads, so hover and click can never disagree. The depth-0 preview has no
 //     stops, so it resolves to -1 (#4240).
 //
-// The dead inter-pane gutter, chrome and prose fall through to neither branch and
-// clear BOTH tints — so crossing from a board row to a rail stop hands the tint
-// over cleanly. Change-only mutation through setHoverTarget/setHoverStop stays the
-// debounce (charter D95): a Motion that moves neither is a no-op.
+// The target rides queueHover's settle timer (the expensive wide preview never
+// renders intermediate rows); the stop tint commits change-only through
+// setHoverStop (charter D95 — a cheap rail repaint needs no timer). The divider
+// tracks hover directly so the ↔ affordance lights the moment the pointer
+// reaches the gutter.
 func (m Model) wideMouseMotion(cx, cy, innerW, inner int, now time.Time) (Model, tea.Cmd) {
 	target := ""
 	stop := -1
+	boardW := m.boardPaneCols(innerW)
+	m.wideDividerHover = cx >= boardW && cx < boardW+paneGutter2 && cy >= 1 && cy <= inner
 	switch {
-	case cx >= 0 && cx < boardPaneWidth && cy >= 1 && cy-1 < inner:
+	case cx >= 0 && cx < boardW && cy >= 1 && cy-1 < inner:
 		idTop, avail := m.wideBoardPaneAvail(inner, now)
 		if idx := m.wideBoardRowIndex(cy-1, idTop, avail, now); idx >= 0 {
 			if rows := m.visibleRows(); idx < len(rows) {
 				target = rows[idx].docID
 			}
 		}
-	case cx >= boardPaneWidth+paneGutter2 && cy >= 1 && cy-1 < inner:
+	case cx >= boardW+paneGutter2 && cy >= 1 && cy-1 < inner:
 		stop = m.rightPaneStopAt(cy-1, innerW, inner, now)
 	}
-	ui, tChanged := setHoverTarget(m.ui, target)
-	ui, sChanged := setHoverStop(ui, stop)
-	if !tChanged && !sChanged {
-		return m, nil
-	}
-	m.ui = ui
-	return m, nil
+	m.ui, _ = setHoverStop(m.ui, stop)
+	return m.queueHover(target, 0)
 }
 
 // paneRow is a composeAt row's vertical class in wide mode, keyed on Y alone (the
@@ -602,11 +700,9 @@ func (m Model) wideGeom() (gl, innerW, inner int) {
 
 // boardPaneMouse routes a click/wheel that landed in the wide left board pane —
 // identical semantics to the narrow board. Wheel steps the cursor one row; a
-// left click selects the FULL row under it (any X in the pane), exactly as
-// arrowing to it would, and a click on the ALREADY-selected row activates it
-// (activateBoard: descend a task, fold/unfold a section) — so a double-click
-// opens, exactly like the narrow board. The identity strip, the bottom status
-// chrome and the ↑/↓ overflow markers are not rows and no-op honestly.
+// left click targets the FULL row under it (any X in the pane), moves the cursor
+// there, and activates it through the same reducer as Enter. The identity strip,
+// bottom status chrome, and ↑/↓ overflow markers are not rows and no-op honestly.
 func (m Model) boardPaneMouse(ev tea.MouseMsg, pl, inner int, now time.Time) (Model, tea.Cmd) {
 	switch ev.Button {
 	case tea.MouseButtonWheelUp:
@@ -628,11 +724,8 @@ func (m Model) boardPaneMouse(ev tea.MouseMsg, pl, inner int, now time.Time) (Mo
 	if idx < 0 {
 		return m, nil // chrome, an overflow marker, or a display-only line
 	}
-	if m.ui.Cursor == idx {
-		return m.activateBoard(), nil
-	}
-	m.ui.Cursor = idx
-	return m, nil
+	nm, cmd := m.boardClickActivate(idx)
+	return nm.(Model), cmd
 }
 
 // wideBoardRowIndex resolves a wide left-pane row (pl, in pane coordinates, with
@@ -647,7 +740,8 @@ func (m Model) wideBoardRowIndex(pl, idTop, avail int, now time.Time) int {
 		return -1 // identity / status chrome, not a spine row
 	}
 	winIdx := pl - idTop
-	spineLines, targets, cursorLine := flattenSpine(m.board, m.ui, boardPaneWidth, now)
+	boardW := m.boardPaneCols(m.wideInnerWidth())
+	spineLines, targets, cursorLine := flattenSpine(m.board, m.ui, boardW, now)
 	top := slideTop(m.ui.SpineScroll, cursorLine, avail, len(spineLines))
 	if top > 0 && winIdx == 0 {
 		return -1 // ↑ more-above marker
@@ -666,8 +760,9 @@ func (m Model) wideBoardRowIndex(pl, idTop, avail int, now time.Time) int {
 // window height — the SAME chrome math Render uses at boardPaneWidth, including
 // Render's internal 8-row floor — shared by the press and hover resolvers.
 func (m Model) wideBoardPaneAvail(inner int, now time.Time) (idTop, avail int) {
-	idTop = len(renderIdentityTop(m.ui, boardPaneWidth, now))
-	bottom := len(bottomChrome(m.board, m.ui, boardPaneWidth, now))
+	boardW := m.boardPaneCols(m.wideInnerWidth())
+	idTop = len(renderIdentityTop(m.ui, boardW, now))
+	bottom := len(bottomChrome(m.board, m.ui, boardW, now))
 	effH := inner
 	if effH < 8 {
 		effH = 8
@@ -685,9 +780,8 @@ func (m Model) wideBoardPaneAvail(inner int, now time.Time) (idTop, avail int) {
 // the previewed task — the same single-open descent as activating its board
 // row. At depth>0 it is the stack-top reading frame: wheel free-scrolls ±1
 // (reusing freeScroll so mouse == keyboard), a click resolves to the rail stop
-// on the clicked body line (overflow markers skipped) and selects it exactly
-// as g/G/j would (viewport follows); a click on the ALREADY-selected stop
-// descends onto it, exactly like enter — the narrow reading semantics.
+// on the clicked body line (overflow markers skipped), moves the cursor there,
+// and descends through the same reducer as Enter.
 func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.Time) (Model, tea.Cmd) {
 	top := m.topFrame()
 	if top.Kind == FrameBoard {
@@ -720,12 +814,8 @@ func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.T
 		return m, nil
 	}
 	if idx := m.rightPaneStopAt(pl, innerW, inner, now); idx >= 0 {
-		if top.Cursor == idx {
-			nm, cmd := m.descend()
-			return nm.(Model), cmd
-		}
-		(&m).setTopCursor(idx)
-		return m, nil
+		nm, cmd := m.readingClickActivate(idx)
+		return nm.(Model), cmd
 	}
 	return m, nil // prose / empty line / overflow marker — nothing to select
 }
@@ -737,14 +827,15 @@ func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.T
 // the stop index on that body line, or -1 when there is nothing to select: the
 // stop-less depth-0 preview (#4240), an ↑/↓ overflow-marker row, or a
 // prose/gutter/empty line. It re-derives the paint's window offset
-// (readingWindowTop) from the SAME geometry composeAt paints, so resolution and
-// paint stay pixel-locked.
+// (readingWindowTop) from the SAME geometry composeAt paints — including the
+// user-resizable divider position (boardPaneCols) — so resolution and paint stay
+// pixel-locked.
 func (m Model) rightPaneStopAt(pl, innerW, inner int, now time.Time) int {
 	top := m.topFrame()
 	if top.Kind == FrameBoard {
 		return -1 // depth-0 preview has no stops (previewLines passes stops=nil)
 	}
-	rightW := innerW - boardPaneWidth - paneGutter2
+	rightW := innerW - m.boardPaneCols(innerW) - paneGutter2
 	if rightW < minReadingWidth {
 		rightW = minReadingWidth
 	}
@@ -772,7 +863,7 @@ func (m Model) rightPaneStopAt(pl, innerW, inner int, now time.Time) int {
 // so a preview that just moved (cursor step, hover) starts at 0, not at a stale
 // offset from the last task.
 func (m *Model) scrollPreview(t Task, delta, innerW, inner int, now time.Time) {
-	rightW := innerW - boardPaneWidth - paneGutter2
+	rightW := innerW - m.boardPaneCols(innerW) - paneGutter2
 	if rightW < minReadingWidth {
 		rightW = minReadingWidth
 	}

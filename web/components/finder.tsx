@@ -10,8 +10,8 @@ import type {
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  DEFAULT_ENGINE,
   DOC_TYPES,
-  ENGINES,
   FACET_DIMENSIONS,
   SORTS,
   typeLabel,
@@ -474,7 +474,7 @@ export function Finder({
   variant = "page",
   initialData = null,
   initialSeed = null,
-  initialEngine = "indx",
+  initialEngine = DEFAULT_ENGINE,
 }: {
   variant?: "page" | "home" | "master";
   /** Server-rendered browse result for the landing — seeds the first paint so
@@ -525,8 +525,11 @@ export function Finder({
   const currentQueryString = sp.toString();
 
   const q = sp.get("q") ?? "";
-  // Default to Indx — the landing then showcases native facets + fuzzy recall.
-  const engine: SearchEngine = sp.get("engine") === "postgres" ? "postgres" : "indx";
+  // Unbiased URL reader: an explicit `engine=indx` opts into fuzzy recall;
+  // anything else resolves to the ONE shared default (postgres — see
+  // DEFAULT_ENGINE), matching the SSR seed and the /api/find route.
+  const engine: SearchEngine =
+    sp.get("engine") === "indx" ? "indx" : DEFAULT_ENGINE;
   const sort: SortId = SORTS.some((s) => s.id === sp.get("sort"))
     ? (sp.get("sort") as SortId)
     : "relevance";
@@ -592,9 +595,6 @@ export function Finder({
   // Identity of the current view: engine + query. No cache/bust dimension —
   // every search goes straight to the engine, always fresh.
   const reqKey = `${engine} ${q}`;
-  // Manual refetch trigger (the reindex button) — not a cache; bumping it re-runs
-  // the fetch effect for the SAME view to pull freshly-reindexed data.
-  const [refreshNonce, setRefreshNonce] = useState(0);
   // Key the server-rendered seed corresponds to: the landing (empty query) on
   // the page's engine. When it matches `reqKey` on mount we use the seed instead
   // of refetching — the first paint already has the results.
@@ -676,7 +676,6 @@ export function Finder({
     q,
     seedKey,
     sessionId,
-    refreshNonce,
     liveEnabled,
     liveReady,
     liveSearch,
@@ -1024,30 +1023,7 @@ export function Finder({
     setParams(patch);
   };
 
-  const [reindexMsg, setReindexMsg] = useState<string | null>(null);
-  const reindexNow = async () => {
-    setReindexMsg("queuing…");
-    try {
-      const r = await fetch("/api/admin/reindex", { method: "POST" });
-      const d = (await r.json()) as { ok?: boolean; error?: string };
-      if (d.ok) {
-        setReindexMsg("rebuilding ~30s…");
-        // The rebuild runs async on the API node; refetch once it should be live.
-        setTimeout(() => {
-          setRefreshNonce((n) => n + 1);
-          setReindexMsg(null);
-        }, 32000);
-      } else {
-        setReindexMsg(d.error ?? "reindex failed");
-        setTimeout(() => setReindexMsg(null), 4000);
-      }
-    } catch (e) {
-      setReindexMsg((e as Error).message);
-      setTimeout(() => setReindexMsg(null), 4000);
-    }
-  };
-
-  // Advanced options panel (cache/reindex/syntax) — a stateful toggle rather
+  // Advanced options panel (query syntax) — a stateful toggle rather
   // than <details>, so the interactive Popular chips can share its header row
   // without a click also toggling the panel.
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -1142,27 +1118,10 @@ export function Finder({
               className="w-full rounded-lg border border-zinc-300 bg-transparent py-2.5 pl-9 pr-3 text-base outline-none transition-colors focus:border-zinc-500 dark:border-zinc-700 dark:focus:border-zinc-400"
             />
           </div>
-          <div
-            role="radiogroup"
-            aria-label="Search engine"
-            className="flex shrink-0 rounded-lg border border-zinc-300 p-0.5 dark:border-zinc-700"
-          >
-            {ENGINES.map((e) => (
-              <button
-                key={e.id}
-                role="radio"
-                aria-checked={engine === e.id}
-                onClick={() => setParams({ engine: e.id })}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  engine === e.id
-                    ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
-                    : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200"
-                }`}
-              >
-                {e.label}
-              </button>
-            ))}
-          </div>
+          {/* The engine pill is RETIRED: the demo no longer advertises an
+              engine it cannot promise is provisioned. `?engine=indx` in the
+              URL still opts in, and the server-reported `engineUsed` keeps
+              the readout honest either way. */}
         </div>
         {/* Status row (fixed height): Popular shortcuts when idle, parsed-query
             chips when searching, + the fuzzy pill — with the Options toggle on
@@ -1234,22 +1193,6 @@ export function Finder({
         </div>
         {optionsOpen ? (
           <div className="flex flex-col gap-3 border-l-2 border-zinc-200 pl-3 dark:border-zinc-800">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-zinc-400">
-                Every query hits {engine === "indx" ? "Indx" : "Postgres"}{" "}
-                directly — always fresh, no cache.
-              </span>
-              {engine === "indx" ? (
-                <button
-                  onClick={reindexNow}
-                  disabled={!!reindexMsg}
-                  title="Trigger an Indx blue/green rebuild"
-                  className="rounded-full border border-zinc-300 px-2.5 py-0.5 font-medium text-zinc-500 transition-colors hover:text-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:hover:text-zinc-200"
-                >
-                  {reindexMsg ?? "reindex"}
-                </button>
-              ) : null}
-            </div>
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
               <span>
                 <code className="font-mono">&quot;exact phrase&quot;</code> phrase
@@ -1268,19 +1211,25 @@ export function Finder({
       {/* Popular shortcuts now live in the status row above (idle state),
           replacing the old engine tagline — no separate line. */}
 
-      {/* banners */}
+      {/* banners — total failure is HUMAN copy (the server already folds the
+          upstream error through humanUpstreamMessage), never a raw upstream
+          dump; the honest recovery hint is that the next keystroke retries.
+          `data-search-error` is a STRUCTURAL oracle for the journey-smoke
+          harness (tooling/search-smoke) — keep it when editing the copy. */}
       {data?.error ? (
-        <section className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
-          <strong className="font-medium">Search failed.</strong>
-          <pre className="mt-2 whitespace-pre-wrap text-xs">{data.error}</pre>
+        <section
+          data-search-error
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200"
+        >
+          <strong className="font-medium">Search is unavailable right now.</strong>{" "}
+          The search service didn&apos;t answer — it may be restarting. Searching
+          again retries automatically.
         </section>
       ) : null}
       {data?.indxUnavailable ? (
         <section className="rounded-lg border border-amber-300/70 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-          Indx needs a scoped read token, which isn&apos;t configured in this
-          deployment — showing <strong>Postgres</strong> results. Set{" "}
-          <code className="font-mono">BARKPARK_TOKEN</code> to enable
-          fuzzy/typo search.
+          Live Indx engine unavailable — showing <strong>Postgres</strong>{" "}
+          results.
         </section>
       ) : null}
       {/* Recovery/fuzzy-widen is now a compact pill in the engine row above

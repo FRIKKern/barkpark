@@ -1370,8 +1370,12 @@ type SpawnSite struct {
 	Instance      string `json:"instance"`
 	RuntimeTarget string `json:"runtime_target,omitempty"`
 	// search-template W2/W6: the shipped starter + deploy-pinned palette.
-	Template            string          `json:"template,omitempty"`
-	Theme               string          `json:"theme,omitempty"`
+	Template string `json:"template,omitempty"`
+	Theme    string `json:"theme,omitempty"`
+	// search-template W10: the featured content type the site's build reads.
+	// Declared here or json.Unmarshal drops it silently — the tag's omitempty is
+	// decode-irrelevant (SpawnSite is never marshalled) and kept for symmetry.
+	DocType             string          `json:"doc_type,omitempty"`
 	Port                int             `json:"port,omitempty"`
 	PortBase            int             `json:"port_base,omitempty"`
 	CurrentDeploymentID string          `json:"current_deployment_id"`

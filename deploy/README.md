@@ -8,7 +8,9 @@ a server.
 
 ```
 merge to main
-   ├─ cloud/**  changed → deploy CONTROL PLANE  (barkpark.cloud / barkpark-cp)
+   ├─ cloud/** | internal/** | cmd/** changed → deploy CONTROL PLANE  (barkpark.cloud / barkpark-cp)
+   │    (internal/ + cmd/ because bp-provisioner is cross-built from
+   │     ./cmd/barkpark-provisioner — an internal-only worker fix must roll the CP)
    └─ api/** | internal/** | connectors/** changed → deploy CONTENT INSTANCE (guerrilla)
         every deploy: build the IDLE blue/green slot (active one keeps serving)
         → health-gate it → flip Caddy's upstream (graceful reload) → stop old.
@@ -243,7 +245,7 @@ Add under **Settings → Secrets and variables → Actions**:
 | Secret | Value |
 |---|---|
 | `DEPLOY_SSH_KEY` | The private key that can `ssh root@` both hosts (the Barkpark account key — locally `~/.ssh/barkpark_indx`). Paste the full PEM, including the BEGIN/END lines. |
-| `CP_HOST` | Control-plane IP — `178.105.92.191` |
+| `CP_HOST` | Control-plane IP — `178.105.92.191`. Doubles as the control plane's **egress** address: the instance job passes it as `BARKPARK_CLOUD_EGRESS_IPS` so each box trusts the caller address the control plane relays (see §Control-plane egress below). |
 | `GUERRILLA_HOST` | Content-instance IP — `157.180.90.121` |
 | `HETZNER_DNS_TOKEN` | Hetzner Cloud DNS-capable API token (the `barkpark.cloud`-zone project's token, NOT `CP_HOST`'s own server token — see `cloud/postfix/README.md` §1). Only used by `renew-mail-cert.yml`. |
 
@@ -343,6 +345,39 @@ partial/malformed relay is logged at worker startup (`mail relay DISABLED — �
 and skipped rather than shipping a broken `.env`; a good one logs `mail relay
 ENABLED`. The relay submission port (587) is published for instances by
 `cloud/docker-compose.yml`; it is SASL-gated (not an open relay).
+
+## Control-plane egress → instance `BARKPARK_TRUSTED_PROXIES`
+
+An instance believes `x-forwarded-for` **only** from loopback or a peer listed in
+`BARKPARK_TRUSTED_PROXIES` (`Barkpark.RateLimiter.client_ip`, individual addresses
+only — a CIDR range is refused at boot, because trusting a range lets any host in
+it forge every client's bucket key). The control plane relays the phone's address
+on a proxied revoke and the instance's own Caddy appends the **control plane's
+egress address** to the right of it, so until that egress address is listed the
+rightmost non-listed hop *is* the control plane and every proxied request keys on
+**one bucket per team** instead of one per caller. Not a forgery, not a 5xx — a
+silent loss of per-caller bucketing.
+
+The address is authored **once**, as the `CP_HOST` secret above (the control
+plane's own IP), and read by both deployers under one name,
+`BARKPARK_CLOUD_EGRESS_IPS`:
+
+| Box | Reader | Where the value comes from |
+|---|---|---|
+| freshly provisioned | `barkpark-provisioner` → the go-live step right before secrets-install (its restart loads it) | `barkpark-cp:/etc/barkpark-provisioner.env` (`deploy/barkpark-provisioner.env.example`) |
+| resurrected from a bundle | same worker → the resurrect chain's identity merge (a resurrect never runs the go-live's configure) | same worker env — the trust list belongs to the CURRENT control plane, never to the archive |
+| already-running (guerrilla/prod) | `instance-deploy.sh` `.env` backfill | `deploy.yml`'s instance job passes `secrets.CP_HOST` over the SSH command |
+
+`instance-deploy.sh` **never overwrites** an existing `BARKPARK_TRUSTED_PROXIES`
+line — provisioning already wrote the right value on a managed box, and a
+self-hosted operator may trust a different front. Both readers **validate the
+shape before writing** (bare IPs, no ranges): the Elixir side raises on a
+malformed entry, so an unvalidated write would not degrade a bucket key, it would
+refuse to boot the box. Value absent on both paths → the script appends a
+commented placeholder and logs the gap (`WARN: no BARKPARK_CLOUD_EGRESS_IPS …`),
+the worker logs it at startup, and the deploy still succeeds.
+
+Check a box: `grep BARKPARK_TRUSTED_PROXIES /opt/barkpark/.env`.
 
 ## Mail relay TLS renewal
 

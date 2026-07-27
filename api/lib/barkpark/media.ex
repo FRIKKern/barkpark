@@ -4,6 +4,7 @@ defmodule Barkpark.Media do
   import Ecto.Query
   alias Barkpark.Repo
   alias Barkpark.Content
+  alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Delivery.{Cdn, Events}
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Media.Assets
@@ -52,8 +53,6 @@ defmodule Barkpark.Media do
     date_dir = "#{now.year}/#{String.pad_leading("#{now.month}", 2, "0")}"
     filename = unique_filename(original_name)
     relative_path = "#{date_dir}/#{filename}"
-    full_dir = Path.join(upload_dir(), date_dir)
-    full_path = Path.join(upload_dir(), relative_path)
 
     # SECURITY — server-derived MIME + validate-before-persist.
     #
@@ -71,16 +70,18 @@ defmodule Barkpark.Media do
     # behavior, zero rejections). When configured it rejects BEFORE any blob is
     # written (`unsupported_media_type` → 422 / `payload_too_large` → 413).
     #
-    # File ops are NON-raising so a disk fault (ENOSPC / EACCES / read-only mount)
-    # returns {:error, :storage_unavailable} — an enveloped 503 — instead of an
-    # uncaught File.*! raise → bare 500. On ANY failure after the copy we remove
-    # the (possibly partial) blob so a rejected upload never orphans bytes.
+    # Byte persistence is delegated to the configured `Blobstore` backend
+    # (local disk by default; S3-compatible object storage when configured).
+    # The backend is NON-raising so a storage fault (ENOSPC / EACCES /
+    # read-only mount / unreachable bucket) returns {:error,
+    # :storage_unavailable} — an enveloped 503 — instead of an uncaught raise
+    # → bare 500. On ANY failure after the write we remove the (possibly
+    # partial) blob so a rejected upload never orphans bytes.
     mime_type = MIME.from_path(original_name)
 
     with {:ok, %{size: size}} <- File.stat(temp_path),
          :ok <- validate_upload(mime_type, original_name, size),
-         :ok <- File.mkdir_p(full_dir),
-         :ok <- File.cp(temp_path, full_path) do
+         :ok <- Blobstore.put_file(relative_path, temp_path, content_type: mime_type) do
       # Create DB record. Tenancy scope (workspace_id/project_id) is stamped from
       # `opts` when the caller supplied a resolved scope — mirrors
       # `Barkpark.Content` write scoping so a new blob is owned by the workspace
@@ -113,15 +114,15 @@ defmodule Barkpark.Media do
           ok
 
         error ->
-          # Insert (validation / DB) failed — the blob is already on disk, so
+          # Insert (validation / DB) failed — the blob is already persisted, so
           # remove it to avoid orphaning bytes with no owning row, then surface
           # the original error unchanged (happy path + error shape preserved).
-          _ = File.rm(full_path)
+          _ = Blobstore.delete(relative_path)
           error
       end
     else
       # PART 2 rejects, raised by validate_upload BEFORE any blob is written — the
-      # allowlist / size-cap veto. Nothing is on disk, so surface the typed error
+      # allowlist / size-cap veto. Nothing is persisted, so surface the typed error
       # (→ 422 / 413 via FallbackController) with no cleanup needed.
       {:error, :unsupported_media_type} = rejected ->
         rejected
@@ -130,10 +131,10 @@ defmodule Barkpark.Media do
         rejected
 
       {:error, _reason} ->
-        # stat(temp) / mkdir_p / cp failed. cp may have written a partial file
-        # before failing → best-effort cleanup so no orphan blob survives, then
-        # report storage as unavailable (503) rather than raising.
-        _ = File.rm(full_path)
+        # stat(temp) or the backend write failed. A partial write may survive
+        # → best-effort cleanup so no orphan blob remains, then report storage
+        # as unavailable (503) rather than raising.
+        _ = Blobstore.delete(relative_path)
         {:error, :storage_unavailable}
     end
   end
@@ -405,11 +406,10 @@ defmodule Barkpark.Media do
   def delete_file(id, opts \\ []) do
     case get_file(id, opts) do
       {:ok, file} ->
-        # Resolve the webhook payload + blob path BEFORE deleting so the DB
-        # delete is the FIRST side effect: on failure the row survives intact
-        # (still pointing at a live blob) and no phantom media.deleted fires.
+        # Resolve the webhook payload BEFORE deleting so the DB delete is the
+        # FIRST side effect: on failure the row survives intact (still
+        # pointing at a live blob) and no phantom media.deleted fires.
         doc = asset_doc_for_file(file, file.dataset)
-        full_path = Path.join(upload_dir(), file.path)
 
         # A stale delete means a concurrent DELETE already consumed the row →
         # {:error, :not_found} (both controllers 404 via FallbackController)
@@ -426,7 +426,7 @@ defmodule Barkpark.Media do
             defer_media_effect(fn ->
               Cdn.invalidate(file)
               Events.dispatch(file.dataset, "media.deleted", file, doc)
-              File.rm(full_path)
+              Blobstore.delete(file.path)
               Barkpark.Media.Renditions.delete_for_file(file.id)
             end)
 
@@ -549,12 +549,8 @@ defmodule Barkpark.Media do
 
   def put_blob(relative_path, body) when is_binary(relative_path) and is_binary(body) do
     if valid_blob_path?(relative_path) do
-      full_path = file_path(relative_path)
-
-      with :ok <- File.mkdir_p(Path.dirname(full_path)),
-           :ok <- File.write(full_path, body) do
-        {:ok, relative_path}
-      else
+      case Blobstore.put_bytes(relative_path, body, []) do
+        :ok -> {:ok, relative_path}
         {:error, _reason} -> {:error, :storage_unavailable}
       end
     else

@@ -83,6 +83,11 @@ function bpBase(over) {
       deprovision_error: null,
       provision_steps: [],
       provision_console: [],
+      // Personal Dev Fleet group record (PDF-D61/D92): serialized on EVERY row
+      // by barkpark_json — null on an ungrouped main.
+      fleet_role: null,
+      fleet_parent_id: null,
+      fleet_token_id: null,
     },
     over,
   );
@@ -1098,6 +1103,123 @@ const notifDeliveries = [
   { id: "del_2", recipient: "slack", event: "provision_failed", channel: "slack", kind: "alert", status: "pending", attempts: 0, last_error: null, http_status: null, inserted_at: tMinus(4200) },
   { id: "del_1", recipient: "alerts@acme.com", event: "subscription_past_due", channel: "email", kind: "transactional", status: "sent", attempts: 1, last_error: null, http_status: 200, inserted_at: tMinus(90000) },
 ];
+
+// ── MVP-0 Personal Dev Fleet fixtures (PDF-D84/D88/D92) ──────────────────────
+// Support rows ride the SAME barkpark envelope with the group record set:
+// fleet_role:"support" + fleet_parent_id:<main>. Their provision_steps carry
+// ONLY the support vocabulary (create/configure/content/verify/ready — never
+// freshen/secure; the SPA folds them over SUPPORT_STEP_ORDER).
+const FLEET_IDS = {
+  supportProvisioning: "5b2c1e00-0000-4000-8000-0000000000fa",
+  supportOnline: "5b2c1e00-0000-4000-8000-0000000000fb",
+  supportFailed: "5b2c1e00-0000-4000-8000-0000000000fc",
+};
+
+// Mid-provision: create done, configure in flight — the SUPPORT theater
+// (5 rows, support labels, no secure rung anywhere).
+const supportProvisioningRow = bpBase({
+  id: FLEET_IDS.supportProvisioning,
+  name: "muscle-1",
+  slug: "muscle-1",
+  fleet_role: "support",
+  fleet_parent_id: IDS.liveInstance,
+  fleet_token_id: "ftk-preview-0001",
+  inserted_at: tMinus(200),
+  provision_steps: [
+    { step: "create", status: "started", at: tMinus(180) },
+    { step: "create", status: "done", at: tMinus(140) },
+    { step: "configure", status: "started", at: tMinus(140), detail: "installing runtime + fleet listener" },
+    { step: "configure", status: "progress", at: tMinus(50), detail: "systemd: barkpark-fleet-listener enabled" },
+  ],
+  provision_console: [
+    { line: "provisioning support muscle-1…", at: tMinus(180) },
+    { line: "create: server cx23 fsn1 — ok (188.245.0.99)", at: tMinus(140) },
+    { line: "configure: installing runtime + agent CLI", at: tMinus(90) },
+  ],
+});
+
+// Online: host set, provision succeeded — the presence chip reads the main's
+// roster (fleetRoster fixture below) and the BYO-key step shows.
+const supportOnlineRow = bpBase({
+  id: FLEET_IDS.supportOnline,
+  name: "muscle-2",
+  slug: "muscle-2",
+  host: "muscle-2-5b2c1e.fleet.internal",
+  fleet_role: "support",
+  fleet_parent_id: IDS.liveInstance,
+  fleet_token_id: "ftk-preview-0002",
+  inserted_at: tMinus(86400),
+  provision_status: "succeeded",
+});
+
+// Stuck-provisioning FAILED honestly (PDF-D10: never lies online) — verify
+// timed out waiting for the first heartbeat.
+const supportFailedRow = bpBase({
+  id: FLEET_IDS.supportFailed,
+  name: "muscle-3",
+  slug: "muscle-3",
+  fleet_role: "support",
+  fleet_parent_id: IDS.liveInstance,
+  fleet_token_id: "ftk-preview-0003",
+  inserted_at: tMinus(4000),
+  provision_status: "failed",
+  provision_error: "verify: no heartbeat within the provisioning budget (listener never came online)",
+  provision_steps: [
+    { step: "create", status: "started", at: tMinus(3900) },
+    { step: "create", status: "done", at: tMinus(3860) },
+    { step: "configure", status: "started", at: tMinus(3860) },
+    { step: "configure", status: "done", at: tMinus(3760) },
+    { step: "content", status: "started", at: tMinus(3760) },
+    { step: "content", status: "done", at: tMinus(3700) },
+    { step: "verify", status: "started", at: tMinus(3700), detail: "polling the main's roster for the first beat" },
+    { step: "verify", status: "failed", at: tMinus(3400) },
+  ],
+  provision_console: [
+    { line: "verify: polling https://production-5b2c1e.barkpark.cloud/v1/fleet/roster", at: tMinus(3700) },
+    { line: "verify: no beat after 300s — failing the job", at: tMinus(3400) },
+    { line: "provision FAILED", at: tMinus(3400) },
+  ],
+});
+
+// The main's roster (documents envelope, PDF-D21) as the browser reads it
+// app-token-direct: muscle-2 beats idle with a validated capacity object.
+const fleetRosterFixture = [
+  {
+    worker: "muscle-2",
+    agent: "claude",
+    scope: "production",
+    status: "idle",
+    capacity: { size_class: "standard", slots_total: 1, slots_free: 1 },
+    last_seen: tMinus(12),
+    ttl_s: 30,
+    task: null,
+  },
+];
+
+// ── MVP-0 offload fixtures (pdf-mvp0-offload-spa, PDF-D87/D92) ───────────────
+// An order is an ASSIGNEE-ROUTED type:task doc filed on the MAIN via the
+// browser-direct mutate seam; the listener (muscle-2, the online support above)
+// claims it, works it, closes it. These model GET /v1/tasks/:id (the .doc
+// envelope) + the roster read in each ladder state the watch folds: filed ->
+// claimed -> working -> done, plus the blocked terminal.
+const OFFLOAD_ORDER_ID = "5b2c1e00-0000-4000-8000-0000000000d1";
+const offloadOrderTask = (lifecycle, claim) => ({
+  doc_id: OFFLOAD_ORDER_ID,
+  type: "task",
+  kind: "task",
+  title: "Summarise the release notes",
+  description: "Read the last three tagged releases and draft a changelog.",
+  lifecycle_status: lifecycle,
+  assignee: "muscle-2",
+  priority: 2,
+  claim: claim || null,
+  status: "published",
+});
+const offloadRoster = (status, task) => [{
+  worker: "muscle-2", agent: "claude", scope: "production", status,
+  capacity: { size_class: "standard", slots_total: 1, slots_free: status === "working" ? 0 : 1 },
+  last_seen: tMinus(8), ttl_s: 30, task: task || null,
+}];
 
 export const SCENARIOS = {
   loggedout: {
@@ -2636,6 +2758,108 @@ export const SCENARIOS = {
       accountSessions: accountSessions,
     },
   },
+  // ── MVP-0 Personal Dev Fleet (PDF-D84/D88/D92): the fleet card states ──────
+  "fleet-support-provisioning": {
+    label: "Fleet card — a support mid-provision: the SUPPORT theater (5 rungs, no secure) under the main",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportProvisioningRow],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  "fleet-support-online": {
+    label: "Fleet card — a support ONLINE (roster presence chip + capacity) with the BYO-model-key step",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      fleetRoster: fleetRosterFixture,
+    },
+  },
+  "fleet-support-failed": {
+    label: "Fleet card — stuck provisioning renders honestly FAILED (never lies online)",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportFailedRow],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  "fleet-support-empty": {
+    label: "Fleet card — no supports yet: the add-a-support CTA on a live main (+ nested #fleet list)",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  // ── MVP-0 OFFLOAD (pdf-mvp0-offload-spa, PDF-D87/D92): the order watch ladder ─
+  // The offload action renders on the ONLINE support (muscle-2); the watch folds
+  // the task read + the roster read into filed -> claimed -> working -> done with
+  // honest blocked/failed terminals. Each scenario pins one rung.
+  "offload-filing": {
+    label: "Offload — the order is filed (open), waiting for the support to claim it",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub, sites: [], audit: [],
+      fleetRoster: offloadRoster("idle", null),
+      orderTask: offloadOrderTask("open", null),
+    },
+  },
+  "offload-working": {
+    label: "Offload — the support has claimed AND is WORKING the order (roster beats working)",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub, sites: [], audit: [],
+      fleetRoster: offloadRoster("working", OFFLOAD_ORDER_ID),
+      orderTask: offloadOrderTask("in_progress", { worker: "muscle-2", epoch: 1, ts_iso: "2026-07-24T12:00:00Z" }),
+    },
+  },
+  "offload-done": {
+    label: "Offload — the order is DONE (terminal success; the poll stops)",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub, sites: [], audit: [],
+      fleetRoster: offloadRoster("idle", null),
+      orderTask: offloadOrderTask("done", { worker: "muscle-2", epoch: 1, ts_iso: "2026-07-24T12:00:00Z" }),
+    },
+  },
+  "offload-blocked": {
+    label: "Offload — the support hit a BLOCKER (honest terminal; the ladder snaps)",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub, sites: [], audit: [],
+      fleetRoster: offloadRoster("blocked", OFFLOAD_ORDER_ID),
+      orderTask: offloadOrderTask("blocked", { worker: "muscle-2", epoch: 1, ts_iso: "2026-07-24T12:00:00Z" }),
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -2661,7 +2885,10 @@ function sessionsOf(d, state) {
 export function route(name, method, path, state) {
   const scen = SCENARIOS[name] || SCENARIOS[DEFAULT_SCENARIO];
   const d = scen.data;
-  const p = String(path || "").split("?")[0];
+  // Strip any absolute origin first (mock.js extracts pathname; smoke passes
+  // the raw URL): the MVP-0 roster read is browser-direct against the MAIN's
+  // absolute URL, and both harnesses must land it on the same /v1 arm.
+  const p = String(path || "").replace(/^https?:\/\/[^/]+/, "").split("?")[0];
 
   // OAuth provider list is fetched unauthenticated on the sign-in screen.
   if (p === "/v1/auth/oauth/providers") return { status: 200, body: { providers: [] } };
@@ -2737,6 +2964,37 @@ export function route(name, method, path, state) {
         }),
       },
     };
+  }
+
+  // MVP-0 Personal Dev Fleet: the app-token mint + the main's roster. The
+  // browser reads the roster app-token-direct off the MAIN's absolute URL;
+  // mock.js path-matches by pathname, so the cross-origin read still lands
+  // here and the ONLINE presence chip is previewable.
+  if (method === "POST" && /^\/v1\/barkparks\/[^/]+\/app-token$/.test(p)) {
+    return {
+      status: 200,
+      body: { token: "tok-preview-app", workspace_id: "ws-preview", permissions: ["read", "write", "chat"], expires_at: tPlus(3600) },
+    };
+  }
+  if (method === "GET" && p === "/v1/fleet/roster") {
+    return { status: 200, body: { documents: d.fleetRoster || [] } };
+  }
+  if (method === "POST" && p === "/v1/fleet/supports") {
+    return d.addSupport || { status: 202, body: { ok: true } };
+  }
+  // MVP-0 offload (pdf-mvp0-offload-spa): the order is FILED via the browser-
+  // direct mutate seam and WATCHED via GET /v1/tasks/:id — both land here (the
+  // absolute origin is already stripped above). The mutate answers success
+  // unless a scenario pins the publish-wall 422 via d.orderMutate; the task read
+  // returns the scenario's order doc in its {ok, doc} envelope, else 404.
+  if (method === "POST" && /^\/v1\/data\/mutate\/[^/]+$/.test(p)) {
+    return d.orderMutate || { status: 200, body: { transactionId: "tx-preview", results: [] } };
+  }
+  const offloadTaskMatch = p.match(/^\/v1\/tasks\/([^/]+)$/);
+  if (method === "GET" && offloadTaskMatch) {
+    return d.orderTask
+      ? { status: 200, body: { ok: true, doc: d.orderTask } }
+      : { status: 404, body: { ok: false, error: "task not found" } };
   }
 
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };

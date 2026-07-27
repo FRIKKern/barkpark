@@ -67,6 +67,21 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
             "content" => [%{"type" => "text", "value" => "The gate is green."}]
           },
           %{
+            "type" => "list",
+            "items" => [
+              [%{"type" => "text", "value" => "First semantic bullet"}],
+              [%{"type" => "text", "value" => "Second semantic bullet"}]
+            ]
+          },
+          %{
+            "type" => "list",
+            "ordered" => true,
+            "items" => [
+              [%{"type" => "text", "value" => "First semantic step"}],
+              [%{"type" => "text", "value" => "Second semantic step"}]
+            ]
+          },
+          %{
             "type" => "task-list",
             "snapshot" => [%{"title" => "ship the email view", "status" => "done"}]
           }
@@ -102,6 +117,16 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
     assert html =~ "The full deck, mailed"
     assert html =~ "#e7f2ec"
     assert html =~ "ship the email view"
+
+    # Canonical PortableDoc lists retain semantic structure in the actual email
+    # endpoint, rather than degrading to presentation-only flex rows.
+    assert html =~ "<ul"
+    assert html =~ "<ol"
+    assert length(Regex.scan(~r/<li(?:\s|>)/, html)) == 4
+    assert html =~ "First semantic bullet"
+    assert html =~ "First semantic step"
+    refute html =~ "• "
+    refute html =~ "flex-direction"
   end
 
   test "unknown slug is a plain 404", %{conn: conn} do

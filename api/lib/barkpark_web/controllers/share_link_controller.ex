@@ -127,26 +127,34 @@ defmodule BarkparkWeb.ShareLinkController do
   defp serve(conn, %ShareLink{kind: "media"} = link) do
     case Media.get_file(link.ref_id, scope(link)) do
       {:ok, file} ->
-        full = Media.file_path(file.path)
+        # PUBLIC anonymous path — the same stored-XSS defense the MediaController
+        # serve edge applies (nosniff + collapse svg/html/xml/js to a
+        # non-executable octet-stream + `attachment`). Ingest neutralizes NEW
+        # uploads and the backfill migration fixed existing rows, but harden the
+        # edge too so no future write path can serve an executable type here.
+        # The redirect branch (object-storage backend) bakes the SAME collapsed
+        # type + disposition into the presigned query, so the bucket echoes them.
+        mime = file.mime_type || "application/octet-stream"
+        disposition = if MediaFile.dangerous_mime?(mime), do: "attachment", else: "inline"
 
-        if File.exists?(full) do
-          # PUBLIC anonymous path — the same stored-XSS defense the MediaController
-          # serve edge applies (nosniff + collapse svg/html/xml/js to a
-          # non-executable octet-stream + `attachment`). Ingest neutralizes NEW
-          # uploads and the backfill migration fixed existing rows, but harden the
-          # edge too so no future write path can serve an executable type here.
-          mime = file.mime_type || "application/octet-stream"
+        case Barkpark.Media.Blobstore.serve_strategy(file.path,
+               response_content_type: MediaFile.serve_content_type(mime),
+               response_content_disposition: disposition
+             ) do
+          {:file, full} ->
+            conn
+            |> put_resp_content_type(MediaFile.serve_content_type(mime))
+            |> put_resp_header("x-content-type-options", "nosniff")
+            |> put_resp_header("content-disposition", disposition)
+            |> send_file(200, full)
 
-          conn
-          |> put_resp_content_type(MediaFile.serve_content_type(mime))
-          |> put_resp_header("x-content-type-options", "nosniff")
-          |> put_resp_header(
-            "content-disposition",
-            if(MediaFile.dangerous_mime?(mime), do: "attachment", else: "inline")
-          )
-          |> send_file(200, full)
-        else
-          not_found_json(conn)
+          {:redirect, url} ->
+            conn
+            |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
+            |> redirect(external: url)
+
+          {:error, :not_found} ->
+            not_found_json(conn)
         end
 
       _ ->

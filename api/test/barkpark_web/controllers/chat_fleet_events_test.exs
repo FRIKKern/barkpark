@@ -156,6 +156,37 @@ defmodule BarkparkWeb.ChatFleetEventsTest do
     end
   end
 
+  # ── B2. the snapshot is the ACTIVE fleet — the shelf is not in the handshake ──
+
+  describe "fleet snapshot excludes the archived shelf" do
+    test "an archived session leaves the snapshot, and unarchiving puts it back" do
+      ws = create_workspace!()
+      kept = session_in!({:workspace, ws.id}, "working")
+      shelved = session_in!({:workspace, ws.id}, "working")
+
+      ids = fn scope -> StudioChat.fleet_snapshot(scope) |> Enum.map(& &1.session_id) end
+
+      assert shelved in ids.(:global), "both sessions start on the active fleet"
+
+      {:ok, _} = StudioChat.archive_session(shelved, ws.id)
+
+      # The handshake snapshot is what a fresh client's WHOLE herd is seeded
+      # from, and archiving is DISMISSAL: a shelved session keeps running and
+      # keeps its agent_state, so nothing but this filter keeps it out of the
+      # roster. Without it a dismissed session reappears on every reconnect —
+      # wearing a live "working" pill, since the state is genuinely current.
+      refute shelved in ids.(:global), "an archived session must not ride the fleet snapshot"
+      refute shelved in ids.(ws.id), "…in a workspace scope either (same seam)"
+      assert kept in ids.(ws.id), "the active sibling must still be in the snapshot"
+
+      # And the exclusion is a FILTER, not a one-way deletion: the row returns
+      # the moment it is put back, with no state to rebuild.
+      {:ok, _} = StudioChat.unarchive_session(shelved, ws.id)
+      assert shelved in ids.(:global)
+      assert shelved in ids.(ws.id)
+    end
+  end
+
   # ── C. fail-closed scope SEAMS 2+3 — the shared term twin (criterion 2) ─────
 
   describe "scope_match?/2 — byte-faithful term twin of scope_sessions/2" do

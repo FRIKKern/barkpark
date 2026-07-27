@@ -36,7 +36,16 @@ defmodule BarkparkCloud.Registry.Deployment do
   # content-publish receiver, which enqueued this build). The wish's "observable —
   # content-triggered, not manual" bar reads straight off this column; it rides
   # through `deployment_json/1` (the SOLE base serializer) to every deployment view.
-  @triggers ~w(manual content-auto)
+  #
+  # stw9 (charter D57) adds "template-auto": the hourly `TemplateFreshnessWorker`
+  # sweep, which re-enqueues an UNFORCED build for every deployed content-bound
+  # site so a merged TEMPLATE change reaches live sites without a human. It is a
+  # THIRD provenance on purpose — a deploy stream that labelled a scheduled sweep
+  # "manual" would lie about who asked, and one labelled "content-auto" would lie
+  # about what changed. An unlisted value is REJECTED by
+  # `validate_inclusion(:trigger, @triggers)`, so the worker's rows would never
+  # insert without this entry.
+  @triggers ~w(manual content-auto template-auto)
 
   # The legal from → to status graph the moduledoc promises. `live`, `failed`,
   # and `cancelled` are terminal (no outgoing edges). A same-status write is

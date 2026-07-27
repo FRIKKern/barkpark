@@ -120,14 +120,63 @@ defmodule Barkpark.Plugins.Indx.Lifecycle do
     _ -> false
   end
 
+  # Schema-visibility gate (search-template W10 / D62). With the flag ON, a
+  # save of a NON-PUBLIC-visibility type must never enqueue an upsert: the
+  # live index deliberately excludes non-public types ("never index a type a
+  # public reader can't fetch" — the rebuild path's own invariant), so an
+  # ungated upsert re-contaminates it on the very next private-type save. The
+  # predicate is the same ALLOWLIST the query route + search retriever +
+  # worker rebuild all use (`Content.schema_public?/3`: visibility MUST be
+  # "public"). Routing:
+  #
+  #   * public       → upsert (today's flag-ON behaviour, unchanged)
+  #   * non-public   → no job at all (nothing in the index to update; the
+  #                    delete/unpublish path stays ungated and still purges)
+  #   * unresolvable (no type on the doc, or the schema read crashed) →
+  #                    REBUILD — it derives its own public-only corpus, so it
+  #                    is safe regardless of what this doc is
   defp do_enqueue_upsert(doc, dataset) do
     case doc_id(doc) do
       id when is_binary(id) and id != "" ->
-        finish(IndexerWorker.enqueue_upsert(dataset, id, scope_opts(doc)), dataset, "upsert")
+        case type_visibility(doc, dataset) do
+          :public ->
+            finish(IndexerWorker.enqueue_upsert(dataset, id, scope_opts(doc)), dataset, "upsert")
+
+          :non_public ->
+            :ok
+
+          :unknown ->
+            do_enqueue_rebuild(doc, dataset)
+        end
 
       _ ->
         do_enqueue_rebuild(doc, dataset)
     end
+  end
+
+  # :public | :non_public | :unknown for the doc's type in its own tenancy
+  # scope. Any failure to ANSWER (typeless doc, schema read crash) is
+  # `:unknown`, never a guess — the caller routes it to the safe rebuild.
+  defp type_visibility(doc, dataset) do
+    case types_of(doc) do
+      [type | _] ->
+        opts =
+          []
+          |> maybe_scope(:workspace_id, scope_field(doc, :workspace_id))
+          |> maybe_scope(:project_id, scope_field(doc, :project_id))
+
+        if Barkpark.Content.schema_public?(type, dataset, opts),
+          do: :public,
+          else: :non_public
+
+      [] ->
+        :unknown
+    end
+  rescue
+    # A lifecycle hook must never crash the mutating Content op — and a
+    # visibility we could not read must never admit an upsert (fail closed
+    # onto the rebuild, which filters for itself).
+    _ -> :unknown
   end
 
   defp do_enqueue_rebuild(doc, dataset) do

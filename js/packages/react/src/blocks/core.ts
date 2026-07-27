@@ -41,10 +41,30 @@ const heading: Emit = (b) => {
     raw === 1 || raw === 2 || raw === 3 || raw === '1' || raw === '2' || raw === '3'
       ? Number(raw)
       : 2
-  return `<h${level}>${escapeHtml(str(b.text))}</h${level}>`
+  // Dual-shape body, byte-for-byte the compose.ex heading twin (compose_block
+  // heading): a non-empty `content` inline array composes through the shared
+  // inline dispatcher; otherwise the bare `text` string (escaped). The 16/16
+  // capstone headings persist the `content[]` shape — reading `text` alone left
+  // them rendering an empty `<h2></h2>`.
+  return `<h${level}>${renderInlines(paragraphInline(b))}</h${level}>`
 }
 
-const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
+// The h1/h2/h3 authoring-drift aliases (charter D57), the JS twin of compose.ex's
+// @heading_aliases clause. The level comes from the TYPE, not from `level`: SIX
+// of the 18 drifted headings (1 h2 + all 5 h3s) carry no `level` key, so
+// `h3: heading` alone would emit `<h2>`. Spreading the level in makes the type
+// authoritative — zero live blocks contradict their own type spelling.
+const headingAtLevel =
+  (level: 1 | 2 | 3): Emit =>
+  (b) =>
+    heading({ ...b, level } as Block)
+
+// Swept sibling of the heading/list content[] defect: eyebrow read `text` alone,
+// so the 3 live eyebrows persisted as `{content:[…]}` rendered an empty
+// `<p class="bp-role-eyebrow"></p>`. The `text` path is byte-identical (the
+// fallback only fires when `content` is absent/empty), so the golden parity
+// fixture is untouched.
+const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${renderInlines(paragraphInline(b))}</p>`
 
 // scaffy:add-block-type Tabs MARK:js-emitter-tabs
 // Mirrors compose_block(tabs) (compose.ex, :article leg): a tab strip
@@ -457,8 +477,27 @@ const pullquote: Emit = (b) =>
 const list: Emit = (b) => {
   const tag = b.ordered === true ? 'ol' : 'ul'
   const items = asList(b.items)
-  const inner = items.map((item) => `<li><span>${renderInlines(normalizeListItem(item))}</span></li>`).join('')
+  const inner = items.map((item) => `<li><span>${renderInlines(itemInlines(item))}</span></li>`).join('')
   return `<${tag}>${inner}</${tag}>`
+}
+
+// The inline content of ONE list item, whatever authored shape it took. The RN
+// twin is apps/mobile/src/papers/portabledoc/model.ts `itemInlines` (shipped
+// af9d64d61) — the reference normalization, ported here rather than re-derived:
+//
+//   array  → inline nodes verbatim
+//   string → JSON-decoded inline array (see normalizeListItem), else plain text
+//   map    → its own `content` inline array, else its bare `text` (the D12
+//            content||text law the heading emitter already carries)
+//
+// The MAP arm is the fix: it is the DOMINANT authored shape in the live corpus
+// (2,033 of 10,455 published list items scanned 2026-07-25 across 537 papers),
+// and `renderInlines` returns '' for a map — so every one of those items shipped
+// as an empty `<li><span></span></li>` on web. Same defect class as the
+// content[]-shape heading fix (289b46b1a / PR #6009), a different emitter.
+function itemInlines(item: unknown): unknown {
+  const n = normalizeListItem(item)
+  return isMap(n) ? paragraphInline(n as Block) : n
 }
 
 // Decode a list item persisted as a JSON-encoded inline array (the drifted
@@ -852,7 +891,10 @@ const statusLegend: Emit = () => {
 function noteItemHtml(item: unknown): string {
   const m = isMap(item) ? item : {}
   const label = escapeHtml(str(m.label))
-  const text = escapeHtml(str(m.text))
+  // Swept sibling of the heading/list content[] defect: the note body read
+  // `text` alone, blanking the live note persisted as `{content:[…]}`. The
+  // `text` path is byte-identical, so notes.golden.json is untouched.
+  const text = renderInlines(paragraphInline(m as Block))
   const lead = str(m.lead).trim()
   const leadHtml = lead === '' ? '' : `<b>${escapeHtml(lead)}</b> `
   return `<div class="bp-note"><span class="bp-note__k">${label}</span><div class="bp-note__d">${leadHtml}${text}</div></div>`
@@ -1152,6 +1194,11 @@ const roadmap: Emit = (b) => {
 
 export const coreEmitters: Record<string, Emit> = {
   heading,
+  // h-tag spellings → heading at the level the TYPE names (charter D57): 18 live
+  // blocks emitted `bp-unknown-block` on every surface until this landed.
+  h1: headingAtLevel(1),
+  h2: headingAtLevel(2),
+  h3: headingAtLevel(3),
   eyebrow,
   byline,
   ingress,
@@ -1166,6 +1213,9 @@ export const coreEmitters: Record<string, Emit> = {
   'bulleted-list': list,
   bulleted_list: list,
   numbered_list: numberedList,
+  // `ordered-list` is the same emitter under a second spelling (charter D57) — 2
+  // live blocks, both with map-shaped items the list emitter already normalizes.
+  'ordered-list': numberedList,
   quote: blockquote,
   callout,
   code,

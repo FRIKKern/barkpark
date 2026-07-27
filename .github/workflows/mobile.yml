@@ -1,0 +1,103 @@
+name: mobile
+
+# The apps/mobile gate (charter D3): typecheck + lint + jest, ALL blocking,
+# modeled on js-tests.yml. Paths cover the app itself, the ROOT workspace
+# file it is a member of, and this workflow — hundesteder is the live
+# zero-CI silent-skip precedent this paths block prevents.
+#
+# THREE PATHS OUTSIDE apps/mobile ARE IN SCOPE, each for the same reason: the
+# mobile jest suite consumes a generator-owned or canonical artifact DIRECTLY, so
+# a change to that artifact can break mobile without touching a single
+# apps/mobile file. Without the path, the break goes invisible here and lands
+# MISATTRIBUTED on whatever mobile PR runs next.
+#
+#   internal/pdrender/testdata/**            the generator-owned chat toolrows
+#     fixture (`mix barkpark.chat.gen_golden_toolrows`), imported by
+#     __tests__/chatRenderers.test.tsx — mobile is its third consumer.
+#   js/packages/react/src/**                 the CANONICAL block registry.
+#     __tests__/registryParity.test.ts live-imports REGISTERED_TYPES from
+#     js/packages/react/src/blocks/registry by deep relative SOURCE path and
+#     asserts mobile ≡ react ∖ EXCLUSIONS with an EMPTY exclusions ledger
+#     (charter D48). Adding an emitter there and nothing here is exactly the
+#     drift that tripwire exists to catch — so the canonical change must RUN it.
+#   api/test/support/fixtures/pd-parity/**   the 60-file cross-surface parity
+#     corpus (`mix barkpark.portable_doc.gen_pd_parity`), read off disk by
+#     __tests__/crownFloor.test.tsx, which drives every fixture through the RN
+#     dispatcher in both registers and requires zero unknown blocks (D51). A
+#     regen that adds a type is a NEW obligation for mobile, and this path is
+#     what makes the regen PR the place it surfaces.
+#
+# Churn cost of the two additions was measured before taking it: ~1.2% more
+# mobile-gate runs.
+#
+# NO EAS job (charter D3: explicit no for wave 1 — zero EXPO_TOKEN secrets
+# exist; revisit when store distribution is scoped).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "internal/pdrender/testdata/**"
+      - "js/packages/react/src/**"
+      - "api/test/support/fixtures/pd-parity/**"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+      - "internal/pdrender/testdata/**"
+      - "js/packages/react/src/**"
+      - "api/test/support/fixtures/pd-parity/**"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/mobile.yml"
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  # Never cancel main (the 2026-06-10 elixir starvation lesson); collapse
+  # superseded PR runs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: Typecheck + lint + jest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      # Root-workspace install: apps/mobile is a member of the ROOT
+      # pnpm-workspace.yaml (charter D2), so the lockfile lives at the repo
+      # root and @barkpark/core + @barkpark/react resolve as workspace links.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The SDK packages publish only dist/ — typecheck resolves their
+      # declaration files, so both must be built first (same two-step ci.yml
+      # uses for web; react AFTER core because its DTS imports core's).
+      - name: Build @barkpark/core (workspace-linked dependency)
+        run: pnpm --filter @barkpark/core build
+
+      - name: Build @barkpark/react (workspace-linked dependency)
+        run: pnpm --filter @barkpark/react build
+
+      - name: Typecheck
+        working-directory: apps/mobile
+        run: pnpm typecheck
+
+      - name: Lint
+        working-directory: apps/mobile
+        run: pnpm lint
+
+      - name: Test
+        working-directory: apps/mobile
+        run: pnpm test

@@ -90,6 +90,20 @@ config :barkpark_cloud, BarkparkCloud.Web.Router,
 # tokens are rejected). runtime.exs reads WORKER_TOKEN in prod.
 config :barkpark_cloud, :worker_token, "worker-token-test-fixed"
 
+# push-relay spike: the process-local fake push transport. Worker tests run
+# jobs in-process via Oban.Testing's perform_job/2, so the fake programs its
+# verdict and records sends in the TEST process's dictionary (no global state,
+# async-safe).
+config :barkpark_cloud, :push_adapter, BarkparkCloud.PushFakeAdapter
+
+# push-relay BUILD: the HTTP BOUNDARY fake, one level below the adapter seam
+# above. The REAL APNs/FCM adapters are exercised through this — their JWTs,
+# URLs, headers and status→verdict mapping run for real; only the socket is
+# fake. Adapter tests set :push_adapter to the real module for their own
+# duration (the line above stays the default so the worker suite is untouched)
+# and program responses per request. Process-dictionary backed, so async-safe.
+config :barkpark_cloud, :push_http_client, BarkparkCloud.PushFakeHttpClient
+
 # oban-substrate: manual testing mode — Oban inserts jobs but its queue pollers
 # and Cron plugin do NOT auto-execute, so the SQL.Sandbox stays deterministic.
 # Tests assert enqueues with Oban.Testing and run a job synchronously via

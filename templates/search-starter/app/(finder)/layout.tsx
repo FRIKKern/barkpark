@@ -1,7 +1,7 @@
 import { Finder } from "@/components/finder";
 import { DocumentNav } from "@/components/document-nav";
 import { runSearch } from "@/lib/find-search";
-import type { FindResponse } from "@/lib/find";
+import { DEFAULT_ENGINE, type FindResponse } from "@/lib/find";
 import { buildPrefixSeed, type PrefixSeed, type SeedDoc } from "@/lib/prefix-seed";
 import { HoveredDocProvider } from "@/lib/hovered-doc-context";
 import { FinderNavProvider } from "@/lib/finder-nav-context";
@@ -41,10 +41,12 @@ export default async function FinderLayout({
   children: React.ReactNode;
 }) {
   // Seed the master finder with the default browse, same as the old home page.
-  // Swallow origin hiccups → null lets the Finder fall back to its client fetch.
+  // `runSearch` already degrades an engine failure honestly (one Postgres retry
+  // + `indxUnavailable`), so this catch fires ONLY on total upstream failure —
+  // null then lets the Finder fall back to its client fetch instead of a 500.
   const r = await runSearch({
     q: " ",
-    engine: "indx",
+    engine: DEFAULT_ENGINE,
     browse: true,
   }).catch(() => null);
   // Don't surface a stale prerendered latency number — the readout fills in on
@@ -76,7 +78,7 @@ export default async function FinderLayout({
               variant="master"
               initialData={initialData}
               initialSeed={initialSeed}
-              initialEngine="indx"
+              initialEngine={DEFAULT_ENGINE}
             />
           </aside>
           <DocumentNav>{children}</DocumentNav>

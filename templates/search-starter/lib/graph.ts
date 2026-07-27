@@ -63,6 +63,14 @@ export interface CorpusGraph {
   edges: GraphEdge[];
   /** Highest-degree node id (PREFERRED_ROOT wins when present), or null. */
   rootId: string | null;
+  /** The server cut the corpus at a ceiling — the graph shown is a subset,
+   * and any caption must say so. Covers BOTH server ceilings (fixed by
+   * stw9-backlog-graph-server-honesty): the whole-graph node budget (2000)
+   * AND the 1000-docs-per-type cap, so `false` here really means "complete". */
+  truncated: boolean;
+  /** Upstream truncation cause ("node_budget", "per_type_cap", or
+   * "per_type_cap+node_budget"), null when not truncated. */
+  truncationReason: string | null;
 }
 
 /* ── upstream parsing ───────────────────────────────────────────────────── */
@@ -70,6 +78,8 @@ export interface CorpusGraph {
 interface UpstreamGraph {
   nodes?: unknown[];
   edges?: unknown[];
+  truncated?: unknown;
+  truncation_reason?: unknown;
 }
 
 function str(v: unknown): string | undefined {
@@ -176,7 +186,12 @@ async function rawCorpusGraph(): Promise<CorpusGraph> {
     .map(normalizeEdge)
     .filter((e): e is GraphEdge => e !== null && ids.has(e.from_id) && ids.has(e.to_id));
 
-  return { nodes, edges, rootId: computeRootId(nodes, edges) };
+  // Truncation truth, passed through verbatim-but-typed. Strictly `=== true`
+  // so a drifted/absent field degrades to the safe "no claim" state.
+  const truncated = json.truncated === true;
+  const truncationReason = truncated ? (str(json.truncation_reason) ?? null) : null;
+
+  return { nodes, edges, rootId: computeRootId(nodes, edges), truncated, truncationReason };
 }
 
 /** Cached variant — 5-min revalidate, tagged GRAPH_TAG + the dataset `_all`
@@ -202,6 +217,6 @@ export async function fetchCorpusGraph(): Promise<CorpusGraph> {
     // revalidation re-populates from the live API once it's healthy.
     return await rawCorpusGraph();
   } catch {
-    return { nodes: [], edges: [], rootId: null };
+    return { nodes: [], edges: [], rootId: null, truncated: false, truncationReason: null };
   }
 }

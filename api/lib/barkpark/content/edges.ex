@@ -265,9 +265,17 @@ defmodule Barkpark.Content.Edges do
 
     from_id = DraftId.published_id(doc_id)
 
+    # `:schemas` is a caller-supplied PREFETCH of this dataset's schema list —
+    # the exact value `Content.list_schemas(dataset, opts)` would return. It
+    # exists because this function is called once PER DOCUMENT while the schema
+    # list is invariant across the whole fold: a 4096-document corpus issued
+    # 4096 identical schema queries (the dominant cost in the /v1/graph
+    # derivation — measured live: a 34s first paint on the flagship demo).
+    # Absent, the read happens exactly as before, so every existing caller keeps
+    # its semantics; `corpus_edges/3` supplies it.
     schema =
-      dataset
-      |> Content.list_schemas(opts)
+      opts
+      |> Keyword.get_lazy(:schemas, fn -> Content.list_schemas(dataset, opts) end)
       |> Enum.find(fn s -> s.name == type end)
 
     case schema do
@@ -653,6 +661,24 @@ defmodule Barkpark.Content.Edges do
 
     type
     |> Content.list_documents(dataset, list_opts)
-    |> Enum.flat_map(fn doc -> extract_edges(doc, opts) end)
+    |> corpus_edges_for_docs(dataset, opts)
+  end
+
+  @doc """
+  `corpus_edges/3` over documents the caller ALREADY holds — same edges, same
+  order, without re-reading the type's documents.
+
+  `/v1/graph` reads every type's published documents to build its node list and
+  then called `corpus_edges/3`, which read them a second time; the corpus graph
+  paid two full document scans per type. The schema list is prefetched ONCE here
+  and threaded into `extract_edges/2` (see its `:schemas` note) instead of being
+  re-queried per document.
+  """
+  @spec corpus_edges_for_docs([map() | Document.t()], String.t(), keyword()) :: [map()]
+  def corpus_edges_for_docs(docs, dataset, opts \\ []) do
+    edge_opts =
+      Keyword.put_new_lazy(opts, :schemas, fn -> Content.list_schemas(dataset, opts) end)
+
+    Enum.flat_map(docs, fn doc -> extract_edges(doc, edge_opts) end)
   end
 end

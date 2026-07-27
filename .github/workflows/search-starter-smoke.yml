@@ -1,0 +1,130 @@
+name: search-starter-smoke
+
+# Browser-level coverage for the search-starter journey (search-template charter
+# D59). Before this workflow the Next edition of the template was certified
+# EXCLUSIVELY by HTTP status codes and source greps — which is how a red "Search
+# failed." banner at first paint, a dead live-search websocket, and 100%
+# soft-404 detail routes all shipped and sat live for nine days. Every one of
+# them returns HTTP 200.
+#
+# TWO JOBS, TWO DIFFERENT QUESTIONS, DELIBERATELY NOT MERGED:
+#
+#   harness-self-test  — "is the smoke harness itself sound?" Runs on every PR
+#     that touches the template or the harness. Boots headless Chrome against
+#     three IN-PROCESS fixtures (healthy / rotten / dead-socket-but-pretty) with
+#     no network at all, and asserts the harness reports green on the first and
+#     the exact expected red on the other two. It certifies the INSTRUMENT.
+#     Path-filtered, fast, and safe to make a required check.
+#
+#   live-journey       — "is the deployed demo actually working right now?"
+#     Scheduled + manually dispatchable, REPORT MODE, never on a PR. It reaches
+#     a live URL, so it can never be a merge gate: a deploy outage is not a
+#     property of anybody's diff. Its exit code is always 0 by design; its
+#     OUTPUT is the signal. This job IS the rot alarm — the thing whose absence
+#     let a broken demo sit unnoticed for nine days.
+#
+# The strict live run (`--strict`, exit 1 on any non-PASS beat) is deliberately
+# NOT wired here. It is the wave-seal evidence, run by hand after a redeploy;
+# scheduling it would red the repo daily for as long as any known defect is
+# knowingly in flight, and a gate that cries wolf is disabled within a wave.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "templates/search-starter/**"
+      - "tooling/search-smoke/**"
+      - ".github/workflows/search-starter-smoke.yml"
+  pull_request:
+    paths:
+      - "templates/search-starter/**"
+      - "tooling/search-smoke/**"
+      - ".github/workflows/search-starter-smoke.yml"
+  schedule:
+    # 06:20 UTC daily — after the nightly content churn, before the working day,
+    # so a demo that rotted overnight is named before anyone shows it to anyone.
+    - cron: "20 6 * * *"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Site base URL to smoke (report mode)"
+        required: false
+        default: "https://guerrilla.barkpark.cloud/sites/search-ember/"
+
+concurrency:
+  group: search-starter-smoke-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  harness-self-test:
+    name: Journey smoke — self-test (fixtures, no network)
+    # Skip on the schedule: there is no diff to certify at 06:20, and the live
+    # job below is the only thing that run exists for.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22: the harness speaks CDP over a bare global WebSocket, which is
+      # stable-by-default only from 22. Under 20 it refuses on the GUARD path
+      # (exit 2) rather than reporting an environment failure as a site defect.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax-check the harness
+        run: node --check tooling/search-smoke/journey-smoke.mjs
+
+      # No setup-chrome action: ubuntu-latest already ships Google Chrome, and
+      # findChrome() honours CHROME first. Pinning it explicitly means a future
+      # runner image that drops the binary exits 2 as a GUARD naming the missing
+      # path, instead of silently falling through to some other browser.
+      - name: Self-test (healthy + rotten + dead-socket fixtures)
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: node tooling/search-smoke/journey-smoke.mjs --self-test
+
+  finder-unit:
+    name: Finder unit specs (dep-free, no browser)
+    # Same reason the astro twin has `astro-search-finder-test`: the browser
+    # smoke certifies the JOURNEY, not the pure helpers the journey depends on.
+    # `curatePopularQueries` decides what the Popular chip row promises, and the
+    # only way to prove "an all-noise pool renders NO row" is to feed it one.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22 strips TypeScript types natively — no npm ci, no build step, so
+      # this job stays seconds-fast and cannot be broken by a dependency.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run the finder unit specs
+        working-directory: templates/search-starter
+        run: node --test 'lib/**/*.test.ts'
+
+  live-journey:
+    name: Journey smoke — live demo (report mode, never gates)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # REPORT MODE. Exit 0 even when beats fail — read the step's output, not
+      # its exit code. `|| true` is NOT used and must not be added: the harness
+      # already distinguishes a site failure (which it reports and swallows)
+      # from an environment failure (exit 2), and `|| true` would erase the
+      # second, turning "Chrome is missing" into a silent green forever.
+      - name: Live journey report
+        env:
+          CHROME: /usr/bin/google-chrome
+          SMOKE_URL: ${{ github.event.inputs.url || 'https://guerrilla.barkpark.cloud/sites/search-ember/' }}
+        run: node tooling/search-smoke/journey-smoke.mjs --url "$SMOKE_URL"

@@ -803,6 +803,26 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     post("/login-tickets", LoginTicketController, :create)
+
+    # ── Mobile app-token exchange, instance half (mobile charter D4) ──────
+    # POST /v1/auth/app-tokens — admin-bearer-gated in the controller (the
+    # mint_login_ticket idiom): the Cloud control plane proves possession of
+    # the stored per-instance admin token server-side and gets back a
+    # member-shaped, workspace-bound [read,write,chat] token for the calling
+    # cloud user (JIT-provisioned member, charter D5). The admin credential
+    # never reaches the member; the plaintext minted token is the payload.
+    post("/app-tokens", AppTokenController, :create)
+
+    # ── App-token revoke, instance half (wave 2, mob-w2-app-token-revoke) ──
+    # DELETE /app-tokens — admin-bearer-gated body revoke ({"token": raw}, or
+    # {"email": e} → every live "app:<e>"-labelled token). DELETE …/current —
+    # the bearer revokes ITSELF (possession is the authorization; admin
+    # bearers refused so the stored custody credential can't self-destruct).
+    # Both only SET revoked_at: Auth.verify_token/1 already filters revoked
+    # rows in its WHERE clause, so a revoked token fails closed on its next
+    # use with zero read-path changes.
+    delete("/app-tokens/current", AppTokenController, :delete_current)
+    delete("/app-tokens", AppTokenController, :delete)
   end
 
   # ── Bulldocs paper reader (LiveView) ────────────────────────────────────
@@ -1721,6 +1741,14 @@ defmodule BarkparkWeb.Router do
     post("/sessions/:id/messages", ChatController, :create_message)
     post("/sessions/:id/interrupt", ChatController, :interrupt)
     post("/sessions/:id/approval", ChatController, :approval)
+
+    # Archive shelf flips (charter D28): POST verbs (NOT a PATCH key — archived
+    # is lifecycle, not a continuity field), same tenant oracle as every other
+    # id route. They ride THIS :require_chat_access scope, never the
+    # :registered_chat_host scope below.
+    post("/sessions/:id/archive", ChatController, :archive)
+    post("/sessions/:id/unarchive", ChatController, :unarchive)
+
     get("/sessions/:id/events", ChatController, :events)
   end
 
