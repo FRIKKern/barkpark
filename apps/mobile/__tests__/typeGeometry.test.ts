@@ -394,8 +394,10 @@ const CENSUS: Record<string, Record<string, number>> = {
     'scale.xs': 2,
   },
   'papers/portabledoc/blocks/core-doc.tsx': {
-    'scale.base': 2,
-    'scale.sm': 1,
+    'scale.base': 5,
+    'scale.md': 1,
+    'scale.micro': 12,
+    'scale.sm': 12,
     'scale.xs': 1,
   },
   'papers/portabledoc/blocks/core-media.tsx': {

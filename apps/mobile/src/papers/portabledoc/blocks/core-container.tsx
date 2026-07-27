@@ -7,10 +7,10 @@
 // BLOCK_RENDERERS, which is a const assembled from spreads and therefore
 // undefined while the family modules evaluate.
 import type { ReactNode } from 'react'
-import { Text, View } from 'react-native'
+import { Linking, Text, View } from 'react-native'
 
 import { roles, scale } from '../../../ui/typography'
-import { asList, isMap, num, str, type Block } from '../model'
+import { asList, isMap, num, openableUrl, str, type Block } from '../model'
 import { MONO, type Render } from '../register'
 import { renderBlockNative } from '../registry'
 
@@ -196,20 +196,41 @@ const toc: Render = (b, ctx, key) => {
   )
 }
 
-/* action — a tappable link button */
+/* action — a tappable link button. It LOOKED tappable and was not: the renderer
+ * dropped `href` entirely, so every action block shipped as a dead underlined
+ * label. The href now opens through Linking behind the openableUrl gate — the
+ * same gate and the same honest no-op catch the inline link folder uses, so an
+ * unsafe/relative href still renders its label as inert accent text rather than
+ * a tap target that goes nowhere. An EMPTY label still renders nothing (editor
+ * scaffolding), href or no href. */
 
 const action: Render = (b, ctx, key) => {
   const label = str(b.label)
   if (label === '') return null
+  const style = {
+    ...scale.md,
+    color: ctx.theme.accent,
+    fontWeight: '700' as const,
+    textDecorationLine: 'underline' as const,
+    marginVertical: 6,
+  }
+  const url = openableUrl(b.href)
+  if (url === undefined) {
+    return (
+      <Text key={key} style={style}>
+        {label}
+      </Text>
+    )
+  }
   return (
     <Text
       key={key}
-      style={{
-        ...scale.md,
-        color: ctx.theme.accent,
-        fontWeight: '700',
-        textDecorationLine: 'underline',
-        marginVertical: 6,
+      accessibilityRole="link"
+      style={style}
+      onPress={() => {
+        Linking.openURL(url).catch(() => {
+          // Honest no-op: a link that cannot open must never crash the reader.
+        })
       }}
     >
       {label}
