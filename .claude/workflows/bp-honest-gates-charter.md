@@ -127,3 +127,28 @@ The required set on day one is deliberately minimal: **the shim's stable aggrega
 **Filed this wave:** 11 backlog children, plus `hg-bl-pr-task-gate-expected-worker-actor-drift` (filed by the reviewer on the S3 builder's own disclosure — `EXPECTED_WORKER` now compares against `closed_by` for done tasks, zero impact today because no author map exists, a false red the day one does).
 
 **Next wave takes branch protection (wave-2 item 1) first.** D13 is the load-bearing gap: nothing here is required-by-name, so every ratchet this wave built is advisory. The path-filter skip-shim is its first step, and it now has four real ratchets worth protecting.
+
+### Wave 2026-07-27 (2), round 1 — the four prerequisites, built and reviewed, grade A−
+
+**Round 1 of three. Four slices built, reviewed, gate-green, pushed with PRs open. Nothing is on main yet, and protection is NOT enabled — that is S7, round 3, by design (the sequenced-rounds law), not a shortfall.**
+
+| Slice | Final branch | Verdict |
+|---|---|---|
+| S1 skip-shim + aggregator | `…skip-shim-for-elixir-yml-a-dispatcher-jo-0-r` | The keystone. `elixir.yml` gains a fail-closed dispatcher, job-level gates on two authored path sets, and `Elixir gate` — the first `if: always()` job-level aggregator in the repo, asserting on every `needs.*.result` against an explicit allow-set. Path sets live in the ratchet that proves them, so filter and proof cannot drift. 83 harness assertions, all executing step bodies extracted from the real YAML. |
+| S2 Sobelow honest baseline | `…sobelow-honour-inline-annotations-in-the-1-r` | `--skip` flipped as its own commit; 26 self-swallowed waivers deleted (pure deletion, 134 → 108); the inline-overlap ratchet built AND wired into `security.yml` as a blocking job; `qi/1`'s false "catalog-derived" waiver corrected to the truth (request-derived behind quoting + an admin gate). |
+| S3 pr-task-gate honesty | `…pr-task-gate-a-reachable-neutral-a-grand-2-r` | D24 (unreachable neutral → bounded retry then an honest red), D25 (three-state grandfather), D23 (lapsed-claim grace, 6h, with the `released_at ≥ expired_at` ordering clause hermetically fixtured), D26 (harness runs in `pr-task-gate.yml` itself, unfiltered, not a `needs:` of the gate). 30 → 62 fixtures. |
+| S5 CI verdict reader | `…the-ci-verdict-reader-stops-lying-adviso-3-r` | The name regex is DELETED, not widened: advisory now derives from the check-suite rollup, with a third value `cannot_tell` where GitHub genuinely does not say. `cancelled` leaves the red set and gets a three-valued classifier. First harness this script has ever had, pinned to two frozen shas so a sibling task making Sobelow green cannot green it vacuously. |
+
+**What the reviewer fixed in place** — four defects, each one a hole the builder had NAMED and could not close from inside their own fence:
+
+1. **S1's aggregator could not see a job nobody told it about.** The allow-set catches a `continue-on-error` job wrongly added to `needs`; nothing caught a BLOCKING job wrongly LEFT OUT — it would red while the required context stayed green. Harness case 8 now asserts `blocking_not_in_needs` is empty, mutation-proven. This bites immediately: S4 adds the ceiling job and must wire it in.
+2. **S2's ratchet ran nowhere.** `security.yml` was outside the builder's fence, so the tripwire was a ratchet in name only. It is now a blocking `sobelow-inline-overlap` job — no BEAM, no deps, ~1s, and deliberately NOT `continue-on-error`: unlike the fingerprint comparison it is deterministic and toolchain-independent, so it has no honest reason to be advisory.
+3. **S3's lapse grace was satisfiable by a FUTURE timestamp.** `now − expired_at ≤ grace` is true for any expiry ahead of the clock, so one hand-patched field bought an indefinite waiver. Now reds below −300s (a reap cannot stamp a future expiry; 300s absorbs clock skew), two fixtures, mutation-proven.
+4. **S3's harness shelled out to `lsof`/`ss` to find its own port** — and it now runs on every PR, so a runner image without them would red every PR for a reason unrelated to any PR. The fixture server announces its own port; the dependency is gone.
+5. **S5 broke its only consumer.** `ci.failures[].advisory` went boolean → string, and `release-curator.md` still filtered `advisory:false` — which now matches nothing, so on a genuinely red main the curator would report ZERO failing checks. Fixed in place, with a new `ci.status == "unknown"` clause telling the curator not to call main jammed on a superseded run.
+
+**Cross-slice**: the four `-r` branches merge onto `origin/main` with zero conflicts (file sets are disjoint), and all four ratchets are green in that one integrated tree.
+
+**Two honest gaps the lead must carry into merge.** (a) **Nothing here has run on GitHub.** Every proof is a local execution of the real step body under the env GitHub is documented and charter-measured to populate. That proves the DECISIONS; it does not prove the platform. `hgw2-s1-live-aggregator-proof` is filed for the three live runs, and S6 cannot pin the required name until it lands. (b) **S2's baseline was PRUNED, not regenerated** on the pinned toolchain — a strict subset of the real regeneration, keyed on baseline line numbers that may already have drifted, so the Sobelow job's own log must be READ on that PR, not inferred from a green tick.
+
+**Round 2 dispatches on merge**: S4 (format ceiling reland) and S6 (required-check spec) both wait solely on S1 landing; S7 (enable protection) waits on S3 + S4 + S6.
