@@ -436,12 +436,18 @@ const CENSUS: Record<string, Record<string, number>> = {
     'scale.sm': 2,
     'scale.xs': 4,
   },
+  'papers/portabledoc/blocks/sheet.tsx': {
+    'scale.base': 1,
+    'scale.sm': 1,
+    'scale.xs': 2,
+  },
   'papers/portabledoc/blocks/table.tsx': {
     'scale.sm': 2,
   },
   'papers/portabledoc/blocks/taskboard.tsx': {
     'scale.base': 3,
-    'scale.sm': 1,
+    'scale.micro': 5,
+    'scale.sm': 4,
   },
   'papers/portabledoc/chat.tsx': {
     'roles.chatApparatus': 4,
