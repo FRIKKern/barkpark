@@ -161,7 +161,7 @@ describe('registry tripwire (charter D31)', () => {
     // live deep import of react's REGISTERED_TYPES) lands at crown.
   })
 
-  it('enumerates the 7 function-identity aliases — numbered_list is NOT one', () => {
+  it('enumerates the 8 function-identity aliases — numbered_list is NOT an alias of list', () => {
     const aliasOf: [string, string][] = [
       ['bulletList', 'list'],
       ['bullet_list', 'list'],
@@ -170,20 +170,28 @@ describe('registry tripwire (charter D31)', () => {
       ['quote', 'blockquote'],
       ['stat-grid', 'stats'],
       ['task-list', 'tasks'],
+      // charter D57: `ordered-list` is a second spelling of numbered_list, not a
+      // second implementation — the shared identity is the record of that.
+      ['ordered-list', 'numbered_list'],
     ]
     for (const [alias, canonical] of aliasOf) {
       expect(BLOCK_RENDERERS[alias]).toBe(BLOCK_RENDERERS[canonical])
     }
-    // The alias set is exactly 7: every OTHER key is its own function.
+    // The alias set is exactly 8: every OTHER key is its own function.
     const aliases = Object.keys(BLOCK_RENDERERS).filter((k) =>
       Object.keys(BLOCK_RENDERERS).some((j) => j !== k && BLOCK_RENDERERS[j] === BLOCK_RENDERERS[k]),
     )
     expect(aliases.sort()).toEqual(
-      ['bulletList', 'bullet_list', 'bulleted-list', 'bulleted_list', 'list', 'blockquote', 'quote', 'stat-grid', 'stats', 'task-list', 'tasks'].sort(),
+      ['bulletList', 'bullet_list', 'bulleted-list', 'bulleted_list', 'list', 'blockquote', 'quote', 'stat-grid', 'stats', 'task-list', 'tasks', 'numbered_list', 'ordered-list'].sort(),
     )
-    // numbered_list is a DISTINCT ordered:true wrapper, never an alias of list.
+    // numbered_list stays a DISTINCT ordered:true wrapper — never an alias of the
+    // UNORDERED list, which is what this pin has always been about. The h1/h2/h3
+    // aliases are likewise distinct closures (each binds its own level).
     expect(BLOCK_RENDERERS.numbered_list).not.toBe(BLOCK_RENDERERS.list)
+    expect(BLOCK_RENDERERS.h1).not.toBe(BLOCK_RENDERERS.heading)
+    expect(BLOCK_RENDERERS.h2).not.toBe(BLOCK_RENDERERS.h3)
     expect(text({ type: 'numbered_list', items: ['a'] })).toContain('1.')
+    expect(text({ type: 'ordered-list', items: ['a'] })).toContain('1.')
     expect(text({ type: 'list', items: ['a'] })).toContain('•')
   })
 

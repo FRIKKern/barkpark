@@ -1,8 +1,8 @@
 // core-prose family — the prose band of react's core family (charter D49):
-// heading, paragraph, eyebrow, byline, ingress, pullquote, list + its four
-// authoring-drift aliases, numbered_list, callout, blockquote + quote,
-// footnote. Every renderer is a PURE function (no hooks) so jest can walk the
-// element trees without a native host.
+// heading + its three h-tag aliases, paragraph, eyebrow, byline, ingress,
+// pullquote, list + its four authoring-drift aliases, numbered_list +
+// ordered-list, callout, blockquote + quote, footnote. Every renderer is a PURE
+// function (no hooks) so jest can walk the element trees without a native host.
 import { Text, View } from 'react-native'
 
 import type { Theme } from '../../../ui/theme'
@@ -41,6 +41,16 @@ const heading: Render = (b, ctx, key) => {
     </Text>
   )
 }
+
+// The h1/h2/h3 authoring-drift aliases (charter D57). The level comes from the
+// TYPE, not from `level`: SIX of the 18 drifted headings (1 h2 + all 5 h3s)
+// carry no `level` key, so `h3: heading` alone would render them at
+// headingLevel's default of 2. Spreading the level in makes the type
+// authoritative — a contradicting stored `level` loses, which is the honest
+// reading of an h-tag spelling. Each call returns a DISTINCT closure, so these
+// three do NOT join the registry's function-identity alias tripwire.
+const headingAtLevel = (level: 1 | 2 | 3): Render => (b, ctx, key) =>
+  heading({ ...b, level }, ctx, key)
 
 const paragraph: Render = (b, ctx, key) => (
   <Text key={key} style={[bodyText(ctx), { marginVertical: 6 }]}>
@@ -232,6 +242,11 @@ const footnote: Render = (b, ctx, key) => {
 
 export const coreProseRenderers: Record<string, Render> = {
   heading,
+  // h-tag spellings → heading at the level the TYPE names (charter D57): 18 live
+  // blocks unknown-boxed on every surface until this landed.
+  h1: headingAtLevel(1),
+  h2: headingAtLevel(2),
+  h3: headingAtLevel(3),
   paragraph,
   eyebrow,
   byline,
@@ -244,6 +259,11 @@ export const coreProseRenderers: Record<string, Render> = {
   'bulleted-list': list,
   bulleted_list: list,
   numbered_list: numberedList,
+  // `ordered-list` is the SAME renderer under a second spelling (charter D57) —
+  // 2 live blocks. Sharing numberedList's identity is deliberate: two closures
+  // doing the same thing would be duplication, and the alias tripwire below
+  // records the shared identity rather than hiding it behind a wrapper.
+  'ordered-list': numberedList,
   callout,
   blockquote,
   quote: blockquote,
