@@ -12,6 +12,7 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
   alias BarkparkWeb.AnonPerspective
+  alias BarkparkWeb.ErrorResponse
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -162,8 +163,15 @@ defmodule BarkparkWeb.QueryController do
   (index-covered by `documents_workspace_project_type_dataset_id_index`).
 
   Perspective is fixed to `:published` (the single perspective agents care
-  about; per-perspective counts change the query shape). FROZEN response shape,
-  which the CLI slice consumes verbatim:
+  about; per-perspective counts change the query shape) and a `?perspective`
+  naming anything else is REFUSED with a 400 (PDS-D303). It used to be read and
+  silently discarded: `?perspective=raw` and `?perspective=zzzbogus` both
+  returned 200 with a byte-identical published body still labelled
+  `"perspective":"published"` — a caller counting drafts got the published
+  number and no way to know. Honouring `raw` here would change a frozen shape
+  AND widen an existence-count surface this design deliberately hides, so the
+  endpoint says no instead of lying. FROZEN response shape, which the CLI slice
+  consumes verbatim:
 
       {"ok": true, "dataset": "<ds>", "perspective": "published",
        "counts": {"<type>": N, ...}}
@@ -176,17 +184,49 @@ defmodule BarkparkWeb.QueryController do
   (existence-hiding, like `backlinks`) — a per-type census across ALL types
   must not surface private-type existence to an anonymous caller.
   """
-  def counts(conn, %{"dataset" => dataset}) do
-    if preview?(conn) or authed?(conn) do
-      json(conn, %{
-        ok: true,
-        dataset: dataset,
-        perspective: "published",
-        counts: published_type_counts(conn, dataset)
-      })
-    else
-      {:error, :not_found}
+  def counts(conn, %{"dataset" => dataset} = params) do
+    cond do
+      # Existence-hiding FIRST: an anonymous caller gets the same 404 whatever
+      # perspective it names, so the refusal below never becomes a probe.
+      not (preview?(conn) or authed?(conn)) ->
+        {:error, :not_found}
+
+      unsupported_perspective(params) ->
+        refuse_perspective(conn, unsupported_perspective(params))
+
+      true ->
+        json(conn, %{
+          ok: true,
+          dataset: dataset,
+          perspective: "published",
+          counts: published_type_counts(conn, dataset)
+        })
     end
+  end
+
+  # `nil` (absent) and "published" are the honoured inputs; anything else comes
+  # back so the refusal can name the value the caller actually sent.
+  defp unsupported_perspective(params) do
+    case Map.get(params, "perspective") do
+      nil -> nil
+      "published" -> nil
+      other -> other
+    end
+  end
+
+  # Canonical 400 `malformed` envelope (code/hint/request_id owned by
+  # Content.Errors), with a message that names the parameter and the one value
+  # this endpoint honours — a refusal a caller can act on, unlike the silent
+  # published body it used to get.
+  defp refuse_perspective(conn, value) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "unsupported perspective #{inspect(value)} on /v1/data/counts — this endpoint " <>
+        "counts the published perspective only; omit ?perspective or pass published",
+      %{parameter: "perspective", supported: ["published"], received: value}
+    )
   end
 
   # ONE grouped aggregate: published docs (drafts.-prefixed ids excluded, the
