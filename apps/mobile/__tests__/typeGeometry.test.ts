@@ -386,6 +386,17 @@ const NAMED: Record<string, string> = {
 // renderer slice moves only its OWN family's rows (D49's recorded shared-file
 // exception; conflicts regen-resolve).
 const CENSUS: Record<string, Record<string, number>> = {
+  // mob-zb-s4's five nav/code natives. The three chatApparatus references are
+  // the mono APPARATUS rows (a diff row, a diff file sub-header, a filetree
+  // row) — the token's own docstring names "a diff line", and using it here
+  // keeps mobile's two diff surfaces (chat-tool-diff and the paper `diff`
+  // block) at one measure instead of two.
+  'papers/portabledoc/blocks/core-code.tsx': {
+    'roles.chatApparatus': 3,
+    'scale.micro': 3,
+    'scale.sm': 2,
+    'scale.xs': 6,
+  },
   'papers/portabledoc/blocks/core-container.tsx': {
     'roles.tocRow': 1,
     'scale.base': 1,
