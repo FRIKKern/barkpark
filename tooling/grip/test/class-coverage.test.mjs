@@ -174,9 +174,23 @@ test("TRIPWIRE never cries wolf: the hyphen-only method flags five census classe
 
 test("TRIPWIRE declares its own blind spot: it requires a hyphen, so seven known class names are invisible to it", () => {
   const INVISIBLE_BY_CONSTRUCTION = ["ADMITTED", "DEMOTED", "REJECTED", "FAILED", "UNAVAILABLE", "CONFLICT", "UNMINTABLE"];
-  const { universe } = scanClassCoverage();
+  const { modules, universe } = scanClassCoverage();
+
+  // NOT VACUOUS: `universe` only ever holds hyphenated ids, so asserting absence
+  // alone would pass for any string at all. The load-bearing half is the FIRST
+  // assertion — each of these is a REAL class literal that lives in the modules
+  // this tripwire scans, and is nonetheless missing from its universe. If a
+  // rename ever gives one of them a hyphen, the second assertion goes red and
+  // the declaration below must be rewritten; if one is deleted outright, the
+  // first goes red and it must be dropped from the list.
+  const sources = modules.map((name) => readFileSync(join(GRIP, name), "utf8")).join("\n");
   for (const id of INVISIBLE_BY_CONSTRUCTION) {
-    assert.ok(!universe.has(id), `${id} is now hyphen-free no longer — the blind-spot declaration below must be rewritten`);
+    assert.match(
+      sources,
+      new RegExp(`(["'\`])${id}\\1`),
+      `${id} is no longer a string literal in tooling/grip/*.mjs — drop it from the blind-spot declaration`,
+    );
+    assert.ok(!universe.has(id), `${id} carries a hyphen now — the blind-spot declaration below must be rewritten`);
   }
   console.log(
     `\n  [BLIND SPOT] This tripwire matches hyphenated UPPERCASE string literals ONLY.` +
