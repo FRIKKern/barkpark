@@ -155,6 +155,19 @@ defmodule Barkpark.Content.Errors do
                          # carries the term, replacing the silent internal_error
                          # the round-3 live fire died on (task-96d8ab2b582818a4).
                          "import_failed",
+                         # Bounded import (PDS W23) — v1/workspace_controller.ex
+                         # spills the request body to disk and extracts member by
+                         # member instead of materialising the bundle in memory.
+                         # Each names a distinct operational failure the caller can
+                         # act on, and each replaces what would otherwise be a
+                         # blind 500: the socket read failed mid-body (400), the
+                         # body exceeded the configured ceiling (413), the spill
+                         # file could not be written (500), and the spill target
+                         # had no room for it (507).
+                         "import_body_read_failed",
+                         "import_body_too_large",
+                         "import_spill_write_failed",
+                         "insufficient_disk_space",
                          # Workspace bundle EXPORT (PDS W3) — v1/workspace_controller.ex:
                          # the export stream failed or timed out before the tar completed.
                          "export_failed",
