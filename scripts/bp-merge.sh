@@ -283,9 +283,26 @@ merged_despite_error() {
   } >&2
   # gh's --delete-branch never reached the remote either, so finish the job
   # through the API, where no local checkout is involved.
-  local head
+  #
+  # THE DELETE IS FENCED, because this is a WRITE on an error path and the
+  # obvious form of it deletes the wrong branch. `headRefName` is a bare branch
+  # name with no repository in it. On a CROSS-REPOSITORY (fork) PR that name
+  # belongs to the FORK, while the DELETE below is addressed to the BASE repo —
+  # so a fork PR from a branch called `staging` would delete THIS repo's
+  # `staging`, which the merge had nothing to do with. Likewise a head that
+  # equals the base branch is never ours to remove. Both are refusals, not
+  # warnings: an unrecoverable write must not proceed on a guess.
+  local head base cross
   head="$(gh pr view "$PR_NUMBER" --json headRefName --jq '.headRefName' 2>/dev/null || true)"
-  if [ -n "$head" ] && [ "$head" != "null" ]; then
+  base="$(gh pr view "$PR_NUMBER" --json baseRefName --jq '.baseRefName' 2>/dev/null || true)"
+  cross="$(gh pr view "$PR_NUMBER" --json isCrossRepository --jq '.isCrossRepository' 2>/dev/null || printf 'true\n')"
+  if [ "$cross" != "false" ]; then
+    echo "bp-merge: head branch '$head' lives in a FORK (or the repository could not be" >&2
+    echo "          determined) — NOT deleting it: that name resolves to a different branch" >&2
+    echo "          in this repo. Delete it in the fork if you want it gone." >&2
+  elif [ "$head" = "$base" ]; then
+    echo "bp-merge: head and base are both '$head' — refusing to delete the base branch." >&2
+  elif [ -n "$head" ] && [ "$head" != "null" ]; then
     if gh api -X DELETE "repos/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/git/refs/heads/$head" >/dev/null 2>&1; then
       echo "bp-merge: deleted the remote head branch '$head'." >&2
     else

@@ -191,6 +191,28 @@ if grep -q 'pr_state() {' "$ROOT/scripts/bp-merge.sh" \
 else
   fail=$((fail + 1)); echo "  FAIL the landed-check is not a state read" >&2
 fi
+# 32/33. THE ONLY WRITE THIS SCRIPT PERFORMS is the remote head-branch delete on
+# the landed-despite-error path, and `headRefName` is a bare branch name that
+# carries no repository. Addressed to the BASE repo, a fork PR's head name
+# resolves to a DIFFERENT branch here — so the delete must be fenced on
+# `isCrossRepository == false` and must never target the base branch. Asserted
+# structurally because the path needs a real merged PR to drive.
+# The field name is anchored on a NON-IDENTIFIER boundary: a bare
+# `grep -q isCrossRepository` also matches `isCrossRepositoryX`, so renaming the
+# field to something gh does not serve would have left this assertion green —
+# the vacuous pass this harness exists to refuse.
+if grep -qE -- '--json isCrossRepository( |$)' "$ROOT/scripts/bp-merge.sh" \
+   && grep -qE -- "--jq '\.isCrossRepository'" "$ROOT/scripts/bp-merge.sh" \
+   && grep -q '\[ "\$cross" != "false" \]' "$ROOT/scripts/bp-merge.sh"; then
+  pass=$((pass + 1)); echo "  ok   32 the head-branch delete is fenced on isCrossRepository (a fork's head name is another branch here)"
+else
+  fail=$((fail + 1)); echo "  FAIL the head-branch delete is unfenced — a fork PR would delete a same-named branch in THIS repo" >&2
+fi
+if grep -q '\[ "\$head" = "\$base" \]' "$ROOT/scripts/bp-merge.sh"; then
+  pass=$((pass + 1)); echo "  ok   33 …and it refuses when head and base are the same branch"
+else
+  fail=$((fail + 1)); echo "  FAIL nothing stops the delete from targeting the base branch" >&2
+fi
 
 # ── the two flags this repo's merge protocol must stop using ─────────────────
 # Comments may DISCUSS them; no executable line may emit them. `--admin` bypasses
