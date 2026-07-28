@@ -839,8 +839,18 @@ test("MENTION-IMMUNITY: a QUOTED destination is still a real invocation, not a m
   assert.equal(deriveLevel(`echo "git show origin/main:api/mix.exs"`), "L6");
 
   // KNOWN RESIDUAL, pinned so it is visible rather than silent: an UNQUOTED
-  // mention under a NON-reader head still promotes. Nothing in 673 committed
-  // rows has this shape; owned by tgw11-bl-level-unquoted-mention-nonreader.
+  // mention under a NON-reader head still promotes. Quote-masking cannot see it
+  // and the READER_HEADS gate does not cover `echo`. Measured: ZERO of the 631
+  // rerun-bearing committed ledger rows have this shape, and the QUOTED form is
+  // correctly L6 — latent, not live, which is why the review did not widen the
+  // head set inside this slice's fence (that is a rule change, not a bug fix).
+  //
+  // NOT FILED AS A TASK, and that is a fact rather than an omission: guerrilla's
+  // /v1/data/mutate doc-CREATE was returning 500/timeout throughout the wave-11
+  // review (request ids GMZYbJhOxSPzcsMACkxR, GMZYdmeCBah-FP4ACz6y), the same
+  // fault tgw9-s1's builder hit. No id is cited here, because citing a task that
+  // does not exist is the dangling pointer this epic refuses. This assertion IS
+  // the pin: whoever fixes the rule gets a failing test that names the decision.
   assert.equal(deriveLevel(`echo ssh root@89.167.28.206`), "L1");
 });
 
