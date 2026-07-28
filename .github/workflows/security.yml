@@ -103,6 +103,15 @@ jobs:
         if: always()
         run: bash scripts/sobelow-fresh-finding-guard.sh
 
+      - name: Anchor-token table still matches the Sobelow detector modules
+        # The blocking staleness ratchet carries a GENERATED detector→token
+        # table so it can run with no deps. This is the only job with a real
+        # Sobelow checkout, so it is the only place the table can be proven
+        # against its source. Advisory like the rest of this job: a Sobelow
+        # version bump that adds a detector should be visible, not a hard stop.
+        if: always()
+        run: bash scripts/sobelow-baseline-staleness-check.sh --verify-tokens deps/sobelow
+
       - name: Upload reconciled Sobelow baseline for human review
         if: always()
         uses: actions/upload-artifact@v4
@@ -129,6 +138,14 @@ jobs:
     # adjacency, so a refactor can silently detach it — the moment the gate is
     # supposed to speak — and a baseline carrying the same finding swallows it.
     # Honest Gates D29.
+    #
+    # This job carries BOTH text-only baseline ratchets (the job id/name is
+    # unchanged because it is referenced by name). The second one is
+    # orthogonal: the overlap check is span-based and baseline-driven, so it
+    # PASSES for a row that drifted out of its annotation span, for a moved
+    # file, and for a file with annotations and zero rows. The staleness check
+    # never looks at annotations — it asks whether each entry's file:line still
+    # holds a construct of its own detector type. Also ~1s, no BEAM.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,6 +155,12 @@ jobs:
 
       - name: No baseline entry duplicates an inline waiver
         run: bash api/scripts/sobelow-inline-overlap-check.sh
+
+      - name: Selftest (the staleness ratchet must be able to fail)
+        run: bash api/scripts/sobelow-baseline-staleness-check.sh --selftest
+
+      - name: Every baseline entry still points at a construct of its own type
+        run: bash api/scripts/sobelow-baseline-staleness-check.sh
 
   mix-audit:
     name: Dependency CVE audit (mix_audit over mix.lock, blocking)
