@@ -1,21 +1,21 @@
 {
-  "_comment": "Happy path. A resolvable successor, zero residue (no live AND no considering rows), every hardcoded gate of charter D89 resolving. The ONLY non-terminal fixture here that may exit 0. `unmeasuredWaivers` names the rung-3 register entry explicitly: a waiver can only arrive through --ledger, so no live run can carry one.",
-  "successor": "cch-fixture-successor-epic",
+  "_comment": "R4. The successor IS the epic, and `forwarded` carries every live row — exactly what fetchRoster(SUCCESSOR) returns when the successor is the epic's own id. Run against an R4-LESS copy of the predicate this fixture SEALS at a=PASS; run against the shipped predicate it is REFUSED before any clause. That pair is the mutation proof that R4 is load-bearing, and it is the fixture form of the live measurement (83 live rows -> forwarded 79, orphans 0, a=PASS).",
+  "successor": "cloud-console-hardening-epic",
   "tasks": {
-    "cch-fixture-successor-epic": {
-      "_id": "cch-fixture-successor-epic",
+    "cloud-console-hardening-epic": {
+      "_id": "cloud-console-hardening-epic",
       "_type": "task",
       "status": "published",
-      "lifecycle_status": "open",
-      "parent_id": "cloud-console-goal"
+      "lifecycle_status": "in_progress",
+      "parent_id": null
     }
   },
   "children": [
     { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
-    { "_id": "gr-fixture-done-2", "lifecycle_status": "done" },
-    { "_id": "gr-fixture-cancelled-1", "lifecycle_status": "cancelled" }
+    { "_id": "gr-fixture-live-1", "lifecycle_status": "open" },
+    { "_id": "gr-fixture-live-2", "lifecycle_status": "in_progress" }
   ],
-  "forwarded": [],
+  "forwarded": ["gr-fixture-live-1", "gr-fixture-live-2"],
   "gates": {
     "gr-ops-platform-admin-emails": {
       "_id": "gr-ops-platform-admin-emails",

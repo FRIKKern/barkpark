@@ -1,5 +1,5 @@
 {
-  "_comment": "Happy path. A resolvable successor, zero residue (no live AND no considering rows), every hardcoded gate of charter D89 resolving. The ONLY non-terminal fixture here that may exit 0. `unmeasuredWaivers` names the rung-3 register entry explicitly: a waiver can only arrive through --ledger, so no live run can carry one.",
+  "_comment": "CONSIDERING is residue. A resolvable successor, ZERO open/in_progress rows, and one `considering` row that nobody forwarded. The predecessor shape sealed this at exit 0 with the row disclosed nowhere; here it is counted into clause (a), named as an orphan, and printed on its own disclosure line.",
   "successor": "cch-fixture-successor-epic",
   "tasks": {
     "cch-fixture-successor-epic": {
@@ -12,8 +12,7 @@
   },
   "children": [
     { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
-    { "_id": "gr-fixture-done-2", "lifecycle_status": "done" },
-    { "_id": "gr-fixture-cancelled-1", "lifecycle_status": "cancelled" }
+    { "_id": "gr-fixture-considering-1", "lifecycle_status": "considering" }
   ],
   "forwarded": [],
   "gates": {

@@ -1,5 +1,5 @@
 {
-  "_comment": "Happy path. A resolvable successor, zero residue (no live AND no considering rows), every hardcoded gate of charter D89 resolving. The ONLY non-terminal fixture here that may exit 0. `unmeasuredWaivers` names the rung-3 register entry explicitly: a waiver can only arrive through --ledger, so no live run can carry one.",
+  "_comment": "THE 'NEVER BY SUBJECT' RULE, made testable. Same shape as sealable.json, but the `diffs` map supplies a patch for 481d6f231 whose body is exactly that commit's SUBJECT LINE — 'clear the Overview snapshot on sign-out' — with the registered marker OVERVIEW_FULL nowhere in it. A register that matched on `%s` would green here. This one reds, by name.",
   "successor": "cch-fixture-successor-epic",
   "tasks": {
     "cch-fixture-successor-epic": {
@@ -11,9 +11,7 @@
     }
   },
   "children": [
-    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
-    { "_id": "gr-fixture-done-2", "lifecycle_status": "done" },
-    { "_id": "gr-fixture-cancelled-1", "lifecycle_status": "cancelled" }
+    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" }
   ],
   "forwarded": [],
   "gates": {
@@ -46,6 +44,12 @@
     "26acc7a91be0f0352efdb3e89b2017accb786367",
     "58862f621"
   ],
+  "diffs": {
+    "481d6f231": {
+      "paths": ["cloud/priv/static/app.js"],
+      "body": "fix(cloud): clear the Overview snapshot on sign-out (cch-w1-refetch-storm review) (#5308)"
+    }
+  },
   "unmeasuredWaivers": ["CCH-D5-rate-limiter-sees-every-user-as-one"],
   "defectCommits": {}
 }
