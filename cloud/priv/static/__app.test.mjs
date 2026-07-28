@@ -447,6 +447,33 @@ test("gr-p5-account: loadSessions' two css_check-named hooks survive — .sessio
     "loadSessions must delegate row revokes through .session-revoke");
 });
 
+test("gr-p5-session-provenance: the session row shows origin only when the server sent one", () => {
+  // A null/absent origin renders NOTHING — every row minted before the column
+  // existed is genuinely unknown, and inventing "via password" for it would be
+  // the same class of lie as the IP this row already suppresses. The label rides
+  // the EXISTING .session-meta line: no new class, so this stays off css_check.
+  const unknown = hooks.sessionRowHtml({ id: "a", user_agent: "barkpark-cli/0.9" });
+  assert.ok(!unknown.includes("via "), "an origin-less row must claim nothing: " + unknown);
+
+  const linked = hooks.sessionRowHtml({ id: "b", user_agent: "barkpark-cli/0.9", origin: "device_link" });
+  assert.ok(/session-meta">Active [^<]*·[^<]*via device link</.test(linked),
+    "device_link must render on the existing .session-meta line: " + linked);
+  assert.ok(!linked.includes("session-origin"), "no new CSS class may appear: " + linked);
+
+  // OAuth reports the provider itself, so the tail IS the label.
+  assert.ok(hooks.sessionRowHtml({ id: "c", origin: "oauth:github" }).includes("via github"),
+    "oauth:<provider> must surface the provider");
+
+  // An origin this client has never heard of is SHOWN, not swallowed — a newer
+  // server must not go silent against an older SPA.
+  assert.ok(hooks.sessionRowHtml({ id: "d", origin: "smartcard" }).includes("via smartcard"),
+    "an unknown origin falls through to the raw value");
+
+  // ...and it is escaped like every other server-controlled string on this row.
+  assert.ok(!hooks.sessionRowHtml({ id: "e", origin: "<img src=x>" }).includes("<img"),
+    "the origin must be escaped");
+});
+
 test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct-btn, #ws-switch, palette act-account", () => {
   // openAccountModal has exactly three entry points. A recomposition that
   // renames the function or drops a listener leaves the account unreachable.

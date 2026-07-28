@@ -1056,6 +1056,27 @@
     });
   }
 
+  // Pure: the human phrasing of a session's `origin`, or "" when the server has
+  // no answer. NULL origin renders as NOTHING — every session minted before the
+  // column existed is genuinely unknown, and "via password" would be a guess on
+  // a security surface. Unrecognised values fall through to the raw string
+  // rather than being dropped: a newer server that mints an origin this client
+  // has never heard of should still show it, slightly ugly and entirely true.
+  function originLabel(origin) {
+    if (!origin) return "";
+    // OAuth reports the provider itself ("oauth:github"), so the tail IS the
+    // label — one arm covers every provider, present and future.
+    if (origin.indexOf("oauth:") === 0) return "via " + origin.slice(6);
+    var known = {
+      password: "via password",
+      two_factor: "via two-factor",
+      password_change: "via password change",
+      register: "via sign-up",
+      device_link: "via device link"
+    };
+    return known[origin] || "via " + origin;
+  }
+
   // Pure: one active-session row. Extracted from loadSessions so the TALL modal
   // shape (9+ sessions — the shape that put Log out out of reach on live, GR63)
   // is reachable from node without a fetch. The current device is badged and its
@@ -1073,12 +1094,16 @@
   // the SPA it happened). REVERT this suppression — restore the ip_address lead
   // on this row and the "IP address" rail row in renderActivateConfirm — once
   // task gr-bl-peer-ip-container lands a genuine per-client peer IP.
+  // The row's `origin` rides the SAME .session-meta line (no new class, no new
+  // rail) — provenance is a qualifier on "Active <when>", not a second fact.
   function sessionRowHtml(x) {
+    var origin = originLabel(x.origin);
     return '<div class="session-row">' +
       '<div class="session-main">' +
         '<div class="session-device">' + esc(deviceLabel(x.user_agent)) +
           (x.current ? ' <span class="badge badge-current">This device</span>' : "") + "</div>" +
-        '<div class="session-meta">Active ' + esc(relTime(x.last_used_at || x.inserted_at)) + "</div>" +
+        '<div class="session-meta">Active ' + esc(relTime(x.last_used_at || x.inserted_at)) +
+          (origin ? " · " + esc(origin) : "") + "</div>" +
       "</div>" +
       (x.current
         ? '<button class="btn btn-sm" type="button" disabled>Current</button>'
