@@ -609,8 +609,10 @@ command -v curl    >/dev/null 2>&1 || die "curl not on PATH"
 command -v python3 >/dev/null 2>&1 || die "python3 not on PATH"
 
 # The trap installs BEFORE any write — in particular BEFORE the rung-1 fire.
-# Every later write flips its own flag for the trap.
+# Every later write flips its own flag for the trap. INT/TERM route through
+# EXIT so an external kill (timeout wrapper, harness stop) still tears down.
 trap cleanup EXIT
+trap 'exit 143' INT TERM
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/pdfp1.XXXXXX")"
