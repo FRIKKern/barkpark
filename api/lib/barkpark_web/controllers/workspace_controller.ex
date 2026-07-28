@@ -663,6 +663,12 @@ defmodule BarkparkWeb.WorkspaceController do
             {:error, :body_too_large, conn, read} ->
               body_too_large(conn, read)
 
+            {:error, {:body_read_failed, reason}, conn, read} ->
+              body_read_failed(conn, reason, read)
+
+            {:error, {:spill_write_failed, reason}, conn, read} ->
+              spill_write_failed(conn, scratch, reason, read)
+
             {:ok, path, bytes, conn} ->
               fun.(conn, path, %{
                 body_bytes: bytes,
@@ -721,19 +727,31 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   end
 
+  # Three ways this loop can end, and every one of them is NAMED. A multi-GB
+  # upload spends minutes on the wire, so the two failure shapes below are not
+  # theoretical: `read_body` answers `{:error, reason}` on a client disconnect or
+  # a read timeout, and `IO.binwrite/2` answers `{:error, :enospc}` when the
+  # filesystem fills mid-spill — the exact hazard extraction-to-disk introduces.
+  # Neither may reach the caller as a FunctionClauseError/MatchError 500: an
+  # opaque 500 is a failure claim as uninformative as a false success.
   defp stream_body(conn, io, path, written) do
     case Plug.Conn.read_body(conn, length: @body_chunk_bytes) do
       {:ok, chunk, conn} ->
         case write_chunk(io, chunk, written) do
           {:ok, written} -> {:ok, path, written, conn}
           :too_large -> {:error, :body_too_large, conn, written + byte_size(chunk)}
+          {:write_failed, reason} -> {:error, {:spill_write_failed, reason}, conn, written}
         end
 
       {:more, chunk, conn} ->
         case write_chunk(io, chunk, written) do
           {:ok, written} -> stream_body(conn, io, path, written)
           :too_large -> {:error, :body_too_large, conn, written + byte_size(chunk)}
+          {:write_failed, reason} -> {:error, {:spill_write_failed, reason}, conn, written}
         end
+
+      {:error, reason} ->
+        {:error, {:body_read_failed, reason}, conn, written}
     end
   end
 
@@ -743,8 +761,10 @@ defmodule BarkparkWeb.WorkspaceController do
     if total > max_import_body_bytes() do
       :too_large
     else
-      :ok = IO.binwrite(io, chunk)
-      {:ok, total}
+      case IO.binwrite(io, chunk) do
+        :ok -> {:ok, total}
+        {:error, reason} -> {:write_failed, reason}
+      end
     end
   end
 
@@ -760,6 +780,49 @@ defmodule BarkparkWeb.WorkspaceController do
             "2,605.5 MiB full-fidelity bundle — one more doubling of the growth this " <>
             "epic observed (942 MB -> 2,012,650,519 B of database).",
         details: %{limit_bytes: max_import_body_bytes(), read_bytes: read}
+      }
+    })
+  end
+
+  # The upload died on the wire. 400 and not 500: nothing on this side failed,
+  # and the byte count says exactly how far it got, so an operator can tell a
+  # 3-byte handshake failure from a 2 GB upload that timed out at the last mile.
+  defp body_read_failed(conn, reason, read) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{
+      error: %{
+        code: "import_body_read_failed",
+        message:
+          "the import body could not be read to completion (#{inspect(reason)}) after " <>
+            "#{read} bytes — the upload was interrupted; nothing was imported. Re-run it.",
+        details: %{reason: inspect(reason), read_bytes: read}
+      }
+    })
+  end
+
+  # ENOSPC (or any other write fault) mid-spill. This is the failure mode
+  # extraction-to-disk INTRODUCES, so it is answered by name with the free space
+  # actually measured at the moment of the failure — never as an opaque 500 that
+  # sends an operator looking for a bug in the bundle.
+  defp spill_write_failed(conn, scratch, reason, read) do
+    free =
+      case Archive.free_space(scratch) do
+        {:ok, bytes} -> bytes
+        {:error, why} -> "unmeasured (#{why})"
+      end
+
+    conn
+    |> put_status(507)
+    |> json(%{
+      error: %{
+        code: "import_spill_write_failed",
+        message:
+          "writing the import body to #{scratch} failed (#{inspect(reason)}) after " <>
+            "#{read} bytes; free space now reads #{free}. Nothing was imported, and the " <>
+            "scratch is removed by this request's `after` clause on the way out. Free " <>
+            "space or point BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
+        details: %{reason: inspect(reason), written_bytes: read, free_bytes: free}
       }
     })
   end
