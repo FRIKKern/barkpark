@@ -25,6 +25,12 @@ defmodule Barkpark.Media.Blobstore.S3 do
       blobs a caller marked safe (`:public` opt); dangerous-mime and
       access-gated serves stay on the presigned path where the header
       overrides hold.
+    * A write ACK is not a storage fact. Both write verbs follow the PUT with
+      `stat_blob/1` — a presigned HEAD straight at the bucket — and answer a
+      `t:Barkpark.Media.Blobstore.receipt/0` carrying RECEIVED and STORED as
+      separate numbers. COST: one extra round trip per blob, so a bundle
+      import's blob phase makes 2 requests per file instead of 1 (the crown
+      proof moves 34 blobs → 68 requests).
     * Failures collapse to `{:error, :storage_unavailable}` — the same typed
       503 the local backend reports on a disk fault, so callers cannot tell
       the backends apart by error shape.
@@ -54,6 +60,7 @@ defmodule Barkpark.Media.Blobstore.S3 do
   @behaviour Barkpark.Media.Blobstore
 
   alias Barkpark.Media
+  alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Blobstore.S3.Presign
 
   require Logger
@@ -62,13 +69,17 @@ defmodule Barkpark.Media.Blobstore.S3 do
   def put_file(relative_path, source_path, opts) do
     case File.read(source_path) do
       {:ok, body} ->
-        with :ok <- put_bytes(relative_path, body, opts) do
+        with {:ok, receipt} <- put_bytes(relative_path, body, opts) do
           # Warm the local cache so the post-upload pipeline (probe +
           # renditions) reads the bytes it just received instead of
           # re-downloading. Best-effort: a full cache disk must not fail an
           # upload the bucket already accepted.
+          #
+          # ORDER IS LOAD-BEARING: the receipt's read-back already ran inside
+          # put_bytes/3, against the BUCKET, before this line put a copy of the
+          # source at exactly the path a naive File.stat would check.
           _ = warm_cache(relative_path, source_path)
-          :ok
+          {:ok, receipt}
         end
 
       {:error, _reason} ->
@@ -82,7 +93,48 @@ defmodule Barkpark.Media.Blobstore.S3 do
     content_type = Keyword.get(opts, :content_type) || MIME.from_path(relative_path)
     url = Presign.url("PUT", key, presign_config(), expires_in: presign_ttl())
 
-    request(:put, url, body: body, headers: [{"content-type", content_type}])
+    # A 2xx is a WRITE ACK — the bucket says it took the bytes. It is not a
+    # storage fact: a proxy or a misconfigured bucket can ACK and store
+    # nothing. stat_blob/1 is the post-condition read that turns the ACK into
+    # a claim, at the cost of one extra round trip per blob.
+    with :ok <- request(:put, url, body: body, headers: [{"content-type", content_type}]) do
+      Blobstore.receipt(byte_size(body), :head, stat_blob(relative_path))
+    end
+  end
+
+  @impl true
+  def stat_blob(relative_path) do
+    url = Presign.url("HEAD", key_for(relative_path), presign_config(), expires_in: presign_ttl())
+
+    # Straight at the bucket. NOT ensure_local/1 (short-circuits on
+    # File.regular? — zero bucket requests when the cache is warm) and NOT
+    # File.stat on Media.file_path/1 (put_file/3 warm-caches the SOURCE there,
+    # so it reports the expected size for an object the bucket never took).
+    case req(:head, url, []) do
+      {:ok, %Req.Response{status: 200} = response} ->
+        case content_length(response) do
+          nil -> {:error, :no_content_length}
+          size -> {:ok, %{size: size}}
+        end
+
+      {:ok, %Req.Response{status: 404}} ->
+        {:error, :not_found}
+
+      {:ok, %Req.Response{status: status}} ->
+        {:error, {:unexpected_status, status}}
+
+      {:error, exception} ->
+        {:error, exception}
+    end
+  end
+
+  defp content_length(response) do
+    with [value | _] <- Req.Response.get_header(response, "content-length"),
+         {size, ""} <- Integer.parse(value) do
+      size
+    else
+      _ -> nil
+    end
   end
 
   @impl true
