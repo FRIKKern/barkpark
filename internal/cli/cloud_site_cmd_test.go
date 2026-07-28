@@ -1285,3 +1285,158 @@ func TestCloudSiteCreateDatasetSurvivesGlobalStripper(t *testing.T) {
 		t.Fatalf("triple from global capture = %q %q %q (%v)", ws, proj, ds, derr)
 	}
 }
+
+// --- W8: the receipts stop resting on a 2xx ----------------------------------
+//
+// Three lines claimed post-conditions nothing in the CLI (or in the envelope) had
+// read. Each test below is the tripwire on ONE of them, end-to-end through the
+// verb — the extracted renders are separately property-gated in
+// success_claim_registry_test.go, and these pin the WORDING the user reads.
+
+// TestSiteDeleteReceiptDoesNotAssertTheTeardown. Before:
+//
+//	✓ site deleted — blog is torn down on its box and deregistered.
+//
+// The box teardown is nowhere in the envelope ({"ok","status","slug"}), and the
+// box's own teardown report is unconditional, so the "torn down" half was a claim
+// about state nothing read.
+func TestSiteDeleteReceiptDoesNotAssertTheTeardown(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{200, deleteEnvelope}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if strings.Contains(stdout, "torn down") {
+		t.Fatalf("the delete receipt must not assert a teardown it never read:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "deregistered") || !strings.Contains(stdout, "blog") {
+		t.Fatalf("the delete receipt must still claim what the envelope DOES back:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "UNVERIFIED") {
+		t.Fatalf("the unread half must be named in the same breath:\n%s", stdout)
+	}
+}
+
+// TestSiteDeleteReceiptRefusesANonDeletedEnvelope: a 200 is not the
+// post-condition. An envelope that is not the deleted receipt gets no checkmark.
+func TestSiteDeleteReceiptRefusesANonDeletedEnvelope(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{200, `{"ok":false,"status":"pending","slug":"blog"}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if strings.Contains(stdout, "✓") {
+		t.Fatalf("a non-deleted envelope must not print a checkmark:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "UNCONFIRMED") {
+		t.Fatalf("a non-deleted envelope must say so:\n%s", stdout)
+	}
+}
+
+// TestSiteLiveReceiptSaysTheURLWasNotFetched. Before:
+//
+//	✓ site live — https://acme.barkpark.cloud/sites/blog/
+//
+// Nothing ever requested that URL; "live" is the control plane's record of its own
+// SWITCH. The receipt now says which of the two it is.
+func TestSiteLiveReceiptSaysTheURLWasNotFetched(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"queued","stage":"PLAN","stages":[]}}`}
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "site live") || !strings.Contains(stdout, "https://acme.barkpark.cloud/sites/blog/") {
+		t.Fatalf("the live receipt must still hand over the URL:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "did not fetch") {
+		t.Fatalf("the live receipt must state that nothing fetched the URL:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "dep-1") {
+		t.Fatalf("the live receipt must name the deployment record it read:\n%s", stdout)
+	}
+}
+
+// TestSiteCreateWillNotClaimAnUnechoedDocTypeBinding. Before:
+//
+//	content: paper docs
+//
+// — a straight echo of the request flag, printed whether or not the control plane
+// stored the binding, and phrased as if the dataset were known to serve that type.
+func TestSiteCreateWillNotClaimAnUnechoedDocTypeBinding(t *testing.T) {
+	cp := newSiteCP(t)
+	// The CP stored the site but echoed NO doc_type (a pre-W10 control plane).
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog",
+		"--dataset", "acme/blog/production", "--instance", testInstanceID, "--doc-type", "paper")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "content: paper docs") {
+		t.Fatalf("an un-echoed doc type must not read as a stored binding:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "UNCONFIRMED") {
+		t.Fatalf("an un-echoed doc type must say the binding is unconfirmed:\n%s", stdout)
+	}
+}
+
+// TestSiteCreateNamesAnEchoedDocTypeBinding is the other half: when the control
+// plane DID store the binding the receipt says so — and still refuses to claim the
+// dataset serves that type, which nothing in THIS envelope has read. (The control
+// plane does read it, at create, per charter D73 — but that verdict rides a
+// top-level content_binding key SpawnSite does not carry, so this receipt names
+// the check without narrating a result it was never shown.)
+func TestSiteCreateNamesAnEchoedDocTypeBinding(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production","doc_type":"paper"}}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog",
+		"--dataset", "acme/blog/production", "--instance", testInstanceID, "--doc-type", "paper")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "stored on the site row") {
+		t.Fatalf("an echoed doc type must be reported as the stored binding:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "UNCONFIRMED") {
+		t.Fatalf("an echoed doc type is not unconfirmed:\n%s", stdout)
+	}
+	// The receipt must not narrate the create-time binding check's RESULT: this
+	// envelope does not carry it. Naming that the check happens is honest; saying
+	// how it came out would be quoting a read this process never made.
+	if !strings.Contains(stdout, "not in this envelope") {
+		t.Fatalf("the receipt must name the verdict it is not being shown:\n%s", stdout)
+	}
+	for _, verdict := range []string{"bound:", "unverified", "content_binding_empty"} {
+		if strings.Contains(stdout, verdict) {
+			t.Fatalf("the receipt must not report a binding verdict it never received (%q):\n%s", verdict, stdout)
+		}
+	}
+}
+
+// TestSiteCreateLabelsAnUnechoedDatasetBinding: siteDatasetLabel falls back to what
+// the user typed, so a control plane that echoed nothing looked identical to one
+// that confirmed the binding. The fallback is now labelled as the request.
+func TestSiteCreateLabelsAnUnechoedDatasetBinding(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro"}}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog",
+		"--dataset", "acme/blog/production", "--instance", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "acme/blog/production") {
+		t.Fatalf("the dataset line must still show the triple:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "as requested") {
+		t.Fatalf("an un-echoed dataset must be labelled as the request:\n%s", stdout)
+	}
+}

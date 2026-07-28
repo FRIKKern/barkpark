@@ -43,6 +43,28 @@ package cli
 // not a census: requiredEnrollments below fails if an entry is deleted, so the
 // registry can only grow.
 //
+// THE PROVENANCE CONVENTION, AND THE HOLE IT CLOSES (site-spawner W8). The
+// property above constrains the RENDER, not the PROVENANCE of what the render is
+// handed: a pure request-echo render PASSES if the row's Backed/Contradicted pair
+// differs in the echoed REQUEST field, because the two calls do print different
+// bytes. That is a green a dishonest receipt can manufacture. So the convention is
+//
+//	BACKED AND CONTRADICTED MUST BE VALUES THE SERVER RETURNED —
+//	types internal/cloudclient hands BACK from a Client method, never a request body.
+//
+// A render may still take the request alongside (the site create receipt does, to
+// tell "the server echoed it" apart from "the server said nothing"), but the axis
+// the pair varies on must be the response. TestSiteClaimsAreProbedWithResponseTypes
+// enforces this MECHANICALLY for the site rows: it parses internal/cloudclient for
+// the types its methods return and fails any pinned site row probed with anything
+// else — swap a row's Backed to cloudclient.SpawnSiteCreate (a request body) and it
+// goes red, which is the mutation that proves the guard is not decorative.
+// Pre-W8 rows predate the convention and are grandfathered by NAME — only the
+// pinned site rows and anything named renderSite* are checked — never by prose on
+// the row itself. The prefix half matters: an enumerated list would leave the NEXT
+// site receipt unchecked until someone remembered it, which is the same
+// nobody-looked shape the registry exists to kill.
+//
 // MUTATION-PROVEN: reverting the cloud_autoupdate_cmd.go fix (each verb's sentence
 // keyed on the local verb again) turns TestSuccessClaimsChangeWhenTheResponseDoes
 // RED on four entries. A gate not proven by mutation has not shipped.
@@ -241,6 +263,80 @@ func successClaimRegistry() []claimSite {
 			Backed:       [2]string{"token", "revoked"},
 			Contradicted: [2]string{"token", "still valid"},
 		},
+		// ── cloud_site_cmd.go — the spawner's five receipts (site-spawner W8) ────
+		// Every Backed/Contradicted below is a type internal/cloudclient RETURNS;
+		// the create rows hold the REQUEST fixed and vary only the row the control
+		// plane sent back, so the printed difference can only come from the response.
+		{
+			Name: "renderSiteCreated/doc-type-binding",
+			Render: func(out *writer, resp any) {
+				renderSiteCreated(out.outf, resp.(cloudclient.SpawnSite), siteCreateReq, false)
+			},
+			// A doc type the control plane did NOT store is not a binding, however
+			// loudly the request asked for one.
+			Backed:       spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.DocType = "paper" }),
+			Contradicted: spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.DocType = "" }),
+		},
+		{
+			Name: "renderSiteCreated/dataset-binding",
+			Render: func(out *writer, resp any) {
+				renderSiteCreated(out.outf, resp.(cloudclient.SpawnSite), siteCreateReq, false)
+			},
+			Backed: spawnSiteRowFixture(nil),
+			Contradicted: spawnSiteRowFixture(func(s *cloudclient.SpawnSite) {
+				s.Workspace, s.Project, s.Dataset = "", "", ""
+			}),
+		},
+		{
+			// The deploy verdict: live is the control plane's RECORD of its switch,
+			// so a record that says otherwise must not print the live receipt.
+			Name: "renderSiteDeployVerdict/live-vs-failed",
+			Render: func(out *writer, resp any) {
+				renderSiteDeployVerdict(out, "blog", resp.(cloudclient.SiteDeployment))
+			},
+			Backed: cloudclient.SiteDeployment{ID: "dep-1", Status: "live", URL: "https://acme.barkpark.cloud/sites/blog/"},
+			Contradicted: cloudclient.SiteDeployment{ID: "dep-1", Status: "failed", Stage: "HEALTH",
+				FailureReason: "health probe returned 502"},
+		},
+		{
+			// A live record with no URL must not fabricate one.
+			Name: "renderSiteDeployVerdict/live-no-url",
+			Render: func(out *writer, resp any) {
+				renderSiteDeployVerdict(out, "blog", resp.(cloudclient.SiteDeployment))
+			},
+			Backed:       cloudclient.SiteDeployment{ID: "dep-1", Status: "live", URL: "https://acme.barkpark.cloud/sites/blog/"},
+			Contradicted: cloudclient.SiteDeployment{ID: "dep-1", Status: "live"},
+		},
+		{
+			// A1: the control plane measured the serving slot after the flip.
+			Name: "renderSiteRolledBack",
+			Render: func(out *writer, resp any) {
+				renderSiteRolledBack(out, "blog", resp.(cloudclient.SiteRollbackResult))
+			},
+			Backed:       cloudclient.SiteRollbackResult{OK: true, DeploymentID: "dep-prev", PreviousDeploymentID: "dep-bad"},
+			Contradicted: cloudclient.SiteRollbackResult{OK: true, DeploymentID: "dep-other", PreviousDeploymentID: "dep-bad"},
+		},
+		{
+			// A 200 is not the post-condition: an envelope that is not the deleted
+			// receipt must not print a checkmark.
+			Name: "renderSiteDeleted",
+			Render: func(out *writer, resp any) {
+				renderSiteDeleted(out, "blog", resp.(cloudclient.SiteDeleteResult))
+			},
+			Backed:       cloudclient.SiteDeleteResult{OK: true, Status: "deleted", Slug: "blog"},
+			Contradicted: cloudclient.SiteDeleteResult{OK: false, Status: "pending", Slug: "blog"},
+		},
+		{
+			// A2: the settings receipt claims the row the server stored, so a row
+			// storing something else has to print something else.
+			Name: "renderSiteSettingsUpdated",
+			Render: func(out *writer, resp any) {
+				renderSiteSettingsUpdated(out, "blog", resp.(cloudclient.SpawnSite))
+			},
+			Backed:       spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.Theme = "ember" }),
+			Contradicted: spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.Theme = "fjord" }),
+		},
+
 		{
 			Name: "supportAddRun.success",
 			Render: func(out *writer, resp any) {
@@ -258,6 +354,28 @@ func successClaimRegistry() []claimSite {
 			},
 		},
 	}
+}
+
+// siteCreateReq is the REQUEST the site create rows hold fixed. It is deliberately
+// never a Backed/Contradicted value: the pair must vary on the response, or the
+// gate would be probing an echo of ourselves.
+var siteCreateReq = cloudclient.SpawnSiteCreate{
+	Name: "blog", Framework: "astro", Kind: "static",
+	Workspace: "acme", Project: "rocket", Dataset: "production", DocType: "paper",
+}
+
+// spawnSiteRowFixture is the control plane's echo of that create — the fully-bound row —
+// with an optional mutation for the contradicting half.
+func spawnSiteRowFixture(mut func(*cloudclient.SpawnSite)) cloudclient.SpawnSite {
+	s := cloudclient.SpawnSite{
+		ID: "site-1", Name: "blog", Slug: "blog", Kind: "static", Framework: "astro",
+		Workspace: "acme", Project: "rocket", Dataset: "production",
+		Instance: "acme", DocType: "paper", Theme: "ember",
+	}
+	if mut != nil {
+		mut(&s)
+	}
+	return s
 }
 
 // frontierClaimResponse bundles the two halves of a granted claim the ledger
@@ -282,6 +400,34 @@ var requiredEnrollments = []string{
 	"supportAddRun.done",
 	"supportRemoveRun.done",
 	"supportAddRun.success",
+	// site-spawner W8 — every `bp cloud site` success receipt.
+	"renderSiteCreated",
+	"renderSiteDeployVerdict",
+	"renderSiteRolledBack",
+	"renderSiteDeleted",
+	"renderSiteSettingsUpdated",
+}
+
+// siteResponseTypedRows are the enrollments whose Backed/Contradicted MUST be
+// types internal/cloudclient returns (the provenance convention in this file's
+// header). Pinned by name, and the names are also in requiredEnrollments, so a
+// rename that would dodge this check fails the floor first.
+//
+// This list is a FLOOR, not the scope. On its own it grandfathers by enumeration:
+// the SIXTH site receipt someone adds next wave would be uncovered until a human
+// remembered to append it here, which is the same "a claim nobody checked" shape
+// the registry exists to kill. So the check ALSO covers every registry row whose
+// name carries siteRenderPrefix — the list makes deletion fail, the prefix makes
+// omission fail. A future site render that legitimately cannot be probed with a
+// response type is a real finding, not an exemption to add here.
+const siteRenderPrefix = "renderSite"
+
+var siteResponseTypedRows = []string{
+	"renderSiteCreated",
+	"renderSiteDeployVerdict",
+	"renderSiteRolledBack",
+	"renderSiteDeleted",
+	"renderSiteSettingsUpdated",
 }
 
 // renderClaim runs one enrolled render against one response and returns
@@ -388,6 +534,86 @@ func TestAutoupdateReceiptNamesTheContradiction(t *testing.T) {
 			t.Errorf("autoupdateApplied(%q, contradicting policy) = true, want false so the verb exits non-zero", tc.verb)
 		}
 	}
+}
+
+// TestSiteClaimsAreProbedWithResponseTypes closes the gate's own hole for the
+// site rows. TestSuccessClaimsChangeWhenTheResponseDoes constrains the RENDER and
+// says nothing about where the probe values came from, so a request-echo receipt
+// can go green by varying the request. Here the pinned site rows must be probed
+// with types internal/cloudclient RETURNS — a request body (SpawnSiteCreate is
+// only ever a parameter) is not one, and fails.
+func TestSiteClaimsAreProbedWithResponseTypes(t *testing.T) {
+	returned := cloudclientReturnedTypes(t)
+	if !returned["SpawnSite"] || !returned["SiteDeployment"] {
+		t.Fatalf("scan of internal/cloudclient found no SpawnSite/SiteDeployment return — the check would pass vacuously (found %d types)", len(returned))
+	}
+	if returned["SpawnSiteCreate"] {
+		t.Fatalf("SpawnSiteCreate is a REQUEST body but the scan calls it returned — the provenance check cannot tell request from response")
+	}
+	pinned := map[string]bool{}
+	for _, n := range siteResponseTypedRows {
+		pinned[n] = true
+	}
+	seen := map[string]bool{}
+	for _, site := range successClaimRegistry() {
+		base := strings.SplitN(site.Name, "/", 2)[0]
+		// Pinned by name (the floor) OR by the site-render prefix (the scope), so a
+		// receipt added later is covered without anyone remembering to enrol it here.
+		if !pinned[base] && !strings.HasPrefix(base, siteRenderPrefix) {
+			continue
+		}
+		seen[base] = true
+		for _, probe := range []struct {
+			half string
+			v    any
+		}{{"Backed", site.Backed}, {"Contradicted", site.Contradicted}} {
+			typ := reflect.TypeOf(probe.v)
+			for typ != nil && typ.Kind() == reflect.Ptr {
+				typ = typ.Elem()
+			}
+			if typ == nil || !strings.HasSuffix(typ.PkgPath(), "internal/cloudclient") || !returned[typ.Name()] {
+				t.Errorf("%s.%s is probed with %v, which internal/cloudclient never RETURNS — "+
+					"a success claim must be probed with what the server sent back, never with the request "+
+					"(a request-echo render passes the change-when-the-response-does property on its own)",
+					site.Name, probe.half, typ)
+			}
+		}
+	}
+	for _, n := range siteResponseTypedRows {
+		if !seen[n] {
+			t.Errorf("%s is pinned as response-typed but is not enrolled in the registry", n)
+		}
+	}
+}
+
+// cloudclientReturnedTypes is the set of type names internal/cloudclient hands
+// BACK — parsed from its `) (T, error)` result lists, so it needs no build tags
+// and no reflection over unexported API.
+func cloudclientReturnedTypes(t *testing.T) map[string]bool {
+	t.Helper()
+	entries, err := os.ReadDir("../cloudclient")
+	if err != nil {
+		t.Fatalf("read internal/cloudclient sources: %v", err)
+	}
+	// `) (T, error)`, `) (*T, error)` and `) ([]T, error)` — a method that hands back
+	// a slice returns that element type just as surely as one that hands back a value,
+	// and missing it would fail a legitimate row with a confusing message.
+	re := regexp.MustCompile(`\)\s*\((?:\[\])?\*?(?:\w+\.)?(\w+), error\)`)
+	out := map[string]bool{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		body, rerr := os.ReadFile("../cloudclient/" + name)
+		if rerr != nil {
+			t.Fatalf("read ../cloudclient/%s: %v", name, rerr)
+		}
+		for _, m := range re.FindAllStringSubmatch(string(body), -1) {
+			out[m[1]] = true
+		}
+	}
+	return out
 }
 
 // ── source helpers ──────────────────────────────────────────────────────────
