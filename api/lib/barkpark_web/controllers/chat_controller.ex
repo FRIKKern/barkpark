@@ -415,6 +415,7 @@ defmodule BarkparkWeb.ChatController do
           |> send_chunked(200)
 
         conn = replay(conn, id, since)
+        conn = stable_snapshot(conn, id)
 
         try do
           stream_loop(conn)
@@ -637,6 +638,14 @@ defmodule BarkparkWeb.ChatController do
       {:studio_chat_runtime_event, %Runtime.Event{} = event} ->
         chunk_or_stop(conn, sse_runtime_frame(event))
 
+      {:chat_stable, frame} ->
+        # DELIBERATELY STATELESS (mobile charter D63): a pass-through, never an
+        # accumulator. Threading segment state through stream_loop/chunk_or_stop
+        # would give every viewer its OWN byte offsets, which breaks the
+        # from-based cursor for exactly the reconnect case mobile hits most —
+        # and would duplicate the computation N times over.
+        chunk_or_stop(conn, sse_stable_frame(frame))
+
       {:claude_chat_permission, ask} ->
         chunk_or_stop(conn, sse_permission_frame(ask))
 
@@ -668,6 +677,32 @@ defmodule BarkparkWeb.ChatController do
       # Chunk error (client gone) terminates the stream — the try/after stops the
       # forwarder; Recorder/ClaudeChat are untouched.
       {:error, _} -> conn
+    end
+  end
+
+  # The connect-time catch-up for a turn ALREADY in flight (D63). Sent after the
+  # persisted replay so a fresh client's cursor is 0 when it lands, and after the
+  # forwarder is subscribed so no frame is lost behind it.
+  #
+  # HONEST FAILURE MODE, stated because it is real: subscribing before snapshotting
+  # leaves a sub-millisecond window in which a segment can be BOTH forwarded live
+  # and included in the snapshot. The duplicate reads as `from < cursor`, which is
+  # a GAP by the D59 rule, so the client keeps what it committed and renders the
+  # remainder plain for that turn — today's floor. Closing it outright needs the
+  # subscribe and the snapshot to be one atomic operation, which PubSub cannot
+  # offer; snapshot-then-subscribe only moves the same window to a LOST frame with
+  # the identical outcome. At the measured 2.11 frames/s this is ~0.1 % of
+  # mid-turn attaches, and it degrades rather than corrupting.
+  defp stable_snapshot(conn, id) do
+    case Recorder.stable_snapshot(id) do
+      nil ->
+        conn
+
+      frame ->
+        case chunk(conn, sse_stable_frame(frame)) do
+          {:ok, conn} -> conn
+          {:error, _} -> conn
+        end
     end
   end
 
@@ -709,6 +744,19 @@ defmodule BarkparkWeb.ChatController do
   def sse_runtime_frame(%Runtime.Event{} = event) do
     "event: runtime\ndata: #{event |> Map.from_struct() |> Jason.encode!()}\n\n"
   end
+
+  @doc false
+  # The live-document frames (mobile charter D59). ID-LESS, both of them: Go and
+  # mobile each advance the resume cursor for ANY id-carrying frame BEFORE
+  # dispatch, so an `id:` here would strand the next reconnect on a seq that
+  # never existed. The payload is JSON and never raw markdown — Go TrimSpaces
+  # every data line while mobile strips exactly one leading space, so raw text
+  # would arrive different per surface.
+  def sse_stable_frame({:stable, payload}),
+    do: "event: stable\ndata: #{Jason.encode!(payload)}\n\n"
+
+  def sse_stable_frame({:stable_end, payload}),
+    do: "event: stable_end\ndata: #{Jason.encode!(payload)}\n\n"
 
   @doc false
   def sse_permission_frame(ask), do: "event: permission\ndata: #{Jason.encode!(ask)}\n\n"

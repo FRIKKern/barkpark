@@ -26,6 +26,7 @@ defmodule Barkpark.StudioChat.Recorder do
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
+  alias Barkpark.StudioChat.StreamSegments
 
   @registry Barkpark.StudioChat.RecorderRegistry
   @supervisor Barkpark.StudioChat.RuntimeSupervisor
@@ -99,6 +100,31 @@ defmodule Barkpark.StudioChat.Recorder do
       pid when is_pid(pid) -> GenServer.cast(pid, {:reported_state, agent_state, expires_at})
       nil -> :ok
     end
+  end
+
+  @doc """
+  The connect-time `stable` snapshot for a session (mobile charter D63) — ONE
+  frame from 0 carrying every segment committed in the turn now in flight, so an
+  SSE client attaching MID-TURN is not stranded with a cursor at 0 against a
+  server already 8 KB in.
+
+  This is the ONLY reconnect fix available: there is no mid-turn tail endpoint
+  anywhere, and `?since=<seq>` replays only PERSISTED rows. It is a synchronous
+  call into a process that may be mid-persist, so it is BOUNDED and every
+  failure — dead recorder, no live turn, timeout, oversize snapshot — returns
+  `nil`, which lands the client on today's plain-tail floor.
+  """
+  @spec stable_snapshot(String.t()) :: StreamSegments.frame() | nil
+  def stable_snapshot(session_id) do
+    case whereis(session_id) do
+      pid when is_pid(pid) ->
+        GenServer.call(pid, :stable_snapshot, StreamSegments.snapshot_timeout_ms())
+
+      nil ->
+        nil
+    end
+  catch
+    :exit, _ -> nil
   end
 
   @doc "PubSub topic a viewer subscribes to for this session's frames."
@@ -313,6 +339,16 @@ defmodule Barkpark.StudioChat.Recorder do
       # clobbering blocked while the ask is genuinely pending.
       pending_asks: MapSet.new(),
       runtime_text: "",
+      # The progressive live-document accumulator (mobile charter D59-D64) and
+      # the per-session monotone turn counter it stamps onto every frame.
+      # RECORDER-owned by D63 because this is the only seam alive for the whole
+      # turn — therefore the only one that can answer a connect-time snapshot,
+      # which is the ONLY reconnect fix available (there is no mid-turn tail
+      # endpoint; `?since=<seq>` replays only PERSISTED rows). ONE computation
+      # serves N viewers, and both provider lanes already converge here.
+      # `nil` between turns; the counter survives so `turn` never repeats.
+      stable: nil,
+      stable_turn: 0,
       # The tool_use_id of THIS turn's FIRST TodoWrite-shaped block (charter D39).
       # Each TodoWrite arrives as a fresh tool_use with a unique id, so a later
       # one in the same turn UPDATES this persisted row's input in place rather
@@ -397,6 +433,20 @@ defmodule Barkpark.StudioChat.Recorder do
   # already fired still gets the held vocabulary. Returns the best available
   # list of `%{"name", "description", "argumentHint"}` maps (rich, then the
   # name-only init fallback, then []).
+  def handle_call(:stable_snapshot, _from, state) do
+    # Rescued like every other derivation: a snapshot fault must never take the
+    # recording down, and `nil` is a complete answer (the client renders plain).
+    snapshot =
+      case state.stable do
+        seg when is_map(seg) -> StreamSegments.snapshot(seg)
+        _ -> nil
+      end
+
+    {:reply, snapshot, state}
+  rescue
+    _ -> {:reply, nil, state}
+  end
+
   def handle_call(:advertised_commands, _from, state),
     do: {:reply, advertised(state), state}
 
@@ -462,6 +512,10 @@ defmodule Barkpark.StudioChat.Recorder do
     # replay reconstructs the ✻ pulse row in the same order it streamed live.
     state = flush_thinking(state)
     state = persist_assistant_blocks(state, blocks, ev)
+    # The message boundary IS the live document's boundary (the web resets its
+    # bubble here too), and this frame carries the durable text the D61 self-check
+    # needs — so the settle happens here, against the row that just persisted.
+    state = stable_settle(state, assistant_text(blocks))
     broadcast(state, msg)
     {:noreply, state |> publish_activity(assistant_activity(blocks, state.activity)) |> touch()}
   end
@@ -471,6 +525,10 @@ defmodule Barkpark.StudioChat.Recorder do
     # to result) still flushes its pulse row so the thought is never lost.
     state = flush_thinking(state)
     record_result(state.session_id, ev)
+    # A live accumulator here means text streamed but no assistant frame ever
+    # carried it durably, so there is nothing to verify the segments against:
+    # abandon them rather than claim a settle we cannot prove (D61).
+    state = stable_start(state)
     broadcast(state, msg)
     # The turn settled — nothing can still be waiting on an ask from it (D56h).
     {:noreply,
@@ -511,6 +569,10 @@ defmodule Barkpark.StudioChat.Recorder do
         pending_thinking: nil,
         pending_asks: MapSet.new()
     }
+
+    # The live document's turn boundary too (D59: turn identity is
+    # SERVER-authored, minted at the existing per-turn reset).
+    state = stable_start(state)
 
     broadcast(state, msg)
 
@@ -563,8 +625,12 @@ defmodule Barkpark.StudioChat.Recorder do
     {:noreply, touch(state)}
   end
 
-  def handle_info({:claude_chat_event, %{"type" => "stream_event"}} = msg, state) do
+  def handle_info({:claude_chat_event, %{"type" => "stream_event"} = ev} = msg, state) do
+    # The raw delta goes out FIRST, then the segments it makes safe to commit:
+    # a client trims its plain tail by the committed cursor, so a `stable` frame
+    # that arrived before the `chat` bytes it covers would briefly double them.
     broadcast(state, msg)
+    state = stable_delta(state, claude_text_delta(ev))
     {:noreply, state |> publish_activity(%{state: :working, line: "writing…"}) |> touch()}
   end
 
@@ -1039,11 +1105,15 @@ defmodule Barkpark.StudioChat.Recorder do
         StudioChat.update_status(state.session_id, "working")
 
         %{state | runtime_text: ""}
+        |> stable_start()
         |> clear_pending_asks()
         |> publish_activity(%{state: :working, line: "thinking…"})
 
       :text_delta ->
-        %{state | runtime_text: state.runtime_text <> runtime_delta(event)}
+        delta = runtime_delta(event)
+
+        %{state | runtime_text: state.runtime_text <> delta}
+        |> stable_delta(delta)
         |> publish_activity(%{state: :working, line: "writing…"})
 
       :approval_requested ->
@@ -1058,6 +1128,9 @@ defmodule Barkpark.StudioChat.Recorder do
       :turn_completed ->
         persist_runtime_text(state)
         StudioChat.update_status(state.session_id, "active")
+        # `runtime_text` IS what `persist_runtime_text/1` just wrote, so it is
+        # the durable text the D61 self-check must compare against.
+        state = stable_settle(state, state.runtime_text)
 
         %{state | runtime_text: ""}
         |> clear_pending_asks()
@@ -1077,7 +1150,10 @@ defmodule Barkpark.StudioChat.Recorder do
         # Clear AFTER the offline publish: the D39 prior-state mapping must
         # still see :needs_you (a mid-ask death maps to "unknown", D56h leaves
         # the offline rule untouched).
-        state |> publish_activity(%{state: :offline, line: nil}) |> clear_pending_asks()
+        state
+        |> stable_settle(state.runtime_text)
+        |> publish_activity(%{state: :offline, line: nil})
+        |> clear_pending_asks()
 
       _ ->
         state
@@ -1802,6 +1878,127 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp observe_init_permission_mode(state, _), do: state
+
+  # ── the progressive live document (mobile charter D59-D64) ──────────────────
+
+  # EVERY derivation goes through one of these three, and every one of them is
+  # wrapped: `restart: :temporary` means an exception ENDS the recording, which
+  # would lose the turn's durable text — an incomparably worse outcome than
+  # losing the cosmetic segment stream. So a fault degrades to
+  # NO-MORE-STABLE-FRAMES for the turn (the `:off` sentinel, re-armed at the next
+  # turn boundary) exactly as `render_paper_html` rescues to nil on the web.
+
+  # A turn boundary. A still-live accumulator here means the turn ended without
+  # a durable settle (an interrupt, a dead subprocess): tell the client to drop
+  # its segments rather than leave them stranded next to a persisted row.
+  defp stable_start(state), do: %{stable_abandon(state) | stable: nil}
+
+  defp stable_delta(%{stable: :off} = state, _delta), do: state
+  defp stable_delta(state, delta) when not is_binary(delta) or delta == "", do: state
+
+  defp stable_delta(state, delta) do
+    {state, seg} =
+      case state.stable do
+        nil ->
+          turn = state.stable_turn + 1
+          {%{state | stable_turn: turn}, StreamSegments.new(turn)}
+
+        seg ->
+          {state, seg}
+      end
+
+    {seg, frames} = StreamSegments.advance(seg, delta, stable_now_ms())
+    emit_stable(%{state | stable: seg}, frames)
+  rescue
+    error -> stable_fault(state, error)
+  end
+
+  # The settle self-check (D61) runs against the text that ACTUALLY PERSISTS —
+  # the assistant frame's text for the claude lane, `runtime_text` for codex —
+  # never the accumulated deltas, because `settled` licenses the client to
+  # SUPPRESS the persisted row and it must never suppress a row it was not shown.
+  defp stable_settle(%{stable: nil} = state, _durable), do: state
+  defp stable_settle(%{stable: :off} = state, _durable), do: %{state | stable: nil}
+
+  defp stable_settle(state, durable) when is_binary(durable) do
+    {seg, frames} = StreamSegments.settle(state.stable, durable)
+
+    %{state | stable: seg}
+    |> emit_stable(frames)
+    |> Map.put(:stable, nil)
+  rescue
+    error -> %{stable_fault(state, error) | stable: nil}
+  end
+
+  defp stable_settle(state, _durable), do: stable_abandon(state)
+
+  defp stable_abandon(%{stable: seg} = state) when is_map(seg) do
+    if seg.phase == :live and seg.emitted_to > 0 do
+      broadcast_stable(
+        state,
+        {:stable_end, %{turn: seg.turn, from: seg.emitted_to, reason: "degraded"}}
+      )
+    end
+
+    state
+  end
+
+  defp stable_abandon(state), do: state
+
+  # A degraded terminal frame is built from an integer and two atoms, so it can
+  # be emitted even after the derivation that faulted.
+  defp stable_fault(state, error) do
+    Logger.warning(
+      "studio_chat stable segments degraded for #{state.session_id}: " <>
+        Exception.message(error)
+    )
+
+    if state.stable_turn > 0 do
+      # `from` is not cursor-checked on a degrade (the client drops every
+      # segment), so 0 is honest here even though the cursor had moved.
+      broadcast_stable(
+        state,
+        {:stable_end, %{turn: state.stable_turn, from: 0, reason: "degraded"}}
+      )
+    end
+
+    %{state | stable: :off}
+  end
+
+  defp emit_stable(state, frames) do
+    Enum.each(frames, &broadcast_stable(state, &1))
+    state
+  end
+
+  defp broadcast_stable(state, frame), do: broadcast(state, {:chat_stable, frame})
+
+  # Monotonic, because the min-interval bound compares two readings and a wall
+  # clock can step backwards mid-turn.
+  defp stable_now_ms, do: System.monotonic_time(:millisecond)
+
+  # The ONE claude text-delta shape (`content_block_delta` → `text_delta`), kept
+  # kind-exact: `thinking_delta` and `tool_delta` ride the SAME envelope, so a
+  # loose match would splice reasoning and command output into the answer.
+  defp claude_text_delta(%{
+         "event" => %{
+           "type" => "content_block_delta",
+           "delta" => %{"type" => "text_delta", "text" => text}
+         }
+       })
+       when is_binary(text),
+       do: text
+
+  defp claude_text_delta(_ev), do: ""
+
+  # The concatenated prose of an assistant frame — the durable text the D61
+  # self-check compares against. Tool-use blocks contribute nothing.
+  defp assistant_text(blocks) when is_list(blocks) do
+    blocks
+    |> Enum.filter(&match?(%{"type" => "text", "text" => t} when is_binary(t), &1))
+    |> Enum.map_join("", & &1["text"])
+  end
+
+  defp assistant_text(_), do: ""
 
   # ── frame plumbing ──────────────────────────────────────────────────────────
 

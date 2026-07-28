@@ -155,6 +155,50 @@ defmodule Barkpark.StudioChat.StreamTail do
   def skeleton_label(_), do: "block"
 
   @doc """
+  Drop every COMPLETE fenced block from `text`, keeping the lines outside fences.
+
+  The one caller is `StreamSegments`' odd-backtick-run guard (charter D60), which
+  must count INLINE backtick runs and would otherwise count a fenced code block's
+  own backticks. It lives here, not there, because fence recognition is this
+  module's law — a second recognizer is exactly the fork D62 deleted.
+
+  An UNCLOSED fence drops its opening line and everything after it: an open fence
+  never carries a committed segment, so its bytes have no vote on parity.
+  """
+  @spec strip_fences(binary()) :: binary()
+  def strip_fences(text) when is_binary(text) do
+    text
+    |> String.split("\n")
+    |> strip_fences(nil, [])
+    |> Enum.reverse()
+    |> Enum.join("\n")
+  end
+
+  defp strip_fences([], _fence, kept), do: kept
+
+  defp strip_fences([line | rest], nil, kept) do
+    case fence_marker(line) do
+      {marker, run, info} ->
+        if opens_fence?(marker, info),
+          do: strip_fences(rest, {marker, run}, kept),
+          else: strip_fences(rest, nil, [line | kept])
+
+      nil ->
+        strip_fences(rest, nil, [line | kept])
+    end
+  end
+
+  defp strip_fences([line | rest], {marker, run} = fence, kept) do
+    case fence_marker(line) do
+      {^marker, close_run, info} when close_run >= run ->
+        if blank?(info), do: strip_fences(rest, nil, kept), else: strip_fences(rest, fence, kept)
+
+      _ ->
+        strip_fences(rest, fence, kept)
+    end
+  end
+
+  @doc """
   The display byte cap (`:barkpark / :claude_chat / :max_streaming_display_bytes`).
   """
   @spec max_streaming_display_bytes() :: pos_integer()
