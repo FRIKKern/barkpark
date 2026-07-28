@@ -1,0 +1,516 @@
+{
+  "_comment": "HAND-AUTHORED cross-surface wire fixture for the chat live-document stream (mobile charter D59). This file, not any implementation, is the contract: the server emitter must MATCH it and every client consumer must reach the recorded outcomes. It lives in internal/pdrender/testdata/ because that is the one path bound by mobile.yml AND go-tests.yml AND the Elixir dispatcher at once, so a regen re-fires all three consumers (the chat_golden_toolrows.json precedent). Consumers today: internal/pdrender/chat_stable_frames_test.go (Go/TUI) and apps/mobile/__tests__/stableFrameContract.test.ts (mobile). Edit the contract here first, then both consumers.",
+  "scope": "chat-stable-frame-wire",
+  "contract": {
+    "_note": "Both frames are id-LESS and ALWAYS carry a data: line. The payload is JSON, NEVER raw markdown: the Go SSE reader TrimSpaces every data line while the mobile reader strips only one leading space, so raw text would differ per surface.",
+    "stable": "{\"turn\":INT,\"from\":INT,\"to\":INT,\"blocks\":[...],\"skeleton\":{\"kind\":\"code|diagram|chart|stats|table|callout|block\",\"prose\":\"...\"}|null}",
+    "stable_end": "{\"turn\":INT,\"from\":INT,\"reason\":\"settled|capped|degraded\"}",
+    "why_to": "REQUIRED: a client cannot advance a byte cursor from {from, blocks} alone -- block text is not source bytes (53 source vs 42 derived over four segments in the run proof), so a PERFECT stream gets rejected at frame 2 without it.",
+    "why_turn": "REQUIRED: `from` alone FALSE-ACCEPTS across a turn boundary, and the client's own `gen` cannot fence it (gen advances on system/init, not on the event: message replay that CAUSES the gap). Sequence turn_boundary_gap_false_accepted_by_from_only is the run proof.",
+    "why_skeleton_is_server_side": "The classifier is part of the one converter, so every surface draws the same placeholder for the same unsettled tail.",
+    "what_skeleton_prose_is": "skeleton.prose is the PROSE ABOVE the forming component -- the bytes between `to` and the component's first triggering line -- NOT a caption and NOT the component's own body. It is the StreamTail.classify/1 third element verbatim (Barkpark.StudioChat.StreamTail, charter D62/D67): the client renders it as live text ABOVE the placeholder box so a paragraph that happens to sit under a forming table keeps streaming. It is legitimately the EMPTY STRING whenever the component starts exactly at `to`, and a consumer must accept that -- never require it non-empty.",
+    "why_stable_end_is_its_own_event": "The capped state is reachable with ZERO stable frames ever emitted (run-proven at a 4 KiB cap: one unbroken block yields capped with 0 segments), so there is no stable frame to carry a terminal field."
+  },
+  "offsets": {
+    "_note": "from/to are UTF-8 BYTE offsets into the turn's source markdown, half-open [from,to). Every `sources` string here is deliberately pure ASCII so byte length equals UTF-16 length and the SAME bounds assertion holds in Go and in TypeScript; a fixture regen that introduces non-ASCII must teach the mobile consumer to measure bytes.",
+    "cursor_rule": "STRICT (the D59 contract): on a stable frame, if data.turn != current turn, adopt it and reset the cursor to 0; then accept iff data.from == cursor and set cursor = data.to. On stable_end: adopt/reset the turn the same way; reason=degraded drops all segments (cursor := 0, `from` NOT checked, render the persisted row); otherwise accept iff data.from == cursor. A mismatch is a GAP: keep what is committed, render the remainder plain, stop trusting the segment stream for this turn.",
+    "from_only_rule": "The NAIVE predicate D59 rejects, recorded here only so the discrimination can be RUN rather than asserted: identical, except it never reads data.turn and therefore never resets the cursor on a turn change. `expected_from_only` is present on exactly one sequence -- the one where the two disagree.",
+    "committed_bytes": "The cursor at the end of the walk, scoped to final_turn (a turn change resets it), or 0 when the server degraded."
+  },
+  "sequences": [
+    {
+      "name": "clean_three_segments_settled",
+      "title": "A clean three-segment turn ending settled",
+      "why": "The happy path: contiguous [from,to) segments, no skeleton, stable_end reason=settled whose from equals the committed total. Note frame 1's block text (17 chars) is nowhere near its 22 source bytes -- the reason `to` exists at all.",
+      "sources": {
+        "1": "## Streaming stables\n\nThe reply commits in stable segments as the converter settles them.\n\n- the byte cursor advances on `to`\n- the turn fences the cursor\n"
+      },
+      "frames": [
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 0,
+            "to": 22,
+            "blocks": [
+              {
+                "type": "heading",
+                "level": 2,
+                "text": "Streaming stables"
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 22,
+            "to": 91,
+            "blocks": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "The reply commits in stable segments as the converter settles them."
+                  }
+                ]
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 91,
+            "to": 155,
+            "blocks": [
+              {
+                "type": "list",
+                "ordered": false,
+                "items": [
+                  [
+                    {
+                      "type": "text",
+                      "value": "the byte cursor advances on to"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "text",
+                      "value": "the turn fences the cursor"
+                    }
+                  ]
+                ]
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable_end",
+          "data": {
+            "turn": 1,
+            "from": 155,
+            "reason": "settled"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": "settled",
+        "accepted_stable_frames": 3,
+        "committed_bytes": 155,
+        "final_turn": 1,
+        "gap": null
+      }
+    },
+    {
+      "name": "open_fence_skeleton",
+      "title": "A segment carrying an open-fence skeleton",
+      "why": "Frame 0 settles the lead paragraph while an unterminated ``` fence is still streaming past `to`. The server classifies the remainder (skeleton.kind=code) because the classifier lives in the one converter (D59); the client draws a code-shaped placeholder, never a raw half-fence. skeleton.prose is the line ABOVE the fence -- the bytes from `to` up to the fence's first line -- so that prose keeps streaming as live text while only the fence is hidden behind the placeholder (see contract.what_skeleton_prose_is). Frame 1 settles both the held-back paragraph and the closed fence, and the skeleton goes null.",
+      "sources": {
+        "1": "Here is the converter entry point:\n\nIt looks like this:\n```go\nfunc Render(doc Doc) string { return doc.Text }\n```\n\n"
+      },
+      "skeleton_at_frame": 0,
+      "frames": [
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 0,
+            "to": 36,
+            "blocks": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Here is the converter entry point:"
+                  }
+                ]
+              }
+            ],
+            "skeleton": {
+              "kind": "code",
+              "prose": "It looks like this:\n"
+            }
+          }
+        },
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 36,
+            "to": 115,
+            "blocks": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "It looks like this:"
+                  }
+                ]
+              },
+              {
+                "type": "code",
+                "value": "func Render(doc Doc) string { return doc.Text }"
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable_end",
+          "data": {
+            "turn": 1,
+            "from": 115,
+            "reason": "settled"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": "settled",
+        "accepted_stable_frames": 2,
+        "committed_bytes": 115,
+        "final_turn": 1,
+        "gap": null
+      }
+    },
+    {
+      "name": "midstream_gap_one_frame_dropped",
+      "title": "A GAP: the middle frame of a three-segment turn is removed",
+      "why": "The recorded stream is the clean one MINUS frame 1. The survivor's from (59) does not equal the cursor (14), so the client degrades: keep everything committed so far, render the remainder as plain text, stop trusting the segment stream for this turn. Both predicates catch this one -- it is the baseline, not the discriminator.",
+      "sources": {
+        "1": "## Gap probe\n\nThe middle frame never arrives on the wire.\n\nTail paragraph, delivered anyway.\n"
+      },
+      "frames": [
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 0,
+            "to": 14,
+            "blocks": [
+              {
+                "type": "heading",
+                "level": 2,
+                "text": "Gap probe"
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 59,
+            "to": 93,
+            "blocks": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Tail paragraph, delivered anyway."
+                  }
+                ]
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable_end",
+          "data": {
+            "turn": 1,
+            "from": 93,
+            "reason": "settled"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": "gap",
+        "accepted_stable_frames": 1,
+        "committed_bytes": 14,
+        "final_turn": 1,
+        "gap": {
+          "frame_index": 1,
+          "turn": 1,
+          "expected_from": 14,
+          "actual_from": 59
+        }
+      }
+    },
+    {
+      "name": "turn_boundary_gap_false_accepted_by_from_only",
+      "title": "A TURN-BOUNDARY gap where turn 1's total coincidentally equals the survivor's from",
+      "why": "Turn 1 settles at 131 bytes. Turn 2's opening frame (0 -> 131) is LOST, and turn 2's second frame starts at 131 -- the same number. A from-only cursor (which cannot see a turn boundary it was never told about, because `gen` advances on system/init and not on the message replay that causes the gap) accepts it and splices turn 2's tail onto turn 1's message. The turn-plus-from cursor resets on the turn change and rejects at from=131, want 0. THIS is why `turn` is on the wire.",
+      "sources": {
+        "1": "## Turn one\n\nTurn one settles cleanly and completely.\n\nIts total length is engineered to collide with turn two's opening segment.\n\n",
+        "2": "## Turn two\n\nThis opening segment is padded so that its length exactly-matches................................. turn one's total.\n\nThe survivor segment.\n"
+      },
+      "frames": [
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 0,
+            "to": 13,
+            "blocks": [
+              {
+                "type": "heading",
+                "level": 2,
+                "text": "Turn one"
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 13,
+            "to": 55,
+            "blocks": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Turn one settles cleanly and completely."
+                  }
+                ]
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 55,
+            "to": 131,
+            "blocks": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Its total length is engineered to collide with turn two's opening segment."
+                  }
+                ]
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable_end",
+          "data": {
+            "turn": 1,
+            "from": 131,
+            "reason": "settled"
+          }
+        },
+        {
+          "event": "stable",
+          "data": {
+            "turn": 2,
+            "from": 131,
+            "to": 153,
+            "blocks": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "The survivor segment."
+                  }
+                ]
+              }
+            ],
+            "skeleton": null
+          }
+        }
+      ],
+      "expected": {
+        "outcome": "gap",
+        "accepted_stable_frames": 3,
+        "committed_bytes": 0,
+        "final_turn": 2,
+        "gap": {
+          "frame_index": 4,
+          "turn": 2,
+          "expected_from": 0,
+          "actual_from": 131
+        }
+      },
+      "expected_from_only": {
+        "outcome": "settled",
+        "accepted_stable_frames": 4,
+        "committed_bytes": 153,
+        "final_turn": 2,
+        "gap": null
+      }
+    },
+    {
+      "name": "capped_after_zero_stable_frames",
+      "title": "stable_end reason=capped with ZERO stable frames ever emitted",
+      "why": "One unbroken block larger than the segment cap settles nothing at all, so the terminal state arrives with the cursor still at 0. This is the run-proven reason stable_end is a DISTINCT EVENT rather than a field on a stable frame: there is no stable frame to hang it on. The client must render the persisted row and show no partial document.",
+      "sources": {},
+      "frames": [
+        {
+          "event": "stable_end",
+          "data": {
+            "turn": 1,
+            "from": 0,
+            "reason": "capped"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": "capped",
+        "accepted_stable_frames": 0,
+        "committed_bytes": 0,
+        "final_turn": 1,
+        "gap": null
+      }
+    },
+    {
+      "name": "degraded_after_two_segments",
+      "title": "stable_end reason=degraded after two good segments",
+      "why": "The SERVER declares its own segmentation untrustworthy. Unlike a client-detected gap (which keeps what it committed), degraded means the client DROPS its segments outright and renders the persisted row -- so the committed cursor goes back to 0 and `from` on the terminal frame is not cursor-checked. Distinguishing the two is the whole point of carrying the reason.",
+      "sources": {
+        "1": "## Degrade probe\n\nTwo segments settle before the server gives up on segmenting.\n\n"
+      },
+      "drops_segments": true,
+      "frames": [
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 0,
+            "to": 18,
+            "blocks": [
+              {
+                "type": "heading",
+                "level": 2,
+                "text": "Degrade probe"
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 18,
+            "to": 81,
+            "blocks": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Two segments settle before the server gives up on segmenting."
+                  }
+                ]
+              }
+            ],
+            "skeleton": null
+          }
+        },
+        {
+          "event": "stable_end",
+          "data": {
+            "turn": 1,
+            "from": 81,
+            "reason": "degraded"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": "degraded",
+        "accepted_stable_frames": 2,
+        "committed_bytes": 0,
+        "final_turn": 1,
+        "gap": null
+      }
+    },
+    {
+      "name": "unknown_future_fields_tolerated",
+      "title": "Unknown future fields on both frame kinds",
+      "why": "Every consumer ignores keys it does not know (the Go decoder's existing tolerance, mirrored on mobile), so a server that starts stamping `hint`, `cost` or `trace_id` does not degrade an older client. A consumer that rejects on unknown keys reds HERE rather than in production.",
+      "sources": {
+        "1": "## Forward compatible\n\nA future server adds fields; this client keeps streaming.\n\n"
+      },
+      "frames": [
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 0,
+            "to": 23,
+            "blocks": [
+              {
+                "type": "heading",
+                "level": 2,
+                "text": "Forward compatible"
+              }
+            ],
+            "skeleton": null,
+            "hint": "prefetch"
+          }
+        },
+        {
+          "event": "stable",
+          "data": {
+            "turn": 1,
+            "from": 23,
+            "to": 82,
+            "blocks": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "A future server adds fields; this client keeps streaming."
+                  }
+                ]
+              }
+            ],
+            "skeleton": null,
+            "cost": {
+              "output_tokens": 12
+            }
+          }
+        },
+        {
+          "event": "stable_end",
+          "data": {
+            "turn": 1,
+            "from": 82,
+            "reason": "settled",
+            "trace_id": "0f8bbf169ff5db6b"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": "settled",
+        "accepted_stable_frames": 2,
+        "committed_bytes": 82,
+        "final_turn": 1,
+        "gap": null
+      }
+    }
+  ]
+}
