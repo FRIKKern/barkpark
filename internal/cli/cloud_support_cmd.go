@@ -34,12 +34,13 @@ package cli
 //     printing the exact SSH one-liner the developer runs themselves.
 //   - barkpark.service is baked into the warm image — never authored here.
 //
-// `remove` is the mirror verb (PDF-D68): tear a support down across all FOUR
-// surfaces — token (main), box (provider), roster row (main), control-plane row
-// (CP, deleted LAST because it is the sole durable holder of the token id) —
-// then RE-READ every surface (delete responses prove nothing, D33) and exit
-// non-zero naming every survivor. Idempotent: a double remove reports
-// already-gone; partial state converges.
+// `remove` is the mirror verb (PDF-D68): tear a support down across all FIVE
+// surfaces — token (main), box (provider), leaked A records (DNS, swept by
+// VALUE: every A rrset resolving to the box IP goes, PDF-D101), roster row
+// (main), control-plane row (CP, deleted LAST because it is the sole durable
+// holder of the token id) — then RE-READ every surface (delete responses prove
+// nothing, D33) and exit non-zero naming every survivor. Idempotent: a double
+// remove reports already-gone; partial state converges.
 
 import (
 	"bytes"
@@ -47,6 +48,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -86,6 +88,19 @@ var supportConfigureHost = cloud.ConfigureSupportHost
 // production crypto/rand generator inside the cloud package. Tests inject
 // deterministic (but validation-passing) secrets.
 var supportSecretsGen cloud.SecretGen
+
+// supportDNSFor resolves the DNS provider the remove-side A-record sweep rides,
+// given the already-resolved DNS token ("" ⇔ compute fallback: CloudDNS
+// inherits the process HCLOUD_TOKEN / `hcloud context`). The token precedence
+// is instDNSClient's law (--dns-token > BARKPARK_DNS_HCLOUD_TOKEN > compute,
+// PDF-D101): the fleet compute token that owns every box sees ZERO zones, so a
+// one-token sweep would fail silently on every real teardown. A seam so tests
+// inject FakeDNS and assert the credential that actually arrived.
+var supportDNSFor = func(dnsToken string) cloud.DNSProvider {
+	d := cloud.NewCloudDNS()
+	d.Token = dnsToken
+	return d
+}
 
 // supportReadyTimeout / poll knobs — vars so tests never sleep for real.
 var (
@@ -838,8 +853,9 @@ const supportProbeSecretScript = `grep '^BARKPARK_API_TOKEN=' /etc/barkpark/flee
 // supportRemoveRun carries one `support remove` invocation's resolved inputs +
 // accumulated truth. Teardown ORDER is law (PDF-D68): read the CP record FIRST
 // (sole durable token-id holder), then token revoke on the main, then the
-// identity-fenced box delete, then the roster row, then the CP row LAST — so a
-// crash at any point never strands the token id. Then the four-surface census.
+// identity-fenced box delete, then the leaked-A-record sweep (by VALUE,
+// PDF-D101), then the roster row, then the CP row LAST — so a crash at any
+// point never strands the token id. Then the five-surface census.
 type supportRemoveRun struct {
 	out *writer
 	g   globals
@@ -863,11 +879,18 @@ type supportRemoveRun struct {
 	probeBefore int    // pre-revoke probe status (0 = never probed)
 
 	revoked map[string]string // token_id → "revoked" | "already gone (404)"
+
+	dnsToken    string            // resolved DNS credential (--dns-token > BARKPARK_DNS_HCLOUD_TOKEN > "" = compute)
+	dnsTokenSrc string            // which rung resolved it — "compute" earns a loud warning
+	dns         cloud.DNSProvider // built at stepDNS; nil ⇔ the DNS leg never ran
+	dnsZone     string            // zone derived from the CP row's url host
+	dnsIP       string            // the box IP the sweep + census match A-record VALUES against
+	dnsSkip     string            // non-empty ⇔ why the DNS leg was skipped (printed honestly, never reported clean)
 }
 
 func runCloudSupportRemove(out *writer, g globals, args []string) int {
-	const usage = "bp cloud support remove <name> [--dataset <slug>]"
-	a, err := parseHzArgs(args, []string{"dataset"}, nil, usage)
+	const usage = "bp cloud support remove <name> [--dataset <slug>] [--dns-token <token>]"
+	a, err := parseHzArgs(args, []string{"dataset", "dns-token"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -902,15 +925,30 @@ func runCloudSupportRemove(out *writer, g globals, args []string) int {
 		return useError(out, "usage", fmt.Sprintf("invalid dataset slug %q", r.dataset), exitUsage)
 	}
 
+	// The DNS sweep credential — instDNSClient's precedence (PDF-D101). The
+	// compute fallback is remembered so the sweep can warn loudly: the fleet
+	// compute token sees ZERO zones, and a silent zero-record sweep is exactly
+	// the lie the by-value census exists to catch.
+	r.dnsToken = strings.TrimSpace(a.val("dns-token"))
+	r.dnsTokenSrc = "--dns-token"
+	if r.dnsToken == "" {
+		r.dnsToken = strings.TrimSpace(os.Getenv("BARKPARK_DNS_HCLOUD_TOKEN"))
+		r.dnsTokenSrc = "BARKPARK_DNS_HCLOUD_TOKEN"
+	}
+	if r.dnsToken == "" {
+		r.dnsTokenSrc = "compute"
+	}
+
 	if g.dryRun {
 		out.progressf("DRY RUN — bp cloud support remove %s would run, in order (PDF-D68):", r.name)
 		out.progressf("  1. cp-read   GET /v1/barkparks on the control plane — capture the support row id + token id FIRST")
 		out.progressf("  2. locate    list boxes labeled %s=%s (identity-fenced; foreign identity refused)", cloud.FleetSupportLabelKey, r.name)
 		out.progressf("  3. token     revoke the support token on the main (idempotent — 404 is already-gone)")
 		out.progressf("  4. server    delete the box (only an exact identity match; >1 match refused)")
-		out.progressf("  5. roster    delete listener-%s on %s (dataset %s)", r.name, r.base, r.dataset)
-		out.progressf("  6. cp-row    DELETE /v1/fleet/supports/:id on the control plane — LAST (sole durable token-id holder)")
-		out.progressf("  7. census    RE-READ all four surfaces; any survivor is named and exits non-zero")
+		out.progressf("  5. dns       sweep every A record in the zone that resolves to the box IP — by VALUE, not name (PDF-D101; credential: --dns-token > BARKPARK_DNS_HCLOUD_TOKEN > compute)")
+		out.progressf("  6. roster    delete listener-%s on %s (dataset %s)", r.name, r.base, r.dataset)
+		out.progressf("  7. cp-row    DELETE /v1/fleet/supports/:id on the control plane — LAST (sole durable token-id holder)")
+		out.progressf("  8. census    RE-READ all five surfaces; any survivor is named and exits non-zero")
 		return exitOK
 	}
 
@@ -932,6 +970,7 @@ func (r *supportRemoveRun) run() int {
 		r.stepLocate,
 		r.stepToken,
 		r.stepServer,
+		r.stepDNS,
 		r.stepRoster,
 		r.stepCPRow,
 	}
@@ -1120,6 +1159,84 @@ func (r *supportRemoveRun) stepServer() (int, bool) {
 	return exitOK, false
 }
 
+// dnsTarget derives the sweep inputs: the ZONE from the CP row's url (hostOf
+// returns the FULL host, e.g. "hex.barkpark.cloud" — the zone is everything
+// after its first label, so no import of internal/provisioner's Zone constant
+// is needed) and the VALUE to sweep by from the located box's IP (the same IP
+// census leg 1 re-reads). A non-empty skip names the honest reason the leg
+// cannot run — an absence is said, never silently passed (PDS-D287).
+func (r *supportRemoveRun) dnsTarget() (zone, ip, skip string) {
+	if len(r.rows) == 0 {
+		return "", "", "no control-plane row — no url to derive the DNS zone from"
+	}
+	var host string
+	for _, row := range r.rows {
+		if u := strings.TrimSpace(row.URL); u != "" {
+			host = hostOf(u)
+			break
+		}
+	}
+	if host == "" {
+		return "", "", "the control-plane row carries no url — cannot derive the DNS zone"
+	}
+	if net.ParseIP(strings.Trim(host, "[]")) != nil {
+		return "", "", fmt.Sprintf("the control-plane row's url points at raw IP %s — no DNS zone to sweep", host)
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) < 3 {
+		return "", "", fmt.Sprintf("url host %q carries no subdomain label — cannot derive the zone", host)
+	}
+	if len(r.boxes) == 0 {
+		return "", "", "no box was located — no box IP to sweep A-record values by"
+	}
+	if strings.TrimSpace(r.boxes[0].IP) == "" {
+		return "", "", fmt.Sprintf("box %s has no IP on record — no value to sweep A records by", r.boxes[0].Name)
+	}
+	return strings.Join(parts[1:], "."), r.boxes[0].IP, ""
+}
+
+// stepDNS sweeps the support's leaked A records — by VALUE (PDF-D101): the CP
+// support chain writes <name>.<zone> (TTL 60) while the main go-live path
+// writes <slug>-<team>.<zone> at the SAME IP, so a by-name delete removes one
+// and leaves the sibling standing while a by-name census still reads clean.
+// Every A rrset in the zone resolving to the box IP is deleted. WARN-AND-
+// CONTINUE, never a stop — the census's fifth leg is the truth. No CP row, no
+// URL, or no box IP → the leg is SKIPPED and says so; the census repeats the
+// skip and never reports the zone clean.
+func (r *supportRemoveRun) stepDNS() (int, bool) {
+	zone, ip, skip := r.dnsTarget()
+	if skip != "" {
+		r.dnsSkip = skip
+		r.state("dns", fmt.Sprintf("SKIPPED — %s (the zone is NOT verified clean)", skip))
+		return exitOK, false
+	}
+	r.dnsZone, r.dnsIP = zone, ip
+	if r.dnsTokenSrc == "compute" {
+		r.out.errf("⚠ dns: no dedicated DNS credential (--dns-token / BARKPARK_DNS_HCLOUD_TOKEN) — riding the compute token; the fleet project's token sees ZERO zones, so the sweep may find nothing while records survive — the census below is the truth")
+	}
+	r.dns = supportDNSFor(r.dnsToken)
+	r.state("dns", fmt.Sprintf("sweeping A records in %s that resolve to %s — by VALUE, not name (a by-name delete leaves the go-live sibling standing)", zone, ip))
+	deleted, err := cloud.SweepARecordsByValue(supportCtx(), r.dns, zone, ip)
+	if err != nil {
+		got := ""
+		if len(deleted) > 0 {
+			got = fmt.Sprintf(" (%s deleted before the failure)", strings.Join(deleted, ", "))
+		}
+		r.out.errf("⚠ dns: sweep failed: %s%s — continuing; the census below is the truth", err, got)
+		return exitOK, false
+	}
+	if len(deleted) == 0 {
+		r.done("dns", fmt.Sprintf("no A records in %s resolve to %s (already clean)", zone, ip))
+		return exitOK, false
+	}
+	fqdns := make([]string, 0, len(deleted))
+	for _, n := range deleted {
+		fqdns = append(fqdns, cloud.Fqdn(n, zone))
+	}
+	r.done("dns", fmt.Sprintf("%d A record(s) deleted: %s (the census re-reads the zone)", len(deleted), strings.Join(fqdns, ", ")))
+	return exitOK, false
+}
+
 // stepRoster deletes the listener row via the PDF-D44d dataset-in-path mutate
 // (the query-param form 404s). A non-2xx is a WARNING, not a stop — delete
 // responses prove nothing either way (D33); the census re-read is the truth.
@@ -1170,11 +1287,12 @@ func (r *supportRemoveRun) stepCPRow() (int, bool) {
 	return exitOK, false
 }
 
-// census — the deliverable (PDF-D68): RE-READ all four surfaces; delete-call
-// 200s prove nothing (D33: bp doc delete can exit 4 on success — verify by
-// re-read, never by exit code). Any survivor is named and the exit is non-zero.
+// census — the deliverable (PDF-D68, five surfaces since PDF-D101): RE-READ
+// every surface; delete-call 200s prove nothing (D33: bp doc delete can exit 4
+// on success — verify by re-read, never by exit code). Any survivor is named
+// and the exit is non-zero.
 func (r *supportRemoveRun) census() int {
-	r.state("census", "re-reading all four surfaces (delete responses prove nothing)")
+	r.state("census", "re-reading all five surfaces (delete responses prove nothing)")
 	var residue []string
 
 	// 1. SERVER — the label listing must come back empty.
@@ -1240,11 +1358,34 @@ func (r *supportRemoveRun) census() int {
 		r.out.progressf("  · token: no token id was on record")
 	}
 
+	// 5. DNS — BY VALUE (PDF-D101): zero A rrsets in the zone may still resolve
+	// to the box IP. A by-name check would read clean while the go-live sibling
+	// (<slug>-<team>) survives — the VALUE is the truth. A skipped leg says so
+	// and is never reported clean.
+	dnsNote := "dns verified by value"
+	switch {
+	case r.dnsSkip != "":
+		dnsNote = "dns SKIPPED — " + r.dnsSkip
+		r.out.progressf("  · dns: SKIPPED — %s (the zone is NOT verified clean)", r.dnsSkip)
+	case r.dns == nil:
+		dnsNote = "dns SKIPPED — the dns step did not run"
+		r.out.progressf("  · dns: SKIPPED — the dns step did not run (the zone is NOT verified clean)")
+	default:
+		if names, err := cloud.ARecordNamesByValue(supportCtx(), r.dns, r.dnsZone, r.dnsIP); err != nil {
+			residue = append(residue, "could not verify dns: "+err.Error())
+		} else {
+			for _, n := range names {
+				residue = append(residue, fmt.Sprintf("A record %s still resolves to box IP %s", cloud.Fqdn(n, r.dnsZone), r.dnsIP))
+			}
+		}
+	}
+
 	report := map[string]any{
 		"ok":      len(residue) == 0,
 		"support": r.name,
 		"dataset": r.dataset,
 		"residue": residue,
+		"dns":     dnsNote,
 	}
 	if r.out.emitStructured(report) {
 		if len(residue) > 0 {
@@ -1261,7 +1402,7 @@ func (r *supportRemoveRun) census() int {
 		return exitGeneric
 	}
 	r.out.outf("")
-	r.out.outf("✓ remove %s — census delta zero (server, roster, control plane, token all clean)", r.name)
+	r.out.outf("✓ remove %s — census delta zero (server, roster, control plane, token clean; %s)", r.name, dnsNote)
 	return exitOK
 }
 
@@ -1735,15 +1876,18 @@ FLAGS
   --dry-run              print the named states and do nothing
   -o json|yaml           one machine-readable receipt on stdout
 
-REMOVE (the mirror verb — PDF-D68)
-  Tears one support down across all FOUR surfaces, in a crash-safe order:
+REMOVE (the mirror verb — PDF-D68, five surfaces since PDF-D101)
+  Tears one support down across all FIVE surfaces, in a crash-safe order:
   read the control-plane record first (it alone holds the token id), revoke
   the token on the main, delete the box (identity-fenced by its
   barkpark-fleet-support label — a foreign identity is refused loudly),
-  delete the roster row, and delete the control-plane row LAST. Then a
-  census RE-READS every surface — delete responses prove nothing — and any
-  survivor is named with a non-zero exit. Idempotent: run it again and it
-  reports already-gone; partial state converges.
+  sweep every A record in the zone that resolves to the box IP (by VALUE,
+  not name — the go-live sibling record leaks too; credential:
+  --dns-token > BARKPARK_DNS_HCLOUD_TOKEN > compute), delete the roster
+  row, and delete the control-plane row LAST. Then a census RE-READS every
+  surface — delete responses prove nothing — and any survivor is named
+  with a non-zero exit. Idempotent: run it again and it reports
+  already-gone; partial state converges.
 
 RELATED
   bp fleet roster        the fleet's presence table (who is online, with what)`
