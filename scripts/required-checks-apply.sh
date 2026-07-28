@@ -36,6 +36,23 @@
 # This fleet has merged three PRs inside 78 seconds; strict would convert
 # parallel merges into a serial rebase-and-rerun train.
 #
+# TWO BREAK-GLASSES, AND `--disable` IS THE BIGGER ONE
+#
+# `--disable` removes ALL protection from the branch. That is the total hammer:
+# it restores admin merge AND direct `git push` (D39), and re-arming is just
+# `--confirm` again, because the PUT is a full replace. Use it when the fleet is
+# genuinely stuck.
+#
+# The NARROW form charter D17 specifies is admin-bypass only, and it is two
+# commands rather than a flag on purpose — each one attributable in the shell
+# history of whoever ran it:
+#     gh api -X DELETE repos/<o>/<r>/branches/main/protection/enforce_admins
+#     gh api -X POST   repos/<o>/<r>/branches/main/protection/enforce_admins
+# Down, the required checks still apply to everyone; only admins may bypass
+# them. Either way required-checks-verify.sh goes RED while the glass is broken
+# (it asserts enforce_admins.enabled == true), so a break-glass left open is a
+# CI failure and not a quiet drift.
+#
 # SAFETY
 #   * refuses unless the spec says enforced:true (so the tooling slice cannot
 #     protect anything by accident)
@@ -88,7 +105,7 @@ main() {
       --confirm) CONFIRM=1; shift ;;
       --payload) PAYLOAD_ONLY=1; shift ;;
       --disable) DISABLE=1; shift ;;
-      -h|--help) sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      -h|--help) sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
       *) fail "unknown argument: $1" ;;
     esac
   done
@@ -129,7 +146,11 @@ main() {
     || fail "the protection PUT failed"
 
   echo "verifying the read-back (GitHub validates neither the context string nor the app_id)"
-  bash "$REPO_ROOT/scripts/required-checks-verify.sh" --spec "$SPEC" ${BRANCH_OVERRIDE:+--sha "$(gh api "repos/$repo/commits/$branch" --jq .sha)"}
+  # `--branch` too, not just `--sha`: verify otherwise reads the live protection
+  # of the branch the SPEC names (main), so an apply to a throwaway branch would
+  # verify a branch it never touched — an apply/verify pair that cannot agree.
+  bash "$REPO_ROOT/scripts/required-checks-verify.sh" --spec "$SPEC" \
+    ${BRANCH_OVERRIDE:+--branch "$branch" --sha "$(gh api "repos/$repo/commits/$branch" --jq .sha)"}
 }
 
 main "$@"

@@ -33,6 +33,7 @@
 #
 # USAGE
 #   scripts/required-checks-verify.sh                 # full three-way check
+#   scripts/required-checks-verify.sh --branch <b>    # live-read b, not .branch
 #   scripts/required-checks-verify.sh --ci            # the CI guard
 #   scripts/required-checks-verify.sh --deadlock      # detector only
 #   scripts/required-checks-verify.sh --selftest      # mutation-prove the clauses
@@ -42,6 +43,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 SPEC="$REPO_ROOT/.github/required-checks.json"
+# Read the live protection of a branch OTHER than the one the spec names. The
+# only caller is required-checks-apply.sh --branch <throwaway>, whose live
+# probe applies to a scratch branch and must then verify THAT branch. Without
+# it the probe reads main's protection and the round-trip can never be green —
+# an apply/verify pair that structurally cannot agree.
+BRANCH_OVERRIDE=""
 READBACK_FILE=""
 RUNS_FILE=""
 HEAD_SHA=""
@@ -59,7 +66,7 @@ read_spec() {
 }
 
 spec_repo()   { jq -r '.repo'   "$SPEC"; }
-spec_branch() { jq -r '.branch' "$SPEC"; }
+spec_branch() { if [ -n "$BRANCH_OVERRIDE" ]; then printf '%s' "$BRANCH_OVERRIDE"; else jq -r '.branch' "$SPEC"; fi; }
 spec_enforced() { jq -r '.enforced == true' "$SPEC"; }
 
 # ── the live read-back ───────────────────────────────────────────────────────
@@ -76,7 +83,7 @@ live_protection() {
   repo="$(spec_repo)"; branch="$(spec_branch)"
   out="$(gh api "repos/$repo/branches/$branch/protection" 2>&1)" || {
     grep -q "Branch not protected" <<<"$out" \
-      && fail "branch $branch of $repo is NOT PROTECTED, but the committed spec says enforced=true"
+      && fail "branch $branch of $repo is NOT PROTECTED, while the committed spec says enforced=$(jq -r '.enforced' "$SPEC")"
     fail "cannot read live protection for $repo/$branch: $out"
   }
   printf '%s' "$out"
@@ -257,6 +264,24 @@ run_full() {
   read_spec
   say "spec: $SPEC ($(jq -r '.protection.required_status_checks.checks | length' "$SPEC") required context(s), enforced=$(jq -r '.enforced' "$SPEC"))"
   local rc=0 actual
+  # enforced=false is a COMMITTED, reviewable state, not an unreadable input —
+  # the same distinction --ci draws. Before the flip there is nothing live to
+  # compare against, and hard-failing here would make hgw2-s7's own gate
+  # (`bash scripts/required-checks-verify.sh`) red for the one reason it is
+  # SUPPOSED to be red on: protection not applied yet. The deadlock detector
+  # below still runs against a real head, so this mode is never vacuous either.
+  if [ "$(spec_enforced)" != "true" ]; then
+    say "── enforced=false: nothing has been applied, so there is no live config to diff ──"
+    say "  The deadlock detector below still runs against a real PR head. From the"
+    say "  commit that flips enforced to true, an unreadable or absent protection"
+    say "  config is a hard failure here."
+    local drc0=0
+    deadlock_check "${HEAD_SHA:-$(recent_pr_head)}" || drc0=$?
+    [ "$drc0" -eq 3 ] && return 3
+    [ "$drc0" -eq 0 ] || return 1
+    say "OK: the committed spec and the rendered check names agree; protection is not applied yet."
+    return 0
+  fi
   actual="$(live_protection)"
   say "── live protection vs committed spec ──"
   compare_protection "$actual" || rc=1
@@ -448,6 +473,7 @@ main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --spec) SPEC="$2"; shift 2 ;;
+      --branch) BRANCH_OVERRIDE="$2"; shift 2 ;;
       --readback) READBACK_FILE="$2"; shift 2 ;;
       --runs) RUNS_FILE="$2"; shift 2 ;;
       --sha) HEAD_SHA="$2"; shift 2 ;;

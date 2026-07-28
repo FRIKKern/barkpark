@@ -510,6 +510,26 @@ else
   fi
 fi
 
+section "11. full mode tracks the spec's enforced flag in BOTH directions"
+
+# hgw2-s7's own slice gate is the bare `scripts/required-checks-verify.sh`, so
+# full mode has to be meaningful on both sides of the flip: green today (no live
+# config to diff, deadlock detector still run against a real head) and RED the
+# moment the spec claims a protection that does not exist. Asserted by mutation
+# rather than by reading the code — a spec whose only difference is the flag.
+FULLMUT="$TMP/enforced-true.json"
+jq '.enforced = true' "$SPEC" > "$FULLMUT"
+if bash "$VERIFY" >/dev/null 2>&1; then
+  ok "full mode is green while enforced=false (the pre-flip state is committed, not swallowed)"
+else
+  bad "full mode reds on the committed spec — hgw2-s7's slice gate cannot pass"
+fi
+if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then
+  bad "full mode PASSED with enforced=true against an unprotected main — it cannot fail"
+else
+  ok "…and RED with enforced=true while main is unprotected (mutation-proven able to fail)"
+fi
+
 # ═══ live stage ══════════════════════════════════════════════════════════════
 
 live_stage() {
