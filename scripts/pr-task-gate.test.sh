@@ -73,6 +73,14 @@ doc spaceclosed "done"      "fable tob" "lead truthgrip"
 # 404 fixture: an id with no file → http.server returns 404 for /task/ghost
 # (missing.json below is a malformed-JSON body served with 200 to test parsing)
 printf 'not json{' > "$fixtures/v1/data/doc/production/task/garbled"
+# THE TWO 200-WITHOUT-A-DOCUMENT SHAPES (D59). Both are well-formed JSON that
+# answers without answering: a null `result`, and a bare document served with no
+# envelope at all (what `?filterresponse=false` emits). Neither is evidence that
+# the task does not exist — a task that genuinely does not exist answers 404,
+# which `ghost` above pins as a definitive red — so both must read UNCHECKED.
+printf '{"result":null}' > "$fixtures/v1/data/doc/production/task/nullresult"
+printf '{"_id":"baredoc","_type":"task","lifecycle_status":"in_progress","claim":{"worker":"fable-tob"}}' \
+  > "$fixtures/v1/data/doc/production/task/baredoc"
 
 # ── Lapsed-claim fixtures (D23) ───────────────────────────────────────────────
 # The TTL sweeper reaps a claim out from under a PR that sits in review longer
@@ -93,8 +101,17 @@ t = datetime.now(timezone.utc) - timedelta(seconds=int(sys.argv[1]))
 print(t.isoformat().replace("+00:00", "Z"))
 PY
 }
-EXP_RECENT="$(iso_ago 600)"       # 10 min ago — inside the 6h grace
-EXP_STALE="$(iso_ago 604800)"     # 7 days ago — far outside it
+EXP_RECENT="$(iso_ago 600)"       # claim lapsed 10 min ago
+EXP_STALE="$(iso_ago 604800)"     # claim lapsed 7 days ago
+# The PR's own created_at, which is what the lease is now measured against
+# (D58): a lapsed claim backs the PR iff expired_at >= PR_OPENED_AT. PR_OPEN is
+# the default for the lapse checks below — a PR opened 15 min ago, i.e. BEFORE
+# EXP_RECENT lapsed and long after EXP_STALE did, so the same pair of documents
+# now separates on when the PR opened instead of on how long the gate took to
+# run. Nothing here reads the wall clock at verdict time.
+PR_OPEN="$(iso_ago 900)"          # PR opened 15 min ago
+PR_OPEN_LATE="$(iso_ago 60)"      # PR opened 1 min ago — AFTER EXP_RECENT lapsed
+PR_OPEN_ANCIENT="$(iso_ago 1209600)" # PR opened 14 days ago — before EXP_STALE lapsed
 raw_doc lapserecent  open "{\"worker\":null,\"epoch\":3,\"previous_worker\":\"fable-tob\",\"expired_at\":\"$EXP_RECENT\"}"
 raw_doc lapsestale   open "{\"worker\":null,\"epoch\":3,\"previous_worker\":\"fable-tob\",\"expired_at\":\"$EXP_STALE\"}"
 # Never claimed, but the doc carries a claim object with a timestamp: no
@@ -128,6 +145,11 @@ raw_doc lapsefuture open "{\"worker\":null,\"epoch\":3,\"previous_worker\":\"fab
 # ...and its boundary mirror: a few seconds of clock skew between the runner and
 # the ledger is honest and must still pass, so the bound is -300s, not 0.
 raw_doc lapseskew   open "{\"worker\":null,\"epoch\":3,\"previous_worker\":\"fable-tob\",\"expired_at\":\"$(iso_ago -30)\"}"
+# THE BOUNDARY of the new predicate: expired_at EXACTLY equal to the PR's
+# created_at. The claim was live up to that instant, so `>=` passes it and a `>`
+# would red it — a one-character slip that no other fixture can see.
+EXP_EXACT="$(iso_ago 1800)"
+raw_doc lapseexact open "{\"worker\":null,\"epoch\":3,\"previous_worker\":\"fable-tob\",\"expired_at\":\"$EXP_EXACT\"}"
 
 # Boot a static server. It returns 200 for existing files, 404 else.
 #
@@ -170,6 +192,25 @@ check() { # check <label> <expected_exit> <env...>
   else fail=$((fail+1)); printf 'FAIL %-40s want %s got %s\n' "$label" "$want" "$got"; fi
 }
 
+# An exit code alone cannot tell a refusal apart from the clause standing next
+# to it: with PR_OPENED_AT withheld, both the refusal and the "could not
+# compare" clause exit 1, so deleting the refusal leaves the suite green while
+# the PR is handed a message about a comparison instead of about the input that
+# is missing. Where the WORDS are the deliverable, assert the words.
+check_says() { # check_says <label> <expected_exit> <substring> <env...>
+  local label="$1" want="$2" sub="$3"; shift 3
+  local out="$fixtures/says.out" got
+  ( eval "LEDGER_BASE=\"$BASE\" $* bash \"$GATE\"" ) > "$out" 2>&1
+  got=$?
+  if [ "$got" != "$want" ]; then
+    fail=$((fail+1)); printf 'FAIL %-40s want exit %s got %s\n' "$label" "$want" "$got"; return
+  fi
+  if ! grep -qF -- "$sub" "$out"; then
+    fail=$((fail+1)); printf 'FAIL %-40s exit %s ok, but output lacks %s\n' "$label" "$got" "$sub"; return
+  fi
+  pass=$((pass+1)); printf 'ok   %-40s (exit %s, says it)\n' "$label" "$got"
+}
+
 check "active task passes"          0 'TASK_ID=active'
 check "open task fails"             1 'TASK_ID=openone'
 check "in_progress but unclaimed"   1 'TASK_ID=claimless'
@@ -191,26 +232,56 @@ check "spaced worker rejects prefix" 1 'TASK_ID=spacey EXPECTED_WORKER=fable'
 check "spaced closed_by passes"     0 'TASK_ID=spaceclosed'
 check "spaced closed_by matches"    0 'TASK_ID=spaceclosed EXPECTED_WORKER="lead truthgrip"'
 
-# -- The lapsed-claim predicate (D23) -----------------------------------------
-check "lapsed recently passes"       0 'TASK_ID=lapserecent'
-check "lapsed long ago fails"        1 'TASK_ID=lapsestale'
-check "open, never claimed, fails"   1 'TASK_ID=openone'
-check "open, no previous_worker"     1 'TASK_ID=lapsenoprev'
-check "lapsed, no expired_at, fails" 1 'TASK_ID=lapsenodate'
-check "lapsed, bad expired_at, fails" 1 'TASK_ID=lapsebadtime'
-check "open with live worker fails"  1 'TASK_ID=lapseworker'
-check "released after reap fails"    1 'TASK_ID=lapsereleased'
-check "future expired_at fails"      1 'TASK_ID=lapsefuture'
-check "small clock skew still passes" 0 'TASK_ID=lapseskew'
-check "released before reap passes"  0 'TASK_ID=lapsereleasedold'
-# The grace is a knob, and it must move the verdict in BOTH directions --
-# otherwise "env-overridable" is an untested claim about a variable nothing reads.
-check "grace shrunk reds a lapse"    1 'TASK_ID=lapserecent LAPSE_GRACE_SECONDS=60'
-check "grace widened greens a lapse" 0 'TASK_ID=lapsestale LAPSE_GRACE_SECONDS=999999999'
+# -- The lapsed-claim predicate (D23), now PR-relative: P4 (D58) --------------
+# Every check in this block supplies PR_OPENED_AT, because that is what the
+# workflow supplies; the refusal fixtures below are the ones that withhold it.
+check "claim live at PR open passes"  0 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPEN"
+check "claim dead at PR open fails"   1 "TASK_ID=lapsestale PR_OPENED_AT=$PR_OPEN"
+check "expired_at == PR open passes"  0 "TASK_ID=lapseexact PR_OPENED_AT=$EXP_EXACT"
+check "open, never claimed, fails"   1 "TASK_ID=openone PR_OPENED_AT=$PR_OPEN"
+check "open, no previous_worker"     1 "TASK_ID=lapsenoprev PR_OPENED_AT=$PR_OPEN"
+check "lapsed, no expired_at, fails" 1 "TASK_ID=lapsenodate PR_OPENED_AT=$PR_OPEN"
+check "lapsed, bad expired_at, fails" 1 "TASK_ID=lapsebadtime PR_OPENED_AT=$PR_OPEN"
+check "open with live worker fails"  1 "TASK_ID=lapseworker PR_OPENED_AT=$PR_OPEN"
+check "released after reap fails"    1 "TASK_ID=lapsereleased PR_OPENED_AT=$PR_OPEN"
+check "future expired_at fails"      1 "TASK_ID=lapsefuture PR_OPENED_AT=$PR_OPEN"
+check "small clock skew still passes" 0 "TASK_ID=lapseskew PR_OPENED_AT=$PR_OPEN"
+check "released before reap passes"  0 "TASK_ID=lapsereleasedold PR_OPENED_AT=$PR_OPEN"
+# The predicate must move the verdict in BOTH directions on the SAME document,
+# and the only thing that moves is when the PR opened -- which is exactly the
+# claim P4 makes. These replace the two grace-tuning cases: the old knob was a
+# number the gate had to be right about, and it is gone.
+check "PR opened after the lapse reds" 1 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPEN_LATE"
+check "PR opened before the lapse greens" 0 "TASK_ID=lapsestale PR_OPENED_AT=$PR_OPEN_ANCIENT"
+# ...and it must REFUSE rather than fall open when it cannot read the PR's open
+# time. Withholding PR_OPENED_AT on a document that otherwise passes is the whole
+# test: if either of these greens, a workflow that ever drops the env line goes
+# silently permissive on every lapsed claim.
+check_says "no PR_OPENED_AT refuses"  1 "PR_OPENED_AT was not supplied" 'TASK_ID=lapserecent'
+check_says "empty PR_OPENED_AT refuses" 1 "PR_OPENED_AT was not supplied" 'TASK_ID=lapserecent PR_OPENED_AT=""'
+check_says "unparseable PR_OPENED_AT refuses" 1 "is not a readable ISO-8601 timestamp" 'TASK_ID=lapserecent PR_OPENED_AT=whenever'
+# The red a lapsed-before-open PR actually receives must name the lapse, not the
+# grace that no longer exists.
+check_says "dead-at-open red names the lapse" 1 "had ALREADY lapsed" "TASK_ID=lapsestale PR_OPENED_AT=$PR_OPEN"
+# ...but only on the branch that needs it: in_progress and done are decided from
+# the document alone, so withholding it there must NOT red a readable PR.
+check "in_progress needs no PR_OPENED_AT" 0 'TASK_ID=active'
+check "done needs no PR_OPENED_AT"        0 'TASK_ID=doneclosed'
 # The lapsed actor is previous_worker, so an author map (when one exists) must be
 # compared against it rather than against the null worker.
-check "lapsed actor matches worker"  0 'TASK_ID=lapserecent EXPECTED_WORKER=fable-tob'
-check "lapsed actor wrong worker"    1 'TASK_ID=lapserecent EXPECTED_WORKER=nobody'
+check "lapsed actor matches worker"  0 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPEN EXPECTED_WORKER=fable-tob"
+check "lapsed actor wrong worker"    1 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPEN EXPECTED_WORKER=nobody"
+
+# -- A 200 that carries no document is UNCHECKED, never an accusation (D59) ---
+# Both shapes used to print "task does not exist on the ledger" at a PR whose
+# task is fine. A genuine nonexistent task answers 404 and stays a definitive
+# red (`ghost`, above and below), so this reroute loses zero true detection.
+check_says "200 with result:null is UNCHECKED" 2 "carried no task document" 'TASK_ID=nullresult'
+check_says "200 with a bare doc is UNCHECKED"  2 "carried no task document" 'TASK_ID=baredoc'
+# ...and the 404 keeps the accusation, because there it is TRUE. Assert the
+# words: an exit code alone cannot tell "does not exist" from "could not check",
+# and printing the wrong one of those at a reader is the whole defect.
+check_says "404 still accuses definitively"    1 "does not exist on the ledger" 'TASK_ID=ghost'
 
 # -- Bounded retry, then FAIL (D24) -------------------------------------------
 # A flaky ledger that 500s the first N requests per id and then answers. This is
@@ -456,6 +527,18 @@ cutoff_case() { # cutoff_case <label> <base_sha> <want_exit> <want_in_GITHUB_OUT
   fi
   pass=$((pass+1)); printf 'ok   %-40s (exit %s)\n' "$label" "$got"
 }
+
+# -- the verify step must PLUMB the PR open time -------------------------------
+# The step bodies above run with an env this harness supplies, so they cannot
+# see the YAML `env:` block at all: delete `PR_OPENED_AT` from the workflow and
+# every fixture in this file still passes, while in production every lapsed
+# claim would hit the refusal and red. The env line is checked as text, in the
+# same file the step bodies are extracted from, for exactly that reason.
+if grep -qE '^\s*PR_OPENED_AT:\s*\$\{\{\s*github\.event\.pull_request\.created_at\s*\}\}\s*$' "$WORKFLOW_ABS"; then
+  pass=$((pass+1)); printf 'ok   %-40s (workflow passes created_at)\n' "verify step plumbs PR_OPENED_AT"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s %s has no PR_OPENED_AT: ${{ github.event.pull_request.created_at }} line\n' "verify step plumbs PR_OPENED_AT" "$WORKFLOW"
+fi
 
 cutoff_case "step cutoff: post-gate enforces"  "$SHA_POST" 0 "enforced=1"
 cutoff_case "step cutoff: pre-gate grandfathers" "$SHA_PRE" 0 "enforced=0"
