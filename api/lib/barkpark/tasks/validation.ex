@@ -180,6 +180,9 @@ defmodule Barkpark.Tasks.Validation do
   # `Map.fetch` so a legitimately-present `false` is NOT masked by `||`
   # (which treats `false` as absent and lets an invalid value pass the
   # type check). `String.to_atom` is safe: keys are fixed literals here.
+  # Reachability: every call site passes a literal field name, so the atom table
+  # can only ever gain the fixed set spelled in this module — never a client key.
+  # sobelow_skip ["DOS.StringToAtom"]
   defp fetch(content, key) do
     case Map.fetch(content, key) do
       {:ok, v} -> v

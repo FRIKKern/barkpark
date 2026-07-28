@@ -108,6 +108,10 @@ defmodule Barkpark.Media.Renditions do
     :ok
   end
 
+  # Reachability: `dest` is `Media.file_path/1` over `cache_relative/4` — the
+  # fixed `_renditions` prefix, a DB-issued `MediaFile` UUID, a `@presets` key
+  # and its format; no caller-supplied path component reaches the mkdir.
+  # sobelow_skip ["Traversal.FileModule"]
   defp generate(%MediaFile{} = file, preset, spec, dest, rel, profile) do
     # The SOURCE original comes via the blobstore (a local path join today; a
     # one-time cache download under an object-storage backend). The rendition

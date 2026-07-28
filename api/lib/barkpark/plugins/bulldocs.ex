@@ -138,6 +138,9 @@ defmodule Barkpark.Plugins.Bulldocs do
   end
 
   @impl Barkpark.Plugin
+  # Reachability: the only path read is `@schemas_dir` joined with one of three
+  # compile-time literal filenames — no runtime input reaches `File.read!/1`.
+  # sobelow_skip ["Traversal.FileModule"]
   def register_schemas(_opts) do
     # paper (public reader artifact) + form_response (PRIVATE — anonymous form
     # submissions land here; visibility "private" keeps every response off the
