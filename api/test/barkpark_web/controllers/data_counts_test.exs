@@ -141,4 +141,83 @@ defmodule BarkparkWeb.DataCountsTest do
       assert is_map(body["counts"])
     end
   end
+
+  describe "?perspective is refused, never silently ignored (PDS-D303)" do
+    # It used to be read and dropped: ?perspective=raw and ?perspective=zzzbogus
+    # both returned 200 with a byte-identical published body still labelled
+    # "perspective":"published" — the caller asked for drafts, got the published
+    # number, and had no signal at all. The endpoint honours exactly one
+    # perspective, so it now says so.
+    test "the honoured value passes: ?perspective=published is 200 and unchanged",
+         %{conn: conn, raw_a: raw_a} do
+      body =
+        conn
+        |> authed(raw_a)
+        |> get("/w/ws-a-counts/p/proj-a/v1/data/counts/#{@dataset}?perspective=published")
+        |> json_response(200)
+
+      assert body["ok"] == true
+      assert body["perspective"] == "published"
+      assert body["counts"] == %{"post" => 2, "note" => 1}
+    end
+
+    test "?perspective=raw is refused with a 400 naming the parameter",
+         %{conn: conn, raw_a: raw_a} do
+      body =
+        conn
+        |> authed(raw_a)
+        |> get("/w/ws-a-counts/p/proj-a/v1/data/counts/#{@dataset}?perspective=raw")
+        |> json_response(400)
+
+      assert body["error"]["code"] == "malformed"
+      assert body["error"]["message"] =~ "perspective"
+      assert body["error"]["details"]["parameter"] == "perspective"
+      assert body["error"]["details"]["supported"] == ["published"]
+      assert body["error"]["details"]["received"] == "raw"
+      # The refusal is a refusal — no counts leak out beside it.
+      refute Map.has_key?(body, "counts")
+    end
+
+    test "a garbage perspective is refused too (allowlist, not a denylist)",
+         %{conn: conn, raw_a: raw_a} do
+      body =
+        conn
+        |> authed(raw_a)
+        |> get("/w/ws-a-counts/p/proj-a/v1/data/counts/#{@dataset}?perspective=zzzbogus")
+        |> json_response(400)
+
+      assert body["error"]["code"] == "malformed"
+      assert body["error"]["details"]["received"] == "zzzbogus"
+    end
+
+    test "the absent-param default is untouched (no perspective → 200 published)",
+         %{conn: conn, raw_a: raw_a} do
+      body =
+        conn
+        |> authed(raw_a)
+        |> get("/w/ws-a-counts/p/proj-a/v1/data/counts/#{@dataset}")
+        |> json_response(200)
+
+      assert body["perspective"] == "published"
+      assert body["counts"] == %{"post" => 2, "note" => 1}
+    end
+
+    test "the flat route shares the action, so it refuses identically",
+         %{conn: conn, raw_a: raw_a} do
+      body =
+        conn
+        |> authed(raw_a)
+        |> get("/v1/data/counts/#{@dataset}?perspective=raw")
+        |> json_response(400)
+
+      assert body["error"]["code"] == "malformed"
+    end
+
+    test "an anonymous caller stays existence-hidden even on a bad perspective (404, not 400)",
+         %{conn: conn} do
+      conn
+      |> get("/v1/data/counts/#{@dataset}?perspective=raw")
+      |> json_response(404)
+    end
+  end
 end

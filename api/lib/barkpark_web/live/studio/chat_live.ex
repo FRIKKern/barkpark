@@ -40,6 +40,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.Tasks
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime
+  alias Barkpark.StudioChat.StreamTail
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -2891,7 +2892,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               live preview truncated — the full response arrives on completion
             </div>
             <%= if !@streaming[:capped] do %>
-              <%= case classify_tail(streaming_tail(@streaming)) do %>
+              <%= case StreamTail.classify(@streaming) do %>
                 <% {:text, tail} -> %>
                   <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;" data-gutter-text>{tail}<span class="text-dim">▌</span></div>
                 <% {:component, kind, prose} -> %>
@@ -3867,7 +3868,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         class="text-xs text-dim"
         style="font-family: var(--font-mono); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;"
       >
-        <span class="bp-skel-dot"></span> rendering <%= skeleton_label(@kind) %>…
+        <span class="bp-skel-dot"></span> rendering <%= StreamTail.skeleton_label(@kind) %>…
       </div>
       <%= case @kind do %>
         <% "chart" -> %>
@@ -5751,175 +5752,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp plan_outcome_label(_), do: "✗ kept planning"
 
   # ── progressive streaming render ────────────────────────────────────────
-  # Blocks render the moment they complete, not when the whole message ends:
-  # the accumulated stream is split at the last block boundary ("\n\n") whose
-  # prefix has BALANCED code fences (never split inside a streaming ```mermaid
-  # or ```portabledoc fence — a half fence would render as a broken block).
-  # The stable prefix renders through the paper engine once per boundary
-  # advance; only the still-forming tail re-renders as plain text per delta.
-  #
-  # DISPLAY-ONLY CAP (felix W22, charter D131). `state.text` is a purely
-  # cosmetic in-flight preview for BOTH providers — the durable text is the
-  # claude full-frame append (:1380) and the codex Recorder runtime_text, never
-  # this accumulator (the codex turn_completed `is_binary` branch is dead — this
-  # always returns a map). A runaway or hostile stream of many small WELL-FORMED
-  # deltas would otherwise grow one assign unboundedly for the whole turn AND
-  # compound cost: stable_boundary re-scans the FULL text per delta and each new
-  # boundary re-renders the FULL prefix through the paper engine (the compounding
-  # re-render is the actual DoS — the LiveView wedged at 5000 deltas in the W22
-  # probe). So we bound the DISPLAY at a config-overridable byte cap: on breach
-  # we do one final render up to the last stable balanced-fence boundary, drop
-  # the still-forming tail (NEVER a mid-fence byte slice — file doctrine below +
-  # the chat_tool_renderer render-only-truncation law), and freeze. Truncating
-  # the live bubble loses ZERO durable data; the full response lands on
-  # completion. Turn-abort was rejected (D131): it kills a legitimate long answer
-  # and cannot undo the Recorder's already-accumulated durable text.
-  @default_max_streaming_display_bytes 1_048_576
-
-  defp advance_streaming(nil, delta),
-    do: advance_streaming(%{text: "", stable_html: nil, stable_len: 0, capped: false}, delta)
-
-  # Once capped the live bubble is frozen: every further delta is ignored, so
-  # neither the accumulator nor the per-delta full-prefix re-render can grow. The
-  # terminal state is safe because the durable full text still arrives on
-  # completion (this accumulator is display-only for both providers).
-  defp advance_streaming(%{capped: true} = state, _delta), do: state
-
-  defp advance_streaming(state, delta) do
-    text = state.text <> delta
-
-    if byte_size(text) > max_streaming_display_bytes() do
-      freeze_streaming(state, text)
-    else
-      state = %{state | text: text}
-      boundary = stable_boundary(text)
-
-      if boundary > state.stable_len do
-        prefix = binary_part(text, 0, boundary)
-        %{state | stable_len: boundary, stable_html: render_paper_html(prefix)}
-      else
-        state
-      end
-    end
-  end
-
-  # Cap breached: do ONE last render up to the last stable balanced-fence
-  # boundary, discard the still-forming tail (freeze the text at that boundary so
-  # `streaming_tail/1` yields nothing and the template shows the honest marker),
-  # and mark the state terminal. If no balanced boundary exists yet (stable_len
-  # stays 0 — one giant unbroken block, the W22 probe shape) the bubble shows
-  # only the marker; the durable full text is unaffected.
-  defp freeze_streaming(state, text) do
-    boundary = stable_boundary(text)
-
-    {stable_html, stable_len} =
-      if boundary > state.stable_len do
-        {render_paper_html(binary_part(text, 0, boundary)), boundary}
-      else
-        {state.stable_html, state.stable_len}
-      end
-
-    %{
-      text: binary_part(text, 0, stable_len),
-      stable_html: stable_html,
-      stable_len: stable_len,
-      capped: true
-    }
-  end
-
-  defp max_streaming_display_bytes do
-    :barkpark
-    |> Application.get_env(:claude_chat, [])
-    |> Keyword.get(:max_streaming_display_bytes, @default_max_streaming_display_bytes)
-  end
-
-  defp streaming_tail(%{text: text, stable_len: stable_len}) do
-    binary_part(text, stable_len, byte_size(text) - stable_len)
-  end
-
-  # ── forming-component classification (streaming skeletons) ──────────────
-  # The tail after the last balanced-fence boundary is a SINGLE forming block
-  # (a "\n\n" with balanced fences would have advanced the boundary), so a
-  # cheap look at how it starts tells us what component is being built. The
-  # raw source of a forming component reads as noise — render a dedicated
-  # skeleton in the component's shape instead; prose keeps streaming as text.
-  #
-  # Returns `{:text, tail}` or `{:component, kind, prose_before_component}`.
-  defp classify_tail(tail) do
-    fence_count = length(:binary.matches(tail, "```"))
-
-    cond do
-      rem(fence_count, 2) == 1 ->
-        {pos, _} = List.last(:binary.matches(tail, "```"))
-        prose = binary_part(tail, 0, pos)
-        fence = binary_part(tail, pos, byte_size(tail) - pos)
-        {:component, fence_kind(fence), prose}
-
-      forming_table?(tail) ->
-        {:component, "table", ""}
-
-      String.starts_with?(String.trim_leading(tail), ">") ->
-        {:component, "callout", ""}
-
-      true ->
-        {:text, tail}
-    end
-  end
-
-  defp fence_kind("```" <> rest) do
-    case rest |> String.split("\n", parts: 2) |> hd() |> String.trim() do
-      "mermaid" -> "diagram"
-      "portabledoc" -> portabledoc_kind(rest)
-      _ -> "code"
-    end
-  end
-
-  defp fence_kind(_), do: "code"
-
-  # Sniff the first "type" in the (partial) JSON to pick the skeleton shape.
-  defp portabledoc_kind(fence_rest) do
-    case Regex.run(~r/"type"\s*:\s*"([\w-]+)"/, fence_rest) do
-      [_, "chart"] -> "chart"
-      [_, "heatmap"] -> "chart"
-      [_, t] when t in ["stat", "stats"] -> "stats"
-      [_, "table"] -> "table"
-      [_, "callout"] -> "callout"
-      [_, "divider"] -> "code"
-      [_, _other] -> "block"
-      _ -> "block"
-    end
-  end
-
-  defp forming_table?(tail) do
-    tail |> String.trim_leading() |> String.starts_with?("|")
-  end
-
-  defp skeleton_label("diagram"), do: "diagram"
-  defp skeleton_label("chart"), do: "chart"
-  defp skeleton_label("stats"), do: "stats"
-  defp skeleton_label("table"), do: "table"
-  defp skeleton_label("callout"), do: "callout"
-  defp skeleton_label("code"), do: "code"
-  defp skeleton_label(_), do: "block"
-
-  defp stable_boundary(text) do
-    case :binary.matches(text, "\n\n") do
-      [] ->
-        0
-
-      matches ->
-        matches
-        |> Enum.reverse()
-        |> Enum.find_value(0, fn {pos, len} ->
-          boundary = pos + len
-          if balanced_fences?(binary_part(text, 0, boundary)), do: boundary, else: nil
-        end)
-    end
-  end
-
-  defp balanced_fences?(prefix) do
-    rem(length(:binary.matches(prefix, "```")), 2) == 0
-  end
+  # Blocks render the moment they complete, not when the whole message ends.
+  # The boundary law, the fold that computes it, the display cap and the
+  # forming-component classification all live in `Barkpark.StudioChat.StreamTail`
+  # (charter D58/D62/D68) so an SSE producer can compute the SAME prefix. The
+  # renderer is injected — `render_paper_html/1` stays HERE because HTML is
+  # web-only and it has three non-streaming callers.
+  defp advance_streaming(state, delta),
+    do: StreamTail.advance(state, delta, &render_paper_html/1)
 
   # Assistant markdown -> PortableDoc blocks -> the SAME article renderer the
   # paper reader uses. The renderer escapes all text at walk time, so the

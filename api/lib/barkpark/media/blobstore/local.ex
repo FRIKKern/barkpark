@@ -7,19 +7,27 @@ defmodule Barkpark.Media.Blobstore.Local do
   `{:error, :storage_unavailable}`, preserving `Media.upload/3`'s contract
   that a disk fault (ENOSPC / EACCES / read-only mount) surfaces as an
   enveloped 503, never a bare 500.
+
+  Both write verbs answer with a `t:Barkpark.Media.Blobstore.receipt/0`: the
+  bytes RECEIVED plus a post-condition `stat_blob/1` read of what the store
+  actually holds. Here the disk IS the store — there is no write-through cache
+  to bypass — so `File.stat` on the real path is the honest read, not the trap
+  it would be under the S3 backend.
   """
 
   @behaviour Barkpark.Media.Blobstore
 
   alias Barkpark.Media
+  alias Barkpark.Media.Blobstore
 
   @impl true
   def put_file(relative_path, source_path, _opts) do
     full_path = Media.file_path(relative_path)
 
     with :ok <- File.mkdir_p(Path.dirname(full_path)),
-         :ok <- File.cp(source_path, full_path) do
-      :ok
+         :ok <- File.cp(source_path, full_path),
+         {:ok, %File.Stat{size: received}} <- File.stat(source_path) do
+      Blobstore.receipt(received, :stat, stat_blob(relative_path))
     else
       # cp may have written a partial file before failing → best-effort cleanup
       # so no orphan blob survives (moved here verbatim from Media.upload/3).
@@ -35,9 +43,20 @@ defmodule Barkpark.Media.Blobstore.Local do
 
     with :ok <- File.mkdir_p(Path.dirname(full_path)),
          :ok <- File.write(full_path, body) do
-      :ok
+      Blobstore.receipt(byte_size(body), :stat, stat_blob(relative_path))
     else
       {:error, _reason} -> {:error, :storage_unavailable}
+    end
+  end
+
+  @impl true
+  def stat_blob(relative_path) do
+    case File.stat(Media.file_path(relative_path)) do
+      {:ok, %File.Stat{type: :regular, size: size}} -> {:ok, %{size: size}}
+      # a directory (or a device/symlink target) at the blob path is not a blob
+      {:ok, %File.Stat{}} -> {:error, :not_found}
+      {:error, :enoent} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
     end
   end
 

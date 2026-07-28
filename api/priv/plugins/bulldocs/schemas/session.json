@@ -39,8 +39,20 @@
          {"name": "kind", "title": "Kind", "type": "select",
           "options": ["paper-published", "task-closed", "epic-wave-complete", "push", "note"]},
          {"name": "ref", "title": "Ref", "type": "string"},
-         {"name": "note", "title": "Note", "type": "text", "rows": 2}
+         {"name": "note", "title": "Note", "type": "text", "rows": 2},
+         {"name": "conversation", "title": "Conversation", "type": "string"}
        ]
-     }}
+     }},
+    {"name": "conversations", "title": "Conversations", "type": "arrayOf", "ordered": false, "group": "trail",
+     "description": "Registry of harness conversations that touched this session. Upserted by id via POST /v1/plugins/bulldocs/sessions/:slug/conversations; first_seen/last_active are server-stamped.",
+     "of": {"name": "conversation", "type": "composite", "fields": [
+       {"name": "id", "title": "Conversation id", "type": "string"},
+       {"name": "harness", "title": "Harness", "type": "select", "options": ["claude-code", "codex", "other"]},
+       {"name": "account", "title": "Account", "type": "string"},
+       {"name": "machine", "title": "Machine", "type": "string"},
+       {"name": "cwd", "title": "Cwd", "type": "string"},
+       {"name": "first_seen", "title": "First seen", "type": "datetime"},
+       {"name": "last_active", "title": "Last active", "type": "datetime"}
+     ]}}
   ]
 }

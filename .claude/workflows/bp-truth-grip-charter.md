@@ -1556,6 +1556,164 @@ bolted on afterward, which is worth nothing.
   LEAVES only: D71's own final sentence REFUSES it for a parent with open children, so every
   candidate needs a parent/child read before any close.*
 
+- **D121 — FIVE STANDING DECISIONS ARE CORRECTED BY MEASUREMENT (wave 11, at origin/main
+  `a9638ecef`; `tooling/grip` bytes unchanged at `5ccd9ad0a`). The originals stay on the record; this
+  is the dated correction.**
+  **D95** — its "exactly three rejection classes have no control or test anywhere" (`NO-QUANTITY`
+  mint.mjs:482, `NOT-A-REF` level.mjs:579/583, `WRITE-FAILED` ledger.mjs:652) is FALSE at main: #6359
+  landed `class-coverage.test.mjs` with a fail-before plant AND a never-cry-wolf half for all three.
+  D95's OTHER two clauses — "against a frozen adversarial fixture" and the undefined "class" — are
+  UNTOUCHED (`grep -n 'fixtures\|evidence-corpus' class-coverage.test.mjs` returns nothing; every
+  control there is an inline literal). So #6359 closes ONE of 2b's three failing words. Its "0/7" for
+  `tgw2-acceptance-suite` is now 0/9. D95's closing warning — that keeping 2a and dropping 2b is the
+  single most likely way this goes wrong — STANDS, unamended.
+  **D109** — its builder-blocker paragraph is OVERSTATED. The FACT is true (`ruling()` at
+  adjudicate.mjs:253 returns nine keys, no top-level `admits`). The INFERENCE, "a seal check built on
+  `adjudicate()` alone structurally cannot adjudicate an absence", is REFUTED at runtime: `ruling()`
+  passes `rerun: result` BY REFERENCE and `decorate()` (rerun.mjs:860) stamps `admits{pass,absence}`,
+  so an executed ADMITTED ruling yields `{"pass":true,"absence":false}`. The real hole is narrower —
+  `screenedRerun`'s refusal branch (adjudicate.mjs:122-134) hand-builds an undecorated 6-key literal,
+  so `ruling.rerun.admits.absence` TypeErrors on every REFUSED command. Also: the "polarity is
+  DISCARDED" text every wave attributed to D111 is D109's.
+  **D111** — the `r.status !== 0` launder is at seal-predicate.mjs:**171 AND :176**, byte-identical.
+  D111 names only :176, and :171 is the `--guard-cmd` override branch that every prior mutation proof
+  of that file actually drove — so the credential was earned through the unfixed line. D111's
+  "`--ledger` fixture injection proven in BOTH directions" is NOT RE-DERIVABLE FROM MAIN: `git grep
+  -ln defectCommits` returns exactly one tracked file, the module itself, and no tracked JSON carries
+  a `landed` key. The fixture was a throwaway.
+  **D113** — the invariant stands; the digit moved. `tooling/grip/test/` holds **17** files, not
+  "16 today". The trap still fires verbatim: `node --test rerun.test.mjs DOES-NOT-EXIST.test.mjs`
+  exits 0 with `# fail 0`, `# skipped 1` and zero mention of the missing path.
+  **D119(e)** — its FINDING is live (level.mjs:526 is still `segmentLevel(segment.raw)`), but its
+  BUILDER GUIDANCE is REFUTED. "Its own title says the suite ENFORCES the bug — so the fix must
+  invert a green test" is sourced to a TASK TITLE and adopted as instruction. Measured before and
+  after across all 17 files: NO green test inverts. level.test.mjs goes 71/71/0 → 75/75/0 and every
+  other file is byte-identical. *That is the hearsay class this epic exists to refuse, committed by
+  the charter itself — which is why it is recorded here rather than quietly dropped.*
+
+- **D122 — D94's PREDICATE HAS THREE CLAUSES, AND THE FOURTH IS D108's. The SEALED ban does NOT
+  reach program stdout.** Read verbatim: (a), (b), (c). There is **no clause (d)**. The four clauses
+  the seal command prints are **(a), (b), (b′), (c)** — (b′) is D108's amendment. Output labelling
+  anything "(d)" invents a predicate clause on the instrument that certifies this epic's honesty.
+  Separately: D94(c)'s ban enumerates four artifact classes — "no wave-log entry, Paper, memory note
+  or commit message may use the word SEALED" — and a program's stdout is none of them. **The rule
+  still binds** (the seal command must not print SEALED before the predicate holds) but it is a WAVE
+  RULE EXTENDING D94(c), never a quotation of it. *Over-citing a real decision for authority it does
+  not carry is the same defect as citing a phantom one; it just survives a grep.*
+
+- **D123 — RECONCILIATION IS NOT SURVEY IN A SMALLER HAT: it changed the scope of three of the four
+  refired briefs and refuted four charter decisions, for the cost of one bounded delta pass.** The
+  attack on this wave's direction was that measurement keeps displacing construction. The answer is
+  arithmetic: the expensive item (the full suite) cost 182s and is now stamped; the delta produced
+  the #6359 overlap ruling, the phantom-fourth-failure refutation, the six-class mint split, the
+  `admits` ruling and the D119(e) refutation — every one of which would have cost a builder real time
+  or produced a false stamp. **A brief stale in its ground rules produces a builder that gates against
+  the wrong baseline.** The briefs were NOT re-cut, NOT re-surveyed and NOT re-filed; each carries a
+  dated amendment block that overrides where it conflicts.
+
+- **D124 — THE THREE GRIP REDS ARE TWO NESTED AND ONE INDEPENDENT, and `run_id` scoping is NECESSARY
+  BUT NOT SUFFICIENT.** `tgw9-s1`'s own title says "three independent problems, not one"; measured,
+  binding.test.mjs:444 does not assert — it CRASHES (`TypeError: run.recipes is not iterable` at
+  ledgerRows :57) — and ledger.test.mjs:1281's first unreadables are `MALFORMED-RUN` on the SAME ten
+  recipes-less files. `run_id` scoping fixes shape 1 outright and removes 218 of shape 2's 421.
+  mint.test.mjs:549 IS independent (`run.recipes ?? []` → those files contribute 0 rows). **And
+  excluding every foreign file takes the D89 control 421 → 203, not → 0**, across 18 of grip's own 40
+  runs: D99's "unowned commons" framing understates, and the argued ruling on grip's OWN rows is the
+  majority of that slice. Three unit rulings the briefs inherited wrong: rejections ACCUMULATE per
+  row (ledger.mjs:772-782), so 203 is **entries across 95 rows**, not rows; the 208/99 mint split is
+  an OWNERSHIP split, not rejected/drifted (mint rejects **zero** of 631); and the 99 drifting rows
+  are **six classes**, of which the 27 `path→path` rows are a LATENT ROOT-RELATIVITY BUG IN MINT, not
+  an improvement — a blanket "mint improved" ruling would ship a regression under a checkbox. Filed
+  as `tgw11-bl-mint-path-root-relativity`. *The 18 files carrying drifting mint rows are EXACTLY the
+  18 owned files carrying unreadable rejections — set equality. Two mechanically independent tests,
+  one population of pre-hardening runs.*
+
+- **D125 — A FAILURE COUNT IS MEANINGLESS WITHOUT THE TREE AND HOW IT WAS BUILT, and there are THREE
+  phantom generators, not one.** The suite is `644/640/3/1` in a clean git worktree at origin/main,
+  reproduced digit-identically by four independent measurements at three commits — **the lead's
+  "four failures" is refuted for the third time; there is no fourth to file.** The generators:
+  (i) a bare-directory invocation, `node --test tooling/grip/test/`, reports "1 test, 1 fail" in
+  ~40ms on node v22 **inside a clean git worktree** — small, plausible, and the dangerous one; any
+  CI job or shell-out must use the glob or explicit files. (ii) a tooling-only non-git copy gives
+  `604/586/17/1`, and its cause is a MISSING REPO-ROOT FILE (`.claude/workflows/bp-epic-cycle.workflow.js`
+  at inloop-gate.test.mjs:29), **not** the missing `.git`. (iii) a FULL tree with `.git` deleted gives
+  `644/628/15/1` — so "non-git" names at least two different shapes. **Every generator only ever ADDS
+  failures; all three contain the same three reds as a subset.** Duration is a HOST property, not a
+  code property: 145-174s idle across four runs, and a 4.4× load increase bought 4%. The "53 minutes"
+  is neither reproduced nor refutable here and its mechanism is UNEXPLAINED — do not quote it as
+  settled, and give grip CI a 10-minute timeout, not 5.
+
+- **D126 — THE SEAL PORTS A BLUEPRINT AND REWRITES BOTH THINGS IT IS JUDGED ON: the LENS and the
+  ADJUDICATION.** D94(b) forbids the prior art's census shape by name (D108 says so in its own
+  words), so this is not a constant swap. Measured lenses: transitive closure **147**, id-prefix
+  **145**, `filter[parent_id]` **131**, union **147** — union equals closure TODAY, a measurement and
+  not an invariant, so **compute the union**. The direct lens drops 16 rows, all children of
+  `tgw1-workflow-gate-wiring`, one of them (`tgw2-verify-writes-back`) OPEN and in the live pool: 32
+  claimable where the truth is 33. An unfenced prefix lens sweeps 4 PAPERS. `--limit` is **silently
+  clamped at 1000** with no truncation flag and `count` is the page size, so a single-call lens sees
+  98 of 146 rows **while reporting the correct claimable count** — green for the wrong reason, and
+  the reason a builder must check the ROW count, not the claimable count. `/v1/tasks` **silently
+  ignores `parent_id`** (a real, an absent and a nonexistent parent all return the identical 1000-row
+  set); pin `GET /v1/data/query/production/task` by name. **(b′) MUST BE WRITTEN, NOT INHERITED**: the
+  prior art excludes its root purely because a `parent_id` census structurally cannot return the
+  parent — there is no check and nothing to fail — so a closure lens without an explicit
+  `pool.has(ROOT)` assertion silently deletes clause (c)'s only enforcement, which is D108's named
+  amendment-into-vacuity. Key (b′) on POOL MEMBERSHIP, never `claim == null`: the root carries an
+  EXPIRED claim and is pooled anyway. **The launder is four shapes**: :171, :176, `status === null`
+  (timeout/signal/ENOENT — D111 names none of it), and a non-JSON HTTP response throwing at :116 so
+  exit 1 means both NO SEAL and infra failure. The fix is a four-way classifier used by both call
+  sites, not a sed. **The fixture must be AUTHORED AND COMMITTED** or the credential evaporates on
+  merge exactly as D111's did. And **the seal reads `admitsAbsenceClaim(ruling.rerun)`** — total
+  functions, correct on all four undefined-admits paths, zero production change: promoting `admits`
+  onto `ruling()` would silently satisfy 2 of open task `tgw4-absence-veto-stops-at-the-rerun-seam`'s
+  3 criteria, so adjudicate.mjs is OUT of the seal's fence.
+
+- **D127 — #6359 SUBTRACTS ONE WORD FROM 2b AND ZERO CRITERIA FROM `tgw2`, and the residual is
+  smaller in one direction and larger in the other than anyone wrote down.** It meets 0 of tgw2's 9
+  stored criteria. Two corrections in opposite directions. **Over-building**: SIX of the seven
+  "missing never-cry-wolf halves over the ten verdict classes" ALREADY EXIST on main with both halves
+  (DEMOTED adjudicate.test.mjs:128/:136 + :144; FAILED, HOST-UNREACHABLE, UNAVAILABLE, NULL-READ,
+  ASYNC-DEFERRED all in rerun.test.mjs) — building seven is D95's softening arriving by OVER-build.
+  The honest residual is a SELFTEST PROJECTION gap plus ONE real build: `REACHABLE-WRONG-ROUTE` has
+  no executed plant, and the hermetic replacement is proven to work (a 404 variant of
+  `withLocalServer`, rerun.test.mjs:737, returns `{"verdict":"REACHABLE-WRONG-ROUTE","code":404,
+  "reachable":true,"absence":true}`). **Do NOT unskip rerun.test.mjs:788** — it curls prod, and
+  flipping `# skipped 1` to 0 reds D113's own gate. **Under-gating**: the three D95 classes are named
+  in EXACTLY ONE test file, `class-coverage.test.mjs`, which tgw2's stored gate did not run — a PR
+  citing #6359 while its own gate never executes that file is a citation with no gate behind it. The
+  gate now runs it. *And a new vacuous-green generator sits on the exact command D116 mandates that
+  gate grow: `cli.mjs --selftest` writes 23 lines to a FILE and 7 through a PIPE, verdict line gone,
+  exit 0. Capture to a file and assert the tail line. Filed as
+  `tgw11-bl-cli-selftest-pipe-truncation`.*
+
+- **D128 — `tgw6-bl-grip-suite-has-no-ci` IS DEFERRED ON D104/D114 ORDERING, NOT ON A WORKFLOWS
+  COLLISION.** The wave's stated ground — that a concurrent branch-protection run owns
+  `.github/workflows/**` — is a CONCURRENCY argument, and `.github/workflows/**` appears in NEITHER
+  half of D118's fence, so it is not a fence argument at all. The charter's own ground is stronger and
+  correctly sourced: D114 states grip CI is the ONLY path lifting epic criterion 2 out of UNSTORABLE,
+  and "D104's ordering stands: round 2, behind a green suite." *This wave hands the next one that
+  green suite, a re-derived cost, and a criterion with a route — which is the whole reason `tgw9-s1`
+  is in it.*
+
+- **D129 — A DROPPED SLICE MUST BE IMPOSSIBLE TO DISCOVER AT REVIEW; the wave asserts its own
+  dispatch.** Wave 10 lost four of eight slices because the builder fan-out is the ONE fan-out not
+  wrapped in `neverLose` — deliberately, since a retry could re-dispatch against a live claim — and
+  `.filter(Boolean)` deletes a null dispatch before anything counts it: no LOST log, no deficit
+  block, no result key, and `Build: 3/3 slices green` printed post-filter over post-filter. Per slice,
+  assert a BRANCH exists (`loop-epic/<slug>-*` created after wave start). Three rulings that make the
+  receipt work rather than misfire: (i) the branch slug comes from **Decide's slice title**, not the
+  bp task title — on wave 10's own data a task-title glob would have reported branch-absent for 2 of
+  the 3 slices that DID build, a 67% false re-dispatch rate; match by slug PREFIX or by set
+  difference over the window, never by exact index (the index is `buildNow`-relative). (ii) **NEVER
+  re-dispatch on claim-present**: the worker id is deterministic from the slice title, so a
+  re-dispatch hits `renewal?` and BUMPS THE EPOCH, fencing off the live builder's stamps and close
+  (`:fenced_off` at stamp.ex:217, close.ex:380) — that converts a lost slice into a stuck one,
+  silently. (iii) `claim == null` does NOT prove no builder is running: the lease TTL is 2700s
+  (ttl_sweeper.ex:143) and wave 10 recorded two leases lapsing back into the pool. Re-dispatch only
+  on branch-absent AND claim-absent AND not-in-`not_green`. **Assert BRANCH at Build, PR at Review** —
+  `gh pr list --head` returns `[]` for every builder branch, because the PR is opened on the
+  reviewer's `-r` branch.
+
 ## Roadmap
 
 Ordered. Round = dispatch round; a slice never dispatches beside an unmerged dependency.
@@ -2582,3 +2740,125 @@ independent ledger-commons reds — everything downstream is blocked on it), the
 `tgw9-s3`. Plus the two rows this review produced: the `screenCommand` global-option hole and the 44
 lost park reasons. **The epic still does not seal, for the same reason it did not seal in wave 9 —
 the predicate does not hold — and now also because the predicate is still prose.**
+
+### Wave 2026-07-28 — wave 11, THE REFIRE: the four unbuilt briefs, rebuilt from a measured main. In flight.
+
+Paper `truth-grip-wave-11-2026-07-28`. Parent `truth-grip-epic`. Measured at origin/main `a9638ecef`
+(`tooling/grip` bytes unchanged at `5ccd9ad0a`; main moved FOUR times during the wave — every digit
+below is stamped, and a builder re-derives at its own head).
+
+**THIS WAVE DOES NOT RE-CUT ANYTHING.** Wave 10's briefs were good; they were lost to a dispatch
+hole, not to a design fault. All four are claimed and built as written, each carrying a dated
+AMENDMENT block that overrides where it conflicts. No re-survey, no re-file. FABLE IS UNAVAILABLE, so
+every slice dispatches at opus@medium — `tgw9-s1` and `tgw9-s3` would otherwise have been fable on
+the difficulty axis, and their briefs carry the extra pre-derivation that buys back.
+
+| # | slice | task | round | size | model | surface |
+|---|---|---|---|---|---|---|
+| 1 | the grip commons folds honest — two nested reds, one independent | `tgw9-s1-ledger-commons-honest` | 1 | large | opus | tooling/grip ledger+mint+binding |
+| 2 | a local grep of a doc stops deriving L1 | `tgw5-bl-level-mention-promotion` | 1 | medium | opus | tooling/grip/level.mjs |
+| 3 | the seal becomes a COMMAND that says NO | `tgw9-s3-criteria-adjudicated` | 1 | large | opus | tooling/grip/seal.mjs (new) |
+| 4 | criterion 2b keeps its frozen fixture | `tgw2-acceptance-suite` | 1 | large | opus | tooling/grip acceptance+cli |
+
+All four are ROUND 1 and file-disjoint. `tgw9-s1` gates `tgw6-bl-grip-suite-has-no-ci` (out of scope,
+D128); it does NOT gate its three siblings — the one behaviour the file fence hides, `deriveLevel`
+feeding the fold's `level_restated`, was measured at **0 of 631 rows**, so no serialising is needed.
+
+**HIGH-FLIP-RISK, and an independent second reviewer is owed before merge:** `tgw9-s3`'s NAMESPACE
+LENS and its (b′) enforcement. A wrong lens or a vacuous (b′) produces a confident, clean-looking
+FALSE SEAL — precisely what this epic exists to refuse, and the one failure mode a green gate cannot
+catch. `tgw5` is the second flag: it is a security item, and under SR-1 no CI check can block a merge.
+
+**THE SEAL IS NOT ATTEMPTED.** D94's predicate does not hold, and D94(c) plus this wave's own rule
+(D122) forbid the word SEALED before it does. Success is four slices built, gated and merged, with
+the seal DERIVABLE BY COMMAND and printing NOT YET.
+
+**Filed to the backlog this wave, all published under the epic:**
+`tgw11-bl-mint-path-root-relativity` (P1 — the 27 `path→path` drift rows are mint decaying, not mint
+improving), `tgw11-bl-cli-selftest-pipe-truncation` (P1 — a grip entrypoint launders its own verdict
+away at exit 0, on the exact command D116 mandates tgw2's gate grow),
+`tgw11-bl-screen-classifysafety-global-option-launder` (P1, SR-1 — `classifySafety` admits SEVEN of
+nine separated-value git globals, so on that shape class D88's defence-in-depth is ZERO layers, not
+one; widens the open `tgw4-screen-git-global-option-audit`, does not duplicate it),
+`tgw11-bl-unwrapped-recipe-rows-unread` (P2 — two recipe-shaped ledger files the fold has never read).
+
+**Coverage was complete.** 17 survey reports and 11 verify reports, zero deficit in either round.
+Nothing in this wave's cut rests on an unanswered question. The corners the survey named and verify
+closed are recorded in D121-D129; the ones still open are the "53 minutes" mechanism (D125) and
+whether `GRIP_LIVE=1` inverts D113's skip canary — neither is load-bearing for any slice here.
+
+### Wave 2026-07-28 — wave 11 REVIEW: all four refire slices built, fixed and merged-ready. Grade A−.
+
+Paper `truth-grip-wave-11-2026-07-28`. Parent `truth-grip-epic`. The refire worked: the four briefs
+wave 10 wrote and lost to a dispatch hole were claimed and built as written, no re-cut, no re-survey.
+**Four of four green.** Every branch is PUSHED and has a PR — the six-wave streak of stranded local
+branches is broken.
+
+| Slice | Final branch | PR | What |
+|---|---|---|---|
+| `tgw9-s1-ledger-commons-honest` | `…the-grip-commons-folds-honest-two-nested-0-r` | #6505 | Write-path ATTESTATION (`isAttestedRun`: the filename reproduces the digest of the file's own bytes), NOT-A-RUN split from MALFORMED-RUN, `foldLedger(scope)`, directional level restatements. Three standing reds green without softening. |
+| `tgw5-bl-level-mention-promotion` | `…a-purely-local-grep-of-a-document-stops--1-r` | #6506 | The security item. A local grep quoting `ssh`/`gh api`/`git show origin/` no longer derives L1/L2. Reviewer fixed three false demotions the builder's own evidence missed. |
+| `tgw9-s3-criteria-adjudicated` | `…the-seal-becomes-a-command-that-ships-sa-2-r` | #6507 | `tooling/grip/seal.mjs` — D94-as-amended, mechanical, four clauses named, live `rc=1`, SEALED nowhere. |
+| `tgw2-acceptance-suite` | `…criterion-2b-keeps-its-frozen-fixture-th-3-r` | #6508 | Criterion 2b's buildable half after five waves of declining it: the frozen `screenCommand` table, the REACHABLE-WRONG-ROUTE plant, the automated exit-3 mutations. Needed no reviewer fix. |
+
+**INTEGRATION PROVEN, NOT ASSUMED.** All four `-r` branches merged into one scratch branch off
+`origin/main`: **686 tests / 685 pass / 0 fail / 1 skipped over 18 files**, against a `644/640/3/1`
+baseline. D113's `# skipped 1` clause holds.
+
+**THE FINDING THAT JUSTIFIED THE REVIEW: two file-disjoint slices were semantically coupled, and the
+pair would have reddened main whichever merged second.** `seal.test.mjs` pinned
+`deriveLevel(CHARTER_GREP_SPECIMEN) === "L2"`; `tgw5` closes exactly that promotion, so the same
+command re-derives L3 once it lands. The file-truth collision check cannot see this class — the two
+slices share no file. **The lesson is a rule: a slice that PINS a value another slice's brief says it
+will CHANGE is collided even when their file sets are disjoint. Dispatch must collide on asserted
+VALUES, not only on paths.** Fixed by asserting the property that holds in both worlds (the PATH rule
+refuses a charter grep whatever the level grammar says) — which is what defence in depth means.
+
+**Other defects the review found and fixed in place:**
+
+1. **Three false demotions in the security slice** (`tgw5`). Reading the blessed tokens off the
+   quote-mask for EVERY head demoted `ssh "root@host" uptime` L1→L6, `git show 'origin/main:…'`
+   L2→L3 and `timeout 30 ssh "root@h"` L1→L6. Quoting a HOST or a REF is quoting an argument. The
+   builder's criterion-3 evidence said "8/8 HOLD rows identical" — true of the rows it walked, false
+   of the criterion it claimed, because the HOLD table never contained a quoted destination. Rule is
+   now head-keyed: a segment headed by the command ITSELF reads its raw bytes.
+2. **A near-vacuous assertion in the D89 control** (`tgw9-s1`). `level_restated_down === 0` reads
+   like a live launder detector and is not one: the fold runs `admitRecipe` before the restatement
+   counter, and a DOWN-shaped row IS the LEVEL-SKIP shape, so it is rejected and can never reach the
+   counter. Now executed both halves against one synthetic run, with the D89 control saying out loud
+   which assertion actually fires on a forged store.
+3. **Clause (c) misreported a non-closed root** (`tgw9-s3`). It read "closes LAST" as CLAIMABLE, so
+   an `in_progress` root printed "the root is already closed" — a false statement in the program
+   whose whole job is refusing false statements. Now reads the two genuinely closed statuses.
+
+**HIGH-FLIP-RISK, re-derived independently and CLEARED — with one thing still owed.** The reviewer
+re-derived `tgw9-s3`'s namespace lens by a different method: 153 recursive **server-side**
+`filter[parent_id]` queries rather than a client-side closure over a walked corpus. Closure 152 /
+prefix 150 / union 152 / claimable 34 / root-in-pool true — identical, and it covers depth 2+, the
+hole the builder named in his own depth-1 reconciliation. **Still owed to a human:** both derivations
+fence to `_type == "task"`, so a `tgw*`-named row of another type carrying a `lifecycle_status` is
+invisible to both. That is one shared assumption, and one reviewer cannot break it.
+
+**Ledger fixes.** `tgw5`'s claim lease had lapsed, so the board read a built-and-unmerged slice as
+`open` — re-claimed, `in_progress`, now-line rewritten. Criterion 3 carries a review-correction
+`--miss` note recording that its stamped evidence overstated. The other three tasks were honest:
+in_progress, merge-gated criteria left open for the lead, no task outside the wave touched.
+`tgw6-bl-grip-suite-has-no-ci` is untouched at 0/11, as D128 requires.
+
+**GUERRILLA'S DOC-CREATE IS DOWN, AND ONE ROW IS THEREFORE UNFILED.** `/v1/data/mutate` doc-CREATE
+returned 500/timeout on every attempt during the review (request ids `GMZYbJhOxSPzcsMACkxR`,
+`GMZYdmeCBah-FP4ACz6y`); reads, claims, pulses and stamps all worked. Same fault `tgw9-s1`'s builder
+hit. The residual it would have filed — an UNQUOTED mention under a NON-reader head (`echo ssh
+root@h` still derives L1; zero of 631 committed rows have the shape) — is PINNED BY ASSERTION in
+`level.test.mjs` and cites no task id, because citing a task that does not exist is the dangling
+pointer this epic refuses. **File it when the server recovers.**
+
+**WHAT THE NEXT WAVE TAKES.** Merge round 1 in any order (integration is proven green in all four
+together; there is no merge-order constraint left). Then, as their deps land:
+`tgw6-bl-grip-suite-has-no-ci` the moment `tgw9-s1` is on main AND the Honest Gates branch-protection
+run has settled — it is the last thing standing between this suite and a gate that can actually
+fail. Then `tgw9-s3`'s criterion 10 (stamping the root's four criteria) inside a lead close-window,
+and `tgw4-absence-veto-stops-at-the-rerun-seam`, which `seal.mjs` now cites by file:line rather than
+works around. **The epic still does not seal — but for the first time the reason is DERIVABLE BY
+COMMAND: `node tooling/grip/seal.mjs` exits 1 and prints `a=FAIL b=FAIL b'=PASS c=PASS blocking=34`.
+The predicate stopped being prose.**

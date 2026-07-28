@@ -399,6 +399,14 @@ function cloudAccentVars(theme, indent, t = tokens) {
     // consumer (.size-opt selected tint) now reads --ok-soft — the identical
     // channel/alpha, since --ok TRACKS accent.primary (GR6). The Studio
     // surface's primaryVars copy is untouched (root.html.heex still consumes it).
+    // --ring-hsl/--ring-soft PROMOTED (gr-p5r7-ring-soft-accent-invariant): the
+    // focus ring's soft tint was hand-stamped TWICE outside the generated region
+    // (evergreen green in both modes), so :focus-visible stayed green under
+    // ember/fjord/charple/iris. It now rides the identity's OWN ring channel —
+    // the same channel --ring already reads — through the shared softAlpha
+    // convention, exactly as the login surface derives it in authRows().
+    `--ring-hsl: ${t.color.ring[theme]};`,
+    `--ring-soft: hsl(var(--ring-hsl) / ${a});`,
     `--ok-hsl: ${p};`,
     `--ok: hsl(var(--ok-hsl));`,
     `--ok-soft: hsl(var(--ok-hsl) / ${a});`,

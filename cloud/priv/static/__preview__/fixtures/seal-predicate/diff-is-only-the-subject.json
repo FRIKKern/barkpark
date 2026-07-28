@@ -1,0 +1,55 @@
+{
+  "_comment": "THE 'NEVER BY SUBJECT' RULE, made testable. Same shape as sealable.json, but the `diffs` map supplies a patch for 481d6f231 whose body is exactly that commit's SUBJECT LINE — 'clear the Overview snapshot on sign-out' — with the registered marker OVERVIEW_FULL nowhere in it. A register that matched on `%s` would green here. This one reds, by name.",
+  "successor": "cch-fixture-successor-epic",
+  "tasks": {
+    "cch-fixture-successor-epic": {
+      "_id": "cch-fixture-successor-epic",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    }
+  },
+  "children": [
+    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" }
+  ],
+  "forwarded": [],
+  "gates": {
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "cch-hg-compose-network-recreation": {
+      "_id": "cch-hg-compose-network-recreation",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    }
+  },
+  "landed": [
+    "481d6f231",
+    "8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4",
+    "d157d098c78bc6604d00d84e22d038bdb176ef58",
+    "26acc7a91be0f0352efdb3e89b2017accb786367",
+    "58862f621"
+  ],
+  "diffs": {
+    "481d6f231": {
+      "paths": ["cloud/priv/static/app.js"],
+      "body": "fix(cloud): clear the Overview snapshot on sign-out (cch-w1-refetch-storm review) (#5308)"
+    }
+  },
+  "unmeasuredWaivers": ["CCH-D5-rate-limiter-sees-every-user-as-one"],
+  "defectCommits": {}
+}

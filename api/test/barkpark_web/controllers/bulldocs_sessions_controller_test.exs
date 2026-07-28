@@ -523,4 +523,113 @@ defmodule BarkparkWeb.BulldocsSessionsControllerTest do
       assert json_response(show_b, 200)["events"] in [nil, []]
     end
   end
+
+  # session-conversations slice: registry of harness conversations that
+  # touched this session, upserted by id.
+  describe "session conversations touch" do
+    test "touches a conversation and returns the registry count", %{conn: conn} do
+      slug = "session-conv-http-happy-path"
+      create = conn |> authed() |> post(@path, body(slug))
+      assert json_response(create, 200)["ok"] == true
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          @path <> "/" <> slug <> "/conversations",
+          Jason.encode!(%{
+            "conversation" => "conv-1",
+            "harness" => "claude-code",
+            "account" => "scaffy@jarl.no",
+            "machine" => "mbp",
+            "cwd" => "/tmp"
+          })
+        )
+
+      payload = json_response(resp, 200)
+      assert payload["ok"] == true
+      assert payload["slug"] == slug
+      assert payload["count"] == 1
+
+      resp2 =
+        conn
+        |> authed()
+        |> post(
+          @path <> "/" <> slug <> "/conversations",
+          Jason.encode!(%{"conversation" => "conv-2"})
+        )
+
+      assert json_response(resp2, 200)["count"] == 2
+    end
+
+    test "GET round-trip shows the conversations registry", %{conn: conn} do
+      slug = "session-conv-http-roundtrip"
+      create = conn |> authed() |> post(@path, body(slug))
+      assert json_response(create, 200)["ok"] == true
+
+      touch =
+        conn
+        |> authed()
+        |> post(
+          @path <> "/" <> slug <> "/conversations",
+          Jason.encode!(%{"conversation" => "conv-1", "harness" => "claude-code"})
+        )
+
+      assert json_response(touch, 200)["count"] == 1
+
+      show = conn |> authed() |> get(@path <> "/" <> slug)
+      payload = json_response(show, 200)
+
+      assert [%{"id" => "conv-1", "harness" => "claude-code"}] = payload["conversations"]
+    end
+
+    test "422 with a structured error envelope for a missing conversation id", %{conn: conn} do
+      slug = "session-conv-missing-id"
+      create = conn |> authed() |> post(@path, body(slug))
+      assert json_response(create, 200)["ok"] == true
+
+      resp =
+        conn
+        |> authed()
+        |> post(@path <> "/" <> slug <> "/conversations", Jason.encode!(%{"harness" => "codex"}))
+
+      payload = json_response(resp, 422)
+      assert payload["error"]["code"] == "invalid_conversation"
+      assert payload["error"]["message"]
+    end
+
+    test "404 for an unknown slug", %{conn: conn} do
+      resp =
+        conn
+        |> authed()
+        |> post(
+          @path <> "/session-conv-nope/conversations",
+          Jason.encode!(%{"conversation" => "conv-1"})
+        )
+
+      assert json_response(resp, 404)
+    end
+
+    test "an event logged with a conversation attr comes back on GET", %{conn: conn} do
+      slug = "session-conv-event-attr"
+      create = conn |> authed() |> post(@path, body(slug))
+      assert json_response(create, 200)["ok"] == true
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          @path <> "/" <> slug <> "/events",
+          Jason.encode!(%{"kind" => "note", "note" => "hi", "conversation" => "conv-1"})
+        )
+
+      assert json_response(resp, 200)["ok"] == true
+
+      show = conn |> authed() |> get(@path <> "/" <> slug)
+      payload = json_response(show, 200)
+
+      assert [%{"kind" => "note", "note" => "hi", "conversation" => "conv-1"}] =
+               payload["events"]
+    end
+  end
 end

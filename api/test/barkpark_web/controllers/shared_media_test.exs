@@ -327,7 +327,15 @@ defmodule BarkparkWeb.SharedMediaTest do
       body = "PUSHED-BLOB-BYTES"
       resp = admin_put_blob(conn, ws_a, rel, body) |> json_response(200)
       assert resp["written"] == rel
+      assert resp["path"] == rel, "`path` is the honest name for the legacy `written` key"
       assert resp["bytes"] == byte_size(body)
+
+      # PDS wave 23: RECEIVED and STORED are separate numbers on the wire, and
+      # `stored` names the read that produced it. Under :local the disk IS the
+      # store, so the post-condition read is a File.stat on the real path.
+      assert resp["stored"] == byte_size(body)
+      assert resp["verified_by"] == "stat"
+      assert resp["unverified_reason"] == nil
 
       # Bytes landed verbatim on disk.
       assert File.read!(full) == body
@@ -352,6 +360,46 @@ defmodule BarkparkWeb.SharedMediaTest do
       served = build_conn() |> get(serve_path(ws_a, proj_a, row))
       assert served.status == 200
       assert served.resp_body == body
+    end
+
+    # PDS wave 23, reviewer addition. The engine-level proof that a black-hole
+    # bucket is caught lives in blobstore_s3_test.exs; this is the HTTP surface
+    # of that verdict — the 502 envelope was previously read, never rendered.
+    test "a store that ACKs and keeps nothing is a 502 blob_not_stored, never a 200", %{
+      conn: conn,
+      ws_a: ws_a
+    } do
+      previous = Application.get_env(:barkpark, :media_storage)
+      on_exit(fn -> Application.put_env(:barkpark, :media_storage, previous) end)
+
+      # The bucket answers 200 to every PUT and 404 to every HEAD: the write ACK
+      # says yes, the post-condition read says the object is not there.
+      Req.Test.stub(__MODULE__, fn c ->
+        case c.method do
+          "PUT" -> Plug.Conn.send_resp(c, 200, "")
+          _ -> Plug.Conn.send_resp(c, 404, "")
+        end
+      end)
+
+      Application.put_env(:barkpark, :media_storage,
+        backend: :s3,
+        s3: [
+          endpoint: "https://test.r2.example.com",
+          bucket: "bp-shared-media-test",
+          region: "auto",
+          access_key_id: "test-access-key",
+          secret_access_key: "test-secret-key",
+          req_options: [plug: {Req.Test, __MODULE__}]
+        ]
+      )
+
+      rel = "uploads/shared-media-test/blackhole-#{System.unique_integer([:positive])}.png"
+      resp = admin_put_blob(conn, ws_a, rel, "PUSHED-BLOB-BYTES") |> json_response(502)
+
+      assert resp["error"]["code"] == "blob_not_stored"
+      assert resp["error"]["message"] =~ "read-back"
+      # The envelope is stamped like every other error on this surface.
+      assert is_binary(resp["error"]["request_id"])
     end
 
     test "a traversal path is rejected 422 and nothing is written", %{conn: conn, ws_a: ws_a} do

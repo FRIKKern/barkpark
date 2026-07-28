@@ -1,0 +1,42 @@
+{
+  "_comment": "THE MEASUREMENT LADDER, unwaived. Identical to terminal-clean.json except that `unmeasuredWaivers` is EMPTY, so the rung-3 register entry stands. Run WITHOUT --guard-cmd, this is the shape of the honest answer: two entries measured HERE by a committed guard, three MEASURED-ELSEWHERE (named ExUnit file + named CI job, NOT executed), and one measured by nothing at all — which fails clause (b) by name. It is the fixture form of the live verdict.",
+  "successor": "TERMINAL",
+  "tasks": {},
+  "children": [
+    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
+    { "_id": "gr-fixture-done-2", "lifecycle_status": "done" }
+  ],
+  "forwarded": [],
+  "gates": {
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "done",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "done",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "cch-hg-compose-network-recreation": {
+      "_id": "cch-hg-compose-network-recreation",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "done",
+      "parent_id": "cloud-console-hardening-epic"
+    }
+  },
+  "landed": [
+    "481d6f231",
+    "8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4",
+    "d157d098c78bc6604d00d84e22d038bdb176ef58",
+    "26acc7a91be0f0352efdb3e89b2017accb786367",
+    "58862f621"
+  ],
+  "unmeasuredWaivers": [],
+  "defectCommits": {}
+}

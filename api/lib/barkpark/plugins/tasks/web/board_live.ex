@@ -460,6 +460,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       {:ok, _} ->
         {:noreply, socket}
 
+      # PDS-D289 refuses a `done` close over unmet acceptance criteria. Saying
+      # "its claim moved under you" here would be the exact defect this wave
+      # exists to kill — a message that names the wrong cause. The board has no
+      # override affordance (that needs a reason, and a drag has nowhere to type
+      # one), so it says what happened and where to fix it.
+      {:error, {:criteria_unmet, indices}} ->
+        {:noreply,
+         rollback(
+           socket,
+           "Couldn't mark that done — acceptance " <>
+             criteria_word(indices) <>
+             " #{Enum.join(indices, ", ")} (0-based) #{plural_verb(indices)} not met yet. " <>
+             "Stamp them with evidence first, or close it from the CLI with a recorded reason."
+         )}
+
       {:error, _} ->
         {:noreply, rollback(socket, "Couldn't close that task — its claim moved under you.")}
     end
@@ -488,6 +503,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     {:noreply,
      assign(socket, :notice, refuse_notice(ctx.from_col, ctx.to_col, ctx.holder, ctx.worker))}
   end
+
+  # Wording helpers for the criteria-unmet refusal above. They live AFTER the
+  # last run_restage/3 clause on purpose: sitting between two clauses of the
+  # same name and arity is a --warnings-as-errors build failure.
+  defp criteria_word([_one]), do: "criterion"
+  defp criteria_word(_many), do: "criteria"
+  defp plural_verb([_one]), do: "is"
+  defp plural_verb(_many), do: "are"
 
   # Optimistically re-bucket the dragged card to its target lifecycle so the
   # board moves the instant you drop (D9). We synthesize a normalized card off

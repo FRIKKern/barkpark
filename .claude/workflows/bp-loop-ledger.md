@@ -40,7 +40,7 @@ Right-click context menu = human-owned (concurrent team building it). Hide/unhid
 
 ## PROCESS RULES (hard-won)
 1. NEVER gate in the shared checkout on the concurrent-lead lock path /private/tmp/bp-warm-tree.lock (it has an owner-file convention and DEADLOCKED for 2.5h once). Use /private/tmp/bp-loop-lead.lock (plain mkdir).
-2. Integrate in a dedicated worktree (/private/tmp/bp-loop-integration), cherry-pick onto fresh origin/main. This repo does NOT allow gh auto-merge — poll checks + `gh pr merge --squash --admin` once the required Elixir Test job passes (advisory Format/Vercel reds never block).
+2. Integrate in a dedicated worktree (/private/tmp/bp-loop-integration), cherry-pick onto fresh origin/main. This repo does NOT allow gh auto-merge — poll checks + `gh pr merge --squash --admin` once the `Elixir gate` check passes (advisory Format/Vercel reds never block).
 3. Union-resolving append-append test conflicts drops a closing `end` when git puts shared trailing context after the theirs-side — ALWAYS run `elixir -e 'Code.string_to_quoted!(File.read!("<file>"))'` immediately after resolving. And COMMIT the resolution BEFORE gating/pushing (gate the committed tree, not the working copy).
 4. When a security/behavior fix breaks a test that ENCODED the old (leaky/buggy) contract, rewrite the test to the new contract (done for M4 proof story, CSV route-lock, fill-over-merge, body_html cache) — but if it breaks 5+ FLAGSHIP stories, that's a contract signal → HOLD for human.
 5. Restore swapped warm-tree files from the REPO ROOT (tracked → git checkout --, new → rm after git ls-files check); a wrong-cwd restore silently no-ops.

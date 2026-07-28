@@ -89,11 +89,11 @@ bp task close <id> <worker> <epoch>   # Complete work (CAS on the claim epoch)
 1. File tasks for remaining work
 2. Run quality gates if code changed (tests, linters, builds)
 3. Close finished tasks, update in-progress ones — log closes to the open session (`bp session log`; never blocks)
-4. **PUSH TO REMOTE** — mandatory: `git pull --rebase && git push && git status` (must show "up to date with origin"); then `bp session log <slug> --kind push --ref <sha>` (never blocks)
+4. **PUSH TO REMOTE**, by ref: on a branch, `git pull --rebase && git push`, open a PR; on `main`, move commits to a branch, push that; `bp session log <slug> --kind push --ref <sha>`
 5. Clean up stashes, prune remote branches
 6. Hand off context for the next session
 
-NEVER stop before pushing — that strands work locally. NEVER say "ready to push when you are" — YOU push. If push fails, resolve and retry until it succeeds.
+NEVER stop before pushing — it strands work locally. NEVER say "ready to push when you are" — YOU push. A push protection refusal (GH006) is CORRECT, not a retry cue.
 
 ## Doc contract
 

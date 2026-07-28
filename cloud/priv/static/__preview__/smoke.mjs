@@ -1478,6 +1478,48 @@ const EXPECTATIONS = {
       assert.ok(domains.includes("certificate usually issues"), "the server remediation renders verbatim");
     },
   },
+  // ── ssw8 (charter D82): the content binding, PAINTED ────────────────────────
+  // scenarios.mjs gained three binding fixtures; without an EXPECTATIONS entry
+  // this harness never renders them (it iterates Object.keys(EXPECTATIONS), not
+  // SCENARIOS), so they would be asserted only by the node string harness and
+  // never by a boot. These three walk the real render into #site-body.
+  "site-binding-bound": {
+    what: "site detail — a bound site: the dataset triple on the rail and a read-token pill that promises only what content_bound means",
+    check(reg) {
+      const body = (reg.get("site-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#site-body rendered empty");
+      assert.ok(body.includes("acme/site/production"), "the rail names the dataset triple the build reads");
+      assert.ok(body.includes(">paper<"), "the bound content type renders");
+      assert.ok(body.includes("status-pill--ok"), "a stored read token reads as an ok pill");
+      assert.ok(body.includes(">Read token stored<"), "the pill says READ TOKEN…");
+      assert.ok(!/has content|is bound</i.test(body),
+        "…and never claims the site HAS content — content_bound is not_is_nil(read_token_encrypted)");
+    },
+  },
+  "site-binding-unknown": {
+    what: "site detail — an older control plane sends no triple and no content_bound; the rail says unknown, never a plausible default",
+    check(reg) {
+      const body = (reg.get("site-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#site-body rendered empty");
+      assert.ok(body.includes(">Binding unknown<"), "an absent binding reads UNKNOWN");
+      assert.ok(body.includes("status-pill--neutral"), "unknown is neutral — not a green, not a red");
+      // THE lie this fixture exists to catch: nothing may invent the documented
+      // defaults for a payload that carries none of them.
+      assert.ok(!body.includes("default/default/production"),
+        "an absent triple must never render the plausible default");
+    },
+  },
+  "site-binding-mismatch": {
+    what: "site detail — the payload's two spellings of the dataset disagree; both render and neither is resolved",
+    check(reg) {
+      const body = (reg.get("site-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#site-body rendered empty");
+      assert.ok(body.includes("producton") && body.includes("production"),
+        "a self-contradictory payload shows BOTH spellings");
+      assert.ok(body.includes(">Binding mismatch<"), "and names the contradiction");
+      assert.ok(body.includes("status-pill--danger"), "a contradiction is a danger state, not a shrug");
+    },
+  },
   // gr-p3-small-surfaces (E-01): the global sites list on v4 — one density row
   // per site with a leading deploy-status pill, states-complete, real fields
   // ONLY (the invented Marketing/Docs/Blank "kind" taxonomy never renders).
@@ -1617,7 +1659,7 @@ const EXPECTATIONS = {
   // connect card + the 9-verb capability matrix (dev-tier filtered, server-owned
   // gap reasons, bare dash where the server owns no reason).
   "providers-connected": {
-    what: "the roster (2 kinds, Disconnect…), the all-connected replace state, and the honest capability matrix render",
+    what: "the roster (2 kinds, Disconnect…), the all-connected ROTATION state, and the honest capability matrix render",
     check(reg) {
       const roster = (reg.get("provider-roster") || {}).innerHTML || "";
       assert.ok(roster.includes("set-section"), "the roster rides the .set-* anatomy");
@@ -1628,12 +1670,17 @@ const EXPECTATIONS = {
       assert.ok(roster.includes("data-prov-disconnect"), "an admin roster carries the typed-confirm Disconnect");
 
       // Both connectable providers are already connected → the connect card is in
-      // the "disconnect to replace" state: it offers NO second connect (the
-      // additive-duplicate guard, GR36 already-connected ruling).
+      // the ROTATION state: a connected kind stays armable and its submit replaces
+      // the stored credential in place (GR44 upsert on (team_id,kind), executed by
+      // gr-bl-provider-reconnect-client-guard). It must NEVER tell the operator to
+      // destroy a working credential first.
       const connect = (reg.get("provider-connect") || {}).innerHTML || "";
       assert.ok(connect.includes("set-section") && connect.includes("Connect a provider"), "the connect card renders");
-      assert.ok(connect.includes("Every supported provider is connected"), "the all-connected replace note renders");
-      assert.ok(!connect.includes("data-connect-submit"), "no second connect is offered for already-connected kinds");
+      assert.ok(connect.includes("data-connect-submit"), "a connected kind can still be re-submitted (rotation)");
+      assert.ok(connect.includes("data-connect-rotating"), "the card says it is REPLACING the stored credential");
+      assert.ok(connect.includes("Verify &amp; replace"), "the verb reads replace, not connect");
+      assert.ok(!connect.includes("Disconnect one above"), "the destroy-first instruction is gone");
+      assert.ok(!/data-connect-kind="[a-z]+"[^>]*disabled/.test(connect), "no connected kind is a disabled ghost");
 
       const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
       assert.ok(matrix.includes("cap-matrix"), "the capability matrix renders");
@@ -2022,11 +2069,11 @@ const EXPECTATIONS = {
   },
   // ── MVP-0 Personal Dev Fleet (pdf-mvp0-fleet-card-spa): the fleet card ─────
   "fleet-support-provisioning": {
-    what: "the fleet card with a support mid-provision — the 5-rung SUPPORT theater, never a secure rung",
+    what: "the fleet card with a support mid-provision — the 6-rung SUPPORT theater, secure included, never a freshen rung",
     container: "instance-body",
     includes: ["fleet-support-card", "fleet-support-theater", "new-steps",
-      "Configuring the runtime", 'data-step="verify"'],
-    excludes: ['data-step="secure"', 'data-step="freshen"'],
+      "Configuring the runtime", 'data-step="secure"', 'data-step="verify"'],
+    excludes: ['data-step="freshen"'],
   },
   "fleet-support-online": {
     what: "the fleet card with an ONLINE support — the BYO-model-key step in the card; the roster read answers the documents envelope and the presence pipeline renders --online from THAT fixture",

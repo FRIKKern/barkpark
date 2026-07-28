@@ -4,7 +4,7 @@ name: console-harness
 # is the surface that renders the deploy stage rail, the freshness badge, and
 # the one-click rollback control — all pure helpers with rich edge cases
 # (min-dwell pacing, stale-vs-fresh classification, deploy-eligibility). Its
-# node:vm harness (__app.test.mjs, 415 tests) pins that logic against the
+# node:vm harness (__app.test.mjs) pins that logic against the
 # SHIPPED file but until now gated NOTHING: cloud.yml runs Elixir only, and
 # ci.yml's node:test is scoped to web/**. A regression to the rail/freshness/
 # rollback helpers shipped blind. This zero-dependency job closes that gap.
@@ -58,6 +58,30 @@ jobs:
       - name: Run console harness
         run: node --test cloud/priv/static/__app.test.mjs
 
+      # The preview SMOKE harness — the instrument that renders every console
+      # scenario against the SHIPPED app.js and asserts what each one draws. It
+      # carried gate authority nobody had wired: it sat RED on main for two days
+      # (a stale `data-step="secure"` exclusion authored in f021b4cd4 on
+      # 2026-07-24, two days before the product legitimately gained the rung in
+      # 1b71a4d09 on 2026-07-26) and no job
+      # anywhere would have said so. Zero-dependency and node-20 clean: it imports
+      # only node builtins plus ./scenarios.mjs and reads only ../app.js — no
+      # Chrome, no network, no goldens.
+      - name: Run preview smoke harness
+        run: node cloud/priv/static/__preview__/smoke.mjs
+
+      # The seal predicate's OWN TESTS — never a live seal run. `seal-predicate.mjs`
+      # decides clause (b) with `git merge-base --is-ancestor`, and under
+      # actions/checkout@v4's depth-1 default (what both jobs here use) that exits
+      # 128 `Not a valid object name`; the predicate catches ANY non-zero as "not an
+      # ancestor", so running the instrument itself in CI would manufacture a false
+      # NO SEAL out of a shallow clone. The test file is hermetic instead — it
+      # spawns the predicate against committed fixtures with `--guard-cmd true`
+      # (verified: with a sentinel curl shim first on PATH, BP_TOKEN unset and
+      # BP_SERVER on a dead port, the sentinel never fired and it passed 11/11).
+      - name: Seal predicate tests
+        run: node --test cloud/priv/static/__preview__/seal-predicate.test.mjs
+
       # The SPA's design contract, machine-checked (charter GR5): dead classes,
       # undefined tokens, WCAG contrast across every theme identity, offline-purity,
       # and the living styleguide's class/token drift. Exits non-zero on any E1-E8
@@ -80,7 +104,7 @@ jobs:
   # node-version: 20; this instrument speaks CDP over a bare global WebSocket,
   # stable-by-default only from Node 22, so a fourth step would inherit 20 and
   # fail. Bumping console-unit to 22 instead would silently change the runtime
-  # under the 415-test __app.test.mjs harness AND __css_check.mjs — a risk-bearing
+  # under the __app.test.mjs harness AND __css_check.mjs — a risk-bearing
   # edit to two working gates to buy nothing. A separate job also earns its own
   # name in branch protection and runs its ~26s in parallel.
   #

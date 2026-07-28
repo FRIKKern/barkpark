@@ -649,7 +649,9 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{error: "invalid", details: errors(cs)})
         end
       else
-        case Accounts.create_user_session_token(user, session_opts(conn)) do
+        # ORIGIN "password": this branch is reached only when 2FA is OFF, so the
+        # password check above is the whole of what established the session.
+        case Accounts.create_user_session_token(user, session_opts(conn) ++ [origin: "password"]) do
           {:ok, token} ->
             team = Accounts.primary_team(user)
             json(conn, 200, %{token: token, team_id: team && team.id})
@@ -710,7 +712,16 @@ defmodule BarkparkCloud.Web.Router do
             if ok? do
               Accounts.delete_two_factor_pending_tokens(user)
 
-              case Accounts.create_user_session_token(user, session_opts(conn)) do
+              # ORIGIN "two_factor": reaching here means the password leg ALREADY
+              # passed (it minted the challenge token) and a second factor — an
+              # OTP or a recovery code — cleared too. Deliberately not split into
+              # otp-vs-recovery: the `ok?` cond above collapses both to a boolean
+              # before this point, and re-deriving which one fired would be a
+              # guess.
+              case Accounts.create_user_session_token(
+                     user,
+                     session_opts(conn) ++ [origin: "two_factor"]
+                   ) do
                 {:ok, token} ->
                   team = Accounts.primary_team(user)
                   json(conn, 200, %{token: token, team_id: team && team.id})
@@ -1058,7 +1069,14 @@ defmodule BarkparkCloud.Web.Router do
            :ok <- OAuth.verify_state(state, provider),
            {:ok, identity} <- OAuth.fetch_identity(provider, code),
            {:ok, user} <- Accounts.get_or_create_user_from_oauth(identity),
-           {:ok, token} <- Accounts.create_user_session_token(user, session_opts(conn)) do
+           # ORIGIN "oauth:<provider>": `provider` is already bound by this
+           # with-chain and IS the answer — no inference, and each provider
+           # reports itself rather than collapsing to a generic "oauth".
+           {:ok, token} <-
+             Accounts.create_user_session_token(
+               user,
+               session_opts(conn) ++ [origin: "oauth:#{provider}"]
+             ) do
         team = Accounts.primary_team(user)
         redirect_to(conn, "/#oauth=#{token}&team=#{team && team.id}")
       else
@@ -1532,7 +1550,16 @@ defmodule BarkparkCloud.Web.Router do
           # the in-flight request never lost its own auth mid-call. Revoke it now
           # and hand back a fresh one so the SPA swaps and stays authenticated.
           _ = Accounts.revoke_user_session_token(old_token)
-          {:ok, fresh} = Accounts.create_user_session_token(user, session_opts(conn))
+
+          # ORIGIN "password_change": this row is NOT a login — it is the
+          # replacement token handed back after "sign out everywhere", and
+          # calling it "password" would misreport a re-mint as a fresh sign-in.
+          {:ok, fresh} =
+            Accounts.create_user_session_token(
+              user,
+              session_opts(conn) ++ [origin: "password_change"]
+            )
+
           json(conn, 200, %{ok: true, token: fresh})
 
         {:error, :invalid_current_password} ->
@@ -1733,6 +1760,7 @@ defmodule BarkparkCloud.Web.Router do
       opts = [
         limit: parse_int(conn.query_params["limit"], 50),
         before: parse_dt(conn.query_params["before"]),
+        before_id: conn.query_params["before_id"],
         target_type: conn.query_params["target_type"],
         target_id: conn.query_params["target_id"],
         actor_user_id: conn.query_params["actor_user_id"],
@@ -4294,7 +4322,10 @@ defmodule BarkparkCloud.Web.Router do
   # list_deliveries leaves the clamp to its caller, so the router owns it).
   #
   # `?channel=` / `?status=` / `?event=` narrow the log, and `?before=<oldest
-  # inserted_at>` walks the next page (the /v1/audit keyset). Filters run INSIDE
+  # inserted_at>&before_id=<that row's id>` walks the next page (the /v1/audit
+  # keyset — both halves of the `(inserted_at, id)` sort key, so a boundary that
+  # lands mid-timestamp-tie cannot drop the far side; `before` alone keeps its
+  # historical stamp-only meaning for bookmarked URLs). Filters run INSIDE
   # the query, so "show me the failures" is a real page of failures rather than
   # the failures that happen to be in the newest 50. A filter value outside the
   # closed vocabulary matches nothing rather than being dropped — a dropped
@@ -4310,7 +4341,8 @@ defmodule BarkparkCloud.Web.Router do
         channel: conn.query_params["channel"],
         status: conn.query_params["status"],
         event: conn.query_params["event"],
-        before: parse_dt(conn.query_params["before"])
+        before: parse_dt(conn.query_params["before"]),
+        before_id: conn.query_params["before_id"]
       ]
 
       deliveries = Notifications.list_deliveries(conn.assigns.current_team, opts)
@@ -5662,7 +5694,13 @@ defmodule BarkparkCloud.Web.Router do
   # its public-read content token here, server-side, over the instance's scoped
   # token route. Both halves matter: without the binding the site is a ghost the
   # reaper later kills, and without the token the build has nothing to read with.
-  # A 201 from this route therefore MEANS content_bound: true.
+  # site-spawner W8 (charter D73): and the route READS the binding back before it
+  # writes the row. `content_bound` is only "a token exists" — a name-level truth
+  # and a claim-level falsehood — so the 201 additionally carries a
+  # `content_binding` verdict the control plane actually OBSERVED: `bound` (the
+  # site read its own content, with the count) or `unverified` (with the reason it
+  # could not be checked). A binding the site provably CANNOT read is refused 422
+  # `content_binding_empty` at the door, with the menu of types it can read.
   post "/v1/sites" do
     conn = Auth.require_user(conn, [])
 
@@ -5716,6 +5754,13 @@ defmodule BarkparkCloud.Web.Router do
              # so). An unreachable/refusing instance is a 502 with its own words —
              # no site row is written.
              {:ok, attrs} <- mint_site_read_token(bp, attrs, slug),
+             # site-spawner W8 (charter D73): PROVE the binding by READING it,
+             # here — the last moment the PLAINTEXT read token is in hand. Until
+             # now `content_bound: true` meant only "a token was minted", so a
+             # typo'd dataset or a type the site cannot see was accepted and died
+             # minutes later inside the build as a bare
+             # `BarkparkNotFoundError: document not found`.
+             {:ok, binding} <- verify_content_binding(bp, attrs),
              # activity-audit-log: the create + a `site.created` audit event share
              # ONE transaction (the target_id is resolved from the created site).
              # target_fun supplies the id only knowable after the insert.
@@ -5740,7 +5785,7 @@ defmodule BarkparkCloud.Web.Router do
           # browser tabs) picks up the new site without a manual refresh.
           push_event(site.team_id, "sites")
           push_event(site.team_id, "audit")
-          json(conn, 201, %{site: site_json(site, bp)})
+          json(conn, 201, Map.merge(%{site: site_json(site, bp)}, binding_note(binding)))
         else
           nil ->
             json(conn, 404, %{error: "barkpark_not_found"})
@@ -5779,6 +5824,19 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, {:mint_failed, detail}} ->
             json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
+
+          # site-spawner W8 (charter D73): the binding was READ and it is empty —
+          # the site's OWN token sees nothing at workspace/project/dataset/type.
+          # Refuse at the door with the real menu (what that token could actually
+          # read) and the exact re-run, rather than 201ing a site whose first
+          # build dies on a message naming neither the type nor the dataset.
+          {:error, {:binding_empty, detail, menu}} ->
+            json(
+              conn,
+              422,
+              %{error: "content_binding_empty", detail: detail}
+              |> maybe_put_menu(menu)
+            )
 
           {:error, %Ecto.Changeset{} = cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -7845,7 +7903,16 @@ defmodule BarkparkCloud.Web.Router do
              # auto-create). A lazy get_or_create_settings/1 backstops any team
              # that predates this.
              {:ok, _settings} <- Notifications.ensure_settings(team),
-             {:ok, token} <- Accounts.create_user_session_token(user, session_opts) do
+             # ORIGIN "register": stamped HERE, at the write site, not by the
+             # caller — `register/4` has exactly one caller and this insert is
+             # the account's very first session, so "register" is the whole
+             # truth about it. Appending to the passed-in `session_opts` keeps
+             # `session_opts/1` itself origin-free.
+             {:ok, token} <-
+               Accounts.create_user_session_token(
+                 user,
+                 session_opts ++ [origin: "register"]
+               ) do
           %{user: user, team: team, token: token}
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -8321,14 +8388,29 @@ defmodule BarkparkCloud.Web.Router do
 
   defp provider_json(p) do
     # encrypted_token is NEVER serialized — the connected token stays at rest.
+    #
+    # `updated_at` is not decoration: `connect_provider/4` is an upsert, so a
+    # credential ROTATION mutates :encrypted_token and :updated_at while leaving
+    # :id and :inserted_at exactly where they were. Serialize only the five
+    # original fields and the payload is BYTE-IDENTICAL before and after a
+    # successful rotation — the console would have no way to show that anything
+    # happened. `updated_at > inserted_at` is the rotation signal the roster
+    # renders as "credential updated <rel>".
     %{
       id: p.id,
       kind: p.kind,
       label: p.label,
       team_id: p.team_id,
-      inserted_at: p.inserted_at
+      inserted_at: p.inserted_at,
+      updated_at: p.updated_at
     }
   end
+
+  # Did this connect REPLACE an existing credential? Read off the row Postgres
+  # returned (`returning: true`), so it reports what actually happened rather
+  # than what a pre-read predicted.
+  defp provider_rotated?(provider),
+    do: DateTime.compare(provider.inserted_at, provider.updated_at) == :lt
 
   ## Provider-neutral connect + catalog helpers ────────────────────────────────
   ## Hetzner and Azure are peers: one connect endpoint (verify-before-save), one
@@ -8369,6 +8451,19 @@ defmodule BarkparkCloud.Web.Router do
       # audit event share ONE transaction. The detail map carries only the
       # provider KIND and LABEL — NEVER the credential material (the token /
       # service-principal blob never reaches an audit row or a log line).
+      #
+      # Rotation is recorded as `rotated: true|false` METADATA, never as a second
+      # `provider.rotated` ACTION: `action` lives in the base attrs and is fixed
+      # before the transaction runs, and a new action string would widen the
+      # closed `noun.verb` vocabulary that `list_audit_events`' `:action_prefix`
+      # filter reads. The signal costs nothing and cannot race — the upsert
+      # replaces :updated_at on the conflict branch only, while a fresh insert
+      # fills both timestamps from ONE autogenerate entry, so
+      # `inserted_at < updated_at` IS "this was a replacement". A `Repo.exists?`
+      # pre-read would cost a round trip AND read pre-state, mislabelling a
+      # rotation as a first connect under a concurrent connect.
+      # `target_fun`'s map merges OVER the base attrs, so the whole distinction
+      # is one key and `Accounts.audit/3` is untouched.
       audited =
         Accounts.audit(
           %{
@@ -8381,7 +8476,12 @@ defmodule BarkparkCloud.Web.Router do
           fn ->
             Registry.connect_provider(conn.assigns.current_team, kind, credential, label: label)
           end,
-          fn provider -> %{target_id: provider.id} end
+          fn provider ->
+            %{
+              target_id: provider.id,
+              metadata: %{kind: kind, label: label, rotated: provider_rotated?(provider)}
+            }
+          end
         )
 
       case audited do
@@ -10415,6 +10515,259 @@ defmodule BarkparkCloud.Web.Router do
   defp mint_failure_copy(bp, _reason),
     do: "#{bp.slug} is unreachable — could not mint the site's read token"
 
+  ## site-spawner W8 (charter D73/D74/D75) — CREATE VERIFIES THE BINDING BY
+  ## READING IT.
+  ##
+  ## `content_bound: true` used to mean `not is_nil(read_token_encrypted)` — i.e.
+  ## "a token was minted", which every content-bound site has, so the field
+  ## discriminated nothing. The triple was checked for PRESENCE and never for
+  ## TRUTH: a typo'd dataset or a doc_type the site cannot see was accepted, the
+  ## row was written, and the build died minutes later on one line naming neither
+  ## the type nor the dataset nor a remedy.
+  ##
+  ## The read is done with the SITE'S OWN just-minted public-read token, over the
+  ## SAME scoped `query/:ds/:type` route the build later fetches with — never over
+  ## the instance admin token, which sees content the clamped build credential
+  ## cannot (charter D74). `counts` is deliberately NOT probed with that token:
+  ## `Plugs.PublicRead` admits only `query` and `doc`, so counts 403s it.
+  ##
+  ## THREE verdicts, a dialect of `cloud_deploy_cmd.go`'s five outcomes:
+  ##
+  ##   * BOUND      — the site read its own content. Proceed, and say what it saw.
+  ##   * EMPTY      — a body the control plane could INTERPRET, showing nothing
+  ##                  (or a definite 404 on the exact route the build uses).
+  ##                  Refuse 422 with the real menu and the exact re-run.
+  ##   * UNVERIFIED — the read could not be PERFORMED, or its body could not be
+  ##                  interpreted. Proceed — but never call it `ok`: the 201 says
+  ##                  `unverified` with the reason in the same breath.
+  ##
+  ## The EMPTY/UNVERIFIED split is load-bearing (charter D75): an unexpected
+  ## 200-with-a-shape-we-do-not-know is a control-plane blind spot, not a verdict
+  ## on the user's content, and turning it into a refusal would lock strangers out
+  ## of creating sites the moment the box's response envelope changed.
+
+  # At most this many candidate types are probed when BUILDING THE REFUSAL MENU.
+  # The happy path costs exactly ONE extra box call; only a create that is already
+  # being refused pays for the menu, and it pays a bounded price.
+  @binding_menu_probe_limit 8
+
+  defp verify_content_binding(bp, %{kind: kind} = attrs) when kind in ["static", "node"] do
+    ws = attrs[:bootstrap_workspace]
+    proj = attrs[:bootstrap_project]
+    ds = attrs[:bootstrap_dataset]
+    # `doc_type` is optional on the wire; the Site schema defaults it to "post",
+    # so that is the type the build would actually read.
+    type = attrs[:doc_type] || "post"
+    token = attrs[:read_token]
+
+    cond do
+      not (is_binary(ws) and is_binary(proj) and is_binary(ds)) ->
+        {:ok, {:unverified, "the site is not fully bound — there was nothing to read"}}
+
+      not (is_binary(token) and token != "") ->
+        {:ok, {:unverified, "the site has no read token — its content could not be probed"}}
+
+      true ->
+        case site_token_read(bp, ws, proj, ds, type, token) do
+          {:readable, total} -> {:ok, {:bound, type, total}}
+          {:unverified, why} -> {:ok, {:unverified, why}}
+          {:empty, why} -> refuse_empty_binding(bp, ws, proj, ds, token, why)
+        end
+    end
+  end
+
+  # A container site builds from a repo — it has no binding to verify, and the
+  # 201 says nothing about one rather than inventing a verdict.
+  defp verify_content_binding(_bp, _attrs), do: {:ok, :not_applicable}
+
+  # THE read: the site's own credential, the build's own route.
+  defp site_token_read(bp, ws, proj, ds, type, token) do
+    path = scoped_query_probe(ws, proj, ds, type)
+
+    case Registry.relay_as(bp, :get, path, token) do
+      {:ok, status, body} when status in 200..299 ->
+        case interpret_query_body(body) do
+          {:ok, page, total} when page > 0 ->
+            {:readable, total}
+
+          {:ok, 0, _total} ->
+            {:empty, "#{type} in #{ds} has no documents this site can read"}
+
+          :uninterpretable ->
+            {:unverified,
+             "#{bp.slug} answered the content read with a body the control plane " <>
+               "could not interpret (HTTP #{status})"}
+        end
+
+      # The box's definite "there is nothing here" for the exact URL the build
+      # uses. A typo'd dataset, a typo'd type and a non-public type are BYTE
+      # IDENTICAL here (both 404 "not found") — which is precisely why the menu
+      # below is worth the extra calls: it answers the question the 404 cannot.
+      {:ok, 404, _body} ->
+        {:empty,
+         "#{ds}/#{type} answered 404 for this site's own read token — that dataset " <>
+           "or type does not exist, or the type is not readable by a public-read token"}
+
+      {:ok, status, _body} ->
+        {:unverified,
+         "#{bp.slug} answered the content read HTTP #{status} — the binding could not be checked"}
+
+      {:error, reason} ->
+        {:unverified, binding_relay_failure_copy(bp, reason)}
+    end
+  end
+
+  # The query envelope is `{"result": {...}}` when the box's response filter is on
+  # and the bare inner map when it is off — interpret BOTH, and nothing else. A
+  # body that matches neither is a shape we do not know, which is `unverified`
+  # (charter D75), never `empty`.
+  #
+  # TWO numbers, and they are NOT interchangeable. `count` is the PAGE size the
+  # query returned, so under `?limit=1` it is 0 or 1 and nothing else — it answers
+  # "is there anything here", never "how much". `total` is the box's own published
+  # aggregate for the type, present only because the probe asks `?count=true`, and
+  # it is the ONLY number this route is entitled to report to a user. An older box
+  # that does not know `count=true` returns no `total`, and then the verdict
+  # carries NO magnitude rather than passing the page size off as one.
+  defp interpret_query_body(%{"result" => %{} = result}), do: interpret_query_body(result)
+
+  defp interpret_query_body(%{"count" => count} = body) when is_integer(count),
+    do: {:ok, count, query_total(body)}
+
+  defp interpret_query_body(%{"documents" => docs} = body) when is_list(docs),
+    do: {:ok, length(docs), query_total(body)}
+
+  defp interpret_query_body(_body), do: :uninterpretable
+
+  defp query_total(%{"total" => total}) when is_integer(total), do: total
+  defp query_total(_body), do: nil
+
+  # The refusal: name what is wrong, what this site CAN read, and the exact re-run.
+  defp refuse_empty_binding(bp, ws, proj, ds, token, why) do
+    menu = readable_type_menu(bp, ws, proj, ds, token)
+
+    detail =
+      "this site would build from nothing — #{why}. " <>
+        menu_sentence(menu, ds) <>
+        " Re-run naming a type this site can read: " <>
+        "`bp cloud site create <name> --kind static --framework astro " <>
+        "--dataset #{ws}/#{proj}/#{ds} --doc-type <type>`"
+
+    {:error, {:binding_empty, detail, menu}}
+  end
+
+  # The honest menu is the INTERSECTION: the instance admin token lists what EXISTS
+  # (one `counts` call, no N+1), and the site's own token says which of those it can
+  # actually read. Offering the admin list raw would hand a stranger a private type
+  # and set up a build that 404s.
+  #
+  # The admin `counts` supply the CANDIDATE LIST and the probe ORDER — never the
+  # magnitudes the user is shown. A sentence that opens "This site CAN read" may
+  # only carry numbers the SITE's own token produced, or the count is an admin
+  # number wearing a site label (an admin sees drafts-free totals over types whose
+  # documents may still be field-redacted for a public-read caller, so it is an
+  # upper bound, not the site's number). Each surviving type therefore reports the
+  # `total` its own probe returned, and a type whose probe reports no total is
+  # listed WITHOUT a number.
+  defp readable_type_menu(bp, ws, proj, ds, token) do
+    path = "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/counts/#{URI.encode(ds)}"
+
+    case Registry.relay_admin(bp, :get, path, nil) do
+      {:ok, status, %{"counts" => counts}} when status in 200..299 and is_map(counts) ->
+        {:ok, intersect_readable_types(bp, ws, proj, ds, token, counts)}
+
+      _ ->
+        :unavailable
+    end
+  end
+
+  defp intersect_readable_types(bp, ws, proj, ds, token, counts) do
+    counts
+    |> Enum.filter(fn {type, count} -> is_binary(type) and is_integer(count) and count > 0 end)
+    |> Enum.sort_by(fn {type, count} -> {-count, type} end)
+    |> Enum.take(@binding_menu_probe_limit)
+    |> Enum.flat_map(fn {type, _admin_count} ->
+      case site_readable_total(bp, ws, proj, ds, type, token) do
+        {:readable, total} -> [{type, total}]
+        :no -> []
+      end
+    end)
+  end
+
+  # Readable, and — when the box reports one — the site's OWN published total for
+  # the type. `:no` covers both "the site cannot read this" and "the answer was a
+  # shape we do not know": neither may be offered as a candidate.
+  defp site_readable_total(bp, ws, proj, ds, type, token) do
+    path = scoped_query_probe(ws, proj, ds, type)
+
+    case Registry.relay_as(bp, :get, path, token) do
+      {:ok, status, body} when status in 200..299 ->
+        case interpret_query_body(body) do
+          {:ok, _page, total} -> {:readable, total}
+          :uninterpretable -> :no
+        end
+
+      _ ->
+        :no
+    end
+  end
+
+  defp menu_sentence({:ok, []}, ds),
+    do: "Nothing in #{ds} is readable by this site's public-read token."
+
+  defp menu_sentence({:ok, menu}, _ds) do
+    "This site CAN read: " <>
+      (menu |> Enum.map(&menu_entry/1) |> Enum.join(", ")) <> "."
+  end
+
+  defp menu_sentence(:unavailable, ds),
+    do: "The control plane could not list what IS readable in #{ds}."
+
+  defp menu_entry({type, total}) when is_integer(total), do: "#{type} (#{total})"
+  defp menu_entry({type, nil}), do: type
+
+  # The build's own route, plus `count=true` — which is what makes the reported
+  # magnitude the box's published TOTAL for the type rather than the page size the
+  # `limit=1` probe itself chose.
+  defp scoped_query_probe(ws, proj, ds, type) do
+    scoped_query_path(ws, proj, ds, type) <> "?limit=1&count=true"
+  end
+
+  defp scoped_query_path(ws, proj, ds, type) do
+    "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/query/#{URI.encode(ds)}/#{URI.encode(type)}"
+  end
+
+  defp binding_relay_failure_copy(bp, :not_live),
+    do: "#{bp.slug} has no URL yet — the site's content could not be read"
+
+  defp binding_relay_failure_copy(bp, _reason),
+    do: "#{bp.slug} could not be reached — the site's content could not be read"
+
+  # What the 201 SAYS about the read. `bound` carries what the site actually saw;
+  # `unverified` carries WHY it could not be confirmed — never a bare `ok`. The
+  # `count` key is the box's published TOTAL for the bound type and is OMITTED
+  # entirely when the box reported none: `bound` without a magnitude is the honest
+  # shape, and an absent key cannot be misread the way a fabricated `1` would be.
+  defp binding_note({:bound, type, total}) when is_integer(total),
+    do: %{content_binding: %{status: "bound", doc_type: type, count: total}}
+
+  defp binding_note({:bound, type, nil}),
+    do: %{content_binding: %{status: "bound", doc_type: type}}
+
+  defp binding_note({:unverified, why}),
+    do: %{content_binding: %{status: "unverified", detail: why}}
+
+  defp binding_note(:not_applicable), do: %{}
+
+  defp maybe_put_menu(body, {:ok, [_ | _] = menu}) do
+    Map.put(body, :readable_types, Enum.map(menu, &menu_row/1))
+  end
+
+  defp maybe_put_menu(body, _menu), do: body
+
+  defp menu_row({type, total}) when is_integer(total), do: %{type: type, count: total}
+  defp menu_row({type, nil}), do: %{type: type}
+
   # name → slug: lowercase, non-alnum → hyphen, trim hyphens. Falls back to a
   # short random suffix so a name like "!!!" still yields a valid slug.
   defp slugify(name) do
@@ -10716,6 +11069,12 @@ defmodule BarkparkCloud.Web.Router do
       id: t.id,
       ip_address: t.ip_address,
       user_agent: t.user_agent,
+      # ALWAYS emitted, `null` when unknown — a present-and-null key lets the SPA
+      # tell "this server does not know where the session came from" apart from
+      # "this server is too old to have the field at all". Rows minted before the
+      # `origin` column existed are exactly the first case, and nothing guesses
+      # on their behalf.
+      origin: t.origin,
       last_used_at: t.last_used_at,
       inserted_at: t.inserted_at,
       current: t.token_hash == current_hash

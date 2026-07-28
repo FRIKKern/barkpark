@@ -9,4 +9,10 @@
 #
 # Measured 2026-07-21 on app.css @ sha256 176f441387bc… (Chrome 150.0.7871.129,
 # node v22.22.0): 1203 authored heads == 1203 CSSOM rules, MISSES 0.
-1233
+#
+# Re-measured 2026-07-28 by running cssom-parity.mjs on this branch merged with
+# origin/main: 1235 authored heads, MISSES 0 — the +2 are the Overview's own
+# not-current chip rules. MISSES 0 is what makes this an unrecorded ADD rather
+# than a parity defect, which is the distinction the ratchet's own failure text
+# tells you to confirm before bumping.
+1235

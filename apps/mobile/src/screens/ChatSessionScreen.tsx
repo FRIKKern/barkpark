@@ -2,8 +2,8 @@
 // assistant turns, interrupt, approve/deny. The transcript is the reducer's
 // truth: settled rows (Postgres, via the turn-boundary refetch), optimistic
 // local echoes (queued-badged mid-turn, D12), and the live streaming tail
-// (D9). Cards (approval / plan / question) answer through the same
-// allow/deny-only contract as the TUI and Studio — one row, one truth.
+// (chat-TUI charter D9). Cards (approval / plan / question) answer through
+// the same allow/deny-only contract as the TUI and Studio — one row, one truth.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import {
@@ -30,6 +30,8 @@ import {
   type StreamStatus,
 } from '../api/chat'
 import { PickerSheet, type PickerKind } from '../chat/PickerSheet'
+import { StreamSkeleton } from '../chat/StreamSkeleton'
+import { tailRemainder, type StableSegment, type SuppressedRow } from '../chat/reducer'
 import {
   contentMark,
   distanceFromEnd,
@@ -61,6 +63,7 @@ import {
   messageBlocks,
   requestId,
   type ChatMessage,
+  type StableSkeleton,
 } from '../chat/wire'
 import { useChatSession } from '../chat/useChatSession'
 import { BLOCK_RENDERERS, DEGRADE_ONLY, renderBlockNative, type BlockCtx } from '../papers/portabledoc/blocks'
@@ -135,6 +138,16 @@ export type Row =
    * apparatus rows (workLog.ts owns which rows those are and whether the run
    * is open; this row is only its handle). */
   | { key: string; kind: 'log'; group: WorkLogGroup; open: boolean }
+  /** ONE committed segment of an answering turn, drawn as a document while the
+   * rest of the answer is still arriving (charter D59/D65). Its key is
+   * `s-<turn>-<from>` — the segment's wire identity — so the row survives every
+   * later delta by identity and React never re-renders a paragraph the reader
+   * has already finished reading. */
+  | { key: string; kind: 'segment'; blocks: Block[] }
+  /** The forming block at the head of the remainder (charter D67): the prose
+   * above it keeps streaming as live text, the block itself is an honest labelled
+   * placeholder until it is whole. Never fabricated content. */
+  | { key: string; kind: 'skeleton'; label: string; prose: string }
 
 /** A row's role in the persisted vocabulary. Local echoes and the streaming
  * tail are the user's and the assistant's own words respectively; the log
@@ -147,6 +160,11 @@ export function rowRole(row: Row): string {
     case 'local':
       return 'user'
     case 'tail':
+    // A committed segment and a forming placeholder are both the assistant
+    // mid-sentence — the same turn the tail is, so they fold exactly as it does
+    // (which is to say: never, because the answer is not apparatus).
+    case 'segment':
+    case 'skeleton':
       return 'assistant'
     case 'log':
       return 'log'
@@ -179,12 +197,131 @@ export function localRows(local: readonly { content: string; queued: boolean }[]
   return local.map((l, i) => ({ key: `l-${i}`, kind: 'local', content: l.content, queued: l.queued }))
 }
 
+/** The committed segments as list rows, THROUGH A MEMO TABLE keyed on the row
+ * key — a `Map`, not state and not a ref, exactly like workLogHeaderCache.
+ *
+ * The table is the point. `state.segments` is append-only, so re-mapping it would
+ * mint a brand-new row object for every EARLIER segment on every commit, and
+ * memo(TranscriptRow) reads identity: a settled paragraph would re-render two
+ * times a second for the rest of the turn. With the table, a segment's row is
+ * built once and handed back forever — which is what makes "a committed segment
+ * never re-renders" a fact about the code rather than a hope about React.
+ *
+ * A segment is immutable and its key carries its turn, so a hit can never be
+ * stale; entries for dropped segments are evicted so a degrade cannot leak a
+ * turn's rows into the next one. */
+export function stableSegmentRows(
+  table: Map<string, Row>,
+  segments: readonly StableSegment[],
+): Row[] {
+  const live = new Set<string>()
+  const out: Row[] = []
+  for (const seg of segments) {
+    const key = `s-${seg.turn}-${seg.from}`
+    live.add(key)
+    const hit = table.get(key)
+    if (hit !== undefined) {
+      out.push(hit)
+      continue
+    }
+    const row: Row = { key, kind: 'segment', blocks: seg.blocks }
+    table.set(key, row)
+    out.push(row)
+  }
+  for (const key of [...table.keys()]) if (!live.has(key)) table.delete(key)
+  return out
+}
+
+/** Everything the live document contributes to the list, hoisted into one shape
+ * so assembleRows takes a single extra argument and the whole progressive layer
+ * is one identity to memoize. */
+export interface LiveDoc {
+  /** The committed segment rows of every turn still being drawn from, in commit
+   * order, grouped by the turn they belong to. */
+  byTurn: Map<number, Row[]>
+  /** Persisted rows whose content is already painted as segment rows: seq → the
+   * turn that stands in for it (charter D61). */
+  suppressed: readonly SuppressedRow[]
+  /** The turn whose segments have not been suppressed yet — the one still
+   * streaming. -1 when none. */
+  liveTurn: number
+  /** The plain, uncommitted remainder of the tail. */
+  remainder: string
+  /** The forming block at the head of that remainder, or null. */
+  skeleton: StableSkeleton | null
+}
+
+/** Group segment rows by turn, reading the turn back out of the row key so the
+ * grouping cannot disagree with the keys the list actually renders. */
+export function groupSegmentRows(rows: readonly Row[]): Map<number, Row[]> {
+  const out = new Map<number, Row[]>()
+  for (const row of rows) {
+    if (row.kind !== 'segment') continue
+    const turn = Number(row.key.split('-')[1])
+    const bucket = out.get(turn)
+    if (bucket === undefined) out.set(turn, [row])
+    else bucket.push(row)
+  }
+  return out
+}
+
 /** Concatenate the pre-built halves with the live tail. The message and local
  * rows are passed through BY REFERENCE — a tail tick mints exactly one new row
- * object (the tail's) and leaves every settled row's identity alone. */
-export function assembleRows(settled: Row[], echoes: Row[], tail: string): Row[] {
-  const out: Row[] = [...settled, ...echoes]
-  if (tail !== '') out.push({ key: 'tail', kind: 'tail', text: tail })
+ * object (the tail's) and leaves every settled row's identity alone.
+ *
+ * `live` is OPTIONAL, and that is the shape of the no-op: called without it —
+ * which is what a server emitting no `stable` frames produces — this returns the
+ * exact array it always did, one plain tail row and nothing else. The
+ * progressive layer cannot degrade a stream it was never handed.
+ *
+ * With it, three things change and nothing else does. A suppressed persisted row
+ * is REPLACED IN PLACE by the segment rows standing in for it, so the turn keeps
+ * its position in the transcript. The still-streaming turn's segments sit after
+ * the echoes, where the tail row used to start. And the tail row carries the
+ * REMAINDER rather than the whole tail — or gives way to a placeholder row when
+ * the remainder's head is a block the server says is still forming. */
+export function assembleRows(settled: Row[], echoes: Row[], tail: string, live?: LiveDoc): Row[] {
+  if (live === undefined) {
+    const out: Row[] = [...settled, ...echoes]
+    if (tail !== '') out.push({ key: 'tail', kind: 'tail', text: tail })
+    return out
+  }
+
+  const standIn = new Map<number, number>()
+  for (const row of live.suppressed) standIn.set(row.seq, row.turn)
+
+  const out: Row[] = []
+  for (const row of settled) {
+    const turn = row.kind === 'message' ? standIn.get(row.message.seq) : undefined
+    if (turn === undefined) {
+      out.push(row)
+      continue
+    }
+    // The row stays in `messages` untouched — Postgres is still the sole truth.
+    // It simply is not drawn twice.
+    out.push(...(live.byTurn.get(turn) ?? []))
+  }
+  out.push(...echoes)
+  // The live turn's segments, unless this turn has already been suppressed into
+  // the transcript above (which would draw it twice).
+  if (live.liveTurn !== -1 && !new Set(standIn.values()).has(live.liveTurn)) {
+    out.push(...(live.byTurn.get(live.liveTurn) ?? []))
+  }
+  if (tail !== '') {
+    if (live.skeleton !== null) {
+      // The placeholder REPLACES the plain tail row rather than joining it: the
+      // skeleton draws its own prose (the bytes above the forming block) and the
+      // block's half-written source belongs behind the box, not beside it.
+      out.push({
+        key: 'skeleton',
+        kind: 'skeleton',
+        label: live.skeleton.kind,
+        prose: live.skeleton.prose,
+      })
+    } else {
+      out.push({ key: 'tail', kind: 'tail', text: live.remainder })
+    }
+  }
   return out
 }
 
@@ -195,6 +332,17 @@ export function assembleRows(settled: Row[], echoes: Row[], tail: string): Row[]
 export type BodyRender =
   | { kind: 'blocks'; blocks: Block[] }
   | { kind: 'text'; text: string }
+
+/** The rows whose body is a two-phase DECISION — and the progressive rows are
+ * deliberately NOT among them.
+ *
+ * A committed segment is already a document: the server converted it, there is
+ * nothing left to decide, and giving it an arm here would add a second
+ * unreachable branch of exactly the kind mob-rt-s3 had to go and pin from the
+ * outside (bodyRender's tail arm is dead for the UI — TranscriptRow returns
+ * first). A placeholder is not a body at all. So the type says so, and no dead
+ * arm exists to be mutated without consequence. */
+export type BodyRow = Exclude<Row, { kind: 'segment' } | { kind: 'skeleton' }>
 
 /** How a settled row is drawn, mirroring the TUI taxonomy verbatim
  * (internal/chat/render.go renderMessage's switch):
@@ -235,6 +383,36 @@ export function rendersBlocks(role: string): boolean {
   return kind === 'assistant' || kind === 'card' || kind === 'block'
 }
 
+/** THE LIST'S SIZE BUCKET for a row — LegendList's `getItemType` (charter D65).
+ *
+ * Without it every row shares ONE bucket (legend-list keys its running average
+ * on `itemType`, which is the empty string when no `getItemType` is given), so
+ * the per-type averages are a single blended number and ESTIMATED_ROW_HEIGHT
+ * — 180px, sized for a short assistant paragraph — is the last-resort estimate
+ * for a one-line log handle and a forty-line code turn alike. Bucketed, each
+ * kind learns its OWN average and the list positions off that.
+ *
+ * The buckets are the kinds a row is actually DRAWN by, which is why message
+ * rows split on `roleKind`: a user bubble, an assistant document, an approval
+ * card and a tool row leave TranscriptRow through four different arms with four
+ * unrelated height distributions, and averaging them together is exactly the
+ * dishonesty this fixes. `getFixedItemSize` is deliberately NOT used — these
+ * heights are unknown, not fixed.
+ *
+ * A module-level function, not an inline arrow: the list prop stays identity-
+ * stable across renders, and the mapping is reachable by jest. */
+export function transcriptItemType(row: Row): string {
+  if (row.kind === 'message') return `message:${roleKind(row.message.role)}`
+  // A committed segment buckets on the block that OPENS it, because that is what
+  // decides its height distribution: a one-line heading segment and a forty-line
+  // code segment share nothing but the word "segment", and averaging them
+  // together is the same dishonesty the message rows split to avoid. An empty
+  // blocks array cannot reach here (the reducer refuses a blockless frame), but
+  // the fallback names itself rather than emitting a bare `segment:`.
+  if (row.kind === 'segment') return `segment:${row.blocks[0]?.type ?? 'unknown'}`
+  return row.kind
+}
+
 /** Does this blocks array have anything the renderer can actually DRAW?
  *
  * `renderBlockNative` never throws and never renders nothing: an unregistered
@@ -266,19 +444,23 @@ export function anyRenderableBlocks(blocks: readonly Block[]): boolean {
 
 /** THE two-phase decision, pure so jest can pin it without a native host.
  *
- * Phase 1 — the live tail (SSE `chat` delta frames) is ALWAYS plain text: the
- * `tail` row carries a growing STRING and no blocks field at all, so a half-
- * written `**bold` is structurally incapable of flashing as markup. Phase 2 —
- * at turn settle the tail is replaced by the persisted `message` row, which
- * carries the server's already-converted blocks, and the turn becomes a
- * document in one step. Local echoes are the user's own words: plain, always.
+ * Phase 1 — the UNSETTLED REMAINDER is always plain text: the `tail` row carries
+ * a growing STRING and no blocks field at all, so a half-written `**bold` is
+ * structurally incapable of flashing as markup. That law is unchanged in
+ * substance and narrowed in scope by charter D59: what the row carries is now the
+ * part of the turn the SERVER has not yet declared settled, and the settled part
+ * is drawn — converted once, server-side — as its own `segment` rows. A client
+ * markdown parser would be the fork this whole design exists to prevent, and
+ * there still is not one. Phase 2 — at turn settle the tail is replaced by the
+ * persisted `message` row, which carries the server's already-converted blocks.
+ * Local echoes are the user's own words: plain, always.
  *
  * Every block-BEARING role takes the blocks path; a row that arrived without
  * usable blocks (a mid-persist frame, or a thinner server) — or with blocks this
  * client cannot draw a single one of (anyRenderableBlocks) — degrades honestly
  * to its source text, the same tolerance render.go's renderStructuralDoc
  * shows. */
-export function bodyRender(row: Row): BodyRender {
+export function bodyRender(row: BodyRow): BodyRender {
   if (row.kind === 'tail') return { kind: 'text', text: row.text }
   if (row.kind === 'local') return { kind: 'text', text: row.content }
   // A log header stands for rows it does not contain, so its body is the
@@ -390,9 +572,34 @@ export function ChatSessionScreen({
   // row's identity (and therefore memo(TranscriptRow)) alive across a tail tick.
   const settledRows = useMemo(() => messageRows(state.messages), [state.messages])
   const echoRows = useMemo(() => localRows(state.local), [state.local])
+
+  // The live document (charter D59). The table is a memo TABLE, exactly like
+  // headerTable below: written during render, never state, never a ref, and
+  // idempotent — a second pass over the same segments hands back the same rows.
+  // It is what keeps a committed paragraph's row identity alive across the NEXT
+  // commit, not merely across a delta.
+  const segTable = useMemo(() => new Map<string, Row>(), [])
+  const segmentRows = useMemo(
+    () => stableSegmentRows(segTable, state.segments),
+    [segTable, state.segments],
+  )
+  const segmentsByTurn = useMemo(() => groupSegmentRows(segmentRows), [segmentRows])
+  const remainder = tailRemainder(state)
+  // Absent unless the server is actually emitting segments: with none, this is
+  // `undefined` and assembleRows takes the path it has always taken.
+  const live = useMemo<LiveDoc | undefined>(() => {
+    if (segmentRows.length === 0 && state.skeleton === null) return undefined
+    return {
+      byTurn: segmentsByTurn,
+      suppressed: state.suppressed,
+      liveTurn: state.stableTurn,
+      remainder,
+      skeleton: state.skeleton,
+    }
+  }, [segmentRows, segmentsByTurn, state.suppressed, state.stableTurn, remainder, state.skeleton])
   const rows = useMemo(
-    () => assembleRows(settledRows, echoRows, state.tail),
-    [settledRows, echoRows, state.tail],
+    () => assembleRows(settledRows, echoRows, state.tail, live),
+    [settledRows, echoRows, state.tail, live],
   )
 
   // The work log, folded on the D77 clock. `gen` is the reducer's own turn
@@ -578,6 +785,17 @@ export function ChatSessionScreen({
         keyExtractor={(row: Row) => row.key}
         dataKey={sessionId}
         estimatedItemSize={ESTIMATED_ROW_HEIGHT}
+        // Per-kind size buckets — without this every row is averaged together
+        // and positioned off ESTIMATED_ROW_HEIGHT (see transcriptItemType).
+        getItemType={transcriptItemType}
+        // EXPLICIT, and load-bearing (charter D56/D65 — the comment D56 promised
+        // at crown). false is legend-list's default, but leaving it implicit
+        // leaves the transcript one prop away from silent breakage: recycling
+        // drops the row key (`key: recycleItems ? undefined : itemKey`), and a
+        // keyless row voids memo(TranscriptRow)'s identity contract — the whole
+        // reason a tail tick costs one render instead of the transcript. The
+        // rows are heterogeneous documents; there is no pool to reuse.
+        recycleItems={false}
         initialScrollAtEnd
         maintainScrollAtEnd={TRANSCRIPT_FOLLOW}
         maintainScrollAtEndThreshold={FOLLOW_THRESHOLD}
@@ -780,6 +998,26 @@ export function TranscriptRow({
         <Text style={{ color: theme.textMuted }}> ▍</Text>
       </Text>
     )
+  }
+  if (row.kind === 'segment') {
+    // A COMMITTED segment of the turn still being written — drawn through the
+    // very same container and the very same renderers a settled assistant turn
+    // uses below, and that identity is the whole point: at settle this row does
+    // not change, because there is nothing it could change into. Not a
+    // mid-stream approximation of the document; the document, arriving in
+    // pieces.
+    return (
+      <View style={styles.assistantDoc}>
+        {row.blocks.map((b, i) => renderBlockNative(b, blockCtx, i))}
+      </View>
+    )
+  }
+  if (row.kind === 'skeleton') {
+    // The block the answer is part-way through. Its prose streams live ABOVE the
+    // box (StreamSkeleton draws it) so a paragraph sitting under a forming table
+    // keeps moving instead of vanishing behind it — the web hides 100% of those
+    // bytes and that defect is deliberately not ported (charter D67).
+    return <StreamSkeleton kind={row.label} prose={row.prose} />
   }
 
   const m = row.message

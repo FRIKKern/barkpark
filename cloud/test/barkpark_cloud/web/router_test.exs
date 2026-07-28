@@ -1290,6 +1290,30 @@ defmodule BarkparkCloud.Web.RouterTest do
       refute conn.resp_body =~ "tok"
     end
 
+    test "the row carries updated_at, so a rotation is not a byte-identical payload" do
+      {user, team} = user_with_team()
+      {:ok, _p} = Registry.connect_provider(team, "hetzner", "tok", label: "main")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      [fresh] = json_body(call(:get, "/v1/providers", nil, token))["providers"]
+      assert is_binary(fresh["updated_at"])
+      # A first connect fills both stamps from one autogenerate entry — the
+      # console reads that as "never rotated" and shows no update line.
+      assert fresh["updated_at"] == fresh["inserted_at"]
+
+      {:ok, _} = Registry.connect_provider(team, "hetzner", "rotated-tok")
+
+      [after_rotation] = json_body(call(:get, "/v1/providers", nil, token))["providers"]
+      assert after_rotation["id"] == fresh["id"]
+      assert after_rotation["inserted_at"] == fresh["inserted_at"]
+
+      assert after_rotation["updated_at"] > fresh["updated_at"],
+             "without updated_at the payload is byte-identical across a rotation and the console cannot show it"
+
+      refute after_rotation["updated_at"] == after_rotation["inserted_at"]
+      refute call(:get, "/v1/providers", nil, token).resp_body =~ "rotated-tok"
+    end
+
     test "empty team → 200 {providers: []}" do
       {user, _team} = user_with_team()
       {:ok, token} = Accounts.create_user_session_token(user)
@@ -2123,6 +2147,165 @@ defmodule BarkparkCloud.Web.RouterTest do
       conn = call(:post, "/v1/providers", %{kind: "hetzner", token: "x"}, token)
       assert conn.status == 403
       assert json_body(conn)["error"] == "forbidden"
+    end
+  end
+
+  ## Keyset pagination — the compound cursor
+
+  # An admin of a fresh team, plus a live session token.
+  defp tied_feed_admin do
+    {user, team} = user_with_team()
+    {:ok, token} = Accounts.create_user_session_token(user)
+    {team, token}
+  end
+
+  # `count` audit rows sharing ONE inserted_at. insert_all (not record_audit)
+  # because the stamp must be identical to the microsecond, and the table
+  # carries a BEFORE UPDATE trigger, so the value cannot be corrected after
+  # the fact.
+  defp seed_tied_audit(team, ts, count) do
+    rows =
+      for _ <- 1..count do
+        %{
+          id: Ecto.UUID.generate(),
+          team_id: team.id,
+          action: "site.created",
+          metadata: %{},
+          inserted_at: ts
+        }
+      end
+
+    {^count, _} = Repo.insert_all(BarkparkCloud.Accounts.AuditEvent, rows)
+    Enum.map(rows, & &1.id)
+  end
+
+  defp seed_tied_deliveries(team, ts, count) do
+    rows =
+      for i <- 1..count do
+        %{
+          id: Ecto.UUID.generate(),
+          team_id: team.id,
+          recipient: "ops#{i}@example.com",
+          event: "provision_failed",
+          channel: "email",
+          kind: "alert",
+          status: "sent",
+          attempts: 1,
+          inserted_at: ts,
+          updated_at: ts
+        }
+      end
+
+    {^count, _} = Repo.insert_all(BarkparkCloud.Notifications.Delivery, rows)
+    Enum.map(rows, & &1.id)
+  end
+
+  defp get_page(token, path, key) do
+    conn = call(:get, path, nil, token)
+    assert conn.status == 200
+    json_body(conn)[key]
+  end
+
+  # Walk `path_fn` with the full `(inserted_at, id)` cursor until a short page,
+  # and return every id seen IN ORDER (duplicates included — the caller asserts
+  # they are absent).
+  defp walk_all(token, key, path_fn, limit) do
+    Enum.reduce_while(1..10, {nil, nil, []}, fn _, {before, before_id, acc} ->
+      cursor =
+        if before,
+          do: "&before=" <> URI.encode_www_form(before) <> "&before_id=" <> before_id,
+          else: ""
+
+      page = get_page(token, path_fn.(limit) <> cursor, key)
+      acc = acc ++ Enum.map(page, & &1["id"])
+
+      if length(page) < limit do
+        {:halt, acc}
+      else
+        last = List.last(page)
+        {:cont, {last["inserted_at"], last["id"], acc}}
+      end
+    end)
+  end
+
+  # gr-bl-delivery-keyset-tiebreak: both paginated feeds ORDER BY the compound
+  # key `(inserted_at DESC, id DESC)` but historically PAGED on half of it
+  # (`inserted_at < ^before`). A page boundary landing between two rows that
+  # share a stamp therefore dropped every tied row on the far side — permanently,
+  # silently, and exactly in the workloads that make ties routine (a fan-out
+  # writes one delivery per recipient in one instant; a burst of audited writes
+  # lands in one microsecond). These tests seed an ALL-TIED page so the boundary
+  # is guaranteed to fall mid-tie, then assert the union of the pages is the
+  # whole set with nothing seen twice and nothing missing.
+  describe "keyset pagination across an inserted_at tie" do
+    test "GET /v1/audit: every tied row is enumerated exactly once across pages" do
+      {team, token} = tied_feed_admin()
+      ts = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      ids = seed_tied_audit(team, ts, 5)
+
+      seen = walk_all(token, "events", fn n -> "/v1/audit?limit=#{n}" end, 2)
+
+      assert length(seen) == length(Enum.uniq(seen)), "a page boundary duplicated a tied row"
+      assert Enum.sort(seen) == Enum.sort(ids), "a page boundary dropped a tied row"
+    end
+
+    test "GET /v1/notifications/deliveries: every tied row is enumerated exactly once" do
+      {team, token} = tied_feed_admin()
+      ts = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      ids = seed_tied_deliveries(team, ts, 5)
+
+      seen =
+        walk_all(token, "deliveries", fn n -> "/v1/notifications/deliveries?limit=#{n}" end, 2)
+
+      assert length(seen) == length(Enum.uniq(seen)), "a page boundary duplicated a tied row"
+      assert Enum.sort(seen) == Enum.sort(ids), "a page boundary dropped a tied row"
+    end
+
+    test "BACKWARD COMPATIBLE: `before` with no `before_id` is still the stamp-only cutoff" do
+      {team, token} = tied_feed_admin()
+      ts = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      _ids = seed_tied_audit(team, ts, 5)
+      _dids = seed_tied_deliveries(team, ts, 5)
+
+      audit_p1 = get_page(token, "/v1/audit?limit=2", "events")
+      assert length(audit_p1) == 2
+      stamp = List.last(audit_p1)["inserted_at"]
+
+      # Unchanged legacy semantics: a stamp-only cutoff is STRICTLY older, so an
+      # all-tied trail yields nothing after page one. That is the historical
+      # behaviour, kept byte-for-byte for bookmarked URLs — the tiebreak arm
+      # engages only when the id half arrives (the tests above).
+      assert get_page(token, "/v1/audit?limit=2&before=" <> URI.encode_www_form(stamp), "events") ==
+               []
+
+      del_p1 = get_page(token, "/v1/notifications/deliveries?limit=2", "deliveries")
+      assert length(del_p1) == 2
+      dstamp = List.last(del_p1)["inserted_at"]
+
+      assert get_page(
+               token,
+               "/v1/notifications/deliveries?limit=2&before=" <> URI.encode_www_form(dstamp),
+               "deliveries"
+             ) == []
+    end
+
+    test "a garbage before_id degrades to the stamp-only cutoff, never a 500" do
+      {team, token} = tied_feed_admin()
+      ts = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      _ids = seed_tied_audit(team, ts, 3)
+      _dids = seed_tied_deliveries(team, ts, 3)
+      stamp = URI.encode_www_form(DateTime.to_iso8601(ts))
+
+      # `id` is a :binary_id — a raw non-UUID in that comparison would raise
+      # Ecto.Query.CastError (a 500 on a typo'd cursor).
+      assert get_page(token, "/v1/audit?limit=2&before=#{stamp}&before_id=not-a-uuid", "events") ==
+               []
+
+      assert get_page(
+               token,
+               "/v1/notifications/deliveries?limit=2&before=#{stamp}&before_id=not-a-uuid",
+               "deliveries"
+             ) == []
     end
   end
 

@@ -84,6 +84,122 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+// ── cch-bl-mockjs-revoke-stateless · THE BROWSER PREVIEW'S REVOKE ───────────
+// scenarios.mjs models the two session DELETEs statefully, but ONLY when the
+// caller hands route() its optional 4th arg — a per-boot mutable bag. smoke.mjs
+// (the node oracle) passes one; mock.js (the BROWSER preview, and therefore the
+// harness shoot.sh photographs) did not. Consequence: clicking Revoke toasted
+// "Device signed out" and app.js's immediate loadSessions() refetch returned a
+// byte-identical list. A success claim with no post-condition read — the epic
+// predicate, in a browser, on a destructive verb.
+//
+// Nothing in this repo would have gone red on a revert: __app.test.mjs never
+// read mock.js, modal-oracle.mjs has zero revoke coverage, and neither it nor
+// smoke.mjs is run by any workflow. This group is therefore in TWO halves:
+//   HALF 1 (CONTRACT) — route()'s own semantics, imported directly: stateless
+//     DELETE leaves the list at N; with a bag it drops to N-1.
+//   HALF 2 (WIRING, the tripwire) — mock.js actually PASSES a bag. It scans the
+//     call's argument list with a balanced-paren walk rather than matching one
+//     literal spelling, so a rename or a reformat cannot make it vacuously
+//     green, and it throws by name if the call site disappears entirely.
+// Half 2 is the half that goes red on clean origin/main (3 args).
+const { route: previewRoute } = await import("./__preview__/scenarios.mjs");
+const MOCK_JS_SRC = fs.readFileSync(new URL("./__preview__/mock.js", import.meta.url), "utf8");
+
+// Split the argument list of the FIRST call to `<needle>` in `src`, walking
+// balanced delimiters and skipping string/template/comment content, so nesting
+// (`route(a, f(b, c), d)`) and reformatting do not miscount. Returns the trimmed
+// top-level argument texts. THROWS if the call site is absent — the failure mode
+// a silent regex would have turned into a vacuous pass.
+function callArgs(src, needle) {
+  const at = src.indexOf(needle);
+  assert.ok(at !== -1, `call site "${needle}" not found in mock.js — the tripwire cannot certify a call it cannot locate`);
+  let i = src.indexOf("(", at) + 1;
+  const args = [];
+  let depth = 0, cur = "", quote = null;
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (quote) {
+      if (c === "\\") { cur += c + src[++i]; continue; }
+      if (c === quote) quote = null;
+      cur += c;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { quote = c; cur += c; continue; }
+    if (c === "/" && src[i + 1] === "/") { while (i < src.length && src[i] !== "\n") i++; continue; }
+    if (c === "/" && src[i + 1] === "*") {
+      const end = src.indexOf("*/", i + 2);
+      // An unterminated block comment would send indexOf to -1, i to 0, and this
+      // walk into an infinite loop — a hung test is worse than a red one.
+      assert.ok(end !== -1, `unterminated block comment while scanning "${needle}" in mock.js`);
+      i = end + 1;
+      continue;
+    }
+    if (c === "(" || c === "[" || c === "{") depth++;
+    if (c === ")" && depth === 0) { args.push(cur.trim()); break; }
+    if (c === ")" || c === "]" || c === "}") depth--;
+    if (c === "," && depth === 0) { args.push(cur.trim()); cur = ""; continue; }
+    cur += c;
+  }
+  assert.ok(i < src.length, `unterminated argument list for "${needle}" in mock.js`);
+  return args;
+}
+
+// HALF 1 — the CONTRACT, straight off scenarios.mjs. Both scenarios are pinned
+// because account-modal-revoke is the one auto-enrolled in shoot.sh's screenshot
+// set (the account-modal name prefix), i.e. the fixture the published evidence
+// is taken through.
+for (const [scen, n] of [["account-modal", 2], ["account-modal-revoke", 4]]) {
+  test(`scenarios.route(${scen}): a DELETE without a state bag leaves the list at N; with one it drops to N-1`, () => {
+    const list = (state) => previewRoute(scen, "GET", "/v1/account/sessions", state).body.sessions;
+
+    // The fixture is the size this check assumes (a shrunken fixture would make
+    // the -1 assertion below pass for the wrong reason).
+    assert.equal(list(undefined).length, n, `${scen} must carry ${n} sessions`);
+
+    // STATELESS (what mock.js used to be): 200, and the following GET is unchanged.
+    const victim = list(undefined).find((s) => !s.current);
+    const stateless = previewRoute(scen, "DELETE", `/v1/account/sessions/${victim.id}`, undefined);
+    assert.equal(stateless.status, 200, "the revoke reports success");
+    assert.equal(list(undefined).length, n, "…over a list that never changed — the false green");
+
+    // STATEFUL: the same 200, and the post-condition read actually shrinks.
+    const bag = {};
+    assert.equal(previewRoute(scen, "DELETE", `/v1/account/sessions/${victim.id}`, bag).status, 200);
+    assert.equal(previewRoute(scen, "GET", "/v1/account/sessions", bag).body.sessions.length, n - 1);
+
+    // A second revoke of the SAME id is now an honest 404, not a second success.
+    assert.equal(previewRoute(scen, "DELETE", `/v1/account/sessions/${victim.id}`, bag).status, 404);
+
+    // Sign-out-everywhere keeps the acting session and reports the real count.
+    const others = previewRoute(scen, "GET", "/v1/account/sessions", bag).body.sessions.filter((s) => !s.current);
+    const all = previewRoute(scen, "DELETE", "/v1/account/sessions", bag);
+    assert.equal(all.body.revoked, others.length, "the toast's count is the number actually revoked");
+    assert.equal(previewRoute(scen, "GET", "/v1/account/sessions", bag).body.sessions.length, 1);
+  });
+}
+
+test("mock.js WIRING TRIPWIRE: the browser preview hands route() a per-boot state bag (red on a 3-arg revert)", () => {
+  const args = callArgs(MOCK_JS_SRC, ".route(");
+  assert.equal(args.length, 4, `mock.js called route() with ${args.length} args — a 3-arg call gets no state bag, so every DELETE is a stateless no-op that still answers 200`);
+
+  // The 4th arg is a bare identifier (not an inline `{}`, which would be a FRESH
+  // bag per request and therefore still stateless across the refetch).
+  const bag = args[3];
+  assert.match(bag, /^[A-Za-z_$][A-Za-z0-9_$]*$/, `route()'s state argument must be a bare identifier, got ${JSON.stringify(bag)}`);
+
+  // …and that identifier is declared ONCE, as an empty object literal, at a
+  // scope outside the fetch handler — per page load, mirroring smoke.mjs.
+  const decl = new RegExp(`\\b(?:var|let|const)\\s+${bag}\\s*=\\s*\\{\\s*\\}`);
+  assert.match(MOCK_JS_SRC, decl, `${bag} must be declared as an empty object literal (the per-boot bag)`);
+
+  // route() hands back the LIVE state array by reference, so the body must be
+  // copied before the app sees it — otherwise a body rendered earlier silently
+  // rewrites itself on the next revoke.
+  const body = callArgs(MOCK_JS_SRC, "jsonResponse(res.status");
+  assert.notEqual(body[1], "res.body", "the routed body must be snapshotted, not handed over by reference");
+});
+
 // ── cch-w1-refetch-storm · THE REQUEST COUNTER ──────────────────────────────
 // Overview binds to five reads. Every SSE tick used to re-run the whole loader:
 // 1 cold boot + 7 fleet ticks = 40 requests, 8 per endpoint — measured in
@@ -126,23 +242,36 @@ function overviewOnboarding(publishedDone) {
 
 function overviewNet() {
   const paths = [];
-  const state = { onboarding: overviewOnboarding(false) };
+  // `state` is the MUTABLE half of the fixture, so a test can flip what the
+  // server would say between ticks:
+  //   state.onboarding   — a step self-heals
+  //   state.subscription — trialing → past_due (the band/chip transition)
+  //   state.fail         — a Set of paths that answer 503 instead of 200, so a
+  //                        BACKGROUND refetch failure is expressible at all
+  //                        (every path was unconditionally ok before).
+  const state = {
+    onboarding: overviewOnboarding(false),
+    subscription: { status: "trialing", plan: "trial" },
+    fail: new Set(),
+  };
   const bodyFor = (path) => {
     if (path === "/v1/barkparks") return { barkparks: OVERVIEW_FLEET };
     if (path.startsWith("/v1/audit")) return { events: [] };
     if (path === "/v1/usage/summary") return { usage: { team: { instances: { quota: 5 } }, instances: [] } };
-    if (path === "/v1/subscription") return { subscription: { status: "trialing", plan: "trial" } };
+    if (path === "/v1/subscription") return { subscription: state.subscription };
     if (path === "/v1/onboarding") return { onboarding: state.onboarding };
     return {};
   };
   return {
     paths, state,
     fetch(path) {
-      paths.push(String(path));
+      const p = String(path);
+      paths.push(p);
+      const down = state.fail.has(p);
       return Promise.resolve({
-        ok: true, status: 200,
+        ok: !down, status: down ? 503 : 200,
         headers: { get: (n) => (String(n).toLowerCase() === "content-type" ? "application/json" : null) },
-        json: () => Promise.resolve(bodyFor(String(path))),
+        json: () => Promise.resolve(down ? { error: "unavailable" } : bodyFor(p)),
       });
     },
     reset() { paths.length = 0; },
@@ -183,15 +312,28 @@ function overviewDom() {
   };
   ["overview-body", "overview-greeting", "overview-sub", "overview-chips", "overview-launch"]
     .forEach((id) => nodes.set(id, make(id)));
+  // ONE document for the whole console, not two: the topbar chips
+  // (#billing-chip, #liveness-chip) and the Overview mounts have to be reachable
+  // from the SAME `document`, or the honesty this group asserts — "the chip says
+  // X while the body says Y" — is unassertable by construction. fakeDom() (below,
+  // hoisted) already owns the richer element model those chips need (children,
+  // insertBefore, class-selector querySelector), so this composes with it rather
+  // than forking a second one.
+  const topbar = fakeDom();
   return {
     nodes,
+    topbarRight: topbar.topbarRight,
+    // The chip elements, by id, once the SPA has mounted them.
+    chip: (id) => topbar.document.getElementById(id),
     document: {
       readyState: "complete",
       addEventListener: noop2, removeEventListener: noop2,
-      querySelector: (sel) => (sel.startsWith("#") ? nodes.get(sel.slice(1)) || null : null),
+      querySelector: (sel) => (sel.startsWith("#")
+        ? nodes.get(sel.slice(1)) || null
+        : topbar.document.querySelector(sel)),
       querySelectorAll: () => [],
-      getElementById: (id) => nodes.get(id) || null,
-      createElement: (t) => make(t),
+      getElementById: (id) => nodes.get(id) || topbar.document.getElementById(id),
+      createElement: (t) => topbar.document.createElement(t),
       documentElement: make(""), body: make(""),
     },
   };
@@ -381,6 +523,222 @@ test("cch-w1: off-Overview, a fleet tick still costs the Overview nothing", asyn
   }
 });
 
+// ── cch-bl-overview-subscription-band-stale · OVERVIEW HONESTY ──────────────
+// Two defects, one class: the Overview told the operator something it could not
+// know. NEITHER was pinned by the 699 tests that preceded this group — both
+// fixes passed the whole suite green before a single assertion below existed,
+// which is exactly why "the suite is green" proves nothing here and every claim
+// gets its own test, each mutation-proved able to fail.
+//
+// DEFECT A — the console CERTIFIED freshness it lacked. A background refetch
+// that fails returns silently from loadOverview's background-failure arm. The
+// SILENCE IS RIGHT (blanking a working dashboard on one blip is the louder
+// lie); what was wrong was the claim that "the liveness chip already reports a
+// broken stream". It does not: the chip is driven by EventSource state alone,
+// and es.onmessage stamps lastEventMs and repaints the chip BEFORE dispatching
+// the refetch — so at the instant of the failure it reads live / "Live" /
+// "· just now" over data that never arrived.
+//
+// DEFECT B — TYPE_ACTIONS.subscription refreshed subCache and repainted the
+// topbar chip, but had no `overview` arm, so the state band beneath a chip
+// reading "Payment failed" still rendered the old trial runway from that same
+// refreshed cache.
+
+test("cch-bl: a failed BACKGROUND refresh stops the chip certifying freshness", async () => {
+  await overviewHarness(async ({ net, dom }) => {
+    const chip = hooks.ensureLivenessChip();
+    hooks.renderLivenessChip();
+    // PRE-CONDITION — the lie, stated: a healthy stream, and the chip says so.
+    assert.equal(chip.getAttribute("data-state"), "live");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Live");
+
+    const bodyBefore = dom.nodes.get("overview-body").innerHTML;
+    assert.ok(bodyBefore.length > 0, "the cold paint must have left a dashboard to preserve");
+    net.reset();
+    net.state.fail.add("/v1/barkparks"); // the refetch the event triggers now 503s
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+
+    assert.equal(net.count("/v1/barkparks"), 1, "the tick did dispatch the refetch");
+    // THE FIX: the chip no longer vouches for data that did not arrive.
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Not current");
+    assert.notEqual(chip.querySelector(".live-chip-label").textContent, "Live");
+    assert.match(chip.getAttribute("aria-label"), /last refresh failed/);
+  });
+});
+
+test("cch-bl: …and the body is still NOT blanked — the silence is the correct half", async () => {
+  // The seam must not be "fixed" by repainting the body: replacing a working
+  // dashboard with an error state on one blip is the louder lie. This assertion
+  // was GREEN before the fix and must stay green after it.
+  await overviewHarness(async ({ net, dom }) => {
+    hooks.ensureLivenessChip();
+    const bodyBefore = dom.nodes.get("overview-body").innerHTML;
+    const bandBefore = dom.nodes.get("overview-state").innerHTML;
+    net.state.fail.add("/v1/barkparks");
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(dom.nodes.get("overview-body").innerHTML, bodyBefore,
+      "a background failure must leave the last good dashboard byte-identical");
+    assert.equal(dom.nodes.get("overview-state").innerHTML, bandBefore);
+    assert.doesNotMatch(dom.nodes.get("overview-body").innerHTML, /Couldn't load your fleet/);
+  });
+});
+
+test("cch-bl: a refresh that LANDS clears the not-current chip", async () => {
+  // A staleness flag that never clears is its own permanent lie — one blip would
+  // condemn the topbar for the rest of the session.
+  await overviewHarness(async ({ net, dom }) => {
+    const chip = hooks.ensureLivenessChip();
+    net.state.fail.add("/v1/barkparks");
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+    net.state.fail.clear(); // the blip passes
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(chip.getAttribute("data-state"), "live", "recovery is honest too");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Live");
+    assert.ok(dom.nodes.get("overview-body").innerHTML.length > 0);
+  });
+});
+
+test("liveDotState: a failed refresh reads refresh_failed — under dead/reconnecting, over stale/live", () => {
+  const now = 1_000_000;
+  // The stream is PERFECT and the screen is still not current — the case no
+  // stream signal can express, which is why this is its own state.
+  assert.equal(hooks.liveDotState(false, now, now, false, true), "refresh_failed");
+  assert.equal(hooks.liveDotState(false, null, now, false, true), "refresh_failed");
+  // A measured failure outranks the timing INFERENCE of staleness…
+  assert.equal(hooks.liveDotState(false, now - 10 * hooks.liveStaleMs, now, false, true), "refresh_failed");
+  // …but a down stream still outranks it: those say "not live" more loudly.
+  assert.equal(hooks.liveDotState(true, now, now, false, true), "reconnecting");
+  assert.equal(hooks.liveDotState(false, now, now, true, true), "dead");
+  // The fifth arg is load-bearing: the same inputs without it keep the old
+  // answers, so none of the above can pass vacuously.
+  assert.equal(hooks.liveDotState(false, now, now, false, false), "live");
+  assert.equal(hooks.liveDotState(false, now - 10 * hooks.liveStaleMs, now, false, false), "stale");
+});
+
+test("cch-bl: the not-current chip carries NO 'as of' — the event was just now, the data wasn't", () => {
+  const orig = sandbox.document;
+  const { document: doc } = fakeDom();
+  sandbox.document = doc;
+  try {
+    const chip = hooks.ensureLivenessChip();
+    const now = 1_000_000;
+    // Exactly the production shape at the instant of failure: onmessage stamped
+    // lastEventMs one second ago, so without the suppression the chip would read
+    // "Not current · just now" — reassurance welded to a warning.
+    hooks.renderLivenessChip({ lastEventMs: now - 1_000, nowMs: now, refreshStale: true });
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Not current");
+    assert.equal(chip.querySelector(".live-chip-ago").textContent, "");
+    assert.equal(chip.querySelector(".live-chip-ago").hidden, true);
+    assert.doesNotMatch(chip.getAttribute("title"), /last event/);
+    // Control: the same recency WITHOUT the failed refresh does show it.
+    hooks.renderLivenessChip({ lastEventMs: now - 1_000, nowMs: now, refreshStale: false });
+    assert.equal(chip.getAttribute("data-state"), "live");
+    assert.equal(chip.querySelector(".live-chip-ago").textContent, "· just now");
+  } finally {
+    sandbox.document = orig;
+  }
+});
+
+// A past-due subscription: the transition the operator most needs to see, and
+// the one overviewStatePick ranks above everything (the money path).
+const OVERVIEW_PAST_DUE = { status: "past_due", plan: "pro", current_period_end: "2026-07-01T00:00:00Z" };
+
+test("cch-bl: a subscription tick repaints the Overview band, not just the topbar chip", async () => {
+  await overviewHarness(async ({ net, dom }) => {
+    const band = () => dom.nodes.get("overview-state").innerHTML;
+    assert.match(band(), /runway-step/, "the cold paint must mount the trial runway band");
+    // The pure model already knows the answer — only the paint was missing.
+    assert.equal(hooks.overviewStatePick(net.state.subscription, hooks.overviewData.onboarding), "runway");
+
+    net.reset();
+    net.state.subscription = OVERVIEW_PAST_DUE;
+    hooks.handleLiveEvent("subscription");
+    await settleOverview();
+
+    // The topbar flipped — the half that always worked, and the reason the band
+    // beneath it reading "trial" was a visible contradiction, not a subtlety.
+    assert.equal(dom.chip("billing-chip").textContent, "Payment failed · fix billing");
+    // PRE-FIX: byte-identical to `band()` above — the old runway card.
+    assert.match(band(), /dunning-banner/, "the state band must follow the refreshed cache");
+    assert.match(band(), /Payment failed/);
+    assert.doesNotMatch(band(), /runway-step/);
+    // …and the narrowing holds: ONE read, the one the event named.
+    assert.deepEqual(net.tally(), [0, 0, 0, 1, 0],
+      "a subscription tick must read the subscription and nothing else, got " + JSON.stringify(net.paths));
+  });
+});
+
+test("cch-bl: the subscription tick repaints the whole sub-dependent Overview, not only the band", async () => {
+  // paintOverviewData, NOT paintOverviewState: the slots meter and the instances
+  // grid read subCache too (overviewInstancesHtml takes `sub`), so a band-only
+  // repaint would leave two more stale regions behind the fixed one.
+  await overviewHarness(async ({ net, dom }) => {
+    const grid = dom.nodes.get("overview-instances");
+    assert.ok(grid, "the cold paint must mount #overview-instances");
+    grid.innerHTML = '<div class="ov-grid-probe">stale</div>'; // survives only if nothing repaints
+    net.state.subscription = OVERVIEW_PAST_DUE;
+    hooks.handleLiveEvent("subscription");
+    await settleOverview();
+    assert.doesNotMatch(dom.nodes.get("overview-instances").innerHTML, /ov-grid-probe/,
+      "the instances grid must be repainted from the refreshed subscription too");
+    assert.match(dom.nodes.get("overview-instances").innerHTML, /bravo/,
+      "…and repainted with the fleet, not blanked");
+  });
+});
+
+test("cch-bl: the not-current claim is OVERVIEW-scoped — Fleet's topbar does not inherit it", async () => {
+  // The flag is set by loadOverview and cleared by an Overview read, so without
+  // a scope the chip would keep disclaiming currency on Fleet — a view that
+  // fetched its own data successfully. That is a NEW lie wearing the fix for an
+  // old one, which is the exact trade this slice exists not to make.
+  const priorHash = sandbox.location.hash;
+  await overviewHarness(async ({ net }) => {
+    const chip = hooks.ensureLivenessChip();
+    net.state.fail.add("/v1/barkparks");
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+
+    sandbox.location.hash = "#fleet";
+    hooks.renderLivenessChip(); // what the 1s chip ticker does on every view
+    assert.equal(chip.getAttribute("data-state"), "live",
+      "Fleet must not wear the Overview's staleness");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Live");
+
+    // …and it is not forgotten either: back on Overview the claim stands until
+    // a read lands.
+    sandbox.location.hash = "#overview";
+    hooks.renderLivenessChip();
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+  });
+  sandbox.location.hash = priorHash;
+});
+
+test("cch-bl: off-Overview, a subscription tick paints no Overview and still costs one read", async () => {
+  // The new arm is VIEW-scoped like every other: a tick arriving on Billing must
+  // not paint into an Overview nobody is looking at.
+  const priorHash = sandbox.location.hash;
+  await overviewHarness(async ({ net, dom }) => {
+    const band = () => dom.nodes.get("overview-state").innerHTML;
+    const before = band();
+    sandbox.location.hash = "#activity";
+    net.reset();
+    net.state.subscription = OVERVIEW_PAST_DUE;
+    hooks.handleLiveEvent("subscription");
+    await settleOverview();
+    assert.equal(band(), before, "no repaint off-Overview");
+    assert.deepEqual(net.tally(), [0, 0, 0, 1, 0]);
+  });
+  sandbox.location.hash = priorHash;
+});
+
 // ── gr-p5-account-2fa · GR54 THE SAFETY NET ─────────────────────────────────
 // The account modal is the ONE surface whose three operations (password change,
 // session revoke, log out) can lock a user out of their own console. Before the
@@ -445,6 +803,33 @@ test("gr-p5-account: loadSessions' two css_check-named hooks survive — .sessio
   const body = fn.slice(0, fn.indexOf("\n  function ", 10));
   assert.ok(body.includes('querySelectorAll(".session-revoke")'),
     "loadSessions must delegate row revokes through .session-revoke");
+});
+
+test("gr-p5-session-provenance: the session row shows origin only when the server sent one", () => {
+  // A null/absent origin renders NOTHING — every row minted before the column
+  // existed is genuinely unknown, and inventing "via password" for it would be
+  // the same class of lie as the IP this row already suppresses. The label rides
+  // the EXISTING .session-meta line: no new class, so this stays off css_check.
+  const unknown = hooks.sessionRowHtml({ id: "a", user_agent: "barkpark-cli/0.9" });
+  assert.ok(!unknown.includes("via "), "an origin-less row must claim nothing: " + unknown);
+
+  const linked = hooks.sessionRowHtml({ id: "b", user_agent: "barkpark-cli/0.9", origin: "device_link" });
+  assert.ok(/session-meta">Active [^<]*·[^<]*via device link</.test(linked),
+    "device_link must render on the existing .session-meta line: " + linked);
+  assert.ok(!linked.includes("session-origin"), "no new CSS class may appear: " + linked);
+
+  // OAuth reports the provider itself, so the tail IS the label.
+  assert.ok(hooks.sessionRowHtml({ id: "c", origin: "oauth:github" }).includes("via github"),
+    "oauth:<provider> must surface the provider");
+
+  // An origin this client has never heard of is SHOWN, not swallowed — a newer
+  // server must not go silent against an older SPA.
+  assert.ok(hooks.sessionRowHtml({ id: "d", origin: "smartcard" }).includes("via smartcard"),
+    "an unknown origin falls through to the raw value");
+
+  // ...and it is escaped like every other server-controlled string on this row.
+  assert.ok(!hooks.sessionRowHtml({ id: "e", origin: "<img src=x>" }).includes("<img"),
+    "the origin must be escaped");
 });
 
 test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct-btn, #ws-switch, palette act-account", () => {
@@ -4357,20 +4742,26 @@ test("liveDotState: a dead stream reads 'dead', outranking every other signal", 
   assert.equal(hooks.liveDotState(false, now - 10 * hooks.liveStaleMs, now, false), "stale");
 });
 
-test("liveDotState: the return set is a CLOSED enum of exactly four states", () => {
+test("liveDotState: the return set is a CLOSED enum of exactly five states", () => {
   // Without this, JS's permissive arity keeps every 3-arg equality test above
   // green after a new state lands — the suite would report green while asserting
   // nothing about the new behaviour. Pin the SET, not just the members.
   // .join() rather than deepEqual: hooks come from a vm sandbox, so their arrays
   // carry a foreign Array.prototype and strict deepEqual fails on the realm, not
   // the contents.
-  assert.equal([...hooks.liveDotStates].sort().join("|"), "dead|live|reconnecting|stale");
+  // cch-bl added the FIFTH state (refresh_failed: the stream is fine, the last
+  // refetch was not) — and this pin is what forced that addition to be declared,
+  // copied, aria'd and reachable rather than slipping in behind green arity.
+  assert.equal([...hooks.liveDotStates].sort().join("|"),
+    "dead|live|reconnecting|refresh_failed|stale");
   const now = 1_000_000;
   const inputs = [];
   for (const dead of [false, true]) {
     for (const errored of [false, true]) {
       for (const last of [null, now, now - 10 * hooks.liveStaleMs]) {
-        inputs.push([errored, last, now, dead]);
+        for (const stale of [false, true]) {
+          inputs.push([errored, last, now, dead, stale]);
+        }
       }
     }
   }
@@ -5996,32 +6387,82 @@ test("gr-p4: roster shows kind+label+connected-at, NEVER a live-validity badge; 
   assert.ok(hooks.providerRosterHtml([], true).indexOf("prov-row") === -1);
 });
 
-test("gr-p4: connect model refuses a second connect for an already-connected kind (additive-duplicate guard)", () => {
+// GR44 (.claude/workflows/bp-cloud-gui-remake-charter.md) — the server has been
+// an UPSERT on (team_id, kind) since the unique index landed, so re-connecting a
+// connected kind ROTATES its credential in place. These two tests used to pin the
+// opposite (the "additive-duplicate guard" / "already-connected is disabled"
+// stopgap that predated the index); they are inverted here, not relaxed.
+test("gr-p4/GR44: a connected kind stays SELECTABLE — a second connect is a rotation, never a duplicate", () => {
   const empty = hooks.providerConnectModel([]);
   assert.equal(empty.allConnected, false);
   assert.equal(empty.selectable, "hetzner"); // first available kind armed
   assert.deepEqual(plain(empty.options.map((o) => o.kind)), ["hetzner", "azure"]);
   assert.ok(empty.options.every((o) => !o.connected));
   const partial = hooks.providerConnectModel([{ kind: "hetzner" }]);
-  assert.equal(partial.selectable, "azure"); // hetzner taken → azure armed
+  assert.equal(partial.selectable, "azure"); // an OPEN kind is still preferred by default
   assert.equal(partial.options.find((o) => o.kind === "hetzner").connected, true);
+  // …but a connected kind is never dropped from the picker.
+  assert.deepEqual(plain(partial.options.map((o) => o.kind)), ["hetzner", "azure"]);
+  // All connected is a ROTATION state, not a dead end: a kind is still armed.
   const full = hooks.providerConnectModel([{ kind: "hetzner" }, { kind: "azure" }]);
   assert.equal(full.allConnected, true);
-  assert.equal(full.selectable, null);
+  assert.equal(full.selectable, "hetzner");
+  assert.ok(full.options.every((o) => o.connected));
+  // providerIsConnected is the single copy switch the card, the wiring and the
+  // submit toast all read, so they can never disagree about connect vs replace.
+  assert.equal(hooks.providerIsConnected([{ kind: "hetzner" }], "hetzner"), true);
+  assert.equal(hooks.providerIsConnected([{ kind: "hetzner" }], "azure"), false);
+  assert.equal(hooks.providerIsConnected(null, "hetzner"), false);
 });
 
-test("gr-p4: connect card is the GR33 hybrid — picker + subform + save-row; already-connected is disabled", () => {
+test("gr-p4/GR44: connect card is the GR33 hybrid, and an armed connected kind reads REPLACE — no disabled seg-btn, no dead end", () => {
   const card = hooks.providerConnectCardHtml([{ kind: "hetzner" }], null);
-  assert.match(card, /data-connect-kind="hetzner"[^>]*disabled/); // connected → not selectable
+  assert.match(card, /data-connect-kind="hetzner"/);
+  assert.ok(!/data-connect-kind="hetzner"[^>]*disabled/.test(card), "a connected kind is never a disabled ghost");
   assert.match(card, /data-connect-kind="azure"/);
-  assert.match(card, /aria-pressed="true"/); // azure armed
+  assert.match(card, /aria-pressed="true"/); // azure armed (the open kind is the default)
   assert.match(card, /set-save-row/); // verify+save in a save-row
   assert.match(card, /data-connect-submit/);
   assert.match(card, /cred-remediation/); // the in-card remediation slot
-  // all connected → the replace note, and NO second connect is offered
+  // Arming the OPEN kind is a first connect: connect copy, no rotation note.
+  assert.match(card, /Verify &amp; connect/);
+  assert.ok(card.indexOf("data-connect-rotating") === -1);
+
+  // Explicitly arming the CONNECTED kind is honoured and becomes a replace.
+  const armedConnected = hooks.providerConnectCardHtml([{ kind: "hetzner" }], "hetzner");
+  assert.match(armedConnected, /data-connect-kind="hetzner"[^>]*aria-pressed="true"/);
+  assert.match(armedConnected, /data-connect-rotating/);
+  assert.match(armedConnected, /Replaces the stored Hetzner Cloud credential/);
+  assert.match(armedConnected, /keeps working until it does/); // the honest no-downtime claim
+  assert.match(armedConnected, /Verify &amp; replace/);
+
+  // All connected → still a working form, and NEVER the destroy-first copy.
   const replace = hooks.providerConnectCardHtml([{ kind: "hetzner" }, { kind: "azure" }], null);
-  assert.match(replace, /Every supported provider is connected/);
-  assert.ok(replace.indexOf("data-connect-submit") === -1);
+  assert.match(replace, /data-connect-submit/);
+  assert.match(replace, /Verify &amp; replace/);
+  assert.match(replace, /data-connect-rotating/);
+  assert.ok(replace.indexOf("Every supported provider is connected") === -1);
+  assert.ok(replace.indexOf("Disconnect one above") === -1);
+  assert.ok(!/data-connect-kind="[a-z]+"[^>]*disabled/.test(replace));
+});
+
+test("gr-p4/GR44: the roster shows a rotation — 'credential updated' ONLY when updated_at moved past inserted_at", () => {
+  const at = new Date(Date.now() - 9 * 86400000).toISOString();
+  const later = new Date(Date.now() - 3600000).toISOString();
+  // A first connect: both stamps come from ONE autogenerate entry → no rotation line.
+  const fresh = hooks.providerRosterHtml(
+    [{ id: "p1", kind: "hetzner", label: "main", inserted_at: at, updated_at: at }], true);
+  assert.match(fresh, /connected /);
+  assert.ok(fresh.indexOf("credential updated") === -1, "an untouched row never claims an update");
+  // A rotated row: the upsert kept inserted_at and moved updated_at.
+  const rotated = hooks.providerRosterHtml(
+    [{ id: "p1", kind: "hetzner", label: "main", inserted_at: at, updated_at: later }], true);
+  assert.match(rotated, /connected /);
+  assert.match(rotated, /credential updated /);
+  assert.match(rotated, /data-prov-rotated/);
+  // An older control plane that omits updated_at degrades to silence, not to a lie.
+  const legacy = hooks.providerRosterHtml([{ id: "p1", kind: "hetzner", inserted_at: at }], true);
+  assert.ok(legacy.indexOf("credential updated") === -1);
 });
 
 test("gr-p4: capability matrix — 9 verbs, prod columns only, server-owned gaps, NO invented reason, NO padded cell", () => {
@@ -8209,6 +8650,29 @@ test("GR80 leg 2: activityQuery sends every set axis and omits every unset one",
   reset();
 });
 
+test("keyset tiebreak: the activity cursor sends before_id, and auditEntry carries the id", () => {
+  const st = hooks.activityFilterState;
+  const reset = () => { st.target_type = null; st.actor_user_id = null; st.action_prefix = null; };
+  reset();
+
+  const pair = hooks.activityQuery("2026-07-19T10:00:00.000000Z", "a7");
+  assert.ok(pair.includes("&before=2026-07-19T10%3A00%3A00.000000Z") && pair.includes("&before_id=a7"), pair);
+
+  // BACKWARD COMPATIBLE: the stamp alone is still a legal cursor.
+  const stampOnly = hooks.activityQuery("2026-07-19T10:00:00.000000Z", null);
+  assert.ok(stampOnly.includes("&before=") && !stampOnly.includes("before_id"), stampOnly);
+
+  // before_id without a stamp is meaningless and is never sent.
+  assert.ok(!hooks.activityQuery(null, "a7").includes("before"), "no stamp → no cursor at all");
+
+  // The entry keeps the raw row id, which is where loadMoreActivity reads the
+  // second half of the cursor from.
+  const e = hooks.auditEntry({ id: "a7", action: "site.created", inserted_at: "2026-07-19T10:00:00Z" });
+  assert.equal(e.id, "a7");
+  assert.equal(hooks.auditEntry({ action: "site.created" }).id, null, "no id → no fabricated cursor half");
+  reset();
+});
+
 test("GR80 leg 2: the actor axis degrades to Everyone/Just me with no member list", () => {
   const meEnv = { user: { id: "usr_ada", email: "ada@acme.com" } };
   const bare = hooks.activityActorFilters(null, meEnv);
@@ -9289,6 +9753,209 @@ test("stw9: siteDetailHtml — the rail reads doc_type back, and a site without 
   assert.doesNotMatch(without, /Content type<\/span><span class="v">post/);
 });
 
+// ── ssw8 (charter D82): THE CONTENT BINDING + THE UNBACKED-CLAIM INVARIANT ───
+//
+// site_json/2 serializes eleven binding fields; the console rendered one. These
+// pin the model AND the law that made the slice worth cutting: A SITE SURFACE
+// MUST RENDER NO CLAIM NO PAYLOAD FIELD BACKS. The invariant test below is
+// MUTATION-PROVEN — each arm was verified to go red against a renderer that
+// invents a value (see the commit message for the pasted reds).
+
+// Scoped readers: pull ONE rail row's value / the binding pill's label+title out
+// of the detail markup. Scoped on purpose — a whole-document scan for
+// "default" would trip on the theme select's real "Template default" option
+// label, which is a control's name, not a claim about this site.
+const railValueOf = (html, key) => {
+  const m = html.match(new RegExp(">" + key + "</span><span class=\"v\">([^<]*)<"));
+  return m && m[1];
+};
+const bindingPillOf = (html) => {
+  const m = html.match(/<span class="status-pill status-pill--(\w+)" title="([^"]*)"><span class="status-pill-dot"[^>]*><\/span><span class="status-pill-label">([^<]*)</);
+  return m && { role: m[1], title: m[2], label: m[3] };
+};
+
+test("ssw8 siteBindingModel: every state is derived from a payload field, and content_bound is read as a TOKEN promise", () => {
+  const M = (over) => hooks.siteBindingModel(over);
+  // Bound: the triple agrees with itself and a read token exists. The label
+  // says READ TOKEN — content_bound is `not is_nil(read_token_encrypted)`, so
+  // "this site has content" is a claim no field backs.
+  const bound = M({
+    workspace: "acme", bootstrap_workspace: "acme",
+    project: "site", bootstrap_project: "site",
+    dataset: "production", bootstrap_dataset: "production",
+    content_bound: true,
+  });
+  assert.equal(bound.path, "acme/site/production");
+  assert.equal(bound.pathState, "ok");
+  assert.equal(bound.role, "ok");
+  assert.equal(bound.label, "Read token stored");
+  assert.ok(!/has content|is bound\b/i.test(bound.label + " " + bound.title), "never promises content");
+  // A triple with NO read token is a real defect the payload states outright.
+  const noToken = M({ workspace: "a", project: "b", dataset: "c", content_bound: false });
+  assert.equal(noToken.role, "danger");
+  assert.equal(noToken.label, "No read token");
+  // content_bound ABSENT (an older control plane) is UNKNOWN, never false.
+  const oldCp = M({ workspace: "a", project: "b", dataset: "c" });
+  assert.equal(oldCp.token, "unknown");
+  assert.equal(oldCp.label, "Read token unknown");
+  assert.equal(oldCp.role, "neutral", "unknown is neutral — not a green, not a red");
+  // The two vocabularies of the SAME column disagreeing: both render, neither wins.
+  const clash = M({
+    workspace: "acme", bootstrap_workspace: "acme",
+    project: "site", bootstrap_project: "site",
+    dataset: "production", bootstrap_dataset: "producton",
+    content_bound: true,
+  });
+  assert.equal(clash.pathState, "mismatch");
+  assert.equal(clash.role, "danger");
+  assert.equal(clash.label, "Binding mismatch");
+  assert.ok(clash.path.includes("production") && clash.path.includes("producton"),
+    "a self-contradictory payload shows BOTH spellings — the renderer breaks no ties");
+  // A HALF-written triple is incomplete, not "ok with an em dash".
+  const partial = M({ workspace: "acme", dataset: "production", content_bound: true });
+  assert.equal(partial.pathState, "partial");
+  assert.equal(partial.role, "danger");
+  assert.equal(partial.label, "Binding incomplete");
+  // Nothing at all: unknown, and the LIST chip stays silent (a repo-deploy site
+  // has no binding to report — the detail rail still spells it out).
+  const nothing = M({});
+  assert.equal(nothing.path, "—");
+  assert.equal(nothing.label, "Binding unknown");
+  assert.equal(nothing.silent, true);
+  assert.equal(hooks.siteBindingChip({}), "");
+});
+
+test("ssw8 INVARIANT: no site surface renders a binding claim no payload field backs", () => {
+  // The vocabulary a renderer could plausibly INVENT. Every one of these is a
+  // REAL default somewhere in this product (`production` is the documented
+  // default dataset, `post` the default doc type, `default` the default
+  // workspace/project) — which is exactly what makes them the tempting lie on a
+  // surface whose payload does not carry them.
+  const INVENTABLE = /\b(production|default|post|entry|paper|bound)\b/i;
+  const SENT = { ws: "zzws", pr: "zzpr", ds: "zzds", ty: "zzty" };
+  const full = () => ({
+    id: "s1", slug: "s1", framework: "astro", inserted_at: "2026-07-01T10:00:00Z",
+    workspace: SENT.ws, bootstrap_workspace: SENT.ws,
+    project: SENT.pr, bootstrap_project: SENT.pr,
+    dataset: SENT.ds, bootstrap_dataset: SENT.ds,
+    doc_type: SENT.ty, content_bound: true,
+  });
+  const surfaces = (s) => [hooks.siteDetailHtml(s, null, [], "", []), hooks.siteRow(s, null)];
+
+  // ARM 1 — ABLATION. Delete one binding CONCEPT at a time (both spellings of
+  // it). Its sentinel must vanish from every site surface: a value that
+  // survives its own field's deletion is, by definition, unbacked.
+  const CONCEPTS = {
+    workspace: ["workspace", "bootstrap_workspace"],
+    project: ["project", "bootstrap_project"],
+    dataset: ["dataset", "bootstrap_dataset"],
+    "content type": ["doc_type"],
+  };
+  for (const [concept, fields] of Object.entries(CONCEPTS)) {
+    const s = full();
+    const values = fields.map((f) => String(s[f]));
+    fields.forEach((f) => { delete s[f]; });
+    for (const html of surfaces(s)) {
+      for (const v of values) {
+        assert.ok(!html.includes(v),
+          concept + " was removed from the payload but " + v + " still renders");
+      }
+    }
+  }
+
+  // ARM 2 — THE EMPTY PAYLOAD. A site carrying NO binding field at all: the rail
+  // reads honest placeholders and the binding rows contain nothing from the
+  // plausible-default vocabulary.
+  const bare = { id: "s1", framework: "astro", inserted_at: "2026-07-01T10:00:00Z" };
+  const bareRail = hooks.siteDetailHtml(bare, null, [], "", []);
+  assert.equal(railValueOf(bareRail, "Content dataset"), "—");
+  assert.equal(railValueOf(bareRail, "Content type"), "—");
+  const barePill = bindingPillOf(bareRail);
+  assert.equal(barePill.label, "Binding unknown");
+  assert.equal(barePill.role, "neutral");
+  for (const claim of [
+    railValueOf(bareRail, "Content dataset"),
+    railValueOf(bareRail, "Content type"),
+    barePill.label, barePill.title,
+  ]) {
+    assert.ok(!INVENTABLE.test(claim),
+      "an unbacked binding surface invented a value: " + JSON.stringify(claim));
+  }
+  // …and the list chip says nothing rather than inventing a state to show.
+  assert.equal(hooks.siteBindingChip(bare), "");
+  assert.ok(!hooks.siteRow(bare, null).includes("status-pill"), "no chip on an unbound row");
+
+  // ARM 3 — SELF-CONTRADICTION IS REPORTED, NOT RESOLVED. Both spellings of the
+  // dataset reach the surface; picking one would be a claim the payload denies.
+  const clash = Object.assign(full(), { bootstrap_dataset: "zzOTHER" });
+  const clashRail = hooks.siteDetailHtml(clash, null, [], "", []);
+  const clashValue = railValueOf(clashRail, "Content dataset");
+  assert.ok(clashValue.includes(SENT.ds) && clashValue.includes("zzOTHER"),
+    "both spellings render: " + clashValue);
+  assert.equal(bindingPillOf(clashRail).label, "Binding mismatch");
+  assert.ok(hooks.siteRow(clash, null).includes("status-pill--danger"),
+    "the row chip carries the contradiction too — the list is where a stranger looks first");
+
+  // ARM 4 — EVERY RENDERED BINDING VALUE TRACES TO A PAYLOAD VALUE. On the fully
+  // populated site the rail's binding rows are EXACTLY the sentinels, so nothing
+  // in them came from anywhere but the response.
+  const rail = hooks.siteDetailHtml(full(), null, [], "", []);
+  assert.equal(railValueOf(rail, "Content dataset"), SENT.ws + "/" + SENT.pr + "/" + SENT.ds);
+  assert.equal(railValueOf(rail, "Content type"), SENT.ty);
+  const pill = bindingPillOf(rail);
+  assert.equal(pill.label, "Read token stored");
+  assert.equal(pill.role, "ok");
+  // The token promise is stated as a token, never upgraded into a content claim.
+  assert.ok(!/has content|site is bound|content bound/i.test(pill.label + " " + pill.title),
+    "content_bound renders as 'a read token exists', never as 'this site has content'");
+});
+
+test("ssw8 siteRow: the FIRST row a stranger sees — real fields, a binding chip only when the payload has one", () => {
+  const s = {
+    id: "site-1", name: "acme-docs", slug: "acme-docs", framework: "astro",
+    domains: ["docs.acme.com"], github_repo: "acme/docs", github_branch: "main",
+    github_webhook_configured: true,
+    workspace: "acme", bootstrap_workspace: "acme",
+    project: "site", bootstrap_project: "site",
+    dataset: "production", bootstrap_dataset: "production",
+    content_bound: true,
+  };
+  const html = hooks.siteRow(s, { id: "bp-1", name: "Production", url: "https://acme.barkpark.cloud" });
+  assert.ok(html.includes('class="site-row" data-id="site-1"'), "the row is the drill-in target");
+  assert.ok(html.includes(">docs.acme.com<"), "the primary domain names the row");
+  assert.ok(html.includes("astro"), "the framework renders");
+  assert.ok(html.includes("acme/docs") && html.includes("@main"), "the linked repo renders");
+  assert.ok(html.includes("Auto-deploy"), "the auto-deploy chip renders");
+  assert.ok(html.includes("status-pill--ok") && html.includes(">Read token stored<"),
+    "a content-bound row carries the binding chip");
+  assert.ok(html.includes("acme/site/production"), "the chip's tooltip names the dataset it reads");
+  // A repo-deploy site with no binding at all: no chip, no invented state.
+  const plain = hooks.siteRow(
+    { id: "site-2", slug: "acme-app", framework: "nextjs", github_webhook_configured: false }, null);
+  assert.ok(!plain.includes("status-pill"), "an unbound row shows no binding chip");
+  assert.ok(plain.includes("not linked") && plain.includes("Manual"), "and still reads honestly otherwise");
+});
+
+test("ssw8: siteLiveUrl — the manufactured 'Visit ↗' strips to URL-safe BEFORE escaping, never after", () => {
+  const bp = { url: "https://acme.barkpark.cloud/" };
+  // The payload's own url always wins — nothing is manufactured when the server sent one.
+  assert.equal(hooks.siteLiveUrl({ url: "https://x.test/s/" }, bp), "https://x.test/s/");
+  // The normal case: trailing slash on the box url is collapsed, one is appended.
+  assert.equal(hooks.siteLiveUrl({ slug: "blog" }, bp), "https://acme.barkpark.cloud/sites/blog/");
+  // THE ORDERING. esc()-then-strip turned `a&b` into `a&amp;b` and the strip kept
+  // the escape's LETTERS, yielding /sites/aampb/ — a confident link to a site that
+  // does not exist. Strip-then-nothing drops the metacharacter instead.
+  assert.equal(hooks.siteLiveUrl({ slug: "a&b" }, bp), "https://acme.barkpark.cloud/sites/ab/");
+  assert.ok(!hooks.siteLiveUrl({ slug: "a&b" }, bp).includes("amp"),
+    "an HTML entity's letters must never survive into a URL path");
+  for (const s of ["a<b", 'a"b', "a'b", "a>b"]) {
+    assert.equal(hooks.siteLiveUrl({ slug: s }, bp), "https://acme.barkpark.cloud/sites/ab/");
+  }
+  // No box url and no site url: null, so callers render no link rather than a broken one.
+  assert.equal(hooks.siteLiveUrl({ slug: "blog" }, null), null);
+  assert.equal(hooks.siteLiveUrl({}, bp), null);
+});
+
 test("gr-p3: siteStatusChip — Deploying while in flight, Live only when the pointer names a live row, else nothing", () => {
   const site = { current_deployment_id: "d1" };
   const live = [{ id: "d1", status: "live" }];
@@ -9678,6 +10345,45 @@ test("GR79: the keyset cursor is the OLDEST rendered row, and a stamp-less row s
   assert.equal(hooks.notifDeliveriesCursor(null), null);
   assert.equal(hooks.notifDeliveriesCursor([{ id: "d3" }]), null,
     "no stamp → no cursor → paging STOPS rather than silently restarting at page one");
+});
+
+// ── gr-bl-delivery-keyset-tiebreak: the cursor carries BOTH halves of the key ──
+
+test("keyset tiebreak: the delivery cursor sends before_id alongside before", () => {
+  const st = hooks.notifDeliveryFilterState;
+  const reset = () => { st.channel = null; st.status = null; st.event = null; };
+  reset();
+
+  // Both halves ride together — the server's tiebreak arm engages only on the
+  // pair, so a stamp without its id is exactly the silent-drop bug.
+  assert.equal(hooks.notifDeliveriesQuery("2026-07-18T09:00:00.000000Z", "d2"),
+    "/v1/notifications/deliveries?limit=50&before=2026-07-18T09%3A00%3A00.000000Z&before_id=d2");
+
+  // BACKWARD COMPATIBLE: a stamp with no id is still a legal stamp-only cursor
+  // (a bookmarked URL, or a row the server did not give an id).
+  assert.equal(hooks.notifDeliveriesQuery("2026-07-18T09:00:00.000000Z", null),
+    "/v1/notifications/deliveries?limit=50&before=2026-07-18T09%3A00%3A00.000000Z");
+
+  // No stamp → no id either; before_id alone is meaningless and never sent.
+  assert.equal(hooks.notifDeliveriesQuery(null, "d2"), "/v1/notifications/deliveries?limit=50");
+
+  // The id is URL-encoded like every other param.
+  assert.match(hooks.notifDeliveriesQuery("2026-07-18T09:00:00.000000Z", "d 2&x"), /&before_id=d%202%26x$/);
+  reset();
+});
+
+test("keyset tiebreak: notifDeliveriesCursorId is the SAME oldest row the stamp came from", () => {
+  const rows = [
+    { id: "d1", inserted_at: "2026-07-19T10:00:00.000000Z" },
+    { id: "d2", inserted_at: "2026-07-18T09:00:00.000000Z" },
+  ];
+  assert.equal(hooks.notifDeliveriesCursorId(rows), "d2",
+    "both halves of the cursor must come from ONE row or the predicate is nonsense");
+  assert.equal(hooks.notifDeliveriesCursor(rows), "2026-07-18T09:00:00.000000Z");
+  assert.equal(hooks.notifDeliveriesCursorId([]), null);
+  assert.equal(hooks.notifDeliveriesCursorId(null), null);
+  assert.equal(hooks.notifDeliveriesCursorId([{ inserted_at: "2026-07-18T09:00:00.000000Z" }]), null,
+    "an id-less row degrades to a stamp-only cursor, never to a fabricated id");
 });
 
 test("GR79: an empty FILTERED log never claims nothing was ever delivered", () => {

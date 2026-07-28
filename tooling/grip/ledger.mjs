@@ -657,37 +657,130 @@ export function writeLedgerRun({ run_id, recipes, dir = DEFAULT_LEDGER_DIR, now,
 
 // ── reading ──────────────────────────────────────────────────────────────────
 
-// readLedgerRuns(dir) → { runs, unreadable }
+// THE THREE SHAPES IN THE COMMONS, AND THE ONE THAT IS NOT A DEFECT.
+//
+// `tooling/grip/ledger/` is a SHARED APPEND-ONLY commons (D118): four epics
+// write into it and none of them may delete another's rows. Measured over the
+// committed store, it holds three shapes and only one of them is grip's:
+//
+//   NOT-A-RUN   a well-formed JSON document that is not a run file at all —
+//               no `recipes[]`. Foreign verifier notes, wave digests, spec
+//               dumps. These are NOT corrupt; they were never run files. They
+//               used to be reported as MALFORMED-RUN, which read as "grip's
+//               store is rotting" when the true statement is "another epic
+//               parked a note here."
+//   MALFORMED-RUN  a document that claims the run shape and fails it — null,
+//               an array, a scalar, or `recipes` present but not an array.
+//               THIS one is a defect report.
+//   a run       `recipes[]` present. `run_id` present as a string makes it
+//               grip-OWNED; absent makes it a FOREIGN `{claim, rerun}` row set
+//               written by an epic that borrowed the directory.
+//
+// Splitting the first two is a RENAME PLUS A SPLIT, not a repair: it moves 11
+// of 422 unreadable entries out of the defect class and into a named,
+// separately-counted one. Both counts stay in the fold's own output
+// (`stats.not_a_run` / `stats.malformed_run`) — a class that is invisible on
+// pass is a class that gets quietly emptied.
+//
+// THE RULING ON THE TWO RECIPE-SHAPED-BUT-UNWRAPPED FILES. Two of the eleven
+// NOT-A-RUN files (grip-20260723T000000Z-v-premise-smoke-canonical-lines.json,
+// grip-20260723T000100Z-v-premise-smoke-block-count.json) carry a SINGLE
+// recipe's fields at top level — subject/quantity/rerun/derived_level/deps/
+// observed_at — with no wrapper and no `run_id`. They stay NOT-A-RUN, and the
+// choice is deliberate: a fold that infers the wrapper invents the one thing
+// the row does not have, its chain of custody. R1 says a fact records the
+// level it was READ at; a run_id this module synthesises at READ time is an
+// L6 claim wearing an L2 uniform. The append-only-legal repair is to RE-RECORD
+// those two rows through `writeLedgerRun` (a new file, nothing deleted), which
+// is filed as `tgw11-bl-unwrapped-recipe-rows-unread`. Naming the class is what
+// makes them findable instead of lost inside a corruption count.
+const RUN_SHAPES = Object.freeze(["all", "owned", "attested"]);
+
+// isAttestedRun(file, parsed) → boolean
+//
+// THE WRITE PATH SIGNS ITS OWN OUTPUT, and the signature is the FILENAME.
+// `writeLedgerRun` names every file it writes `<run_id>-<digest of the exact
+// serialised body>.json`, so a file whose name reproduces the digest of its own
+// bytes DEMONSTRABLY came out of `writeLedgerRun` — which means every one of
+// its rows crossed `admitRecipe` at write time. A hand-authored run file cannot
+// accidentally have that name.
+//
+// This is the discriminator the three folding tests scope by, and it is a SHAPE
+// check computed from the file's own bytes — never a pinned list of filenames.
+// A pin goes stale silently and green; this grows with the store by
+// construction, because every new honestly-written run attests automatically.
+export function isAttestedRun(file, parsed) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  if (typeof parsed.run_id !== "string" || !Array.isArray(parsed.recipes)) return false;
+  const keys = Object.keys(parsed).sort();
+  if (keys.length !== 2 || keys[0] !== "recipes" || keys[1] !== "run_id") return false;
+  return file === `${parsed.run_id}-${digest(serialize({ run_id: parsed.run_id, recipes: parsed.recipes }))}.json`;
+}
+
+// readLedgerRuns(dir) → { runs, unreadable, shape }
 //
 // A file that will not parse is REPORTED, never skipped. D6: an empty or
 // failed read may not become an admissible negative claim, and a fold that
 // silently drops a corrupt file is a fold that reports a smaller, cleaner,
 // wrong world.
+//
+// Every run carries its own provenance flags — `owned` (grip wrote a run_id)
+// and `attested` (the write path signed the filename) — so a caller can scope
+// by SHAPE without re-reading the directory or hardcoding a file list.
 export function readLedgerRuns(dir = DEFAULT_LEDGER_DIR) {
   const runs = [];
   const unreadable = [];
-  if (!existsSync(dir)) return { runs, unreadable };
+  const shape = { files: 0, runs: 0, owned: 0, attested: 0, foreign: 0, not_a_run: 0, malformed_run: 0, unparseable: 0 };
+  if (!existsSync(dir)) return { runs, unreadable, shape };
 
   const files = readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
     .sort(); // deterministic: never readdir order
 
   for (const file of files) {
+    shape.files += 1;
     const path = join(dir, file);
     let parsed;
     try {
       parsed = JSON.parse(readFileSync(path, "utf8"));
     } catch (err) {
-      unreadable.push({ file, reason: "UNPARSEABLE", message: `UNPARSEABLE: ${file} — ${err?.message ?? String(err)}` });
+      shape.unparseable += 1;
+      unreadable.push({ file, reason: "UNPARSEABLE", scope: "file", message: `UNPARSEABLE: ${file} — ${err?.message ?? String(err)}` });
       continue;
     }
-    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.recipes)) {
-      unreadable.push({ file, reason: "MALFORMED-RUN", message: `MALFORMED-RUN: ${file} has no recipes[] array` });
+    const isObject = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+    // CLAIMS the run shape = carries `run_id` or `recipes` at all. A document
+    // carrying NEITHER never claimed to be a run and is not a defect report.
+    const claimsRun = isObject && ("run_id" in parsed || "recipes" in parsed);
+    if (!isObject || claimsRun) {
+      if (!isObject || !Array.isArray(parsed.recipes)) {
+        shape.malformed_run += 1;
+        unreadable.push({ file, reason: "MALFORMED-RUN", scope: "file", message: `MALFORMED-RUN: ${file} claims the run shape and fails it — recipes must be an array` });
+        continue;
+      }
+    } else {
+      shape.not_a_run += 1;
+      unreadable.push({ file, reason: "NOT-A-RUN", scope: "file", message: `NOT-A-RUN: ${file} has no recipes[] and no run_id — it never claimed to be a run. A foreign document in the shared commons, REPORTED so it stays findable, and not folded` });
       continue;
     }
-    runs.push({ file, run_id: typeof parsed.run_id === "string" ? parsed.run_id : null, recipes: parsed.recipes });
+    const owned = typeof parsed.run_id === "string";
+    const attested = isAttestedRun(file, parsed);
+    shape.runs += 1;
+    if (owned) shape.owned += 1; else shape.foreign += 1;
+    if (attested) shape.attested += 1;
+    runs.push({ file, run_id: owned ? parsed.run_id : null, owned, attested, recipes: parsed.recipes });
   }
-  return { runs, unreadable };
+  return { runs, unreadable, shape };
+}
+
+// inScope(run, scope) — the ONE shape predicate every scoped reader shares.
+// "owned" is `Array.isArray(recipes) && typeof run_id === "string"`, already
+// decided by readLedgerRuns; "attested" adds the write-path signature.
+export function inScope(run, scope = "all") {
+  if (!RUN_SHAPES.includes(scope)) throw new Error(`unknown ledger scope ${JSON.stringify(scope)} — one of ${RUN_SHAPES.join(", ")}`);
+  if (scope === "all") return true;
+  if (scope === "owned") return run?.owned === true;
+  return run?.attested === true;
 }
 
 // ── the fold ─────────────────────────────────────────────────────────────────
@@ -728,10 +821,27 @@ export function readLedgerRuns(dir = DEFAULT_LEDGER_DIR) {
 // THE WRITE PATH IS NOW THE READ PATH for admission: the fold COMPOSES
 // admitRecipe rather than re-deriving any rejection class, so a sixth hand-copy
 // of the grammar — this epic's own defect — is impossible by construction.
-export function foldLedger(source = DEFAULT_LEDGER_DIR, { now, screen } = {}) {
-  const { runs, unreadable } = Array.isArray(source)
-    ? { runs: source, unreadable: [] }
+//
+// `scope` NARROWS WHICH RUNS ARE FOLDED, BY SHAPE, NEVER BY NAME. Default
+// "all" — the CLI's behaviour is unchanged, and a fold that quietly stopped
+// reading part of a shared commons would be exactly the defect this module
+// exists to make impossible. "owned" keeps runs grip wrote a `run_id` into;
+// "attested" keeps the runs the WRITE PATH signed (see isAttestedRun). What
+// falls outside the scope is COUNTED in stats.out_of_scope — never dropped
+// silently — and the scope itself is reported in stats.scope, so no reader can
+// mistake a narrowed fold for a whole one.
+export function foldLedger(source = DEFAULT_LEDGER_DIR, { now, screen, scope = "all" } = {}) {
+  const read = Array.isArray(source)
+    ? { runs: source, unreadable: [], shape: null }
     : readLedgerRuns(source);
+  const allRuns = read.runs;
+  const runs = allRuns.filter((run) => inScope(run, scope));
+  // File-level reports (UNPARSEABLE / NOT-A-RUN / MALFORMED-RUN) belong to no
+  // run, so a scoped fold cannot own them: they are counted out of scope, and
+  // their per-class totals stay visible in stats below either way.
+  const unreadable = scope === "all" ? read.unreadable : [];
+  const outOfScopeRuns = allRuns.length - runs.length;
+  const outOfScopeFiles = read.unreadable.length - unreadable.length;
 
   const byKey = new Map();
   let rowCount = 0;
@@ -742,6 +852,15 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR, { now, screen } = {}) {
   let quantityFallbacks = 0;
   let restatedLevels = 0;
   let levelFallbacks = 0;
+  // THE DIRECTION IS THE WHOLE POINT. A restatement that moves a row UP in
+  // authority (stored L4, the command re-derives L2) is a conservative author
+  // being corrected by the ladder — harmless, and worth naming. A restatement
+  // that moves it DOWN (stored L2, the command only supports L4) is the launder
+  // this substrate exists to prevent, arriving through the READ path. Counting
+  // them together as one number cannot tell those apart, which is why the
+  // control asserts on the DOWN count and merely reports the UP one.
+  const levelRestatementsUp = [];
+  const levelRestatementsDown = [];
 
   for (const run of runs) {
     run.recipes.forEach((row, index) => {
@@ -789,7 +908,17 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR, { now, screen } = {}) {
       const level = restateLevel(row);
       if (quantity.quantity_restated) restatedQuantities += 1;
       if (quantity.quantity_fallback !== null) quantityFallbacks += 1;
-      if (level.level_restated) restatedLevels += 1;
+      if (level.level_restated) {
+        restatedLevels += 1;
+        const from = LEVELS[level.stored_level];
+        const to = LEVELS[level.derived_level];
+        const moved = { file: run.file, index, subject: row?.subject ?? null, stored_level: level.stored_level, derived_level: level.derived_level, rerun: row?.rerun ?? null };
+        // LEVELS is L1:1..L6:6 with L1 the STRONGEST, so a SMALLER number is
+        // stronger. An unrankable level (neither on the ladder) is reported as
+        // a DOWN restatement rather than swallowed — unknown is not safe.
+        if (typeof from === "number" && typeof to === "number" && to < from) levelRestatementsUp.push(moved);
+        else levelRestatementsDown.push(moved);
+      }
       if (level.level_fallback !== null) levelFallbacks += 1;
 
       const key = recipeKey({ subject: row?.subject, quantity: quantity.quantity });
@@ -882,8 +1011,27 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR, { now, screen } = {}) {
     entries,
     rival_methods: rivalMethods,
     unreadable,
+    // The rows whose stored level the re-derivation MOVED, split by direction
+    // and carried whole (file, index, subject, both levels, rerun) so a reader
+    // can name the row instead of counting it. Reported, never a rejection.
+    level_restatements: { up: levelRestatementsUp, down: levelRestatementsDown },
     stats: {
+      scope,
       runs: runs.length,
+      // What the walk DECLINED, so a narrowed fold can never read as a whole
+      // one. Both are 0 at the default scope.
+      out_of_scope_runs: outOfScopeRuns,
+      out_of_scope_files: outOfScopeFiles,
+      // The shape census of the whole directory — present even when the fold
+      // itself was scoped, because a class you cannot see on PASS is a class
+      // that gets quietly emptied. null when folding an in-memory run array.
+      files: read.shape?.files ?? null,
+      owned_runs: read.shape?.owned ?? null,
+      foreign_runs: read.shape?.foreign ?? null,
+      attested_runs: read.shape?.attested ?? null,
+      not_a_run: read.shape?.not_a_run ?? null,
+      malformed_run: read.shape?.malformed_run ?? null,
+      unparseable: read.shape?.unparseable ?? null,
       rows: rowCount,
       subjects: entries.length,
       rival_methods: rivalMethods.length,
@@ -893,6 +1041,11 @@ export function foldLedger(source = DEFAULT_LEDGER_DIR, { now, screen } = {}) {
       // moves, so this is the drift the re-derivation exists to absorb.
       quantity_restated: restatedQuantities,
       level_restated: restatedLevels,
+      // Split by DIRECTION: `down` is a stored level the command cannot
+      // support (the launder, arriving through the read path); `up` is a
+      // conservative author corrected by the ladder.
+      level_restated_up: levelRestatementsUp.length,
+      level_restated_down: levelRestatementsDown.length,
       // Rows where the re-derivation could NOT answer and the stored value was
       // used instead. THIS one is worth reading: it is the only way the fold
       // can be keying on a stale value, and it is never silent.
@@ -1294,9 +1447,29 @@ async function main(argv) {
   if (cmd === "prescreen") return prescreenCommand(rest);
   if (cmd === "leads") return leadsCommand(rest);
   if (cmd === "fold") {
-    const dir = rest[0] ? resolve(rest[0]) : DEFAULT_LEDGER_DIR;
-    const folded = foldLedger(dir, await cliBounds());
+    const positional = rest.filter((a) => !a.startsWith("--"));
+    const scopeArg = rest.find((a) => a.startsWith("--scope="));
+    const scope = scopeArg ? scopeArg.slice("--scope=".length) : "all";
+    if (!RUN_SHAPES.includes(scope)) {
+      process.stderr.write(`ledger: unknown --scope ${JSON.stringify(scope)} — one of ${RUN_SHAPES.join(", ")}\n`);
+      return 2;
+    }
+    const dir = positional[0] ? resolve(positional[0]) : DEFAULT_LEDGER_DIR;
+    const folded = foldLedger(dir, { ...(await cliBounds()), scope });
     process.stdout.write(`${JSON.stringify(folded, null, 2)}\n`);
+    // The SHAPE CENSUS, on stderr next to the provenance banner (stdout stays
+    // pure JSON). Both file classes are printed on every run, including a clean
+    // one: NOT-A-RUN and MALFORMED-RUN are different facts about a shared
+    // commons — "another epic parked a note here" versus "a run file is rotting"
+    // — and a class only visible on failure is a class that gets quietly
+    // emptied.
+    const s = folded.stats;
+    process.stderr.write(
+      `[grip-fold] scope=${s.scope} — walked ${s.runs} run file(s) / ${s.rows} row(s); ` +
+        `store holds ${s.files} file(s): ${s.owned_runs} grip-owned (${s.attested_runs} write-path attested), ` +
+        `${s.foreign_runs} foreign run(s), ${s.not_a_run} NOT-A-RUN, ${s.malformed_run} MALFORMED-RUN, ${s.unparseable} UNPARSEABLE; ` +
+        `declined by scope: ${s.out_of_scope_runs} run(s) + ${s.out_of_scope_files} file-level report(s)\n`,
+    );
     // RIVAL-METHOD is a feature of the data, not a failure: both rows are
     // legitimately stored. Exit 0 and let the caller read `rival_methods`.
     // A row admitRecipe refuses lands in `unreadable`, so a forged store folds
@@ -1309,6 +1482,7 @@ async function main(argv) {
   process.stderr.write("  prescreen  rehearse a write: report the per-row screen verdict and store NOTHING\n");
   process.stderr.write("  write      mint {claim,evidence,rerun} facts into recipe rows and store one immutable run file\n");
   process.stderr.write("  fold       read every run file in the store back as one index\n");
+  process.stderr.write(`             [--scope=${RUN_SHAPES.join("|")}] — narrow by run SHAPE (default all): "owned" = carries a run_id, "attested" = the write path signed the filename\n`);
   return 2;
 }
 

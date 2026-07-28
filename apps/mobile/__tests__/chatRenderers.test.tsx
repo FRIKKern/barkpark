@@ -51,7 +51,7 @@ import {
   chatBlockCtx,
   rendersBlocks,
   roleKind,
-  type Row,
+  type BodyRow,
 } from '../src/screens/ChatSessionScreen'
 import type { ChatMessage } from '../src/chat/wire'
 import { MermaidIsland } from '../src/papers/portabledoc/MermaidIsland'
@@ -506,7 +506,7 @@ describe('chat-approval / chat-question / chat-plan', () => {
 
 /* ── 6. the role taxonomy (internal/chat/render.go renderMessage's twin) ─────── */
 
-function messageRow(m: Partial<ChatMessage> & { role: string }): Row {
+function messageRow(m: Partial<ChatMessage> & { role: string }): BodyRow {
   return { key: 'm-1', kind: 'message', message: { seq: 1, ...m } }
 }
 

@@ -1,0 +1,42 @@
+{
+  "id": "grip-20260728T030000Z-v-claude-cli-behavior",
+  "wave": "claude-ready-servers-wave-2026-07-28",
+  "lane": "v-claude-cli-behavior",
+  "assignment": "By experiment, establish the two F1 design facts: (a) exit code + JSON envelope of `claude -p --output-format json` when auth fails / is_error is true; (b) which credential is named when BOTH ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN are set (both bogus, distinguishable). Report the macOS keychain/OAuth confound explicitly.",
+  "cli_version": "2.1.220 (Claude Code)",
+  "real_binary": "/Users/frikkjarl/.local/bin/claude -> ~/.local/share/claude/versions/2.1.220",
+  "wrapper_confound": "`which claude` on this Mac resolves to /Applications/cmux.app/Contents/Resources/bin/claude, a bash wrapper that injects hooks; its SessionEnd hook appends a NON-JSON line AFTER the result object, so `json.load(whole file)` raises 'Extra data'. Every rerun below invokes the real binary directly.",
+  "verdict": "Exit code is TRUSTWORTHY (0 on success, 1 on every observed failure). `subtype` is a LIAR — it stays \"success\" on 401 auth failure, 404 bad model, and not-logged-in. The honest discriminators are is_error (bool), terminal_reason (completed|api_error), api_error_status (int|null) and result (human string). ANTHROPIC_API_KEY WINS over CLAUDE_CODE_OAUTH_TOKEN when both are set. Two non-exit-code hazards for F1: (1) an auth-failed turn still emits total_cost_usd:0, which record_spend records as a real $0.00 claude-cli-json row — a failed turn is indistinguishable from a cheap one unless is_error is read; (2) an unreachable ANTHROPIC_BASE_URL HANGS with ZERO output past 100s, and fleet-run.sh has no timeout and no set -e.",
+  "recipes": [
+    {
+      "claim": "auth failure: exit=1, is_error=true, subtype=\"success\" (lie), api_error_status=401, terminal_reason=\"api_error\", result=\"Invalid API key · Fix external API key\", total_cost_usd=0",
+      "rerun": "cd /tmp && env -i PATH=/usr/bin:/bin HOME=$(mktemp -d) ANTHROPIC_API_KEY=sk-ant-bogus-verify /Users/frikkjarl/.local/bin/claude -p 'Reply OK' --model haiku --output-format json > c_err3.json 2>&1; echo \"exit=$?\"; cat c_err3.json",
+      "expect": "exit=1 and the envelope above"
+    },
+    {
+      "claim": "both creds set -> ANTHROPIC_API_KEY is the one named",
+      "rerun": "cd /tmp && env -i PATH=/usr/bin:/bin HOME=$(mktemp -d) ANTHROPIC_API_KEY=sk-ant-bogusA CLAUDE_CODE_OAUTH_TOKEN=bogusB /Users/frikkjarl/.local/bin/claude -p 'hi' --model haiku --output-format json 2>&1 | tail -c 300",
+      "expect": "api_error_status:401 with result \"Invalid API key · Fix external API key\" (NOT the bearer-token message)"
+    },
+    {
+      "claim": "oauth-only -> distinguishable message",
+      "rerun": "cd /tmp && env -i PATH=/usr/bin:/bin HOME=$(mktemp -d) CLAUDE_CODE_OAUTH_TOKEN=bogusB /Users/frikkjarl/.local/bin/claude -p 'hi' --model haiku --output-format json 2>&1 | tail -c 300",
+      "expect": "result \"Failed to authenticate. API Error: 401 Invalid bearer token\""
+    },
+    {
+      "claim": "no creds -> api_error_status is NULL (not 401)",
+      "rerun": "cd /tmp && env -i PATH=/usr/bin:/bin HOME=$(mktemp -d) /Users/frikkjarl/.local/bin/claude -p 'hi' --model haiku --output-format json 2>&1 | tail -c 300",
+      "expect": "exit=1, api_error_status:null, result \"Not logged in · Please run /login\""
+    },
+    {
+      "claim": "macOS keychain confound: with the REAL HOME, bogus env credentials are silently IGNORED and the turn succeeds against the stored OAuth login (and BILLS the real account)",
+      "rerun": "cd /tmp && ANTHROPIC_API_KEY=sk-ant-bogus-verify CLAUDE_CODE_OAUTH_TOKEN=bogusB /Users/frikkjarl/.local/bin/claude -p 'hi' --model haiku --output-format json 2>&1 | tail -c 300",
+      "expect": "exit=0, is_error:false, real total_cost_usd > 0 -- proving the env vars were not consulted"
+    },
+    {
+      "claim": "unreachable ANTHROPIC_BASE_URL hangs >100s with a 0-byte log",
+      "rerun": "cd /tmp && ( env -i PATH=/usr/bin:/bin HOME=$(mktemp -d) ANTHROPIC_API_KEY=sk-ant-bogus ANTHROPIC_BASE_URL=http://127.0.0.1:9 /Users/frikkjarl/.local/bin/claude -p 'hi' --model haiku --output-format json > c_url3.json 2>&1 & P=$!; for i in $(seq 1 100); do kill -0 $P 2>/dev/null || break; /bin/sleep 1; done; kill -0 $P 2>/dev/null && { echo 'STILL RUNNING after 100s'; kill -9 $P; } ); wc -c c_url3.json",
+      "expect": "STILL RUNNING after 100s; 0 bytes"
+    }
+  ]
+}

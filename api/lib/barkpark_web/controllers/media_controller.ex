@@ -245,10 +245,36 @@ defmodule BarkparkWeb.MediaController do
     case read_full_body(conn) do
       {:ok, body, conn} ->
         case Media.put_blob(relative_path, body) do
-          {:ok, written} ->
+          {:ok, written, receipt} ->
             conn
             |> put_status(:ok)
-            |> json(%{written: written, bytes: byte_size(body)})
+            |> json(
+              %{
+                # `written` is the legacy key and carries the PATH, not a count
+                # — `path` is its honest name; both are emitted so the existing
+                # CLI keeps working.
+                written: written,
+                path: written,
+                # RECEIVED. The CLI compares its sent size against this key, so
+                # it keeps meaning exactly what it always meant.
+                bytes: byte_size(body)
+              }
+              |> Map.merge(receipt_json(receipt))
+            )
+
+          {:error, :not_stored} ->
+            readback_failure(
+              conn,
+              "blob_not_stored",
+              "the store accepted the write and a read-back then found no object at that path"
+            )
+
+          {:error, {:storage_mismatch, received, stored}} ->
+            readback_failure(
+              conn,
+              "blob_storage_mismatch",
+              "received #{received} bytes but the store holds #{stored}"
+            )
 
           {:error, :invalid_path} ->
             unprocessable(conn, "invalid_path", "invalid blob path")
@@ -291,6 +317,33 @@ defmodule BarkparkWeb.MediaController do
       {:ok, body, conn} -> {:ok, body, conn}
       {:more, _partial, conn} -> {:error, :too_large, conn}
     end
+  end
+
+  # The storage claim, rendered so the two numbers can never be read as one:
+  # `bytes` (above) is what this instance RECEIVED; `stored` is what a
+  # post-condition read of the store found. `stored` degrades to the string
+  # "unverified" with a NAMED reason — never to a copy of the received count.
+  defp receipt_json(%{stored: :unverified, unverified_reason: reason}) do
+    %{stored: "unverified", verified_by: nil, unverified_reason: format_reason(reason)}
+  end
+
+  defp receipt_json(%{stored: stored, verified_by: verified_by}) do
+    %{stored: stored, verified_by: to_string(verified_by), unverified_reason: nil}
+  end
+
+  defp format_reason(reason) when is_atom(reason), do: to_string(reason)
+  defp format_reason(reason), do: inspect(reason)
+
+  # A read-back that proves the bytes are absent (or disagrees about their
+  # size) is a FAILED transfer at the storage edge, not a 200 carrying a
+  # discrepancy field. 502: this instance is honest about a store below it that
+  # was not.
+  defp readback_failure(conn, code, message) do
+    env = Errors.stamp(%{code: code, message: message, status: 502}, conn)
+
+    conn
+    |> put_status(:bad_gateway)
+    |> json(%{error: Map.delete(env, :status)})
   end
 
   defp unprocessable(conn, code, message) do

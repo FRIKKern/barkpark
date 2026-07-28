@@ -608,6 +608,7 @@ func (r *supportRun) contentRosterRow(ctx context.Context) error {
 // registered as a console-redaction secret immediately; mint-response bodies
 // are NEVER embedded in errors (they carry the token).
 func (r *supportRun) contentMintToken(ctx context.Context) error {
+	mintedAt := time.Now().UTC()
 	status, resp, err := r.mainJSON(ctx, http.MethodPost, r.parentURL+"/v1/fleet/support-tokens",
 		map[string]any{"name": r.name, "worker": r.name})
 	if err != nil {
@@ -627,8 +628,28 @@ func (r *supportRun) contentMintToken(ctx context.Context) error {
 	if !supportTokenSafeRe.MatchString(tok) {
 		return fmt.Errorf("support-token mint: the minted token has an unexpected shape; refusing to interpolate it into an on-box script")
 	}
-	r.ledgerToken, r.tokenID = tok, tokID
+	// Custody first: the token is real from here on, so it is a redaction secret
+	// BEFORE any branch that narrates a failure about it.
 	r.console.addSecret(tok)
+	if strings.TrimSpace(tokID) == "" {
+		// PDF-D102. The mint SUCCEEDED — a live support token now exists on the
+		// parent main's ledger — but the response carried no id, and the CP row's
+		// fleet_token_id is the SOLE durable holder of that id (PDF-D68): without
+		// it `bp cloud support remove` has nothing to revoke. Every layer below
+		// this one is deliberately blank-tolerant (succeedSupport omits the key,
+		// the CP's fleet_token_id_opts(nil) returns []), so letting an empty id
+		// through here would report GREEN over an unrevocable credential — the
+		// exact orphan-token window D68 exists to close. Fatal is the honest
+		// maximum available: failStep tears the box down but CANNOT revoke a
+		// token whose id it never received, so the error NAMES the orphan
+		// instead. Never echo the response body — it carries the token itself.
+		return fmt.Errorf("support-token mint: a live support token WAS minted on the parent main %s at %s (for worker %q) "+
+			"but the response carried no token id, so nothing can revoke it automatically — "+
+			"revoke it BY HAND on that main (its fleet support tokens, minted at that moment) before reprovisioning; "+
+			"failing the provision because an unrevocable credential is worse than a failed box",
+			r.parentURL, mintedAt.Format(time.RFC3339), r.name)
+	}
+	r.ledgerToken, r.tokenID = tok, tokID
 	return nil
 }
 

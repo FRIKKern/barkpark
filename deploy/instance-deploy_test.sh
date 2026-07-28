@@ -33,6 +33,14 @@
 #     succeeds and the tsx runner exists, and is DISABLED again if it does not
 #     stay active (no crash-loop); connectors.env is 0600, pins the stable
 #     public front, and carries NO chat token (the multi-tenant hole)
+#   - advance vs stall (D292): the fake git keeps a STATEFUL HEAD, so a deploy
+#     that reports SUCCESS without moving the box off its pre-deploy sha is
+#     distinguishable from one that advances — the script's own claims (STATE,
+#     slot stamp, HEALTHY line) are cross-checked against the box's actual HEAD
+#   - the slot sha stamp (D291) is written only AFTER the health gate: a build
+#     that fails (exit 12/13) never stamps, a slot that already held a good
+#     stamp keeps it, and --rollback is therefore never offered a sha the slot
+#     never successfully built
 # The fake git records every invocation to $GITLOG so the channel asserts can
 # see which git verb ran. Never touches a real server.
 # Run: bash deploy/instance-deploy_test.sh
@@ -53,6 +61,20 @@ make_fakes() {
 # Fake git: record the invocation, honor refs. Skip leading -c KV / -C PATH
 # option pairs to find the subcommand (the script calls e.g.
 # `git -c core.hooksPath=/dev/null fetch origin <ref>`).
+#
+# STATEFUL HEAD (D292). This used to answer every `rev-parse` with one per-run
+# CONSTANT, which made an ADVANCING deploy and a STALLED one byte-identical:
+# both exited 0, both logged HEALTHY, both wrote the state file — so a harness
+# assert of the form `[ current != target ]` was false in BOTH and no case here
+# could ever fail on advance. The box's HEAD now lives in $GITSTATE/head.sha and
+# the remote's offer in $GITSTATE/fetch_head:
+#   fetch <remote> <ref>      -> fetch_head := $REMOTE_SHA (defaults to FAKE_SHA)
+#   reset --hard FETCH_HEAD   -> head.sha  := fetch_head   (the advance)
+#   reset --hard <sha>        -> head.sha  := <sha>        (rollback / failure reset)
+#   rev-parse [--short] HEAD  -> head.sha  (truncated for --short)
+#   merge-base --is-ancestor  -> 0 (no divergence warning)
+# With $GITSTATE unset the old constant behaviour is kept, so any other caller
+# of make_fakes is unaffected.
 [ -n "${GITLOG:-}" ] && echo "git $*" >> "$GITLOG"
 args=("$@"); i=0; sub=""
 while [ "$i" -lt "${#args[@]}" ]; do
@@ -61,12 +83,44 @@ while [ "$i" -lt "${#args[@]}" ]; do
     *) sub="${args[$i]}"; break ;;
   esac
 done
-[ "$sub" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeef}"; exit 0; }
+if [ -z "${GITSTATE:-}" ]; then
+  [ "$sub" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeef}"; exit 0; }
+  exit 0
+fi
+mkdir -p "$GITSTATE"
+case "$sub" in
+  fetch)
+    printf '%s' "${REMOTE_SHA:-${FAKE_SHA:-deadbeef}}" > "$GITSTATE/fetch_head"
+    ;;
+  reset)
+    ref=""; k=0
+    while [ "$k" -lt "${#args[@]}" ]; do
+      [ "${args[$k]}" = "--hard" ] && { ref="${args[$((k + 1))]:-}"; break; }
+      k=$((k + 1))
+    done
+    if [ "$ref" = "FETCH_HEAD" ]; then
+      [ -f "$GITSTATE/fetch_head" ] && cp "$GITSTATE/fetch_head" "$GITSTATE/head.sha"
+    elif [ -n "$ref" ]; then
+      printf '%s' "$ref" > "$GITSTATE/head.sha"
+    fi
+    ;;
+  rev-parse)
+    head="$(cat "$GITSTATE/head.sha" 2>/dev/null || true)"
+    [ -z "$head" ] && head="${FAKE_SHA:-deadbeef}"
+    for a in "$@"; do
+      [ "$a" = "--short" ] && head="$(printf '%s' "$head" | cut -c1-7)"
+    done
+    echo "$head"
+    ;;
+esac
 exit 0
 EOF
   cat > "$dir/mix" <<'EOF'
 #!/usr/bin/env bash
 echo "mix $* [MIX_BUILD_ROOT=${MIX_BUILD_ROOT:-}]" >> "$MIXLOG"
+# MIX_FAIL=<subcommand> fails exactly that step (e.g. compile -> exit 12,
+# ecto.migrate -> exit 13): the build-failure half of the slot-stamp ordering.
+[ -n "${MIX_FAIL:-}" ] && [ "$1" = "${MIX_FAIL}" ] && exit 1
 if [ "$1" = "compile" ]; then
   mkdir -p "${MIX_BUILD_ROOT:-_build}/prod"
   echo built > "${MIX_BUILD_ROOT:-_build}/prod/MARKER"
@@ -182,7 +236,9 @@ EOF
   cp "$HERE/systemd/barkpark-connectors.service" "$APP/deploy/systemd/"
   CADDY="$TMP/Caddyfile"
   printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$CADDY"
-  export MIXLOG="$TMP/mix.log" SYSCTLLOG="$TMP/sysctl.log" GITLOG="$TMP/git.log"
+  # The fake git's HEAD/FETCH_HEAD store — per case, so cases never bleed.
+  GITSTATE="$TMP/gitstate"; mkdir -p "$GITSTATE"
+  export MIXLOG="$TMP/mix.log" SYSCTLLOG="$TMP/sysctl.log" GITLOG="$TMP/git.log" GITSTATE
   : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
 }
 
@@ -197,6 +253,7 @@ run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NOD
     BARKPARK_SANDBOX_RUNNER_BIN="$TMP/cloud-sandbox-runner" \
     BARKPARK_SANDBOX_RUNNER_MJS="$TMP/cloud-sandbox-runner.mjs" \
     HOME="$TMP/home" FAKE_SHA="$2" HEALTH_CODE="$1" \
+    REMOTE_SHA="${REMOTE_SHA:-$2}" MIX_FAIL="${MIX_FAIL:-}" \
     BARKPARK_CLOUD_EGRESS_IPS="${BARKPARK_CLOUD_EGRESS_IPS:-}" \
     DEPLOY_REF="${DEPLOY_REF:-}" DEPLOY_REMOTE="${DEPLOY_REMOTE:-}" \
     GO_HTTP="${GO_HTTP:-}" GO_FAIL="${GO_FAIL:-}" \
@@ -747,6 +804,97 @@ check "absent redeploy: exit 0 (comment is sourceable)" "[ '$rc' = '0' ]"
 check "absent redeploy: still no live line"       "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
 check "absent redeploy: placeholder NOT re-appended (.env does not grow)" "[ \"\$(grep -c '^# BARKPARK_TRUSTED_PROXIES=' '$APP/.env')\" = '1' ]"
 check "absent redeploy: gap still logged (visible every deploy)" "grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo "== Case 17: ADVANCE vs STALL — a deploy that reports SUCCESS without moving HEAD is now VISIBLE =="
+# THE FAILURE CLASS (D292): "deploy said SUCCESS while the box stayed one commit
+# behind". Until the fake git became stateful this harness could not even STATE
+# the question: `rev-parse` answered one per-run CONSTANT, so an advancing run and
+# a stalled run produced byte-identical evidence (exit 0, HEALTHY, state file) and
+# an assert of the form `[ current != target ]` was false in BOTH.
+# The discriminator is a CROSS-CHECK, never a self-report: box_head() reads the
+# fake VCS state directly (what the box actually holds) and is compared against
+# what the SCRIPT claims (its STATE file, its slot stamp, its HEALTHY line).
+# MUTATION PROOF: put the old one-line constant handler back
+# (`[ "$sub" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeef}"; exit 0; }`) and
+# exactly three checks flip RED — "advance: the deploy's STATE claim matches the
+# box's actual HEAD", "advance: the slot stamp records the sha that was built"
+# and "stall: HEALTHY log line carries a SHORT sha" — i.e. the script's claim and
+# the box's truth come apart, which is exactly the class this case exists for.
+# Everything else, including the whole STALL block, stays green: the stall half
+# was ALWAYS green, which is precisely why the old harness proved nothing.
+box_head() { cat "$GITSTATE/head.sha" 2>/dev/null; }
+setup_case
+run_deploy 200 basesha >/dev/null                      # box lands at basesha, green live
+check "pre-state: box HEAD is basesha"          "[ \"\$(box_head)\" = 'basesha' ]"
+# --- ADVANCE: the remote offers a NEW sha; the box must end up on it.
+pre="$(box_head)"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(REMOTE_SHA=advancesha run_deploy 200 basesha)"
+check "advance: exit 0"                                  "[ '$rc' = '0' ]"
+check "advance: HEAD moved off the pre-deploy sha"       "[ \"\$(box_head)\" != '$pre' ]"
+check "advance: HEAD == the sha the remote offered"      "[ \"\$(box_head)\" = 'advancesha' ]"
+check "advance: the deploy's STATE claim matches the box's actual HEAD" "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = \"\$(box_head)\" ]"
+check "advance: the slot stamp records the sha that was built" "[ \"\$(cat '$APP/.slots/blue.sha' 2>/dev/null)\" = 'advancesha' ]"
+# --- STALL: the remote offers what the box already has. The run still succeeds
+# (nothing is broken — the deploy is just a re-deploy), but "success" must NOT be
+# readable as "advanced". STATE is removed first so the coalesce no-op does not
+# short-circuit the run: this is the full deploy path, landing on the same sha.
+pre2="$(box_head)"
+rm -f "$APP/.instance-deploy-last"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(REMOTE_SHA=advancesha run_deploy 200 advancesha)"
+check "stall: the run still reports SUCCESS (exit 0)"    "[ '$rc' = '0' ]"
+check "stall: the run still logs HEALTHY"                "grep -q 'HEALTHY — slot' '$TMP/out.log'"
+check "stall: the run still writes the state file"       "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'advancesha' ]"
+check "stall: but HEAD did NOT advance — and the harness can SEE it" "[ \"\$(box_head)\" = '$pre2' ]"
+check "stall: HEALTHY log line carries a SHORT sha (7 chars)" "grep -qE 'HEALTHY — slot (blue|green) live at [0-9a-z]{7}\$' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo "== Case 18: a failed build never stamps the slot (the poisoned rollback target) =="
+# .slots/<slot>.sha used to be written BEFORE deps.get/deps.compile/compile/
+# ecto.migrate, and no exit-12/13 path reverted it — so a deploy that never built
+# left the idle slot claiming a sha it does not hold, and --rollback (which reads
+# exactly that file) would reset the checkout to it and reboot a stale build root.
+# FAIL-BEFORE: with the pre-fix ordering these four checks are RED (blue.sha =
+# brokensha; preflight exits 0 offering a build that does not exist).
+setup_case
+run_deploy 200 goodsha >/dev/null                       # green live + stamped at goodsha
+rm -f "$APP/.instance-deploy-last"                      # defeat the coalesce
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(MIX_FAIL=compile REMOTE_SHA=brokensha run_deploy 200 goodsha)"
+check "compile failure: exit 12"                        "[ '$rc' = '12' ]"
+check "compile failure: target slot NOT stamped"        "[ ! -e '$APP/.slots/blue.sha' ]"
+check "compile failure: live slot stamp untouched"      "[ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'goodsha' ]"
+check "compile failure: STATE not advanced"             "[ ! -f '$APP/.instance-deploy-last' ]"
+rc="$(run_preflight goodsha)"
+check "compile failure: rollback still refuses (21 no_previous_slot)" "[ '$rc' = '21' ]"
+# ecto.migrate failure (exit 13) is the same law one step later.
+rm -f "$APP/.instance-deploy-last"
+rc="$(MIX_FAIL=ecto.migrate REMOTE_SHA=brokensha2 run_deploy 200 goodsha)"
+check "migrate failure: exit 13"                        "[ '$rc' = '13' ]"
+check "migrate failure: target slot still NOT stamped"  "[ ! -e '$APP/.slots/blue.sha' ]"
+rm -rf "$TMP"
+
+# A slot that ALREADY holds a good stamp keeps it when the next deploy into it
+# fails: the previous build is still what that build root contains, so it stays
+# the honest rollback target.
+setup_case
+run_deploy 200 v1sha >/dev/null                          # green stamped v1sha
+run_deploy 200 v2sha >/dev/null                          # blue  stamped v2sha, blue live
+rm -f "$APP/.instance-deploy-last"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(MIX_FAIL=compile REMOTE_SHA=v3sha run_deploy 200 v2sha)"   # targets green, fails
+check "failed redeploy: exit 12"                         "[ '$rc' = '12' ]"
+check "failed redeploy: green keeps its PREVIOUS stamp (v1sha)" "[ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'v1sha' ]"
+check "failed redeploy: live blue stamp untouched (v2sha)" "[ \"\$(cat '$APP/.slots/blue.sha' 2>/dev/null)\" = 'v2sha' ]"
+# The stamp is honest, but rollback is still refused — the clean build wiped
+# _build_green before compiling, so the old build root is gone. That refusal is
+# TYPED and fail-closed (21 no_previous_slot, naming the missing build root),
+# which is the point: the box never offers a rollback it cannot perform.
+rc="$(run_preflight v2sha)"
+check "failed redeploy: preflight refuses fail-closed (21)" "[ '$rc' = '21' ]"
+check "failed redeploy: refusal names the wiped build root, not a bogus sha" "grep -q 'no complete build root' '$TMP/preflight.log'"
 rm -rf "$TMP"
 
 echo

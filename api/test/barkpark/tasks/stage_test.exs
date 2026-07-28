@@ -102,8 +102,10 @@ defmodule Barkpark.Tasks.StageTest do
       assert row1.content["lifecycle_status"] == "considering"
       assert row1.content["engagement"]["object"] == "build"
       assert row1.content["engagement"]["holder"] == "cycle-1"
-      assert row1.content["engagement"]["note"] == "weighing"
       assert is_binary(row1.content["engagement"]["ts"])
+      # The note is DURABLE, so it does not ride the ephemeral lease.
+      refute Map.has_key?(row1.content["engagement"], "note")
+      assert row1.content["disposition_reason"] == "weighing"
 
       # considering → researching: engagement rewritten, object=research.
       r2 = stage(conn, doc_id, %{state: "researching", object: "research", worker: "cycle-1"})
@@ -138,6 +140,104 @@ defmodule Barkpark.Tasks.StageTest do
       assert ev.document["staged"]["from"] == "open"
       assert ev.document["staged"]["to"] == "considering"
       assert ev.document["staged"]["object"] == "research"
+    end
+  end
+
+  # ─── The durable/ephemeral split (PDS wave 23) ────────────────────────────
+  #
+  # A `--note` is a DURABLE adjudication reason. It used to ride
+  # `content.engagement`, which `TtlSweeper` deletes wholesale after 900 s — so
+  # the verb returned ok:true on text with a 15-minute half-life. The note now
+  # lands on `content.disposition_reason`, a key no sweeper owns, and the lease
+  # states its own death (`lapse_ttl_seconds` / `lapses_at`).
+  describe "POST /v1/tasks/:doc_id/stage — the note is durable, the lease is not" do
+    test "a note lands on disposition_reason, NEVER on the swept engagement map",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-durable")
+      task = mk_task!(doc_id, scope)
+
+      reason = "parked: blocked on the crown proof, reopen when pds-w20 lands"
+
+      resp =
+        stage(conn, doc_id, %{
+          state: "considering",
+          object: "research",
+          worker: "cycle-9",
+          note: reason
+        })
+
+      assert resp.status == 200
+      row = reload(task)
+
+      # DURABLE: on the key the engagement sweep does not touch.
+      assert row.content["disposition_reason"] == reason
+      assert row.content["disposition_reason"] == row.content[Tasks.Stage.durable_reason_key()]
+
+      # EPHEMERAL: lease fields only — object, holder, ts + the honesty pair.
+      engagement = row.content["engagement"]
+      refute Map.has_key?(engagement, "note")
+
+      assert Enum.sort(Map.keys(engagement)) ==
+               ~w(holder lapse_ttl_seconds lapses_at object ts)
+
+      # …and the receipt STATES the half-life instead of implying permanence.
+      ttl = Tasks.Stage.engagement_ttl_seconds()
+      assert engagement["lapse_ttl_seconds"] == ttl
+      {:ok, ts, _} = DateTime.from_iso8601(engagement["ts"])
+      {:ok, lapses_at, _} = DateTime.from_iso8601(engagement["lapses_at"])
+      assert DateTime.diff(lapses_at, ts, :second) == ttl
+
+      # The rendered receipt (what `bp task stage` prints) carries both, so the
+      # verb no longer returns a bare ok on a field it knows will be deleted.
+      body = Jason.decode!(resp.resp_body)
+      assert body["ok"] == true
+      assert body["doc"]["content"]["disposition_reason"] == reason
+      assert body["doc"]["content"]["engagement"]["lapses_at"] == engagement["lapses_at"]
+      assert body["doc"]["content"]["engagement"]["lapse_ttl_seconds"] == ttl
+    end
+
+    test "a note on a → open stage is recorded even though engagement is cleared",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-open-note")
+      task = mk_task!(doc_id, scope, %{"lifecycle_status" => "considering"})
+
+      assert stage(conn, doc_id, %{state: "open", note: "resolved: it is ready backlog now"}).status ==
+               200
+
+      row = reload(task)
+      refute Map.has_key?(row.content, "engagement")
+      assert row.content["disposition_reason"] == "resolved: it is ready backlog now"
+    end
+
+    test "a stage WITHOUT a note never erases an existing durable reason",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-keep-reason")
+      task = mk_task!(doc_id, scope, %{"disposition_reason" => "parked by the wave-22 triage"})
+
+      assert stage(conn, doc_id, %{state: "considering", worker: "cycle-3"}).status == 200
+      assert reload(task).content["disposition_reason"] == "parked by the wave-22 triage"
+
+      # A blank note is no note — it must not blank the reason either.
+      assert stage(conn, doc_id, %{state: "researching", note: "   "}).status == 200
+      assert reload(task).content["disposition_reason"] == "parked by the wave-22 triage"
+    end
+
+    test "task.staged NAMES the key the note was routed to", %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-notekey")
+      task = mk_task!(doc_id, scope)
+
+      assert stage(conn, doc_id, %{state: "considering", note: "why I parked it"}).status == 200
+
+      [ev] =
+        Repo.all(
+          from(e in MutationEvent,
+            where: e.doc_id == ^task.doc_id and e.mutation == "task.staged"
+          )
+        )
+
+      assert ev.document["staged"]["note"] == "why I parked it"
+      assert ev.document["staged"]["note_key"] == "disposition_reason"
+      assert is_binary(ev.document["staged"]["lapses_at"])
     end
   end
 

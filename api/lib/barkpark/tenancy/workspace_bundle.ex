@@ -1123,7 +1123,23 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   # ── SQL identifier / hashing helpers ─────────────────────────────────────────
 
-  # Double-quote an identifier (column/table name) — every name originates from
-  # the live catalog, never user input; the quote-doubling is belt-and-suspenders.
+  # Double-quote an identifier (column/table name). The quote-doubling is the
+  # ACTUAL control here, not belt-and-suspenders — on the IMPORT path these
+  # names are REQUEST-DERIVED, not catalog-derived.
+  #
+  #   * export: names come from the live catalog (`table_exists?/1`-filtered),
+  #     so nothing attacker-shaped reaches this function.
+  #   * import: `import_member/3` reads `entry["name"]` and `entry["columns"]`
+  #     straight off the uploaded tar manifest. The DDL passes filter members
+  #     through `table_exists?/1`, but the COPY / INSERT path does NOT — so
+  #     seven of the interpolated statements below carry manifest strings.
+  #
+  # Those sites are defended by quoting plus an ADMIN GATE (the router's
+  # `:require_admin` pipeline), with `:merge` additionally fail-closed behind
+  # the `:allow_bundle_import` config. That is the honest waiver: request-derived
+  # identifiers behind correct quoting plus an admin gate. Calling them
+  # catalog-derived would be a FALSE annotation on the one bucket where a real
+  # injection could hide — so do not weaken the quoting, and do not extend this
+  # helper's callers on the import path without a `table_exists?/1` check.
   defp qi(ident), do: ~s("#{String.replace(ident, "\"", "\"\"")}")
 end

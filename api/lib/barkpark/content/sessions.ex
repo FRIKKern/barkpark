@@ -76,6 +76,7 @@ defmodule Barkpark.Content.Sessions do
             %{"ts" => DateTime.utc_now() |> DateTime.to_iso8601(), "kind" => kind}
             |> maybe_put("ref", attrs["ref"])
             |> maybe_put("note", attrs["note"])
+            |> maybe_put("conversation", attrs["conversation"])
 
           events = (doc.content["events"] || []) ++ [event]
           new_content = Map.put(doc.content, "events", events)
@@ -91,6 +92,95 @@ defmodule Barkpark.Content.Sessions do
             )
 
           if rows == 1, do: %{count: length(events)}, else: Repo.rollback(:stale)
+      end
+    end)
+  end
+
+  # Whitelist for the conversation registry (session-conversations slice) — the
+  # ONLY caller-supplied keys `touch_conversation/5` ever writes into a
+  # registry entry. Mirrors `append_event/5`'s ref/note maybe_put pattern but
+  # as an explicit list since this is an upsert-by-id merge, not a fixed
+  # literal map. "id"/"first_seen"/"last_active" are deliberately absent — id
+  # is the lookup key (never re-derived from attrs) and both timestamps are
+  # always server-minted, never taken from the caller.
+  @conversation_attrs ~w(harness account machine cwd)
+
+  @doc """
+  Upsert-by-id a harness conversation into `slug`'s `content["conversations"]`
+  registry. Rides the SAME advisory-lock + CAS-on-rev shape as
+  `append_event/5` — same lock key (`"session:\#{slug}"`), so a conversation
+  touch serializes with both a concurrent event append AND a concurrent
+  session upsert rather than racing them.
+
+  `conversation_id` must be a non-empty binary. When an entry with that id
+  already exists, only the whitelisted keys (`harness`, `account`, `machine`,
+  `cwd`) are merged over it and `"last_active"` is bumped to server-now;
+  `"first_seen"` is untouched. Otherwise a new entry is appended carrying the
+  whitelisted attrs plus `"id"` and server-stamped `"first_seen"` AND
+  `"last_active"` (equal on creation). Both timestamps are NEVER taken from
+  the caller — a `"first_seen"`/`"last_active"`/`"ts"` key in `attrs` is
+  silently ignored, exactly like `append_event/5` ignores a caller `"ts"`.
+
+  Returns `{:ok, %{count: n}}` (the registry size after the touch),
+  `{:error, :not_found}`, `{:error, :invalid_conversation}` (a nil/non-binary/
+  empty `conversation_id`), or `{:error, :stale}` (CAS lost).
+  """
+  @spec touch_conversation(binary(), term(), map(), binary(), keyword()) ::
+          {:ok, %{count: non_neg_integer()}}
+          | {:error, :not_found | :invalid_conversation | :stale}
+  def touch_conversation(slug, conversation_id, attrs \\ %{}, dataset \\ "production", opts \\ [])
+
+  def touch_conversation(_slug, conversation_id, _attrs, _dataset, _opts)
+      when not is_binary(conversation_id) or conversation_id == "",
+      do: {:error, :invalid_conversation}
+
+  def touch_conversation(slug, conversation_id, attrs, dataset, opts) do
+    Repo.transaction(fn ->
+      _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["session:#{slug}"])
+
+      case Content.get_blocks_doc(slug, "session", dataset, opts) do
+        nil ->
+          Repo.rollback(:not_found)
+
+        %Document{} = doc ->
+          now = DateTime.utc_now() |> DateTime.to_iso8601()
+          whitelisted = Map.take(attrs, @conversation_attrs)
+          conversations = doc.content["conversations"] || []
+
+          conversations =
+            if Enum.any?(conversations, &(&1["id"] == conversation_id)) do
+              Enum.map(conversations, fn entry ->
+                if entry["id"] == conversation_id do
+                  entry
+                  |> Map.merge(whitelisted)
+                  |> Map.put("last_active", now)
+                else
+                  entry
+                end
+              end)
+            else
+              new_entry =
+                whitelisted
+                |> Map.put("id", conversation_id)
+                |> Map.put("first_seen", now)
+                |> Map.put("last_active", now)
+
+              conversations ++ [new_entry]
+            end
+
+          new_content = Map.put(doc.content, "conversations", conversations)
+
+          {rows, _} =
+            from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)
+            |> Repo.update_all(
+              set: [
+                content: new_content,
+                rev: Writer.generate_rev(),
+                updated_at: DateTime.utc_now()
+              ]
+            )
+
+          if rows == 1, do: %{count: length(conversations)}, else: Repo.rollback(:stale)
       end
     end)
   end

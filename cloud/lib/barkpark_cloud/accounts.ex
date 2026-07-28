@@ -432,7 +432,7 @@ defmodule BarkparkCloud.Accounts do
 
     AuditEvent
     |> where([e], e.team_id == ^tid)
-    |> maybe_audit_before(opts[:before])
+    |> maybe_audit_before(opts[:before], opts[:before_id])
     |> maybe_audit_target(opts[:target_type], opts[:target_id])
     |> maybe_audit_actor(opts[:actor_user_id])
     |> maybe_audit_action_prefix(opts[:action_prefix])
@@ -442,8 +442,33 @@ defmodule BarkparkCloud.Accounts do
     |> Repo.all()
   end
 
-  defp maybe_audit_before(query, nil), do: query
-  defp maybe_audit_before(query, %DateTime{} = ts), do: where(query, [e], e.inserted_at < ^ts)
+  # The keyset cursor. The trail is ordered by the COMPOUND key
+  # `(inserted_at DESC, id DESC)`, so the page predicate has to compare that same
+  # compound key or the page boundary is not a real cut: with a stamp-only
+  # `<`, two rows sharing an `inserted_at` that straddle a boundary lose the far
+  # side of the tie PERMANENTLY and SILENTLY (routine the moment a burst of
+  # audit writes lands in the same microsecond). `before_id` is the second half
+  # of the cursor, and the predicate is strictly lexicographic on the pair.
+  #
+  # BACKWARD COMPATIBLE by construction: the tiebreak arm engages only when BOTH
+  # halves arrive, so a bookmarked `?before=<stamp>` URL keeps the exact
+  # stamp-only cutoff it has always had. `id` is a `:binary_id`, so a non-UUID
+  # from a query string would raise Ecto.Query.CastError — it is cast first, and
+  # anything that is not a UUID degrades to the stamp-only arm rather than 500ing.
+  defp maybe_audit_before(query, nil, _before_id), do: query
+
+  defp maybe_audit_before(query, %DateTime{} = ts, before_id) when is_binary(before_id) do
+    case Ecto.UUID.cast(before_id) do
+      {:ok, uuid} ->
+        where(query, [e], e.inserted_at < ^ts or (e.inserted_at == ^ts and e.id < ^uuid))
+
+      :error ->
+        where(query, [e], e.inserted_at < ^ts)
+    end
+  end
+
+  defp maybe_audit_before(query, %DateTime{} = ts, _before_id),
+    do: where(query, [e], e.inserted_at < ^ts)
 
   defp maybe_audit_target(query, type, id) when is_binary(type) and is_binary(id),
     do: where(query, [e], e.target_type == ^type and e.target_id == ^id)
@@ -515,6 +540,14 @@ defmodule BarkparkCloud.Accounts do
 
     * `:ip_address` — the caller's peer IP (string), for the sessions list.
     * `:user_agent` — the `User-Agent` header, for the "Device" column.
+    * `:origin` — HOW this session was established, as known BY THE CALLER
+      ("password", "two_factor", "oauth:<provider>", "password_change",
+      "register", "device_link"). OMITTED means unknown, and unknown is stored
+      as NULL and rendered as nothing — this function never infers an origin
+      from the other opts, and nothing backfills the column. Deliberately NOT
+      folded into the web layer's `session_opts/1` helper: five of the six mint
+      sites share that helper, so one shared value there would make a single
+      helper answer for five different origins.
 
   `last_used_at` is stamped to now at mint so a fresh token sorts to the top of
   the active-sessions list before its first authenticated request.
@@ -534,6 +567,7 @@ defmodule BarkparkCloud.Accounts do
       expires_at: expires_at,
       ip_address: Keyword.get(opts, :ip_address),
       user_agent: Keyword.get(opts, :user_agent),
+      origin: Keyword.get(opts, :origin),
       last_used_at: now
     })
     |> Repo.insert()

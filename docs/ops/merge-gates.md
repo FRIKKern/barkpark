@@ -38,21 +38,56 @@ A PR targeting `main` must clear:
 
 7. **`pr-task-gate` CI job** — `.github/workflows/pr-task-gate.yml`. Enforces
    task-obsession layer 1: every PR must carry a `Task: <doc_id>` trailer in its
-   description naming a task that is `in_progress` (claimed) on the
-   ledger-of-record (guerrilla). No task / task not found / not in_progress →
-   the check fails. The pure ledger decision is the unit-tested
-   `scripts/pr-task-gate.sh` (`bash scripts/pr-task-gate.test.sh`, hermetic);
-   the workflow only plumbs PR context in. Three designed behaviours:
-   **merge-base cutoff** — a PR whose base predates the gate (workflow absent at
-   base SHA) is grandfathered, so turning the gate on does not red the open-PR
-   fleet; **hotfix lane** — a `hotfix!` label passes AND auto-files an override
+   description naming a task that is task-backed on the ledger-of-record
+   (guerrilla). No task / task not found / task unowned → the check fails. The
+   pure ledger decision is the unit-tested `scripts/pr-task-gate.sh`
+   (`bash scripts/pr-task-gate.test.sh`, hermetic, and run in CI by this same
+   workflow's **`PR task gate self-test`** job — deliberately not in
+   `shell-harnesses.yml`, which is paths-filtered and so can never carry a
+   required name); the workflow only plumbs PR context in. Four designed
+   behaviours:
+   **merge-base cutoff, three-state** — the base COMMIT is resolved first; base
+   resolves + this workflow absent = grandfathered (so turning the gate on did
+   not red the open-PR fleet), base resolves + present = enforced, base
+   **unresolvable = a loud red**, never grandfathered. A guard that cannot tell
+   must fail, not wave the PR through: the two-state version reported SUCCESS
+   having skipped every downstream step;
+   **hotfix lane** — a `hotfix!` label passes AND auto-files an override
    task (needs the `BARKPARK_TASK_TOKEN` secret; without it the lane still
-   passes but logs that the record was not filed); **ledger-outage neutral** —
-   a 5xx / unreachable ledger warns and passes (an infra blip must not freeze
-   merges), while only a definitive "no task / not found / not in_progress"
-   fails. Optional `.github/pr-task-workers.json` (`{ "<gh-login>": "<worker>" }`)
+   passes but logs that the record was not filed);
+   **lapsed-claim rule — "live when this PR opened"** (charter D58; the
+   `LAPSE_GRACE_SECONDS` wall-clock grace it replaced is GONE, and there is no
+   tunable left to set). The claim lease (~45min) is shorter than PR dwell, so
+   the TTL sweeper reaps claims out from under PRs that were green when they
+   opened (11 of the gate's last 15 reds). A task that is `open` because its
+   claim was **reaped** passes iff `claim.expired_at ≥ pull_request.created_at`
+   — the claim was still live at the instant the PR was opened — read straight
+   off the document's `claim.previous_worker` / `claim.expired_at` and the PR's
+   own `created_at` (plumbed as `PR_OPENED_AT`; absent or unparseable is a
+   **refusal**, never a fall-open). The verdict is therefore fixed for a given
+   PR: the same unchanged PR can no longer go green in the morning and red in
+   the afternoon merely by sitting. A task that was never claimed, whose claim
+   was voluntarily **released** (`released_at ≥ expired_at`), whose
+   `expired_at` is in the FUTURE (a reap cannot stamp one; −300s of skew slack),
+   or that had ALREADY lapsed before the PR was opened, still fails. Stated
+   cost: a PR opened under a live claim stays backed however long it then sits —
+   the gate certifies how the PR started, not that work continued;
+   **ledger outage = a red that says so** — a 5xx / unreachable ledger is
+   retried (3 attempts) and then **fails** with "task backing UNVERIFIED …
+   re-run this check once the ledger is up". It does not pass. A `2xx` whose
+   `result` envelope carries **no document** is the same UNCHECKED state (D59),
+   not an accusation: a task that genuinely does not exist answers `404`, which
+   reds definitively, so the old "task does not exist" message on the empty
+   envelope could only ever have been false. GitHub has no
+   `neutral` conclusion for exit codes, so the only alternative to red would be
+   a green check that verified nothing (the old `exit 0` handler was, in fact,
+   unreachable dead code under GitHub's `bash -e`, and every outage already red
+   — under a misleading label).
+   Optional `.github/pr-task-workers.json` (`{ "<gh-login>": "<worker>" }`)
    tightens the check to require the task be claimed by the author's mapped
-   worker. **Currently advisory** until made required-by-name (below).
+   worker (matched against the lapsed claim's `previous_worker` when the
+   lapsed-claim rule applies). The file does not exist today. **Currently advisory** until made
+   required-by-name (below).
 
 8. **`reland-check` CI job** — `.github/workflows/reland-check.yml`. **Advisory
    only** (`continue-on-error: true`): flags when a PR changes files a
@@ -75,7 +110,12 @@ completed 2026-06-10 (`continue-on-error` dropped at that point); a failing
 test suite now prevents merge. Its job **id** is `mix-test`; the check that
 shows up on the PR is its display name, `Test (Elixir 1.18.1 / OTP 27.0)`,
 inside the workflow named `elixir`. There is no check called "Elixir Test" —
-that name is folklore, and searching for it finds nothing.
+that name is folklore, and searching for it finds nothing. **The name a reader
+looking for "the Elixir gate" actually wants is `Elixir gate`**: the `elixir`
+workflow's `elixir-gate` aggregator, which is un-matrixed (so its check-run name
+is exactly that string), runs `if: always()`, and fails when any upstream job
+lands outside its allow-set. That is the one name branch protection is meant to
+require — `Test (Elixir 1.18.1 / OTP 27.0)` is a job underneath it.
 
 `main` has **no branch protection or rulesets** configured (verified
 2026-06-21, re-checked 2026-07-01, via the GitHub branches/rulesets APIs), so none of these gates
@@ -94,7 +134,16 @@ Elixir security gates, path-triggered on `api/**`:
 9. **`sobelow` job** — Phoenix-aware static analysis (XSS.Raw / SendResp,
    SQL injection, unsafe `String.to_atom`, missing CSRF/CSP, hardcoded secrets,
    `binary_to_term`, directory traversal…). **Advisory** (`continue-on-error:
-   true`) because Sobelow fingerprints are not stable across Elixir toolchains.
+   true`) because the reviewed baseline is not drained — see the amended flip
+   verdict below. The rationale this line used to give ("fingerprints are not
+   stable across Elixir toolchains") is **REFUTED** and must not be reused:
+   felix-pristine **D140** measured byte-identical 51-finding sets across
+   1.18.1/OTP27 and 1.19.5/OTP28, a wider gap than the pinned pair, and
+   `Finding.fingerprint/1` is `:erlang.phash2/1` over AST from
+   `Code.string_to_quoted`, not compiler output. What *is* unstable is the
+   **line number**, which is inside the hash: a pure renumber invalidates every
+   waiver in the file. That is a reason to migrate waivers to AST-bound inline
+   annotations, not a reason to stay advisory.
    `mix sobelow --skip --exit Low` reads the reviewed `api/.sobelow-skips`
    baseline and reds on a fresh unskipped finding. CI also runs a pinned
    Elixir 1.18.1/OTP27 reconcile in the only safe order: `--clear-skip`, then
@@ -105,16 +154,65 @@ Elixir security gates, path-triggered on `api/**`:
    `String.to_atom` call and requires Sobelow to exit 1, preventing blanket
    suppression while the job remains advisory.
 
-   **Flip verdict 2026-07-21 — STAY ADVISORY.** The felix-pristine wave re-ran
-   D75's blocking-flip test and it fails: D75 gates the flip on the baseline
-   file:line entries reaching **0**, sequenced after the CSP slice. The CSP
-   slice (#3545, merged) cleared only the 5 `Config.CSP` router findings;
-   `origin/main:api/.sobelow-skips` still carries **137** baselined entries
-   (`grep -c '^[A-Za-z]'` = 137; 0 are `Config.CSP` — 74 Traversal.FileModule,
-   12 DOS.StringToAtom, 9 each XSS.SendResp/SQL.Query/CI.System, …). Draining
-   137 findings is a multi-slice remediation out of this wave's scope, so the
-   precondition is unmet and the `sobelow` job stays `continue-on-error: true`.
-   Re-evaluate only when the baseline reaches 0.
+   **Flip verdict 2026-07-21 — STAY ADVISORY**, and **amended 2026-07-28 (D139)**
+   because the precondition as first written was unsatisfiable. The original
+   text gated the flip on the baseline's `file:line` entries reaching **0**, and
+   quoted **137** entries. Both numbers are corrected below.
+
+   **Live count (re-derived at edit time, 2026-07-28, on `main`):**
+
+   ```
+   $ grep -c '^[A-Za-z]' api/.sobelow-skips
+   108
+   $ grep '^[A-Za-z]' api/.sobelow-skips | sed 's/:.*//' | sort | uniq -c | sort -rn
+     68 Traversal.FileModule   12 DOS.StringToAtom   9 SQL.Query   6 Config.CSRF
+      3 XSS.Raw   2 SQL.Stream   2 CI.System   1 XSS.SendResp   1 XSS.ContentType
+      1 Traversal.SendFile   1 RCE.CodeModule   1 Config.HTTPS   1 Config.Headers
+   ```
+
+   **Amended precondition — the floor is 10, not 0.** The flip is gated on the
+   baseline holding **ONLY entries that provably cannot carry an inline
+   `# sobelow_skip` annotation**, enumerated by type and count. On sobelow
+   0.14.1 that floor is exactly **10 of 108** (98 are annotatable), in two
+   mechanical classes:
+
+   | Class | Count | Entries | Why no annotation can ever reach it |
+   |---|---|---|---|
+   | `Sobelow.Config.*` | **8** | 6 `Config.CSRF` + 1 `Config.Headers` (`router.ex`) + 1 `Config.HTTPS` (`config/prod.exs:0`) | `sobelow.ex` calls `Config.fetch(project_root, routers, endpoints)` and only *then* does `allowed = allowed -- [Config, Vuln]`. Config findings are produced outside the `def_funs |> combine_skips()` pipeline, so `@sobelow_skip` is never consulted. `config/prod.exs:0` has no function to annotate at all. |
+   | `.heex` `XSS.Raw` | **2** | `layouts/bulldocs.html.heex:67`, `layouts/quiz.html.heex:21` | `Parse.get_meta_template_funs/1` builds the template AST with `EEx.compile_string(File.read!(filepath))`. It bypasses `Parse.read_file/1`, the reader that rewrites `# sobelow_skip [...]` into `@sobelow_skip [...]` when `--skip` is set, so a template's source never sees the substitution. |
+
+   The third `XSS.Raw` entry (`controllers/error_html.ex:25`) is a normal `.ex`
+   function and **is** annotatable — it is not part of the floor. Re-evaluate
+   the flip when the baseline contains nothing but those 10; do not re-evaluate
+   on "reaches 0", which cannot happen.
+
+   **Topology: no security.yml check can be required today (S4 + SR-1).** The
+   amendment records this so the implicit "…and then it blocks" promise stops
+   being made:
+
+   - `main` has **no branch protection** — `gh api repos/FRIKKern/barkpark/branches/main/protection`
+     → `404 "Branch not protected"` — and **no rulesets** (`gh api …/rulesets` → `[]`).
+   - `.github/required-checks.json` carries **`"enforced": false`**; its
+     `protection` block is a *proposal*, not applied state.
+   - `scripts/required-checks-generate.sh` **stage S4 excludes every check
+     defined in a paths-filtered workflow** ("an ABSENT check is a permanent
+     *expected*"). `security.yml` is paths-filtered on `api/**`, so *every* job
+     in it is S4-excluded regardless of blocking-ness. Proof that this is not
+     just the advisory flag: the **`mix-audit` job carries no
+     `continue-on-error` and is still excluded**, with reason `S4
+     PATHS-FILTERED` — while `sobelow` is excluded under `S2 ADVISORY`.
+
+   So flipping `continue-on-error: true` → `false` on `sobelow` would make the
+   *job* red but would still not gate any merge. Making Sobelow actually block
+   requires branch protection (or a ruleset) plus a non-paths-filtered required
+   context — a separate change from the baseline drain.
+
+   **Provenance: D75 is a dangling citation.** "D75" has no defining charter
+   entry. It is cited at `bp-felix-pristine-charter.md:904` and `:2165` and at
+   this file's flip verdict, but the felix charter's own **D75** (`:1163`,
+   "Fresh-eyes last corner honestly clean") is a different subject entirely.
+   This paragraph — introduced by `34b9b25d3` (#5474) — is D75's only extant
+   text. Cite *this section*, not the number.
 
 10. **`mix-audit` job** — dependency CVE scan (`mix deps.audit`, the `mix_audit`
     dep) over `mix.lock`. **Blocking** (no `continue-on-error`). The 8
@@ -159,7 +257,9 @@ run them, cannot run them locally, and cannot fix them in a PR.
     the failure *pattern*, not a diagnosis. Until someone does, treat these
     two as carrying no information about the PR under review — and do not
     cite this entry as evidence that Vercel is *healthy*. Diagnosis is owned
-    by **`gr-blk-vercel-checks-ungoverned`**; when it lands, this entry gets
+    by **`hg-bl-vercel-legacy-statuses-red-repo-wide`** (it absorbed
+    `gr-blk-vercel-checks-ungoverned`, which was cancelled as a duplicate —
+    do not re-file either); when it lands, this entry gets
     replaced by a real classification (fix it, or turn the integration off —
     a permanently-red check trains reviewers to ignore red).
 
@@ -177,10 +277,60 @@ required-status-checks list **by name**. Required-by-name is load-bearing (D3):
 a workflow that silently never runs on a conflicting PR must read as
 "not satisfied", not as an absent/passing check.
 
+**Bootstrap is a `PUT` on `protection` itself — there is no `PATCH` route.**
+This file previously prescribed
+`gh api -X PATCH .../branches/main/protection/required_status_checks`; run
+verbatim against this repo today it returns
+`{"message":"Branch not protected","status":"404"}`, because
+`required_status_checks` is a **child** of protection and cannot create its
+parent. `gh api -X PATCH .../branches/main/protection` is a plain
+`404 Not Found` — that route does not exist at all. The only bootstrap verb is
+`PUT /branches/main/protection`, carrying the **whole** protection object: all
+four required-and-nullable keys must be sent explicitly (omit one and the PUT
+422s), and because `PUT` **replaces** rather than merges, every later edit must
+re-send the full body too — a partial re-PUT silently drops the keys it omits.
+
 ```bash
-# One-time, needs repo admin. Adds pr-task-gate to the required checks.
-gh api -X PATCH repos/:owner/:repo/branches/main/protection/required_status_checks \
-  -f 'checks[][context]=PR references an active task'
+# One-time, needs repo admin. Creates branch protection on `main` with
+# pr-task-gate in the required-checks list.
+# app_id 15368 is GitHub Actions. The pin is load-bearing: GitHub validates
+# NEITHER the context string nor the app id (a typo'd id reads back as
+# `app_id: null`, i.e. "any app may satisfy this context"), and Vercel's app
+# 8329 already publishes check runs on this repo — an unpinned context is
+# therefore spoofable by anything holding `checks:write`.
+# The context string must be COPIED from a check run observed on a real PR,
+# never hand-typed: GitHub appends unconsumed matrix values to a job's display
+# name, so a typed name matches no check, sits Pending forever, and deadlocks
+# the branch. The example below is illustrative — the AUTHORITY is
+# `.github/required-checks.json`, which is GENERATED from observed check runs
+# by `scripts/required-checks-generate.sh` and applied by
+# `scripts/required-checks-apply.sh --confirm`. Prefer those to hand-running
+# this curl; they also verify the read-back and detect a deadlock by set
+# difference, which no refusal message will tell you (charter D38).
+# Sent as a JSON body, not `-f checks[][…]` flags: those build the array
+# positionally and can split one check into two half-specified entries.
+gh api -X PUT repos/:owner/:repo/branches/main/protection \
+  --input - <<'JSON'
+{
+  "required_status_checks": {
+    "strict": false,
+    "checks": [{"context": "PR references an active task", "app_id": 15368}]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": null,
+  "restrictions": null
+}
+JSON
+# `strict: false` — do not require the branch to be up to date with main; that
+# is a serialization tax, not a correctness gate.
+# `enforce_admins: true` — every merge in this repo is `gh pr merge --squash
+# --admin`, so protection with `enforce_admins: false` would be bypassed by
+# 100% of merges: a gate that cannot block.
+# Verify by round-tripping the read back: the context must match byte for byte
+# and app_id must be 15368, never null.
+gh api repos/:owner/:repo/branches/main/protection/required_status_checks \
+  --jq '.checks[] | select(.context == "PR references an active task")'
+gh api repos/:owner/:repo/branches/main/protection --jq '.enforce_admins.enabled'
 ```
 
 Two human-provisioned prerequisites before flipping it on:
@@ -255,14 +405,27 @@ to remove the override on the task itself:
 
 A task is a `type:"task"` document created through the standard mutate
 endpoint (`content.kind` must equal `"task"`); there is no bespoke
-`POST /v1/tasks` create verb — the `bp task` verbs are read/lifecycle only
-(`ls`, `ready`, `prime`, `get`, `claim`, `close`, `next`).
+`POST /v1/tasks` create verb — the `bp task` verbs are read/lifecycle/progress
+only (`ls`, `ready`, `prime`, `get`, `events`, `claim`, `release`, `next`,
+`move`, `stage`, `pulse`, `stamp`, `close`). Run `bp task <verb> --help` for
+the current contract of any one of them.
+
+**Write to the ledger of record, not to a dev box.** The commands below target
+`https://guerrilla.barkpark.cloud` — the instance every gate and board reads.
+The older form of this runbook pointed at `http://localhost:4000` with
+`barkpark-dev-token`, so an agent following it at 3am recorded the override
+into a database that does not exist and left the merge unjustified. Use your
+own guerrilla token (`bp login`, or the same write token CI uses as
+`BARKPARK_TASK_TOKEN`); the `curl` here is the no-`bp` fallback — with the CLI
+on hand, `bp doc create task … && bp doc publish task <task_id>` is the shorter
+path, and boards read only the **published** ledger.
 
 ```bash
-TOKEN=barkpark-dev-token
+LEDGER=https://guerrilla.barkpark.cloud
+TOKEN=<your guerrilla write token>   # never barkpark-dev-token
 
 # 1. Record the override decision as a task. Pick a stable doc id (<task_id>).
-curl -sS -X POST http://localhost:4000/v1/data/mutate/production \
+curl -sS -X POST "$LEDGER/v1/data/mutate/production" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"mutations":[{"create":{
@@ -280,7 +443,9 @@ curl -sS -X POST http://localhost:4000/v1/data/mutate/production \
         }
       }}]}'
 # → the create lands as drafts.merge-gate-override-<pr>; the doc id you chose
-#   is <task_id> below.
+#   is <task_id> below. Publish it — a draft override is invisible to every
+#   board and to the pr-task-gate:
+#   bp doc publish task merge-gate-override-<pr> --yes
 ```
 
 Optionally attach a written paper (a Bulldocs paper the task references) when
@@ -288,7 +453,7 @@ the rationale needs prose longer than a task body — author it through the
 Bulldocs ingest API, then link it:
 
 ```bash
-curl -sS -X POST http://localhost:4000/v1/tasks/<task_id>/papers \
+curl -sS -X POST "$LEDGER/v1/tasks/<task_id>/papers" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"add": ["merge-gate-override-<pr>"]}'

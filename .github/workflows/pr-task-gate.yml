@@ -16,6 +16,15 @@ name: pr-task-gate
 #     so it is exempt. This is why turning the gate on does NOT red the open-PR
 #     fleet. A PR rebased onto post-gate main adopts the rule.
 #
+#     THREE states, not two (charter D25). The cutoff used to test only
+#     `git cat-file -e "$BASE_SHA:<this file>"`, which cannot tell "the base
+#     resolves and the file is genuinely absent" from "BASE_SHA does not resolve
+#     at all" — both took the grandfather branch, every downstream step carries
+#     `if: enforced == '1'`, and the job then reported SUCCESS having checked
+#     nothing. A guard that fails open is worse than no guard, and this was one
+#     inside the gate whose whole job is blocking. The commit is now resolved
+#     FIRST: unresolvable is UNKNOWN and fails loudly, never grandfathered.
+#
 #   • Hotfix lane (D3): a `hotfix!` label passes the gate AND auto-files a
 #     linked override task (the durable record), rather than silently waiving
 #     the requirement. The exception path SATISFIES the invariant (a task now
@@ -55,6 +64,23 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # The gate's own predicate, proven on every PR (charter D26). This job lives
+  # HERE and not in shell-harnesses.yml on purpose: that workflow is
+  # workflow-level `on: paths:` filtered, and a paths-filtered workflow emits no
+  # check run at all on a PR it skips — which a required-status list reads as a
+  # permanent deadlock (D18), so it can never carry a required name. This
+  # workflow has no paths filter, so the harness runs on every PR, including the
+  # ones that edit the gate. It is deliberately NOT a `needs:` of the gate job:
+  # a red harness must not turn the gate itself into a `skipped` conclusion,
+  # because GitHub counts `skipped` as SATISFYING a required context (D19).
+  pr-task-gate-selftest:
+    name: PR task gate self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hermetic fixtures for the gate predicate and its step bodies
+        run: bash scripts/pr-task-gate.test.sh
+
   pr-task-gate:
     name: PR references an active task
     runs-on: ubuntu-latest
@@ -69,13 +95,28 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          # NOTE: GitHub runs this as `bash -e {0}`; `set -uo pipefail` adds -u
+          # and pipefail but does NOT clear -e. Every command below is therefore
+          # either inside an `if`/`||` or is meant to abort the step.
           set -uo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          # State 1 of 3 — can we resolve the base COMMIT at all? Anything that
+          # answers "no" here (a force-pushed base, a shallow fetch that missed,
+          # a deleted branch) is UNKNOWN, not "old". Fail loudly: the gate must
+          # never certify a PR it could not evaluate.
+          if ! git rev-parse --verify --quiet "${BASE_SHA}^{commit}" >/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          fi
+          if ! git rev-parse --verify --quiet "${BASE_SHA}^{commit}" >/dev/null; then
+            echo "::error title=pr-task-gate could not evaluate this PR::The base commit ${BASE_SHA} does not resolve in this checkout, even after fetching it, so the gate cannot tell whether this PR predates the gate. Refusing to grandfather what it cannot read — rebase the PR onto current main, or re-run this check." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # States 2 and 3 — the base resolves, so the file test is now
+          # meaningful: present = enforced, absent = genuinely pre-gate.
           if git cat-file -e "${BASE_SHA}:.github/workflows/pr-task-gate.yml" 2>/dev/null; then
             echo "enforced=1" >> "$GITHUB_OUTPUT"
           else
             echo "enforced=0" >> "$GITHUB_OUTPUT"
-            echo "This PR's base ($BASE_SHA) predates the pr-task-gate — grandfathered, not enforced." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "This PR's base ($BASE_SHA) resolves but predates the pr-task-gate — grandfathered, not enforced." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Detect hotfix label
@@ -166,17 +207,39 @@ jobs:
           echo "expected=${expected}" >> "$GITHUB_OUTPUT"
 
       - name: Verify the task is active on the ledger
+        # `id:` is how scripts/pr-task-gate.test.sh addresses this step body to
+        # execute it verbatim under GitHub's real shell. Do not remove it.
+        id: verify
         if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix != '1'
         env:
           TASK_ID: ${{ steps.ref.outputs.task_id }}
           EXPECTED_WORKER: ${{ steps.worker.outputs.expected }}
           LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          # The lease predicate is PR-relative (charter D58): a lapsed claim
+          # backs this PR iff it was still live when the PR was OPENED. created_at
+          # is the right stamp and the only stable one — it does not move on
+          # synchronize/edited/reopened (verified on #6414: created_at
+          # 2026-07-27T21:27:32Z vs updated_at 2026-07-28T07:13:05Z), so a
+          # re-fire cannot decay a verdict. The gate REFUSES rather than falls
+          # open if this is ever empty or unreadable.
+          PR_OPENED_AT: ${{ github.event.pull_request.created_at }}
         run: |
+          # `set -uo pipefail` does NOT clear the -e in GitHub's `bash -e {0}`,
+          # so a bare `bash scripts/pr-task-gate.sh` on a non-zero exit aborts
+          # the step HERE and everything below becomes dead code — which is what
+          # the exit-2 handler was for the whole life of this gate (D24). `|| rc=$?`
+          # is the -e-safe form; scripts/pr-task-gate.test.sh executes this exact
+          # step body under `bash --noprofile --norc -e -o pipefail` so it cannot
+          # silently revert.
           set -uo pipefail
-          bash scripts/pr-task-gate.sh
-          rc=$?
+          rc=0
+          bash scripts/pr-task-gate.sh || rc=$?
           if [ "$rc" = "2" ]; then
-            echo "::warning title=Ledger unreachable::The task ledger could not be reached, so this PR's task backing could not be verified. Not blocking the merge on an infra error — re-run once the ledger is reachable." | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
+            # Exit 2 = "could not check", after the script's own bounded retries.
+            # It is a FAILURE, not a pass: GitHub has no `neutral` conclusion for
+            # exit codes, so the only alternative to red is a green check that
+            # verified nothing. Red, with the one instruction that fixes it.
+            echo "::error title=Ledger unreachable — task backing UNVERIFIED::The task ledger did not answer after the gate's bounded retries, so whether this PR is task-backed is UNKNOWN. This is not a finding against the PR. Re-run this check once the ledger is up; if it stays down, the hotfix! lane is the documented override (docs/ops/merge-gates.md)." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
           exit "$rc"
