@@ -17,8 +17,8 @@
 - Fan-out workers NEVER write the shared wave Paper (clobber law) — journeys travel via structured output; Fable phases fold them in.
 - `facts[].rerun` stays OPTIONAL (charter D3: demote, never reject). Do not touch the provenance gate semantics (length in == length out).
 - Telemetry honesty (design D9): record only what was measured, at measured grain. `budget.spent()` deltas are per-phase; per-agent token splits DO NOT EXIST — never present them.
-- Main checkout stays on `main`. Workflow/skill code changes go through a worktree branch + PR. Docs-only commits (design/plan/charter) may land directly on main by explicit path (`git pull --rebase origin main && git push`, never `--force`, never `git add -A`).
-- Syntax gate for every workflow.js edit: `node --input-type=module --check < .claude/workflows/bp-epic-cycle.workflow.js` → exit 0, no output.
+- Main checkout stays on `main`. EVERYTHING goes through a worktree branch + PR — docs-only commits (design/plan/charter) included. `main` is protected: a direct push is rejected with `remote: error: GH006: Protected branch update failed for refs/heads/main.`, exit 1, even for a repo admin, and the contents API returns 409 with the same sentence (honest-gates charter D39, measured on live GitHub). The old "docs-only may land directly on main" rule is DEAD — it would hang every epic-cycle at Decide the day protection landed. The rules that survive onto the PR branch unchanged: explicit paths only, never `git add -A`, never a directory or an unexpanded glob, never `--force`, never a blind push. A docs-only PR carrying `Task: <task id>` self-satisfies the required contexts and clears the docs-only skip in ~30s.
+- Syntax gate for every workflow.js edit: `bash scripts/workflow-module-smoke.sh .claude/workflows/bp-epic-cycle.workflow.js` → exit 0, prints `MODULE-SCOPE-OK <file>`. Do NOT use `node --check` (VACUOUS: exits 0 on this file with `const x = (((;` appended, because a top-level `export` plus a top-level `return` defeats Node's format sniffing) and do NOT use `node --input-type=module --check <` (FALSE RED: exits 1 on unmodified main, `Illegal return statement` at line 751, because these files legitimately top-level `return` — they run as a classic script in a vm). The smoke script strips `export` and parses the rest as an async function body, which legalises both the top-level `return` and the top-level `await`; it is mutation-proven (charter D66).
 
 ---
 
@@ -31,17 +31,21 @@
 **Interfaces:**
 - Produces: both docs on origin/main so every later worktree/builder can read them.
 
-- [ ] **Step 1: Commit by explicit path and push (race-safe)**
+- [ ] **Step 1: Commit by explicit path onto a worktree branch, and open a docs-only PR**
+
+Per the constraint above: `main` is protected, so a direct push is rejected with GH006 even for an admin, and the primary checkout never leaves `main`.
 
 ```bash
-cd /Users/frikkjarl/Documents/GitHub/barkpark
+git -C <primary checkout> fetch origin main
+git -C <primary checkout> worktree add ../bp-epic-memory-docs-wt -b docs/epic-memory-design-plan origin/main
+# copy the two files in by explicit path, then inside the worktree:
 git add .claude/workflows/bp-epic-cycle-epic-memory-design.md .claude/workflows/bp-epic-cycle-epic-memory-plan.md
 git commit -m "docs(epic-memory): design + implementation plan for journeys, wave telemetry, premium debrief"
-git pull --rebase origin main && git push
-git status   # must show "up to date with origin/main"
+git push -u origin docs/epic-memory-design-plan
+gh pr create --base main --head docs/epic-memory-design-plan   # body MUST carry a `Task: <task id>` line
 ```
 
-Expected: push succeeds; if rejected non-fast-forward, re-run `git pull --rebase origin main && git push` (never `--force`).
+Expected: the PR is open and reporting; a `.md`-only diff clears the docs-only skip in ~30s. Never `--force`, never `git add -A`, never a blind push.
 
 ---
 
