@@ -91,9 +91,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
+          # `refs/pull/N/merge` — a commit that already contains main's advance
+          # — while `pull_request.base.sha` LAGS the base branch tip. The
+          # three-dot diff below then sweeps in every commit main gained since
+          # that stale base: PR #6427 changed ONE docs file and this dispatcher
+          # printed TEN, so the docs-only skip had never once fired (charter
+          # D34). Pinning the head sha makes the diff describe THIS PR.
+          #
+          # This job ONLY. Every other job here deliberately keeps the merge
+          # ref: they must test the merged result, not the head in isolation.
+          # `github.sha` is the fallback for `push` events, which have no PR.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # Full history: the PR base sha must be resolvable locally for the
           # three-dot diff below. A shallow checkout makes `git cat-file -e`
-          # miss it, which this step treats as a hard failure.
+          # miss it, which this step treats as a hard failure. Measured cost of
+          # depth 0 over depth 1 in this repo: ~3 seconds.
           fetch-depth: 0
 
       - id: sets
@@ -145,11 +158,17 @@ jobs:
           compile="$(printf '%s\n' "$changed" | bash scripts/elixir-path-escape-check.sh --match compile)"
           test="$(printf '%s\n' "$changed" | bash scripts/elixir-path-escape-check.sh --match test)"
 
-          # Containment invariant. mix-prod-compile `needs: mix-test`, so a
-          # compile-affecting change that did NOT also select the test job would
-          # leave prod-compile permanently skipped behind a skipped dependency —
-          # hazard (3) in charter D19. compile ⊆ test must hold by construction;
-          # assert it rather than trust it.
+          # Containment invariant: compile ⊆ test, by construction of the two
+          # path sets — every path that recompiles the app is also a path the
+          # test suite reads. compile=true with test=false therefore does not
+          # describe a real change; it means the two matchers in
+          # scripts/elixir-path-escape-check.sh have drifted apart, and the
+          # consequence is that a change to compiled code sails through with the
+          # ENTIRE test suite skipped — legitimately, as far as the aggregator
+          # can see, because it accepts a skip whose gate is literally 'false'.
+          # The case statement below refuses that verdict too; this assertion
+          # exists to name the cause. (It once cited `mix-prod-compile needs:
+          # mix-test` — that edge was cut, the invariant was never about it.)
           if [ "$compile" = "true" ] && [ "$test" != "true" ]; then
             echo "::error::dispatcher: compile=true but test=${test}. The compile path set is not a subset of the test set — fix scripts/elixir-path-escape-check.sh."
             exit 1
@@ -429,15 +448,21 @@ jobs:
   mix-prod-compile:
     # The merge gate. See docs/ops/merge-gates.md.
     name: Prod compile gate (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
-    needs: [changes, mix-test]
+    needs: [changes]
     # The COMPILE path set — api/** plus design/** (design/status-manifest.json
     # is an @external_resource of portable_doc/render/status_vocab.ex:20, so
     # editing it recompiles). Strictly narrower than the test set.
     #
-    # `needs: mix-test` stays, so this job is also skipped when mix-test FAILED.
-    # That is hazard (3) — a skip that means "upstream died", not "not needed" —
-    # and it is why the elixir-gate aggregator accepts a skip here ONLY when the
-    # dispatcher's compile output was literally 'false'.
+    # NO `needs: mix-test`. There was never a correctness edge — own checkout,
+    # own `rm -rf _build/prod`, a disjoint cache namespace, no artifact hand-off
+    # (`validation-perf` is the live precedent) — it only serialised 177s onto
+    # the critical path (16m36s → 13m39s) and MANUFACTURED hazard (3) of charter
+    # D19: a skip meaning "upstream died" rather than "not needed". With the
+    # edge gone this job can no longer be skipped-by-upstream-death, so the
+    # aggregator's rule for it — accept a skip ONLY when the dispatcher's
+    # compile output was literally 'false' — degrades from load-bearing to
+    # belt-and-braces. It stays: the aggregator must not depend on the shape of
+    # the `needs` graph to stay fail-closed.
     if: needs.changes.outputs.compile == 'true'
     runs-on: ubuntu-latest
     strategy:
