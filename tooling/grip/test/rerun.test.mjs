@@ -734,9 +734,13 @@ test("rerun.mjs does not import level.mjs", async () => {
 // blocks this thread, so an in-process http server would never accept the
 // connection and every probe would read HOST-UNREACHABLE — a fake red that
 // looks exactly like the real one.
-async function withLocalServer(body, fn) {
+// `status` is a parameter, not a constant: the whole point of the 404 plant
+// below is that a REACHABLE host answering a wrong route is a different fact
+// from an unreachable one, and a server that can only answer 200 cannot express
+// it. Default 200 so every existing caller is unchanged.
+async function withLocalServer(body, fn, { status = 200 } = {}) {
   const { spawn } = await import("node:child_process");
-  const src = `const http=require("http");const s=http.createServer((q,r)=>{r.writeHead(200,{"content-type":"text/plain"});r.end(${JSON.stringify(body)})});s.listen(0,"127.0.0.1",()=>console.log(s.address().port));`;
+  const src = `const http=require("http");const s=http.createServer((q,r)=>{r.writeHead(${JSON.stringify(status)},{"content-type":"text/plain"});r.end(${JSON.stringify(body)})});s.listen(0,"127.0.0.1",()=>console.log(s.address().port));`;
   const child = spawn(process.execPath, ["-e", src], { stdio: ["ignore", "pipe", "ignore"] });
   try {
     const port = await new Promise((resolve, reject) => {
@@ -780,6 +784,44 @@ test("an UNPIPED curl that discards stdout is not falsely NULL-READ", async () =
     assert.notEqual(r.verdict, VERDICT.NULL_READ,
       "the response IS the read; the probe measured it, so emptiness of stdout proves nothing");
     assert.equal(r.verdict, VERDICT.OK);
+  });
+});
+
+// ── 7c. REACHABLE-WRONG-ROUTE, EXECUTED — hermetically, never against prod ───
+//
+// Of the ten verdict classes this was the only one with no EXECUTED plant
+// anywhere: the classifier half is pinned pure at :49 and its never-cry-wolf
+// twin at :53 ("404-reachable and 000-unreachable are NOT merged"), but the
+// only end-to-end demonstration lived in the GRIP_LIVE=1 test below, which
+// curls prod. A plant that needs a production box to be UP is the
+// outage-forges-a-verdict shape this module exists to abolish — and it cannot
+// run in the gate at all.
+//
+// So the plant is driven through the REAL runRerun against a loopback server
+// that answers 404. Same code path, same verdict, no world required.
+
+test("EXECUTED PLANT: a live host answering 404 reads REACHABLE-WRONG-ROUTE (loopback, no prod)", async () => {
+  await withLocalServer("not found\n", (port) => {
+    const r = runRerun(`curl -s http://127.0.0.1:${port}/definitely-not-a-route`, { timeoutMs: 5000 });
+    assert.equal(r.verdict, VERDICT.WRONG_ROUTE);
+    assert.equal(r.code, 404);
+    assert.equal(r.reachable, true, "the host ANSWERED — this is not an outage");
+    // The absence seam: a live host saying 404 is a real read, so it may support
+    // an absence claim, and may never support a pass claim.
+    assert.equal(admitsAbsenceClaim(r), true);
+    assert.equal(admitsPassClaim(r), false);
+  }, { status: 404 });
+});
+
+test("NEVER CRY WOLF: the same loopback answering 200 is NOT REACHABLE-WRONG-ROUTE", async () => {
+  // The executed half of the :53 distinction. If the 404 plant above passed
+  // against a server that answers 200 too, it would be measuring "a server
+  // exists", not "the route is wrong".
+  await withLocalServer("here\n", (port) => {
+    const r = runRerun(`curl -s http://127.0.0.1:${port}/definitely-not-a-route`, { timeoutMs: 5000 });
+    assert.notEqual(r.verdict, VERDICT.WRONG_ROUTE);
+    assert.equal(r.verdict, VERDICT.OK);
+    assert.equal(r.code, 200);
   });
 });
 

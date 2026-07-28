@@ -99,15 +99,40 @@ const PLANTED = [
 // the MAPPING is provable without a network, a host, or a clock. The stub also
 // COUNTS its invocations: a mapping control whose runner was never called did
 // not test the mapping, and that is an exit-3 condition, never a pass.
+//
+// EACH ROW NOW CARRIES BOTH HALVES (charter D127). A plant alone proves the
+// mapping can FIRE; it cannot distinguish a live mapping from one that returns
+// its verdict unconditionally. So every row also names a NEIGHBOUR executor
+// verdict that must NOT produce this row's verdict — the never-cry-wolf half.
+//
+// This is a PROJECTION, not new coverage: six of these seven already have both
+// halves under test (DEMOTED adjudicate.test.mjs:128/:136 + :144; FAILED
+// rerun.test.mjs:292 + :152; HOST-UNREACHABLE :49 + :79; UNAVAILABLE
+// adjudicate.test.mjs:188 + :190; NULL-READ rerun.test.mjs:167 + :183;
+// ASYNC-DEFERRED :430 + :86). What was missing is that `--selftest` — the
+// surface the acceptance criterion actually reads — showed only the plants.
 const PASSTHROUGH = [
-  { name: "FAILED is not REJECTED", executorVerdict: VERDICT.FAILED, expect: VERDICTS.FAILED },
-  { name: "REACHABLE-WRONG-ROUTE passes through", executorVerdict: VERDICT.WRONG_ROUTE, expect: VERDICTS.WRONG_ROUTE },
-  { name: "HOST-UNREACHABLE passes through", executorVerdict: VERDICT.UNREACHABLE, expect: VERDICTS.UNREACHABLE },
-  { name: "UNAVAILABLE passes through", executorVerdict: VERDICT.UNAVAILABLE, expect: VERDICTS.UNAVAILABLE },
-  { name: "NULL-READ passes through", executorVerdict: VERDICT.NULL_READ, expect: VERDICTS.NULL_READ },
-  { name: "ASYNC-DEFERRED passes through", executorVerdict: VERDICT.ASYNC_DEFERRED, expect: VERDICTS.ASYNC_DEFERRED },
-  { name: "UNSAFE-RERUN is REJECTED, not FAILED", executorVerdict: VERDICT.UNSAFE_RERUN, expect: VERDICTS.REJECTED },
+  { name: "FAILED is not REJECTED", executorVerdict: VERDICT.FAILED, expect: VERDICTS.FAILED, neighbour: VERDICT.WRONG_ROUTE },
+  { name: "REACHABLE-WRONG-ROUTE passes through", executorVerdict: VERDICT.WRONG_ROUTE, expect: VERDICTS.WRONG_ROUTE, neighbour: VERDICT.UNREACHABLE },
+  { name: "HOST-UNREACHABLE passes through", executorVerdict: VERDICT.UNREACHABLE, expect: VERDICTS.UNREACHABLE, neighbour: VERDICT.WRONG_ROUTE },
+  { name: "UNAVAILABLE passes through", executorVerdict: VERDICT.UNAVAILABLE, expect: VERDICTS.UNAVAILABLE, neighbour: VERDICT.ASYNC_DEFERRED },
+  { name: "NULL-READ passes through", executorVerdict: VERDICT.NULL_READ, expect: VERDICTS.NULL_READ, neighbour: VERDICT.FAILED },
+  { name: "ASYNC-DEFERRED passes through", executorVerdict: VERDICT.ASYNC_DEFERRED, expect: VERDICTS.ASYNC_DEFERRED, neighbour: VERDICT.UNAVAILABLE },
+  { name: "UNSAFE-RERUN is REJECTED, not FAILED", executorVerdict: VERDICT.UNSAFE_RERUN, expect: VERDICTS.REJECTED, neighbour: VERDICT.FAILED },
 ];
+
+// The DEMOTED control, which had no half at all in this selftest.
+//
+// The discriminator is whether the COMMAND classifies, never whether the author
+// asked for a low level. `frobnicate --all` derives L6, so the fact stands but
+// is DEMOTED. The near-miss is the honest UNDER-claim: L6 claimed over a command
+// that DOES classify is ADMITTED at L6 and must never be reported as a demotion,
+// or every modest author gets accused of losing authority they never claimed.
+const DEMOTION = {
+  name: "DEMOTED — an unclassifiable command demotes; an honest UNDER-claim does not",
+  plant: () => withField({ rerun: "frobnicate --all", level: "L6" }),
+  nearMiss: () => withField({ level: "L6" }),
+};
 
 function stubRunner(verdict, counter) {
   return (command) => {
@@ -147,7 +172,7 @@ function selftest() {
     }
   }
 
-  lines.push("verdict pass-through controls (stubbed executor):");
+  lines.push("verdict pass-through controls (stubbed executor; each a plant + a never-cry-wolf neighbour):");
   for (const c of PASSTHROUGH) {
     const counter = { calls: 0 };
     const ruling = adjudicate(CLEAN, { run: stubRunner(c.executorVerdict, counter) });
@@ -155,10 +180,39 @@ function selftest() {
       void_(c.name, "the stub executor was never invoked — this control tested nothing");
       continue;
     }
+
+    // The NEVER-CRY-WOLF half. A mapping that returned its verdict whatever the
+    // executor said would pass the plant above and be indistinguishable from a
+    // live one, so the same control is driven with a NEIGHBOUR verdict and must
+    // NOT answer this row's verdict.
+    const nearCounter = { calls: 0 };
+    const near = adjudicate(CLEAN, { run: stubRunner(c.neighbour, nearCounter) });
+    if (nearCounter.calls === 0) {
+      void_(c.name, "the near-miss stub executor was never invoked — the never-cry-wolf half tested nothing");
+      continue;
+    }
+
     if (ruling.verdict !== c.expect) {
       bad(c.name, `executor said ${c.executorVerdict}, engine ruled ${ruling.label}, expected ${c.expect}`);
+    } else if (near.verdict === c.expect) {
+      bad(c.name, `CRIES WOLF: the neighbour ${c.neighbour} ALSO ruled ${c.expect} — the mapping is unconditional, not a mapping`);
     } else {
-      ok(c.name, `${c.executorVerdict} → ${ruling.label}`);
+      ok(c.name, `${c.executorVerdict} → ${ruling.label} · neighbour ${c.neighbour} → ${near.label}, not ${c.expect}`);
+    }
+  }
+
+  lines.push("demotion control (plant + near-miss):");
+  {
+    const planted = adjudicate(DEMOTION.plant(), { execute: false });
+    const nearMiss = adjudicate(DEMOTION.nearMiss(), { execute: false });
+    if (!stands(nearMiss.verdict)) {
+      void_(DEMOTION.name, `the UNDER-claim twin was ${nearMiss.label}, so the demotion below proves nothing about demotion`);
+    } else if (planted.verdict !== VERDICTS.DEMOTED) {
+      bad(DEMOTION.name, `an unclassifiable command ruled ${planted.label}, expected ${VERDICTS.DEMOTED}`);
+    } else if (nearMiss.verdict === VERDICTS.DEMOTED) {
+      bad(DEMOTION.name, "CRIES WOLF: an honest UNDER-claim over a classifying command was reported as a demotion");
+    } else {
+      ok(DEMOTION.name, `${planted.label} at ${planted.level} · under-claim → ${nearMiss.label} at ${nearMiss.level}`);
     }
   }
 
