@@ -1,19 +1,10 @@
 {
-  "_comment": "Happy path. A resolvable successor, zero residue (no live AND no considering rows), every hardcoded gate of charter D89 resolving. The ONLY non-terminal fixture here that may exit 0. `unmeasuredWaivers` names the rung-3 register entry explicitly: a waiver can only arrive through --ledger, so no live run can carry one.",
-  "successor": "cch-fixture-successor-epic",
-  "tasks": {
-    "cch-fixture-successor-epic": {
-      "_id": "cch-fixture-successor-epic",
-      "_type": "task",
-      "status": "published",
-      "lifecycle_status": "open",
-      "parent_id": "cloud-console-goal"
-    }
-  },
+  "_comment": "TERMINAL, refuted by a CONSIDERING row. The predecessor shape filtered `open || in_progress`, so this exact fixture sealed at exit 0 with the row disclosed nowhere. `considering` is not closed work; a terminal claim over it is false.",
+  "successor": "TERMINAL",
+  "tasks": {},
   "children": [
     { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
-    { "_id": "gr-fixture-done-2", "lifecycle_status": "done" },
-    { "_id": "gr-fixture-cancelled-1", "lifecycle_status": "cancelled" }
+    { "_id": "gr-fixture-considering-1", "lifecycle_status": "considering" }
   ],
   "forwarded": [],
   "gates": {
@@ -21,21 +12,21 @@
       "_id": "gr-ops-platform-admin-emails",
       "_type": "task",
       "status": "published",
-      "lifecycle_status": "open",
+      "lifecycle_status": "done",
       "parent_id": "cloud-console-hardening-epic"
     },
     "gr-backlog-qr-live-scan-proof": {
       "_id": "gr-backlog-qr-live-scan-proof",
       "_type": "task",
       "status": "published",
-      "lifecycle_status": "open",
+      "lifecycle_status": "done",
       "parent_id": "cloud-console-hardening-epic"
     },
     "cch-hg-compose-network-recreation": {
       "_id": "cch-hg-compose-network-recreation",
       "_type": "task",
       "status": "published",
-      "lifecycle_status": "open",
+      "lifecycle_status": "done",
       "parent_id": "cloud-console-hardening-epic"
     }
   },
