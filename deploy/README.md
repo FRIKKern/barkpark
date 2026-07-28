@@ -161,7 +161,7 @@ Caddy port-flip back (`<1 s`, no reboot/re-gate); a cold older release reboots t
 idle slot onto it + gates + flips. The slot unit is
 `deploy/systemd/barkpark-site@.service` (§below). Offline gate (fake
 `systemctl`/`caddy`/`npm`, no real systemd/network): `bash
-deploy/site-deploy-node.sh --self-test` — 91 checks: the six-stage protocol,
+deploy/site-deploy-node.sh --self-test` — 108 checks: the six-stage protocol,
 boot-in-place HEALTH with the marker-value gate, the marker-anchored port flip,
 retire protecting both live slots, and the warm-rollback flip.
 
@@ -226,7 +226,7 @@ writable). Both acquire in the same order — own lock (fd 9) → Caddyfile lock
 deploy never waits on the instance deploy's multi-minute run.
 
 Offline gate (no npm/caddy/systemd): `bash deploy/site-deploy.sh --self-test` —
-110 checks: the symlink flip, forward/back rollback and retire-N over fixture
+128 checks: the symlink flip, forward/back rollback and retire-N over fixture
 release dirs, the marker reader, then the real script driven end-to-end against a
 fake npm (the six-stage protocol, a lying build failing HEALTH with exit 14 and
 being purged, the retry rebuilding, a BUILD failure carrying its 401 to stdout).
