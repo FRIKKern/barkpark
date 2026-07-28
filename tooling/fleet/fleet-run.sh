@@ -5,7 +5,7 @@
 #
 #   FLEET_AGENT=claude  bash fleet-run.sh listen <worker>     # stay-alive loop (Claude Code)
 #   FLEET_AGENT=codex   bash fleet-run.sh listen <worker>     # stay-alive loop (OpenAI Codex)
-#   FLEET_AGENT=custom  FLEET_AGENT_EXEC='myagent --prompt {{PROMPT}}' bash fleet-run.sh listen <worker>
+#   FLEET_AGENT=custom  FLEET_AGENT_EXEC='myagent --prompt "$FLEET_PROMPT"' bash fleet-run.sh listen <worker>
 #   FLEET_AGENT=codex   bash fleet-run.sh once <task-id> <worker>   # run a single dispatched order
 #   bash fleet-run.sh capacity                                     # print the MEASURED capacity JSON
 #
