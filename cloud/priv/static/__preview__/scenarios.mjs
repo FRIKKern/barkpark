@@ -216,6 +216,29 @@ function site(over) {
       domains: [],
       scale_mode: "always_on",
       port: 3000,
+      // ssw8 (charter D82): the ELEVEN binding fields site_json/2 serializes.
+      // The factory emitted 21 fields and NOT ONE of them was a binding field,
+      // so no fixture could express binding truth at all. Shape derived from
+      // router.ex site_json/2, not invented:
+      //   kind · framework's runtime target      template · the starter it deploys
+      //   doc_type · the featured type           port_base · node-slot base (static → null)
+      //   bootstrap_{workspace,project,dataset} + the CLI spelling of the SAME
+      //   three columns (workspace/project/dataset) — one row, both vocabularies
+      //   content_bound · `not is_nil(read_token_encrypted)`, i.e. A READ TOKEN
+      //     EXISTS. NOT "this site has content".
+      // Defaults are the UNBOUND site (a plain GitHub-repo deploy): no triple,
+      // no token. Bound rows override.
+      kind: "node",
+      template: null,
+      doc_type: null,
+      port_base: null,
+      bootstrap_workspace: null,
+      bootstrap_project: null,
+      bootstrap_dataset: null,
+      workspace: null,
+      project: null,
+      dataset: null,
+      content_bound: false,
       current_deployment_id: null,
       github_repo: null,
       github_branch: null,
@@ -244,6 +267,52 @@ const blogSite = site({
   domains: ["blog.acme.com"],
   framework: "astro",
 });
+
+// ── ssw8 (charter D82): the three content-binding cases ──────────────────────
+// A spawned static site's whole reason to exist is the dataset it reads. These
+// three rows are the states that binding can actually be in, all expressible
+// from site_json/2's own fields:
+//
+//   BOUND     — the triple agrees with itself and a read token exists.
+//   UNKNOWN   — an OLDER control plane: no triple, and `content_bound` is
+//               ABSENT (not false). The surface must say "unknown", never
+//               "default/default/production" — the plausible-default lie.
+//   MISMATCH  — site_json/2 sends the SAME three columns twice (bootstrap_* and
+//               the CLI spelling). Here they DISAGREE, which is exactly what a
+//               stranger's mistyped `--dataset` looks like after a partial
+//               rebind. The surface must show BOTH and resolve neither.
+const boundSite = site({
+  id: "5b2c1e00-0000-4000-8000-0000000000cb",
+  name: "acme-docs", slug: "acme-docs", domains: ["docs.acme.com"],
+  framework: "astro", kind: "static", template: "astro-starter",
+  doc_type: "paper",
+  bootstrap_workspace: "acme", bootstrap_project: "site", bootstrap_dataset: "production",
+  workspace: "acme", project: "site", dataset: "production",
+  content_bound: true,
+});
+// `content_bound` is DELETED, not false: a control plane that predates the field
+// says nothing, and "nothing" must not be read as "no".
+const unknownBindingSite = (() => {
+  const s = site({
+    id: "5b2c1e00-0000-4000-8000-0000000000cc",
+    name: "acme-legacy", slug: "acme-legacy", domains: [],
+    framework: "astro", kind: "static",
+  });
+  delete s.content_bound;
+  return s;
+})();
+const mismatchedBindingSite = site({
+  id: "5b2c1e00-0000-4000-8000-0000000000cd",
+  name: "acme-typo", slug: "acme-typo", domains: [],
+  framework: "astro", kind: "static", doc_type: "post",
+  // The rebind wrote the CLI spelling; the bootstrap columns still hold the old
+  // dataset. A 201 was returned for this site and every surface has agreed with
+  // it ever since.
+  bootstrap_workspace: "acme", bootstrap_project: "site", bootstrap_dataset: "producton",
+  workspace: "acme", project: "site", dataset: "production",
+  content_bound: true,
+});
+const bindingSites = [boundSite, unknownBindingSite, mismatchedBindingSite];
 
 // E-01 (#sites list): the LIST endpoint embeds a slim `last_deployment`
 // (status · trigger · stamps — never content_rev, HONESTY LAW) via
@@ -2368,6 +2437,51 @@ export const SCENARIOS = {
       deployments: siteStatesDeployments,
       previews: siteStatesPreviews,
       siteDomainStatus: siteStatesDomains,
+    },
+  },
+
+  // ── ssw8 (charter D82): the content binding on the site surfaces ────────────
+  // One fixture list, three deep links — the same three rows render as siteRow
+  // chips on the instance workspace while each scenario opens ONE of them on the
+  // detail rail. Nothing here is invented: every value is a field site_json/2
+  // serializes, and the UNKNOWN row's honesty comes from a field being ABSENT.
+  "site-binding-bound": {
+    label: "Site binding — bound: the triple agrees with itself and a read token exists",
+    authed: true,
+    deepLink: "#site/" + boundSite.id,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: bindingSites,
+      audit: [],
+      deployments: [],
+    },
+  },
+  "site-binding-unknown": {
+    label: "Site binding — unknown: an older control plane sends no triple and no content_bound; the rail says so",
+    authed: true,
+    deepLink: "#site/" + unknownBindingSite.id,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: bindingSites,
+      audit: [],
+      deployments: [],
+    },
+  },
+  "site-binding-mismatch": {
+    label: "Site binding — mismatch: the payload's two spellings of the dataset disagree; both are shown, neither resolved",
+    authed: true,
+    deepLink: "#site/" + mismatchedBindingSite.id,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: bindingSites,
+      audit: [],
+      deployments: [],
     },
   },
 
