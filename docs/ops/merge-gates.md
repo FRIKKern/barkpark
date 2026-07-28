@@ -98,7 +98,12 @@ completed 2026-06-10 (`continue-on-error` dropped at that point); a failing
 test suite now prevents merge. Its job **id** is `mix-test`; the check that
 shows up on the PR is its display name, `Test (Elixir 1.18.1 / OTP 27.0)`,
 inside the workflow named `elixir`. There is no check called "Elixir Test" —
-that name is folklore, and searching for it finds nothing.
+that name is folklore, and searching for it finds nothing. **The name a reader
+looking for "the Elixir gate" actually wants is `Elixir gate`**: the `elixir`
+workflow's `elixir-gate` aggregator, which is un-matrixed (so its check-run name
+is exactly that string), runs `if: always()`, and fails when any upstream job
+lands outside its allow-set. That is the one name branch protection is meant to
+require — `Test (Elixir 1.18.1 / OTP 27.0)` is a job underneath it.
 
 `main` has **no branch protection or rulesets** configured (verified
 2026-06-21, re-checked 2026-07-01, via the GitHub branches/rulesets APIs), so none of these gates
@@ -226,7 +231,12 @@ re-send the full body too — a partial re-PUT silently drops the keys it omits.
 # The context string must be COPIED from a check run observed on a real PR,
 # never hand-typed: GitHub appends unconsumed matrix values to a job's display
 # name, so a typed name matches no check, sits Pending forever, and deadlocks
-# the branch.
+# the branch. The example below is illustrative — the AUTHORITY is
+# `.github/required-checks.json`, which is GENERATED from observed check runs
+# by `scripts/required-checks-generate.sh` and applied by
+# `scripts/required-checks-apply.sh --confirm`. Prefer those to hand-running
+# this curl; they also verify the read-back and detect a deadlock by set
+# difference, which no refusal message will tell you (charter D38).
 # Sent as a JSON body, not `-f checks[][…]` flags: those build the array
 # positionally and can split one check into two half-specified entries.
 gh api -X PUT repos/:owner/:repo/branches/main/protection \
