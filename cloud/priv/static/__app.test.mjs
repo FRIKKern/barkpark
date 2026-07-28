@@ -8534,6 +8534,29 @@ test("GR80 leg 2: activityQuery sends every set axis and omits every unset one",
   reset();
 });
 
+test("keyset tiebreak: the activity cursor sends before_id, and auditEntry carries the id", () => {
+  const st = hooks.activityFilterState;
+  const reset = () => { st.target_type = null; st.actor_user_id = null; st.action_prefix = null; };
+  reset();
+
+  const pair = hooks.activityQuery("2026-07-19T10:00:00.000000Z", "a7");
+  assert.ok(pair.includes("&before=2026-07-19T10%3A00%3A00.000000Z") && pair.includes("&before_id=a7"), pair);
+
+  // BACKWARD COMPATIBLE: the stamp alone is still a legal cursor.
+  const stampOnly = hooks.activityQuery("2026-07-19T10:00:00.000000Z", null);
+  assert.ok(stampOnly.includes("&before=") && !stampOnly.includes("before_id"), stampOnly);
+
+  // before_id without a stamp is meaningless and is never sent.
+  assert.ok(!hooks.activityQuery(null, "a7").includes("before"), "no stamp → no cursor at all");
+
+  // The entry keeps the raw row id, which is where loadMoreActivity reads the
+  // second half of the cursor from.
+  const e = hooks.auditEntry({ id: "a7", action: "site.created", inserted_at: "2026-07-19T10:00:00Z" });
+  assert.equal(e.id, "a7");
+  assert.equal(hooks.auditEntry({ action: "site.created" }).id, null, "no id → no fabricated cursor half");
+  reset();
+});
+
 test("GR80 leg 2: the actor axis degrades to Everyone/Just me with no member list", () => {
   const meEnv = { user: { id: "usr_ada", email: "ada@acme.com" } };
   const bare = hooks.activityActorFilters(null, meEnv);
@@ -10206,6 +10229,45 @@ test("GR79: the keyset cursor is the OLDEST rendered row, and a stamp-less row s
   assert.equal(hooks.notifDeliveriesCursor(null), null);
   assert.equal(hooks.notifDeliveriesCursor([{ id: "d3" }]), null,
     "no stamp → no cursor → paging STOPS rather than silently restarting at page one");
+});
+
+// ── gr-bl-delivery-keyset-tiebreak: the cursor carries BOTH halves of the key ──
+
+test("keyset tiebreak: the delivery cursor sends before_id alongside before", () => {
+  const st = hooks.notifDeliveryFilterState;
+  const reset = () => { st.channel = null; st.status = null; st.event = null; };
+  reset();
+
+  // Both halves ride together — the server's tiebreak arm engages only on the
+  // pair, so a stamp without its id is exactly the silent-drop bug.
+  assert.equal(hooks.notifDeliveriesQuery("2026-07-18T09:00:00.000000Z", "d2"),
+    "/v1/notifications/deliveries?limit=50&before=2026-07-18T09%3A00%3A00.000000Z&before_id=d2");
+
+  // BACKWARD COMPATIBLE: a stamp with no id is still a legal stamp-only cursor
+  // (a bookmarked URL, or a row the server did not give an id).
+  assert.equal(hooks.notifDeliveriesQuery("2026-07-18T09:00:00.000000Z", null),
+    "/v1/notifications/deliveries?limit=50&before=2026-07-18T09%3A00%3A00.000000Z");
+
+  // No stamp → no id either; before_id alone is meaningless and never sent.
+  assert.equal(hooks.notifDeliveriesQuery(null, "d2"), "/v1/notifications/deliveries?limit=50");
+
+  // The id is URL-encoded like every other param.
+  assert.match(hooks.notifDeliveriesQuery("2026-07-18T09:00:00.000000Z", "d 2&x"), /&before_id=d%202%26x$/);
+  reset();
+});
+
+test("keyset tiebreak: notifDeliveriesCursorId is the SAME oldest row the stamp came from", () => {
+  const rows = [
+    { id: "d1", inserted_at: "2026-07-19T10:00:00.000000Z" },
+    { id: "d2", inserted_at: "2026-07-18T09:00:00.000000Z" },
+  ];
+  assert.equal(hooks.notifDeliveriesCursorId(rows), "d2",
+    "both halves of the cursor must come from ONE row or the predicate is nonsense");
+  assert.equal(hooks.notifDeliveriesCursor(rows), "2026-07-18T09:00:00.000000Z");
+  assert.equal(hooks.notifDeliveriesCursorId([]), null);
+  assert.equal(hooks.notifDeliveriesCursorId(null), null);
+  assert.equal(hooks.notifDeliveriesCursorId([{ inserted_at: "2026-07-18T09:00:00.000000Z" }]), null,
+    "an id-less row degrades to a stamp-only cursor, never to a fabricated id");
 });
 
 test("GR79: an empty FILTERED log never claims nothing was ever delivered", () => {

@@ -2781,15 +2781,22 @@
   var notifDeliveryRows = null; // the accumulated FILTERED page list
 
   // Pure: the request URL for one page of the delivery log. An unset axis sends
-  // nothing; `before` is the ISO stamp of the oldest row already rendered, which
-  // is exactly the cursor maybe_delivery_before compares against (strictly older,
-  // so a page boundary can never duplicate or skip a row).
-  function notifDeliveriesQuery(before) {
+  // nothing; `before` is the ISO stamp of the oldest row already rendered and
+  // `before_id` is THAT SAME ROW's id — together they are the whole
+  // `(inserted_at, id)` sort key the server orders by. The id half is not
+  // decoration: one fan-out writes a row per recipient in the same instant, and
+  // a stamp-only cursor drops every tied row on the far side of the boundary,
+  // permanently and without a trace. Sent as a pair or not at all (a lone
+  // `before` is still a legal, historically-shaped stamp-only cutoff).
+  function notifDeliveriesQuery(before, beforeId) {
     var q = "/v1/notifications/deliveries?limit=" + NOTIF_DELIVERY_PAGE;
     if (notifDeliveryFilter.channel) q += "&channel=" + encodeURIComponent(notifDeliveryFilter.channel);
     if (notifDeliveryFilter.status) q += "&status=" + encodeURIComponent(notifDeliveryFilter.status);
     if (notifDeliveryFilter.event) q += "&event=" + encodeURIComponent(notifDeliveryFilter.event);
-    if (before) q += "&before=" + encodeURIComponent(before);
+    if (before) {
+      q += "&before=" + encodeURIComponent(before);
+      if (beforeId) q += "&before_id=" + encodeURIComponent(beforeId);
+    }
     return q;
   }
 
@@ -2801,6 +2808,15 @@
     if (!rows || !rows.length) return null;
     var last = rows[rows.length - 1];
     return (last && last.inserted_at) || null;
+  }
+
+  // Pure: the OTHER half of that cursor — the same oldest row's id, which breaks
+  // an inserted_at tie at the page boundary. A row with no id yields null, and
+  // the query builder then sends the stamp alone (degraded, never wrong).
+  function notifDeliveriesCursorId(rows) {
+    if (!rows || !rows.length) return null;
+    var last = rows[rows.length - 1];
+    return (last && last.id) || null;
   }
 
   function notifDeliveryFiltered() {
@@ -2979,10 +2995,11 @@
     var rows = notifDeliveryRows;
     var before = notifDeliveriesCursor(rows);
     if (!before) return;
+    var beforeId = notifDeliveriesCursorId(rows);
     var btn = $("#notif-del-load-more");
     if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
     var restore = function () { if (btn) { btn.disabled = false; btn.textContent = "Load more"; } };
-    api("GET", notifDeliveriesQuery(before)).then(function (r) {
+    api("GET", notifDeliveriesQuery(before, beforeId)).then(function (r) {
       restore();
       if (!(r.ok && r.data && Array.isArray(r.data.deliveries))) {
         toast({ kind: "error", title: "Couldn't load more", body: friendly(r.data, "Please try again.") });
@@ -12330,6 +12347,10 @@
     return {
       source: "audit",
       key: "a:" + String(e.id),
+      // The raw row id, kept alongside `at` because the two together ARE the
+      // keyset cursor (`before` + `before_id`). Reconstructing it by slicing
+      // `key` would be a second, silently-drifting definition of the same fact.
+      id: e.id != null ? String(e.id) : null,
       at: e.inserted_at || null,
       type: String(e.action || ""),
       payload: e.metadata || null,
@@ -12341,17 +12362,26 @@
   }
 
   // The GET /v1/audit URL for the current filter + keyset cursor. Only the
-  // server-supported params (limit, before, target_type, actor_user_id,
-  // action_prefix) are ever sent, and an unset axis sends NOTHING — an empty
-  // string would be an equally-honest no-op server-side, but omitting it keeps
-  // the request URL readable in the network panel, which is how a filter bug
-  // gets found.
-  function activityQuery(before) {
+  // server-supported params (limit, before, before_id, target_type,
+  // actor_user_id, action_prefix) are ever sent, and an unset axis sends
+  // NOTHING — an empty string would be an equally-honest no-op server-side, but
+  // omitting it keeps the request URL readable in the network panel, which is
+  // how a filter bug gets found.
+  //
+  // The cursor is BOTH halves of the server's `(inserted_at, id)` ordering:
+  // `before` alone cuts on the stamp, so a burst of audit writes sharing one
+  // microsecond loses whichever tied rows fall past the page boundary. They ride
+  // as a pair — a lone `before` remains valid (and stamp-only) for a bookmarked
+  // URL.
+  function activityQuery(before, beforeId) {
     var q = "/v1/audit?limit=" + ACTIVITY_PAGE;
     if (activityFilter.target_type) q += "&target_type=" + encodeURIComponent(activityFilter.target_type);
     if (activityFilter.actor_user_id) q += "&actor_user_id=" + encodeURIComponent(activityFilter.actor_user_id);
     if (activityFilter.action_prefix) q += "&action_prefix=" + encodeURIComponent(activityFilter.action_prefix);
-    if (before) q += "&before=" + encodeURIComponent(before);
+    if (before) {
+      q += "&before=" + encodeURIComponent(before);
+      if (beforeId) q += "&before_id=" + encodeURIComponent(beforeId);
+    }
     return q;
   }
 
@@ -12438,12 +12468,16 @@
   function loadMoreActivity() {
     var entries = activityEntries;
     if (!entries || !entries.length) return;
-    // Keyset cursor = the oldest loaded row's stamp (entries are 1:1 with audit
-    // rows — coalescing is display-only, so it never drops the cursor row).
-    var before = entries[entries.length - 1].at;
+    // Keyset cursor = the oldest loaded row's stamp AND id (entries are 1:1 with
+    // audit rows — coalescing is display-only, so it never drops the cursor
+    // row). The id is what keeps a same-microsecond burst from losing its tail
+    // across the boundary.
+    var last = entries[entries.length - 1];
+    var before = last.at;
+    var beforeId = last.id || null;
     var btn = $("#activity-load-more");
     btn.disabled = true;
-    api("GET", activityQuery(before)).then(function (r) {
+    api("GET", activityQuery(before, beforeId)).then(function (r) {
       btn.disabled = false;
       if (!r.ok) {
         toast({ kind: "error", title: "Couldn't load more", body: friendly(r.data, "Please try again.") });
@@ -18510,6 +18544,7 @@
       // GR79 leg 4: the delivery-log filter panel — the request-URL builder, the
       // keyset cursor, the chip row and the filter-aware body (all pure).
       notifDeliveriesQuery: notifDeliveriesQuery, notifDeliveriesCursor: notifDeliveriesCursor,
+      notifDeliveriesCursorId: notifDeliveriesCursorId,
       notifDeliveryFiltersHtml: notifDeliveryFiltersHtml, notifDeliveryChipHtml: notifDeliveryChipHtml,
       notifDeliveriesBodyHtml: notifDeliveriesBodyHtml, notifDeliveryFilterState: notifDeliveryFilter,
       notifDeliveryPage: NOTIF_DELIVERY_PAGE,
