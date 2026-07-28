@@ -1122,7 +1122,7 @@ say ""
 say "BEFORE COMMITTING THE TRANSCRIPT:"
 say "  $0 --scan-transcript <transcript-file>"
 say "must print ZERO hits — the guerrilla admin bearer, the cloud_token, the named teardown"
-say "token, any hcloud cli.toml token, and any sk-ant prefix. Zero hits or no commit."
+say "token, any hcloud cli.toml token, and any Anthropic key prefix. Zero hits or no commit."
 rule
 if [ "$N_FAIL" -gt 0 ]; then
   exit 1
