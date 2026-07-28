@@ -33,7 +33,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   on exactly two things, both stable across the engine's own refactors:
 
     * the **filename prefixes** `bp-ws-bundle-` (the tar, already produced by
-      `WorkspaceBundle.Archive`) and `bp-ws-spill-` (the per-table spill files);
+      `WorkspaceBundle.Archive`), `bp-ws-spill-` (the per-table spill files) and
+      `bp-ws-import-` (the import scratch — the FIRST candidate that is a
+      DIRECTORY, holding the spilled request body plus the extracted members).
+      `remove/1` has always been `File.rm_rf/1`, so a directory was already
+      collectable; what it was NOT is visible — `candidates/1` sweeps by prefix,
+      so an unregistered prefix leaves a multi-GB scratch stranded forever;
     * the **config key** `:bundle_spill_dir`, the directory both sides agree
       the files live in — the SAME key `WorkspaceBundle.Archive.spill_dir/0`
       reads (set in `config/config.exs`, overridable by
@@ -91,6 +96,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
 
   @bundle_prefix "bp-ws-bundle-"
   @spill_prefix "bp-ws-spill-"
+  @scratch_prefix "bp-ws-import-"
   @owner_suffix ".owner"
 
   # See the moduledoc's derivation: ~130 s measured server-side (wave 7) plus
@@ -251,7 +257,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   # match the same prefixes and are collected with their subject, never on
   # their own).
   defp candidates(dir) do
-    [@bundle_prefix, @spill_prefix]
+    [@bundle_prefix, @spill_prefix, @scratch_prefix]
     |> Enum.flat_map(fn prefix -> Path.wildcard(Path.join(dir, prefix <> "*")) end)
     |> Enum.reject(&String.ends_with?(&1, @owner_suffix))
     |> Enum.uniq()

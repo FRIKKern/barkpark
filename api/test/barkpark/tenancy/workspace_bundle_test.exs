@@ -1093,6 +1093,368 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── bounded import: spill the body, extract to disk (pds-bl-bounded-import) ──
+
+  describe "bounded import (PDS wave 23)" do
+    test "unpack_to_dir/2 answers the SAME manifest and members as unpack/1, and every " <>
+           "per-table md5 folds INCREMENTALLY off disk — and can still FAIL" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle_path} = WorkspaceBundle.export_to_file(ws_a.id)
+      dir = Path.join(Archive.spill_dir(), "unpack-to-dir-#{System.unique_integer([:positive])}")
+
+      try do
+        # The binary shape (the one the tenancy tripwires read) …
+        {manifest_bin, dumps_bin} = Archive.unpack(File.read!(bundle_path))
+        # … and the disk shape.
+        {manifest_disk, paths} = Archive.unpack_to_dir(bundle_path, dir)
+
+        assert manifest_disk == manifest_bin
+        assert Map.keys(paths) |> Enum.sort() == Map.keys(dumps_bin) |> Enum.sort()
+
+        # Same member NAMES, same member BYTES — proven by md5 folded over
+        # File.stream!, never :crypto.hash(:md5, File.read!(path)), which would
+        # pass while re-materialising the very 1.31 GB member this path exists
+        # to keep out of the BEAM.
+        for %{"name" => table, "md5" => md5} <- manifest_disk["tables"],
+            path = paths[table],
+            not is_nil(path) do
+          assert md5_stream(path) == md5,
+                 "member #{table}: on-disk bytes do not match the manifest md5"
+
+          assert md5_stream(path) ==
+                   :crypto.hash(:md5, dumps_bin[table]) |> Base.encode16(case: :lower)
+        end
+
+        # PROVE THE FOLD CAN FAIL. A tripwire that cannot red is decoration:
+        # mutate one member ON DISK by a single byte and the same fold must
+        # diverge from the manifest.
+        [{table, path} | _] =
+          paths
+          |> Enum.filter(fn {_t, p} -> File.stat!(p).size > 0 end)
+          |> Enum.sort()
+
+        original = md5_stream(path)
+        File.write!(path, "x", [:append])
+
+        refute md5_stream(path) == original,
+               "appending a byte to member #{table} did not change the streamed md5 — " <>
+                 "the fold is not reading the file"
+
+        refute md5_stream(path) ==
+                 Enum.find_value(manifest_disk["tables"], fn
+                   %{"name" => ^table, "md5" => md5} -> md5
+                   _ -> nil
+                 end)
+      after
+        File.rm_rf(dir)
+        File.rm(bundle_path)
+      end
+    end
+
+    test "unpack/1 KEEPS its binary contract, so the 20 cross-tenant refutes stay real" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {_manifest, dumps} = Archive.unpack(bundle)
+
+      # Every value is BYTES. If this ever became %{table => path}, every
+      # `refute dumps[t] =~ "<marker>"` below would pass vacuously — the marker
+      # is in the file, not in its name.
+      for {table, value} <- dumps do
+        assert is_binary(value), "dumps[#{inspect(table)}] must be COPY bytes, not a path"
+      end
+
+      # The vacuity itself, demonstrated rather than argued: A's own id is IN
+      # A's documents bytes, and it is NOT in the path that would name them.
+      assert dumps["documents"] =~ ws_a.id
+
+      fake_path_shape = Map.new(dumps, fn {t, _} -> {t, "/tmp/tables/#{t}.copy"} end)
+      refute fake_path_shape["documents"] =~ ws_a.id
+
+      # THE COUNT, STATED. Twenty `refute dumps[…] =~ …` cross-tenant isolation
+      # tripwires ride this contract across the two bundle suites. If a future
+      # change flips `unpack/1` to paths, they all go quietly green — so the
+      # count is pinned here, in the same file, next to the reason.
+      counted =
+        for file <- [
+              "test/barkpark/tenancy/workspace_bundle_test.exs",
+              "test/barkpark/tenancy/workspace_bundle_dev_profile_test.exs"
+            ],
+            line <- File.stream!(file),
+            not String.starts_with?(String.trim_leading(line), "#"),
+            String.match?(line, ~r/refute\s+\w*dumps\[/),
+            reduce: 0 do
+          n -> n + 1
+        end
+
+      assert counted == 20,
+             "expected 20 `refute …dumps[…]` cross-tenant tripwires riding unpack/1's " <>
+               "binary contract; found #{counted}. If you added or removed one, update this " <>
+               "count deliberately — do not delete the assertion."
+    end
+
+    test "import_bundle_file/2 restores the same rows import_bundle/2 does, streaming " <>
+           "each member off disk, and leaves NO scratch behind" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, _} = Archive.unpack(bundle)
+      {:ok, bundle_path} = WorkspaceBundle.export_to_file(ws_a.id)
+
+      docs_before =
+        scalar("SELECT count(*) FROM documents WHERE workspace_id=$1::text::uuid", [ws_a.id])
+
+      assert docs_before > 0
+
+      purge_workspace!(ws_a.id, manifest)
+
+      assert scalar("SELECT count(*) FROM documents WHERE workspace_id=$1::text::uuid", [ws_a.id]) ==
+               0
+
+      spill_dir = Archive.spill_dir()
+      scratch_before = scratch_dirs(spill_dir)
+
+      try do
+        assert {:ok, stats} = WorkspaceBundle.import_bundle_file(bundle_path)
+        assert stats.total_rows > 0
+        assert stats.manifest["format"] == "bp-export-v1"
+
+        assert scalar("SELECT count(*) FROM documents WHERE workspace_id=$1::text::uuid", [
+                 ws_a.id
+               ]) == docs_before
+
+        assert_no_orphans!()
+
+        # The extraction directory is gone — no member survives the import.
+        assert scratch_dirs(spill_dir) == scratch_before
+
+        assert Path.wildcard(Path.join(Path.dirname(bundle_path), "members-*")) == [],
+               "an extraction directory survived import_bundle_file/2"
+      after
+        File.rm(bundle_path)
+      end
+    end
+
+    test "a member name that escapes the extraction root is REFUSED BY NAME, and nothing " <>
+           "is written outside the root" do
+      root = Path.join(Archive.spill_dir(), "traversal-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      outside = Path.join(root, "outside")
+      dir = Path.join(root, "extract")
+      File.mkdir_p!(outside)
+
+      try do
+        for evil <- [~c"../../evil.copy", ~c"tables/../../evil.copy", ~c"/etc/evil.copy"] do
+          path = hand_packed_tar(root, evil)
+
+          e =
+            assert_raise Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError, fn ->
+              Archive.unpack_to_dir(path, dir)
+            end
+
+          assert e.code == "invalid_bundle"
+
+          assert e.message =~ "evil.copy",
+                 "the refusal must NAME the offending member; got: #{e.message}"
+
+          File.rm(path)
+        end
+
+        # A DIRECTORY member is refused on type, not name — a symlink/dir member
+        # is the other way a tar escapes a cwd.
+        dirmember = hand_packed_tar(root, {:dir, outside})
+
+        assert_raise Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError,
+                     ~r/not a regular file/,
+                     fn ->
+                       Archive.unpack_to_dir(dirmember, dir)
+                     end
+
+        # Refused BEFORE extraction: not one byte landed.
+        refute File.exists?(Path.join(root, "evil.copy"))
+        assert File.ls!(outside) == []
+        assert (File.exists?(dir) and File.ls!(dir) == []) or not File.exists?(dir)
+      after
+        File.rm_rf(root)
+      end
+    end
+
+    test "the free-space precondition refuses BEFORE the spill, and says so when it cannot " <>
+           "be performed" do
+      dir = Archive.spill_dir()
+
+      assert {:ok, free} = Archive.free_space(dir)
+      assert free > 0
+
+      # Sufficient → verified, with the number.
+      assert {:ok, {:verified, ^free}} = Archive.check_free_space(dir, 1)
+
+      # Short → a NAMED refusal carrying both sides of the comparison.
+      assert {:error, {:insufficient_disk_space, info}} =
+               Archive.check_free_space(dir, free + 1_000_000)
+
+      assert info.free_bytes == free
+      assert info.required_bytes == free + 1_000_000
+      assert info.dir == dir
+
+      # Unperformable → says so, never a silent pass dressed as a check.
+      assert {:ok, {:unverified, reason}} = Archive.check_free_space("/no/such/dir/at/all", 1)
+      assert reason in [:df_failed, :df_unparsable, :df_unavailable]
+    end
+
+    test "the janitor collects an abandoned import scratch DIRECTORY" do
+      dir = Path.join(Archive.spill_dir(), "janitor-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+
+      try do
+        scratch = Path.join(dir, "#{Archive.scratch_prefix()}999")
+        File.mkdir_p!(Path.join(scratch, "members-1"))
+        File.write!(Path.join(scratch, "body.tar"), "x")
+        File.write!(Path.join([scratch, "members-1", "documents.copy"]), "y")
+
+        old = System.os_time(:second) - 10_000
+        File.touch!(scratch, old)
+
+        assert {:ok, %{removed: removed}} =
+                 Barkpark.Tenancy.WorkspaceBundle.Janitor.sweep(dir: dir, max_age_seconds: 60)
+
+        assert scratch in removed,
+               "the janitor did not collect the scratch DIRECTORY #{scratch}"
+
+        refute File.exists?(scratch)
+      after
+        File.rm_rf(dir)
+      end
+    end
+
+    @tag timeout: 300_000
+    test "MEASURED: the disk path peaks at ~1x the largest member, not ~3x the archive" do
+      dir = Path.join(Archive.spill_dir(), "measure-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+
+      # One dominant member, so "1x the largest member" is a number this fixture
+      # can actually show. 48 MiB — big enough that the binary path's ~3x is far
+      # outside sampling noise, small enough to stay a unit test.
+      member_bytes = 48 * 1024 * 1024
+      spill = Archive.spill_path(dir, "documents")
+      File.write!(spill, String.duplicate("0123456789abcdef", div(member_bytes, 16)))
+
+      manifest = %{"format" => "bp-export-v1", "grain" => "workspace", "tables" => []}
+      path = Archive.pack(manifest, %{"documents" => spill}, dir: dir)
+
+      try do
+        binary_peak = peak_bytes(fn -> Archive.unpack(File.read!(path)) end)
+
+        disk_peak =
+          peak_bytes(fn ->
+            out = Path.join(dir, "out-#{System.unique_integer([:positive])}")
+            Archive.unpack_to_dir(path, out)
+            File.rm_rf(out)
+          end)
+
+        IO.puts(
+          "\n[pds-bl-bounded-import-unpack] MEASURED, this run, on a #{member_bytes}-byte " <>
+            "largest member (OTP #{System.otp_release()}): " <>
+            "unpack/1 (binary, [:memory]) peak=#{binary_peak} B = " <>
+            "#{Float.round(binary_peak / member_bytes, 2)}x the largest member · " <>
+            "unpack_to_dir/2 peak=#{disk_peak} B = " <>
+            "#{Float.round(disk_peak / member_bytes, 2)}x. " <>
+            "THE CLAIM IS '1x THE LARGEST MEMBER', NEVER 'CONSTANT MEMORY'. Runs of this " <>
+            "test have measured the disk path anywhere from 0.01x to 1.01x — the spread " <>
+            "IS the point: :erl_tar exposes no chunked EXTRACT API, so whether a given " <>
+            "member is held whole is an implementation detail, and 1x the largest member " <>
+            "is the bound actually owed. On guerrilla that is ~1.31 GB (mutation_events) " <>
+            "— RE-MEASURE rather than quoting: the database grew 63.6 MB in one day."
+        )
+
+        assert disk_peak < binary_peak,
+               "unpack_to_dir/2 peaked at #{disk_peak} B, no better than unpack/1's " <>
+                 "#{binary_peak} B"
+
+        # The bound is 1x the largest member; the sampler is a 1 ms poll over a
+        # shared VM, so the assertion carries one member of slack rather than
+        # sitting exactly on the number it is measuring.
+        assert disk_peak < 2 * member_bytes,
+               "unpack_to_dir/2 peaked at #{disk_peak} B = " <>
+                 "#{Float.round(disk_peak / member_bytes, 2)}x the largest member — past " <>
+                 "the 1x bound this slice claims (plus slack)"
+
+        assert binary_peak > div(3 * member_bytes, 2),
+               "the binary path measured #{Float.round(binary_peak / member_bytes, 2)}x — " <>
+                 "if it is no longer a multiple of the archive, re-derive the comparison " <>
+                 "rather than keeping this number"
+      after
+        File.rm_rf(dir)
+      end
+    end
+  end
+
+  # md5 folded over a stream, never over File.read!/1 — the whole point is that
+  # no member is ever a binary in the BEAM.
+  defp md5_stream(path) do
+    path
+    |> File.stream!(65_536)
+    |> Enum.reduce(:crypto.hash_init(:md5), &:crypto.hash_update(&2, &1))
+    |> :crypto.hash_final()
+    |> Base.encode16(case: :lower)
+  end
+
+  defp scratch_dirs(dir) do
+    dir
+    |> File.ls!()
+    |> Enum.filter(&String.starts_with?(&1, Archive.scratch_prefix()))
+    |> Enum.sort()
+  end
+
+  # A tar the ENGINE would never produce: a hostile member name (or a directory
+  # member) beside a valid manifest.
+  defp hand_packed_tar(dir, member) do
+    path = Path.join(dir, "hostile-#{System.unique_integer([:positive])}.tar")
+    {:ok, tar} = :erl_tar.open(String.to_charlist(path), [:write])
+
+    try do
+      :ok = :erl_tar.add(tar, Jason.encode!(%{"format" => "bp-export-v1"}), ~c"manifest.json", [])
+
+      case member do
+        {:dir, real} -> :ok = :erl_tar.add(tar, String.to_charlist(real), ~c"tables", [])
+        name -> :ok = :erl_tar.add(tar, "row\n", name, [])
+      end
+    after
+      :erl_tar.close(tar)
+    end
+
+    path
+  end
+
+  # Peak `:erlang.memory(:total)` above baseline while `fun` runs, sampled from a
+  # separate process (the traced one is too busy to sample itself).
+  defp peak_bytes(fun) do
+    :erlang.garbage_collect()
+    baseline = :erlang.memory(:total)
+    me = self()
+    sampler = spawn_link(fn -> sample(me, baseline, 0) end)
+
+    try do
+      fun.()
+    after
+      send(sampler, {:stop, self()})
+    end
+
+    receive do
+      {:peak, peak} -> peak
+    after
+      5_000 -> flunk("the memory sampler never answered")
+    end
+  end
+
+  defp sample(parent, baseline, peak) do
+    receive do
+      {:stop, pid} -> send(pid, {:peak, peak})
+    after
+      1 ->
+        sample(parent, baseline, max(peak, :erlang.memory(:total) - baseline))
+    end
+  end
+
   defp spill_files(dir) do
     dir |> File.ls!() |> Enum.filter(&String.starts_with?(&1, "bp-ws-spill-")) |> Enum.sort()
   end
