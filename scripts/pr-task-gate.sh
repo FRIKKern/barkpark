@@ -126,7 +126,21 @@ RETRY_DELAY="${PR_TASK_GATE_RETRY_DELAY:-2}"
 case "$RETRIES" in ''|*[!0-9]*|0) echo "pr-task-gate: PR_TASK_GATE_RETRIES must be a positive integer, got '${RETRIES}'" >&2; exit 1 ;; esac
 case "$RETRY_DELAY" in ''|*[!0-9]*) echo "pr-task-gate: PR_TASK_GATE_RETRY_DELAY must be a non-negative integer, got '${RETRY_DELAY}'" >&2; exit 1 ;; esac
 
-fail()      { echo "pr-task-gate: FAIL: $*" >&2; exit 1; }
+# The refusal has to survive the trip to the check-run UI. A plain stderr line
+# does not: a red `PR references an active task` exposed output.title=null,
+# output.summary=null and a single annotation reading `Process completed with
+# exit code 1.` — while all 17 fail() sites below already carry the exact
+# remediation command. GitHub's log parser only lifts WORKFLOW COMMANDS out of a
+# step's output, so the fix is the `::error title=…::` envelope, not the stream:
+# proven 2026-07-28 on a live throwaway run, this exact form written to stderr
+# from inside a called script, invoked exactly as .github/workflows/
+# pr-task-gate.yml invokes it, landed as `[failure] title=… | pr-task-gate:
+# FAIL: …`. Only `fail()` wears this title — `unchecked()` is an outage, not a
+# finding about the PR, and the workflow raises its own ::error for it.
+# CONSUMERS: the authored annotation is NOT annotations[0]. The runner's own
+# `Process completed with exit code 1.` and actions/checkout's Node-20 warning
+# both precede it, so select on a non-empty `.title`, never on index.
+fail()      { echo "::error title=PR is not task-backed::pr-task-gate: FAIL: $*" >&2; exit 1; }
 unchecked() { echo "pr-task-gate: UNCHECKED: $*" >&2; exit 2; }
 pass()      { echo "pr-task-gate: PASS: $*";        exit 0; }
 

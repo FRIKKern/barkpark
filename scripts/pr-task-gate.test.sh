@@ -457,7 +457,7 @@ if step_body no-such-step-id >/dev/null 2>&1; then
 else
   pass=$((pass+1)); printf 'ok   %-40s (aborts on an unknown step id)\n' "step extractor is falsifiable"
 fi
-for _s in verify cutoff; do
+for _s in verify cutoff hotfix hotfix_record; do
   if ! step_body "$_s" > "$fixtures/body.$_s" 2>/dev/null; then
     echo "TEST HARNESS FAIL: cannot extract step '$_s' from $WORKFLOW" >&2; exit 99
   fi
@@ -547,6 +547,122 @@ cutoff_case "step cutoff: pre-gate grandfathers" "$SHA_PRE" 0 "enforced=0"
 # UNKNOWN must be a loud red, and must never write enforced= at all.
 cutoff_case "step cutoff: unknown base reds" "0000000000000000000000000000000000000000" 1 "-" "enforced="
 cutoff_case "step cutoff: garbage base reds" "not-a-sha-at-all" 1 "-" "enforced="
+
+# -- hotfix step: the emergency exit must engage regardless of LABEL ORDER -----
+# Until this block existed, `for _s in verify cutoff` extracted exactly two step
+# ids, so NO fixture could execute the hotfix step body. Measured consequence:
+# replacing the detector line with `if true; then` — routing every PR through the
+# bypass, i.e. disabling the task gate repo-wide — left this file at 73 passed /
+# 0 failed. A kill mutant that a suite cannot see is a suite that is not watching
+# that code at all, which is why this is not a one-line fix.
+#
+# The defect these four cases pin: `.pull_request.labels[]?.name == "hotfix!"` is
+# a GENERATOR, one boolean per label, and `jq -e` takes its exit status from the
+# LAST one. Against the pre-fix line, hotfix-first and hotfix-middle both report
+# hotfix=0 — the lane silently does not engage the moment a human adds a second
+# label to an urgent PR. Point PR_TASK_GATE_WORKFLOW at a pre-fix copy of the
+# workflow and exactly those two go red.
+hotfix_case() { # hotfix_case <label> <labels-json-array> <want hotfix=N>
+  local label="$1" labels="$2" want="$3" got
+  local ev="$fixtures/hotfix.event.json" go="$fixtures/hotfix.output" so="$fixtures/hotfix.out"
+  printf '{"pull_request":{"number":1,"labels":%s}}' "$labels" > "$ev"
+  : > "$go"; : > "$so"
+  ( GITHUB_EVENT_PATH="$ev" GITHUB_OUTPUT="$go" \
+    bash --noprofile --norc -e -o pipefail "$fixtures/body.hotfix" ) > "$so" 2>&1
+  got=$?
+  if [ "$got" != "0" ]; then
+    fail=$((fail+1)); printf 'FAIL %-40s step exited %s (must always decide, never abort)\n' "$label" "$got"; return
+  fi
+  if ! grep -qFx -- "$want" "$go"; then
+    fail=$((fail+1)); printf 'FAIL %-40s GITHUB_OUTPUT wants %s (got: %s)\n' "$label" "$want" "$(tr '\n' ' ' < "$go")"; return
+  fi
+  pass=$((pass+1)); printf 'ok   %-40s (%s)\n' "$label" "$want"
+}
+
+hotfix_case "step hotfix: label first engages"  '[{"name":"hotfix!"},{"name":"bug"}]' "hotfix=1"
+hotfix_case "step hotfix: label last engages"   '[{"name":"bug"},{"name":"hotfix!"}]' "hotfix=1"
+hotfix_case "step hotfix: label middle engages" '[{"name":"bug"},{"name":"hotfix!"},{"name":"docs"}]' "hotfix=1"
+hotfix_case "step hotfix: no label, no lane"    '[{"name":"bug"}]' "hotfix=0"
+hotfix_case "step hotfix: no labels at all"     '[]' "hotfix=0"
+
+# -- hotfix record: an UNWRITTEN override record is the job's failure ----------
+# The lane's whole justification is that the exception SATISFIES the invariant —
+# a task exists for the change. The record step used to warn and `exit 0` on a
+# missing token or a non-200 ledger, and every step below it carries
+# `if: hotfix != '1'`, so once the lane engaged the job reported SUCCESS no
+# matter what was written: a silent, unattributable waiver of a required check.
+# A POST-accepting stub stands in for the ledger so the SUCCESS path is exercised
+# too — a pair of red cases alone would be satisfied by a step that always reds.
+recport="$fixtures/rec.port"
+python3 - "$recport" >/dev/null 2>&1 <<'PY' &
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class H(BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.end_headers(); self.wfile.write(b'{"results":[]}')
+    def log_message(self, *a): pass
+
+srv = HTTPServer(("127.0.0.1", 0), H)
+with open(sys.argv[1], "w") as f:
+    f.write("%d\n" % srv.server_address[1])
+srv.serve_forever()
+PY
+REC_PID=$!
+trap 'kill "${SRV_PID:-0}" "${FLAKY_PID:-0}" "${REC_PID:-0}" 2>/dev/null; wait "${SRV_PID:-0}" "${FLAKY_PID:-0}" "${REC_PID:-0}" 2>/dev/null; rm -rf "$fixtures"' EXIT
+rec_port=""
+for _ in $(seq 1 100); do
+  [ -s "$recport" ] && rec_port="$(tr -d ' \n' < "$recport")" && [ -n "$rec_port" ] && break
+  sleep 0.1
+done
+[ -n "$rec_port" ] || { echo "TEST HARNESS FAIL: the record stub never announced a port" >&2; exit 99; }
+REC_BASE="http://127.0.0.1:$rec_port"
+
+record_case() { # record_case <label> <token> <ledger base> <want exit> <want substring>
+  local label="$1" tok="$2" base="$3" want="$4" sub="$5" got
+  local so="$fixtures/record.out" ss="$fixtures/record.summary"
+  : > "$so"; : > "$ss"
+  ( GITHUB_STEP_SUMMARY="$ss" LEDGER_BASE="$base" TASK_TOKEN="$tok" \
+    PR_NUMBER=4242 PR_TITLE="urgent: the roof is on fire" \
+    PR_URL="https://github.com/example/repo/pull/4242" \
+    bash --noprofile --norc -e -o pipefail "$fixtures/body.hotfix_record" ) > "$so" 2>&1
+  got=$?
+  judge "$label" "$want" "$got" "$sub" "$so"
+}
+
+record_case "hotfix record: no token REDS"   ""    "$REC_BASE"        1 "::error title=Hotfix override not recorded::"
+record_case "hotfix record: dead ledger REDS" "tok" "http://127.0.0.1:1" 1 "::error title=Hotfix override not recorded::"
+record_case "hotfix record: filed passes"    "tok" "$REC_BASE"        0 "::notice title=Hotfix lane::"
+
+# -- the refusal must be MACHINE-READABLE, not just human-readable -------------
+# A red required check exposed output.title=null, output.summary=null and one
+# annotation reading `Process completed with exit code 1.` — while fail() had the
+# exact remediation in hand and wrote it to plain stderr, where GitHub's log
+# parser does not look. The missing piece was the WORKFLOW COMMAND, not the
+# stream: proven 2026-07-28 on a live throwaway run, an `::error title=…::`
+# written to stderr from inside a called script's fail(), invoked exactly as this
+# workflow invokes it, landed as `[failure] title=… | pr-task-gate: FAIL: …`
+# while a plain stderr line produced no annotation at all.
+#
+# ANNOTATION-ORDER TRAP, for whoever consumes this next: the authored annotation
+# is NOT annotations[0]. The runner's own `Process completed with exit code 1.`
+# and actions/checkout's Node-20 deprecation warning both PRECEDE it in
+# `gh api .../check-runs/<id>/annotations`. Select on a non-empty `.title`
+# (`jq '[.[] | select(.title != null and .title != "")] | .[0]'`), never on index.
+check_says "no task ref annotates"  1 '::error title=PR is not task-backed::' 'TASK_ID='
+check_says "violation annotates"    1 '::error title=PR is not task-backed::' 'TASK_ID=openone'
+# UNCHECKED (exit 2) must NOT wear the "not task-backed" title: it is not a
+# finding about the PR, and the workflow raises its own ::error for it.
+: > "$fixtures/says.out"
+( TASK_ID=active LEDGER_BASE=http://127.0.0.1:1 PR_TASK_GATE_RETRIES=1 bash "$GATE" ) \
+  > "$fixtures/says.out" 2>&1
+if grep -qF -- 'title=PR is not task-backed' "$fixtures/says.out"; then
+  fail=$((fail+1)); printf 'FAIL %-40s an outage was annotated as a PR fault\n' "outage is not a PR fault"
+else
+  pass=$((pass+1)); printf 'ok   %-40s (no false accusation)\n' "outage is not a PR fault"
+fi
 
 echo "---"
 echo "passed: $pass  failed: $fail"

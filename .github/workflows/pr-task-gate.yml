@@ -29,8 +29,10 @@ name: pr-task-gate
 #     linked override task (the durable record), rather than silently waiving
 #     the requirement. The exception path SATISFIES the invariant (a task now
 #     exists for the change) instead of skipping it. Auto-file needs a write
-#     token secret (BARKPARK_TASK_TOKEN); without it the lane still passes but
-#     logs that the record was not filed — a human-provisioned gate.
+#     token secret (BARKPARK_TASK_TOKEN), and the record is the CONDITION of the
+#     bypass: if the task cannot be filed, the lane REFUSES (red) rather than
+#     passing with a warning nobody reads. A bypass with no attributable record
+#     is indistinguishable from the gate being off.
 #
 # Enforcement note: `main` has no branch protection today, so a red check here
 # does not yet mechanically block a merge. To make it binding, add this job to
@@ -51,10 +53,16 @@ on:
     # base.sha on every trigger, and the hotfix auto-file is keyed on the PR
     # number via createIfNotExists, so re-firing cannot duplicate it.
     #
-    # Residue, named not hidden: adding a `hotfix!` LABEL after open emits a
-    # `labeled` event, not `edited`, so the hotfix lane keeps the same non-refire
-    # property. Widening to `labeled` is deliberately out of scope here.
-    types: [opened, synchronize, reopened, edited]
+    # `labeled`/`unlabeled` are load-bearing for the SAME reason, and they are the
+    # emergency exit's own re-fire: applying `hotfix!` to an already-red open PR
+    # emits `labeled`, not `edited`, so without them the lane could only be
+    # entered by pushing a commit — during the emergency the lane exists for.
+    # `unlabeled` is the other half and is not symmetry for its own sake: removing
+    # the label must RE-RED the PR, otherwise a bypass, once taken, is permanent
+    # and invisible. Both are safe to re-fire on for the reasons above: the cutoff
+    # recomputes from base.sha every time, and the auto-file is createIfNotExists
+    # keyed on the PR number.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -120,20 +128,41 @@ jobs:
           fi
 
       - name: Detect hotfix label
+        # `id:` is how scripts/pr-task-gate.test.sh addresses this step body to
+        # execute it verbatim under GitHub's real shell. Do not remove it.
         id: hotfix
         if: steps.cutoff.outputs.enforced == '1'
         run: |
           set -uo pipefail
-          if jq -e '.pull_request.labels[]?.name == "hotfix!"' "$GITHUB_EVENT_PATH" >/dev/null; then
+          # ORDER-INDEPENDENT, and that is the whole point. `.labels[]?.name ==
+          # "hotfix!"` is a GENERATOR: it emits one boolean PER LABEL and `jq -e`
+          # sets its exit status from the LAST one. Measured on this jq:
+          # [hotfix!,bug] -> exit 1, [bug,hotfix!] -> exit 0, [bug] -> exit 1,
+          # [] -> exit 4. So the emergency lane engaged only when `hotfix!`
+          # happened to be the last label — it would have failed silently the
+          # first time a human added a second label to a genuinely urgent PR.
+          # Collecting the names into ONE array and asking `index` once yields a
+          # single value, so the exit status answers the question actually asked.
+          if jq -e '[.pull_request.labels[]?.name] | index("hotfix!")' "$GITHUB_EVENT_PATH" >/dev/null; then
             echo "hotfix=1" >> "$GITHUB_OUTPUT"
           else
             echo "hotfix=0" >> "$GITHUB_OUTPUT"
           fi
 
-      # D3: the hotfix lane files a task instead of waiving the rule. Best-effort
-      # — the label alone passes the gate; the auto-file is the durable record,
-      # and its absence (missing token) is logged, not fatal.
+      # D3: the hotfix lane files a task instead of waiving the rule — and the
+      # record is the CONDITION of the bypass, not a courtesy alongside it. This
+      # step used to warn-and-`exit 0` on a missing token or a non-200 ledger, and
+      # it could not have reded anyway: every step below carries `if: hotfix !=
+      # '1'`, so once the lane engaged this step was the only one left and the job
+      # reported SUCCESS regardless of what it wrote. That is a silent, unlogged
+      # waiver of a required check. An unwritten override record is now the JOB'S
+      # FAILURE: no record, no bypass. The `::notice` announcing the record has
+      # moved BELOW the write, because announcing a durable record before
+      # attempting to write it is how the log came to disagree with the ledger.
       - name: Hotfix lane — auto-file the override task
+        # `id:` is how scripts/pr-task-gate.test.sh addresses this step body to
+        # execute it verbatim under GitHub's real shell. Do not remove it.
+        id: hotfix_record
         if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix == '1'
         env:
           LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
@@ -143,10 +172,9 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -uo pipefail
-          echo "::notice title=Hotfix lane::PR labelled 'hotfix!' — gate passes; filing an override task as the durable record."
           if [ -z "${TASK_TOKEN:-}" ]; then
-            echo "::warning title=Hotfix override not recorded::BARKPARK_TASK_TOKEN secret is not set, so the override task was not auto-filed. Provision the secret to close this gap (see merge-gates.md)." | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
+            echo "::error title=Hotfix override not recorded::PR #${PR_NUMBER} is labelled 'hotfix!', but BARKPARK_TASK_TOKEN is not set, so the override task could not be filed. The hotfix lane is a RECORDED bypass, not a silent one — with no record it is refused. Provision the secret (see docs/ops/merge-gates.md), or remove the 'hotfix!' label and back the PR with a task." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
           # Idempotent create keyed on the PR number, so re-runs don't duplicate.
           # jq --arg reads values as DATA — the attacker-controlled PR title
@@ -166,9 +194,10 @@ jobs:
             -H "Content-Type: application/json" \
             --data "$body" 2>/dev/null || echo 000)"
           if [ "$code" = "200" ] || [ "$code" = "201" ]; then
-            echo "Filed override task hotfix-pr-${PR_NUMBER}." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::notice title=Hotfix lane::PR #${PR_NUMBER} passes under the 'hotfix!' lane; override task hotfix-pr-${PR_NUMBER} is filed on the ledger as the durable record." | tee -a "$GITHUB_STEP_SUMMARY"
           else
-            echo "::warning title=Hotfix auto-file failed::Ledger returned HTTP ${code}; the gate still passes but the override task was not recorded." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Hotfix override not recorded::Filing the override task for PR #${PR_NUMBER} returned HTTP ${code}, so the bypass has no durable record and is refused. Re-run this check once the ledger answers, or remove the 'hotfix!' label and back the PR with a task." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
       - name: Extract the task reference from the PR
