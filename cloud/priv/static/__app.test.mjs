@@ -9797,6 +9797,26 @@ test("ssw8 siteRow: the FIRST row a stranger sees — real fields, a binding chi
   assert.ok(plain.includes("not linked") && plain.includes("Manual"), "and still reads honestly otherwise");
 });
 
+test("ssw8: siteLiveUrl — the manufactured 'Visit ↗' strips to URL-safe BEFORE escaping, never after", () => {
+  const bp = { url: "https://acme.barkpark.cloud/" };
+  // The payload's own url always wins — nothing is manufactured when the server sent one.
+  assert.equal(hooks.siteLiveUrl({ url: "https://x.test/s/" }, bp), "https://x.test/s/");
+  // The normal case: trailing slash on the box url is collapsed, one is appended.
+  assert.equal(hooks.siteLiveUrl({ slug: "blog" }, bp), "https://acme.barkpark.cloud/sites/blog/");
+  // THE ORDERING. esc()-then-strip turned `a&b` into `a&amp;b` and the strip kept
+  // the escape's LETTERS, yielding /sites/aampb/ — a confident link to a site that
+  // does not exist. Strip-then-nothing drops the metacharacter instead.
+  assert.equal(hooks.siteLiveUrl({ slug: "a&b" }, bp), "https://acme.barkpark.cloud/sites/ab/");
+  assert.ok(!hooks.siteLiveUrl({ slug: "a&b" }, bp).includes("amp"),
+    "an HTML entity's letters must never survive into a URL path");
+  for (const s of ["a<b", 'a"b', "a'b", "a>b"]) {
+    assert.equal(hooks.siteLiveUrl({ slug: s }, bp), "https://acme.barkpark.cloud/sites/ab/");
+  }
+  // No box url and no site url: null, so callers render no link rather than a broken one.
+  assert.equal(hooks.siteLiveUrl({ slug: "blog" }, null), null);
+  assert.equal(hooks.siteLiveUrl({}, bp), null);
+});
+
 test("gr-p3: siteStatusChip — Deploying while in flight, Live only when the pointer names a live row, else nothing", () => {
   const site = { current_deployment_id: "d1" };
   const live = [{ id: "d1", status: "live" }];

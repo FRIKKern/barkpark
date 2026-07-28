@@ -7048,10 +7048,19 @@
   // surface serializes it as `s.url` (the CP loads the instance there); the LIST
   // surfaces skip that N+1, so we reconstruct it from the instance the row
   // already carries. Null when neither is available (never invent a dead link).
+  // ssw8: this MANUFACTURES a URL nobody fetched, so the least it owes is the
+  // right characters. It used to esc() the slug and THEN strip to the URL-safe
+  // class — HTML-escaping first turns `&` into `&amp;`, whose letters SURVIVE the
+  // strip, so a slug `a&b` produced `/sites/aampb/`: a confidently-wrong link to a
+  // site that does not exist. Strip FIRST; the surviving class is already
+  // HTML-inert, and siteOpenLink esc()s the finished href regardless.
+  // LATENT, not live: Site's changeset pins slugs to ^[a-z0-9][a-z0-9-]*$, so no
+  // stored row can reach the bad branch today. This removes the trap, it does not
+  // fix an incident.
   function siteLiveUrl(s, bp) {
     if (s && s.url) return s.url;
     if (bp && bp.url && s && s.slug) {
-      return String(bp.url).replace(/\/+$/, "") + "/sites/" + esc(s.slug).replace(/[^A-Za-z0-9._-]/g, "") + "/";
+      return String(bp.url).replace(/\/+$/, "") + "/sites/" + String(s.slug).replace(/[^A-Za-z0-9._-]/g, "") + "/";
     }
     return null;
   }
@@ -7268,7 +7277,14 @@
       role: role,
       label: label,
       title: (pathState === "unknown" ? "No content dataset on this site" : "Content dataset " + path) +
-        " · " + tokenLabel,
+        " · " + tokenLabel +
+        // A mismatch renders as "a ≠ b" and the two sides are otherwise
+        // indistinguishable — the hover has to say WHICH payload field each one
+        // came from, or "report, don't resolve" hands the operator a
+        // contradiction they cannot act on.
+        (mismatch
+          ? " · this payload contradicts itself: the left value is the site row's workspace/project/dataset, the right is its bootstrap_* twin of the same column"
+          : ""),
       // A LIST chip is signal, not decoration: a row whose payload names no
       // triple AND holds no token has nothing to say about a binding, so it says
       // nothing. The DETAIL rail still spells the unknown out — a surface you
@@ -18473,6 +18489,9 @@
       siteBindingPill: siteBindingPill,
       siteBindingChip: siteBindingChip,
       siteRow: siteRow,
+      // …and the URL the LIST surfaces manufacture when the payload carries none.
+      // Unasserted until ssw8 despite being the "Visit ↗" a stranger clicks first.
+      siteLiveUrl: siteLiveUrl,
       // G-04 Notifications (the crown, GR33/GR34/GR36): the pure builders for the
       // settings-anatomy page — cell/channel state, the matrix + roster + email +
       // delivery-log markup, and the routing-write helpers. DOM mounts
