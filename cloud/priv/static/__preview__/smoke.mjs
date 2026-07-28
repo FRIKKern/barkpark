@@ -1617,7 +1617,7 @@ const EXPECTATIONS = {
   // connect card + the 9-verb capability matrix (dev-tier filtered, server-owned
   // gap reasons, bare dash where the server owns no reason).
   "providers-connected": {
-    what: "the roster (2 kinds, Disconnect…), the all-connected replace state, and the honest capability matrix render",
+    what: "the roster (2 kinds, Disconnect…), the all-connected ROTATION state, and the honest capability matrix render",
     check(reg) {
       const roster = (reg.get("provider-roster") || {}).innerHTML || "";
       assert.ok(roster.includes("set-section"), "the roster rides the .set-* anatomy");
@@ -1628,12 +1628,17 @@ const EXPECTATIONS = {
       assert.ok(roster.includes("data-prov-disconnect"), "an admin roster carries the typed-confirm Disconnect");
 
       // Both connectable providers are already connected → the connect card is in
-      // the "disconnect to replace" state: it offers NO second connect (the
-      // additive-duplicate guard, GR36 already-connected ruling).
+      // the ROTATION state: a connected kind stays armable and its submit replaces
+      // the stored credential in place (GR44 upsert on (team_id,kind), executed by
+      // gr-bl-provider-reconnect-client-guard). It must NEVER tell the operator to
+      // destroy a working credential first.
       const connect = (reg.get("provider-connect") || {}).innerHTML || "";
       assert.ok(connect.includes("set-section") && connect.includes("Connect a provider"), "the connect card renders");
-      assert.ok(connect.includes("Every supported provider is connected"), "the all-connected replace note renders");
-      assert.ok(!connect.includes("data-connect-submit"), "no second connect is offered for already-connected kinds");
+      assert.ok(connect.includes("data-connect-submit"), "a connected kind can still be re-submitted (rotation)");
+      assert.ok(connect.includes("data-connect-rotating"), "the card says it is REPLACING the stored credential");
+      assert.ok(connect.includes("Verify &amp; replace"), "the verb reads replace, not connect");
+      assert.ok(!connect.includes("Disconnect one above"), "the destroy-first instruction is gone");
+      assert.ok(!/data-connect-kind="[a-z]+"[^>]*disabled/.test(connect), "no connected kind is a disabled ghost");
 
       const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
       assert.ok(matrix.includes("cap-matrix"), "the capability matrix renders");
