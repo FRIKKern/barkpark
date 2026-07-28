@@ -194,8 +194,19 @@ test("the polarity helpers are TOTAL over the undecorated refusal literal — no
 
 // --- the charter-grep path rule ---------------------------------------------
 
-test("D65 promotes a charter grep to L2 and the screen admits it — the PATH rule refuses it anyway", () => {
-  assert.equal(deriveLevel(CHARTER_GREP_SPECIMEN), "L2");
+test("the charter grep is REFUSED BY PATH whatever the level grammar makes of it", () => {
+  // REVIEW FIX (wave 11): this asserted `deriveLevel(…) === "L2"`, which is
+  // MERGE-ORDER DEPENDENT. `tgw5-bl-level-mention-promotion` ships in this same
+  // wave and closes exactly D65's mention-promotion, so the identical command
+  // re-derives L3 the moment that branch lands — this file and that one are
+  // file-disjoint, and the pair would have turned main red whichever merged
+  // second. Measured both ways at this head: L2 before tgw5, L3 after.
+  //
+  // Pinning the level was never the point anyway. The load-bearing property is
+  // that the PATH rule refuses a charter grep in BOTH worlds — that is what
+  // "defence in depth" means, and asserting it that way is what makes the
+  // assertion independent of the level grammar it is defending against.
+  assert.ok(["L2", "L3"].includes(deriveLevel(CHARTER_GREP_SPECIMEN)), `unexpected level ${deriveLevel(CHARTER_GREP_SPECIMEN)}`);
   assert.equal(screenCommand(CHARTER_GREP_SPECIMEN).ok, true);
   assert.equal(refusesAsCharterGrep(CHARTER_GREP_SPECIMEN), true);
   const r = adjudicateCriterion({ index: 0, polarity: "pass", covers: true, criterion: "x", rerun: CHARTER_GREP_SPECIMEN }, REPO);

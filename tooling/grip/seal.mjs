@@ -102,6 +102,15 @@ export const NAMESPACE_RE = /^(tgw|truth-grip)/;
 // validation.ex:31 — @claimable_statuses is ~w(open blocked). `considering` is a
 // legitimate third disposition that leaves the pool without a false-done close.
 export const CLAIMABLE_STATUSES = new Set(["open", "blocked"]);
+// validation.ex:24 — the full ladder is open|in_progress|blocked|done|cancelled|
+// considering|researching. Exactly two of those are CLOSED, and clause (c) asks
+// only whether the root has closed. Reading (c) as "claimable" instead would
+// make it a duplicate of (b') AND print "the root already closed" for a root
+// that is merely `in_progress` — a false statement in the one program whose
+// entire job is refusing false statements. The verdict is unchanged either way
+// (a non-claimable root is absent from the ready pool, so (b') fails), so this
+// costs no strictness and buys an honest failure line.
+export const CLOSED_STATUSES = new Set(["done", "cancelled"]);
 export const PAGE = 500; // deliberately under the silent 1000 clamp
 export const CLAUSES = ["(a)", "(b)", "(b')", "(c)"]; // never "(d)" — D122
 
@@ -256,12 +265,18 @@ export const FROZEN_CRITERIA = [
   },
 ];
 
-// D65 is LIVE and aims straight at this seal: a purely LOCAL grep whose search
-// STRING mentions a remote form is PROMOTED to L2 and screens ADMITTED, so
-// grip's level derivation alone will rubber-stamp charter prose as remote
-// authority. An EXPLICIT PATH RULE, not a level test, is the only thing that
-// refuses it (D96's closing clause: no criterion evidence may be a local grep of
-// the charter).
+// D65: a purely LOCAL grep whose search STRING mentions a remote form was
+// PROMOTED to L2 and screened ADMITTED, so grip's level derivation alone would
+// rubber-stamp charter prose as remote authority. An EXPLICIT PATH RULE, not a
+// level test, is what refuses it (D96's closing clause: no criterion evidence
+// may be a local grep of the charter).
+//
+// `tgw5-bl-level-mention-promotion` ships in this same wave and closes the
+// promotion at its source — the same command re-derives L3 once that branch is
+// on main. This rule STAYS, and stays independent of it: the path rule is the
+// second layer, and a defence that only works while the first layer is broken
+// is not defence in depth. Nothing here asserts the level; the run prints
+// whatever the grammar says today.
 export const CHARTER_PATH_RE = /(charter|CHARTER)[^\s]*\.md/;
 export const CHARTER_GREP_SPECIMEN = 'grep -n "git show origin/main:" .claude/workflows/bp-truth-grip-charter.md';
 export function refusesAsCharterGrep(command) {
@@ -374,7 +389,8 @@ export function main(argv = process.argv.slice(2), out = console.log) {
     const a = rulings.every((r) => r.ok);
     const b = blocking.length === 0;
     const bPrime = pool.has(ROOT_ID);
-    const c = CLAIMABLE_STATUSES.has(rootDoc.lifecycle_status);
+    const rootStatus = rootDoc.lifecycle_status;
+    const c = !CLOSED_STATUSES.has(rootStatus);
     const holds = a && b && bPrime && c;
 
     // ── output ──
@@ -410,8 +426,8 @@ export function main(argv = process.argv.slice(2), out = console.log) {
     say(`  => (b') ${bPrime ? "PASS" : "FAIL — the root has left the pool, so (c)'s only enforcement is gone"}`);
     say("");
     say(`CLAUSE (c) the root closes LAST — it has not closed yet`);
-    say(`  ${ROOT_ID}.lifecycle_status = ${rootDoc.lifecycle_status}`);
-    say(`  => (c) ${c ? "PASS" : "FAIL — the root already closed; this predicate will not bless it retroactively"}`);
+    say(`  ${ROOT_ID}.lifecycle_status = ${rootStatus}  (closed = ${[...CLOSED_STATUSES].join("|")}; every other status is "not closed yet")`);
+    say(`  => (c) ${c ? "PASS" : `FAIL — the root is already ${rootStatus}; this predicate will not bless an out-of-order close retroactively`}`);
     say("");
     say("POLARITY, MEASURED — why \"just accept FAILED\" would be a SOFTENING:");
     for (const [label, cmd] of POLARITY_SPECIMENS) {
@@ -427,7 +443,8 @@ export function main(argv = process.argv.slice(2), out = console.log) {
     }
     say("  The screen REWARDS CONCEALING the host and PUNISHES DECLARING it. That asymmetry is");
     say("  more informative than any wrapper, and no L2 wrapper is manufactured here.");
-    say(`  D65 mention-promotion is live and aims at this seal: deriveLevel(${JSON.stringify(CHARTER_GREP_SPECIMEN)})`);
+    say(`  D65's charter-grep shape, adjudicated by PATH regardless of level (tgw5 closes the promotion itself):`);
+    say(`  deriveLevel(${JSON.stringify(CHARTER_GREP_SPECIMEN)})`);
     say(`  = ${deriveLevel(CHARTER_GREP_SPECIMEN)} and screenCommand admits it (${screenCommand(CHARTER_GREP_SPECIMEN).ok}). refusesAsCharterGrep rejects it anyway: ${refusesAsCharterGrep(CHARTER_GREP_SPECIMEN)}.`);
     say("");
     say("NOT ASSERTED by this run:");
@@ -447,7 +464,7 @@ export function main(argv = process.argv.slice(2), out = console.log) {
       if (!a) say(`  - clause (a) fails: ${rulings.filter((r) => !r.ok).map((r) => `[${r.index}] ${r.failCode}`).join(", ")}`);
       if (!b) say(`  - clause (b) fails by ${blocking.length} claimable row(s)`);
       if (!bPrime) say("  - clause (b') fails: the root is not in the ready pool");
-      if (!c) say(`  - clause (c) fails: the root is already ${rootDoc.lifecycle_status}`);
+      if (!c) say(`  - clause (c) fails: the root is already ${rootStatus}`);
       say("  This is a pre-authorised, honest outcome (D93). The named failing clauses are the handoff.");
     }
     say(`VERDICT-TOKEN: SEAL-PREDICATE ${holds ? "HOLDS" : "NOT-YET"} a=${a ? "PASS" : "FAIL"} b=${b ? "PASS" : "FAIL"} b'=${bPrime ? "PASS" : "FAIL"} c=${c ? "PASS" : "FAIL"} blocking=${blocking.length}`);
