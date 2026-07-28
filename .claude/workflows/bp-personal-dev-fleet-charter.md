@@ -662,6 +662,169 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   agent box must be provable at ready; an ordinary box must never block on a vendor CLI — and a
   green chain over a missing binary (the 2026-07-27 finding) is exactly the seam-lie class
   (INDX/postgres precedent) this charter exists to kill.
+- **PDF-D97 — CREDENTIAL GROUND TRUTH (MEMORY.md was FALSIFIED; correct it).** This Mac holds
+  THREE fleet-reaching credentials, not one: (a) an owner-tier CP **session** token in
+  `~/.config/barkpark/config.json` `.cloud_token` — owner of team Guerrilla, 43 chars / 32 raw
+  bytes, NO `bpc_pat_` prefix, so it takes the `team_admin?` branch, not the `deploy`-PAT branch;
+  expires ~**2026-08-22T23:31Z** (30-day `@default_validity_days` from a 2026-07-23 mint), and
+  "revoke all other sessions" kills it — re-mint via `bp login` is the recovery; (b) the
+  **fleet** hcloud token (context `barkpark`), WRITE scope proven by a placement-group
+  create+delete with census delta zero; (c) the **guerrilla** hcloud token (context `main`),
+  which is the ONLY one that can see DNS — the fleet token returns `"zones": []`,
+  `total_entries: 0`. What this Mac does NOT hold: `~/.ssh/barkpark_indx`. It exists only as the
+  GitHub `DEPLOY_SSH_KEY` secret, prod holds no bridging private key, and there is no two-hop
+  path — so **every on-box read is OWNER-GATED** and capstone O7's "settles it in seconds"
+  presumed a credential this machine lacks. STANDING HAZARD, new: the fleet project holds
+  EXACTLY ONE ssh-key, and `resolveSSHKey` (internal/cli/cloud/provider.go:503) auto-selects only
+  when `len(keys) == 1` — adding a second key breaks EVERY provision whose env lacks
+  `BARKPARK_SSH_KEY` (which docs/ops/barkpark-cloud-go-live.md:98 explicitly blesses omitting).
+  Nobody adds a key to that project. TOOLING TRIPWIRE: `git grep` has no `\|` alternation — the
+  `'a\|b'` form exits 1 on files with matches; use repeated `-e` or `-E`, and re-check any
+  "not_found" derived from an alternation grep.
+- **PDF-D98 — P1 IS A GUERRILLA-PARENTED DIRECT FIRE, NOT THE JOURNEY-PROOF HARNESS.** The
+  merged harness's R1 always registers a fresh CP team and launches a fresh `astro-search-starter`
+  main — there is NO `PDFJP_MAIN_ID` reuse knob (grep-proven absent). A template main pins the
+  claim's workspace to the TEMPLATE slug, and both chains gate the c65f517e2 reset+re-mint
+  bracket on exactly `workspace == "default"` (internal/provisioner/support.go:671,
+  internal/cli/cloud_support_cmd.go:658). So the harness would test a DIFFERENT chain, skip the
+  bracket entirely, and pay for a second main. Guerrilla is template-less — `GET
+  /v1/barkparks/b2b81e69-…/bootstrap` returns 404 `no_bootstrap`, which `Registry.reveal_bootstrap`
+  emits ONLY when `bootstrap_workspace` AND `bootstrap_read_token_encrypted` are both nil — so a
+  Guerrilla-parented claim pins `workspace: "default"` via the 928e37a38 fallback
+  (router.ex:9471) and the bracket RUNS. Both 928e37a38 and c65f517e2 are ancestors of the
+  deployed 78209d8e4, and the newest warm image (413101285 / commit 2c8fe0da4) contains
+  c65f517e2. Gate already cleared: `GET /v1/barkparks/<guerrilla>/credentials` → 200 with an
+  admin_token present, so the enqueue will not 409 `no_admin_token`. WHY: P1 exists to learn
+  whether c65f517e2 alone repaired the chain; an instrument that skips the fix under test is a
+  green that proves nothing. NOTE the harness's own trap: gate 0b ABORTs if `HCLOUD_TOKEN` is set
+  in the shell, which collides head-on with this epic's "export HCLOUD_TOKEN explicitly (D75)"
+  habit — the teardown credential is the SEPARATE `PDFJP_TEARDOWN_HCLOUD_TOKEN`.
+- **PDF-D99 — THE EMPTY-SHELL CITATION IS PDS-D9, NOT PDF-D9 (a phantom-D32-class mis-cite).**
+  PDF-D9 in this charter (:48) is "the machine is the isolation boundary" — worktrees isolate
+  code, not performance. It says nothing about adopt or imports, and the string `empty-shell`
+  appears ZERO times in this file. The law is **PDS-D9**, `.claude/workflows/bp-pds-charter.md:86`,
+  and it is CONDITIONAL: same slug + different id → delete the shell inside the import
+  transaction ONLY when the target workspace is provably EMPTY (0 documents, 0 media_files);
+  otherwise **REFUSE**. CONSEQUENCE the wave must carry: if the warm image's seeded `default`
+  workspace is still populated at P1, a fail-closed refusal is the LAWFUL outcome — a red P1 for
+  a correct reason, which must NOT be misread as "c65f517e2 did not take". Any brief citing
+  PDF-D9 here points a builder at worktree isolation and will be read as noise.
+- **PDF-D100 — HONEST HEADLESS EVIDENCE IS A READ, NEVER A CANNED STRING; AND `subtype` LIES.**
+  `tooling/fleet/fleet-run.sh` violates PDS-D287 on both halves at :237 (a hardcoded `--met`
+  evidence string derived from nothing the run produced) and :239 (an unconditional close), both
+  silenced with `>/dev/null 2>&1`; there is no `set -e`, no timeout, and `agent_exec`'s exit
+  status is discarded by the `( cd "$D" … )` subshell at :231-234. Ratified fix shape, three
+  tiers: (1) PATH-READ — the order convention makes an absolute artifact path mandatory, so
+  `stat` it (exists, size > 0, mtime AFTER the claim — the mtime control is what stops a
+  pre-existing file being a vacuous green per PDS-D20); (2) RECEIPT-VERDICT — extend the
+  parser `record_spend` ALREADY has in hand, and stamp only with the receipt quoted plus a
+  sentence naming its own weakness ("attests the turn, not the outcome"); (3) MISS — `--miss
+  --note` (a shipped, never-used verb) and `bp task release`, never a close. LIVE-PROVEN CLI
+  facts a builder must not re-derive from memory (claude 2.1.220): the **exit code is
+  trustworthy** (1 on failure, 0 on success) but **`subtype` is `"success"` on ALL FOUR failure
+  shapes** — 401 bad key, 401 bad bearer, not-logged-in, 404 bad model — so the honest fields are
+  exit code → `is_error` → `terminal_reason` → `api_error_status` (NULL for not-logged-in, so it
+  is not a sufficient test) → `result`. Two traps: a 401 turn still reports `total_cost_usd: 0`,
+  and `record_spend` only rejects `None`, so a failed turn writes a real-looking `$0.00`
+  `claude-cli-json` row — spend telemetry silently counts auth failures as cheap successes
+  unless the row carries the verdict; and an unreachable `ANTHROPIC_BASE_URL` hangs past 100s
+  with a 0-byte log, which no timeout catches today. Also ratified: `ANTHROPIC_API_KEY` BEATS
+  `CLAUDE_CODE_OAUTH_TOKEN` (proven with both set and distinguishable), matching the keyVar the
+  provisioner already prints — and a stored login (macOS Keychain) SHADOWS env credentials
+  entirely, so every such experiment must run under `env -i … HOME=<empty dir>` or it bills a
+  real account and returns a misleading PASS.
+- **PDF-D101 — THE A-RECORD FIX IS CLI-ONLY AND SWEEPS BY VALUE; PDF-D63 GOES FROM FOUR SURFACES
+  TO FIVE.** The CP half of `task-688ebffc4b0aa50a` is infeasible as written: the Elixir control
+  plane has NO Hetzner DNS client (zero `rrset`/`dns.hetzner` hits under `cloud/lib/**`; its only
+  DNS client is Cloudflare, for custom domains), so a CP-side fix means new Elixir plumbing or a
+  deprovision-job mirror — both are construction this wave forbids. The CLI is the route's only
+  real caller (the deployed SPA carries exactly ONE `/v1/fleet/supports` reference and it is a
+  POST; the journey-proof's two raw DELETEs both run AFTER `bp cloud support remove`), so
+  amend the task's "both surfaces" wording rather than half-deliver it. **By-name derivation is
+  a trap that would ship a lying fix**: `muscle-1` (ttl=60, the support chain's only TTL-60
+  writer) and `muscle-1-506f035e` (ttl=null, the MAIN go-live writer using the CP-allocated
+  `<slug>-<team_short_id>`) both point at 46.224.19.120, so deleting the row-URL's first label
+  removes one and leaves the other — while the census still reports delta zero. Ruling: sweep by
+  **box IP**, which census leg 1 already holds, and add a FIFTH census leg asserting zero A
+  rrsets in the zone resolve to it. Credential law: the sweep MUST ride `instDNSClient`'s
+  precedence (`--dns-token` > `BARKPARK_DNS_HCLOUD_TOKEN` > compute) — the fleet token that owns
+  every box sees zero zones, so a one-token fix fails the DNS leg silently on every real
+  teardown. The zone already carries at least three unreserved residue records
+  (`muscle-1-506f035e`, `gyldendal`, `gyldendal-9d71ba21`) — the leak is systemic, not
+  muscle-1-shaped.
+- **PDF-D102 — `fleet_token_id` NIL IS THE SILENT-NIL SEAM, NOT A STALE DEPLOY.** Both the
+  read-only discriminators came back GREEN, which moves the burden onto the live fire. The
+  parent main's mint renders `token_id` at TOP LEVEL (`fleet_support_token_controller.ex:56`),
+  the controller has exactly ONE commit in its history so the answer is sha-invariant, and
+  `supportParseMint`'s first search layer would find it; both halves of #6087 ship in ONE commit
+  (7e0d744b7) whose CP deploy (run 30117708237, all jobs success) landed ~4.5h BEFORE round 5
+  fired; the `fleet_role: "support"` guard does not misfire (the provision path registers through
+  the sole `fleet_role: "support"` writer) and `health_changeset` casts `:fleet_token_id`. Every
+  static link is intact. The one surviving explanation is the seam itself:
+  `internal/provisioner/support.go:622` makes an empty **token** fatal and never checks the
+  empty **token id** at :630 — and three downstream layers are deliberately tolerant (the worker
+  omits the key when empty, `fleet_token_id_opts(nil)` → `[]`, `maybe_put_fleet_token_id` no-ops
+  on blank), so a lost id emits ZERO signal anywhere. Ruling: make the seam LOUD before P1, or
+  the wave burns a live provision cycle and learns nothing; the discriminator is the CP row's
+  `fleet_token_id` read immediately after succeed. Note this is a **D68 violation, not cosmetics**
+  — D68 names the CP row "the sole token_id holder", so a nil there is an unrecoverable orphan
+  token by construction, which is the exact window D68 was written to close.
+- **PDF-D103 — THE BAKE FIX IS ROUND 2, STRICTLY AFTER P1 FIRES — AND THE SEED COUNT IS
+  UNMEASURED FOLKLORE.** Sequencing is load-bearing in both directions: land the seed reset first
+  and `SupportResetDefaultWorkspaceStep` degrades to its narrated no-op, so c65f517e2 goes
+  untested again, permanently and invisibly. Correcting a premise the wave nearly built on:
+  **muscle-1's 3,866 documents are NOT the image seed** — the box was created 2026-07-26T13:47Z,
+  its newest doc `_updatedAt` is 14:37Z (49 min AFTER birth), and the only image available at
+  birth was baked 03:44Z that day; `_createdAt` runs back to 2026-06-29 with zero docs created
+  after birth, i.e. a timestamp-preserving import of the owner's guerrilla ledger. The "~27 docs"
+  figure originates in c65f517e2's own test comment and remains unmeasured for the IMAGE (all
+  five warm-pool boxes answer nothing on 80/443, so it is owner-gated). Ruling: the reset step
+  must REPORT the document count it is about to delete — one line that converts folklore into
+  measurement at zero cost, and the only observation of the seed that survives the reset. Bake
+  hazards a builder must respect: the script is `set -euo pipefail` with `trap cleanup EXIT`, so
+  any non-zero reset kills the nightly bake silently (the provisioner keeps resolving the older
+  snapshot); `KEEP_IMAGES=2` means a bad generation is irreversible in two nights;
+  `schema_migrations` must SURVIVE (the pre-run migrate exists so a provisioned box's migrate is
+  a no-op); and the bake swaps in throwaway `SECRET_KEY_BASE`/`KEK`/`CLOAK` keys before the
+  migrate and restores the real `.env` after — so a reset must be DELETE-ONLY or run outside that
+  bracket, else it writes rows nothing can decrypt afterwards.
+- **PDF-D104 — THE GUI SPIKE IS CUT ON EVIDENCE, NOT DEFERRED ON BUDGET.** The severable Layer-4
+  spike is not run this wave because verification answered its motivating question for free:
+  Anthropic's own Linux doc states "**Computer Use**: app and screen control isn't available on
+  Linux," so a KasmVNC kiosk yields a HUMAN-drivable Claude Desktop, never an agent-drivable one
+  — if Layer 4's thesis was "an agent drives the GUI," it is already dead without spending a
+  euro. The remaining thesis (a hosted workstation a person VNCs into) is a product bet for the
+  owner, not a wave deliverable. Externals are now RESOLVED so the day is cheap whenever it is
+  taken: KasmVNC ships `kasmvncserver_noble_1.4.0_amd64.deb` (v1.4.0, URL resolves 200), so the
+  TigerVNC fallback branch is unnecessary; claude-desktop has an OFFICIAL signed apt repo,
+  verified live (`Origin: Anthropic`, `Architectures: amd64 arm64`, newest pool .deb 166 MB /
+  ~511 MiB installed) — no postinst archaeology needed. Two corrections to the wish's spec:
+  **cx33 is creatable in ZERO datacenters** (and cpx31 too), so the throwaway must be `cpx32`
+  (€0.0569/h ≈ €1.37/day) or `cpx22`; and Desktop refuses a Console API key entirely (sign-in is
+  a subscription/SSO browser handshake inside the session), which sits awkwardly against D94
+  never-keeps because the session credential lands in the box keyring by construction.
+- **PDF-D105 — SPEND TELEMETRY SHIPS A MEASURED NUMERATOR AND A DECLARED DENOMINATOR, AND SAYS
+  SO.** orders/day is unmeasurable this wave and no aggregator will change that: there is NO
+  `spend.jsonl` anywhere on this Mac, and NO bp task has ever carried `assignee: muscle-1`, so
+  `record_spend` (which only fires inside `do_order`) has almost certainly never run. Ruling:
+  P2's row is a real measured cost-per-order at n=1; orders/day stays owner-DECLARED and the
+  `~1.7 orders/day` crossover is re-labelled an assumption wherever it is quoted. No new surface
+  — the wave Paper's own section is the report, per the simplicity law. Adjacent honesty defect
+  filed rather than fixed: the orchestrator cap-gate reads `$FLEET_HOME/orchestrator/spend.jsonl`
+  and NOTHING in the repo ever writes it (only the efficiency proof seeds synthetic rows), so the
+  batch cap gate reads $0.00 forever in production — a tested mechanism with no producer.
+- **PDF-D106 — THE EXPOSURE IS WIDER THAN muscle-1, AND P3 DOES NOT CLOSE IT.** muscle-1 violates
+  D59 in full (public FQDN + Caddy TLS + anonymously rendering Studio, all four dropped steps
+  present) and serves 3,866 real documents anonymously on the UNSCOPED data route — full paper
+  bodies, not just titles, with titles disclosing secrets provisioning, SSH deploy failures, npm
+  audit counts and the SOC 2 evidence map — plus an open anonymous `POST /v1/auth/register`. The
+  scoped `/w/…` route IS correctly gated (403), so the defect is route-shaped, not
+  tenancy-shaped. But the same anonymous read works against **guerrilla.barkpark.cloud, the
+  owner's LIVE primary** (proven under `env -i /usr/bin/curl` with no `~/.netrc` and no
+  `~/.curlrc` on this machine). Ruling: P3's removal closes ONE of two doors, and this wave must
+  NOT claim "exposure closed"; the second door needs an owner ruling on read-tier policy (prod's
+  own smoke test in CLAUDE.md depends on anonymous `/api/schemas`), so it is FILED at top
+  priority, not fixed under a wave that forbids product construction.
 
 ## Roadmap (waves; interleaved with MVP stages per the build plan)
 
@@ -679,6 +842,11 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
 - **MVP-0 — Visual setup + first offload** (IN FLIGHT 2026-07-24: the console journey
   create-main → add-support → offload, CP-provisioned server-side — decisions PDF-D83..D93;
   wave Paper `personal-dev-fleet-wave-mvp0-2026-07-24`).
+- **Claude-ready servers — Wave 1: Proof Before Build** (IN FLIGHT 2026-07-28: make the system
+  stop lying before anything is built — a GREEN `provision_support` re-fire, a real Claude turn
+  with hard evidence, the honest-evidence fix, and the three wound-tasks; decisions PDF-D97..D106;
+  epic `task-claude-ready-servers-epic-candidate`, wave Paper
+  `claude-ready-servers-wave-2026-07-28`).
 - **Wave D — Durability**: fence-lifecycle fix; lease-lapse recovery; runner robustness.
 - **Wave E — Orchestrator at scale**: dials live; gate hardening for full-auto.
 - **Wave F — The seal**: one unattended mixed-agent, mixed-size real run; epic closes on it.
@@ -850,3 +1018,39 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   order: CP branch (CI green first — its gate never ran) → provisioner `-r` → SPA `-r`; then
   dispatch round-2 `pdf-mvp0-offload-spa` (after the SPA train merges) and
   `pdf-mvp0-journey-proof` (after all four + deploy + #6038; closes epic criterion 1 per D33/D90).
+- **2026-07-28 · CLAUDE-READY SERVERS WAVE 1 DECIDE (proof before build).** 16 survey lanes +
+  12 verify lanes, full coverage both rounds. THE SHAPE: most of this wave's deliverables are
+  EXECUTION, not construction — P0 probe, P1 fire, P2 turn and P3 teardown all touch live infra
+  and money, so builders deliver the FIXES those proofs will test plus the INSTRUMENT that fires
+  them, and the lead/owner executes. Five premises inverted on evidence: (1) P1 is fireable from
+  this Mac as one authed curl (the bogus-parent probe returned 404, not 403 — auth, team and name
+  all passed, and the 404 arm is upstream of both register and enqueue), so no executor-model
+  change is needed; (2) the journey-proof harness is the WRONG P1 instrument (no main-reuse knob →
+  template slug → the fix under test is skipped) — D98; (3) `PDF-D9` is a phantom citation, the
+  law is `PDS-D9` and it is CONDITIONAL, which names a lawful red-P1 mode nobody had — D99;
+  (4) muscle-1's 3,866 docs are an IMPORT, not the image seed, so they must not predict the reset
+  step — D103; (5) the GUI spike's motivating capability does not exist on Linux per Anthropic's
+  own doc, so it is cut on evidence rather than run — D104. Also settled read-only: the
+  Guerrilla parent is template-less (404 `no_bootstrap`) so P1 genuinely brackets c65f517e2; the
+  newest warm image (2c8fe0da4) contains the fix; every static link of the `fleet_token_id` chain
+  is intact, leaving only the silent-nil seam (D102); the fleet hcloud token has write scope but
+  sees ZERO DNS zones, so teardown needs TWO credentials (D101); and `subtype` lies on every
+  claude-CLI failure shape (D100). Decisions PDF-D97..D106. Wave = 5 slices: `pdf-w1-honest-evidence`
+  (r1, fable, `tooling/fleet/fleet-run.sh` — the PDS-D287 fix, HIGH-FLIP-RISK verdict predicate) ·
+  `pdf-w1-dns-census-leg` (r1, fable, `internal/cli/cloud_support_cmd.go` — by-VALUE sweep +
+  fifth census leg, HIGH-FLIP-RISK label-vs-value derivation) · `pdf-w1-tokenid-loud-seam` (r1,
+  opus, `internal/provisioner/support.go` — make the empty-tokID seam loud before P1 reads it) ·
+  `pdf-w1-p1-refire-instrument` (r1, fable, `scripts/pdf-p1-refire.sh` + the journey-proof's
+  teardown hole — the money-safe live-fire instrument, HIGH-FLIP-RISK teardown credential) ·
+  `pdf-w1-bake-seed-reset` (r2 AFTER the instrument merges AND P1 has FIRED, fable, the bake
+  lineage fix + the reset step reporting what it deletes). Backlog filed (published ids):
+  `pdf-bl-anon-read-exposure` (P0 — guerrilla's live ledger is anonymously readable, wider than
+  muscle-1) · `pdf-bl-fleet-run-refresh` (merged runner fixes never reach existing boxes) ·
+  `pdf-bl-orchestrator-spend-producer` (cap gate reads $0 forever) · `pdf-bl-cp-version-endpoint`
+  (deploy currency is an inference) · `pdf-bl-gui-workstation-spike` (externals resolved,
+  Computer-Use-not-on-Linux recorded) · `pdf-bl-fleet-ssh-key-singleton-tripwire`. Ledger hygiene
+  at Decide: `task-d28779a3eeb39caf` CLOSED on evidence (deploy.yml:79 already carries
+  `internal|cmd` on origin/main — close, don't build); `pdf-wc-support-proof` CANCELLED as a
+  zombie after absorbing its criteria 5+6 into the epic; `pdf-bl-console-key-custody` criterion 0
+  STAMPED from D94 and left open at 1/3; the three wound-tasks re-parented under the epic with
+  criteria. Wave Paper: `claude-ready-servers-wave-2026-07-28`.
