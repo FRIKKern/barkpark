@@ -1760,6 +1760,7 @@ defmodule BarkparkCloud.Web.Router do
       opts = [
         limit: parse_int(conn.query_params["limit"], 50),
         before: parse_dt(conn.query_params["before"]),
+        before_id: conn.query_params["before_id"],
         target_type: conn.query_params["target_type"],
         target_id: conn.query_params["target_id"],
         actor_user_id: conn.query_params["actor_user_id"],
@@ -4321,7 +4322,10 @@ defmodule BarkparkCloud.Web.Router do
   # list_deliveries leaves the clamp to its caller, so the router owns it).
   #
   # `?channel=` / `?status=` / `?event=` narrow the log, and `?before=<oldest
-  # inserted_at>` walks the next page (the /v1/audit keyset). Filters run INSIDE
+  # inserted_at>&before_id=<that row's id>` walks the next page (the /v1/audit
+  # keyset — both halves of the `(inserted_at, id)` sort key, so a boundary that
+  # lands mid-timestamp-tie cannot drop the far side; `before` alone keeps its
+  # historical stamp-only meaning for bookmarked URLs). Filters run INSIDE
   # the query, so "show me the failures" is a real page of failures rather than
   # the failures that happen to be in the newest 50. A filter value outside the
   # closed vocabulary matches nothing rather than being dropped — a dropped
@@ -4337,7 +4341,8 @@ defmodule BarkparkCloud.Web.Router do
         channel: conn.query_params["channel"],
         status: conn.query_params["status"],
         event: conn.query_params["event"],
-        before: parse_dt(conn.query_params["before"])
+        before: parse_dt(conn.query_params["before"]),
+        before_id: conn.query_params["before_id"]
       ]
 
       deliveries = Notifications.list_deliveries(conn.assigns.current_team, opts)

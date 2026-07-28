@@ -520,6 +520,10 @@ defmodule BarkparkCloud.Notifications do
                    (keyset pagination on `inserted_at`, the `/v1/audit`
                    precedent — the log outgrew "a bounded backlog" the moment
                    filters made deep reads worth walking).
+    * `:before_id` — the SECOND half of that cursor (the id of the same row the
+                   `:before` stamp came from). Supplied together they page on
+                   the full `(inserted_at, id)` sort key; supplied alone,
+                   `:before` keeps its historical stamp-only meaning.
 
   A filter value outside the closed vocabulary is NOT rewritten or ignored: it
   is matched literally and therefore returns nothing. Silently DROPPING an
@@ -541,7 +545,7 @@ defmodule BarkparkCloud.Notifications do
     |> maybe_delivery_eq(:channel, opts[:channel])
     |> maybe_delivery_eq(:status, opts[:status])
     |> maybe_delivery_eq(:event, opts[:event])
-    |> maybe_delivery_before(opts[:before])
+    |> maybe_delivery_before(opts[:before], opts[:before_id])
     |> order_by([d], desc: d.inserted_at, desc: d.id)
     |> limit(^limit)
     |> Repo.all()
@@ -552,10 +556,28 @@ defmodule BarkparkCloud.Notifications do
 
   defp maybe_delivery_eq(query, _field, _value), do: query
 
-  defp maybe_delivery_before(query, %DateTime{} = ts),
+  # The keyset cursor, lexicographic on the SAME compound key the log is ordered
+  # by — `(inserted_at DESC, id DESC)`. A stamp-only `<` is not a real page cut:
+  # one fan-out writes one row per recipient in the same instant, so a boundary
+  # landing mid-tie drops every tied row on the far side permanently and without
+  # a trace. The tiebreak arm engages ONLY when both halves of the cursor arrive,
+  # so an existing `?before=<stamp>` caller keeps byte-identical behaviour. `id`
+  # is a `:binary_id`: a non-UUID from a query string is cast first (a raw binary
+  # in that comparison raises Ecto.Query.CastError) and degrades to stamp-only.
+  defp maybe_delivery_before(query, %DateTime{} = ts, before_id) when is_binary(before_id) do
+    case Ecto.UUID.cast(before_id) do
+      {:ok, uuid} ->
+        where(query, [d], d.inserted_at < ^ts or (d.inserted_at == ^ts and d.id < ^uuid))
+
+      :error ->
+        where(query, [d], d.inserted_at < ^ts)
+    end
+  end
+
+  defp maybe_delivery_before(query, %DateTime{} = ts, _before_id),
     do: where(query, [d], d.inserted_at < ^ts)
 
-  defp maybe_delivery_before(query, _), do: query
+  defp maybe_delivery_before(query, _before, _before_id), do: query
 
   @doc """
   The platform-wide FLEET-DIGEST delivery log — the Operator-console analogue of
