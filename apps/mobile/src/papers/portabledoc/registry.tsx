@@ -87,6 +87,33 @@ export const BLOCK_RENDERERS: Record<string, Render> = {
 
 /* ── the degrade-only set (charter D47) ─────────────────────────────────────── */
 
+/** A renderer carrying the degrade-card marker. The property name is written
+ * out LITERALLY inside the two functions below rather than hoisted into a
+ * module const, because of the same Metro TDZ law as `renderBlockNative`: a
+ * family module calls `degradeCard()` while ITS OWN module body evaluates,
+ * which is before this module's body has run. A `function` declaration exists
+ * at that moment; a `const` does not. */
+interface DegradeMarked {
+  readonly __bpDegradeCard?: true
+}
+
+/** Mark a renderer as a DEGRADE CARD — a labeled box that states its ceiling
+ * instead of playing the content (video, asciicast; core-media.tsx carries the
+ * doctrine). The mark is what `DEGRADE_ONLY` is derived FROM, so wrapping a new
+ * card here is the whole registration: nothing else needs editing, and nothing
+ * else can go stale. Read the DEGRADE_ONLY comment before adding a third — a
+ * degrade card counts as UNrenderable at turn level, which is a deliberate
+ * subtraction and not an oversight. */
+export function degradeCard<R extends Render>(render: R): R {
+  Object.defineProperty(render, '__bpDegradeCard', { value: true })
+  return render
+}
+
+/** Does this renderer carry the degrade-card marker? */
+export function isDegradeCard(render: Render | undefined): boolean {
+  return (render as (Render & DegradeMarked) | undefined)?.__bpDegradeCard === true
+}
+
 /** The registered types whose renderer is a DEGRADE CARD rather than a render:
  * a labeled box that states its ceiling (`video`, `asciicast` — D46d). They ARE
  * in BLOCK_RENDERERS, so a block of one still draws its card wherever the
@@ -108,8 +135,19 @@ export const BLOCK_RENDERERS: Record<string, Render> = {
  * degrade-only turn stays on the text path, and a MIXED turn takes the document
  * path and draws the card next to the prose. Gating the dispatch instead would
  * have been the worse fix — the mixed turn would lose its card to an
- * "Unsupported block" box, which is a lie about a type we support. */
-export const DEGRADE_ONLY: ReadonlySet<string> = new Set(['video', 'asciicast'])
+ * "Unsupported block" box, which is a lie about a type we support.
+ *
+ * DERIVED, not hand-kept. A two-literal Set said nothing about the renderers it
+ * claimed to describe: a THIRD degrade card could be written and registered
+ * without touching this line, and the turn-level subtraction would silently
+ * stop covering it — the exact information-loss regression this set exists to
+ * prevent, reintroduced by omission. The marker rides the renderer itself, so
+ * the set cannot be out of date with the register. */
+export const DEGRADE_ONLY: ReadonlySet<string> = new Set(
+  Object.entries(BLOCK_RENDERERS)
+    .filter(([, render]) => isDegradeCard(render))
+    .map(([type]) => type),
+)
 
 /** Render one type-keyed block to a ReactNode. Unknown/malformed blocks
  * degrade to the labeled fallback — never a throw, never a silent hole
