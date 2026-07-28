@@ -1,0 +1,82 @@
+# required-checks-drift — the three-way drift gate for branch protection.
+#
+# Live protection, the committed .github/required-checks.json, and the check-run
+# names a real PR head actually renders must agree. This job fails when they do
+# not, and — the part that matters — it fails when it cannot SEE one of them.
+#
+# WHY IT IS ADVISORY-BY-INTENT AND NOT IN THE REQUIRED SET
+#
+# It reads the GitHub API on every run, so it is exactly the shape that must
+# never gate a merge while the epic is still installing gates: an API blip would
+# stall the fleet. It is also paths-filtered, and `.github/required-checks.json`
+# names it in its own exclusions. Both facts are enforced by the generator, not
+# by convention — a paths-filtered or continue-on-error job cannot enter the
+# required set (stages S2 and S4).
+#
+# BEFORE THE FLIP (enforced:false) it still runs the deadlock detector against a
+# real PR head, so it is never a vacuous pass. AFTER hgw2-s7 flips enforced to
+# true, an unreadable protection API is a hard red here.
+
+name: required-checks-drift
+
+on:
+  pull_request:
+    paths:
+      - ".github/required-checks.json"
+      - ".github/workflows/required-checks-drift.yml"
+      - "scripts/required-checks-*.sh"
+      - "scripts/required-checks.test.sh"
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/required-checks.json"
+      - "scripts/required-checks-*.sh"
+      - "scripts/required-checks.test.sh"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+concurrency:
+  group: required-checks-drift-${{ github.ref }}
+  # Mirror elixir.yml: cancel superseded PR runs, never cancel main.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  required-checks-drift:
+    name: Required-check spec drift (advisory)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The tripwire's own tripwire. If these mutation proofs stop failing where
+      # they should, the guard below is decoration and this run says so BEFORE
+      # it reports on anything else.
+      - name: Prove the guard can fail (verify --selftest)
+        run: bash scripts/required-checks-verify.sh --selftest
+
+      - name: Prove the toolchain by mutation (required-checks.test.sh)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/required-checks.test.sh
+
+      - name: Three-way drift check (spec ↔ live protection ↔ rendered names)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rc=0
+          # No --sha: the guard picks a SETTLED head (a recently merged PR) on
+          # purpose. This PR's own head is mid-flight, and a required context
+          # that has not reported YET is not a deadlock.
+          bash scripts/required-checks-verify.sh --ci || rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::error::DEADLOCK — the committed spec requires a context this head never rendered. Merging with protection on would brick the branch."
+            exit 1
+          fi
+          exit "$rc"
