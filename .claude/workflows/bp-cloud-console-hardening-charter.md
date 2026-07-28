@@ -515,9 +515,16 @@ gate (710/710 node, 386/0 elixir, `check.mjs` PASS, `emit --check` 19/19, `__css
 seal 11/11, design 66/66). No shared helper was duplicated and no two slices contradict each other
 in copy or state.
 
-**Ledger**: exemplary. Five tasks `in_progress` and published, every provable criterion stamped
-with real evidence as the builders worked, every merge-gated criterion left open for the lead, and
-the epic roster shows exactly those five in flight — no foreign row was touched.
+**Ledger**: clean on everything that matters, with two corrections. Five tasks `in_progress` and
+published, every provable criterion stamped with real evidence as the builders worked, every
+merge-gated criterion left open for the lead, and the epic roster shows exactly those five in
+flight — no foreign row was touched. But two builder claims had LAPSED by the end of Review
+(`cch-bl-overview-subscription-band-stale`, `gr-bl-predicate-null-successor-silent-seal`), each
+leaving a now-line reading "Not pushed" over work that is now pushed and PR'd — our own board
+telling a small version of the lie this epic exists to remove. Both were re-claimed as
+`wave-reviewer-cch-w6` and corrected. **Lead consequence**: those two hold a REVIEWER claim, not the
+builder's, so their merge-gated close needs `wave-reviewer-cch-w6` at the CURRENT epoch — read it
+from `bp task get`, never from a remembered number.
 
 **Server defect, isolated during Review and recorded because it will cost the next wave the same**:
 on `guerrilla`, **creating a `task` document fails every time** — 500 or client timeout on
