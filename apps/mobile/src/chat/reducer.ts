@@ -107,10 +107,19 @@ export type TurnPhase = 'idle' | 'waiting' | 'streaming' | 'interrupting'
 
 /** An optimistic local echo of an outgoing user message — shown immediately,
  * badged queued while another turn is streaming (charter D12), and dropped
- * once the turn-boundary refetch returns its persisted row. */
+ * once the turn-boundary refetch returns its persisted row.
+ *
+ * `failed` is the honesty field. The echo is OPTIMISTIC: it is painted before
+ * the POST is answered, and a send that never reached the server has no
+ * persisted row, so the drop rule (dropSettledLocal) can never retire it — it
+ * would sit there, pixel-identical to a delivered message, until unmount. A
+ * client must not show a state it has not fetched, so a rejected POST comes
+ * BACK through the reducer (the sendFailed event) and marks its echo. */
 export interface LocalSend {
   content: string
   queued: boolean
+  /** The POST was rejected — this message is NOT on the server. */
+  failed: boolean
 }
 
 /** The whole reducible session state. `messages` are settled Postgres truth;
@@ -242,6 +251,11 @@ export function initialChatState(sessionId: string): ChatState {
 export type FrameEvent = { type: 'frame'; name: string; data: string }
 /** The user submitting a non-empty composer. */
 export type SendEvent = { type: 'send'; content: string }
+/** The send POST was REJECTED — the shell telling the reducer what only the
+ * shell can know. Carries `content` because that is the echo's only identity
+ * (a local echo has no seq until the server gives it one, which is precisely
+ * what did not happen here). */
+export type SendFailedEvent = { type: 'sendFailed'; content: string; error: string }
 /** The user tapping Stop/interrupt. */
 export type InterruptEvent = { type: 'interrupt' }
 /** The heartbeat — the wedge timer's clock. */
@@ -263,6 +277,7 @@ export type AnsweredEvent = { type: 'answered'; requestId: string; error?: strin
 export type ChatEvent =
   | FrameEvent
   | SendEvent
+  | SendFailedEvent
   | InterruptEvent
   | TickEvent
   | TailFetchedEvent
@@ -276,6 +291,22 @@ export type ChatEvent =
  * returns only newer rows. `gen` is the issuing turn generation (D77) — echo
  * it back on the TailFetchedEvent. */
 export type FetchTailEffect = { type: 'fetchTail'; sinceSeq: number; gen: number }
+
+/** The generation a HYDRATION fetch carries — a session GET that is not a
+ * settle boundary (the shell's seed GET at attach; the TUI's rail-expand
+ * refetch). It is a SENTINEL, not a generation: `gen` and `tailGen` are only
+ * ever >= 0, so `ev.gen === st.tailGen` (the D77 clear guard) is unsatisfiable
+ * for it and a hydration read can never clear a live tail.
+ *
+ * Both plausible alternatives are wrong, which is the whole reason this is a
+ * named constant and not a literal at the call site:
+ *   - carrying the CURRENT gen wipes the live streamed text whenever the
+ *     hydration lands mid-stream (it matches the tail's own generation);
+ *   - the ZERO value wipes it in the attach-mid-turn case — deltas observed
+ *     before any system/init frame leave gen === tailGen === 0, so a seed GET
+ *     stamped 0 matches and clears a tail that is still streaming.
+ * Parity: internal/chat/keys.go passes `Gen: -1` for the same two reasons. */
+export const HYDRATION_GEN = -1
 export type SendEffect = { type: 'sendMessage'; content: string }
 export type InterruptEffect = { type: 'interruptTurn' }
 export type AnswerEffect = { type: 'answerCard'; requestId: string; decision: string }
@@ -298,6 +329,8 @@ export function reduce(st: ChatState, ev: ChatEvent, nowMs: number): ReduceResul
       return reduceFrame(st, ev)
     case 'send':
       return reduceSend(st, ev)
+    case 'sendFailed':
+      return reduceSendFailed(st, ev)
     case 'interrupt':
       return reduceInterrupt(st, nowMs)
     case 'tick':
@@ -374,11 +407,46 @@ function reduceSend(st: ChatState, ev: SendEvent): ReduceResult {
   return {
     state: {
       ...st,
-      local: [...st.local, { content, queued: midTurn }],
+      local: [...st.local, { content, queued: midTurn, failed: false }],
       phase: midTurn ? st.phase : 'waiting',
       notice: '',
     },
     effects: [{ type: 'sendMessage', content }],
+  }
+}
+
+// The send POST came back rejected. The echo is already painted, and the drop
+// rule cannot retire it (there is no persisted row for a message the server
+// never received), so the ONLY honest move is to mark it: the bubble keeps the
+// user's text — losing it would be worse than mislabelling it — and stops
+// claiming delivery.
+//
+// The OLDEST unfailed echo with this content is the one marked: sends settle
+// oldest-first (dropSettledLocal matches the same way), so a duplicate send
+// whose first attempt succeeded and whose second was rejected marks exactly one
+// bubble. An echo that has already settled (its persisted row arrived before
+// the rejection was observed) matches nothing and the event is inert — it never
+// invents a failure for a message the server does hold.
+//
+// The queued badge is cleared with the flip: a failed send is not waiting its
+// turn in a queue, and two contradictory badges on one bubble is worse than
+// none. And if this send is the only thing the session was waiting on, the
+// phase returns to idle — otherwise the composer would spin on a turn that was
+// never started.
+function reduceSendFailed(st: ChatState, ev: SendFailedEvent): ReduceResult {
+  const i = st.local.findIndex((l) => !l.failed && l.content === ev.content)
+  if (i === -1) return { state: st, effects: none }
+  const local = [...st.local]
+  local[i] = { ...local[i]!, queued: false, failed: true }
+  const stillPending = local.some((l) => !l.failed)
+  return {
+    state: {
+      ...st,
+      local,
+      phase: st.phase === 'waiting' && !stillPending ? 'idle' : st.phase,
+      notice: `send failed — ${ev.error}`,
+    },
+    effects: none,
   }
 }
 
@@ -1029,13 +1097,18 @@ function exitNotice(status: number | null, reason: string): string {
 // Removes optimistic echoes whose persisted user row just arrived (first
 // content match wins — duplicate sends settle one per row). Unmatched echoes
 // stay: a queued send's row may not persist until its own turn starts.
+//
+// A FAILED echo is never settled by a row: its POST was rejected, so no row it
+// could be is coming. Skipping it matters for the retry shape — re-sending the
+// same text and succeeding must retire the SECOND echo (the one that reached
+// the server) and leave the failed bubble standing, not the other way round.
 function dropSettledLocal(local: LocalSend[], settled: ChatMessage[]): LocalSend[] {
   if (local.length === 0 || settled.length === 0) return local
   const remaining = [...local]
   for (const m of settled) {
     if (m.role !== 'user') continue
     const content = (m.source_markdown ?? '').trim()
-    const i = remaining.findIndex((l) => l.content === content)
+    const i = remaining.findIndex((l) => !l.failed && l.content === content)
     if (i !== -1) remaining.splice(i, 1)
   }
   return remaining

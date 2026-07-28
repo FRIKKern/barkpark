@@ -17,6 +17,7 @@ import {
   type StreamStatus,
 } from '../api/chat'
 import {
+  HYDRATION_GEN,
   initialChatState,
   reduce,
   type ChatEffect,
@@ -245,7 +246,11 @@ export class ChatSessionStore {
       try {
         const session = await getChatSession(this.connection, this.sessionId, 0)
         if (this.stopped || gen !== this.startGen) return
-        this.dispatch({ type: 'tailFetched', gen: 0, session })
+        // HYDRATION, not a settle: a re-attach (background→foreground, a screen
+        // remount) re-runs this seed GET while a turn may still be streaming,
+        // and the zero this used to pass MATCHED the attach-mid-turn tail
+        // (gen === tailGen === 0 until an init frame is observed) and wiped it.
+        this.dispatch({ type: 'tailFetched', gen: HYDRATION_GEN, session })
         this.set({ loading: false, choices: choicesFrom(this.snapshot.choices, session) })
       } catch (err) {
         if (this.stopped || gen !== this.startGen) return
@@ -350,7 +355,13 @@ export class ChatSessionStore {
         break
       case 'sendMessage':
         sendChatMessage(this.connection, this.sessionId, eff.content).catch((err: unknown) => {
-          if (!this.stopped) this.set({ transportError: `send failed — ${message(err)}` })
+          if (this.stopped) return
+          this.set({ transportError: `send failed — ${message(err)}` })
+          // The banner alone is not enough: the optimistic echo is still
+          // painted as a delivered message and nothing else will ever retire it
+          // (no persisted row exists for a POST the server refused). Tell the
+          // reducer, so the bubble itself says so.
+          this.dispatch({ type: 'sendFailed', content: eff.content, error: message(err) })
         })
         break
       case 'interruptTurn':
