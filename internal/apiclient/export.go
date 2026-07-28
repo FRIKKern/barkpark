@@ -45,7 +45,17 @@ func (c *Client) Export(ctx context.Context, opts ExportOpts, onDoc func(line st
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
-	req.Header.Set("Accept", "application/x-ndjson")
+	// `application/x-ndjson` ALONE is not negotiable: the export route rides
+	// :api / :scoped_api, both `plug(:accepts, ["json"])`, so Phoenix raises
+	// NotAcceptableError -> 406 BEFORE auth and the operator sees only
+	// "export: unknown error" (live: guerrilla returns 406 for x-ndjson and 401
+	// for x-ndjson+json on the identical URL). Append `application/json` — the
+	// same append AcceptBarkparkVendor makes server-side for text/event-stream
+	// and application/x-tar — so the standard matcher negotiates JSON while the
+	// header still states the streaming type this client actually parses. Doing
+	// it client-side keeps `bp export` working against EVERY deployed server,
+	// not only ones carrying a new plug branch.
+	req.Header.Set("Accept", "application/x-ndjson, application/json")
 
 	// No client timeout — a full-dataset export is long; ctx cancellation ends it.
 	resp, err := (&http.Client{Timeout: 0}).Do(req)
@@ -73,6 +83,15 @@ func (c *Client) Export(ctx context.Context, opts ExportOpts, onDoc func(line st
 			return err
 		}
 	}
-	// Export is finite: a clean EOF means every document streamed.
+	// Export is finite: a clean EOF means every document streamed — but ONLY as
+	// far as the framing can tell. Measured against hand-framed loopback servers:
+	// a chunked body without its terminating chunk and a short Content-Length
+	// both surface as "unexpected EOF" (honest, non-nil here); a truncated
+	// close-delimited body cannot be distinguished from a complete one and
+	// returns nil. The caller must therefore always REPORT the count it received
+	// rather than treating a nil error as proof of completeness. (The real
+	// ExportController uses send_chunked — the honest framing — so the silent
+	// case needs a re-framing intermediary; it is a caveat, not an observed
+	// production behaviour.)
 	return scanner.Err()
 }
