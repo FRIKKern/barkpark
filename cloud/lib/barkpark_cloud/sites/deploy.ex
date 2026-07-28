@@ -290,12 +290,18 @@ defmodule BarkparkCloud.Sites.Deploy do
     with ws when is_binary(ws) <- site.bootstrap_workspace,
          proj when is_binary(proj) <- site.bootstrap_project,
          ds when is_binary(ds) <- site.bootstrap_dataset,
+         # The projection is TYPE-SCOPED, so a site with no bound type has nothing
+         # to project. `sites.doc_type` is `null: false default 'post'` in the
+         # schema AND the migration, so this is unreachable from a stored row —
+         # but an unbound type must degrade to :error (unknown ⇒ nonce ⇒ rebuild),
+         # never raise a FunctionClauseError inside the deploy hot path.
+         doc_type when is_binary(doc_type) <- site.doc_type,
          path <-
            "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/analytics/#{URI.encode(ds)}",
          {:ok, status, body} when status in 200..299 <- Registry.relay_admin(bp, :get, path, nil) do
       rev =
         :sha256
-        |> :crypto.hash(Jason.encode!(content_projection(body, site.doc_type)))
+        |> :crypto.hash(Jason.encode!(content_projection(body, doc_type)))
         |> Base.encode16(case: :lower)
         |> binary_part(0, 12)
 
