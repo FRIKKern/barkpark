@@ -93,6 +93,35 @@ defmodule BarkparkCloud.Web.RouterSessionsTest do
       # Exactly one row is flagged current.
       assert Enum.count(sessions, & &1["current"]) == 1
     end
+
+    test "origin is ALWAYS emitted — present-and-null for a session minted without one" do
+      # gr-p5-session-provenance. A missing key and a null key say different
+      # things to the SPA ("this server is too old to know" vs "this server does
+      # not know about THIS row"), so the key is unconditional and only its value
+      # is nullable. `user_with_token/1` mints with no :origin on purpose.
+      {_user, token} = user_with_token()
+
+      sessions = json_body(call(:get, "/v1/account/sessions", nil, token))["sessions"]
+      [row] = sessions
+      assert Map.has_key?(row, "origin")
+      assert is_nil(row["origin"])
+    end
+
+    test "a real login stamps origin=password and the sessions list reports it" do
+      # The end-to-end leg for the router's own mint site: POST /v1/auth/login,
+      # then read the origin back off the HTTP surface — not off a struct.
+      user = user_fixture()
+
+      login =
+        call(:post, "/v1/auth/login", %{email: user.email, password: @password})
+
+      assert login.status == 200
+      fresh = json_body(login)["token"]
+
+      sessions = json_body(call(:get, "/v1/account/sessions", nil, fresh))["sessions"]
+      current = Enum.find(sessions, & &1["current"])
+      assert current["origin"] == "password"
+    end
   end
 
   ## DELETE /v1/account/sessions/:id
@@ -194,6 +223,26 @@ defmodule BarkparkCloud.Web.RouterSessionsTest do
 
       assert conn.status == 422
       assert json_body(conn)["error"] == "invalid"
+    end
+
+    test "the re-minted token reports origin=password_change, NOT password" do
+      # The re-mint is not a sign-in: it is the replacement handed back after
+      # "sign out everywhere". Calling it "password" would misreport it, which is
+      # the exact class of lie this row exists to remove.
+      {_user, old_token} = user_with_token()
+
+      conn =
+        call(
+          :put,
+          "/v1/account/password",
+          %{current_password: @password, new_password: @new_password},
+          old_token
+        )
+
+      fresh = json_body(conn)["token"]
+      sessions = json_body(call(:get, "/v1/account/sessions", nil, fresh))["sessions"]
+      current = Enum.find(sessions, & &1["current"])
+      assert current["origin"] == "password_change"
     end
   end
 end

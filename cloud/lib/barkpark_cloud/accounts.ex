@@ -515,6 +515,14 @@ defmodule BarkparkCloud.Accounts do
 
     * `:ip_address` — the caller's peer IP (string), for the sessions list.
     * `:user_agent` — the `User-Agent` header, for the "Device" column.
+    * `:origin` — HOW this session was established, as known BY THE CALLER
+      ("password", "two_factor", "oauth:<provider>", "password_change",
+      "register", "device_link"). OMITTED means unknown, and unknown is stored
+      as NULL and rendered as nothing — this function never infers an origin
+      from the other opts, and nothing backfills the column. Deliberately NOT
+      folded into the web layer's `session_opts/1` helper: five of the six mint
+      sites share that helper, so one shared value there would make a single
+      helper answer for five different origins.
 
   `last_used_at` is stamped to now at mint so a fresh token sorts to the top of
   the active-sessions list before its first authenticated request.
@@ -534,6 +542,7 @@ defmodule BarkparkCloud.Accounts do
       expires_at: expires_at,
       ip_address: Keyword.get(opts, :ip_address),
       user_agent: Keyword.get(opts, :user_agent),
+      origin: Keyword.get(opts, :origin),
       last_used_at: now
     })
     |> Repo.insert()

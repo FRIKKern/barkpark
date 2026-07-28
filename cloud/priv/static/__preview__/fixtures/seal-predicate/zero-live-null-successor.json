@@ -1,0 +1,35 @@
+{
+  "_comment": "DEFECT 1. successor is explicitly null and there are ZERO live rows, so `forwarded` was never consulted: pre-fix this exited 0 and printed '0 forwarded by name / to null'.",
+  "successor": null,
+  "tasks": {},
+  "children": [
+    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
+    { "_id": "gr-fixture-done-2", "lifecycle_status": "done" }
+  ],
+  "forwarded": [],
+  "gates": {
+    "cloud-console-billing-live-gate": {
+      "_id": "cloud-console-billing-live-gate",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    },
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "task-47bc4168392dec17"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "task-47bc4168392dec17"
+    }
+  },
+  "landed": ["0261ace15"],
+  "defectCommits": {}
+}

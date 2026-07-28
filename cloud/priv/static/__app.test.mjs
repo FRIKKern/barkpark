@@ -689,6 +689,33 @@ test("gr-p5-account: loadSessions' two css_check-named hooks survive — .sessio
     "loadSessions must delegate row revokes through .session-revoke");
 });
 
+test("gr-p5-session-provenance: the session row shows origin only when the server sent one", () => {
+  // A null/absent origin renders NOTHING — every row minted before the column
+  // existed is genuinely unknown, and inventing "via password" for it would be
+  // the same class of lie as the IP this row already suppresses. The label rides
+  // the EXISTING .session-meta line: no new class, so this stays off css_check.
+  const unknown = hooks.sessionRowHtml({ id: "a", user_agent: "barkpark-cli/0.9" });
+  assert.ok(!unknown.includes("via "), "an origin-less row must claim nothing: " + unknown);
+
+  const linked = hooks.sessionRowHtml({ id: "b", user_agent: "barkpark-cli/0.9", origin: "device_link" });
+  assert.ok(/session-meta">Active [^<]*·[^<]*via device link</.test(linked),
+    "device_link must render on the existing .session-meta line: " + linked);
+  assert.ok(!linked.includes("session-origin"), "no new CSS class may appear: " + linked);
+
+  // OAuth reports the provider itself, so the tail IS the label.
+  assert.ok(hooks.sessionRowHtml({ id: "c", origin: "oauth:github" }).includes("via github"),
+    "oauth:<provider> must surface the provider");
+
+  // An origin this client has never heard of is SHOWN, not swallowed — a newer
+  // server must not go silent against an older SPA.
+  assert.ok(hooks.sessionRowHtml({ id: "d", origin: "smartcard" }).includes("via smartcard"),
+    "an unknown origin falls through to the raw value");
+
+  // ...and it is escaped like every other server-controlled string on this row.
+  assert.ok(!hooks.sessionRowHtml({ id: "e", origin: "<img src=x>" }).includes("<img"),
+    "the origin must be escaped");
+});
+
 test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct-btn, #ws-switch, palette act-account", () => {
   // openAccountModal has exactly three entry points. A recomposition that
   // renames the function or drops a listener leaves the account unreachable.
@@ -6244,32 +6271,82 @@ test("gr-p4: roster shows kind+label+connected-at, NEVER a live-validity badge; 
   assert.ok(hooks.providerRosterHtml([], true).indexOf("prov-row") === -1);
 });
 
-test("gr-p4: connect model refuses a second connect for an already-connected kind (additive-duplicate guard)", () => {
+// GR44 (.claude/workflows/bp-cloud-gui-remake-charter.md) — the server has been
+// an UPSERT on (team_id, kind) since the unique index landed, so re-connecting a
+// connected kind ROTATES its credential in place. These two tests used to pin the
+// opposite (the "additive-duplicate guard" / "already-connected is disabled"
+// stopgap that predated the index); they are inverted here, not relaxed.
+test("gr-p4/GR44: a connected kind stays SELECTABLE — a second connect is a rotation, never a duplicate", () => {
   const empty = hooks.providerConnectModel([]);
   assert.equal(empty.allConnected, false);
   assert.equal(empty.selectable, "hetzner"); // first available kind armed
   assert.deepEqual(plain(empty.options.map((o) => o.kind)), ["hetzner", "azure"]);
   assert.ok(empty.options.every((o) => !o.connected));
   const partial = hooks.providerConnectModel([{ kind: "hetzner" }]);
-  assert.equal(partial.selectable, "azure"); // hetzner taken → azure armed
+  assert.equal(partial.selectable, "azure"); // an OPEN kind is still preferred by default
   assert.equal(partial.options.find((o) => o.kind === "hetzner").connected, true);
+  // …but a connected kind is never dropped from the picker.
+  assert.deepEqual(plain(partial.options.map((o) => o.kind)), ["hetzner", "azure"]);
+  // All connected is a ROTATION state, not a dead end: a kind is still armed.
   const full = hooks.providerConnectModel([{ kind: "hetzner" }, { kind: "azure" }]);
   assert.equal(full.allConnected, true);
-  assert.equal(full.selectable, null);
+  assert.equal(full.selectable, "hetzner");
+  assert.ok(full.options.every((o) => o.connected));
+  // providerIsConnected is the single copy switch the card, the wiring and the
+  // submit toast all read, so they can never disagree about connect vs replace.
+  assert.equal(hooks.providerIsConnected([{ kind: "hetzner" }], "hetzner"), true);
+  assert.equal(hooks.providerIsConnected([{ kind: "hetzner" }], "azure"), false);
+  assert.equal(hooks.providerIsConnected(null, "hetzner"), false);
 });
 
-test("gr-p4: connect card is the GR33 hybrid — picker + subform + save-row; already-connected is disabled", () => {
+test("gr-p4/GR44: connect card is the GR33 hybrid, and an armed connected kind reads REPLACE — no disabled seg-btn, no dead end", () => {
   const card = hooks.providerConnectCardHtml([{ kind: "hetzner" }], null);
-  assert.match(card, /data-connect-kind="hetzner"[^>]*disabled/); // connected → not selectable
+  assert.match(card, /data-connect-kind="hetzner"/);
+  assert.ok(!/data-connect-kind="hetzner"[^>]*disabled/.test(card), "a connected kind is never a disabled ghost");
   assert.match(card, /data-connect-kind="azure"/);
-  assert.match(card, /aria-pressed="true"/); // azure armed
+  assert.match(card, /aria-pressed="true"/); // azure armed (the open kind is the default)
   assert.match(card, /set-save-row/); // verify+save in a save-row
   assert.match(card, /data-connect-submit/);
   assert.match(card, /cred-remediation/); // the in-card remediation slot
-  // all connected → the replace note, and NO second connect is offered
+  // Arming the OPEN kind is a first connect: connect copy, no rotation note.
+  assert.match(card, /Verify &amp; connect/);
+  assert.ok(card.indexOf("data-connect-rotating") === -1);
+
+  // Explicitly arming the CONNECTED kind is honoured and becomes a replace.
+  const armedConnected = hooks.providerConnectCardHtml([{ kind: "hetzner" }], "hetzner");
+  assert.match(armedConnected, /data-connect-kind="hetzner"[^>]*aria-pressed="true"/);
+  assert.match(armedConnected, /data-connect-rotating/);
+  assert.match(armedConnected, /Replaces the stored Hetzner Cloud credential/);
+  assert.match(armedConnected, /keeps working until it does/); // the honest no-downtime claim
+  assert.match(armedConnected, /Verify &amp; replace/);
+
+  // All connected → still a working form, and NEVER the destroy-first copy.
   const replace = hooks.providerConnectCardHtml([{ kind: "hetzner" }, { kind: "azure" }], null);
-  assert.match(replace, /Every supported provider is connected/);
-  assert.ok(replace.indexOf("data-connect-submit") === -1);
+  assert.match(replace, /data-connect-submit/);
+  assert.match(replace, /Verify &amp; replace/);
+  assert.match(replace, /data-connect-rotating/);
+  assert.ok(replace.indexOf("Every supported provider is connected") === -1);
+  assert.ok(replace.indexOf("Disconnect one above") === -1);
+  assert.ok(!/data-connect-kind="[a-z]+"[^>]*disabled/.test(replace));
+});
+
+test("gr-p4/GR44: the roster shows a rotation — 'credential updated' ONLY when updated_at moved past inserted_at", () => {
+  const at = new Date(Date.now() - 9 * 86400000).toISOString();
+  const later = new Date(Date.now() - 3600000).toISOString();
+  // A first connect: both stamps come from ONE autogenerate entry → no rotation line.
+  const fresh = hooks.providerRosterHtml(
+    [{ id: "p1", kind: "hetzner", label: "main", inserted_at: at, updated_at: at }], true);
+  assert.match(fresh, /connected /);
+  assert.ok(fresh.indexOf("credential updated") === -1, "an untouched row never claims an update");
+  // A rotated row: the upsert kept inserted_at and moved updated_at.
+  const rotated = hooks.providerRosterHtml(
+    [{ id: "p1", kind: "hetzner", label: "main", inserted_at: at, updated_at: later }], true);
+  assert.match(rotated, /connected /);
+  assert.match(rotated, /credential updated /);
+  assert.match(rotated, /data-prov-rotated/);
+  // An older control plane that omits updated_at degrades to silence, not to a lie.
+  const legacy = hooks.providerRosterHtml([{ id: "p1", kind: "hetzner", inserted_at: at }], true);
+  assert.ok(legacy.indexOf("credential updated") === -1);
 });
 
 test("gr-p4: capability matrix — 9 verbs, prod columns only, server-owned gaps, NO invented reason, NO padded cell", () => {

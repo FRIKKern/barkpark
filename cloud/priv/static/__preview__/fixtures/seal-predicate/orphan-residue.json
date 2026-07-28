@@ -1,0 +1,44 @@
+{
+  "_comment": "CONTROL. The successor resolves, so no refusal fires — and clause (a) still reds on one unforwarded live row. Proves the refusals were added BEFORE the clauses, not INSTEAD of them.",
+  "successor": "cch-fixture-successor-epic",
+  "tasks": {
+    "cch-fixture-successor-epic": {
+      "_id": "cch-fixture-successor-epic",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    }
+  },
+  "children": [
+    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
+    { "_id": "gr-fixture-orphan-1", "lifecycle_status": "open" },
+    { "_id": "gr-fixture-forwarded-1", "lifecycle_status": "in_progress" }
+  ],
+  "forwarded": ["gr-fixture-forwarded-1"],
+  "gates": {
+    "cloud-console-billing-live-gate": {
+      "_id": "cloud-console-billing-live-gate",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    },
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "task-47bc4168392dec17"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "task-47bc4168392dec17"
+    }
+  },
+  "landed": ["0261ace15"],
+  "defectCommits": {}
+}

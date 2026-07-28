@@ -649,7 +649,9 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{error: "invalid", details: errors(cs)})
         end
       else
-        case Accounts.create_user_session_token(user, session_opts(conn)) do
+        # ORIGIN "password": this branch is reached only when 2FA is OFF, so the
+        # password check above is the whole of what established the session.
+        case Accounts.create_user_session_token(user, session_opts(conn) ++ [origin: "password"]) do
           {:ok, token} ->
             team = Accounts.primary_team(user)
             json(conn, 200, %{token: token, team_id: team && team.id})
@@ -710,7 +712,16 @@ defmodule BarkparkCloud.Web.Router do
             if ok? do
               Accounts.delete_two_factor_pending_tokens(user)
 
-              case Accounts.create_user_session_token(user, session_opts(conn)) do
+              # ORIGIN "two_factor": reaching here means the password leg ALREADY
+              # passed (it minted the challenge token) and a second factor — an
+              # OTP or a recovery code — cleared too. Deliberately not split into
+              # otp-vs-recovery: the `ok?` cond above collapses both to a boolean
+              # before this point, and re-deriving which one fired would be a
+              # guess.
+              case Accounts.create_user_session_token(
+                     user,
+                     session_opts(conn) ++ [origin: "two_factor"]
+                   ) do
                 {:ok, token} ->
                   team = Accounts.primary_team(user)
                   json(conn, 200, %{token: token, team_id: team && team.id})
@@ -1058,7 +1069,14 @@ defmodule BarkparkCloud.Web.Router do
            :ok <- OAuth.verify_state(state, provider),
            {:ok, identity} <- OAuth.fetch_identity(provider, code),
            {:ok, user} <- Accounts.get_or_create_user_from_oauth(identity),
-           {:ok, token} <- Accounts.create_user_session_token(user, session_opts(conn)) do
+           # ORIGIN "oauth:<provider>": `provider` is already bound by this
+           # with-chain and IS the answer — no inference, and each provider
+           # reports itself rather than collapsing to a generic "oauth".
+           {:ok, token} <-
+             Accounts.create_user_session_token(
+               user,
+               session_opts(conn) ++ [origin: "oauth:#{provider}"]
+             ) do
         team = Accounts.primary_team(user)
         redirect_to(conn, "/#oauth=#{token}&team=#{team && team.id}")
       else
@@ -1532,7 +1550,16 @@ defmodule BarkparkCloud.Web.Router do
           # the in-flight request never lost its own auth mid-call. Revoke it now
           # and hand back a fresh one so the SPA swaps and stays authenticated.
           _ = Accounts.revoke_user_session_token(old_token)
-          {:ok, fresh} = Accounts.create_user_session_token(user, session_opts(conn))
+
+          # ORIGIN "password_change": this row is NOT a login — it is the
+          # replacement token handed back after "sign out everywhere", and
+          # calling it "password" would misreport a re-mint as a fresh sign-in.
+          {:ok, fresh} =
+            Accounts.create_user_session_token(
+              user,
+              session_opts(conn) ++ [origin: "password_change"]
+            )
+
           json(conn, 200, %{ok: true, token: fresh})
 
         {:error, :invalid_current_password} ->
@@ -7845,7 +7872,16 @@ defmodule BarkparkCloud.Web.Router do
              # auto-create). A lazy get_or_create_settings/1 backstops any team
              # that predates this.
              {:ok, _settings} <- Notifications.ensure_settings(team),
-             {:ok, token} <- Accounts.create_user_session_token(user, session_opts) do
+             # ORIGIN "register": stamped HERE, at the write site, not by the
+             # caller — `register/4` has exactly one caller and this insert is
+             # the account's very first session, so "register" is the whole
+             # truth about it. Appending to the passed-in `session_opts` keeps
+             # `session_opts/1` itself origin-free.
+             {:ok, token} <-
+               Accounts.create_user_session_token(
+                 user,
+                 session_opts ++ [origin: "register"]
+               ) do
           %{user: user, team: team, token: token}
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -8321,14 +8357,29 @@ defmodule BarkparkCloud.Web.Router do
 
   defp provider_json(p) do
     # encrypted_token is NEVER serialized — the connected token stays at rest.
+    #
+    # `updated_at` is not decoration: `connect_provider/4` is an upsert, so a
+    # credential ROTATION mutates :encrypted_token and :updated_at while leaving
+    # :id and :inserted_at exactly where they were. Serialize only the five
+    # original fields and the payload is BYTE-IDENTICAL before and after a
+    # successful rotation — the console would have no way to show that anything
+    # happened. `updated_at > inserted_at` is the rotation signal the roster
+    # renders as "credential updated <rel>".
     %{
       id: p.id,
       kind: p.kind,
       label: p.label,
       team_id: p.team_id,
-      inserted_at: p.inserted_at
+      inserted_at: p.inserted_at,
+      updated_at: p.updated_at
     }
   end
+
+  # Did this connect REPLACE an existing credential? Read off the row Postgres
+  # returned (`returning: true`), so it reports what actually happened rather
+  # than what a pre-read predicted.
+  defp provider_rotated?(provider),
+    do: DateTime.compare(provider.inserted_at, provider.updated_at) == :lt
 
   ## Provider-neutral connect + catalog helpers ────────────────────────────────
   ## Hetzner and Azure are peers: one connect endpoint (verify-before-save), one
@@ -8369,6 +8420,19 @@ defmodule BarkparkCloud.Web.Router do
       # audit event share ONE transaction. The detail map carries only the
       # provider KIND and LABEL — NEVER the credential material (the token /
       # service-principal blob never reaches an audit row or a log line).
+      #
+      # Rotation is recorded as `rotated: true|false` METADATA, never as a second
+      # `provider.rotated` ACTION: `action` lives in the base attrs and is fixed
+      # before the transaction runs, and a new action string would widen the
+      # closed `noun.verb` vocabulary that `list_audit_events`' `:action_prefix`
+      # filter reads. The signal costs nothing and cannot race — the upsert
+      # replaces :updated_at on the conflict branch only, while a fresh insert
+      # fills both timestamps from ONE autogenerate entry, so
+      # `inserted_at < updated_at` IS "this was a replacement". A `Repo.exists?`
+      # pre-read would cost a round trip AND read pre-state, mislabelling a
+      # rotation as a first connect under a concurrent connect.
+      # `target_fun`'s map merges OVER the base attrs, so the whole distinction
+      # is one key and `Accounts.audit/3` is untouched.
       audited =
         Accounts.audit(
           %{
@@ -8381,7 +8445,12 @@ defmodule BarkparkCloud.Web.Router do
           fn ->
             Registry.connect_provider(conn.assigns.current_team, kind, credential, label: label)
           end,
-          fn provider -> %{target_id: provider.id} end
+          fn provider ->
+            %{
+              target_id: provider.id,
+              metadata: %{kind: kind, label: label, rotated: provider_rotated?(provider)}
+            }
+          end
         )
 
       case audited do
@@ -10716,6 +10785,12 @@ defmodule BarkparkCloud.Web.Router do
       id: t.id,
       ip_address: t.ip_address,
       user_agent: t.user_agent,
+      # ALWAYS emitted, `null` when unknown — a present-and-null key lets the SPA
+      # tell "this server does not know where the session came from" apart from
+      # "this server is too old to have the field at all". Rows minted before the
+      # `origin` column existed are exactly the first case, and nothing guesses
+      # on their behalf.
+      origin: t.origin,
       last_used_at: t.last_used_at,
       inserted_at: t.inserted_at,
       current: t.token_hash == current_hash
