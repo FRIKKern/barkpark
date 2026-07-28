@@ -84,6 +84,122 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+// ── cch-bl-mockjs-revoke-stateless · THE BROWSER PREVIEW'S REVOKE ───────────
+// scenarios.mjs models the two session DELETEs statefully, but ONLY when the
+// caller hands route() its optional 4th arg — a per-boot mutable bag. smoke.mjs
+// (the node oracle) passes one; mock.js (the BROWSER preview, and therefore the
+// harness shoot.sh photographs) did not. Consequence: clicking Revoke toasted
+// "Device signed out" and app.js's immediate loadSessions() refetch returned a
+// byte-identical list. A success claim with no post-condition read — the epic
+// predicate, in a browser, on a destructive verb.
+//
+// Nothing in this repo would have gone red on a revert: __app.test.mjs never
+// read mock.js, modal-oracle.mjs has zero revoke coverage, and neither it nor
+// smoke.mjs is run by any workflow. This group is therefore in TWO halves:
+//   HALF 1 (CONTRACT) — route()'s own semantics, imported directly: stateless
+//     DELETE leaves the list at N; with a bag it drops to N-1.
+//   HALF 2 (WIRING, the tripwire) — mock.js actually PASSES a bag. It scans the
+//     call's argument list with a balanced-paren walk rather than matching one
+//     literal spelling, so a rename or a reformat cannot make it vacuously
+//     green, and it throws by name if the call site disappears entirely.
+// Half 2 is the half that goes red on clean origin/main (3 args).
+const { route: previewRoute } = await import("./__preview__/scenarios.mjs");
+const MOCK_JS_SRC = fs.readFileSync(new URL("./__preview__/mock.js", import.meta.url), "utf8");
+
+// Split the argument list of the FIRST call to `<needle>` in `src`, walking
+// balanced delimiters and skipping string/template/comment content, so nesting
+// (`route(a, f(b, c), d)`) and reformatting do not miscount. Returns the trimmed
+// top-level argument texts. THROWS if the call site is absent — the failure mode
+// a silent regex would have turned into a vacuous pass.
+function callArgs(src, needle) {
+  const at = src.indexOf(needle);
+  assert.ok(at !== -1, `call site "${needle}" not found in mock.js — the tripwire cannot certify a call it cannot locate`);
+  let i = src.indexOf("(", at) + 1;
+  const args = [];
+  let depth = 0, cur = "", quote = null;
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (quote) {
+      if (c === "\\") { cur += c + src[++i]; continue; }
+      if (c === quote) quote = null;
+      cur += c;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { quote = c; cur += c; continue; }
+    if (c === "/" && src[i + 1] === "/") { while (i < src.length && src[i] !== "\n") i++; continue; }
+    if (c === "/" && src[i + 1] === "*") {
+      const end = src.indexOf("*/", i + 2);
+      // An unterminated block comment would send indexOf to -1, i to 0, and this
+      // walk into an infinite loop — a hung test is worse than a red one.
+      assert.ok(end !== -1, `unterminated block comment while scanning "${needle}" in mock.js`);
+      i = end + 1;
+      continue;
+    }
+    if (c === "(" || c === "[" || c === "{") depth++;
+    if (c === ")" && depth === 0) { args.push(cur.trim()); break; }
+    if (c === ")" || c === "]" || c === "}") depth--;
+    if (c === "," && depth === 0) { args.push(cur.trim()); cur = ""; continue; }
+    cur += c;
+  }
+  assert.ok(i < src.length, `unterminated argument list for "${needle}" in mock.js`);
+  return args;
+}
+
+// HALF 1 — the CONTRACT, straight off scenarios.mjs. Both scenarios are pinned
+// because account-modal-revoke is the one auto-enrolled in shoot.sh's screenshot
+// set (the account-modal name prefix), i.e. the fixture the published evidence
+// is taken through.
+for (const [scen, n] of [["account-modal", 2], ["account-modal-revoke", 4]]) {
+  test(`scenarios.route(${scen}): a DELETE without a state bag leaves the list at N; with one it drops to N-1`, () => {
+    const list = (state) => previewRoute(scen, "GET", "/v1/account/sessions", state).body.sessions;
+
+    // The fixture is the size this check assumes (a shrunken fixture would make
+    // the -1 assertion below pass for the wrong reason).
+    assert.equal(list(undefined).length, n, `${scen} must carry ${n} sessions`);
+
+    // STATELESS (what mock.js used to be): 200, and the following GET is unchanged.
+    const victim = list(undefined).find((s) => !s.current);
+    const stateless = previewRoute(scen, "DELETE", `/v1/account/sessions/${victim.id}`, undefined);
+    assert.equal(stateless.status, 200, "the revoke reports success");
+    assert.equal(list(undefined).length, n, "…over a list that never changed — the false green");
+
+    // STATEFUL: the same 200, and the post-condition read actually shrinks.
+    const bag = {};
+    assert.equal(previewRoute(scen, "DELETE", `/v1/account/sessions/${victim.id}`, bag).status, 200);
+    assert.equal(previewRoute(scen, "GET", "/v1/account/sessions", bag).body.sessions.length, n - 1);
+
+    // A second revoke of the SAME id is now an honest 404, not a second success.
+    assert.equal(previewRoute(scen, "DELETE", `/v1/account/sessions/${victim.id}`, bag).status, 404);
+
+    // Sign-out-everywhere keeps the acting session and reports the real count.
+    const others = previewRoute(scen, "GET", "/v1/account/sessions", bag).body.sessions.filter((s) => !s.current);
+    const all = previewRoute(scen, "DELETE", "/v1/account/sessions", bag);
+    assert.equal(all.body.revoked, others.length, "the toast's count is the number actually revoked");
+    assert.equal(previewRoute(scen, "GET", "/v1/account/sessions", bag).body.sessions.length, 1);
+  });
+}
+
+test("mock.js WIRING TRIPWIRE: the browser preview hands route() a per-boot state bag (red on a 3-arg revert)", () => {
+  const args = callArgs(MOCK_JS_SRC, ".route(");
+  assert.equal(args.length, 4, `mock.js called route() with ${args.length} args — a 3-arg call gets no state bag, so every DELETE is a stateless no-op that still answers 200`);
+
+  // The 4th arg is a bare identifier (not an inline `{}`, which would be a FRESH
+  // bag per request and therefore still stateless across the refetch).
+  const bag = args[3];
+  assert.match(bag, /^[A-Za-z_$][A-Za-z0-9_$]*$/, `route()'s state argument must be a bare identifier, got ${JSON.stringify(bag)}`);
+
+  // …and that identifier is declared ONCE, as an empty object literal, at a
+  // scope outside the fetch handler — per page load, mirroring smoke.mjs.
+  const decl = new RegExp(`\\b(?:var|let|const)\\s+${bag}\\s*=\\s*\\{\\s*\\}`);
+  assert.match(MOCK_JS_SRC, decl, `${bag} must be declared as an empty object literal (the per-boot bag)`);
+
+  // route() hands back the LIVE state array by reference, so the body must be
+  // copied before the app sees it — otherwise a body rendered earlier silently
+  // rewrites itself on the next revoke.
+  const body = callArgs(MOCK_JS_SRC, "jsonResponse(res.status");
+  assert.notEqual(body[1], "res.body", "the routed body must be snapshotted, not handed over by reference");
+});
+
 // ── cch-w1-refetch-storm · THE REQUEST COUNTER ──────────────────────────────
 // Overview binds to five reads. Every SSE tick used to re-run the whole loader:
 // 1 cold boot + 7 fleet ticks = 40 requests, 8 per endpoint — measured in

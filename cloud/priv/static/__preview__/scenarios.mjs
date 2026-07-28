@@ -3120,8 +3120,10 @@ export function route(name, method, path, state) {
   // when the caller supplies one, so the two DELETEs below actually change it.
   // With a stateless fixture the list is byte-identical before and after a
   // revoke, so a per-row revoke that never fired is indistinguishable from one
-  // that did: the check passes either way (D39). smoke.mjs passes a store;
-  // mock.js (3 args) does not, and keeps the old read-only behaviour.
+  // that did: the check passes either way (D39). smoke.mjs passes a store, and
+  // since cch-bl-mockjs-revoke-stateless so does mock.js (a per-boot bag), so
+  // both harnesses now answer the destructive routes the same way. A caller
+  // that omits the 4th arg still gets the old read-only behaviour.
   if (p === "/v1/account/sessions" && method === "GET") {
     return { status: 200, body: { sessions: sessionsOf(d, state) } };
   }
