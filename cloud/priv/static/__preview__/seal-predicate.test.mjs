@@ -143,6 +143,23 @@ test('an unreadable ledger is INFRA FAULT (exit 2), never NO SEAL (exit 1)', () 
   assert.doesNotMatch(out, /VERDICT: NO SEAL/);
 });
 
+// ── R0 — THE OVERRIDE CANNOT REACH A LIVE RUN ────────────────────────────────
+// `--guard-cmd` is applied verbatim once per registered defect and never receives
+// the defect id, so ONE `--guard-cmd true` marks all three entries measured-clean.
+// That is a command-line path to the exact vacuous green clause (b) exists to
+// prevent. Binding it to --ledger means the live run — the only run whose green
+// anybody quotes — cannot substitute a stub for the browser guard.
+test('R0: --guard-cmd without --ledger is REFUSED before any clause runs', () => {
+  const { status, out } = run(['--repo', REPO, '--guard-cmd', 'true', '--successor', 'whatever']);
+  assert.equal(status, NO_SEAL, 'a live run with a stubbed guard must never seal');
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=GUARD-OVERRIDE-WITHOUT-FIXTURE/);
+  assert.match(out, /a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
+  assert.doesNotMatch(out, /VERDICT: SEAL$/m);
+  // It refuses BEFORE the network, so an unreachable ledger server cannot turn
+  // this into an infra fault that reads as "inconclusive".
+  assert.doesNotMatch(out, /INFRA FAULT/);
+});
+
 test('every run emits exactly one machine-readable VERDICT-TOKEN line', () => {
   for (const args of [
     ['--ledger', FIX('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'],

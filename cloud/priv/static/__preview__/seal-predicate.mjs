@@ -63,6 +63,7 @@
 // an unqualified SEAL. A predicate that prints an honest sentence and still exits 0
 // is the same defect as one that lies, so these are REFUSALS, not prose:
 //
+//   R0  --guard-cmd given without --ledger      — clause (b) would certify a stub
 //   R1  the defect register is empty            — clause (b) would certify nothing
 //   R2  no successor is named                   — clause (a) has no forwarding address
 //   R3  the named successor does not resolve to a published task
@@ -79,7 +80,8 @@
 //   --ledger <file>    inject a ledger fixture instead of live HTTP (mutation proofs only)
 //   --successor <id>   the successor epic's task id, for clause (a) forwarding
 //   --repo <path>      repo root
-//   --guard-cmd <cmd>  override the guard command (mutation proofs only)
+//   --guard-cmd <cmd>  override the guard command (mutation proofs only — REFUSED
+//                      unless --ledger is also given; see R0)
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -197,6 +199,17 @@ function main() {
   if (!Array.isArray(KNOWN_DEFECTS) || KNOWN_DEFECTS.length === 0)
     throw new Refusal('EMPTY-DEFECT-REGISTER',
       'KNOWN_DEFECTS is empty — clause (b) would certify the word KNOWN over zero defects and spawn no guard at all. An unrun clause is not a passed clause.');
+
+  // R0 — `--guard-cmd` is a FIXTURE-ONLY affordance. It is applied verbatim once
+  // per registered defect and never receives the defect id, so a single
+  // `--guard-cmd true` marks every entry in clause (b) measured-clean: the exact
+  // vacuous green clause (b) exists to prevent, reachable from the command line.
+  // Binding it to `--ledger` costs nothing (every mutation proof already injects
+  // a fixture) and makes the live run — the only run whose green anybody quotes —
+  // structurally incapable of substituting a stub for the browser guard.
+  if (guardOverride !== null && !ledgerPath)
+    throw new Refusal('GUARD-OVERRIDE-WITHOUT-FIXTURE',
+      '--guard-cmd was given without --ledger. The override is applied once per registered defect and carries no defect id, so on a LIVE run it would certify clause (b) over a stub instead of the browser guard. Mutation proofs inject a ledger fixture; live runs use the committed guard.');
 
   const SUCCESSOR = arg('--successor') || (fixture ? fixture.successor : null) || null;
   if (typeof SUCCESSOR !== 'string' || SUCCESSOR.trim() === '')
