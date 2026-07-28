@@ -1034,8 +1034,12 @@ defmodule Barkpark.Sites.DeployRunner do
     Process.send_after(self(), {:run_deadline, port}, run_deadline_ms())
   end
 
-  # Closing a `{:spawn_executable, _}` port terminates the external program;
-  # tolerate an already-closed port so the watchdog never crashes the Runner.
+  # Closing a `{:spawn_executable, _}` port closes the pipe fds and sends the child
+  # NO signal — it terminates only a program that exits on stdin EOF or dies to
+  # SIGPIPE (GH #6681: the Codex runtime orphaned a child that did neither, which
+  # `Session.reap_port/1` now SIGKILLs after the close). A deploy child that
+  # ignores EOF survives this watchdog the same way; reaping here is filed, not
+  # done. Tolerate an already-closed port so the watchdog never crashes the Runner.
   defp close_port(port) do
     Port.close(port)
   rescue

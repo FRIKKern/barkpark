@@ -208,9 +208,22 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
     IFS= read -r line                                    # thread/start
     printf '{"id":3,"result":{"thread":{"id":"thread-1"}}}\\n'
     IFS= read -r line                                    # turn/start -> flood
-    while :; do
+    # DELIBERATELY pathological, and it must stay that way: the loop stops reading
+    # stdin before it writes (so it never sees the EOF a port close produces) and
+    # writes with the `printf` BUILTIN (so a closed pipe yields EPIPE, which the
+    # shell reports and survives — SIGPIPE only kills external commands). That is
+    # the wedged-provider shape the overflow path exists to stop, and the only
+    # stub against which "the OS process is gone" means anything.
+    #
+    # The one concession to hygiene is the iteration BOUND (GH #6681): breaching a
+    # 64KB cap needs ~512 iterations, so it is unreachable while the test is
+    # healthy, but it caps a leaked orphan at seconds of spinning instead of the
+    # 1d19h two of these actually ran for.
+    i=0
+    while [ "$i" -lt 500000 ]; do
       printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
       printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      i=$((i + 1))
     done
     """)
 
@@ -239,6 +252,16 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
     port = :sys.get_state(runtime.runtime).port
     assert Port.info(port) != nil, "port should be open after a clean handshake"
 
+    # Read the child's pid while the port is still open — it is both the subject
+    # of the regression assertion below and the safety net: if anything in this
+    # test fails early, on_exit reaps the flood loop rather than leaving it to the
+    # machine (belt; the assertion is the braces).
+    {:os_pid, os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      System.cmd("kill", ["-9", Integer.to_string(os_pid)], stderr_to_stdout: true)
+    end)
+
     # Threshold-crossing assertion: the pending turn caller fails closed with the
     # bound's atom (never :timeout, which is what unbounded code returns).
     assert {:error, :buffer_overflow} = Codex.send_turn(runtime, "flood")
@@ -248,7 +271,48 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
 
     assert Port.info(port) == nil, "port must be closed on buffer breach"
 
+    # The port being closed proves only that the BEAM let go (GH #6681). This stub
+    # cannot notice EOF and cannot die to EPIPE, so it is gone if and only if the
+    # overflow path SIGNALLED it — revert the kill in `reap_port/1` and this reds
+    # while every assertion above still passes.
+    assert wait_until(fn -> not os_process_alive?(os_pid) end),
+           "app-server OS process #{os_pid} survived the buffer breach — closing a " <>
+             "{:spawn_executable, _} port sends the child no signal, so a provider that " <>
+             "ignores stdin EOF is orphaned at 100% CPU (GH #6681)"
+
     assert :ok = Codex.close(runtime)
+  end
+
+  # `kill -0` cannot answer this: it succeeds on a zombie, and a SIGKILLed child
+  # is a zombie until the BEAM's erl_child_setup reaps it. Read the state column
+  # instead and count `Z` as gone — it holds no CPU and no fds.
+  defp os_process_alive?(os_pid) do
+    case System.cmd("ps", ["-o", "state=", "-p", Integer.to_string(os_pid)],
+           stderr_to_stdout: true
+         ) do
+      {out, 0} ->
+        state = String.trim(out)
+        state != "" and not String.starts_with?(state, "Z")
+
+      _ ->
+        false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp wait_until(fun, timeout_ms \\ 2_000, waited_ms \\ 0) do
+    cond do
+      fun.() ->
+        true
+
+      waited_ms >= timeout_ms ->
+        false
+
+      true ->
+        Process.sleep(25)
+        wait_until(fun, timeout_ms, waited_ms + 25)
+    end
   end
 
   defp ordered?(wire, methods) do
