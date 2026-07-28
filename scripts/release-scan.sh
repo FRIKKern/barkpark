@@ -100,7 +100,19 @@ if [ -n "$last_tag" ]; then range="${last_tag}..${head_sha}"; else range="$head_
 # Commits since the last tag (newest first) as sha<TAB>subject lines, folded
 # into a JSON array. Squash-merges carry (#NNNN) in the subject; we surface
 # the first PR number per commit so the agent can link them.
-commits_json="$(git log --format='%H%x09%s' "$range" 2>/dev/null \
+#
+# THE ARRAY TRAVELS BY FILE, NEVER BY ARGV (honest-gates charter D44). Linux
+# caps a SINGLE argv word at MAX_ARG_STRLEN = 131072 bytes, independently of
+# the much larger ARG_MAX; macOS has no per-argument cap at all. This repo
+# crossed that ceiling on 2026-07-15, and from then on `--argjson commits
+# "$commits_json"` (~310 KB for the 1900-commit v0.2.25..HEAD range) made
+# execve fail E2BIG: jq never started, bash returned 126, stdout was EMPTY.
+# The script was dead on every Linux runner for two weeks and nobody saw it,
+# because main carried no harness and no CI caller.
+SCAN_TMP="$(mktemp -d)"
+trap 'rm -rf "$SCAN_TMP"' EXIT
+commits_file="$SCAN_TMP/commits.json"
+git log --format='%H%x09%s' "$range" 2>/dev/null \
   | jq -R -s '
       split("\n")
       | map(select(length > 0))
@@ -108,10 +120,13 @@ commits_json="$(git log --format='%H%x09%s' "$range" 2>/dev/null \
           sha: (.[0][0:12]),
           subject: (.[1] // ""),
           pr: ((.[1] // "") | (capture("#(?<n>[0-9]+)") | .n | tonumber)? // null)
-        })')"
-# An empty range yields empty stdin; guarantee a valid JSON array either way.
-commits_json="${commits_json:-[]}"
-commit_count="$(printf '%s' "$commits_json" | jq 'length')"
+        })' >"$commits_file" || true
+# An empty range yields empty stdin, and a failed jq leaves a truncated file;
+# guarantee a valid JSON array either way rather than emitting `null`.
+if ! jq -e 'type == "array"' "$commits_file" >/dev/null 2>&1; then
+  printf '[]' >"$commits_file"
+fi
+commit_count="$(jq 'length' "$commits_file")"
 
 # Suggested bump: any feat commit → minor, else patch. Major stays a manual
 # decision (0.x, and it is never inferred). Applied to the last tag's A.B.C.
@@ -276,7 +291,7 @@ jq -n \
   --arg head_short "$head_short" \
   --argjson shallow "$shallow_json" \
   --argjson commit_count "$commit_count" \
-  --argjson commits "$commits_json" \
+  --slurpfile commits "$commits_file" \
   --arg bump "$bump" \
   --arg suggested_version "$suggested_version" \
   --argjson ci "$ci_json" \
@@ -291,5 +306,9 @@ jq -n \
     suggested_bump: $bump,
     suggested_version: (if $suggested_version == "" then null else $suggested_version end),
     ci: $ci,
-    commits: $commits
+    # --slurpfile wraps the file contents in an OUTER array, so this must be
+    # $commits[0]. Plain $commits would nest the list one level deeper and
+    # silently break the .commits[] reader in docs/ops/release-curator.md —
+    # the argv fix is a contract change inside the jq program too.
+    commits: $commits[0]
   }'
