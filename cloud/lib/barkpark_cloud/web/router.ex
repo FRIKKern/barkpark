@@ -10564,7 +10564,7 @@ defmodule BarkparkCloud.Web.Router do
 
       true ->
         case site_token_read(bp, ws, proj, ds, type, token) do
-          {:readable, count} -> {:ok, {:bound, type, count}}
+          {:readable, total} -> {:ok, {:bound, type, total}}
           {:unverified, why} -> {:ok, {:unverified, why}}
           {:empty, why} -> refuse_empty_binding(bp, ws, proj, ds, token, why)
         end
@@ -10577,15 +10577,15 @@ defmodule BarkparkCloud.Web.Router do
 
   # THE read: the site's own credential, the build's own route.
   defp site_token_read(bp, ws, proj, ds, type, token) do
-    path = scoped_query_path(ws, proj, ds, type) <> "?limit=1"
+    path = scoped_query_probe(ws, proj, ds, type)
 
     case Registry.relay_as(bp, :get, path, token) do
       {:ok, status, body} when status in 200..299 ->
         case interpret_query_body(body) do
-          {:ok, count} when count > 0 ->
-            {:readable, count}
+          {:ok, page, total} when page > 0 ->
+            {:readable, total}
 
-          {:ok, 0} ->
+          {:ok, 0, _total} ->
             {:empty, "#{type} in #{ds} has no documents this site can read"}
 
           :uninterpretable ->
@@ -10616,13 +10616,26 @@ defmodule BarkparkCloud.Web.Router do
   # and the bare inner map when it is off — interpret BOTH, and nothing else. A
   # body that matches neither is a shape we do not know, which is `unverified`
   # (charter D75), never `empty`.
+  #
+  # TWO numbers, and they are NOT interchangeable. `count` is the PAGE size the
+  # query returned, so under `?limit=1` it is 0 or 1 and nothing else — it answers
+  # "is there anything here", never "how much". `total` is the box's own published
+  # aggregate for the type, present only because the probe asks `?count=true`, and
+  # it is the ONLY number this route is entitled to report to a user. An older box
+  # that does not know `count=true` returns no `total`, and then the verdict
+  # carries NO magnitude rather than passing the page size off as one.
   defp interpret_query_body(%{"result" => %{} = result}), do: interpret_query_body(result)
-  defp interpret_query_body(%{"count" => count}) when is_integer(count), do: {:ok, count}
 
-  defp interpret_query_body(%{"documents" => docs}) when is_list(docs),
-    do: {:ok, length(docs)}
+  defp interpret_query_body(%{"count" => count} = body) when is_integer(count),
+    do: {:ok, count, query_total(body)}
+
+  defp interpret_query_body(%{"documents" => docs} = body) when is_list(docs),
+    do: {:ok, length(docs), query_total(body)}
 
   defp interpret_query_body(_body), do: :uninterpretable
+
+  defp query_total(%{"total" => total}) when is_integer(total), do: total
+  defp query_total(_body), do: nil
 
   # The refusal: name what is wrong, what this site CAN read, and the exact re-run.
   defp refuse_empty_binding(bp, ws, proj, ds, token, why) do
@@ -10642,6 +10655,15 @@ defmodule BarkparkCloud.Web.Router do
   # (one `counts` call, no N+1), and the site's own token says which of those it can
   # actually read. Offering the admin list raw would hand a stranger a private type
   # and set up a build that 404s.
+  #
+  # The admin `counts` supply the CANDIDATE LIST and the probe ORDER — never the
+  # magnitudes the user is shown. A sentence that opens "This site CAN read" may
+  # only carry numbers the SITE's own token produced, or the count is an admin
+  # number wearing a site label (an admin sees drafts-free totals over types whose
+  # documents may still be field-redacted for a public-read caller, so it is an
+  # upper bound, not the site's number). Each surviving type therefore reports the
+  # `total` its own probe returned, and a type whose probe reports no total is
+  # listed WITHOUT a number.
   defp readable_type_menu(bp, ws, proj, ds, token) do
     path = "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/counts/#{URI.encode(ds)}"
 
@@ -10659,18 +10681,29 @@ defmodule BarkparkCloud.Web.Router do
     |> Enum.filter(fn {type, count} -> is_binary(type) and is_integer(count) and count > 0 end)
     |> Enum.sort_by(fn {type, count} -> {-count, type} end)
     |> Enum.take(@binding_menu_probe_limit)
-    |> Enum.filter(fn {type, _count} -> site_can_read?(bp, ws, proj, ds, type, token) end)
+    |> Enum.flat_map(fn {type, _admin_count} ->
+      case site_readable_total(bp, ws, proj, ds, type, token) do
+        {:readable, total} -> [{type, total}]
+        :no -> []
+      end
+    end)
   end
 
-  defp site_can_read?(bp, ws, proj, ds, type, token) do
-    path = scoped_query_path(ws, proj, ds, type) <> "?limit=1"
+  # Readable, and — when the box reports one — the site's OWN published total for
+  # the type. `:no` covers both "the site cannot read this" and "the answer was a
+  # shape we do not know": neither may be offered as a candidate.
+  defp site_readable_total(bp, ws, proj, ds, type, token) do
+    path = scoped_query_probe(ws, proj, ds, type)
 
     case Registry.relay_as(bp, :get, path, token) do
       {:ok, status, body} when status in 200..299 ->
-        match?({:ok, _}, interpret_query_body(body))
+        case interpret_query_body(body) do
+          {:ok, _page, total} -> {:readable, total}
+          :uninterpretable -> :no
+        end
 
       _ ->
-        false
+        :no
     end
   end
 
@@ -10679,11 +10712,21 @@ defmodule BarkparkCloud.Web.Router do
 
   defp menu_sentence({:ok, menu}, _ds) do
     "This site CAN read: " <>
-      (menu |> Enum.map(fn {type, count} -> "#{type} (#{count})" end) |> Enum.join(", ")) <> "."
+      (menu |> Enum.map(&menu_entry/1) |> Enum.join(", ")) <> "."
   end
 
   defp menu_sentence(:unavailable, ds),
     do: "The control plane could not list what IS readable in #{ds}."
+
+  defp menu_entry({type, total}) when is_integer(total), do: "#{type} (#{total})"
+  defp menu_entry({type, nil}), do: type
+
+  # The build's own route, plus `count=true` — which is what makes the reported
+  # magnitude the box's published TOTAL for the type rather than the page size the
+  # `limit=1` probe itself chose.
+  defp scoped_query_probe(ws, proj, ds, type) do
+    scoped_query_path(ws, proj, ds, type) <> "?limit=1&count=true"
+  end
 
   defp scoped_query_path(ws, proj, ds, type) do
     "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/query/#{URI.encode(ds)}/#{URI.encode(type)}"
@@ -10696,9 +10739,15 @@ defmodule BarkparkCloud.Web.Router do
     do: "#{bp.slug} could not be reached — the site's content could not be read"
 
   # What the 201 SAYS about the read. `bound` carries what the site actually saw;
-  # `unverified` carries WHY it could not be confirmed — never a bare `ok`.
-  defp binding_note({:bound, type, count}),
-    do: %{content_binding: %{status: "bound", doc_type: type, count: count}}
+  # `unverified` carries WHY it could not be confirmed — never a bare `ok`. The
+  # `count` key is the box's published TOTAL for the bound type and is OMITTED
+  # entirely when the box reported none: `bound` without a magnitude is the honest
+  # shape, and an absent key cannot be misread the way a fabricated `1` would be.
+  defp binding_note({:bound, type, total}) when is_integer(total),
+    do: %{content_binding: %{status: "bound", doc_type: type, count: total}}
+
+  defp binding_note({:bound, type, nil}),
+    do: %{content_binding: %{status: "bound", doc_type: type}}
 
   defp binding_note({:unverified, why}),
     do: %{content_binding: %{status: "unverified", detail: why}}
@@ -10706,10 +10755,13 @@ defmodule BarkparkCloud.Web.Router do
   defp binding_note(:not_applicable), do: %{}
 
   defp maybe_put_menu(body, {:ok, [_ | _] = menu}) do
-    Map.put(body, :readable_types, Enum.map(menu, fn {t, n} -> %{type: t, count: n} end))
+    Map.put(body, :readable_types, Enum.map(menu, &menu_row/1))
   end
 
   defp maybe_put_menu(body, _menu), do: body
+
+  defp menu_row({type, total}) when is_integer(total), do: %{type: type, count: total}
+  defp menu_row({type, nil}), do: %{type: type}
 
   # name → slug: lowercase, non-alnum → hyphen, trim hyphens. Falls back to a
   # short random suffix so a name like "!!!" still yields a valid slug.

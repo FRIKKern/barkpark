@@ -779,18 +779,21 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
         # The bound type: interpretable, and it shows NOTHING. That is a refusal.
         "/w/acme/p/blog/v1/data/query/production/post" =>
           {:ok, %{status: 200, body: ~s({"result":{"count":0,"documents":[]}})}},
-        # The admin menu — one call, no N+1.
+        # The admin menu — one call, no N+1. Its numbers are the CANDIDATE LIST and
+        # the probe order ONLY; they are deliberately DIFFERENT from the site's own
+        # totals below so a menu that echoed them would be caught here.
         "/w/acme/p/blog/v1/data/counts/production" =>
           {:ok,
            %{
              status: 200,
              body: ~s({"ok":true,"counts":{"paper":579,"task":3328,"session":5,"post":0}})
            }},
-        # …intersected with what the SITE token can actually read.
+        # …intersected with what the SITE token can actually read, and the
+        # magnitude the user is shown is the one the SITE's own probe returned.
         "/w/acme/p/blog/v1/data/query/production/paper" =>
-          {:ok, %{status: 200, body: ~s({"result":{"count":1,"documents":[{}]}})}},
+          {:ok, %{status: 200, body: ~s({"result":{"count":1,"total":40,"documents":[{}]}})}},
         "/w/acme/p/blog/v1/data/query/production/task" =>
-          {:ok, %{status: 200, body: ~s({"result":{"count":1,"documents":[{}]}})}}
+          {:ok, %{status: 200, body: ~s({"result":{"count":1,"total":12,"documents":[{}]}})}}
         # `session` is deliberately UNPROGRAMMED: the fake answers 200 "{}", which
         # the control plane cannot interpret, so it is NOT offered as readable.
       })
@@ -816,18 +819,26 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       body = json_body(conn)
       assert body["error"] == "content_binding_empty"
 
-      # The refusal names what IS readable, with real counts…
-      assert body["detail"] =~ "paper (579)"
-      assert body["detail"] =~ "task (3328)"
+      # The refusal names what IS readable, with the numbers the SITE's OWN token
+      # produced — 40 and 12, NOT the admin aggregate's 579 and 3328. A sentence
+      # opening "This site CAN read" may not carry an admin number wearing a site
+      # label: the admin sees types whose documents are field-redacted for a
+      # public-read caller, so its magnitudes are an upper bound, not the site's.
+      assert body["detail"] =~ "paper (40)"
+      assert body["detail"] =~ "task (12)"
+      refute body["detail"] =~ "579"
+      refute body["detail"] =~ "3328"
       # …and never a type the site's own token could not prove it can read.
       refute body["detail"] =~ "session"
       # …and the EXACT re-run, not "check your dataset".
       assert body["detail"] =~ "acme/blog/production"
       assert body["detail"] =~ "--doc-type"
-      # Machine-readable menu for the CLI/console, same intersection.
+      # Machine-readable menu for the CLI/console, same intersection, same
+      # provenance. Order is the admin candidate order (task outranks paper);
+      # the NUMBERS are the site's.
       assert body["readable_types"] == [
-               %{"type" => "task", "count" => 3328},
-               %{"type" => "paper", "count" => 579}
+               %{"type" => "task", "count" => 12},
+               %{"type" => "paper", "count" => 40}
              ]
 
       # Refused AT THE DOOR: no row, so no ghost for the reaper to kill later.
@@ -954,6 +965,68 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       StudioLinkFakeHttpClient.program(%{
         "/w/acme/p/blog/v1/tokens" =>
           {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}},
+        # `count` is the PAGE size the `?limit=1` probe itself chose, so it is 1 for
+        # every non-empty binding that will ever exist. `total` is the box's own
+        # published aggregate — the only number this route may report.
+        "/w/acme/p/blog/v1/data/query/production/paper" =>
+          {:ok,
+           %{status: 200, body: ~s({"result":{"count":1,"total":100,"documents":[{"_id":"p1"}]}})}}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production",
+            doc_type: "paper"
+          },
+          token
+        )
+
+      assert conn.status == 201
+
+      assert json_body(conn)["content_binding"] == %{
+               "status" => "bound",
+               "doc_type" => "paper",
+               "count" => 100
+             }
+
+      # …and the read was made with the JUST-MINTED site token over the SAME
+      # scoped query route the build later fetches with — not the admin token.
+      probe =
+        Enum.find(StudioLinkFakeHttpClient.requests(), fn r ->
+          String.contains?(r.url, "/v1/data/query/production/paper")
+        end)
+
+      assert probe, "create must READ the binding before writing the row"
+
+      assert List.keyfind(probe.headers, "Authorization", 0) ==
+               {"Authorization", "Bearer bpt_public_read_minted"}
+
+      # …and it ASKED for the total. Without `count=true` the box reports only the
+      # page size, and a `count` in the 201 would be the probe's own limit echoed
+      # back as if it were the site's content.
+      assert probe.url =~ "count=true"
+      assert probe.url =~ "limit=1"
+    end
+
+    # An older box that does not know `?count=true` reports no `total`. The verdict
+    # is still `bound` — the read PROVED readability — but it carries no magnitude
+    # rather than passing the page size off as one.
+    test "a box that reports no total is BOUND without a fabricated count" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}},
         "/w/acme/p/blog/v1/data/query/production/paper" =>
           {:ok, %{status: 200, body: ~s({"result":{"count":1,"documents":[{"_id":"p1"}]}})}}
       })
@@ -978,21 +1051,8 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
 
       assert json_body(conn)["content_binding"] == %{
                "status" => "bound",
-               "doc_type" => "paper",
-               "count" => 1
+               "doc_type" => "paper"
              }
-
-      # …and the read was made with the JUST-MINTED site token over the SAME
-      # scoped query route the build later fetches with — not the admin token.
-      probe =
-        Enum.find(StudioLinkFakeHttpClient.requests(), fn r ->
-          String.contains?(r.url, "/v1/data/query/production/paper")
-        end)
-
-      assert probe, "create must READ the binding before writing the row"
-
-      assert List.keyfind(probe.headers, "Authorization", 0) ==
-               {"Authorization", "Bearer bpt_public_read_minted"}
     end
 
     # The BYO-token branch short-circuits the mint entirely, so here the
@@ -1005,7 +1065,8 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
 
       StudioLinkFakeHttpClient.program(%{
         "/w/acme/p/blog/v1/data/query/production/post" =>
-          {:ok, %{status: 200, body: ~s({"result":{"count":4,"documents":[{},{},{},{}]}})}}
+          {:ok,
+           %{status: 200, body: ~s({"result":{"count":1,"total":4,"documents":[{"_id":"p1"}]}})}}
       })
 
       conn =
