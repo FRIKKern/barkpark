@@ -126,23 +126,36 @@ function overviewOnboarding(publishedDone) {
 
 function overviewNet() {
   const paths = [];
-  const state = { onboarding: overviewOnboarding(false) };
+  // `state` is the MUTABLE half of the fixture, so a test can flip what the
+  // server would say between ticks:
+  //   state.onboarding   — a step self-heals
+  //   state.subscription — trialing → past_due (the band/chip transition)
+  //   state.fail         — a Set of paths that answer 503 instead of 200, so a
+  //                        BACKGROUND refetch failure is expressible at all
+  //                        (every path was unconditionally ok before).
+  const state = {
+    onboarding: overviewOnboarding(false),
+    subscription: { status: "trialing", plan: "trial" },
+    fail: new Set(),
+  };
   const bodyFor = (path) => {
     if (path === "/v1/barkparks") return { barkparks: OVERVIEW_FLEET };
     if (path.startsWith("/v1/audit")) return { events: [] };
     if (path === "/v1/usage/summary") return { usage: { team: { instances: { quota: 5 } }, instances: [] } };
-    if (path === "/v1/subscription") return { subscription: { status: "trialing", plan: "trial" } };
+    if (path === "/v1/subscription") return { subscription: state.subscription };
     if (path === "/v1/onboarding") return { onboarding: state.onboarding };
     return {};
   };
   return {
     paths, state,
     fetch(path) {
-      paths.push(String(path));
+      const p = String(path);
+      paths.push(p);
+      const down = state.fail.has(p);
       return Promise.resolve({
-        ok: true, status: 200,
+        ok: !down, status: down ? 503 : 200,
         headers: { get: (n) => (String(n).toLowerCase() === "content-type" ? "application/json" : null) },
-        json: () => Promise.resolve(bodyFor(String(path))),
+        json: () => Promise.resolve(down ? { error: "unavailable" } : bodyFor(p)),
       });
     },
     reset() { paths.length = 0; },
@@ -183,15 +196,28 @@ function overviewDom() {
   };
   ["overview-body", "overview-greeting", "overview-sub", "overview-chips", "overview-launch"]
     .forEach((id) => nodes.set(id, make(id)));
+  // ONE document for the whole console, not two: the topbar chips
+  // (#billing-chip, #liveness-chip) and the Overview mounts have to be reachable
+  // from the SAME `document`, or the honesty this group asserts — "the chip says
+  // X while the body says Y" — is unassertable by construction. fakeDom() (below,
+  // hoisted) already owns the richer element model those chips need (children,
+  // insertBefore, class-selector querySelector), so this composes with it rather
+  // than forking a second one.
+  const topbar = fakeDom();
   return {
     nodes,
+    topbarRight: topbar.topbarRight,
+    // The chip elements, by id, once the SPA has mounted them.
+    chip: (id) => topbar.document.getElementById(id),
     document: {
       readyState: "complete",
       addEventListener: noop2, removeEventListener: noop2,
-      querySelector: (sel) => (sel.startsWith("#") ? nodes.get(sel.slice(1)) || null : null),
+      querySelector: (sel) => (sel.startsWith("#")
+        ? nodes.get(sel.slice(1)) || null
+        : topbar.document.querySelector(sel)),
       querySelectorAll: () => [],
-      getElementById: (id) => nodes.get(id) || null,
-      createElement: (t) => make(t),
+      getElementById: (id) => nodes.get(id) || topbar.document.getElementById(id),
+      createElement: (t) => topbar.document.createElement(t),
       documentElement: make(""), body: make(""),
     },
   };
@@ -379,6 +405,222 @@ test("cch-w1: off-Overview, a fleet tick still costs the Overview nothing", asyn
     sandbox.location.hash = priorHash;
     hooks.overviewData.list = null;
   }
+});
+
+// ── cch-bl-overview-subscription-band-stale · OVERVIEW HONESTY ──────────────
+// Two defects, one class: the Overview told the operator something it could not
+// know. NEITHER was pinned by the 699 tests that preceded this group — both
+// fixes passed the whole suite green before a single assertion below existed,
+// which is exactly why "the suite is green" proves nothing here and every claim
+// gets its own test, each mutation-proved able to fail.
+//
+// DEFECT A — the console CERTIFIED freshness it lacked. A background refetch
+// that fails returns silently from loadOverview's background-failure arm. The
+// SILENCE IS RIGHT (blanking a working dashboard on one blip is the louder
+// lie); what was wrong was the claim that "the liveness chip already reports a
+// broken stream". It does not: the chip is driven by EventSource state alone,
+// and es.onmessage stamps lastEventMs and repaints the chip BEFORE dispatching
+// the refetch — so at the instant of the failure it reads live / "Live" /
+// "· just now" over data that never arrived.
+//
+// DEFECT B — TYPE_ACTIONS.subscription refreshed subCache and repainted the
+// topbar chip, but had no `overview` arm, so the state band beneath a chip
+// reading "Payment failed" still rendered the old trial runway from that same
+// refreshed cache.
+
+test("cch-bl: a failed BACKGROUND refresh stops the chip certifying freshness", async () => {
+  await overviewHarness(async ({ net, dom }) => {
+    const chip = hooks.ensureLivenessChip();
+    hooks.renderLivenessChip();
+    // PRE-CONDITION — the lie, stated: a healthy stream, and the chip says so.
+    assert.equal(chip.getAttribute("data-state"), "live");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Live");
+
+    const bodyBefore = dom.nodes.get("overview-body").innerHTML;
+    assert.ok(bodyBefore.length > 0, "the cold paint must have left a dashboard to preserve");
+    net.reset();
+    net.state.fail.add("/v1/barkparks"); // the refetch the event triggers now 503s
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+
+    assert.equal(net.count("/v1/barkparks"), 1, "the tick did dispatch the refetch");
+    // THE FIX: the chip no longer vouches for data that did not arrive.
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Not current");
+    assert.notEqual(chip.querySelector(".live-chip-label").textContent, "Live");
+    assert.match(chip.getAttribute("aria-label"), /last refresh failed/);
+  });
+});
+
+test("cch-bl: …and the body is still NOT blanked — the silence is the correct half", async () => {
+  // The seam must not be "fixed" by repainting the body: replacing a working
+  // dashboard with an error state on one blip is the louder lie. This assertion
+  // was GREEN before the fix and must stay green after it.
+  await overviewHarness(async ({ net, dom }) => {
+    hooks.ensureLivenessChip();
+    const bodyBefore = dom.nodes.get("overview-body").innerHTML;
+    const bandBefore = dom.nodes.get("overview-state").innerHTML;
+    net.state.fail.add("/v1/barkparks");
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(dom.nodes.get("overview-body").innerHTML, bodyBefore,
+      "a background failure must leave the last good dashboard byte-identical");
+    assert.equal(dom.nodes.get("overview-state").innerHTML, bandBefore);
+    assert.doesNotMatch(dom.nodes.get("overview-body").innerHTML, /Couldn't load your fleet/);
+  });
+});
+
+test("cch-bl: a refresh that LANDS clears the not-current chip", async () => {
+  // A staleness flag that never clears is its own permanent lie — one blip would
+  // condemn the topbar for the rest of the session.
+  await overviewHarness(async ({ net, dom }) => {
+    const chip = hooks.ensureLivenessChip();
+    net.state.fail.add("/v1/barkparks");
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+    net.state.fail.clear(); // the blip passes
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(chip.getAttribute("data-state"), "live", "recovery is honest too");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Live");
+    assert.ok(dom.nodes.get("overview-body").innerHTML.length > 0);
+  });
+});
+
+test("liveDotState: a failed refresh reads refresh_failed — under dead/reconnecting, over stale/live", () => {
+  const now = 1_000_000;
+  // The stream is PERFECT and the screen is still not current — the case no
+  // stream signal can express, which is why this is its own state.
+  assert.equal(hooks.liveDotState(false, now, now, false, true), "refresh_failed");
+  assert.equal(hooks.liveDotState(false, null, now, false, true), "refresh_failed");
+  // A measured failure outranks the timing INFERENCE of staleness…
+  assert.equal(hooks.liveDotState(false, now - 10 * hooks.liveStaleMs, now, false, true), "refresh_failed");
+  // …but a down stream still outranks it: those say "not live" more loudly.
+  assert.equal(hooks.liveDotState(true, now, now, false, true), "reconnecting");
+  assert.equal(hooks.liveDotState(false, now, now, true, true), "dead");
+  // The fifth arg is load-bearing: the same inputs without it keep the old
+  // answers, so none of the above can pass vacuously.
+  assert.equal(hooks.liveDotState(false, now, now, false, false), "live");
+  assert.equal(hooks.liveDotState(false, now - 10 * hooks.liveStaleMs, now, false, false), "stale");
+});
+
+test("cch-bl: the not-current chip carries NO 'as of' — the event was just now, the data wasn't", () => {
+  const orig = sandbox.document;
+  const { document: doc } = fakeDom();
+  sandbox.document = doc;
+  try {
+    const chip = hooks.ensureLivenessChip();
+    const now = 1_000_000;
+    // Exactly the production shape at the instant of failure: onmessage stamped
+    // lastEventMs one second ago, so without the suppression the chip would read
+    // "Not current · just now" — reassurance welded to a warning.
+    hooks.renderLivenessChip({ lastEventMs: now - 1_000, nowMs: now, refreshStale: true });
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Not current");
+    assert.equal(chip.querySelector(".live-chip-ago").textContent, "");
+    assert.equal(chip.querySelector(".live-chip-ago").hidden, true);
+    assert.doesNotMatch(chip.getAttribute("title"), /last event/);
+    // Control: the same recency WITHOUT the failed refresh does show it.
+    hooks.renderLivenessChip({ lastEventMs: now - 1_000, nowMs: now, refreshStale: false });
+    assert.equal(chip.getAttribute("data-state"), "live");
+    assert.equal(chip.querySelector(".live-chip-ago").textContent, "· just now");
+  } finally {
+    sandbox.document = orig;
+  }
+});
+
+// A past-due subscription: the transition the operator most needs to see, and
+// the one overviewStatePick ranks above everything (the money path).
+const OVERVIEW_PAST_DUE = { status: "past_due", plan: "pro", current_period_end: "2026-07-01T00:00:00Z" };
+
+test("cch-bl: a subscription tick repaints the Overview band, not just the topbar chip", async () => {
+  await overviewHarness(async ({ net, dom }) => {
+    const band = () => dom.nodes.get("overview-state").innerHTML;
+    assert.match(band(), /runway-step/, "the cold paint must mount the trial runway band");
+    // The pure model already knows the answer — only the paint was missing.
+    assert.equal(hooks.overviewStatePick(net.state.subscription, hooks.overviewData.onboarding), "runway");
+
+    net.reset();
+    net.state.subscription = OVERVIEW_PAST_DUE;
+    hooks.handleLiveEvent("subscription");
+    await settleOverview();
+
+    // The topbar flipped — the half that always worked, and the reason the band
+    // beneath it reading "trial" was a visible contradiction, not a subtlety.
+    assert.equal(dom.chip("billing-chip").textContent, "Payment failed · fix billing");
+    // PRE-FIX: byte-identical to `band()` above — the old runway card.
+    assert.match(band(), /dunning-banner/, "the state band must follow the refreshed cache");
+    assert.match(band(), /Payment failed/);
+    assert.doesNotMatch(band(), /runway-step/);
+    // …and the narrowing holds: ONE read, the one the event named.
+    assert.deepEqual(net.tally(), [0, 0, 0, 1, 0],
+      "a subscription tick must read the subscription and nothing else, got " + JSON.stringify(net.paths));
+  });
+});
+
+test("cch-bl: the subscription tick repaints the whole sub-dependent Overview, not only the band", async () => {
+  // paintOverviewData, NOT paintOverviewState: the slots meter and the instances
+  // grid read subCache too (overviewInstancesHtml takes `sub`), so a band-only
+  // repaint would leave two more stale regions behind the fixed one.
+  await overviewHarness(async ({ net, dom }) => {
+    const grid = dom.nodes.get("overview-instances");
+    assert.ok(grid, "the cold paint must mount #overview-instances");
+    grid.innerHTML = '<div class="ov-grid-probe">stale</div>'; // survives only if nothing repaints
+    net.state.subscription = OVERVIEW_PAST_DUE;
+    hooks.handleLiveEvent("subscription");
+    await settleOverview();
+    assert.doesNotMatch(dom.nodes.get("overview-instances").innerHTML, /ov-grid-probe/,
+      "the instances grid must be repainted from the refreshed subscription too");
+    assert.match(dom.nodes.get("overview-instances").innerHTML, /bravo/,
+      "…and repainted with the fleet, not blanked");
+  });
+});
+
+test("cch-bl: the not-current claim is OVERVIEW-scoped — Fleet's topbar does not inherit it", async () => {
+  // The flag is set by loadOverview and cleared by an Overview read, so without
+  // a scope the chip would keep disclaiming currency on Fleet — a view that
+  // fetched its own data successfully. That is a NEW lie wearing the fix for an
+  // old one, which is the exact trade this slice exists not to make.
+  const priorHash = sandbox.location.hash;
+  await overviewHarness(async ({ net }) => {
+    const chip = hooks.ensureLivenessChip();
+    net.state.fail.add("/v1/barkparks");
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+
+    sandbox.location.hash = "#fleet";
+    hooks.renderLivenessChip(); // what the 1s chip ticker does on every view
+    assert.equal(chip.getAttribute("data-state"), "live",
+      "Fleet must not wear the Overview's staleness");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Live");
+
+    // …and it is not forgotten either: back on Overview the claim stands until
+    // a read lands.
+    sandbox.location.hash = "#overview";
+    hooks.renderLivenessChip();
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+  });
+  sandbox.location.hash = priorHash;
+});
+
+test("cch-bl: off-Overview, a subscription tick paints no Overview and still costs one read", async () => {
+  // The new arm is VIEW-scoped like every other: a tick arriving on Billing must
+  // not paint into an Overview nobody is looking at.
+  const priorHash = sandbox.location.hash;
+  await overviewHarness(async ({ net, dom }) => {
+    const band = () => dom.nodes.get("overview-state").innerHTML;
+    const before = band();
+    sandbox.location.hash = "#activity";
+    net.reset();
+    net.state.subscription = OVERVIEW_PAST_DUE;
+    hooks.handleLiveEvent("subscription");
+    await settleOverview();
+    assert.equal(band(), before, "no repaint off-Overview");
+    assert.deepEqual(net.tally(), [0, 0, 0, 1, 0]);
+  });
+  sandbox.location.hash = priorHash;
 });
 
 // ── gr-p5-account-2fa · GR54 THE SAFETY NET ─────────────────────────────────
@@ -4384,20 +4626,26 @@ test("liveDotState: a dead stream reads 'dead', outranking every other signal", 
   assert.equal(hooks.liveDotState(false, now - 10 * hooks.liveStaleMs, now, false), "stale");
 });
 
-test("liveDotState: the return set is a CLOSED enum of exactly four states", () => {
+test("liveDotState: the return set is a CLOSED enum of exactly five states", () => {
   // Without this, JS's permissive arity keeps every 3-arg equality test above
   // green after a new state lands — the suite would report green while asserting
   // nothing about the new behaviour. Pin the SET, not just the members.
   // .join() rather than deepEqual: hooks come from a vm sandbox, so their arrays
   // carry a foreign Array.prototype and strict deepEqual fails on the realm, not
   // the contents.
-  assert.equal([...hooks.liveDotStates].sort().join("|"), "dead|live|reconnecting|stale");
+  // cch-bl added the FIFTH state (refresh_failed: the stream is fine, the last
+  // refetch was not) — and this pin is what forced that addition to be declared,
+  // copied, aria'd and reachable rather than slipping in behind green arity.
+  assert.equal([...hooks.liveDotStates].sort().join("|"),
+    "dead|live|reconnecting|refresh_failed|stale");
   const now = 1_000_000;
   const inputs = [];
   for (const dead of [false, true]) {
     for (const errored of [false, true]) {
       for (const last of [null, now, now - 10 * hooks.liveStaleMs]) {
-        inputs.push([errored, last, now, dead]);
+        for (const stale of [false, true]) {
+          inputs.push([errored, last, now, dead, stale]);
+        }
       }
     }
   }
