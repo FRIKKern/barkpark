@@ -1389,7 +1389,10 @@ func TestSiteCreateWillNotClaimAnUnechoedDocTypeBinding(t *testing.T) {
 
 // TestSiteCreateNamesAnEchoedDocTypeBinding is the other half: when the control
 // plane DID store the binding the receipt says so — and still refuses to claim the
-// dataset serves that type, which nothing here has read.
+// dataset serves that type, which nothing in THIS envelope has read. (The control
+// plane does read it, at create, per charter D73 — but that verdict rides a
+// top-level content_binding key SpawnSite does not carry, so this receipt names
+// the check without narrating a result it was never shown.)
 func TestSiteCreateNamesAnEchoedDocTypeBinding(t *testing.T) {
 	cp := newSiteCP(t)
 	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production","doc_type":"paper"}}`}
@@ -1399,11 +1402,22 @@ func TestSiteCreateNamesAnEchoedDocTypeBinding(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "bound on the site row") {
+	if !strings.Contains(stdout, "stored on the site row") {
 		t.Fatalf("an echoed doc type must be reported as the stored binding:\n%s", stdout)
 	}
 	if strings.Contains(stdout, "UNCONFIRMED") {
 		t.Fatalf("an echoed doc type is not unconfirmed:\n%s", stdout)
+	}
+	// The receipt must not narrate the create-time binding check's RESULT: this
+	// envelope does not carry it. Naming that the check happens is honest; saying
+	// how it came out would be quoting a read this process never made.
+	if !strings.Contains(stdout, "not in this envelope") {
+		t.Fatalf("the receipt must name the verdict it is not being shown:\n%s", stdout)
+	}
+	for _, verdict := range []string{"bound:", "unverified", "content_binding_empty"} {
+		if strings.Contains(stdout, verdict) {
+			t.Fatalf("the receipt must not report a binding verdict it never received (%q):\n%s", verdict, stdout)
+		}
 	}
 }
 

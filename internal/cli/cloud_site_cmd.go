@@ -271,12 +271,20 @@ func renderSiteCreated(emit func(string, ...any), site cloudclient.SpawnSite, re
 	emit("  dataset: %s", siteDatasetClaim(site, req))
 	// The bound content type. The record's doc_type is the only thing that says the
 	// control plane STORED the binding; echoing req.DocType back would claim a
-	// binding nothing confirmed — and neither read says the dataset actually serves
-	// that type, so the line does not pretend to (D-honest: the first deploy's
-	// content fetch is what proves that).
+	// binding nothing confirmed.
+	//
+	// WHAT THIS LINE MAY NOT SAY. The control plane now READS the binding back at
+	// create time (charter D73) and refuses 422 content_binding_empty when the
+	// site's own token cannot see the type — so "whether the dataset serves that
+	// type is proven by the first deploy, not here" became FALSE the moment that
+	// landed. But the verdict rides a top-level `content_binding` key that
+	// cloudclient.SpawnSite (the site ROW) does not carry, so this render cannot
+	// see it either way. It therefore claims exactly what it holds — the stored
+	// row — and names the verdict it is not being shown, rather than narrating
+	// someone else's read from memory. Surfacing it is ssw8-surface-the-create-binding-verdict.
 	switch {
 	case strings.TrimSpace(site.DocType) != "":
-		emit("  content: %s (bound on the site row; whether the dataset serves that type is proven by the first deploy, not here)", hzCell(site.DocType))
+		emit("  content: %s (the type stored on the site row; the control plane also checks at create that this site can read it, but that verdict is not in this envelope)", hzCell(site.DocType))
 	case strings.TrimSpace(req.DocType) != "":
 		emit("  content: %s requested — the control plane echoed no doc type back, so the binding is UNCONFIRMED", hzCell(req.DocType))
 	}
