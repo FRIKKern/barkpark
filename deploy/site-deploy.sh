@@ -77,7 +77,14 @@
 #   14 HEALTH failed          15 gave up waiting for lock
 #   16 SWITCH failed          21 rollback: no_previous
 #   22 rollback: not_supported  23 rollback: lock held (deploy running)
-#   24 rollback failed
+#   24 rollback failed         25 teardown: route still live (disarm rejected)
+#
+# TEARDOWN machine contract (no BPSTAGE — a teardown is not a deploy):
+#   exit 0  prints TORN_DOWN=<slug> on stdout AND appends it to
+#           $BARKPARK_SITE_LOG_FILE — the route is gone and the tree is deleted.
+#   exit 25 prints TEARDOWN_FAILED=<slug> detail="…" on the SAME two channels and
+#           NEVER TORN_DOWN=: the Caddy route survived (the disarm was rejected and
+#           reverted), so the release tree is deliberately LEFT ON DISK.
 #
 # Env inputs (a caller — bp cloud site deploy — injects these):
 #   SITE_SLUG          required. Names releases root + the /sites/<slug>/ route.
@@ -513,6 +520,52 @@ TCF
   check "second teardown still exit 0 (idempotent)" [ "$tdrc2" = 0 ]
 
   # -------------------------------------------------------------------------
+  # TEARDOWN, REJECTED (D77) — the ONE case the fake caddy above (validate always
+  # exits 0) structurally cannot reach. With a `caddy validate` that REJECTS, the
+  # disarm reverts and the route KEEPS SERVING: the engine must NOT print
+  # TORN_DOWN= (the only marker the CP reads — its presence alone is exit 0), must
+  # exit 25, and must LEAVE THE RELEASE TREE ON DISK (a half-disarmed site with
+  # its bytes is recoverable). On origin/main this case fails on every assertion:
+  # exit 0, TORN_DOWN= on both channels, tree deleted.
+  # -------------------------------------------------------------------------
+  echo "[selftest] --teardown REFUSES to claim TORN_DOWN when caddy validate rejects the disarm (D77)"
+  TR="$TD/teardown-reject"; mkdir -p "$TR/bin" "$TR/sites/stuck/releases/b1"
+  # The rejecting fake: validate says no, everything else is fine.
+  printf '#!/usr/bin/env bash\ncase "$1" in validate) exit 1;; *) exit 0;; esac\n' > "$TR/bin/caddy"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TR/bin/systemctl"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TR/bin/flock"
+  chmod +x "$TR/bin/"*
+  ln -sfn releases/b1 "$TR/sites/stuck/current"
+  cat > "$TR/Caddyfile" <<'RCF'
+example.com {
+	# BARKPARK_SITE_ROUTE:stuck — static site 'stuck'.
+	handle_path /sites/stuck/* {
+		root * /x/stuck/current
+		file_server
+	}
+	reverse_proxy localhost:4000
+}
+RCF
+  env PATH="$TR/bin:$PATH" SITE_SLUG=stuck BARKPARK_SITES_DIR="$TR/sites" \
+    BARKPARK_CADDYFILE="$TR/Caddyfile" BARKPARK_SITE_DEPLOY_LOCK="$TR/lock" \
+    BARKPARK_CADDYFILE_LOCK="$TR/cflock" BARKPARK_SITE_LOG_FILE="$TR/log" \
+    bash "$SELF" --teardown > "$TR/out" 2>&1; tdrc3=$?
+  check "rejected teardown exits 25 (not 0)"        [ "$tdrc3" = 25 ]
+  check "rejected teardown printed NO TORN_DOWN= on stdout" \
+    absent 'TORN_DOWN=' "$TR/out"
+  check "rejected teardown logged NO TORN_DOWN= to the durable log" \
+    absent 'TORN_DOWN=' "$TR/log"
+  check "rejected teardown printed the typed failure on stdout" \
+    grep -q '^TEARDOWN_FAILED=stuck detail="' "$TR/out"
+  check "rejected teardown logged the typed failure durably" \
+    grep -q '^TEARDOWN_FAILED=stuck detail="' "$TR/log"
+  check "rejected teardown KEPT the release tree (recoverable)" [ -d "$TR/sites/stuck/releases/b1" ]
+  check "rejected teardown KEPT the live route (reverted, still serving)" \
+    grep -q 'BARKPARK_SITE_ROUTE:stuck' "$TR/Caddyfile"
+  check "rejected teardown left the Caddyfile brace-balanced" \
+    bash -c "[ \$(grep -c '{' '$TR/Caddyfile') = \$(grep -c '}' '$TR/Caddyfile') ]"
+
+  # -------------------------------------------------------------------------
   # HEALTH finder integrity — the gate must refuse a finder build whose seed is
   # corrupt (the #4020 class) or whose island lost its error boundary (#4047),
   # while leaving plain (seedless) templates untouched. Drives the REAL
@@ -903,6 +956,11 @@ fi
 # removal is REVERTED (the site stays) and never breaks the live FQDN block.
 # Runs under with_caddy_lock (the caller wraps it) — the marker read + rewrite is
 # a read-modify-write another writer must not interleave.
+# RETURNS: 0 the route is gone (or was never armed / no caddy on this box), 1 the
+# route is STILL LIVE because the excision was rejected and reverted. The caller
+# MUST branch on this (D77): a revert used to be the function's LAST `mv`, i.e.
+# exit status 0, so "the site is still serving" was not representable at the
+# function boundary and the teardown printed TORN_DOWN= over it.
 disarm_caddy_site_route() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG disarm"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — nothing to disarm"; return 0; }
@@ -922,21 +980,49 @@ disarm_caddy_site_route() {
       next
     }
     { print }
-  ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE"
+  ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE" || {
+    log "could not rewrite $CADDYFILE for the /sites/$SITE_SLUG disarm — restoring the backup, Caddy untouched"
+    rm -f "$tmp"; mv "$bak" "$CADDYFILE"; return 1
+  }
   chmod --reference="$bak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
   chown --reference="$bak" "$CADDYFILE" 2>/dev/null || true
   if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
     if systemctl reload caddy 2>/dev/null; then log "disarmed caddy /sites/$SITE_SLUG route"; else log "caddy reload failed (config valid) — /sites/$SITE_SLUG route drops on next reload"; fi
     rm -f "$bak"
+    return 0
   else
     log "caddy validate rejected the /sites/$SITE_SLUG disarm — reverting, Caddy untouched"
     mv "$bak" "$CADDYFILE"
+    return 1
   fi
+}
+
+# A teardown that could NOT disarm the route must never print TORN_DOWN= (D77).
+# That marker is the ONLY thing DeployRunner.teardown_outcome/1 reads, and its mere
+# presence IS exit 0 to the control plane — so printing it after a reverted disarm
+# certifies a site that is still being served. Speak a typed failure on the SAME
+# two channels the success marker uses (stdout for the CLI, $BARKPARK_SITE_LOG_FILE
+# for the systemd-mode runner, which sees no exit code), and exit non-zero: with no
+# TORN_DOWN= in the log the runner already folds this to -1, and BoxRelay's
+# `exit_code == 0` gate then keeps the CP row instead of deleting it.
+# The release tree is deliberately LEFT ON DISK — a half-disarmed site that still
+# has its bytes is a live route over real files (recoverable by re-running
+# --teardown once the Caddyfile is fixed); one without them is a live route over
+# nothing, with no CP row left to name it.
+teardown_failed() { # <detail>
+  local detail="$1" line
+  log "TEARDOWN FAILED — $detail"
+  printf -v line 'TEARDOWN_FAILED=%s detail="%s"' "$SITE_SLUG" "$detail"
+  [ -n "${BARKPARK_SITE_LOG_FILE:-}" ] && printf '%s\n' "$line" >> "$BARKPARK_SITE_LOG_FILE"
+  printf '%s\n' "$line"
+  exit 25
 }
 
 if [ "$MODE" = teardown ]; then
   setup_caddy_lock   # resolve CADDY_LOCK before with_caddy_lock (deploy does this later)
-  with_caddy_lock disarm_caddy_site_route || true
+  if ! with_caddy_lock disarm_caddy_site_route; then
+    teardown_failed "the caddy /sites/$SITE_SLUG route is STILL LIVE (the disarm was rejected and reverted, or the Caddyfile lock was unavailable) — the release tree is kept at $ROOT so the site still serves real bytes; fix the Caddyfile and re-run --teardown"
+  fi
   if [ -d "$ROOT" ]; then
     rm -rf "$ROOT" && log "TORE DOWN — removed release tree $ROOT"
   else

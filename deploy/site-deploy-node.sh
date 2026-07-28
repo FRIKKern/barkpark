@@ -66,7 +66,14 @@
 #   14 HEALTH failed          15 gave up waiting for lock
 #   16 SWITCH failed          21 rollback: no_previous
 #   22 rollback: not_supported  23 rollback: lock held (deploy running)
-#   24 rollback failed
+#   24 rollback failed         25 teardown: route still live (disarm rejected)
+#
+# TEARDOWN machine contract (no BPSTAGE — a teardown is not a deploy):
+#   exit 0  prints TORN_DOWN=<slug> on stdout AND appends it to
+#           $BARKPARK_SITE_LOG_FILE — slots stopped, route gone, tree deleted.
+#   exit 25 prints TEARDOWN_FAILED=<slug> detail="…" on the SAME two channels and
+#           NEVER TORN_DOWN=: the Caddy route survived (the disarm was rejected and
+#           reverted), so the release tree + slot env files are LEFT ON DISK.
 #
 # Env inputs (a caller — bp cloud site deploy — injects these):
 #   SITE_SLUG          required. Names releases root, the /sites/<slug>/ route,
@@ -934,6 +941,37 @@ FAKENPM
   check "node teardown is idempotent (second run exit 0)" \
     sh -c 'env PATH="'"$FAKEBIN"':$PATH" SITE_SLUG=selftest BARKPARK_SITES_DIR="'"$TD"'/sites" BARKPARK_SLOT_ENV_DIR="'"$SENV"'" BARKPARK_CADDYFILE="'"$CF"'" BARKPARK_SITE_DEPLOY_LOCK="'"$TD"'/deploy.lock" BARKPARK_CADDYFILE_LOCK="'"$TD"'/caddyfile.lock" BARKPARK_SITE_NO_CAP=1 bash "'"$SELF"'" --teardown >/dev/null 2>&1'
 
+  echo "[selftest] --teardown REFUSES to claim TORN_DOWN when caddy validate rejects the disarm (D77)"
+  # The ONE case $FAKEBIN/caddy (validate always exits 0) structurally cannot
+  # reach: a REJECTING validate makes commit_caddyfile revert, so the 'warm' route
+  # keeps serving. The engine must not print TORN_DOWN= (the only marker the CP
+  # reads — its presence alone is exit 0), must exit 25, and must keep the release
+  # tree AND the slot env files. On origin/main every one of these fails.
+  REJBIN="$TD/bin-reject"; mkdir -p "$REJBIN"
+  printf '#!/usr/bin/env bash\ncase "$1" in validate) exit 1;; *) exit 0;; esac\n' > "$REJBIN/caddy"
+  chmod +x "$REJBIN/caddy"   # everything else still resolves from $FAKEBIN
+  env PATH="$REJBIN:$FAKEBIN:$PATH" \
+    SITE_SLUG=warm SITE_PORT_A="$T_PORT_C" SITE_PORT_B="$T_PORT_D" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$CF" BARKPARK_SITE_DEPLOY_LOCK="$TD/warm.lock" \
+    BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" BARKPARK_SITE_LOG_FILE="$TD/td-reject.log" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" --teardown > "$TD/td-reject.out" 2>&1; tdrc3=$?
+  check "node rejected teardown exits 25 (not 0)"   [ "$tdrc3" = 25 ]
+  check "node rejected teardown printed NO TORN_DOWN= on stdout" \
+    sh -c "! grep -q 'TORN_DOWN=' '$TD/td-reject.out'"
+  check "node rejected teardown logged NO TORN_DOWN= durably" \
+    sh -c "! grep -q 'TORN_DOWN=' '$TD/td-reject.log'"
+  check "node rejected teardown printed the typed failure on stdout" \
+    grep -q '^TEARDOWN_FAILED=warm detail="' "$TD/td-reject.out"
+  check "node rejected teardown logged the typed failure durably" \
+    grep -q '^TEARDOWN_FAILED=warm detail="' "$TD/td-reject.log"
+  check "node rejected teardown KEPT the release tree (recoverable)" [ -d "$TD/sites/warm/releases/w3" ]
+  check "node rejected teardown KEPT both slot env files (slots restartable)" \
+    sh -c "[ -f '$SENV/warm__a.env' ] && [ -f '$SENV/warm__b.env' ]"
+  check "node rejected teardown KEPT the live route (reverted, still serving)" \
+    grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
+
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
   [ "$FAILS" -eq 0 ] || { echo "[selftest] FAILED ($FAILS)"; exit 1; }
@@ -1083,6 +1121,9 @@ fi
 # the marker comment through the close brace of the handle[_path], covering the
 # @matcher/redir/reverse_proxy form) and the same commit safety (backup + caddy
 # validate + reload-or-revert): a botched excision REVERTS, never breaking Caddy.
+# RETURNS: 0 the route is gone (or was never armed / no caddy here), 1 the route is
+# STILL LIVE (commit_caddyfile reverted). Unlike the static engine this signal was
+# always correct — it was the CALLER that discarded it with `|| true` (D77).
 disarm_caddy_node_route() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG disarm"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — nothing to disarm"; return 0; }
@@ -1103,9 +1144,29 @@ disarm_caddy_node_route() {
   commit_caddyfile "$tmp"
 }
 
+# A teardown that could NOT disarm the route must never print TORN_DOWN= (D77).
+# That marker is the ONLY thing DeployRunner.teardown_outcome/1 reads, and its mere
+# presence IS exit 0 to the control plane — so printing it after a reverted disarm
+# certifies a site that is still routed. Speak a typed failure on the SAME two
+# channels the success marker uses (stdout for the CLI, $BARKPARK_SITE_LOG_FILE for
+# the systemd-mode runner, which sees no exit code), exit non-zero, and leave the
+# release tree AND both slot env files on disk: the route still points at this
+# site, so a re-run of --teardown (after the Caddyfile is fixed) can finish the job
+# and `systemctl start barkpark-site@<slug>__<slot>` can put it back in service.
+teardown_failed_node() { # <detail>
+  local detail="$1" line
+  log "TEARDOWN FAILED — $detail"
+  printf -v line 'TEARDOWN_FAILED=%s detail="%s"' "$SITE_SLUG" "$detail"
+  [ -n "${BARKPARK_SITE_LOG_FILE:-}" ] && printf '%s\n' "$line" >> "$BARKPARK_SITE_LOG_FILE"
+  printf '%s\n' "$line"
+  exit 25
+}
+
 if [ "$MODE" = teardown ]; then
   stop_slot a; stop_slot b
-  with_caddy_lock disarm_caddy_node_route || true
+  if ! with_caddy_lock disarm_caddy_node_route; then
+    teardown_failed_node "the caddy /sites/$SITE_SLUG route is STILL LIVE (the disarm was rejected and reverted, or the Caddyfile lock was unavailable) — both slots are stopped but the release tree at $ROOT and the slot env files are kept, so the site is recoverable; fix the Caddyfile and re-run --teardown"
+  fi
   rm -f "$(slot_env a)" "$(slot_env b)" 2>/dev/null || true
   if [ -d "$ROOT" ]; then
     rm -rf "$ROOT" && log "TORE DOWN — stopped slots + removed release tree $ROOT"
