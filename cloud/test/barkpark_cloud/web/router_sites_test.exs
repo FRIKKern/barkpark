@@ -722,6 +722,342 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert Registry.list_sites_for_team(team) == []
     end
 
+    ## site-spawner W8 (charter D73/D74/D75) — CREATE READS THE BINDING BACK.
+    ##
+    ## Everything below exists because `content_bound: true` meant only "a token
+    ## was minted" — a field every content-bound site sets, so it discriminated
+    ## nothing. A typo'd dataset or an unreadable doc_type 201'd, and the build
+    ## died minutes later on `BarkparkNotFoundError: document not found`, naming
+    ## neither the type, nor the dataset, nor a remedy.
+
+    test "relay_as carries the CALLER's bearer; relay_admin still carries the instance admin token" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+      path = "/w/acme/p/blog/v1/data/query/production/post"
+
+      StudioLinkFakeHttpClient.program(%{
+        path => {:ok, %{status: 200, body: ~s({"result":{"count":3,"documents":[]}})}}
+      })
+
+      # Same transport, same {:ok, status, decoded} contract — only the bearer differs.
+      assert {:ok, 200, %{"result" => %{"count" => 3}}} =
+               Registry.relay_as(bp, :get, path, "site-read-token-plaintext")
+
+      assert {:ok, 200, %{"result" => %{"count" => 3}}} =
+               Registry.relay_admin(bp, :get, path, nil)
+
+      [as_req, admin_req] = StudioLinkFakeHttpClient.requests()
+
+      # THE point of the sibling (charter D74): the site's clamped credential goes
+      # on the wire, NOT the instance admin token — an admin relay would report
+      # content the build's token cannot see, manufacturing a new false green.
+      assert List.keyfind(as_req.headers, "Authorization", 0) ==
+               {"Authorization", "Bearer site-read-token-plaintext"}
+
+      assert List.keyfind(admin_req.headers, "Authorization", 0) ==
+               {"Authorization", "Bearer " <> @instance_admin_token}
+
+      # …over the SAME URL, i.e. the shared body really is shared.
+      assert as_req.url == admin_req.url
+      assert as_req.url == "#{@instance_url}#{path}"
+
+      # A box with no URL, or a blank bearer, is :not_live — never a silent nil call.
+      assert Registry.relay_as(%Registry.Barkpark{url: nil}, :get, path, "t") ==
+               {:error, :not_live}
+
+      assert Registry.relay_as(bp, :get, path, "") == {:error, :not_live}
+    end
+
+    test "a binding the site's OWN token reads as EMPTY → 422 with the real menu, the re-run, and NO site row" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}},
+        # The bound type: interpretable, and it shows NOTHING. That is a refusal.
+        "/w/acme/p/blog/v1/data/query/production/post" =>
+          {:ok, %{status: 200, body: ~s({"result":{"count":0,"documents":[]}})}},
+        # The admin menu — one call, no N+1.
+        "/w/acme/p/blog/v1/data/counts/production" =>
+          {:ok,
+           %{
+             status: 200,
+             body: ~s({"ok":true,"counts":{"paper":579,"task":3328,"session":5,"post":0}})
+           }},
+        # …intersected with what the SITE token can actually read.
+        "/w/acme/p/blog/v1/data/query/production/paper" =>
+          {:ok, %{status: 200, body: ~s({"result":{"count":1,"documents":[{}]}})}},
+        "/w/acme/p/blog/v1/data/query/production/task" =>
+          {:ok, %{status: 200, body: ~s({"result":{"count":1,"documents":[{}]}})}}
+        # `session` is deliberately UNPROGRAMMED: the fake answers 200 "{}", which
+        # the control plane cannot interpret, so it is NOT offered as readable.
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            framework: "astro",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production",
+            doc_type: "post"
+          },
+          token
+        )
+
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["error"] == "content_binding_empty"
+
+      # The refusal names what IS readable, with real counts…
+      assert body["detail"] =~ "paper (579)"
+      assert body["detail"] =~ "task (3328)"
+      # …and never a type the site's own token could not prove it can read.
+      refute body["detail"] =~ "session"
+      # …and the EXACT re-run, not "check your dataset".
+      assert body["detail"] =~ "acme/blog/production"
+      assert body["detail"] =~ "--doc-type"
+      # Machine-readable menu for the CLI/console, same intersection.
+      assert body["readable_types"] == [
+               %{"type" => "task", "count" => 3328},
+               %{"type" => "paper", "count" => 579}
+             ]
+
+      # Refused AT THE DOOR: no row, so no ghost for the reaper to kill later.
+      assert Registry.list_sites_for_team(team) == []
+    end
+
+    test "a typo'd dataset 404s the site's own token → refused, even when the menu is unavailable" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}},
+        # A typo'd dataset, a typo'd type and a private type are byte-identical here.
+        "/w/acme/p/blog/v1/data/query/prodcution/post" =>
+          {:ok, %{status: 404, body: ~s({"error":"not found"})}}
+        # counts is unprogrammed → 200 "{}" → no menu, and the refusal SAYS so.
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "prodcution"
+          },
+          token
+        )
+
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["error"] == "content_binding_empty"
+      assert body["detail"] =~ "prodcution/post"
+      assert body["detail"] =~ "404"
+      # No menu was obtainable — say that, do not invent one.
+      assert body["detail"] =~ "could not list what IS readable"
+      refute Map.has_key?(body, "readable_types")
+      assert Registry.list_sites_for_team(team) == []
+    end
+
+    test "a body the control plane cannot INTERPRET is unverified — it creates, and says so (charter D75)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      # ONLY the mint is programmed. The verification read therefore lands on the
+      # fake's unprogrammed-path default, {:ok, 200, "{}"} — a 200 whose shape the
+      # control plane does not know. That is a BLIND SPOT, not a verdict on the
+      # user's content: it must NOT become a refusal.
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          token
+        )
+
+      assert conn.status == 201
+      body = json_body(conn)
+      # Never "ok" — the 201 carries the unverified verdict in the same breath.
+      assert body["content_binding"]["status"] == "unverified"
+      assert body["content_binding"]["detail"] =~ "could not interpret"
+      refute body["content_binding"]["status"] == "bound"
+      # The site EXISTS — an un-performable check never costs the user their site.
+      assert [%Registry.Site{}] = Registry.list_sites_for_team(team)
+    end
+
+    test "a read that could not be PERFORMED is unverified too, naming the box" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}},
+        "/w/acme/p/blog/v1/data/query/production/post" => {:error, :timeout}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          token
+        )
+
+      assert conn.status == 201
+      binding = json_body(conn)["content_binding"]
+      assert binding["status"] == "unverified"
+      assert binding["detail"] =~ bp.slug
+      assert [%Registry.Site{}] = Registry.list_sites_for_team(team)
+    end
+
+    test "a binding the site CAN read → 201 content_binding bound, with what it saw" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}},
+        "/w/acme/p/blog/v1/data/query/production/paper" =>
+          {:ok, %{status: 200, body: ~s({"result":{"count":1,"documents":[{"_id":"p1"}]}})}}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production",
+            doc_type: "paper"
+          },
+          token
+        )
+
+      assert conn.status == 201
+
+      assert json_body(conn)["content_binding"] == %{
+               "status" => "bound",
+               "doc_type" => "paper",
+               "count" => 1
+             }
+
+      # …and the read was made with the JUST-MINTED site token over the SAME
+      # scoped query route the build later fetches with — not the admin token.
+      probe =
+        Enum.find(StudioLinkFakeHttpClient.requests(), fn r ->
+          String.contains?(r.url, "/v1/data/query/production/paper")
+        end)
+
+      assert probe, "create must READ the binding before writing the row"
+
+      assert List.keyfind(probe.headers, "Authorization", 0) ==
+               {"Authorization", "Bearer bpt_public_read_minted"}
+    end
+
+    # The BYO-token branch short-circuits the mint entirely, so here the
+    # verification read is the FIRST contact this route ever makes with the box.
+    # It had no test at all before W8.
+    test "a caller-supplied read_token skips the mint but STILL verifies, with the caller's token" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/data/query/production/post" =>
+          {:ok, %{status: 200, body: ~s({"result":{"count":4,"documents":[{},{},{},{}]}})}}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production",
+            read_token: "bpt_caller_supplied"
+          },
+          token
+        )
+
+      assert conn.status == 201
+      assert json_body(conn)["content_binding"]["status"] == "bound"
+      assert json_body(conn)["content_binding"]["count"] == 4
+
+      requests = StudioLinkFakeHttpClient.requests()
+      # The mint really was short-circuited…
+      refute Enum.any?(requests, &String.contains?(&1.url, "/v1/tokens"))
+
+      # …and the verification rode the CALLER's token, not the instance admin one.
+      probe = Enum.find(requests, &String.contains?(&1.url, "/v1/data/query/production/post"))
+      assert probe, "the BYO-token branch must verify too"
+
+      assert List.keyfind(probe.headers, "Authorization", 0) ==
+               {"Authorization", "Bearer bpt_caller_supplied"}
+
+      # The caller's token is what was stored — the plaintext never comes back.
+      [site] = Registry.list_sites_for_team(team)
+      assert {:ok, "bpt_caller_supplied"} = Registry.reveal_site_read_token(site)
+      refute conn.resp_body =~ "bpt_caller_supplied"
+    end
+
+    # A container site has no binding, so the 201 must invent no verdict about one.
+    test "a CONTAINER site's 201 carries NO content_binding verdict" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      conn =
+        call(:post, "/v1/sites", %{barkpark_id: bp.id, name: "api", kind: "container"}, token)
+
+      assert conn.status == 201
+      refute Map.has_key?(json_body(conn), "content_binding")
+    end
+
     # The ghost 201 this route exists to kill has a second door: a static site
     # created with NO content binding at all. It used to insert cleanly, and the
     # deploy reaper would terminally fail it ~60s later — long after the user

@@ -5689,7 +5689,13 @@ defmodule BarkparkCloud.Web.Router do
   # its public-read content token here, server-side, over the instance's scoped
   # token route. Both halves matter: without the binding the site is a ghost the
   # reaper later kills, and without the token the build has nothing to read with.
-  # A 201 from this route therefore MEANS content_bound: true.
+  # site-spawner W8 (charter D73): and the route READS the binding back before it
+  # writes the row. `content_bound` is only "a token exists" — a name-level truth
+  # and a claim-level falsehood — so the 201 additionally carries a
+  # `content_binding` verdict the control plane actually OBSERVED: `bound` (the
+  # site read its own content, with the count) or `unverified` (with the reason it
+  # could not be checked). A binding the site provably CANNOT read is refused 422
+  # `content_binding_empty` at the door, with the menu of types it can read.
   post "/v1/sites" do
     conn = Auth.require_user(conn, [])
 
@@ -5743,6 +5749,13 @@ defmodule BarkparkCloud.Web.Router do
              # so). An unreachable/refusing instance is a 502 with its own words —
              # no site row is written.
              {:ok, attrs} <- mint_site_read_token(bp, attrs, slug),
+             # site-spawner W8 (charter D73): PROVE the binding by READING it,
+             # here — the last moment the PLAINTEXT read token is in hand. Until
+             # now `content_bound: true` meant only "a token was minted", so a
+             # typo'd dataset or a type the site cannot see was accepted and died
+             # minutes later inside the build as a bare
+             # `BarkparkNotFoundError: document not found`.
+             {:ok, binding} <- verify_content_binding(bp, attrs),
              # activity-audit-log: the create + a `site.created` audit event share
              # ONE transaction (the target_id is resolved from the created site).
              # target_fun supplies the id only knowable after the insert.
@@ -5767,7 +5780,7 @@ defmodule BarkparkCloud.Web.Router do
           # browser tabs) picks up the new site without a manual refresh.
           push_event(site.team_id, "sites")
           push_event(site.team_id, "audit")
-          json(conn, 201, %{site: site_json(site, bp)})
+          json(conn, 201, Map.merge(%{site: site_json(site, bp)}, binding_note(binding)))
         else
           nil ->
             json(conn, 404, %{error: "barkpark_not_found"})
@@ -5806,6 +5819,19 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, {:mint_failed, detail}} ->
             json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
+
+          # site-spawner W8 (charter D73): the binding was READ and it is empty —
+          # the site's OWN token sees nothing at workspace/project/dataset/type.
+          # Refuse at the door with the real menu (what that token could actually
+          # read) and the exact re-run, rather than 201ing a site whose first
+          # build dies on a message naming neither the type nor the dataset.
+          {:error, {:binding_empty, detail, menu}} ->
+            json(
+              conn,
+              422,
+              %{error: "content_binding_empty", detail: detail}
+              |> maybe_put_menu(menu)
+            )
 
           {:error, %Ecto.Changeset{} = cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -10483,6 +10509,207 @@ defmodule BarkparkCloud.Web.Router do
 
   defp mint_failure_copy(bp, _reason),
     do: "#{bp.slug} is unreachable — could not mint the site's read token"
+
+  ## site-spawner W8 (charter D73/D74/D75) — CREATE VERIFIES THE BINDING BY
+  ## READING IT.
+  ##
+  ## `content_bound: true` used to mean `not is_nil(read_token_encrypted)` — i.e.
+  ## "a token was minted", which every content-bound site has, so the field
+  ## discriminated nothing. The triple was checked for PRESENCE and never for
+  ## TRUTH: a typo'd dataset or a doc_type the site cannot see was accepted, the
+  ## row was written, and the build died minutes later on one line naming neither
+  ## the type nor the dataset nor a remedy.
+  ##
+  ## The read is done with the SITE'S OWN just-minted public-read token, over the
+  ## SAME scoped `query/:ds/:type` route the build later fetches with — never over
+  ## the instance admin token, which sees content the clamped build credential
+  ## cannot (charter D74). `counts` is deliberately NOT probed with that token:
+  ## `Plugs.PublicRead` admits only `query` and `doc`, so counts 403s it.
+  ##
+  ## THREE verdicts, a dialect of `cloud_deploy_cmd.go`'s five outcomes:
+  ##
+  ##   * BOUND      — the site read its own content. Proceed, and say what it saw.
+  ##   * EMPTY      — a body the control plane could INTERPRET, showing nothing
+  ##                  (or a definite 404 on the exact route the build uses).
+  ##                  Refuse 422 with the real menu and the exact re-run.
+  ##   * UNVERIFIED — the read could not be PERFORMED, or its body could not be
+  ##                  interpreted. Proceed — but never call it `ok`: the 201 says
+  ##                  `unverified` with the reason in the same breath.
+  ##
+  ## The EMPTY/UNVERIFIED split is load-bearing (charter D75): an unexpected
+  ## 200-with-a-shape-we-do-not-know is a control-plane blind spot, not a verdict
+  ## on the user's content, and turning it into a refusal would lock strangers out
+  ## of creating sites the moment the box's response envelope changed.
+
+  # At most this many candidate types are probed when BUILDING THE REFUSAL MENU.
+  # The happy path costs exactly ONE extra box call; only a create that is already
+  # being refused pays for the menu, and it pays a bounded price.
+  @binding_menu_probe_limit 8
+
+  defp verify_content_binding(bp, %{kind: kind} = attrs) when kind in ["static", "node"] do
+    ws = attrs[:bootstrap_workspace]
+    proj = attrs[:bootstrap_project]
+    ds = attrs[:bootstrap_dataset]
+    # `doc_type` is optional on the wire; the Site schema defaults it to "post",
+    # so that is the type the build would actually read.
+    type = attrs[:doc_type] || "post"
+    token = attrs[:read_token]
+
+    cond do
+      not (is_binary(ws) and is_binary(proj) and is_binary(ds)) ->
+        {:ok, {:unverified, "the site is not fully bound — there was nothing to read"}}
+
+      not (is_binary(token) and token != "") ->
+        {:ok, {:unverified, "the site has no read token — its content could not be probed"}}
+
+      true ->
+        case site_token_read(bp, ws, proj, ds, type, token) do
+          {:readable, count} -> {:ok, {:bound, type, count}}
+          {:unverified, why} -> {:ok, {:unverified, why}}
+          {:empty, why} -> refuse_empty_binding(bp, ws, proj, ds, token, why)
+        end
+    end
+  end
+
+  # A container site builds from a repo — it has no binding to verify, and the
+  # 201 says nothing about one rather than inventing a verdict.
+  defp verify_content_binding(_bp, _attrs), do: {:ok, :not_applicable}
+
+  # THE read: the site's own credential, the build's own route.
+  defp site_token_read(bp, ws, proj, ds, type, token) do
+    path = scoped_query_path(ws, proj, ds, type) <> "?limit=1"
+
+    case Registry.relay_as(bp, :get, path, token) do
+      {:ok, status, body} when status in 200..299 ->
+        case interpret_query_body(body) do
+          {:ok, count} when count > 0 ->
+            {:readable, count}
+
+          {:ok, 0} ->
+            {:empty, "#{type} in #{ds} has no documents this site can read"}
+
+          :uninterpretable ->
+            {:unverified,
+             "#{bp.slug} answered the content read with a body the control plane " <>
+               "could not interpret (HTTP #{status})"}
+        end
+
+      # The box's definite "there is nothing here" for the exact URL the build
+      # uses. A typo'd dataset, a typo'd type and a non-public type are BYTE
+      # IDENTICAL here (both 404 "not found") — which is precisely why the menu
+      # below is worth the extra calls: it answers the question the 404 cannot.
+      {:ok, 404, _body} ->
+        {:empty,
+         "#{ds}/#{type} answered 404 for this site's own read token — that dataset " <>
+           "or type does not exist, or the type is not readable by a public-read token"}
+
+      {:ok, status, _body} ->
+        {:unverified,
+         "#{bp.slug} answered the content read HTTP #{status} — the binding could not be checked"}
+
+      {:error, reason} ->
+        {:unverified, binding_relay_failure_copy(bp, reason)}
+    end
+  end
+
+  # The query envelope is `{"result": {...}}` when the box's response filter is on
+  # and the bare inner map when it is off — interpret BOTH, and nothing else. A
+  # body that matches neither is a shape we do not know, which is `unverified`
+  # (charter D75), never `empty`.
+  defp interpret_query_body(%{"result" => %{} = result}), do: interpret_query_body(result)
+  defp interpret_query_body(%{"count" => count}) when is_integer(count), do: {:ok, count}
+
+  defp interpret_query_body(%{"documents" => docs}) when is_list(docs),
+    do: {:ok, length(docs)}
+
+  defp interpret_query_body(_body), do: :uninterpretable
+
+  # The refusal: name what is wrong, what this site CAN read, and the exact re-run.
+  defp refuse_empty_binding(bp, ws, proj, ds, token, why) do
+    menu = readable_type_menu(bp, ws, proj, ds, token)
+
+    detail =
+      "this site would build from nothing — #{why}. " <>
+        menu_sentence(menu, ds) <>
+        " Re-run naming a type this site can read: " <>
+        "`bp cloud site create <name> --kind static --framework astro " <>
+        "--dataset #{ws}/#{proj}/#{ds} --doc-type <type>`"
+
+    {:error, {:binding_empty, detail, menu}}
+  end
+
+  # The honest menu is the INTERSECTION: the instance admin token lists what EXISTS
+  # (one `counts` call, no N+1), and the site's own token says which of those it can
+  # actually read. Offering the admin list raw would hand a stranger a private type
+  # and set up a build that 404s.
+  defp readable_type_menu(bp, ws, proj, ds, token) do
+    path = "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/counts/#{URI.encode(ds)}"
+
+    case Registry.relay_admin(bp, :get, path, nil) do
+      {:ok, status, %{"counts" => counts}} when status in 200..299 and is_map(counts) ->
+        {:ok, intersect_readable_types(bp, ws, proj, ds, token, counts)}
+
+      _ ->
+        :unavailable
+    end
+  end
+
+  defp intersect_readable_types(bp, ws, proj, ds, token, counts) do
+    counts
+    |> Enum.filter(fn {type, count} -> is_binary(type) and is_integer(count) and count > 0 end)
+    |> Enum.sort_by(fn {type, count} -> {-count, type} end)
+    |> Enum.take(@binding_menu_probe_limit)
+    |> Enum.filter(fn {type, _count} -> site_can_read?(bp, ws, proj, ds, type, token) end)
+  end
+
+  defp site_can_read?(bp, ws, proj, ds, type, token) do
+    path = scoped_query_path(ws, proj, ds, type) <> "?limit=1"
+
+    case Registry.relay_as(bp, :get, path, token) do
+      {:ok, status, body} when status in 200..299 ->
+        match?({:ok, _}, interpret_query_body(body))
+
+      _ ->
+        false
+    end
+  end
+
+  defp menu_sentence({:ok, []}, ds),
+    do: "Nothing in #{ds} is readable by this site's public-read token."
+
+  defp menu_sentence({:ok, menu}, _ds) do
+    "This site CAN read: " <>
+      (menu |> Enum.map(fn {type, count} -> "#{type} (#{count})" end) |> Enum.join(", ")) <> "."
+  end
+
+  defp menu_sentence(:unavailable, ds),
+    do: "The control plane could not list what IS readable in #{ds}."
+
+  defp scoped_query_path(ws, proj, ds, type) do
+    "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/query/#{URI.encode(ds)}/#{URI.encode(type)}"
+  end
+
+  defp binding_relay_failure_copy(bp, :not_live),
+    do: "#{bp.slug} has no URL yet — the site's content could not be read"
+
+  defp binding_relay_failure_copy(bp, _reason),
+    do: "#{bp.slug} could not be reached — the site's content could not be read"
+
+  # What the 201 SAYS about the read. `bound` carries what the site actually saw;
+  # `unverified` carries WHY it could not be confirmed — never a bare `ok`.
+  defp binding_note({:bound, type, count}),
+    do: %{content_binding: %{status: "bound", doc_type: type, count: count}}
+
+  defp binding_note({:unverified, why}),
+    do: %{content_binding: %{status: "unverified", detail: why}}
+
+  defp binding_note(:not_applicable), do: %{}
+
+  defp maybe_put_menu(body, {:ok, [_ | _] = menu}) do
+    Map.put(body, :readable_types, Enum.map(menu, fn {t, n} -> %{type: t, count: n} end))
+  end
+
+  defp maybe_put_menu(body, _menu), do: body
 
   # name → slug: lowercase, non-alnum → hyphen, trim hyphens. Falls back to a
   # short random suffix so a name like "!!!" still yields a valid slug.
