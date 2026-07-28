@@ -1,5 +1,4 @@
 
-Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/sites/deploy_runner.ex:908,4E221A5
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:319,2C2D0EA
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/content/validation.ex:109,FD6035
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/tickets/attachments.ex:259,31F6FE7
@@ -11,21 +10,15 @@ Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/media/ren
 XSS.Raw: XSS,lib/barkpark_web/layouts/bulldocs.html.heex:67,6A41676
 Traversal.FileModule: Directory Traversal in `File.cp`,lib/barkpark/media.ex:62,323F7CD
 Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/studio_chat.ex:2399,3D3BF24
-Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/sites/deploy_runner.ex:1204,3DFD49
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/bulldocs.ex:145,BBCE6C
-Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/sites/deploy_runner.ex:1323,6F012
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/epic_fleet/benchmark.ex:960,78E6342
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:252,21E5CDB
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark_web/studio/claude_chat.ex:1699,51C11E4
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/discovery.ex:211,65F4F64
-Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/sites/deploy_runner.ex:916,74D999
 XSS.Raw: XSS,lib/barkpark_web/layouts/quiz.html.heex:21,47A091E
 XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/onixedit/web/export_controller.ex:52,64EB26D
 SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:354,67196AA
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/codelists/editeur.ex:298,227D73E
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/sites/provisioner.ex:214,1E1DB9B
-DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/validation.ex:152,46EF48B
-Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/sites/deploy_runner.ex:663,96AADD
 Traversal.FileModule: Directory Traversal in `File.write!`,lib/barkpark/sites/provisioner.ex:158,4EA14F9
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/frt.ex:141,227F1B8
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/media.ex:96,340ACA6
@@ -43,26 +36,21 @@ XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark_web/controllers/med
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/discovery.ex:149,A91E89
 SQL.Query: SQL injection,lib/barkpark/media/delivery/search.ex:406,17455DA
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/manifest.ex:90,6A0A6D5
-CI.System: Command Injection via `System` function,lib/barkpark/studio_chat/titles.ex:366,5BC7F60
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:245,2428CAE
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/sites/provisioner.ex:178,229BECE
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/tenancy/workspace_bundle/archive.ex:38,4CE988E
-Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/sites/deploy_runner.ex:1289,5BCA2FE
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/media/probe.ex:27,2C782D6
-SQL.Query: SQL injection,lib/barkpark/tenancy.ex:1154,4A58F5D
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/release/secrets.ex:144,76B922D
 Traversal.FileModule: Directory Traversal in `File.mkdir_p!`,lib/barkpark/sites/provisioner.ex:151,21C1D00
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark_web/router/plugins.ex:295,3CA05A1
 Traversal.FileModule: Directory Traversal in `File.open`,lib/barkpark_web/studio/claude_chat.ex:1751,34EF875
 CI.System: Command Injection via `System` function,lib/barkpark/studio_chat/runtime/codex/readiness.ex:42,6CC3DE8
-SQL.Query: SQL injection,lib/barkpark/tenancy.ex:1178,72FD1FF
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/onixedit/schemas/text_content.ex:40,1DCA539
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/epic_fleet/benchmark.ex:233,7E9FD64
 Traversal.FileModule: Directory Traversal in `File.cp_r!`,lib/barkpark/sites/provisioner.ex:152,2C3FE7D
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:4776,141FE9A
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/plugins/indx/persistence.ex:81,ABE21C
 Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/plugins/indx/persistence.ex:71,14F913C
-Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/sites/deploy_runner.ex:1322,3BA66CF
 RCE.CodeModule: Code Execution in `Code.eval_file`,lib/barkpark/release.ex:23,5B901F4
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/scaffy.ex:65,6B64B93
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/onixedit.ex:444,15795B4
@@ -72,15 +60,11 @@ SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:348,727F126
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:596,14F200
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/indx/persistence.ex:72,299D8A1
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:274,31F7E1B
-Traversal.FileModule: Directory Traversal in `File.mkdir_p!`,lib/barkpark/sites/deploy_runner.ex:1197,1744D74
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:1529,2582513
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/controllers/tickets_attachments_controller.ex:264,553E2B0
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/epic_fleet/benchmark.ex:1038,32B9398
-Traversal.FileModule: Directory Traversal in `File.chmod`,lib/barkpark/sites/deploy_runner.ex:909,42E50E6
 SQL.Stream: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:345,2978ED5
 Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/studio_chat.ex:2451,44395AE
-Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/sites/deploy_runner.ex:1321,5CC9415
-Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/sites/deploy_runner.ex:682,2C638B
 Traversal.FileModule: Directory Traversal in `File.chmod`,lib/barkpark_web/studio/claude_chat.ex:1698,453C272
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/search/golden_eval.ex:23,4D27E0F
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:142,F7AE3D
@@ -90,7 +74,6 @@ Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/re
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:513,769FAA7
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/tenancy/workspace_bundle/archive.ex:36,73FD054
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:1707,3E7191
-Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/sites/deploy_runner.ex:1217,4BBB84B
 Traversal.SendFile: Directory Traversal in `send_file`,lib/barkpark_web/controllers/media_controller.ex:152,83E448
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:117,31116C2
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:252,2F231DA
@@ -99,11 +82,9 @@ Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:215,2CA5D00
 Traversal.FileModule: Directory Traversal in `File.stream!`,lib/barkpark/codelists/editeur.ex:122,107C442
 Traversal.FileModule: Directory Traversal in `File.mkdir_p!`,lib/barkpark/release/secrets.ex:77,3E96E62
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:308,3288FF6
-SQL.Query: SQL injection,lib/barkpark/tenancy.ex:1167,276CA17
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/media.ex:115,47AF102
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/release/secrets.ex:90,3AA2C2B
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/indx/persistence.ex:103,29C99C9
-Traversal.FileModule: Directory Traversal in `File.mkdir_p!`,lib/barkpark/media/renditions.ex:113,CD9C35
 XSS.Raw: XSS,lib/barkpark_web/controllers/error_html.ex:25,6380E04
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/media.ex:408,1F51355
 Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/media.ex:61,28E547D

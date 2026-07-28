@@ -103,6 +103,15 @@ jobs:
         if: always()
         run: bash scripts/sobelow-fresh-finding-guard.sh
 
+      - name: Anchor-token table still matches the Sobelow detector modules
+        # The blocking staleness ratchet carries a GENERATED detector→token
+        # table so it can run with no deps. This is the only job with a real
+        # Sobelow checkout, so it is the only place the table can be proven
+        # against its source. Advisory like the rest of this job: a Sobelow
+        # version bump that adds a detector should be visible, not a hard stop.
+        if: always()
+        run: bash scripts/sobelow-baseline-staleness-check.sh --verify-tokens deps/sobelow
+
       - name: Upload reconciled Sobelow baseline for human review
         if: always()
         uses: actions/upload-artifact@v4
@@ -129,6 +138,17 @@ jobs:
     # adjacency, so a refactor can silently detach it — the moment the gate is
     # supposed to speak — and a baseline carrying the same finding swallows it.
     # Honest Gates D29.
+    #
+    # This job carries BOTH text-only baseline ratchets (the job id/name is
+    # unchanged because it is referenced by name). The second one is
+    # orthogonal: the overlap check is span-based and baseline-driven, so it
+    # PASSES for a row that drifted out of its annotation span, for a moved
+    # file, and for a file with annotations and zero rows. The staleness check
+    # never looks at annotations — it asks whether each entry's file:line still
+    # holds a construct of its own detector type. Also ~1s, no BEAM. Its
+    # SELFTEST is blocking (hermetic, must always pass); its run against the
+    # real baseline is reporting-only until the residue reaches zero — see the
+    # measured numbers on that step.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,6 +158,30 @@ jobs:
 
       - name: No baseline entry duplicates an inline waiver
         run: bash api/scripts/sobelow-inline-overlap-check.sh
+
+      - name: Selftest (the staleness ratchet must be able to fail)
+        run: bash api/scripts/sobelow-baseline-staleness-check.sh --selftest
+
+      # REPORTING-ONLY UNTIL THE RESIDUE REACHES ZERO — measured, not assumed.
+      # On origin/main today this check reds with 50 stale entries; with wave
+      # 23 S1's 19-row migration applied it still reds with 31 (re-measured
+      # 2026-07-28 against S1's tree AND its pruned baseline together, because
+      # S1's added comment lines shift line numbers inside the files it edits).
+      # Left BLOCKING, this step would turn `sobelow-inline-overlap` — a job
+      # that is GREEN and meaningful today — permanently red on every PR in the
+      # repo, which is precisely the blind-gate failure mode this wave exists to
+      # remove: a gate nobody can distinguish from broken cannot report the next
+      # real regression. So the step runs, prints the full stale list, and does
+      # not fail the job.
+      #
+      # FLIP CONDITION (delete this one line, nothing else): the step exits 0 on
+      # main. That is reached by migrating the remaining stale rows to inline
+      # annotations — 15 of the 31 are the blobstore rows owned by
+      # `felix-w23-s5-blobstore-migration`; the residue is tracked at
+      # `task-felix-w23-bl-staleness-blocking-flip`.
+      - name: Every baseline entry still points at a construct of its own type
+        continue-on-error: true
+        run: bash api/scripts/sobelow-baseline-staleness-check.sh
 
   mix-audit:
     name: Dependency CVE audit (mix_audit over mix.lock, blocking)

@@ -55,26 +55,38 @@ A PR targeting `main` must clear:
    **hotfix lane** — a `hotfix!` label passes AND auto-files an override
    task (needs the `BARKPARK_TASK_TOKEN` secret; without it the lane still
    passes but logs that the record was not filed);
-   **lapsed-claim grace** — the claim lease (~45min) is shorter than PR dwell,
-   so the TTL sweeper reaps claims out from under PRs that were green when they
+   **lapsed-claim rule — "live when this PR opened"** (charter D58; the
+   `LAPSE_GRACE_SECONDS` wall-clock grace it replaced is GONE, and there is no
+   tunable left to set). The claim lease (~45min) is shorter than PR dwell, so
+   the TTL sweeper reaps claims out from under PRs that were green when they
    opened (11 of the gate's last 15 reds). A task that is `open` because its
-   claim was **reaped** still passes for `LAPSE_GRACE_SECONDS` (default 21600 =
-   6h), read straight off the document's `claim.previous_worker` /
-   `claim.expired_at`. A task that was never claimed, or whose claim was
-   voluntarily **released** (`released_at ≥ expired_at`), or whose lapse is
-   older than the grace, still fails — the grace forgives the sweeper, not the
-   author;
+   claim was **reaped** passes iff `claim.expired_at ≥ pull_request.created_at`
+   — the claim was still live at the instant the PR was opened — read straight
+   off the document's `claim.previous_worker` / `claim.expired_at` and the PR's
+   own `created_at` (plumbed as `PR_OPENED_AT`; absent or unparseable is a
+   **refusal**, never a fall-open). The verdict is therefore fixed for a given
+   PR: the same unchanged PR can no longer go green in the morning and red in
+   the afternoon merely by sitting. A task that was never claimed, whose claim
+   was voluntarily **released** (`released_at ≥ expired_at`), whose
+   `expired_at` is in the FUTURE (a reap cannot stamp one; −300s of skew slack),
+   or that had ALREADY lapsed before the PR was opened, still fails. Stated
+   cost: a PR opened under a live claim stays backed however long it then sits —
+   the gate certifies how the PR started, not that work continued;
    **ledger outage = a red that says so** — a 5xx / unreachable ledger is
    retried (3 attempts) and then **fails** with "task backing UNVERIFIED …
-   re-run this check once the ledger is up". It does not pass. GitHub has no
+   re-run this check once the ledger is up". It does not pass. A `2xx` whose
+   `result` envelope carries **no document** is the same UNCHECKED state (D59),
+   not an accusation: a task that genuinely does not exist answers `404`, which
+   reds definitively, so the old "task does not exist" message on the empty
+   envelope could only ever have been false. GitHub has no
    `neutral` conclusion for exit codes, so the only alternative to red would be
    a green check that verified nothing (the old `exit 0` handler was, in fact,
    unreachable dead code under GitHub's `bash -e`, and every outage already red
    — under a misleading label).
    Optional `.github/pr-task-workers.json` (`{ "<gh-login>": "<worker>" }`)
    tightens the check to require the task be claimed by the author's mapped
-   worker (matched against the lapsed claim's `previous_worker` when the grace
-   applies). The file does not exist today. **Currently advisory** until made
+   worker (matched against the lapsed claim's `previous_worker` when the
+   lapsed-claim rule applies). The file does not exist today. **Currently advisory** until made
    required-by-name (below).
 
 8. **`reland-check` CI job** — `.github/workflows/reland-check.yml`. **Advisory
@@ -122,7 +134,16 @@ Elixir security gates, path-triggered on `api/**`:
 9. **`sobelow` job** — Phoenix-aware static analysis (XSS.Raw / SendResp,
    SQL injection, unsafe `String.to_atom`, missing CSRF/CSP, hardcoded secrets,
    `binary_to_term`, directory traversal…). **Advisory** (`continue-on-error:
-   true`) because Sobelow fingerprints are not stable across Elixir toolchains.
+   true`) because the reviewed baseline is not drained — see the amended flip
+   verdict below. The rationale this line used to give ("fingerprints are not
+   stable across Elixir toolchains") is **REFUTED** and must not be reused:
+   felix-pristine **D140** measured byte-identical 51-finding sets across
+   1.18.1/OTP27 and 1.19.5/OTP28, a wider gap than the pinned pair, and
+   `Finding.fingerprint/1` is `:erlang.phash2/1` over AST from
+   `Code.string_to_quoted`, not compiler output. What *is* unstable is the
+   **line number**, which is inside the hash: a pure renumber invalidates every
+   waiver in the file. That is a reason to migrate waivers to AST-bound inline
+   annotations, not a reason to stay advisory.
    `mix sobelow --skip --exit Low` reads the reviewed `api/.sobelow-skips`
    baseline and reds on a fresh unskipped finding. CI also runs a pinned
    Elixir 1.18.1/OTP27 reconcile in the only safe order: `--clear-skip`, then
@@ -133,16 +154,65 @@ Elixir security gates, path-triggered on `api/**`:
    `String.to_atom` call and requires Sobelow to exit 1, preventing blanket
    suppression while the job remains advisory.
 
-   **Flip verdict 2026-07-21 — STAY ADVISORY.** The felix-pristine wave re-ran
-   D75's blocking-flip test and it fails: D75 gates the flip on the baseline
-   file:line entries reaching **0**, sequenced after the CSP slice. The CSP
-   slice (#3545, merged) cleared only the 5 `Config.CSP` router findings;
-   `origin/main:api/.sobelow-skips` still carries **137** baselined entries
-   (`grep -c '^[A-Za-z]'` = 137; 0 are `Config.CSP` — 74 Traversal.FileModule,
-   12 DOS.StringToAtom, 9 each XSS.SendResp/SQL.Query/CI.System, …). Draining
-   137 findings is a multi-slice remediation out of this wave's scope, so the
-   precondition is unmet and the `sobelow` job stays `continue-on-error: true`.
-   Re-evaluate only when the baseline reaches 0.
+   **Flip verdict 2026-07-21 — STAY ADVISORY**, and **amended 2026-07-28 (D139)**
+   because the precondition as first written was unsatisfiable. The original
+   text gated the flip on the baseline's `file:line` entries reaching **0**, and
+   quoted **137** entries. Both numbers are corrected below.
+
+   **Live count (re-derived at edit time, 2026-07-28, on `main`):**
+
+   ```
+   $ grep -c '^[A-Za-z]' api/.sobelow-skips
+   108
+   $ grep '^[A-Za-z]' api/.sobelow-skips | sed 's/:.*//' | sort | uniq -c | sort -rn
+     68 Traversal.FileModule   12 DOS.StringToAtom   9 SQL.Query   6 Config.CSRF
+      3 XSS.Raw   2 SQL.Stream   2 CI.System   1 XSS.SendResp   1 XSS.ContentType
+      1 Traversal.SendFile   1 RCE.CodeModule   1 Config.HTTPS   1 Config.Headers
+   ```
+
+   **Amended precondition — the floor is 10, not 0.** The flip is gated on the
+   baseline holding **ONLY entries that provably cannot carry an inline
+   `# sobelow_skip` annotation**, enumerated by type and count. On sobelow
+   0.14.1 that floor is exactly **10 of 108** (98 are annotatable), in two
+   mechanical classes:
+
+   | Class | Count | Entries | Why no annotation can ever reach it |
+   |---|---|---|---|
+   | `Sobelow.Config.*` | **8** | 6 `Config.CSRF` + 1 `Config.Headers` (`router.ex`) + 1 `Config.HTTPS` (`config/prod.exs:0`) | `sobelow.ex` calls `Config.fetch(project_root, routers, endpoints)` and only *then* does `allowed = allowed -- [Config, Vuln]`. Config findings are produced outside the `def_funs |> combine_skips()` pipeline, so `@sobelow_skip` is never consulted. `config/prod.exs:0` has no function to annotate at all. |
+   | `.heex` `XSS.Raw` | **2** | `layouts/bulldocs.html.heex:67`, `layouts/quiz.html.heex:21` | `Parse.get_meta_template_funs/1` builds the template AST with `EEx.compile_string(File.read!(filepath))`. It bypasses `Parse.read_file/1`, the reader that rewrites `# sobelow_skip [...]` into `@sobelow_skip [...]` when `--skip` is set, so a template's source never sees the substitution. |
+
+   The third `XSS.Raw` entry (`controllers/error_html.ex:25`) is a normal `.ex`
+   function and **is** annotatable — it is not part of the floor. Re-evaluate
+   the flip when the baseline contains nothing but those 10; do not re-evaluate
+   on "reaches 0", which cannot happen.
+
+   **Topology: no security.yml check can be required today (S4 + SR-1).** The
+   amendment records this so the implicit "…and then it blocks" promise stops
+   being made:
+
+   - `main` has **no branch protection** — `gh api repos/FRIKKern/barkpark/branches/main/protection`
+     → `404 "Branch not protected"` — and **no rulesets** (`gh api …/rulesets` → `[]`).
+   - `.github/required-checks.json` carries **`"enforced": false`**; its
+     `protection` block is a *proposal*, not applied state.
+   - `scripts/required-checks-generate.sh` **stage S4 excludes every check
+     defined in a paths-filtered workflow** ("an ABSENT check is a permanent
+     *expected*"). `security.yml` is paths-filtered on `api/**`, so *every* job
+     in it is S4-excluded regardless of blocking-ness. Proof that this is not
+     just the advisory flag: the **`mix-audit` job carries no
+     `continue-on-error` and is still excluded**, with reason `S4
+     PATHS-FILTERED` — while `sobelow` is excluded under `S2 ADVISORY`.
+
+   So flipping `continue-on-error: true` → `false` on `sobelow` would make the
+   *job* red but would still not gate any merge. Making Sobelow actually block
+   requires branch protection (or a ruleset) plus a non-paths-filtered required
+   context — a separate change from the baseline drain.
+
+   **Provenance: D75 is a dangling citation.** "D75" has no defining charter
+   entry. It is cited at `bp-felix-pristine-charter.md:904` and `:2165` and at
+   this file's flip verdict, but the felix charter's own **D75** (`:1163`,
+   "Fresh-eyes last corner honestly clean") is a different subject entirely.
+   This paragraph — introduced by `34b9b25d3` (#5474) — is D75's only extant
+   text. Cite *this section*, not the number.
 
 10. **`mix-audit` job** — dependency CVE scan (`mix deps.audit`, the `mix_audit`
     dep) over `mix.lock`. **Blocking** (no `continue-on-error`). The 8

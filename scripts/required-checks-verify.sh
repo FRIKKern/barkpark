@@ -29,7 +29,17 @@
 # are a DEADLOCK — a third state, exit 3, distinct from pass and fail. Extra
 # rendered names are tolerated: new advisory checks land constantly.
 #
-# EXIT CODES   0 = agree · 1 = drift / cannot read · 3 = DEADLOCK
+# EXIT CODES   0 = agree · 1 = drift / cannot read · 3 = DEADLOCK · 4 = RE-RUN
+#
+# 4 is returned by --deadlock, the mode a caller points at a SPECIFIC head (the
+# merge verb's pre-flight). --full and --ci SAMPLE an arbitrary settled head, so
+# there it is printed as a NOTE and never reds: a cancelled run on a foreign
+# merged PR is not drift, and no PR author could fix it.
+#
+# 4 (RE-RUN) is the state D56 found the detector blind to: every required
+# context IS rendered on the head, so the set difference is empty, but one of
+# them concluded `cancelled` — which nothing will ever re-report on its own.
+# Exit 0 there is shape-identical to green on a permanently frozen head.
 #
 # USAGE
 #   scripts/required-checks-verify.sh                 # full three-way check
@@ -255,6 +265,47 @@ EOF
     echo "         GitHub reports these as \"expected\" forever and NEVER names them at N>1 (D38), so this set difference is the only signal." >&2
     return 3
   fi
+
+  # PRESENT is not the same as ABLE TO SATISFY (D56). rendered_names already
+  # emits `name<TAB>conclusion`, and the loop above threw the conclusion away by
+  # matching on `cut -f1` — so a required context whose latest run concluded
+  # `cancelled` returned EXIT 0, shape-identical to green. Proven live on head
+  # 5ea4cb4f, whose required `PR references an active task` was cancelled. That
+  # is the worst state to be blind to: nothing re-reports a cancelled run on its
+  # own, so the head is frozen while the detector says it is fine. RE-RUN is a
+  # FOURTH state, exit 4 — not a deadlock (the workflow does emit this context)
+  # and not a pass.
+  local cancelled=""
+  while IFS= read -r ctx; do
+    [ -n "$ctx" ] || continue
+    local concl
+    # Here-string for the same SIGPIPE reason as above; the tuple is already in
+    # hand, this only stops discarding it.
+    concl="$(awk -F'\t' -v c="$ctx" '$1 == c { print $2 }' <<<"$names")"
+    # `skipped` is DELIBERATELY ABSENT from this set, and the omission is the
+    # reviewed decision (wave 4 review). GitHub counts a required check whose
+    # conclusion is `skipped` as SATISFYING protection — so listing it here
+    # would make the merge verb refuse a head GitHub would happily merge, which
+    # is a lie in the opposite direction inside an epic about honest gates. The
+    # states below share one property `skipped` does not: GitHub blocks on them
+    # AND nothing re-reports them on its own. Probe 16/16 pins this both ways.
+    case "$concl" in
+      cancelled|timed_out|stale|action_required)
+        cancelled="$cancelled$ctx (concluded $concl)
+"
+        ;;
+    esac
+  done <<EOF
+$(jq -r '.protection.required_status_checks.checks[].context' "$SPEC")
+EOF
+
+  if [ -n "$cancelled" ]; then
+    echo "RE-RUN: head $sha rendered every required context, but one concluded in a state that will never turn green on its own." >&2
+    printf '%s' "$cancelled" | sed 's/^/         re-run: /' >&2
+    echo "         This is NOT a deadlock — the workflow does emit the context — and it is NOT green. Re-run the run, then merge." >&2
+    echo "         Note (D57): \"Elixir gate\" launders cancellation into failure, so a cancelled upstream can also surface as \"is failing.\"" >&2
+    return 4
+  fi
   say "  ok     every required context appears in the $(printf '%s' "$names" | grep -c . || true) name(s) rendered on $sha"
   return 0
 }
@@ -278,7 +329,8 @@ run_full() {
     local drc0=0
     deadlock_check "${HEAD_SHA:-$(recent_pr_head)}" || drc0=$?
     [ "$drc0" -eq 3 ] && return 3
-    [ "$drc0" -eq 0 ] || return 1
+    [ "$drc0" -eq 4 ] && say "NOTE: the sampled head carries a cancelled required context (above). See --deadlock for the actionable form."
+    [ "$drc0" -eq 0 ] || [ "$drc0" -eq 4 ] || return 1
     say "OK: the committed spec and the rendered check names agree; protection is not applied yet."
     return 0
   fi
@@ -289,7 +341,7 @@ run_full() {
   local sha="${HEAD_SHA:-$(recent_pr_head)}"
   local drc=0
   deadlock_check "$sha" || drc=$?
-  [ "$drc" -eq 3 ] || [ "$drc" -eq 0 ] || rc=1
+  [ "$drc" -eq 3 ] || [ "$drc" -eq 4 ] || [ "$drc" -eq 0 ] || rc=1
   # Precedence, deliberate: config drift outranks DEADLOCK in the exit code,
   # because a spec that disagrees with live config is the actionable finding and
   # a typo'd context reports as BOTH. Both are always printed; only the code is
@@ -300,6 +352,9 @@ run_full() {
     return 1
   fi
   [ "$drc" -eq 3 ] && return 3
+  # Note-only in the sampling modes; EXIT 4 belongs to --deadlock, the mode a
+  # caller points at a SPECIFIC head. See the run_ci comment for the reasoning.
+  [ "$drc" -eq 4 ] && say "NOTE: the sampled head carries a cancelled required context (above). See --deadlock for the actionable form."
   say "OK: live protection, the committed spec and the rendered check names all agree."
   return 0
 }
@@ -311,7 +366,7 @@ run_ci() {
   local sha="${HEAD_SHA:-$(recent_pr_head)}"
   local drc=0
   deadlock_check "$sha" || drc=$?
-  [ "$drc" -eq 3 ] || [ "$drc" -eq 0 ] || rc=1
+  [ "$drc" -eq 3 ] || [ "$drc" -eq 4 ] || [ "$drc" -eq 0 ] || rc=1
 
   if [ "$(spec_enforced)" = "true" ]; then
     say "── enforced=true: live protection must match ──"
@@ -328,6 +383,18 @@ run_ci() {
   fi
   [ "$rc" -eq 0 ] || { echo "FAIL: required-checks guard is RED." >&2; return 1; }
   [ "$drc" -eq 3 ] && return 3
+  # RE-RUN is deliberately NOT a CI failure, and this is a scope judgement, not
+  # a softening. --ci samples an ARBITRARY settled head (a recently merged PR)
+  # to render names against, and 13 of 120 recent heads carry a cancelled latest
+  # run. A cancelled run on someone else's merged PR is not drift between this
+  # repo's committed spec and its live protection, which is the only thing this
+  # guard certifies — failing on it would red every PR for a state no author of
+  # that PR can fix. It is still PRINTED, loudly, by deadlock_check above. The
+  # consumer that must act on it is the merge verb, which asks the head it is
+  # actually about to merge: scripts/bp-merge.sh calls --deadlock and exits 3.
+  if [ "$drc" -eq 4 ]; then
+    say "NOTE: the sampled head carries a cancelled required context (see above). Not drift; not a CI failure here."
+  fi
   say "OK: required-checks guard green."
   return 0
 }
@@ -414,50 +481,85 @@ JSON
 
   echo "── verify selftest: every clause proven by mutation ──"
 
-  probe "1/12 honest read-back passes" 0 \
+  probe "1/16 honest read-back passes" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks[0].context = "Elixir gat"' "$good_spec" > "$tmp/typo.json"
-  probe "2/12 a typo'd context reds (GitHub accepts it; we must not)" 1 \
+  probe "2/16 a typo'd context reds (GitHub accepts it; we must not)" 1 \
     --spec "$tmp/typo.json" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = null' "$good_rb" > "$tmp/nullapp.json"
-  probe "3/12 app_id:null where the spec pins an id is HARD" 1 \
+  probe "3/16 app_id:null where the spec pins an id is HARD" 1 \
     --spec "$good_spec" --readback "$tmp/nullapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = 8329' "$good_rb" > "$tmp/wrongapp.json"
-  probe "4/12 a wrong app_id reds" 1 \
+  probe "4/16 a wrong app_id reds" 1 \
     --spec "$good_spec" --readback "$tmp/wrongapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.enforce_admins.enabled = false' "$good_rb" > "$tmp/breakglass.json"
-  probe "5/12 a left-open break-glass (enforce_admins false) reds" 1 \
+  probe "5/16 a left-open break-glass (enforce_admins false) reds" 1 \
     --spec "$good_spec" --readback "$tmp/breakglass.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_linear_history.enabled = true' "$good_rb" > "$tmp/oob.json"
-  probe "6/12 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
+  probe "6/16 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
     --spec "$good_spec" --readback "$tmp/oob.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '. + {"required_deployments": {"enabled": true}}' "$good_rb" > "$tmp/extra.json"
-  probe "7/12 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
+  probe "7/16 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
     --spec "$good_spec" --readback "$tmp/extra.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.strict = true' "$good_rb" > "$tmp/strict.json"
-  probe "8/12 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
+  probe "8/16 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
     --spec "$good_spec" --readback "$tmp/strict.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks += [{"context":"No workflow emits me","app_id":15368}]' "$good_spec" > "$tmp/deadspec.json"
-  probe "9/12 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
+  probe "9/16 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
     --spec "$tmp/deadspec.json" --readback "$good_rb" --runs "$good_runs" --sha probe --deadlock || rc=1
 
-  probe "10/12 an unreadable protection read-back FAILS (never skips)" 1 \
+  probe "10/16 an unreadable protection read-back FAILS (never skips)" 1 \
     --spec "$good_spec" --readback "$tmp/does-not-exist.json" --runs "$good_runs" --sha probe || rc=1
 
-  probe "11/12 an unreadable check-run feed FAILS (never skips)" 1 \
+  probe "11/16 an unreadable check-run feed FAILS (never skips)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/no-runs.json" --sha probe || rc=1
 
   echo '{ "check_runs": [] }' > "$tmp/emptyruns.json"
-  probe "12/12 an EMPTY check-run feed FAILS — agreement against nothing is the vacuous pass this epic exists for" 1 \
+  probe "12/16 an EMPTY check-run feed FAILS — agreement against nothing is the vacuous pass this epic exists for" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/emptyruns.json" --sha probe || rc=1
+
+  # 13 & 14 are the D56 clause: the detector used to match on `cut -f1` and
+  # throw away the conclusion column rendered_names already emits, so a required
+  # context concluding `cancelled` returned EXIT 0 — shape-identical to green on
+  # a head that is frozen forever. Proven live on head 5ea4cb4f. Mutation-proof:
+  # 13 must be 4 and 14 must be 0, and reverting the clause makes 13 return 0.
+  jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "cancelled"' \
+    "$good_runs" > "$tmp/cancelledruns.json"
+  probe "13/16 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --deadlock || rc=1
+
+  # The mirror clause: cancellation on a NON-required check is none of our
+  # business, and a detector that reds on it would red constantly — advisory
+  # checks are cancelled by concurrency groups all day.
+  jq '(.check_runs[] | select(.name == "Boundary gate (advisory)") | .conclusion) = "cancelled"' \
+    "$good_runs" > "$tmp/advcancelled.json"
+  probe "14/16 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$tmp/advcancelled.json" --sha probe --deadlock || rc=1
+
+  # The caller-scope clause above, proven rather than asserted: --ci must NOT
+  # turn a cancelled run on an arbitrary sampled head into a red, while
+  # --deadlock (13/15) still exits 4 on the identical input.
+  probe "15/16 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --ci || rc=1
+
+  # 16 pins the scope of the RE-RUN set from the other side. GitHub counts a
+  # required check concluding `skipped` as SATISFYING protection, so a detector
+  # that called it RE-RUN would refuse a head GitHub would merge — a false stall
+  # in a wrapper whose whole promise is that it never lies about the merge. The
+  # builder had `skipped` in the set as an unmeasured guess; the review took it
+  # out and pinned the removal here, so re-adding it reds this probe.
+  jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "skipped"' \
+    "$good_runs" > "$tmp/skippedruns.json"
+  probe "16/16 a required context concluding SKIPPED is NOT RE-RUN (GitHub treats skipped as satisfying; refusing it would be a false stall)" 0 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$tmp/skippedruns.json" --sha probe --deadlock || rc=1
 
   rm -rf "$tmp"
   echo

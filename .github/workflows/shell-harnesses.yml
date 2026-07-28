@@ -7,7 +7,15 @@ name: Shell harnesses
 # (regex #5935, then compare-target) — a patch without a harness is how this
 # file regresses, so the harness rides its own required lane.
 #
-# Second tenant: scripts/release-scan.test.sh, the verdict-derivation matrix for
+# Second tenant: scripts/bp-merge.test.sh, the refusal-string table behind the
+# fleet's merge verb (honest-gates D54). GitHub owns those strings; the day one
+# changes, the table must red HERE rather than mis-classify a blocked PR in a
+# builder's terminal. It runs the classifier over CAPTURED fixtures — no token,
+# no network — so it cannot rot into a skip. The paths list below is EXPLICIT
+# per file: D26's finding was that a `pr-task-gate.sh` edit did not even trigger
+# this workflow, so every script a job here executes gets its own entry.
+#
+# Third tenant: scripts/release-scan.test.sh, the verdict-derivation matrix for
 # scripts/release-scan.sh — the one machine reader of CI state the
 # release-curation agent trusts. NOTHING in .github/workflows/** invoked
 # release-scan.sh at all before this: no syntax check, no test, no caller, while
@@ -19,6 +27,9 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      - "scripts/bp-merge.sh"
+      - "scripts/bp-merge.test.sh"
+      - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
       - ".github/workflows/shell-harnesses.yml"
@@ -27,6 +38,9 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      - "scripts/bp-merge.sh"
+      - "scripts/bp-merge.test.sh"
+      - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
       - ".github/workflows/shell-harnesses.yml"
@@ -55,6 +69,19 @@ jobs:
         run: bash -n scripts/doctor.sh
       - name: doctor.sh section-2 verdict matrix
         run: bash scripts/doctor.test.sh
+
+  merge-verb-table:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bp-merge.sh syntax check
+        run: bash -n scripts/bp-merge.sh
+      - name: bp-merge refusal-string table (captured fixtures, no live GitHub)
+        run: bash scripts/bp-merge.test.sh
+      - name: required-checks-verify selftest (every clause mutation-proven)
+        # The merge verb's pre-flight IS this script, so its own selftest rides
+        # the same lane. It needs no token: --selftest drives temp fixtures only.
+        run: bash scripts/required-checks-verify.sh --selftest
 
   release-scan-verdict:
     name: release-scan.sh CI-verdict derivation

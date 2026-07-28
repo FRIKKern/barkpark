@@ -2781,15 +2781,22 @@
   var notifDeliveryRows = null; // the accumulated FILTERED page list
 
   // Pure: the request URL for one page of the delivery log. An unset axis sends
-  // nothing; `before` is the ISO stamp of the oldest row already rendered, which
-  // is exactly the cursor maybe_delivery_before compares against (strictly older,
-  // so a page boundary can never duplicate or skip a row).
-  function notifDeliveriesQuery(before) {
+  // nothing; `before` is the ISO stamp of the oldest row already rendered and
+  // `before_id` is THAT SAME ROW's id — together they are the whole
+  // `(inserted_at, id)` sort key the server orders by. The id half is not
+  // decoration: one fan-out writes a row per recipient in the same instant, and
+  // a stamp-only cursor drops every tied row on the far side of the boundary,
+  // permanently and without a trace. Sent as a pair or not at all (a lone
+  // `before` is still a legal, historically-shaped stamp-only cutoff).
+  function notifDeliveriesQuery(before, beforeId) {
     var q = "/v1/notifications/deliveries?limit=" + NOTIF_DELIVERY_PAGE;
     if (notifDeliveryFilter.channel) q += "&channel=" + encodeURIComponent(notifDeliveryFilter.channel);
     if (notifDeliveryFilter.status) q += "&status=" + encodeURIComponent(notifDeliveryFilter.status);
     if (notifDeliveryFilter.event) q += "&event=" + encodeURIComponent(notifDeliveryFilter.event);
-    if (before) q += "&before=" + encodeURIComponent(before);
+    if (before) {
+      q += "&before=" + encodeURIComponent(before);
+      if (beforeId) q += "&before_id=" + encodeURIComponent(beforeId);
+    }
     return q;
   }
 
@@ -2801,6 +2808,15 @@
     if (!rows || !rows.length) return null;
     var last = rows[rows.length - 1];
     return (last && last.inserted_at) || null;
+  }
+
+  // Pure: the OTHER half of that cursor — the same oldest row's id, which breaks
+  // an inserted_at tie at the page boundary. A row with no id yields null, and
+  // the query builder then sends the stamp alone (degraded, never wrong).
+  function notifDeliveriesCursorId(rows) {
+    if (!rows || !rows.length) return null;
+    var last = rows[rows.length - 1];
+    return (last && last.id) || null;
   }
 
   function notifDeliveryFiltered() {
@@ -2979,10 +2995,11 @@
     var rows = notifDeliveryRows;
     var before = notifDeliveriesCursor(rows);
     if (!before) return;
+    var beforeId = notifDeliveriesCursorId(rows);
     var btn = $("#notif-del-load-more");
     if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
     var restore = function () { if (btn) { btn.disabled = false; btn.textContent = "Load more"; } };
-    api("GET", notifDeliveriesQuery(before)).then(function (r) {
+    api("GET", notifDeliveriesQuery(before, beforeId)).then(function (r) {
       restore();
       if (!(r.ok && r.data && Array.isArray(r.data.deliveries))) {
         toast({ kind: "error", title: "Couldn't load more", body: friendly(r.data, "Please try again.") });
@@ -4013,6 +4030,12 @@
   function applyRoute() {
     var r = parseHash();
     if (r.view !== "instance") stopInstanceTicker(); // C3: leave the timeline ticker with its view
+    // The "Not current" chip is OVERVIEW-scoped: only loadOverview sets it, and
+    // only an Overview read clears it. Carrying it onto Fleet would make the
+    // topbar disclaim data that view just fetched successfully — a fresh lie
+    // inside the fix for an old one. Leaving Overview drops the claim; coming
+    // back re-runs loadOverview(full), which re-answers it honestly.
+    if (r.view !== "overview") clearRefreshStale();
     var detail = DETAIL_VIEWS.indexOf(r.view) !== -1;
     // Which PRIMARY nav entry stays highlighted. A drill-down keeps its parent
     // lit; the four Settings pages light the single "settings" cluster trigger.
@@ -5009,12 +5032,17 @@
       if (!r.ok) {
         // A BACKGROUND refresh that fails keeps the last good dashboard —
         // replacing a working screen with an error state on one blip is the
-        // louder lie, and the liveness chip already reports a broken stream.
-        if (!full) return;
+        // louder lie. But that silence must not read as freshness: the liveness
+        // chip is driven by the STREAM alone, and es.onmessage stamps
+        // lastEventMs and repaints the chip BEFORE dispatching this refetch, so
+        // at the instant of the failure it says "Live · just now" over data
+        // that never arrived. Mark the staleness; never blank the body.
+        if (!full) { markRefreshStale(); return; }
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load your fleet</h2><p>' +
           esc(friendly(r.data)) + "</p></div>";
         return;
       }
+      clearRefreshStale(); // the read landed — what's on screen is current again
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
       overviewData.list = list;
@@ -7037,10 +7065,19 @@
   // surface serializes it as `s.url` (the CP loads the instance there); the LIST
   // surfaces skip that N+1, so we reconstruct it from the instance the row
   // already carries. Null when neither is available (never invent a dead link).
+  // ssw8: this MANUFACTURES a URL nobody fetched, so the least it owes is the
+  // right characters. It used to esc() the slug and THEN strip to the URL-safe
+  // class — HTML-escaping first turns `&` into `&amp;`, whose letters SURVIVE the
+  // strip, so a slug `a&b` produced `/sites/aampb/`: a confidently-wrong link to a
+  // site that does not exist. Strip FIRST; the surviving class is already
+  // HTML-inert, and siteOpenLink esc()s the finished href regardless.
+  // LATENT, not live: Site's changeset pins slugs to ^[a-z0-9][a-z0-9-]*$, so no
+  // stored row can reach the bad branch today. This removes the trap, it does not
+  // fix an incident.
   function siteLiveUrl(s, bp) {
     if (s && s.url) return s.url;
     if (bp && bp.url && s && s.slug) {
-      return String(bp.url).replace(/\/+$/, "") + "/sites/" + esc(s.slug).replace(/[^A-Za-z0-9._-]/g, "") + "/";
+      return String(bp.url).replace(/\/+$/, "") + "/sites/" + String(s.slug).replace(/[^A-Za-z0-9._-]/g, "") + "/";
     }
     return null;
   }
@@ -7185,6 +7222,105 @@
     });
   }
 
+  // ── ssw8 (charter D82): THE CONTENT BINDING, RENDERED FROM THE PAYLOAD ONLY ──
+  //
+  // `site_json/2` (router.ex ~9675) serializes ELEVEN binding fields; the console
+  // rendered exactly ONE of them (`doc_type`, W10's readback). Everything below
+  // reads the rest — and NOTHING the payload does not carry.
+  //
+  // THE INVARIANT this slice exists to install: A SITE SURFACE MUST RENDER NO
+  // CLAIM NO PAYLOAD FIELD BACKS. Three consequences, each pinned in
+  // __app.test.mjs ("ssw8 INVARIANT: …"):
+  //
+  //  1. an ABSENT field reads as an honest placeholder ("—", "unknown") and
+  //     never as a plausible default — "production" is the documented default
+  //     dataset everywhere else in this product, which is exactly what makes it
+  //     the tempting lie here;
+  //  2. site_json/2 sends the SAME three columns under TWO vocabularies
+  //     (`bootstrap_workspace/project/dataset` and the CLI's
+  //     `workspace/project/dataset`). They are cross-checked: when they disagree
+  //     the surface SAYS SO and shows BOTH. A self-contradictory payload is a
+  //     defect to report, never a tie for the renderer to break silently;
+  //  3. `content_bound` is server-side literally `not is_nil(read_token_encrypted)`
+  //     — it promises A READ TOKEN EXISTS, never that the site HAS content. Every
+  //     label below says "read token"; none says "bound"/"has content", because
+  //     no field in this payload backs that.
+  //
+  // ZERO CSS: the pill is the shared `.status-pill status-pill--{ok,danger,neutral}`
+  // (app.css, dynamic head already ALLOW_PREFIXES-listed in __css_check.mjs), so
+  // this slice adds no rule head and the CSSOM ratchet is untouched.
+  var SITE_BINDING_PARTS = [
+    ["workspace", "bootstrap_workspace"],
+    ["project", "bootstrap_project"],
+    ["dataset", "bootstrap_dataset"],
+  ];
+  function siteBindingModel(s) {
+    s = s || {};
+    var parts = [], missing = 0, mismatch = false;
+    SITE_BINDING_PARTS.forEach(function (pair) {
+      var seen = [s[pair[0]], s[pair[1]]]
+        .filter(function (v) { return v != null && v !== ""; })
+        .map(String);
+      if (!seen.length) { missing++; parts.push("—"); return; }
+      // Both spellings present and DIFFERENT: show both, resolve neither.
+      if (seen.length === 2 && seen[0] !== seen[1]) {
+        mismatch = true;
+        parts.push(seen[0] + " ≠ " + seen[1]);
+        return;
+      }
+      parts.push(seen[0]);
+    });
+    var pathState = mismatch ? "mismatch"
+      : missing === 3 ? "unknown"
+      : missing ? "partial" : "ok";
+    // A boolean the control plane always sends; ABSENT means an older control
+    // plane, and "we do not know" is then the only honest answer.
+    var token = typeof s.content_bound === "boolean"
+      ? (s.content_bound ? "present" : "absent") : "unknown";
+    var tokenLabel = token === "present" ? "Read token stored"
+      : token === "absent" ? "No read token" : "Read token unknown";
+    var role = "neutral", label = "Binding unknown";
+    if (pathState === "mismatch") { role = "danger"; label = "Binding mismatch"; }
+    else if (pathState === "partial") { role = "danger"; label = "Binding incomplete"; }
+    else if (pathState === "ok") { role = token === "present" ? "ok" : token === "absent" ? "danger" : "neutral"; label = tokenLabel; }
+    else if (token === "present") { role = "danger"; label = "Dataset unknown"; }
+    else if (token === "absent") { role = "neutral"; label = "No content binding"; }
+    var path = pathState === "unknown" ? "—" : parts.join("/");
+    return {
+      path: path,
+      pathState: pathState,
+      token: token,
+      tokenLabel: tokenLabel,
+      role: role,
+      label: label,
+      title: (pathState === "unknown" ? "No content dataset on this site" : "Content dataset " + path) +
+        " · " + tokenLabel +
+        // A mismatch renders as "a ≠ b" and the two sides are otherwise
+        // indistinguishable — the hover has to say WHICH payload field each one
+        // came from, or "report, don't resolve" hands the operator a
+        // contradiction they cannot act on.
+        (mismatch
+          ? " · this payload contradicts itself: the left value is the site row's workspace/project/dataset, the right is its bootstrap_* twin of the same column"
+          : ""),
+      // A LIST chip is signal, not decoration: a row whose payload names no
+      // triple AND holds no token has nothing to say about a binding, so it says
+      // nothing. The DETAIL rail still spells the unknown out — a surface you
+      // opened on purpose owes you the state, blank or not.
+      silent: pathState === "unknown" && token !== "present",
+    };
+  }
+  // The binding as a shared status pill. Role ∈ ok | danger | neutral.
+  function siteBindingPill(m) {
+    return '<span class="status-pill status-pill--' + esc(m.role) + '" title="' + esc(m.title) + '">' +
+      '<span class="status-pill-dot" aria-hidden="true"></span>' +
+      '<span class="status-pill-label">' + esc(m.label) + "</span></span>";
+  }
+  // The compact row chip — "" when the payload says nothing about a binding.
+  function siteBindingChip(s) {
+    var m = siteBindingModel(s);
+    return m.silent ? "" : siteBindingPill(m);
+  }
+
   function siteRow(s, bp) {
     var domain = (s.domains && s.domains[0]) || s.slug || s.name || "—";
     var fw = s.framework ? esc(s.framework) : "site";
@@ -7197,6 +7333,7 @@
       '<div class="site-meta">' + fw + " &middot; " + repo + "</div>" +
       '</div><div class="fleet-badges">' +
         siteOpenLink(siteLiveUrl(s, bp)) +
+        siteBindingChip(s) +
         freshnessBadge(s) +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
@@ -9331,6 +9468,8 @@
   function siteDetailHtml(site, bp, deployments, domain, previews) {
     previews = previews || [];
     var auto = site.github_webhook_configured;
+    // ssw8 (D82): the content binding, derived once for the rail rows below.
+    var binding = siteBindingModel(site);
     var repo = site.github_repo
       ? '<span class="mono">' + esc(site.github_repo) + (site.github_branch ? "@" + esc(site.github_branch) : "") + "</span>"
       : "—";
@@ -9393,10 +9532,18 @@
           railRowHtml("Theme",
             '<select class="rail-select" id="site-theme-select" aria-label="Deploy theme">' +
               siteThemeOptionsHtml(site.theme || "") + "</select>") +
+          // ssw8 (D82): the content BINDING — the dataset triple the build reads
+          // and what `content_bound` actually promises. Both derive from
+          // siteBindingModel, which renders payload fields only: an absent triple
+          // reads "—" (never "default/default/production"), a payload that
+          // disagrees with ITSELF shows both spellings, and the pill says "read
+          // token", never "this site has content".
+          railRow("Content dataset", binding.path) +
           // W10: the featured content type the build reads. The create form has
           // always WRITTEN doc_type and no surface read it back — "—" when the
           // control plane predates the field, never an invented default.
           railRow("Content type", site.doc_type || "—") +
+          railRowHtml("Content binding", siteBindingPill(binding)) +
           railRowHtml("Repository", repo) +
           // E-03: the env editor affordance. Write-only truth (POST …/env is a
           // full-blob replace; reveal_site_env has zero route callers) means the
@@ -12200,6 +12347,10 @@
     return {
       source: "audit",
       key: "a:" + String(e.id),
+      // The raw row id, kept alongside `at` because the two together ARE the
+      // keyset cursor (`before` + `before_id`). Reconstructing it by slicing
+      // `key` would be a second, silently-drifting definition of the same fact.
+      id: e.id != null ? String(e.id) : null,
       at: e.inserted_at || null,
       type: String(e.action || ""),
       payload: e.metadata || null,
@@ -12211,17 +12362,26 @@
   }
 
   // The GET /v1/audit URL for the current filter + keyset cursor. Only the
-  // server-supported params (limit, before, target_type, actor_user_id,
-  // action_prefix) are ever sent, and an unset axis sends NOTHING — an empty
-  // string would be an equally-honest no-op server-side, but omitting it keeps
-  // the request URL readable in the network panel, which is how a filter bug
-  // gets found.
-  function activityQuery(before) {
+  // server-supported params (limit, before, before_id, target_type,
+  // actor_user_id, action_prefix) are ever sent, and an unset axis sends
+  // NOTHING — an empty string would be an equally-honest no-op server-side, but
+  // omitting it keeps the request URL readable in the network panel, which is
+  // how a filter bug gets found.
+  //
+  // The cursor is BOTH halves of the server's `(inserted_at, id)` ordering:
+  // `before` alone cuts on the stamp, so a burst of audit writes sharing one
+  // microsecond loses whichever tied rows fall past the page boundary. They ride
+  // as a pair — a lone `before` remains valid (and stamp-only) for a bookmarked
+  // URL.
+  function activityQuery(before, beforeId) {
     var q = "/v1/audit?limit=" + ACTIVITY_PAGE;
     if (activityFilter.target_type) q += "&target_type=" + encodeURIComponent(activityFilter.target_type);
     if (activityFilter.actor_user_id) q += "&actor_user_id=" + encodeURIComponent(activityFilter.actor_user_id);
     if (activityFilter.action_prefix) q += "&action_prefix=" + encodeURIComponent(activityFilter.action_prefix);
-    if (before) q += "&before=" + encodeURIComponent(before);
+    if (before) {
+      q += "&before=" + encodeURIComponent(before);
+      if (beforeId) q += "&before_id=" + encodeURIComponent(beforeId);
+    }
     return q;
   }
 
@@ -12308,12 +12468,16 @@
   function loadMoreActivity() {
     var entries = activityEntries;
     if (!entries || !entries.length) return;
-    // Keyset cursor = the oldest loaded row's stamp (entries are 1:1 with audit
-    // rows — coalescing is display-only, so it never drops the cursor row).
-    var before = entries[entries.length - 1].at;
+    // Keyset cursor = the oldest loaded row's stamp AND id (entries are 1:1 with
+    // audit rows — coalescing is display-only, so it never drops the cursor
+    // row). The id is what keeps a same-microsecond burst from losing its tail
+    // across the boundary.
+    var last = entries[entries.length - 1];
+    var before = last.at;
+    var beforeId = last.id || null;
     var btn = $("#activity-load-more");
     btn.disabled = true;
-    api("GET", activityQuery(before)).then(function (r) {
+    api("GET", activityQuery(before, beforeId)).then(function (r) {
       btn.disabled = false;
       if (!r.ok) {
         toast({ kind: "error", title: "Couldn't load more", body: friendly(r.data, "Please try again.") });
@@ -12435,6 +12599,13 @@
   // EventSource NEVER surfaces to onmessage, so this only advances on genuine
   // invalidations — it is the honest "as of Xs ago" the liveness chip reads.
   var lastEventMs = null;
+  // A BACKGROUND refetch failed while the stream itself stayed healthy — what is
+  // on screen is older than the event that asked for it. This is NOT derivable
+  // from any signal above: onmessage stamps lastEventMs and repaints the chip
+  // BEFORE dispatching the refetch, so the stream reads perfectly live at the
+  // exact instant the data went stale. Set by markRefreshStale, cleared by the
+  // next refresh that lands (and by closeEvents with the rest of the session).
+  var refreshStale = false;
 
   // ── Liveness chip (OC6): topbar SSE health dot, honest reconnect ────────────
   // Pure state machine for the topbar dot, driven ONLY by the existing
@@ -12445,6 +12616,10 @@
   //                  "Reconnecting…" forever over a permanently closed stream.
   //   reconnecting — onerror fired and we ARE retrying (remint + reopen on a
   //                  capped backoff — no longer a claim about the browser).
+  //   refresh_failed — the stream is fine and an event DID arrive; the refetch
+  //                  it triggered is what failed. The screen keeps its last good
+  //                  data (blanking it would be worse) but it is NOT current, and
+  //                  no stream signal can say so — hence its own state.
   //   stale        — stream is up but no data frame in LIVE_STALE_MS (we cannot
   //                  PROVE currency, so we say so — a quiet fleet, not a lie);
   //   live         — connected, recently confirmed (or freshly connected).
@@ -12453,10 +12628,13 @@
   // LIVE_DOT_STATES pins the return set as a CLOSED enum — without that, JS's
   // permissive arity lets a new state land while every equality test stays green.
   var LIVE_STALE_MS = 90000; // 90s of silence → "stale" (well past the 25s heartbeat)
-  var LIVE_DOT_STATES = ["live", "stale", "reconnecting", "dead"];
-  function liveDotState(evtErrored, lastEventMs, nowMs, evtDead) {
+  var LIVE_DOT_STATES = ["live", "stale", "reconnecting", "dead", "refresh_failed"];
+  function liveDotState(evtErrored, lastEventMs, nowMs, evtDead, refreshStale) {
     if (evtDead) return "dead"; // outranks everything: retrying would be a lie
     if (evtErrored) return "reconnecting";
+    // A failed refetch outranks both freshness reads below: it is a MEASURED
+    // failure, where "live"/"stale" are only inferences from stream timing.
+    if (refreshStale) return "refresh_failed";
     if (lastEventMs == null) return "live"; // connected; sparse events ≠ trouble
     if (nowMs - lastEventMs > LIVE_STALE_MS) return "stale";
     return "live";
@@ -12475,11 +12653,15 @@
   }
   var LIVE_CHIP_COPY = {
     live: "Live", stale: "Live", reconnecting: "Reconnecting…", dead: "Not live",
+    // NOT "Live": the stream is live, the SCREEN is not, and the chip speaks for
+    // what the operator is reading.
+    refresh_failed: "Not current",
   };
   var LIVE_CHIP_ARIA = {
     live: "Live updates connected", stale: "Live updates connected but quiet",
     reconnecting: "Live updates interrupted, reconnecting",
     dead: "Live updates stopped, sign in again to resume",
+    refresh_failed: "Live updates connected but the last refresh failed, showing older data",
   };
   // A state with no entry must NEVER fall through to the word "Live" — that was
   // the old `LIVE_CHIP_COPY[state] || "Live"` fallback, which would have made an
@@ -12521,7 +12703,8 @@
   // every state transition AND once per second by the chip ticker (so the "as of"
   // label counts up and a quiet stream ages honestly into "stale").
   //
-  // `override` is the TEST SEAM: {evtErrored, evtDead, lastEventMs, nowMs}. The
+  // `override` is the TEST SEAM: {evtErrored, evtDead, lastEventMs, nowMs,
+  // refreshStale}. The
   // stream signals are private closure state, so without it the terminal state's
   // DOM contract (which data-state, which label, which announced sentence) is
   // literally unassertable from node. Absent in production — every real caller
@@ -12534,11 +12717,21 @@
     var errored = o ? !!o.evtErrored : evtErrored;
     var dead = o ? !!o.evtDead : evtDead;
     var last = o ? (o.lastEventMs != null ? o.lastEventMs : null) : lastEventMs;
-    var state = liveDotState(errored, last, now, dead);
+    // OVERVIEW-SCOPED, and this is the whole of the rule. Only loadOverview
+    // sets the flag and only an Overview read clears it, so asserting it from
+    // the Fleet topbar would disclaim data that Fleet just fetched
+    // successfully — a fresh lie wearing the fix for an old one. applyRoute
+    // also drops the flag on the way out (immediate, rather than by the next
+    // 1s tick); this read is the invariant that makes the scope assertable.
+    var refreshed = o ? !!o.refreshStale : refreshStale && currentView() === "overview";
+    var state = liveDotState(errored, last, now, dead, refreshed);
     chip.setAttribute("data-state", state);
     // No "as of" on a down stream: a recency stamp beside a dead dot reads as
-    // reassurance ("2s ago") for data that has stopped arriving.
-    var ago = state === "reconnecting" || state === "dead" ? "" : liveFreshness(last, now);
+    // reassurance ("2s ago") for data that has stopped arriving. Same for a
+    // failed refresh — "· just now" beside "Not current" is the exact lie this
+    // state exists to stop (the EVENT was just now; the DATA was not).
+    var ago = state === "reconnecting" || state === "dead" || state === "refresh_failed"
+      ? "" : liveFreshness(last, now);
     var label = chip.querySelector(".live-chip-label");
     if (label) label.textContent = liveChipCopy(state);
     var agoEl = chip.querySelector(".live-chip-ago");
@@ -12549,6 +12742,21 @@
     // ticking recency rides the title (a hover tooltip, not an announcement).
     chip.setAttribute("aria-label", liveChipAria(state));
     chip.setAttribute("title", liveChipAria(state) + (ago ? ", last event " + ago : ""));
+  }
+
+  // The refresh-honesty seam. loadOverview's background-failure arm deliberately
+  // keeps the last good dashboard on screen — silence about the FAILURE is the
+  // right call, but silence must not be read as freshness. These two mark and
+  // clear "what you are looking at did not refresh", which the chip renders.
+  function markRefreshStale() {
+    if (refreshStale) return;
+    refreshStale = true;
+    renderLivenessChip();
+  }
+  function clearRefreshStale() {
+    if (!refreshStale) return;
+    refreshStale = false;
+    renderLivenessChip();
   }
 
   // A fresh data frame arrived — snap the dot's one-shot ping so motion signals
@@ -12734,6 +12942,7 @@
     evtErrored = false;
     evtDead = false;
     lastEventMs = null;
+    refreshStale = false; // a new session starts with nothing left un-refreshed
     stopChipTicker();     // the topbar chip's clock dies with the session
     renderLivenessChip(); // reset to a neutral "live/—" before the shell hides
     stopInstanceTicker(); // C3: no orphaned timeline ticker after logout
@@ -12802,6 +13011,17 @@
     subscription: function (v) {
       loadSubscription().then(function () {
         if (v === "billing") renderBilling();
+        // The Overview's state band, slots meter and instance cards ALL read
+        // subCache, so refreshing the cache and repainting only the topbar chip
+        // left the band rendering the old trial card directly beneath a chip
+        // that had already flipped to "Payment failed". paintOverviewData is the
+        // ONE painter covering every sub-dependent region, and it repaints from
+        // the snapshot — no refetch, so the narrowing holds. (Mirrors
+        // refreshOverviewOnboarding: an empty fleet is the runway, whose only
+        // sub-derived text refreshRunwaySubline below already handles.)
+        else if (v === "overview" && overviewData.list && overviewData.list.length) {
+          paintOverviewData(overviewData.list);
+        }
         // A4: the welcome runway's trial subline reads the same cache — keep any
         // mounted runway honest when the subscription flips (no-op otherwise).
         refreshRunwaySubline(document);
@@ -18295,6 +18515,17 @@
       deployDuration: deployDuration,
       siteStatusChip: siteStatusChip,
       siteDetailHtml: siteDetailHtml,
+      // ssw8 (D82): the content-binding model + its two renderers, and siteRow —
+      // the FIRST site row a stranger sees, which had zero hooks and zero
+      // assertions until this slice. These are what the "no claim unbacked by a
+      // payload field" invariant is asserted against.
+      siteBindingModel: siteBindingModel,
+      siteBindingPill: siteBindingPill,
+      siteBindingChip: siteBindingChip,
+      siteRow: siteRow,
+      // …and the URL the LIST surfaces manufacture when the payload carries none.
+      // Unasserted until ssw8 despite being the "Visit ↗" a stranger clicks first.
+      siteLiveUrl: siteLiveUrl,
       // G-04 Notifications (the crown, GR33/GR34/GR36): the pure builders for the
       // settings-anatomy page — cell/channel state, the matrix + roster + email +
       // delivery-log markup, and the routing-write helpers. DOM mounts
@@ -18313,6 +18544,7 @@
       // GR79 leg 4: the delivery-log filter panel — the request-URL builder, the
       // keyset cursor, the chip row and the filter-aware body (all pure).
       notifDeliveriesQuery: notifDeliveriesQuery, notifDeliveriesCursor: notifDeliveriesCursor,
+      notifDeliveriesCursorId: notifDeliveriesCursorId,
       notifDeliveryFiltersHtml: notifDeliveryFiltersHtml, notifDeliveryChipHtml: notifDeliveryChipHtml,
       notifDeliveriesBodyHtml: notifDeliveriesBodyHtml, notifDeliveryFilterState: notifDeliveryFilter,
       notifDeliveryPage: NOTIF_DELIVERY_PAGE,

@@ -220,11 +220,55 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
 
   @impl true
   def terminate(_reason, %{port: port} = state) do
-    if Port.info(port), do: Port.close(port)
+    reap_port(port)
     cleanup_task_token(state[:task_token])
     :ok
   rescue
     _ -> :ok
+  end
+
+  # Closing a `{:spawn_executable, _}` port closes the pipe fds and NOTHING ELSE —
+  # the BEAM sends the child no signal, so an app-server that does not exit on
+  # stdin EOF (or die to SIGPIPE) is left running, reparented to init, burning
+  # whatever CPU it was burning. That is exactly the wedged/runaway provider this
+  # module's overflow path exists to stop, so "the port is closed" is not enough:
+  # the OS process must be signalled too (GH #6681 — a test stub with the same
+  # shape held two cores for 1d19h).
+  #
+  # The pid is read WHILE the port is still open, never remembered from spawn
+  # time: `Port.info/2` answers nil once closed, and a pid cached earlier may
+  # since have been reaped and recycled onto an unrelated process.
+  defp reap_port(port) do
+    if Port.info(port) do
+      os_pid = port_os_pid(port)
+      Port.close(port)
+      kill_os_process(os_pid)
+    end
+
+    :ok
+  end
+
+  defp port_os_pid(port) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, os_pid} when is_integer(os_pid) -> os_pid
+      _ -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  # Best-effort by design: the child has usually already exited on EOF, in which
+  # case `kill` just reports "no such process". A missing `kill` binary or a
+  # racing reap must never take the Session (or its terminate/2) down with it.
+  defp kill_os_process(nil), do: :ok
+
+  defp kill_os_process(os_pid) when is_integer(os_pid) do
+    System.cmd("kill", ["-9", Integer.to_string(os_pid)], stderr_to_stdout: true)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp consume_line("", state), do: state
@@ -443,12 +487,12 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
 
   # Reassembly-buffer breach: a newline-free / runaway stream can never be stopped
   # by `fail_pending` alone (it lives on the handle_call clauses, and split_lines
-  # keeps a newline-free chunk whole), so the cap MUST act here. Close the port so
-  # the runaway external process can no longer wedge the BEAM, drop the buffer, and
-  # fail every pending caller closed — mirroring the malformed-JSONL path (a Protocol
-  # failure event + fail_pending).
+  # keeps a newline-free chunk whole), so the cap MUST act here. Reap the port so
+  # the runaway external process can no longer wedge the BEAM *or* the machine,
+  # drop the buffer, and fail every pending caller closed — mirroring the
+  # malformed-JSONL path (a Protocol failure event + fail_pending).
   defp overflow(state, byte_size) do
-    if Port.info(state.port), do: Port.close(state.port)
+    reap_port(state.port)
 
     state
     |> emit(Protocol.buffer_overflow(context(state), byte_size))

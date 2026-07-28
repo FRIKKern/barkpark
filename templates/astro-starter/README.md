@@ -19,7 +19,7 @@ At build time it:
 2. builds a **fresh** `@barkpark/core` client (not memoized; no `createPreloader`
    — that helper is Next.js-only and bleeds request state across module scope),
 3. fetches one document (newest published `BARKPARK_DOC_TYPE`, default `post`),
-4. bakes four `<meta>` deploy markers into `dist/index.html` so the deploy engine
+4. bakes five `<meta>` deploy markers into `dist/index.html` so the deploy engine
    can assert **content-truth** before switching traffic:
 
    ```html
@@ -27,6 +27,7 @@ At build time it:
    <meta name="bp-content-rev" content="…">   <!-- content revision it was cut against -->
    <meta name="bp-doc-id"      content="…">   <!-- featured doc id  -->
    <meta name="bp-doc-title"   content="…">   <!-- featured doc title -->
+   <meta name="bp-site-base"   content="…">   <!-- the Astro `base` it was built under -->
    ```
 
 A broken content link (unreachable API, bad token) **fails the build** — it never

@@ -21,9 +21,13 @@ defmodule Barkpark.Tasks.Stage do
        staging target OR `Transitions.legal?/2` says no. The controller renders
        that as a 422 naming `from`, `to`, and the sanctioned verb.
     3. **Engagement map** (charter D3) — a `→ considering`/`→ researching`
-       stage WRITES `content.engagement = %{object, holder, ts, note?}`
-       (`object ∈ {"research","build"}`, how a thought "carries its object");
-       a `→ open` stage CLEARS it (the thought resolved into ready backlog).
+       stage WRITES `content.engagement = %{object, holder, ts,
+       lapse_ttl_seconds, lapses_at}` (`object ∈ {"research","build"}`, how a
+       thought "carries its object"); a `→ open` stage CLEARS it (the thought
+       resolved into ready backlog).
+    3b. **Durable reason** (PDS wave 23) — a `:note` does NOT ride the
+       engagement map. It lands in `content.disposition_reason`, a key no
+       sweeper owns. See "The durable/ephemeral split" below.
     4. **CAS-rev update** — `rev = <observed_rev>` guard, mirroring move/pulse;
        0 rows → `{:error, :stale_claim}`.
     5. **Additive event** — one `task.staged` mutation_event in the same
@@ -32,8 +36,40 @@ defmodule Barkpark.Tasks.Stage do
 
   A same→same stage (`from == to`, both a staging target) is legal (the no-op
   clause in `Transitions`) and still writes — it lets a worker refresh the
-  engagement object/note on a task already in that state, mirroring how
+  engagement object/holder on a task already in that state, mirroring how
   `relabel_by_id` always persists even on a no-op label set.
+
+  ## The durable/ephemeral split (PDS wave 23)
+
+  `content.engagement` is an **ephemeral ownership lease**: `TtlSweeper`'s
+  engagement sweep does `Map.delete("engagement")` once `engagement.ts` is
+  older than `:task_engagement_ttl_seconds` (default 900 s, swept every
+  minute). That is intentional design — an unowned thought row must not claim
+  a holder forever.
+
+  What was NOT intentional: a **durable adjudication reason** — "parked
+  because X" — was piggy-backed onto that lease as `engagement.note`, so the
+  verb returned `ok: true` on text with a 15-minute half-life and said
+  nothing. Measured on guerrilla: a row staged at 20:02:00.455593 lapsed at
+  20:17:01.430503 (15m00.97s); an epic-wide census found `engagement.note`
+  surviving on 0 of 31 parked rows while `content.disposition_reason` survived
+  12 of 12.
+
+  So the two things are now split at the source:
+
+    * `content.engagement` — LEASE ONLY: `object`, `holder`, `ts`, plus the
+      honesty pair `lapse_ttl_seconds` / `lapses_at` so the stage receipt
+      STATES when the lease dies instead of implying permanence. Deleted
+      wholesale by the sweeper, by design.
+    * `content.disposition_reason` — DURABLE: where a `:note` lands. No
+      sweeper owns this key (`apply_lapse` deletes exactly one key, by name),
+      so an adjudication written here survives the lapse it describes.
+
+  A note is therefore never refused and never silently eaten: it is routed,
+  and `task.staged` records the key it was routed to (`staged.note_key`).
+  `TtlSweeper.apply_lapse` additionally PROMOTES a legacy `engagement.note`
+  into `disposition_reason` on the way out, so rows written before this split
+  keep their reason too.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -65,9 +101,38 @@ defmodule Barkpark.Tasks.Stage do
   # Valid engagement objects (charter D3): what a thought is ABOUT.
   @objects ~w(research build)
 
+  # The DURABLE key a `:note` lands on — no sweeper owns it (PDS wave 23).
+  # `TtlSweeper.apply_lapse/1` deletes exactly one key ("engagement"), by name.
+  @durable_reason_key "disposition_reason"
+
+  # Mirrors TtlSweeper's engagement lease default so the receipt can state the
+  # half-life the sweeper will actually enforce.
+  @default_engagement_ttl_seconds 900
+
   @doc "The mutation_events kind a stage emits."
   @spec event_kind() :: String.t()
   def event_kind, do: @event_task_staged
+
+  @doc """
+  The content key a staged `:note` is written to — the DURABLE adjudication
+  reason, deliberately NOT the ephemeral engagement lease (PDS wave 23).
+  """
+  @spec durable_reason_key() :: String.t()
+  def durable_reason_key, do: @durable_reason_key
+
+  @doc """
+  The engagement lease TTL, in seconds, as the sweeper will apply it
+  (`:task_engagement_ttl_seconds`, default #{@default_engagement_ttl_seconds}).
+  Stamped into the written lease so the stage receipt states its own half-life.
+  """
+  @spec engagement_ttl_seconds() :: non_neg_integer()
+  def engagement_ttl_seconds do
+    Application.get_env(
+      :barkpark,
+      :task_engagement_ttl_seconds,
+      @default_engagement_ttl_seconds
+    )
+  end
 
   @doc "The lifecycle statuses `stage` may target."
   @spec stageable_targets() :: [String.t()]
@@ -84,7 +149,14 @@ defmodule Barkpark.Tasks.Stage do
       Any other value → `{:error, {:invalid_object, object}}`.
     * `:holder` — the agent/worker owning the thought, stamped into
       `engagement.holder`. Optional.
-    * `:note` — a free-text note, stamped into `engagement.note`. Optional.
+    * `:note` — a free-text adjudication reason. Optional. Written to
+      `content.#{@durable_reason_key}` — NOT to the engagement lease, which the
+      TTL sweeper deletes wholesale (see "The durable/ephemeral split"). A
+      blank/whitespace-only note is treated as absent and overwrites nothing;
+      a real note is recorded on the row AND named in the `task.staged`
+      payload as `staged.note_key`. Routed on EVERY stageable target,
+      including `→ open`, where the reason for resolving the thought is
+      exactly the thing worth keeping.
     * `:caller_token_id` — audit stamp for the mutation_event.
 
   Returns `{:ok, doc}`, or:
@@ -106,7 +178,7 @@ defmodule Barkpark.Tasks.Stage do
   def stage(task_id, to, opts \\ []) when is_binary(task_id) and is_binary(to) do
     object = Keyword.get(opts, :object) || "research"
     holder = Keyword.get(opts, :holder)
-    note = Keyword.get(opts, :note)
+    note = normalize_note(Keyword.get(opts, :note))
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
     result =
@@ -176,8 +248,12 @@ defmodule Barkpark.Tasks.Stage do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
-    {new_content, engagement} = apply_engagement(content, to, object, holder, note, ts_iso)
-    new_content = Map.put(new_content, "lifecycle_status", to)
+    {new_content, engagement} = apply_engagement(content, to, object, holder, ts_iso)
+
+    new_content =
+      new_content
+      |> Map.put("lifecycle_status", to)
+      |> apply_durable_reason(note)
 
     {rows, _} =
       from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
@@ -211,22 +287,64 @@ defmodule Barkpark.Tasks.Stage do
   # `→ considering`/`→ researching` writes the engagement companion map;
   # everything else (i.e. `→ open`) CLEARS it. Returns `{new_content,
   # engagement_or_nil}` so the event payload can echo what was written.
-  defp apply_engagement(content, to, object, holder, note, ts_iso) when to in @thought do
+  #
+  # LEASE FIELDS ONLY (PDS wave 23). The map carries what the sweeper's lease
+  # semantics need — object, holder, ts — plus the two honesty fields that make
+  # the receipt state its own half-life: `lapse_ttl_seconds` and the derived
+  # `lapses_at`. Nothing durable rides here; the sweeper deletes this whole map.
+  defp apply_engagement(content, to, object, holder, ts_iso) when to in @thought do
+    ttl = engagement_ttl_seconds()
+
     engagement =
-      %{"object" => object, "ts" => ts_iso}
+      %{
+        "object" => object,
+        "ts" => ts_iso,
+        "lapse_ttl_seconds" => ttl,
+        "lapses_at" => lapses_at(ts_iso, ttl)
+      }
       |> maybe_put("holder", holder)
-      |> maybe_put("note", note)
 
     {Map.put(content, "engagement", engagement), engagement}
   end
 
-  defp apply_engagement(content, _to, _object, _holder, _note, _ts_iso) do
+  defp apply_engagement(content, _to, _object, _holder, _ts_iso) do
     {Map.delete(content, "engagement"), nil}
   end
 
-  # Additive task.staged payload (charter D8): from, to, and the engagement
-  # fields (object/holder/note) when the target carries a thought — nil on a
-  # `→ open` stage that cleared engagement.
+  # The note's DURABLE home. Absent note → the row's existing reason is left
+  # exactly as it was (a stage that says nothing must not erase an earlier
+  # adjudication).
+  defp apply_durable_reason(content, nil), do: content
+  defp apply_durable_reason(content, note), do: Map.put(content, @durable_reason_key, note)
+
+  # When the written lease dies, as an ISO-8601 instant. Derived from the same
+  # `ts` the sweeper compares against, so this is a statement about the actual
+  # enforcement, not a guess.
+  defp lapses_at(ts_iso, ttl) when is_integer(ttl) and ttl >= 0 do
+    case DateTime.from_iso8601(ts_iso) do
+      {:ok, dt, _offset} -> dt |> DateTime.add(ttl, :second) |> DateTime.to_iso8601()
+      _ -> nil
+    end
+  end
+
+  defp lapses_at(_ts_iso, _ttl), do: nil
+
+  # A blank note is no note: it must not overwrite a durable reason with "".
+  defp normalize_note(note) when is_binary(note) do
+    case String.trim(note) do
+      "" -> nil
+      _ -> note
+    end
+  end
+
+  defp normalize_note(_), do: nil
+
+  # Additive task.staged payload (charter D8): from, to, the engagement fields
+  # (object/holder) when the target carries a thought — nil on a `→ open` stage
+  # that cleared engagement — and the note WITH the key it was routed to
+  # (`note_key`), so the event says where the durable text actually landed
+  # instead of implying it rode the lease (PDS wave 23). `lapses_at` echoes the
+  # written lease's death so a consumer of the event knows it too.
   defp staged_payload(from, to, engagement, holder, note) do
     %{
       "staged" => %{
@@ -234,7 +352,9 @@ defmodule Barkpark.Tasks.Stage do
         "to" => to,
         "object" => engagement && Map.get(engagement, "object"),
         "holder" => holder,
-        "note" => note
+        "note" => note,
+        "note_key" => note && @durable_reason_key,
+        "lapses_at" => engagement && Map.get(engagement, "lapses_at")
       }
     }
   end

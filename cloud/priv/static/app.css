@@ -492,13 +492,19 @@ a:hover { text-decoration: underline; }
   transition: background var(--t), border-color var(--t), color var(--t), box-shadow var(--t), opacity var(--t);
 }
 .btn:hover { background: var(--muted-surface); }
-.btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring-soft); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
-/* Shared keyboard focus ring (WCAG 2.4.7) — the house ring from .btn above,
-   for interactive chrome that would otherwise fall back to the near-invisible
-   UA outline on the dark near-black bg. :focus-visible only (no mouse-click
-   ring). New panels: add your class here rather than re-rolling the ring. */
+/* Shared keyboard focus ring (WCAG 2.4.7 + 1.4.11) — the house ring from .btn
+   above, for interactive chrome that would otherwise fall back to the near-
+   invisible UA outline on the dark near-black bg. :focus-visible only (no
+   mouse-click ring). New panels: add your class here rather than re-rolling
+   the ring.
+   The indicator band is the OPAQUE --ring, never --ring-soft: composited over
+   any console backdrop, an alpha-0.15/0.20 tint tops out at 1.62:1 / 1.92:1 —
+   an arithmetic ceiling below the 3:1 SC 1.4.11 floor that no accent can lift.
+   __css_check E12 refuses any focus rule whose sole band is a translucent
+   token; --ring-soft stays for DECORATIVE fills (tints, tracks, pulses). */
 .nav-link:focus-visible,
 .nav-menu summary:focus-visible,
 .nav-menu-item:focus-visible,
@@ -510,7 +516,7 @@ a:hover { text-decoration: underline; }
 .toast-close:focus-visible,
 .topbar-link:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring-soft);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring);
 }
 
 .btn-primary {
@@ -837,7 +843,7 @@ select.form-input {
 .topbar-link:hover { color: var(--text); text-decoration: none; }
 
 .acct-btn { padding: 0; border: none; background: none; cursor: pointer; border-radius: var(--pill); flex: 0 0 auto; }
-.acct-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring-soft); }
+.acct-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring); }
 .acct-avatar {
   width: 30px; height: 30px;
   border-radius: var(--pill);
@@ -1436,7 +1442,7 @@ select.form-input {
   border-radius: 4px; flex: 0 0 auto;
 }
 .copy-btn:hover { color: var(--text); background: var(--muted-surface); }
-.copy-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring-soft); }
+.copy-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 
 /* ── Instance Overview rhythm + sectioned Details rail ────────────────────────
    .inst-overview gives the Overview main column a uniform vertical rhythm so the
@@ -1501,7 +1507,7 @@ select.form-input {
 .site-host { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; }
 .site-inst-link { color: var(--text); font-weight: 500; text-decoration: none; }
 .site-inst-link:hover { text-decoration: underline; }
-.site-inst-link:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring-soft); border-radius: var(--radius-sm); }
+.site-inst-link:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); border-radius: var(--radius-sm); }
 /* E-03 env editor: the write-only warning aligns to the top (two lines of law,
    not a one-liner), and the KEY=VALUE editor is a tall mono textarea. */
 .env-warn { align-items: flex-start; line-height: 1.5; }
@@ -1524,7 +1530,7 @@ select.form-input {
    opens the live site instead of drilling into the detail view. */
 .site-open { font-size: 12px; color: var(--muted-text); text-decoration: none; white-space: nowrap; padding: 2px 6px; border-radius: var(--radius-sm); }
 .site-open:hover { color: var(--text); text-decoration: underline; }
-.site-open:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring-soft); }
+.site-open:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* ===================================================== DEPLOYMENTS
@@ -2049,7 +2055,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   transition: color var(--t), border-color var(--t), background var(--t);
 }
 .actfilter-chip:hover { color: var(--text); border-color: var(--dim); }
-.actfilter-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring-soft); }
+.actfilter-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 .actfilter-chip.is-active {
   color: var(--text);
   background: hsl(var(--primary-hsl) / 0.1);
@@ -3528,6 +3534,20 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .live-chip[data-state="dead"] .live-dot { background: var(--danger); }
 
+/* refresh_failed (cch-bl) — the stream is HEALTHY and an event did arrive; the
+   refetch it triggered is what failed, so the dashboard on screen is older than
+   the event that asked for it. Amber like "reconnecting" (same severity: not
+   current, recoverable) but deliberately STATIC — nothing is retrying on a
+   timer here; the next event that lands clears it. The label ("Not current")
+   carries the difference in cause. Same load-bearing note as the dead rule
+   above: without this the fifth data-state matches zero author rules and
+   inherits .live-dot { background: var(--dim) } — a calm grey for a warning. */
+.live-chip[data-state="refresh_failed"] {
+  border-color: hsl(var(--warn-hsl) / 0.35);
+  background: var(--warn-soft);
+}
+.live-chip[data-state="refresh_failed"] .live-dot { background: var(--warn); }
+
 @media (prefers-reduced-motion: reduce) {
   /* Motion is redundant with colour + label here — drop it entirely. */
   .live-chip[data-state="reconnecting"] .live-dot { animation: none; }
@@ -4024,7 +4044,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   transition: background var(--t);
 }
 .ws-switch:hover { background: rgba(var(--cc-line-rgb), 0.05); }
-.ws-switch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--cc-bg-side), 0 0 0 4px var(--ring-soft); }
+.ws-switch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--cc-bg-side), 0 0 0 4px var(--ring); }
 .ws-avatar {
   width: 26px; height: 26px; flex: 0 0 auto;
   border-radius: 7px; background: var(--primary); color: var(--primary-fg);
@@ -4047,7 +4067,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font: inherit; font-size: var(--text-sm); transition: border-color var(--t), color var(--t);
 }
 .nav-find:hover { border-color: rgba(var(--cc-line-rgb), 0.22); color: var(--muted-text); }
-.nav-find:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--cc-bg-side), 0 0 0 4px var(--ring-soft); }
+.nav-find:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--cc-bg-side), 0 0 0 4px var(--ring); }
 .nav-find-ico { flex: 0 0 auto; }
 .nav-find-key {
   margin-left: auto; font-family: var(--mono); font-size: 10.5px;
@@ -4097,7 +4117,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .nav-operator { color: var(--muted-text); }
 .nav-account:hover { background: rgba(var(--cc-line-rgb), 0.05); }
-.nav-account:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--cc-bg-side), 0 0 0 4px var(--ring-soft); }
+.nav-account:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--cc-bg-side), 0 0 0 4px var(--ring); }
 .acct-id { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
 .acct-name { font-size: var(--text-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-email { font-size: 11.5px; color: var(--cc-fg4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4111,7 +4131,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font: inherit; font-size: var(--text-sm); font-weight: 600; transition: border-color var(--t);
 }
 .scope-switch:hover { border-color: rgba(var(--cc-line-rgb), 0.22); }
-.scope-switch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring-soft); }
+.scope-switch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring); }
 .scope-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
 .scope-caret { flex: 0 0 auto; opacity: 0.6; }
 .scope-menu {

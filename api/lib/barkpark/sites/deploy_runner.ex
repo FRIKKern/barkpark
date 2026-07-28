@@ -671,6 +671,9 @@ defmodule Barkpark.Sites.DeployRunner do
 
   # Fold the durable status file (one BPSTAGE line per state boundary) into the
   # stage list, using the SAME upsert as the Port stream so both paths agree.
+  # Reachability: `path` is always `manifest.status_file` — built here at :459
+  # from `run_state_dir()` + a charset-validated slug, never from request data.
+  # sobelow_skip ["Traversal.FileModule"]
   defp fold_status_file(path, default_build_id) do
     case File.read(path) do
       {:ok, contents} ->
@@ -688,6 +691,9 @@ defmodule Barkpark.Sites.DeployRunner do
     end
   end
 
+  # Reachability: `path` is always `manifest.log_file` — same provenance as the
+  # status file (run_state_dir + validated slug), never a caller-supplied path.
+  # sobelow_skip ["Traversal.FileModule"]
   defp read_log_tail(path) do
     max = Keyword.get(config(), :max_log_lines, @default_max_log_lines)
 
@@ -899,6 +905,10 @@ defmodule Barkpark.Sites.DeployRunner do
   # PATH is carried explicitly (a systemd unit's default PATH lacks asdf's `npm`
   # shims). The engine reads SITE_SLUG/BUILD_ID/CONTENT_REV and the status/log
   # file paths from here.
+  # Reachability: `path` is the env file this module names itself (:462) under
+  # `run_state_dir()` from a slug matching ^[a-z0-9][a-z0-9-]{0,62}$ (no `/`,
+  # no `.`) — DeployRequest.validate_slug/1 rejects everything else upstream.
+  # sobelow_skip ["Traversal.FileModule"]
   defp write_env_file(path, %DeployRequest{} = req, status_file, log_file) do
     build_lines =
       for {key, value} <- resolved_build_vars(req), is_binary(value), do: "#{key}=#{value}"
@@ -925,6 +935,9 @@ defmodule Barkpark.Sites.DeployRunner do
     error -> {:error, error}
   end
 
+  # Reachability: `build_env_file` is only ever the path write_env_file/4 just
+  # created; the annotation binds THIS clause only (charter D141b).
+  # sobelow_skip ["Traversal.FileModule"]
   defp unlink_env(%{build_env_file: path}) when is_binary(path), do: File.rm(path)
   defp unlink_env(_), do: :ok
 
@@ -1021,8 +1034,12 @@ defmodule Barkpark.Sites.DeployRunner do
     Process.send_after(self(), {:run_deadline, port}, run_deadline_ms())
   end
 
-  # Closing a `{:spawn_executable, _}` port terminates the external program;
-  # tolerate an already-closed port so the watchdog never crashes the Runner.
+  # Closing a `{:spawn_executable, _}` port closes the pipe fds and sends the child
+  # NO signal — it terminates only a program that exits on stdin EOF or dies to
+  # SIGPIPE (GH #6681: the Codex runtime orphaned a child that did neither, which
+  # `Session.reap_port/1` now SIGKILLs after the close). A deploy child that
+  # ignores EOF survives this watchdog the same way; reaping here is filed, not
+  # done. Tolerate an already-closed port so the watchdog never crashes the Runner.
   defp close_port(port) do
     Port.close(port)
   rescue
@@ -1204,6 +1221,9 @@ defmodule Barkpark.Sites.DeployRunner do
     Keyword.get(config(), :run_state_dir) || Path.join(run_cd(), ".bp-site-deploy-runs")
   end
 
+  # Reachability: the argument is `run_state_dir()` — a config constant or a
+  # repo-root join, with no caller-supplied component at all.
+  # sobelow_skip ["Traversal.FileModule"]
   defp ensure_run_state_dir do
     dir = run_state_dir()
     File.mkdir_p!(dir)
@@ -1212,6 +1232,9 @@ defmodule Barkpark.Sites.DeployRunner do
 
   defp manifest_path(dir, slug), do: Path.join(dir, "#{slug}.manifest.json")
 
+  # Reachability: `manifest_path/2` joins `run_state_dir()` with a validated
+  # slug and a fixed `.manifest.json` suffix — no traversable component.
+  # sobelow_skip ["Traversal.FileModule"]
   defp write_manifest(dir, manifest) do
     File.write(manifest_path(dir, manifest.slug), Jason.encode!(encode_manifest(manifest)))
   rescue
@@ -1225,6 +1248,10 @@ defmodule Barkpark.Sites.DeployRunner do
     end
   end
 
+  # Reachability: callers pass either `manifest_path/2` (validated slug) or a
+  # `File.ls(run_state_dir())` entry filtered to `*.manifest.json` — both are
+  # names this module wrote itself into a dir it owns.
+  # sobelow_skip ["Traversal.FileModule"]
   defp read_manifest(path) do
     with {:ok, raw} <- File.read(path),
          {:ok, json} <- Jason.decode(raw) do
@@ -1296,6 +1323,9 @@ defmodule Barkpark.Sites.DeployRunner do
 
   # Start a fresh status + log so a redeploy of the same slug never folds a
   # previous run's stages.
+  # Reachability: the only call site (:477) passes `[status_file, log_file]`,
+  # both just built from run_state_dir + a validated slug.
+  # sobelow_skip ["Traversal.FileModule"]
   defp fresh_run_files(paths) do
     Enum.reduce_while(paths, :ok, fn path, :ok ->
       case File.write(path, "") do
@@ -1315,6 +1345,9 @@ defmodule Barkpark.Sites.DeployRunner do
   # Keep the run-state dir bounded: newest @max_tracked_runs manifests survive;
   # for each evicted one, sweep its manifest/status/log/env quartet. A unit still
   # active is NEVER evicted (its files are load-bearing for re-attach).
+  # Reachability: every swept path comes from a manifest this module wrote into
+  # `run_state_dir()`; the sweep is confined to that dir and never takes input.
+  # sobelow_skip ["Traversal.FileModule"]
   defp prune_run_state_dir(dir) do
     manifests = list_manifests(dir)
 

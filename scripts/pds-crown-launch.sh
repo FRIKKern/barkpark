@@ -100,8 +100,27 @@
 # synchronous behaviour for an operator who is watching and does not care how
 # long arming takes. A failed pre-warm aborts the child WITHOUT firing.
 #
+# ── ARMED IS A READ-BACK, NOT A FORK RETURN (PDS-D317) ──────────────────────
+#
+# `arm` used to print ARMED on the strength of `is_int "$pid"` — proof that the
+# FORK PARENT printed digits, nothing more. execvp ENOENT, a child-side syntax
+# error, an instant `set -e` abort and an OOM kill all produced digits and all
+# printed ARMED. So the claim is now backed by a post-condition READ of the
+# state it claims to have produced: assert_child_up() settles, reads a marker
+# THE CHILD ITSELF WROTE into the transcript, and then classifies.
+#
+# A bare liveness poke at t+0 would be a mirror-image lie: armed with a payload
+# that is literally `exit 0`, one measured run returned rc=0 (LIVE) while
+# classify microseconds later already said KILLED, and three re-runs returned
+# rc=1. Hence SETTLE-then-CLASSIFY, never poke-and-tick.
+#
+# And the banner claims exactly what was read: "child is UP as of <t>" —
+# necessary, not sufficient. It never claims the climb finishes.
+#
 # ── EXIT STATUS ─────────────────────────────────────────────────────────────
-#   arm       0 armed (pid + transcript printed) · 3 refused/usage/environment
+#   arm       0 armed (child proven up, or liveness UNPERFORMABLE and said so)
+#             4 the child is NOT up (the named state is printed)
+#             3 refused/usage/environment
 #   collect   0 FINISHED or FINISHED-nosent · 2 STILL-RUNNING · 1 anything else
 #   selftest  0 every check held · 1 a check failed
 #
@@ -135,6 +154,12 @@ MAX_DRAWS="${PDS_LAUNCH_MAX_DRAWS:-360}"
 # standing down forever. scripts/pds-w20-floor-derivation.md.
 MEM_FLOOR_MIB="${PDS_LAUNCH_MEM_FLOOR_MIB:-897}"
 MEM_FLOOR_LAW=897
+
+# How long `arm` settles before it reads the child's own transcript marker
+# (PDS-D317). It is a DEADLINE, not a sleep: the loop breaks the moment the
+# marker lands, so a healthy child costs ~1s. Raise it on a loaded host; the
+# check never gets weaker, only more patient.
+ARM_SETTLE_S="${PDS_LAUNCH_ARM_SETTLE_S:-5}"
 
 SSH_HOST="${PDS_LAUNCH_SSH_HOST:-root@guerrilla.barkpark.cloud}"
 SSH_KEY="${PDS_LAUNCH_SSH_KEY:-$HOME/.ssh/barkpark_indx}"
@@ -445,6 +470,7 @@ write_run_meta() {
 
 cmd_arm() {
   local force=0 run_id run_tag run_dir log pid_file child payload pid t0 t1
+  local child_state arc read_at
   DO_PREWARM=1
 
   while [ $# -gt 0 ]; do
@@ -520,10 +546,53 @@ cmd_arm() {
   # individually diagnosable from the run directory (PDS-D276/D277).
   write_run_meta "$run_dir" "$run_tag" "$run_id" "$pid" "$log"
 
+  # ── the read-back behind the word ARMED (PDS-D317) ──────────────────────
+  # `is_int "$pid"` above proves the FORK PARENT printed digits. It does not
+  # prove a child exists. Settle, then read a marker the CHILD wrote, then
+  # classify — and print whatever that read actually says.
+  say "settling ${ARM_SETTLE_S}s, then reading the child's own transcript before claiming anything…"
+  set +e
+  child_state="$(assert_child_up "$log" "$pid_file" "$ARM_SETTLE_S")"
+  arc=$?
+  set -e
+  read_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  if [ "$arc" -eq 1 ]; then
+    rule
+    say "NOT ARMED — the fork returned a pid, but the read-back says $child_state."
+    rule
+    info "run_tag     $run_tag"
+    info "pid         $pid"
+    info "transcript  $log"
+    info "child       $child"
+    info "read at     $read_at (after a ${ARM_SETTLE_S}s settle)"
+    case "$child_state" in
+      DEAD)          info "meaning     the child is gone and wrote no sentinel — the execvp-ENOENT / instant-abort / OOM-kill shape." ;;
+      NO-MARKER)     info "meaning     a process is alive but never stamped 'child up' — the fork exec'd something that is not this climb." ;;
+      CRASHED)       info "meaning     the child wrote a sentinel and stopped inside the settle window. Read the transcript." ;;
+      EXITED-EARLY)  info "meaning     the child already finished inside ${ARM_SETTLE_S}s. A climb cannot; something else ran." ;;
+      NO-TRANSCRIPT) info "meaning     the fork never created $log at all." ;;
+    esac
+    say "Nothing is polling. Read the transcript, fix the cause, arm again."
+    rule
+    exit 4
+  fi
+
   t1="$(date +%s)"
 
   rule
-  say "ARMED — the climb now outlives this turn."
+  if [ "$arc" -eq 2 ]; then
+    # pid_live rc=2 — `ps` refuses to evaluate this pid, so liveness is UNPROVEN
+    # in BOTH directions. Saying "armed" bare here would be the same lie with a
+    # different cause, so the caveat rides in the same breath as the claim.
+    say "ARMED — but LIVENESS UNPERFORMABLE: pid $pid is outside the range ps evaluates."
+    say "  Nothing here proves the child is up, and nothing here proves it is dead."
+    say "  Read the outcome with \`collect\` before trusting this run."
+  else
+    say "ARMED — child is UP as of $read_at (it stamped its own arrival and is still running)."
+    say "  That is NECESSARY, NOT SUFFICIENT: it is one read at one instant, not a"
+    say "  promise about how the climb ends. Only \`collect\` answers that."
+  fi
   rule
   info "run_tag     $run_tag"
   info "pid         $pid"
@@ -575,6 +644,65 @@ classify() { # $1 = transcript · $2 = pid file  -> prints the state token
     *) printf 'KILLED\n' ;;   # pid unusable — caller prints the caveat
   esac
   return 0
+}
+
+# ── the arm-time read-back (PDS-D317) ────────────────────────────────────────
+#
+# THE POST-CONDITION READ BEHIND THE WORD "ARMED". Prints ONE state token and
+# returns:
+#
+#   UP            0  the child wrote its own arrival stamp AND is still running
+#   NO-MARKER     1  the pid is alive but the child never stamped — the fork
+#                    exec'd something, but nothing that identifies as the climb
+#   DEAD          1  no marker, no sentinel, pid gone — the instant-death shape
+#   CRASHED       1  the child got far enough to write a sentinel and stopped
+#   EXITED-EARLY  1  the child already FINISHED inside the settle window — a
+#                    climb cannot; something else ran
+#   NO-TRANSCRIPT 1  the fork never even created the log
+#   UNPERFORMABLE 2  the pid is outside the range `ps` will evaluate, so
+#                    liveness is UNPROVEN in either direction (pid_live rc=2 —
+#                    kept DISTINCT from death, never collapsed into it)
+#
+# It is a FUNCTION, not four inline lines in cmd_arm, for one reason: the
+# selftest reaches fire_detached directly and never runs cmd_arm, so anything
+# inlined there ships untested by the harness that actually exists.
+#
+# THE SETTLE IS LOAD-BEARING. See the header: a t+0 poke is a measured coin
+# flip. The marker is the child's FIRST act (write_child_script's `stamp "child
+# up …"`), so waiting for it is waiting for the child to prove itself rather
+# than for a clock to elapse.
+#
+# $1 transcript · $2 pid file · $3 settle seconds (default ARM_SETTLE_S)
+assert_child_up() {
+  local t="${1:-}" p="${2:-}" settle="${3:-$ARM_SETTLE_S}"
+  local pid rc i marker state
+  is_int "$settle" || settle=5
+
+  pid="$(cat "$p" 2>/dev/null | tr -d ' \n' || true)"
+  set +e
+  pid_live "$pid"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 2 ]; then printf 'UNPERFORMABLE\n'; return 2; fi
+
+  marker=0
+  i=0
+  while [ "$i" -lt "$settle" ]; do
+    if [ -f "$t" ] && grep -qF 'child up' "$t" 2>/dev/null; then marker=1; break; fi
+    sleep 1
+    i=$(( i + 1 ))
+  done
+
+  state="$(classify "$t" "$p")"
+  case "$state" in
+    STILL-RUNNING)
+      if [ "$marker" -eq 1 ]; then printf 'UP\n'; return 0; fi
+      printf 'NO-MARKER\n'; return 1 ;;
+    NO-TRANSCRIPT)          printf 'NO-TRANSCRIPT\n'; return 1 ;;
+    KILLED)                 printf 'DEAD\n';          return 1 ;;
+    CRASHED)                printf 'CRASHED\n';       return 1 ;;
+    *)                      printf 'EXITED-EARLY\n';  return 1 ;;
+  esac
 }
 
 cmd_collect() {
@@ -1155,6 +1283,94 @@ DUMMY
     ok "pid_live contains no pgrep; liveness is ps -p only"
   fi
 
+  # ── 9. ARMED is a read-back, not a fork return (PDS-D317) ────────────────
+  #
+  # Four live fixtures through assert_child_up — the SAME function cmd_arm
+  # calls — plus two source guards so deleting the call, or softening the
+  # banner back into a promise, turns this section RED.
+  say ""
+  say "9 · ARMED is gated on a marker the CHILD wrote, not on the fork's pid"
+
+  # (a) a child that stamps its own arrival and stays up -> UP
+  cat > "$scratch/live-child.sh" <<'LIVECHILD'
+printf '[fixture] child up — pid=%s\n' "$$"
+sleep 20
+LIVECHILD
+  fire_detached "cafe0001" "$scratch/full/attempts" \
+    "$scratch/live.log" "exec /bin/bash $(printf '%q' "$scratch/live-child.sh")" \
+    "$scratch/live.pid"
+  set +e
+  out="$(assert_child_up "$scratch/live.log" "$scratch/live.pid" 5)"; rc=$?
+  set -e
+  check "$out" "UP" "a stamped, still-running child reads UP"
+  check "$rc"  "0"  "…and returns 0"
+
+  # (b) THE FLAGSHIP LIE: a payload that is literally `exit 0`. Pre-fix this
+  # printed ARMED and returned 0. It must now be a NAMED non-zero outcome.
+  cat > "$scratch/dead-child.sh" <<'DEADCHILD'
+exit 0
+DEADCHILD
+  fire_detached "cafe0002" "$scratch/full/attempts" \
+    "$scratch/dead.log" "exec /bin/bash $(printf '%q' "$scratch/dead-child.sh")" \
+    "$scratch/dead.pid"
+  set +e
+  out="$(assert_child_up "$scratch/dead.log" "$scratch/dead.pid" 4)"; rc=$?
+  set -e
+  check "$rc" "1" "an instant-exit payload is a NON-ZERO outcome, not ARMED"
+  case "$out" in
+    UP) bad "an instant-exit payload read UP — this is the success-lie itself" ;;
+    "") bad "an instant-exit payload produced no state token at all" ;;
+    *)  ok  "…and it is NAMED, not a bare failure ($out)" ;;
+  esac
+
+  # (c) a live process that never identifies itself. Alive is not enough: the
+  # marker is what separates "the climb is up" from "SOMETHING is up".
+  cat > "$scratch/mute-child.sh" <<'MUTECHILD'
+sleep 20
+MUTECHILD
+  fire_detached "cafe0003" "$scratch/full/attempts" \
+    "$scratch/mute.log" "exec /bin/bash $(printf '%q' "$scratch/mute-child.sh")" \
+    "$scratch/mute.pid"
+  set +e
+  out="$(assert_child_up "$scratch/mute.log" "$scratch/mute.pid" 3)"; rc=$?
+  set -e
+  check "$out" "NO-MARKER" "a live process that never stamped is NO-MARKER, not UP"
+  check "$rc"  "1"         "…and returns non-zero"
+
+  # (d) the tri-state survives: an unusable pid is UNPERFORMABLE, never DEAD.
+  # 100000 is the measured boundary — `ps` rejects it as "too large", which is
+  # not proof of death in either direction (see pid_live's own checks in §4).
+  printf '100000\n' > "$scratch/unusable.pid"
+  set +e
+  out="$(assert_child_up "$scratch/live.log" "$scratch/unusable.pid" 1)"; rc=$?
+  set -e
+  check "$out" "UNPERFORMABLE" "an unusable pid is UNPERFORMABLE, not collapsed into DEAD"
+  check "$rc"  "2"             "…and keeps rc=2 distinct from rc=1"
+
+  # (e) MUTATION GUARD — the call itself. cmd_arm must run the read-back
+  # between the fork and the banner; delete it and this FAILS.
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'assert_child_up' || true)"
+  if [ "${out:-0}" -ge 1 ]; then
+    ok "cmd_arm calls assert_child_up (the read-back is wired, not merely defined)"
+  else
+    bad "cmd_arm no longer calls assert_child_up — ARMED is back to trusting the fork's pid"
+  fi
+
+  # (f) MUTATION GUARD — the wording. The banner may claim a read at an
+  # instant; it may never claim an outcome it cannot know.
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'child is UP as of' || true)"
+  if [ "${out:-0}" -ge 1 ]; then
+    ok "the ARMED banner claims 'child is UP as of <t>'"
+  else
+    bad "the ARMED banner lost its 'child is UP as of <t>' wording"
+  fi
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -cE 'climb will complete|climb now outlives' || true)"
+  if [ "${out:-0}" -eq 0 ]; then
+    ok "the banner promises nothing about how the climb ends"
+  else
+    bad "the banner makes a promise about the climb's outcome that one read cannot back"
+  fi
+
   say ""
   rule
   printf '  %d ok · %d FAIL\n' "$ST_PASS" "$ST_FAIL"
@@ -1164,7 +1380,8 @@ DUMMY
     return 1
   fi
   say "SELFTEST PASSED — the launcher detaches, carries its budget across the fork,"
-  say "and classifies all six states. It has fired nothing."
+  say "classifies all six states, and backs the word ARMED with a read of the"
+  say "child's own transcript. It has fired nothing."
   return 0
 }
 

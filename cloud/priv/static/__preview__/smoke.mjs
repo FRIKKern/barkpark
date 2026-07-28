@@ -1478,6 +1478,48 @@ const EXPECTATIONS = {
       assert.ok(domains.includes("certificate usually issues"), "the server remediation renders verbatim");
     },
   },
+  // ── ssw8 (charter D82): the content binding, PAINTED ────────────────────────
+  // scenarios.mjs gained three binding fixtures; without an EXPECTATIONS entry
+  // this harness never renders them (it iterates Object.keys(EXPECTATIONS), not
+  // SCENARIOS), so they would be asserted only by the node string harness and
+  // never by a boot. These three walk the real render into #site-body.
+  "site-binding-bound": {
+    what: "site detail — a bound site: the dataset triple on the rail and a read-token pill that promises only what content_bound means",
+    check(reg) {
+      const body = (reg.get("site-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#site-body rendered empty");
+      assert.ok(body.includes("acme/site/production"), "the rail names the dataset triple the build reads");
+      assert.ok(body.includes(">paper<"), "the bound content type renders");
+      assert.ok(body.includes("status-pill--ok"), "a stored read token reads as an ok pill");
+      assert.ok(body.includes(">Read token stored<"), "the pill says READ TOKEN…");
+      assert.ok(!/has content|is bound</i.test(body),
+        "…and never claims the site HAS content — content_bound is not_is_nil(read_token_encrypted)");
+    },
+  },
+  "site-binding-unknown": {
+    what: "site detail — an older control plane sends no triple and no content_bound; the rail says unknown, never a plausible default",
+    check(reg) {
+      const body = (reg.get("site-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#site-body rendered empty");
+      assert.ok(body.includes(">Binding unknown<"), "an absent binding reads UNKNOWN");
+      assert.ok(body.includes("status-pill--neutral"), "unknown is neutral — not a green, not a red");
+      // THE lie this fixture exists to catch: nothing may invent the documented
+      // defaults for a payload that carries none of them.
+      assert.ok(!body.includes("default/default/production"),
+        "an absent triple must never render the plausible default");
+    },
+  },
+  "site-binding-mismatch": {
+    what: "site detail — the payload's two spellings of the dataset disagree; both render and neither is resolved",
+    check(reg) {
+      const body = (reg.get("site-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#site-body rendered empty");
+      assert.ok(body.includes("producton") && body.includes("production"),
+        "a self-contradictory payload shows BOTH spellings");
+      assert.ok(body.includes(">Binding mismatch<"), "and names the contradiction");
+      assert.ok(body.includes("status-pill--danger"), "a contradiction is a danger state, not a shrug");
+    },
+  },
   // gr-p3-small-surfaces (E-01): the global sites list on v4 — one density row
   // per site with a leading deploy-status pill, states-complete, real fields
   // ONLY (the invented Marketing/Docs/Blank "kind" taxonomy never renders).
@@ -2027,11 +2069,11 @@ const EXPECTATIONS = {
   },
   // ── MVP-0 Personal Dev Fleet (pdf-mvp0-fleet-card-spa): the fleet card ─────
   "fleet-support-provisioning": {
-    what: "the fleet card with a support mid-provision — the 5-rung SUPPORT theater, never a secure rung",
+    what: "the fleet card with a support mid-provision — the 6-rung SUPPORT theater, secure included, never a freshen rung",
     container: "instance-body",
     includes: ["fleet-support-card", "fleet-support-theater", "new-steps",
-      "Configuring the runtime", 'data-step="verify"'],
-    excludes: ['data-step="secure"', 'data-step="freshen"'],
+      "Configuring the runtime", 'data-step="secure"', 'data-step="verify"'],
+    excludes: ['data-step="freshen"'],
   },
   "fleet-support-online": {
     what: "the fleet card with an ONLINE support — the BYO-model-key step in the card; the roster read answers the documents envelope and the presence pipeline renders --online from THAT fixture",
