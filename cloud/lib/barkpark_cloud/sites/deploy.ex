@@ -44,9 +44,11 @@ defmodule BarkparkCloud.Sites.Deploy do
   on the box AND is the PLAN no-op key: the `(site_id, build_id)` partial unique
   index turns a re-deploy of unchanged code+content+config into a 200 no-op
   instead of a duplicate build. `content_rev` is read from the box (the only thing
-  that can see the dataset); when it cannot be read the rev degrades to a fresh
-  marker — an honest "I don't know the content revision, so rebuild" rather than a
-  false cache hit that would serve stale content forever.
+  that can see the dataset); when it cannot be read the rev degrades to the EMPTY
+  string — an honest "I don't know the content revision", which still forces a
+  rebuild (the unknown rev folds a nonce into `build_id`, so a false cache hit can
+  never serve stale content) but ships NO revision to the box, so HEALTH knows it
+  has nothing to cross-check instead of asserting an invented value against itself.
   """
 
   require Logger
@@ -71,6 +73,12 @@ defmodule BarkparkCloud.Sites.Deploy do
   # falls back to. It is a constant, so it freezes that half of `build_id` — see
   # `code_rev_known?/1`, which exists so a scheduled caller can SEE that.
   @unknown_code_rev "unknown"
+
+  # The `content_rev` an UNREADABLE box degrades to (ssw8): the empty string, not
+  # a fabricated marker. It is the wire value the box reads as "no CONTENT_REV
+  # supplied", which is the only honest thing to say when the read failed — see
+  # `content_rev/2`.
+  @unknown_content_rev ""
 
   @doc "The six visible deploy stages, in order."
   @spec stages() :: [String.t()]
@@ -121,7 +129,13 @@ defmodule BarkparkCloud.Sites.Deploy do
         probed_rev \\ nil
       ) do
     content_rev = probed_rev || content_rev(site, bp)
-    build_id = build_id(site, bp, content_rev, force)
+    # An UNKNOWN revision must never dedupe (ssw8). The empty rev is a CONSTANT,
+    # so on its own it would collapse every re-deploy of an unreadable box into
+    # the `(site_id, build_id)` no-op and serve stale content forever — the exact
+    # failure the old random `"u…"` marker existed to prevent. So the nonce that
+    # `force` folds in is applied here too: the build is genuinely new, and the
+    # revision shipped to the box stays honestly empty.
+    build_id = build_id(site, bp, content_rev, force || content_rev == @unknown_content_rev)
 
     case Registry.create_deployment(site, %{
            build_id: build_id,
@@ -216,17 +230,26 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   # The content revision baked into the build (and into the `bp-content-rev`
   # marker HEALTH asserts). Only the box can see the dataset, so we ask it — over
-  # the SCOPED analytics read, with the site's own public-read token.
+  # the scoped analytics path, relayed with the INSTANCE ADMIN token
+  # (`Registry.relay_admin/4`). NOT the site's own public-read token: that token
+  # is the BUILD's credential and never leaves the deploy payload, so the probe
+  # and the build read the dataset through two different credentials.
   #
-  # FAIL-OPEN, DELIBERATELY: an unreadable revision degrades to a fresh random
-  # marker, which makes the build_id unique and forces a real rebuild. The
-  # opposite (a stable placeholder) would collide with the previous build_id and
-  # make PLAN a no-op — silently serving stale content forever, the worst possible
-  # failure for a content-bound site. Distrust vacuous green.
+  # FAIL-HONEST (ssw8): an unreadable revision degrades to the EMPTY string, and
+  # `enqueue/5` folds a nonce into the build_id when it sees one — so the build is
+  # still genuinely new (never a false cache hit that serves stale content), but
+  # the box is told plainly that no revision was supplied. It was previously a
+  # fresh random `"u" <> hex` marker: that value was stored on the row, exported
+  # as CONTENT_REV, baked into `<meta name="bp-content-rev">` by the template, and
+  # then asserted EQUAL by HEALTH — a green certified by comparing an invented
+  # value to itself, with no detector anywhere in the repo that could tell it from
+  # a real revision. An empty CONTENT_REV routes `deploy/site-deploy.sh` into its
+  # existing honest branch instead ("no CONTENT_REV supplied — asserting
+  # bp-content-rev is non-empty only"). Distrust vacuous green.
   defp content_rev(%Site{} = site, %Barkpark{} = bp) do
     case content_rev_probe(site, bp) do
       {:ok, rev} -> rev
-      :error -> "u" <> (:crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower))
+      :error -> @unknown_content_rev
     end
   end
 
@@ -238,12 +261,29 @@ defmodule BarkparkCloud.Sites.Deploy do
   did not (box down, no admin token, non-2xx, unbound triple).
 
   stw9 (charter D57): this exists so a SCHEDULED caller can tell "content
-  unchanged" from "I could not look". `content_rev/2` fail-opens an unreadable
-  revision to a fresh random `"u…"` marker — correct for a human-triggered
-  deploy (never serve stale content), but catastrophic on a timer: a sick box
-  would mint a brand-new `build_id` on EVERY tick, so the idempotent no-op that
-  makes an unforced sweep cheap never fires and the box builds forever.
-  `TemplateFreshnessWorker` probes first and SKIPS the site on `:error`.
+  unchanged" from "I could not look". `content_rev/2` degrades an unreadable
+  revision to the empty string, and `enqueue/5` then nonces the build_id —
+  correct for a human-triggered deploy (never serve stale content), but
+  catastrophic on a timer: a sick box would mint a brand-new `build_id` on EVERY
+  tick, so the idempotent no-op that makes an unforced sweep cheap never fires and
+  the box builds forever. `TemplateFreshnessWorker` probes first and SKIPS the
+  site on `:error`.
+
+  ## What the revision is derived FROM (ssw8)
+
+  NOT the whole analytics body. That body's `recent_activity` is the last 50
+  mutation events for the DATASET — every type, drafts included — so hashing it
+  moved the revision on activity the site does not publish: an unrelated task
+  closing, or anyone saving a draft, minted a fresh `build_id` and a full rebuild
+  of byte-identical output (~53/hour measured on a live dataset), and the
+  idempotent no-op the `(site_id, build_id)` index exists to produce was dead.
+
+  So the revision is derived from a PROJECTION of what this site actually
+  publishes: the PUBLISHED document count for the site's bound `doc_type`, plus
+  the published mutation events of that type still inside the activity window.
+  Published-only and type-filtered on both halves — a draft edit or another type's
+  churn cannot move it, while a real publish (a new document, or an edit to an
+  existing published one of the bound type) does.
   """
   @spec content_rev_probe(Site.t(), Barkpark.t()) :: {:ok, String.t()} | :error
   def content_rev_probe(%Site{} = site, %Barkpark{} = bp) do
@@ -255,7 +295,7 @@ defmodule BarkparkCloud.Sites.Deploy do
          {:ok, status, body} when status in 200..299 <- Registry.relay_admin(bp, :get, path, nil) do
       rev =
         :sha256
-        |> :crypto.hash(Jason.encode!(body))
+        |> :crypto.hash(Jason.encode!(content_projection(body, site.doc_type)))
         |> Base.encode16(case: :lower)
         |> binary_part(0, 12)
 
@@ -264,6 +304,44 @@ defmodule BarkparkCloud.Sites.Deploy do
       _ -> :error
     end
   end
+
+  # The published, type-scoped projection of an analytics body — a LIST, not a
+  # map, so its JSON encoding is ordered and stable regardless of key traversal.
+  defp content_projection(body, doc_type) when is_binary(doc_type) do
+    [doc_type, published_count(body, doc_type), published_events(body, doc_type)]
+  end
+
+  # The published-document count for the bound type. The instance splits
+  # `published` from `drafts` per type (`Barkpark.Content.Analytics.document_stats/2`);
+  # an older box that reports only `total` falls back to it rather than to 0 —
+  # a coarser signal, never a silently frozen one.
+  defp published_count(%{"types" => types}, doc_type) when is_list(types) do
+    Enum.find_value(types, 0, fn
+      %{"type" => ^doc_type} = row -> row["published"] || row["total"] || 0
+      _ -> false
+    end)
+  end
+
+  defp published_count(_body, _doc_type), do: 0
+
+  # The bound type's PUBLISHED events inside the activity window, projected to the
+  # fields that identify a content change (which document, which mutation, when).
+  # `id` is deliberately dropped: it is a per-event uuid that would make two
+  # otherwise-identical windows differ. Drafts carry a `drafts.`-prefixed doc_id
+  # (the instance's own published/draft discriminator) and are excluded.
+  defp published_events(%{"recent_activity" => events}, doc_type) when is_list(events) do
+    events
+    |> Enum.filter(fn
+      %{"type" => ^doc_type, "doc_id" => doc_id} when is_binary(doc_id) ->
+        not String.starts_with?(doc_id, "drafts.")
+
+      _ ->
+        false
+    end)
+    |> Enum.map(&[&1["doc_id"], &1["mutation"], &1["timestamp"]])
+  end
+
+  defp published_events(_body, _doc_type), do: []
 
   defp build_id_conflict?(%Ecto.Changeset{errors: errors}) do
     Enum.any?(errors, fn

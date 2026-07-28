@@ -133,6 +133,163 @@ defmodule BarkparkCloud.SitesDeployTest do
     end
   end
 
+  # ssw8 — WHAT the content revision is derived from, and what it says when it
+  # could not be read.
+  #
+  # The revision used to be sha256 of the WHOLE analytics body, whose
+  # `recent_activity` is the last 50 mutation events for the entire dataset —
+  # every type, drafts included. A site bound to one doc_type therefore got a
+  # fresh rev, a fresh build_id and a full rebuild of byte-identical output every
+  # time an unrelated type churned or anyone saved a draft. And when the read
+  # FAILED it minted a random `"u" <> hex` marker that was shipped to the box,
+  # baked into `<meta name="bp-content-rev">` and then asserted EQUAL by HEALTH —
+  # a green certified by comparing an invented value to itself.
+  describe "content_rev — published + type-scoped, honest when unreadable" do
+    @analytics_path "/w/acme/p/blog/v1/data/analytics/production"
+
+    defp analytics(fields) do
+      body =
+        %{
+          "dataset" => "production",
+          "total_documents" => 3,
+          "types" => [%{"type" => "post", "total" => 3, "published" => 2, "drafts" => 1}],
+          "recent_activity" => []
+        }
+        |> Map.merge(Map.new(fields, fn {k, v} -> {to_string(k), v} end))
+
+      {:ok, %{status: 200, body: Jason.encode!(body)}}
+    end
+
+    defp event(id, type, doc_id, mutation, ts) do
+      %{"id" => id, "type" => type, "doc_id" => doc_id, "mutation" => mutation, "timestamp" => ts}
+    end
+
+    defp program_analytics(response),
+      do: StudioLinkFakeHttpClient.program(%{@analytics_path => response})
+
+    test "draft churn and other types do NOT move the revision — the no-op survives a live dataset" do
+      {bp, site} = setup_site()
+
+      program_analytics(
+        analytics(
+          recent_activity: [
+            event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
+          ]
+        )
+      )
+
+      assert {:ok, d1} = Deploy.enqueue(site, bp)
+
+      # The SAME published content, on a dataset that has since churned: a draft
+      # of the bound type was saved, an unrelated `task` was closed, the totals
+      # and the draft counts moved with them. Nothing the site PUBLISHES changed.
+      program_analytics(
+        analytics(
+          total_documents: 5,
+          types: [
+            %{"type" => "post", "total" => 4, "published" => 2, "drafts" => 2},
+            %{"type" => "task", "total" => 1, "published" => 1, "drafts" => 0}
+          ],
+          recent_activity: [
+            event("e3", "task", "t-1", "patch", "2026-07-28T10:02:00Z"),
+            event("e2", "post", "drafts.hello", "createOrReplace", "2026-07-28T10:01:00Z"),
+            event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
+          ]
+        )
+      )
+
+      assert {:duplicate, ^d1} = Deploy.enqueue(site, bp),
+             "a draft-only / other-type mutation must not mint a new build of byte-identical output"
+
+      assert length(Registry.list_deployments(site, 10)) == 1
+    end
+
+    test "a real PUBLISHED change to the bound type DOES move the revision — the fix is not a constant" do
+      {bp, site} = setup_site()
+
+      program_analytics(
+        analytics(
+          recent_activity: [
+            event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
+          ]
+        )
+      )
+
+      assert {:ok, d1} = Deploy.enqueue(site, bp)
+
+      # A published post is edited: same count, a new published event of the bound
+      # type. The site's output really does change, so the build must.
+      program_analytics(
+        analytics(
+          recent_activity: [
+            event("e2", "post", "hello", "createOrReplace", "2026-07-28T10:05:00Z"),
+            event("e1", "post", "hello", "createOrReplace", "2026-07-28T10:00:00Z")
+          ]
+        )
+      )
+
+      assert {:ok, d2} = Deploy.enqueue(site, bp)
+      refute d2.content_rev == d1.content_rev
+      refute d2.build_id == d1.build_id
+
+      # …and so does a brand-new published document of the bound type, even if the
+      # activity window has rolled past every event.
+      program_analytics(
+        analytics(
+          types: [%{"type" => "post", "total" => 4, "published" => 3, "drafts" => 1}],
+          recent_activity: []
+        )
+      )
+
+      assert {:ok, d3} = Deploy.enqueue(site, bp)
+      refute d3.content_rev in [d1.content_rev, d2.content_rev]
+    end
+
+    test "an UNREADABLE box ships an EMPTY content_rev — never a fabricated one — and still rebuilds" do
+      {bp, site} = setup_site()
+
+      program_analytics({:ok, %{status: 502, body: "upstream down"}})
+
+      assert {:ok, d1} = Deploy.enqueue(site, bp)
+
+      # The honesty claim: nothing invented. An empty CONTENT_REV is what routes
+      # deploy/site-deploy.sh into its "no CONTENT_REV supplied — asserting
+      # bp-content-rev is non-empty only" branch, instead of cross-checking a
+      # random value against itself. (Ecto's cast stores the empty string as NULL,
+      # and the box's DeployRequest maps `nil` and `""` to the same "not supplied"
+      # — so both spellings of empty are the honest branch, and neither is a value.)
+      assert d1.content_rev in [nil, ""]
+
+      refute String.starts_with?(d1.content_rev || "", "u"),
+             "the fail-open must not mint a 'u'+hex marker that nothing in the repo can detect"
+
+      # …and that emptiness is what the BOX is handed — the post-condition read,
+      # not an assumption about the row.
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(all_stages())])
+      assert {:ok, :live} = Deploy.run(d1.id)
+      assert [{:start_deploy, payload} | _] = FakeBoxRelay.calls()
+      assert payload.content_rev in [nil, ""]
+
+      # …and the unknown revision must NOT dedupe: a constant rev would collapse
+      # every re-deploy of a sick box into the (site_id, build_id) no-op and serve
+      # stale content forever.
+      assert {:ok, d2} = Deploy.enqueue(site, bp)
+      refute d2.build_id == d1.build_id
+      assert d2.content_rev in [nil, ""]
+    end
+
+    test "the probe reports :error (not a value) when the box cannot be read" do
+      {bp, site} = setup_site()
+
+      program_analytics({:ok, %{status: 502, body: "upstream down"}})
+      assert Deploy.content_rev_probe(site, bp) == :error
+
+      program_analytics(analytics([]))
+      assert {:ok, rev} = Deploy.content_rev_probe(site, bp)
+      assert byte_size(rev) == 12
+    end
+  end
+
   describe "run/1 — the six-stage walk" do
     test "walks PLAN..RETIRE, persists each stage, and settles live with the site pointer flipped" do
       {bp, site} = setup_site()
