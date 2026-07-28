@@ -508,6 +508,84 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-07-28 — wave 7 REVIEW (the board got short, five instruments got honest — grade A)
+
+**Six slices dispatched in round 1, six green, zero failed.** The seventh
+(`cch-bl-auth-touch-unthrottled`) was deferred to round 2 by design — same file as the keyset slice,
+different region — and is untouched, `open`, 0/7, exactly as the sequenced-rounds law intends.
+
+- **`cch-bl-bands-136-reproduce` (Movement 0, ledger-only, no branch)** — 46 writes across 46
+  distinct rows, every one confirmed by a PUBLISHED re-read rather than a printed `rev`. 17 closes
+  (16 done + 1 cancelled), 14 re-parents into two destinations both looked up and confirmed open
+  first, 15 durable dispositions. Wave 6's dangling `82eb84a37` was confirmed NOT an ancestor and
+  named as the citation being REFUSED; refetch-storm closed on `481d6f231` alone.
+  `gr-p5r5-successor-seal`'s three invisible grandchildren were re-parented at 14:12:30Z BEFORE the
+  parent closed at 14:15Z, so the self-orphan trap was not re-committed one level down.
+  `gr-backlog-e02-deploy-actor` CLOSED on the landed trigger-only ratification (D87);
+  `gr-blk-worktree-registry-bloat` CANCELLED, and `git worktree prune` was never run.
+  **Verified by the reviewer against the live ledger: roster 138 -> 129, open 80 -> 55.** Six of the
+  brief's pre-adjudicated dispositions disagreed with the tree, and in all six the tree won.
+- **`cch-bl-smoke-harness-red-on-main-and-ungated` -> PR #6694** — the smoke red was one stale string
+  (`secure` joined the product two days AFTER the assertion was authored). Deleted, and `secure`
+  MOVED INTO the includes so the scenario asserts the rung its prose claims instead of nothing. Both
+  prose corrections ride the same diff; the `415 tests` count is DELETED from `console-harness.yml`
+  (:7 and :83), never restated. `smoke.mjs` + `seal-predicate.test.mjs` wired into the node-20
+  `console-unit` job — the TEST, never a live seal run (depth-1 checkout launders exit 128 into a
+  false NO SEAL). Reviewer changed nothing.
+- **`cch-bl-seal-predicate-retarget-and-reparent` -> PR #6695** — `--epic` plus the PROSE, the frozen
+  six-entry D88 register verified by ancestry AND diff (`git show --format=`, so the subject is
+  structurally unreachable), the three-rung ladder with rung 3 FAILING by name (the rate limiter),
+  R4, TERMINAL-on-a-post-condition-read, `considering` counted, guard exit 2 read as INFRA FAULT.
+  Suite 11 -> 30. **Reviewer fixed three same-class defects in the instrument itself**: a "verified by
+  ancestry + diff" note printed beside a diff MISMATCH, a rung-2 MEASURED-ELSEWHERE note suppressed
+  by an unrelated earlier problem, and `--successor " <epic> "` slipping past R4 on a space.
+- **`cch-bl-ring-soft-focus-contrast-unasserted` -> PR #6696** — D91's three parts, all load-bearing:
+  11 declaration sites repointed to the opaque `--ring`, five CONTRAST_PAIRS rows (43 -> 47 pairs,
+  516 -> 564 evaluations, worst new cell 3.31:1), and **E12**, the rule-level detector without which
+  (b) is a proven vacuous green. `cssom-heads.baseline` stayed 1235 with MISSES 0, `design/check.mjs`
+  PASS. Reviewer re-ran the E12 mutation independently. Reviewer changed nothing.
+- **`cch-bl-mockjs-revoke-stateless` -> PR #6697** — one missing argument: mock.js called
+  `route(scen, method, path)` while the stateful DELETE handlers are guarded `if (state)`. The
+  browser preview toasted "Device signed out" over a byte-identical refetch. Fixed with a per-boot
+  bag + a `snapshot()` (route hands back the LIVE array by reference), and the real work is the gate:
+  a contract half plus a balanced-paren WIRING tripwire proven red on clean origin/main. **Reviewer
+  fixed an infinite loop** in that scanner (unterminated block comment -> `indexOf` -1 -> i=0) and a
+  scenarios.mjs comment the fix itself falsified.
+- **`gr-bl-delivery-keyset-tiebreak` -> PR #6698** — both feeds ordered by `(inserted_at, id)` and
+  paged on half of it, so a boundary mid-tie dropped the far side permanently and silently. Now
+  strictly lexicographic, `before_id` threaded through both routes and both client builders,
+  backward compatible by construction (`when is_binary(before_id)`, `Ecto.UUID.cast` first).
+  Reviewer re-ran the full ExUnit file (168/0) and the mutation independently.
+
+**Cross-slice**: all five branches merge onto `origin/main` CLEAN in any order, and on the integrated
+tree every instrument is green — `__app.test.mjs` 720/720, smoke 98/98, `__css_check` 0 errors,
+seal-predicate 30/30. That integrated run matters more than the per-slice ones, because #6694 is what
+makes smoke.mjs a blocking gate for every later console PR.
+
+**Ledger**: honest, with one nit and one recovery. Five code slices `in_progress`, claims still held,
+every provable criterion stamped as the builders worked, every merge-gated criterion left open for
+the lead, no foreign row touched. The nit: Movement 0's now-line still reads "44 ledger writes / 15
+done-closes" where the true figure is 46 / 17 — stale embedded arithmetic in the row whose own
+subject is stale embedded arithmetic. It is corrected in that row's criterion-6 evidence; the
+reviewer did NOT rewrite the now-line, because impersonating a live builder claim on an honesty
+ledger is worse than a stale sentence. **D95 has partially RECOVERED**: `bp task create` works again
+(intermittent timeouts remain), so the reviewer filed the three follow-ups the builders could not —
+`task-5acf9b5ad30f9a74` (E12 coverage gaps: styleguide inline CSS + band-less `:focus` rules),
+`task-4a591a26279e7d24` (no gate stops a hardcoded population count re-entering console-harness.yml),
+`task-43f7662b33e8e0b7` (the rate limiter's bucket separation is unmeasured — the single rung-3
+register entry, and therefore the reason clause (b) fails on every predicate run). Publishing 422s on
+`label_spine` until the tag RATIONALES are substantive; the strengths were already distinct.
+
+**Next wave takes**, in this order: (1) merge round 1 — #6694/6695/6696/6697 are node/CSS-only, #6698
+waits for the CI Elixir gate; (2) dispatch `cch-bl-auth-touch-unthrottled` the moment #6698 lands,
+rebased on it; (3) the ~55 open rows the sweep did NOT touch — Movement 0 executed a pre-adjudicated
+table of ~31 and left the rest unswept, and the base rate says several are already fixed on main;
+(4) build `task-43f7662b33e8e0b7`, because it is the ONLY thing standing between this epic and a
+clause-(b) PASS; (5) `gr-blk-vercel-checks-ungoverned`, still reddening every PR repo-wide and
+governed by nobody — standing law 7 says LAND the sentence. Still held for a Fable-available wave:
+D73's `--ok`/`--danger` hue question. D93's rule holds — no successor is filed until residue is
+≤ ~10 non-gate rows.
+
 ### 2026-07-28 — wave 7 DECIDE (build in flight)
 
 Wave 6 graded A for pointing the predicate at the operator — and then never paid its own Movement 0.
