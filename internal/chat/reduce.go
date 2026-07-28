@@ -355,6 +355,8 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 		return st, nil
 	case "chat":
 		return reduceClaudeFrame(st, ev.Data)
+	case "runtime":
+		return reduceRuntimeFrame(st, ev.Data)
 	case "workflow":
 		// Live workflow delta (wsc-bl-workflow-sse): the COMPACT summary pushed
 		// mid-turn so the collapsed strip refreshes without a turn-boundary
@@ -483,6 +485,77 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 		// THIS turn's generation so its landing clears only this turn's tail.
 		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq, Gen: st.Gen}}
 	}
+	return st, nil
+}
+
+// reduceRuntimeFrame handles one normalized Runtime.Event frame (event:
+// runtime) — the codex and remote/RemoteRef text lane, the sibling of
+// event: chat. The wire is the serialized %Runtime.Event{} struct
+// (chat_controller.ex sse_runtime_frame): `kind` is the normalized verb and
+// `native` retains the lossless provider envelope, so the text lives at
+// native.params.delta.
+//
+// The kind is matched EXACTLY, and that is load-bearing: codex's protocol maps
+// item/reasoning/textDelta → thinking_delta and item/commandExecution/
+// outputDelta → tool_delta to the SAME native.params.delta location, so a loose
+// match would splice reasoning and command output into the answer. Everything
+// that is not text_delta or turn_completed is inert here — those rows arrive as
+// persisted truth at the turn boundary, exactly as on the claude lane.
+func reduceRuntimeFrame(st State, data []byte) (State, []Effect) {
+	var frame struct {
+		Kind          string          `json:"kind"`
+		TerminalState string          `json:"terminal_state"`
+		Native        json.RawMessage `json:"native"`
+	}
+	if err := json.Unmarshal(data, &frame); err != nil {
+		return st, nil
+	}
+
+	switch frame.Kind {
+	case "text_delta":
+		// native is decoded lazily and tolerantly: a provider envelope whose
+		// params.delta is not a string leaves the tail untouched rather than
+		// killing the frame's whole decode.
+		var native struct {
+			Params struct {
+				Delta string `json:"delta"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(frame.Native, &native); err != nil || native.Params.Delta == "" {
+			return st, nil
+		}
+		st.Tail += native.Params.Delta
+		// Stamped with the current generation exactly as the claude lane stamps
+		// it (charter D77), so the settle guard sees the same shape on both lanes.
+		// Residual, recorded: Gen advances only on a claude system/init frame, so
+		// a codex turn keeps the generation it started in — the fence is inert
+		// there rather than wrong, and advancing it on runtime turn boundaries is
+		// a separate parity slice.
+		st.TailGen = st.Gen
+		if st.Phase == TurnIdle || st.Phase == TurnWaiting {
+			st.Phase = TurnStreaming
+		}
+		return st, nil
+
+	case "turn_completed":
+		// The codex turn boundary — the sibling of the claude result frame, and
+		// the ONLY settle a codex turn gets. Without it the phase never returns to
+		// idle and the Recorder's persisted answer never reaches the transcript.
+		interrupted := st.Phase == TurnInterrupting || frame.TerminalState == "interrupted"
+		switch {
+		case interrupted:
+			st.Notice = "⊘ Interrupted — session live"
+		case frame.TerminalState == "failed":
+			st.Notice = "the turn ended with an error"
+		default:
+			st.Notice = ""
+		}
+		st.Phase = TurnIdle
+		st.WedgeAt = time.Time{}
+		st.Settling = true
+		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq, Gen: st.Gen}}
+	}
+
 	return st, nil
 }
 

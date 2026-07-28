@@ -5,7 +5,9 @@
 // server emits — no device, no server, no clock.
 import {
   initialChatState,
+  MAX_TAIL_BYTES,
   reduce,
+  TAIL_CAP_NOTICE,
   WEDGE_TIMEOUT_MS,
   type ChatEffect,
   type ChatEvent,
@@ -27,6 +29,34 @@ const deltaFrame = (text: string): ChatEvent =>
   chatFrame({
     type: 'stream_event',
     event: { type: 'content_block_delta', delta: { type: 'text_delta', text } },
+  })
+
+/** One `event: runtime` frame — the serialized %Runtime.Event{} the codex and
+ * remote lanes emit (chat_controller.ex sse_runtime_frame): the normalized
+ * `kind` plus the lossless provider envelope under `native`. */
+function runtimeFrame(kind: string, extra: Record<string, unknown> = {}): ChatEvent {
+  return {
+    type: 'frame',
+    name: 'runtime',
+    data: JSON.stringify({
+      version: 1,
+      provider: 'codex',
+      session_id: 's1',
+      durability: 'delta',
+      kind,
+      ...extra,
+    }),
+  }
+}
+
+/** A codex text frame of the given kind — text_delta, thinking_delta and
+ * tool_delta ALL carry their text at native.params.delta (codex protocol.ex
+ * maps item/agentMessage/delta, item/reasoning/textDelta and
+ * item/commandExecution/outputDelta to the same place). */
+const runtimeTextFrame = (kind: string, delta: string): ChatEvent =>
+  runtimeFrame(kind, {
+    item_id: 'item_1',
+    native: { method: 'item/agentMessage/delta', params: { itemId: 'item_1', delta } },
   })
 
 const resultFrame = (reason: string, isError: boolean): ChatEvent =>
@@ -552,4 +582,212 @@ test('D77: wedge and answer refetches stamp the issuing generation', () => {
     { type: 'answered', requestId: 'r1' },
   )
   expect(fetchTailOf(answered.effects)?.gen).toBe(3)
+})
+
+// ── the runtime lane (codex + remote/RemoteRef) ──────────────────────────────
+// The wire has TWO live text lanes. `event: chat` is raw claude stream-json;
+// `event: runtime` is the normalized Runtime.Event struct codex and RemoteRef
+// emit, with the text at native.params.delta. Before this lane existed a codex
+// frame fell through reduceFrame inert: no tail, no phase flip, and — the
+// correctness half — no settle at all, so the persisted answer never landed and
+// the composer stayed stuck out of idle.
+
+test('runtime text deltas stream and turn_completed settles the turn', () => {
+  // A codex session sends without a claude system/init frame ever arriving —
+  // the phase must still leave 'waiting' on the first delta.
+  let { state } = drive(initialChatState('s1'), t0, { type: 'send', content: 'hi' })
+  expect(state.phase).toBe('waiting')
+
+  let effects: ChatEffect[]
+  ;({ state, effects } = drive(
+    state,
+    t0,
+    runtimeTextFrame('text_delta', 'Hel'),
+    runtimeTextFrame('text_delta', 'lo, '),
+    runtimeTextFrame('text_delta', 'world'),
+  ))
+  expect(state.tail).toBe('Hello, world')
+  expect(state.phase).toBe('streaming')
+  expect(effects).toHaveLength(0) // a delta must trigger no IO — the tail is live truth
+  expect(state.tailGen).toBe(state.gen) // stamped exactly as the claude lane stamps it
+
+  // The codex turn boundary. The Recorder persists the codex row, so the settle
+  // refetch is what makes the answer durable on screen.
+  ;({ state, effects } = drive(
+    state,
+    t0,
+    runtimeFrame('turn_completed', { durability: 'durable', terminal_state: 'completed' }),
+  ))
+  expect(state.phase).toBe('idle')
+  expect(state.settling).toBe(true)
+  const fetch = fetchTailOf(effects)
+  expect(fetch).toBeDefined()
+  expect(fetch?.sinceSeq).toBe(state.lastSeq)
+  expect(fetch?.gen).toBe(state.gen) // carries the issuing generation (D77)
+  expect(state.tail).toBe('Hello, world') // still painted — never a blank flash
+
+  // …and the settle clears it, exactly like the claude lane.
+  ;({ state } = drive(state, t0, {
+    type: 'tailFetched',
+    gen: fetch?.gen ?? 0,
+    session: {
+      id: 's1',
+      messages: [{ seq: 1, role: 'assistant', source_markdown: 'Hello, world' }],
+    },
+  }))
+  expect(state.tail).toBe('')
+  expect(state.messages).toHaveLength(1)
+})
+
+// THE TRAP: thinking_delta (reasoning) and tool_delta (command output) carry
+// their text at the SAME native.params.delta location as the answer. Match the
+// kind loosely and reasoning splices into the answer document.
+test('runtime kind matching is exact — thinking_delta and tool_delta never enter the tail', () => {
+  let { state } = drive(
+    initialChatState('s1'),
+    t0,
+    initFrame(),
+    runtimeTextFrame('text_delta', 'The answer is '),
+  )
+  expect(state.tail).toBe('The answer is ')
+
+  let effects: ChatEffect[]
+  ;({ state, effects } = drive(
+    state,
+    t0,
+    runtimeTextFrame('thinking_delta', 'let me reconsider the premise…'),
+    runtimeTextFrame('tool_delta', '$ rm -rf build\nremoved 412 files'),
+    runtimeFrame('item_started', { native: { params: { item: { id: 'i1' } } } }),
+    runtimeFrame('usage', { usage: { input_tokens: 10 } }),
+  ))
+  expect(state.tail).toBe('The answer is ') // EXACTLY unmoved
+  expect(effects).toHaveLength(0)
+
+  // The answer keeps streaming around them — the tail is not frozen, just picky.
+  ;({ state } = drive(state, t0, runtimeTextFrame('text_delta', '42.')))
+  expect(state.tail).toBe('The answer is 42.')
+})
+
+// An interrupted or failed codex turn is still a settle: the phase returns to
+// idle, the notice is honest, and the transcript refetches.
+test('runtime turn_completed carries the terminal state honestly', () => {
+  const streaming: ChatState = { ...initialChatState('s1'), phase: 'streaming', tail: 'partial' }
+
+  const interrupted = drive(
+    streaming,
+    t0,
+    runtimeFrame('turn_completed', { terminal_state: 'interrupted' }),
+  )
+  expect(interrupted.state.phase).toBe('idle')
+  expect(interrupted.state.notice).toContain('Interrupted')
+  expect(fetchTailOf(interrupted.effects)).toBeDefined()
+
+  const failed = drive(streaming, t0, runtimeFrame('turn_completed', { terminal_state: 'failed' }))
+  expect(failed.state.notice).toContain('error')
+  expect(fetchTailOf(failed.effects)).toBeDefined()
+
+  const ok = drive(streaming, t0, runtimeFrame('turn_completed', { terminal_state: 'completed' }))
+  expect(ok.state.notice).toBe('')
+})
+
+// A malformed runtime frame is inert, like every other unknown frame — the
+// decoder never throws and never moves the tail on garbage.
+test('runtime frames survive malformed and missing payloads', () => {
+  const base: ChatState = { ...initialChatState('s1'), phase: 'streaming', tail: 'kept' }
+  const garbage = drive(base, t0, { type: 'frame', name: 'runtime', data: 'not json' })
+  expect(garbage.state).toEqual(base)
+
+  const noNative = drive(base, t0, runtimeFrame('text_delta'))
+  expect(noNative.state.tail).toBe('kept')
+
+  const wrongType = drive(base, t0, runtimeFrame('text_delta', { native: { params: { delta: 42 } } }))
+  expect(wrongType.state.tail).toBe('kept')
+})
+
+// D64's client half. The display cap is LiveView-LOCAL today — the controller
+// forwards raw frames — so the phone bounds its own tail or a runaway turn
+// grows an unbounded string that re-measures on every delta. FREEZE, not shed
+// and not close: what was shown stays shown, one honest line explains the rest,
+// the stream keeps running and the turn still settles.
+test('the tail freezes at the byte cap and keeps what is shown', () => {
+  const chunk = 'x'.repeat(8192)
+  let state = drive(initialChatState('s1'), t0, initFrame()).state
+
+  // Drive the accumulator right up to the cap without breaching it.
+  const wholeChunks = Math.floor(MAX_TAIL_BYTES / chunk.length)
+  for (let i = 0; i < wholeChunks; i++) {
+    state = drive(state, t0, runtimeTextFrame('text_delta', chunk)).state
+  }
+  expect(state.tail).toHaveLength(wholeChunks * chunk.length)
+  expect(state.tailCapped).toBe(false)
+
+  // The delta that breaches it: the shown text is KEPT verbatim and the honest
+  // line lands. Nothing is dropped from what the user already read.
+  const frozen = drive(state, t0, runtimeTextFrame('text_delta', chunk)).state
+  expect(frozen.tail).toBe(state.tail + TAIL_CAP_NOTICE)
+  expect(frozen.tailCapped).toBe(true)
+  expect(frozen.tail.length - TAIL_CAP_NOTICE.length).toBeLessThanOrEqual(MAX_TAIL_BYTES)
+
+  // Frozen means frozen: further deltas (either lane) no longer grow the tail,
+  // and the marker is written exactly once.
+  const more = drive(
+    frozen,
+    t0,
+    runtimeTextFrame('text_delta', chunk),
+    deltaFrame('claude text too'),
+  ).state
+  expect(more.tail).toBe(frozen.tail)
+  expect(more.tail.split(TAIL_CAP_NOTICE)).toHaveLength(2)
+
+  // NOT closed and NOT shed: the turn still settles, the full answer arrives
+  // from Postgres, and the next turn streams into a fresh, unfrozen tail.
+  const settled = drive(more, t0, resultFrame('', false), {
+    type: 'tailFetched',
+    gen: more.gen,
+    session: {
+      id: 's1',
+      messages: [{ seq: 1, role: 'assistant', source_markdown: 'the untruncated answer' }],
+    },
+  }).state
+  expect(settled.tail).toBe('')
+  expect(settled.tailCapped).toBe(false)
+  expect(settled.messages[0]?.source_markdown).toBe('the untruncated answer')
+  const next = drive(settled, t0, initFrame(), runtimeTextFrame('text_delta', 'fresh')).state
+  expect(next.tail).toBe('fresh')
+})
+
+// The cap is measured in UTF-8 BYTES (the unit D64's number is stated in), not
+// UTF-16 code units: multi-byte text must freeze EARLIER than its char count
+// would suggest, never later.
+test('the tail cap counts UTF-8 bytes, not characters', () => {
+  const emoji = '🐕'.repeat(2048) // 4 bytes each, 2 UTF-16 units each
+  let state = drive(initialChatState('s1'), t0, initFrame()).state
+  const chunks = Math.floor(MAX_TAIL_BYTES / (2048 * 4)) + 1
+  for (let i = 0; i < chunks; i++) {
+    state = drive(state, t0, runtimeTextFrame('text_delta', emoji)).state
+  }
+  expect(state.tailCapped).toBe(true)
+  // Frozen well before the UTF-16 length would have reached the cap.
+  expect(state.tail.length).toBeLessThan(MAX_TAIL_BYTES)
+})
+
+// THE CONTROL LEG: the same drive() harness, the same cap-bearing appendTail,
+// and the claude lane still streams and settles — so nothing above is vacuously
+// green on a harness that simply cannot observe movement.
+test('control: the claude lane still streams and settles through the shared tail', () => {
+  let { state, effects } = drive(
+    initialChatState('s1'),
+    t0,
+    initFrame(),
+    deltaFrame('Hel'),
+    deltaFrame('lo'),
+  )
+  expect(state.tail).toBe('Hello')
+  expect(state.tailBytes).toBe(5)
+  expect(state.tailCapped).toBe(false)
+  expect(state.phase).toBe('streaming')
+
+  ;({ state, effects } = drive(state, t0, resultFrame('', false)))
+  expect(fetchTailOf(effects)?.gen).toBe(1)
+  expect(state.settling).toBe(true)
 })
