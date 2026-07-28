@@ -424,8 +424,7 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_call(:session_pid, _from, state), do: {:reply, {:ok, state.session}, state}
 
   def handle_call({:project_runtime_event, %Event{} = event}, _from, state) do
-    state = capture_runtime_event(state, event, false)
-    broadcast(state, {:studio_chat_runtime_event, event})
+    state = ingest_runtime_event(state, event, false)
     {:reply, :ok, touch(state)}
   end
 
@@ -472,16 +471,14 @@ defmodule Barkpark.StudioChat.Recorder do
         {:studio_chat_managed_runtime_event, token, %Event{} = event},
         %{runtime_ingress_token: token} = state
       ) do
-    state = capture_runtime_event(state, event, true)
-    broadcast(state, {:studio_chat_runtime_event, event})
+    state = ingest_runtime_event(state, event, true)
     {:noreply, touch(state)}
   end
 
   # Provider-neutral untrusted ingress for registered-host replay and generic
   # projection callers. It can update chat UI state but cannot mint usage.
-  def handle_info({:studio_chat_runtime_event, %Event{} = event} = msg, state) do
-    state = capture_runtime_event(state, event, false)
-    broadcast(state, msg)
+  def handle_info({:studio_chat_runtime_event, %Event{} = event}, state) do
+    state = ingest_runtime_event(state, event, false)
     {:noreply, touch(state)}
   end
 
@@ -491,8 +488,7 @@ defmodule Barkpark.StudioChat.Recorder do
       |> Barkpark.ChatHosts.replay_unprojected()
       |> Enum.reduce(state, fn
         {event_id, %Event{} = event}, acc ->
-          acc = capture_runtime_event(acc, event, false)
-          broadcast(acc, {:studio_chat_runtime_event, event})
+          acc = ingest_runtime_event(acc, event, false)
           Barkpark.ChatHosts.mark_projected(event_id)
           acc
 
@@ -1110,10 +1106,11 @@ defmodule Barkpark.StudioChat.Recorder do
         |> publish_activity(%{state: :working, line: "thinking…"})
 
       :text_delta ->
-        delta = runtime_delta(event)
-
-        %{state | runtime_text: state.runtime_text <> delta}
-        |> stable_delta(delta)
+        # Segments are NOT derived here. `capture_runtime_event/3` runs BEFORE the
+        # raw frame is broadcast at every ingest site, so deriving here would put
+        # the `stable` frame on the wire ahead of the bytes it covers — see
+        # `ingest_runtime_event/3`. The durable accumulation stays.
+        %{state | runtime_text: state.runtime_text <> runtime_delta(event)}
         |> publish_activity(%{state: :working, line: "writing…"})
 
       :approval_requested ->
@@ -1912,6 +1909,40 @@ defmodule Barkpark.StudioChat.Recorder do
   rescue
     error -> stable_fault(state, error)
   end
+
+  # THE RUNTIME LANE'S ONE INGEST ORDER (mobile charter D59). Every runtime event
+  # enters here, and the order is load-bearing: capture state, put the RAW bytes on
+  # the wire, and only THEN derive the segments those bytes make safe to commit.
+  #
+  # Inverting it is not cosmetic — it CORRUPTS the client's tail. Mobile grows the
+  # same `tail` from runtime frames, so a `stable {from: 0, to: N}` arriving before
+  # the raw frame lands while `tail` is still empty: `committedBytes` becomes N but
+  # `committedChars` clamps to 0, the raw frame then appends those bytes, and the
+  # remainder helper returns the WHOLE tail because `committedChars <= 0`. Every
+  # segment renders as a block AND as plain source underneath, forever. The client
+  # cannot detect it either — `from == committedBytes` still holds, because both
+  # sides are counting the server's byte space.
+  #
+  # It lives in ONE function with four callers rather than four inlined copies
+  # precisely because a missed site would cost the codex lane its live document
+  # silently. `stream_segments_test.exs` asserts the emitted ORDER for both lanes.
+  #
+  # `:turn_started`/`:turn_completed` deliberately stay inside
+  # `capture_runtime_event/3` (i.e. still before the broadcast): those emit the
+  # terminal frames, and the claude lane likewise settles BEFORE broadcasting the
+  # frame that triggers the client's settle refetch.
+  defp ingest_runtime_event(state, %Event{} = event, trusted_managed_ingress?) do
+    state
+    |> capture_runtime_event(event, trusted_managed_ingress?)
+    |> tap(&broadcast(&1, {:studio_chat_runtime_event, event}))
+    |> stable_runtime_delta(event)
+  end
+
+  # The runtime lane's text delta, derived only AFTER its raw frame is on the wire.
+  defp stable_runtime_delta(state, %Event{kind: :text_delta} = event),
+    do: stable_delta(state, runtime_delta(event))
+
+  defp stable_runtime_delta(state, %Event{}), do: state
 
   # The settle self-check (D61) runs against the text that ACTUALLY PERSISTS —
   # the assistant frame's text for the claude lane, `runtime_text` for codex —

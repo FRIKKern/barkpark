@@ -72,10 +72,32 @@ defmodule Barkpark.StudioChat.StreamSegments do
 
   ## The bound (D64): four numbers, and terminal means FREEZE
 
-  All four terminate into the SAME `stable_end reason=capped` and the stream
-  STAYS OPEN — never shed-and-close (D24). `Process.flag(:max_heap_size)` is a
-  placebo here and is deliberately absent: the text and block terms are off-heap
-  refc binaries, so a holder of 2,354,954 B reports 2,648 B on-heap.
+  Three of the four terminate into the SAME `stable_end reason=capped` and the
+  stream STAYS OPEN — never shed-and-close (D24). `min_segment_interval_ms` is
+  the exception BY DESIGN: it is a coalescer, not a cap, so it has no terminal
+  state — freezing on a rate limiter would discard content the settle is still
+  obliged to deliver. `Process.flag(:max_heap_size)` is a placebo here and is
+  deliberately absent: the text and block terms are off-heap refc binaries, so a
+  holder of 2,354,954 B reports 2,648 B on-heap.
+
+  ### The byte cap is ALSO a LATENCY bound, not only a memory policy
+
+  `settle/2` parses the whole turn in ONE `handle_info`, so the cap is what
+  bounds how long the Recorder — the hottest persistence process — can block:
+
+      turn size    settle/2 blocks for
+      ---------    -------------------
+      12 KiB       6.0 ms      (a realistic reply)
+      64 KiB       49.0 ms
+      256 KiB      1478.6 ms   (AT the cap)
+
+  Measured on this tree; an independent reviewer measured 320.7 ms at the cap on
+  different hardware, so treat the cap-case figure as machine-dependent and
+  O(100 ms)-to-O(1 s), not as a single constant. Either way it is bounded, it
+  happens once per assistant frame, and realistic replies stay in single-digit
+  to tens of milliseconds. It also confirms `stable_snapshot_timeout_ms` (250 ms)
+  is correctly sized: a mid-turn attach landing during a cap-sized settle times
+  out and degrades to the plain floor rather than queueing behind it.
   """
 
   alias Barkpark.PortableDoc.FromMarkdown

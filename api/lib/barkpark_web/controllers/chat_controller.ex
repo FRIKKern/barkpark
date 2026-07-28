@@ -685,8 +685,11 @@ defmodule BarkparkWeb.ChatController do
   # forwarder is subscribed so no frame is lost behind it.
   #
   # HONEST FAILURE MODE, stated because it is real: subscribing before snapshotting
-  # leaves a sub-millisecond window in which a segment can be BOTH forwarded live
-  # and included in the snapshot. The duplicate reads as `from < cursor`, which is
+  # leaves a window in which a segment can be BOTH forwarded live and included in
+  # the snapshot. Its width is NOT sub-millisecond as first written — this is a
+  # `GenServer.call` into a process that may be mid-persist, so it is bounded by
+  # `stable_snapshot_timeout_ms` (250 ms default), and a Recorder parsing a full
+  # turn at the byte cap can genuinely hold it that long. The duplicate reads as `from < cursor`, which is
   # a GAP by the D59 rule, so the client keeps what it committed and renders the
   # remainder plain for that turn — today's floor. Closing it outright needs the
   # subscribe and the snapshot to be one atomic operation, which PubSub cannot

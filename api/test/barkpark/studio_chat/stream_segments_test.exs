@@ -271,6 +271,35 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       end
     end
 
+    test "offsets survive an ASTRAL character — bytes, not codepoints, not UTF-16 units" do
+      # The Norwegian case above is entirely BMP, so it separates bytes from
+      # codepoints but NOT bytes from UTF-16 code units. A regional-indicator flag
+      # is astral (4 UTF-8 bytes, TWO UTF-16 units, one grapheme), which forces all
+      # three units apart and closes the last hole the fixture cannot see.
+      #
+      # HAND-DERIVED: "Grüße 🇳🇴 alle!\n\n" = G,r(2) + ü,ß(4) + e,space(2)
+      # + two 4-byte flag halves(8) + " alle!"(6) + "\n\n"(2) = 24 bytes.
+      head = "Grüße 🇳🇴 alle!\n\n"
+      body = "Zweiter Absatz.\n\n"
+
+      {_state, frames} = turn(head <> body, chunk: 5)
+
+      assert Enum.map(stables(frames), &{&1.from, &1.to}) == [{0, 24}, {24, 41}]
+      assert reasons(frames) == ["settled"]
+
+      # All three rival units, made explicit — none of them can produce 24/41.
+      assert String.length(head) == 15, "graphemes (the flag is ONE cluster)"
+      assert head |> String.to_charlist() |> length() == 16, "codepoints"
+
+      assert head |> :unicode.characters_to_binary(:utf8, :utf16) |> byte_size() |> div(2) == 18,
+             "UTF-16 code units"
+
+      for %{from: from, to: to} <- stables(frames) do
+        assert String.valid?(binary_part(head <> body, from, to - from)),
+               "segment [#{from},#{to}) split an astral character"
+      end
+    end
+
     test "a real turn's frames pass the fixture's own cursor rule and are append-only" do
       text = "## Streaming stables\n\nThe reply commits in segments.\n\n- a cursor\n- a turn\n\n"
       {_state, frames} = turn(text)
@@ -949,6 +978,134 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       assert stables(frames) != [], "the codex lane emitted no segments"
       assert reasons(frames) == ["settled"]
       assert walk(frames).outcome == :settled
+    end
+
+    test "FRAME ORDER on BOTH lanes: the raw bytes precede the stable frame that covers them",
+         %{recorder: recorder} do
+      # The defect this pins was real and user-visible: the runtime lane derived
+      # segments inside capture_runtime_event/3, which every ingest site calls
+      # BEFORE broadcast, so `stable` landed ahead of the bytes it covered. Mobile
+      # grows the same tail from runtime frames, so the client committed into an
+      # empty tail and rendered every segment BOTH as a block and as plain source
+      # underneath — permanently, and undetectably (`from == committedBytes` still
+      # held). Asserted per lane against real arrival order, not reasoned about.
+      #
+      # ALL FOUR runtime ingress paths are exercised, because the fix's named risk
+      # is a MISSED site costing codex its live document silently.
+      claude_text = "claude para\n\nclaude more\n\n"
+      send_frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      send_frame(recorder, claude_delta(claude_text))
+      assert_raw_precedes_stable(collect_ordered(), :claude)
+
+      # (a) untrusted ingress — handle_info({:studio_chat_runtime_event, event})
+      drive_runtime_turn(recorder, fn event ->
+        send_frame(recorder, {:studio_chat_runtime_event, event})
+      end)
+
+      # (b) trusted managed ingress — carries the runtime_ingress_token
+      token = :sys.get_state(recorder).runtime_ingress_token
+
+      drive_runtime_turn(recorder, fn event ->
+        send_frame(recorder, {:studio_chat_managed_runtime_event, token, event})
+      end)
+
+      # (c) the synchronous projection call
+      drive_runtime_turn(recorder, fn event ->
+        :ok = GenServer.call(recorder, {:project_runtime_event, event})
+      end)
+    end
+
+    # Drive one codex turn through `deliver` and assert the runtime lane's order.
+    defp drive_runtime_turn(recorder, deliver) do
+      deliver.(%Event{kind: :turn_started})
+
+      for chunk <- ["codex para\n", "\ncodex more\n\n"] do
+        deliver.(%Event{kind: :text_delta, native: %{"params" => %{"delta" => chunk}}})
+      end
+
+      deliver.(%Event{kind: :turn_completed})
+
+      assert_raw_precedes_stable(collect_ordered(), :runtime)
+    end
+
+    # THE LAW, byte-accurate: when a stable frame says "commit through `to`", the
+    # client must ALREADY have received at least `to` bytes of raw text on that
+    # lane. Merely asserting "some raw delta came first" is too weak — on a
+    # multi-delta turn an EARLIER delta satisfies it while the frame covering the
+    # LATEST bytes still overtakes them, which is precisely the shipped defect.
+    defp assert_raw_precedes_stable(ordered, lane) do
+      {raw_bytes, stable_seen} =
+        Enum.reduce(ordered, {0, 0}, fn msg, {raw, stable} ->
+          case raw_delta_bytes(msg, lane) do
+            n when is_integer(n) ->
+              {raw + n, stable}
+
+            nil ->
+              case msg do
+                {:chat_stable, {:stable, p}} ->
+                  assert raw >= p.to,
+                         "#{lane}: stable frame commits through #{p.to} but only #{raw} raw " <>
+                           "bytes had reached the wire — the client commits past its own tail"
+
+                  {raw, stable + 1}
+
+                _ ->
+                  {raw, stable}
+              end
+          end
+        end)
+
+      assert raw_bytes > 0, "#{lane}: no raw bytes observed — the assertion would be vacuous"
+      assert stable_seen > 0, "#{lane}: no stable frame observed — the assertion would be vacuous"
+    end
+
+    # The raw text carried by one broadcast frame on `lane`, or nil if not a delta.
+    defp raw_delta_bytes(
+           {:claude_chat_event,
+            %{
+              "event" => %{
+                "type" => "content_block_delta",
+                "delta" => %{"type" => "text_delta", "text" => text}
+              }
+            }},
+           :claude
+         ),
+         do: byte_size(text)
+
+    defp raw_delta_bytes(
+           {:studio_chat_runtime_event, %Event{kind: :text_delta} = event},
+           :runtime
+         ),
+         do: byte_size(get_in(event.native, ["params", "delta"]) || "")
+
+    defp raw_delta_bytes(_msg, _lane), do: nil
+
+    test "RATCHET: every runtime ingest goes through ingest_runtime_event/3" do
+      # The order test above drives three of the four ingress paths; the fourth
+      # (`:replay_registered_host_events`) needs persisted ChatHosts rows. Rather
+      # than leave it uncovered — and rather than leave a FIFTH future site free to
+      # reintroduce the inversion — this is a source ratchet: `capture_runtime_event`
+      # must have exactly ONE caller, the helper that owns the order.
+      source = File.read!("lib/barkpark/studio_chat/recorder.ex")
+
+      callers =
+        source
+        |> String.split("\n")
+        |> Enum.with_index(1)
+        |> Enum.filter(fn {line, _n} ->
+          String.contains?(line, "capture_runtime_event(") and
+            not String.contains?(line, "defp capture_runtime_event(")
+        end)
+
+      assert length(callers) == 1,
+             "capture_runtime_event/3 must be called ONLY from ingest_runtime_event/3 " <>
+               "(which broadcasts the raw frame BEFORE deriving segments). Found: " <>
+               inspect(Enum.map(callers, fn {l, n} -> "#{n}: #{String.trim(l)}" end))
+
+      # And that one caller is inside the ordering helper.
+      [{_line, n}] = callers
+      window = source |> String.split("\n") |> Enum.slice(max(n - 8, 0), 8) |> Enum.join("\n")
+      assert window =~ "defp ingest_runtime_event"
     end
 
     test "the per-session turn counter is monotone across turns", %{recorder: recorder} do
