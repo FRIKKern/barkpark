@@ -225,7 +225,7 @@ fake it, or file work that depends on it being lit. Same disposition for the QR 
 
 | Slice | Task | Round | Size | Surface |
 |---|---|---|---|---|
-| Movement 0 — adjudicate all 88 non-done rows by content | `cch-w7-movement0-adjudication` | 1 | large | bp ledger only (no repo files) |
+| Movement 0 — adjudicate all 88 non-done rows by content | `cch-bl-bands-136-reproduce` | 1 | large | bp ledger only (no repo files) |
 | Instrument liveness — repair the stale smoke red, wire what gates | `cch-bl-smoke-harness-red-on-main-and-ungated` | 1 | medium | `__preview__/smoke.mjs`, `scenarios.mjs`, `console-harness.yml` |
 | The spine — retarget the seal predicate at THIS epic | `cch-bl-seal-predicate-retarget-and-reparent` | 1 | large | `__preview__/seal-predicate.mjs` + test + fixtures |
 | The focus ring stops failing SC 1.4.11 | `cch-bl-ring-soft-focus-contrast-unasserted` | 1 | medium | `app.css`, `__css_check.mjs` |
@@ -233,10 +233,24 @@ fake it, or file work that depends on it being lit. Same disposition for the QR 
 | The delivery/audit feeds stop dropping rows on a stamp tie | `gr-bl-delivery-keyset-tiebreak` | 1 | medium | `accounts.ex`, `notifications.ex`, `app.js` |
 | A refused 403 stops printing "Active just now" | `cch-bl-auth-touch-unthrottled` | 2 | small | `accounts.ex` |
 
-Wave 7 files NO successor (D93). NOT built and filed instead: the rate-limiter bucket-separation
-measurement (D88 entry 5), the six remaining stateless destroy verbs in `scenarios.mjs`, the eight
-dangling charter commits one `git gc` from destruction, and `styleguide.html`'s 194 uncertified
-inline CSS lines.
+Wave 7 files NO successor (D93). NOT built and filed instead: the twelve remaining stateless destroy
+verbs in `scenarios.mjs` (`cch-bl-destroy-verbs-stateless-family`), the eight dangling charter commits
+one `git gc` from destruction (`cch-bl-rescue-dangling-charter-commits`), and `styleguide.html`'s ~194
+uncertified inline CSS lines (`cch-bl-styleguide-inline-css-uncertified`).
+
+**D95 — guerrilla's task CREATE verb was DOWN at Decide, and the wave adapted rather than stalled.**
+Measured, with a control: `create` on a minimal four-field task doc returned **HTTP 500
+`internal_error` at 27.7s**, reproducibly, across the `bp` CLI (31s client timeout) and raw curl at
+240s; the identical-shaped `patch` on an existing task returned **HTTP 200 in 0.49s**, and a 160KB
+paper patch also returned 200. So it is the CREATE path specifically, not payload size and not the
+server as a whole — which REGRESSES the survey's "create is HEALTHY, 10/10 HTTP 200" finding within
+the same day. Consequences, both honest: Movement 0 is carried by `cch-bl-bands-136-reproduce`, an
+existing open row whose own subject IS census reproduction and whose embedded arithmetic was stale a
+third time (it asserts 91 children / 85 open against a measured 135/83/41/9/2) — reuse, not a
+workaround, and better than minting a duplicate. And **one planned backlog row could not be filed**:
+the rate-limiter bucket-separation measurement (D88 register entry 5). It is NOT lost — it is written
+into D88, into the seal-retarget slice's brief as the reason clause (b) fails, and into the wave
+Paper — but it has no ledger row yet, and wave 8 must file it the moment `create` recovers.
 
 ### Wave 1 — the four lies on the wire, plus the instruments that must hold them
 
