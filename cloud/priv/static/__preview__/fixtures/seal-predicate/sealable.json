@@ -1,0 +1,44 @@
+{
+  "_comment": "Happy path. A resolvable successor, zero live rows, every hardcoded gate resolving. The ONLY fixture here that may exit 0.",
+  "successor": "cch-fixture-successor-epic",
+  "tasks": {
+    "cch-fixture-successor-epic": {
+      "_id": "cch-fixture-successor-epic",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    }
+  },
+  "children": [
+    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
+    { "_id": "gr-fixture-done-2", "lifecycle_status": "done" },
+    { "_id": "cloud-console-billing-live-gate", "lifecycle_status": "done" }
+  ],
+  "forwarded": [],
+  "gates": {
+    "cloud-console-billing-live-gate": {
+      "_id": "cloud-console-billing-live-gate",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    },
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "task-47bc4168392dec17"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "task-47bc4168392dec17"
+    }
+  },
+  "landed": ["0261ace15"],
+  "defectCommits": {}
+}

@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 // SEAL PREDICATE — Cloud GUI Remake phase 5.  FROZEN AT DECIDE, round 8.
 //
-//   exit 0 = SEAL.   non-zero = NO SEAL, and the named successor is the honest handoff.
+//   exit 0 = SEAL.   exit 1 = NO SEAL.   exit 2 = INFRA FAULT.
+//
+// Three exit codes, not two. The two-code shape shipped at round 8 let exit 1 mean
+// BOTH "no seal" and "a non-JSON HTTP response threw at the curl site", which is a
+// red nobody can read; `tooling/grip/seal.mjs` names this file by name as that prior
+// art and ports the triad plus a machine-readable `VERDICT-TOKEN:` line. Ported back
+// here at wave 6, unchanged in spirit: infra gets its own code and its own token.
 //
 // Five rounds of this epic ended in a PROSE verdict whose bar moved with the reader.
 // This file is that verdict made mechanical. It is frozen BEFORE any builder flies,
@@ -42,6 +48,32 @@
 // committed guard that RENDERS and MEASURES, and this file asserts only that the guard
 // exists, runs, and passes. If the guard is missing, that is NO SEAL, not a pass —
 // an unmeasured defect is never a cleared defect.
+//
+// ---------------------------------------------------------------------------
+// WHY THREE REFUSALS FIRE BEFORE ANY CLAUSE IS EVALUATED
+//
+// Round 8 shipped this file able to print `VERDICT: SEAL` over the sentence
+// "0 forwarded by name / to null". Measured, not read: with ZERO live rows the
+// `forwarded` set is never consulted, so a missing successor cost nothing and the
+// run exited 0 — the defect fired exactly at the moment of success, which is the
+// only run anybody ever quotes. A fixture omitting the key rendered "to undefined";
+// `--successor task-DOES-NOT-EXIST-9999` was accepted verbatim and PRINTED as the
+// forwarding address; and a register with `KNOWN_DEFECTS = []` sealed at exit 0
+// having spawned no guard at all, its honest "KNOWN over 0" disclosure sitting under
+// an unqualified SEAL. A predicate that prints an honest sentence and still exits 0
+// is the same defect as one that lies, so these are REFUSALS, not prose:
+//
+//   R1  the defect register is empty            — clause (b) would certify nothing
+//   R2  no successor is named                   — clause (a) has no forwarding address
+//   R3  the named successor does not resolve to a published task
+//
+// They run BEFORE the roster is read, so a bogus id can never reach the output as a
+// forwarding address; a refusal names it only as the id that was REJECTED.
+//
+// NOT fixed here (charter D83, next wave's `cch-bl-seal-predicate-retarget-and-reparent`):
+// naming a successor does not by itself clear clause (a), because forwarding is
+// MEMBERSHIP IN THE SUCCESSOR'S OWN ROSTER via fetchRoster(SUCCESSOR) — the residue
+// must actually be re-parented, and the EPIC constant still points at the predecessor.
 //
 // ---------------------------------------------------------------------------
 //   --ledger <file>    inject a ledger fixture instead of live HTTP (mutation proofs only)
@@ -109,129 +141,218 @@ const SWEEP = {
 };
 
 // ---------------------------------------------------------------------------
+// EXIT TRIAD, ported from tooling/grip/seal.mjs (read, never modified — that file
+// is out of fence). `Infra` is never a verdict: nothing was measured, so nothing is
+// claimed. `Refusal` IS a verdict — NO SEAL — reached before any clause ran.
+class Infra extends Error {}
+class Refusal extends Error {
+  constructor(code, message) { super(message); this.code = code; }
+}
+
 function q(params) {
   const a = ['-sG', `${SERVER}/v1/data/query/production/task`];
   for (const [k, v] of params) a.push('--data-urlencode', `${k}=${v}`);
   a.push('-H', `Authorization: Bearer ${TOKEN}`);
-  return JSON.parse(execFileSync('curl', a, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
+  let body;
+  try { body = execFileSync('curl', a, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
+  catch (e) { throw new Infra(`curl failed: ${String(e.message).slice(0, 90)}`); }
+  try { return JSON.parse(body); }
+  catch { throw new Infra(`response is not JSON (${body.slice(0, 60).replace(/\s+/g, ' ')})`); }
 }
 // NEVER bare ?parent_id= — proven at Decide to silently return 500 unfiltered rows.
 const fetchRoster = (parentId) => q([['filter[parent_id]', parentId], ['limit', '500']]).result.documents;
-const fetchById = (id) => { try { return q([['filter[_id]', id]]).result.documents[0] || null; } catch { return null; } };
+const fetchById = (id) => q([['filter[_id]', id]]).result.documents[0] || null;
 
-// ---------------------------------------------------------------------------
-const fixture = arg('--ledger') ? JSON.parse(readFileSync(arg('--ledger'), 'utf8')) : null;
-const STAMP = new Date().toISOString();
-const children = fixture ? fixture.children : fetchRoster(EPIC);
-const SUCCESSOR = arg('--successor') || (fixture ? fixture.successor : null);
-
-// The successor's own roster is the ONLY thing that makes a forwarding address "named".
-let forwarded = new Set();
-if (fixture) forwarded = new Set(fixture.forwarded || []);
-else if (SUCCESSOR) forwarded = new Set(fetchRoster(SUCCESSOR).map((c) => c._id));
-
-const byStatus = {};
-for (const c of children) byStatus[c.lifecycle_status] = (byStatus[c.lifecycle_status] || 0) + 1;
-const live = children.filter((c) => c.lifecycle_status === 'open' || c.lifecycle_status === 'in_progress');
-
-const orphans = [], gatedLive = [], fwd = [];
-for (const c of live) {
-  if (PERMANENT_HUMAN_GATES[c._id]) gatedLive.push(c._id);
-  else if (forwarded.has(c._id)) fwd.push(c._id);
-  else orphans.push(c._id);
+// A task id is RESOLVED only by a document that exists, is a task, and is PUBLISHED.
+// Unpublished is unresolved: boards and gates read the published ledger only, so an
+// unpublished successor is a forwarding address no reader can follow.
+function resolveTask(id, fixture) {
+  const doc = fixture
+    ? ((fixture.tasks || {})[id] || (fixture.gates || {})[id] || null)
+    : fetchById(id);
+  if (!doc) return { ok: false, why: 'no published task with that id' };
+  if (doc._type && doc._type !== 'task') return { ok: false, why: `id resolves to _type=${doc._type}, not a task` };
+  if (doc.status && doc.status !== 'published') return { ok: false, why: `task exists but status=${doc.status}` };
+  return { ok: true, doc };
 }
 
-// Bucket (c): every hardcoded gate must resolve. A gate that silently vanished is a
-// gate that stopped being disclosed — that is NO SEAL, not a clean sheet.
-const gateReport = Object.entries(PERMANENT_HUMAN_GATES).map(([id, why]) => {
-  const doc = fixture ? (fixture.gates || {})[id] : fetchById(id);
-  return { id, why, inRoster: children.some((c) => c._id === id), resolved: !!doc,
-           status: doc ? doc.lifecycle_status : null, parent: doc ? doc.parent_id : null };
-});
+// ---------------------------------------------------------------------------
+function main() {
+  const L = [];
+  const STAMP = new Date().toISOString();
+  const ledgerPath = arg('--ledger');
+  const guardOverride = arg('--guard-cmd');
 
-// Clause (b): landed commit AND a live measurement by a committed guard.
-const defectFails = [];
-for (const d of KNOWN_DEFECTS) {
-  const commit = (fixture && fixture.defectCommits && fixture.defectCommits[d.id] !== undefined)
-    ? fixture.defectCommits[d.id] : d.commit;
-  const problems = [];
-
-  if (!commit) problems.push('NO COMMIT — defect is known and unlanded');
-  else if (fixture) { if (!(fixture.landed || []).includes(commit)) problems.push(`commit ${commit} is not an ancestor of origin/main`); }
-  else {
-    try { execFileSync('git', ['-C', REPO, 'merge-base', '--is-ancestor', commit, 'origin/main'], { stdio: 'ignore' }); }
-    catch { problems.push(`commit ${commit} is not an ancestor of origin/main`); }
+  let fixture = null;
+  if (ledgerPath) {
+    try { fixture = JSON.parse(readFileSync(ledgerPath, 'utf8')); }
+    catch (e) { throw new Infra(`--ledger ${ledgerPath}: ${String(e.message).slice(0, 90)}`); }
   }
 
-  // The measurement. Absent guard fails CLOSED: unmeasured is never cleared.
-  const override = arg('--guard-cmd');
-  const guardPath = `${REPO}/${d.guard}`;
-  if (override) {
-    const r = spawnSync('sh', ['-c', override], { encoding: 'utf8' });
-    if (r.status !== 0) problems.push(`guard exited ${r.status} — the defect is still measurable at origin/main`);
-  } else if (!existsSync(guardPath)) {
-    problems.push(`guard ${d.guard} is NOT COMMITTED — the fix is unmeasured, and unmeasured is not cleared`);
+  L.push('=== SEAL PREDICATE — Cloud GUI Remake phase 5 ===');
+  L.push(`read at ${STAMP}${fixture ? '  (LEDGER FIXTURE — not live)' : '  (live ledger)'}`);
+
+  // ── REFUSALS. Evaluated BEFORE the roster is read, so nothing downstream can
+  // print an unresolvable id as a forwarding address. ────────────────────────
+  if (!Array.isArray(KNOWN_DEFECTS) || KNOWN_DEFECTS.length === 0)
+    throw new Refusal('EMPTY-DEFECT-REGISTER',
+      'KNOWN_DEFECTS is empty — clause (b) would certify the word KNOWN over zero defects and spawn no guard at all. An unrun clause is not a passed clause.');
+
+  const SUCCESSOR = arg('--successor') || (fixture ? fixture.successor : null) || null;
+  if (typeof SUCCESSOR !== 'string' || SUCCESSOR.trim() === '')
+    throw new Refusal('NO-SUCCESSOR',
+      'no successor named (--successor, or `successor` in the ledger fixture). Clause (a) certifies that residue has a forwarding address; with none there is nothing to forward TO, and with zero live rows the absence would otherwise cost nothing and seal.');
+
+  const resolution = resolveTask(SUCCESSOR, fixture);
+  if (!resolution.ok)
+    throw new Refusal('UNRESOLVABLE-SUCCESSOR',
+      `the id offered as successor does not resolve to a published task (${resolution.why}). Rejected id: ${SUCCESSOR}. It is NOT printed as a forwarding address, because it is not one.`);
+
+  // ── from here the successor is real, and may be named in the output ─────────
+  const children = fixture ? fixture.children : fetchRoster(EPIC);
+  if (!Array.isArray(children)) throw new Infra('roster is not an array of documents');
+
+  // The successor's own roster is the ONLY thing that makes a forwarding address "named".
+  const forwarded = fixture
+    ? new Set(fixture.forwarded || [])
+    : new Set(fetchRoster(SUCCESSOR).map((c) => c._id));
+
+  const byStatus = {};
+  for (const c of children) byStatus[c.lifecycle_status] = (byStatus[c.lifecycle_status] || 0) + 1;
+  const live = children.filter((c) => c.lifecycle_status === 'open' || c.lifecycle_status === 'in_progress');
+
+  const orphans = [], gatedLive = [], fwd = [];
+  for (const c of live) {
+    if (PERMANENT_HUMAN_GATES[c._id]) gatedLive.push(c._id);
+    else if (forwarded.has(c._id)) fwd.push(c._id);
+    else orphans.push(c._id);
+  }
+
+  // Bucket (c): every hardcoded gate must resolve. A gate that silently vanished is a
+  // gate that stopped being disclosed — that is NO SEAL, not a clean sheet.
+  const gateReport = Object.entries(PERMANENT_HUMAN_GATES).map(([id, why]) => {
+    const doc = fixture ? (fixture.gates || {})[id] : fetchById(id);
+    return { id, why, inRoster: children.some((c) => c._id === id), resolved: !!doc,
+             status: doc ? doc.lifecycle_status : null, parent: doc ? doc.parent_id : null };
+  });
+
+  // Clause (b): landed commit AND a live measurement by a committed guard.
+  const defectFails = [];
+  for (const d of KNOWN_DEFECTS) {
+    const commit = (fixture && fixture.defectCommits && fixture.defectCommits[d.id] !== undefined)
+      ? fixture.defectCommits[d.id] : d.commit;
+    const problems = [];
+
+    if (!commit) problems.push('NO COMMIT — defect is known and unlanded');
+    else if (fixture) { if (!(fixture.landed || []).includes(commit)) problems.push(`commit ${commit} is not an ancestor of origin/main`); }
+    else {
+      try { execFileSync('git', ['-C', REPO, 'merge-base', '--is-ancestor', commit, 'origin/main'], { stdio: 'ignore' }); }
+      catch { problems.push(`commit ${commit} is not an ancestor of origin/main`); }
+    }
+
+    // The measurement. Absent guard fails CLOSED: unmeasured is never cleared. And a
+    // guard that NEVER RAN (spawn error, timeout, signal — status null, not non-zero)
+    // is named separately from one that ran and failed, because "did not run" read as
+    // "passed" is exactly how an empty clause looks green.
+    let ranClean = false;
+    const guardPath = `${REPO}/${d.guard}`;
+    if (guardOverride) {
+      const r = spawnSync('sh', ['-c', guardOverride], { encoding: 'utf8' });
+      if (r.error || r.status === null) problems.push(`guard override NEVER RAN (${r.error ? r.error.code || r.error.message : `signal ${r.signal || '?'}`})`);
+      else if (r.status !== 0) problems.push(`guard exited ${r.status} — the defect is still measurable at origin/main`);
+      else ranClean = true;
+    } else if (!existsSync(guardPath)) {
+      problems.push(`guard ${d.guard} is NOT COMMITTED — the fix is unmeasured, and unmeasured is not cleared`);
+    } else {
+      const r = spawnSync('node', [guardPath, '--defect', d.id], { encoding: 'utf8', timeout: 300000 });
+      if (r.error || r.status === null) problems.push(`guard ${d.guard} NEVER RAN (${r.error ? r.error.code || r.error.message : `timeout or signal ${r.signal || '?'}`})`);
+      else if (r.status !== 0) problems.push(`guard exited ${r.status} — the defect is still measurable at origin/main`);
+      else ranClean = true;
+    }
+    // The explicit assertion: every registered entry must have had a guard RUN clean.
+    if (!ranClean && problems.length === 0)
+      problems.push('no guard ran for this entry — an unrun clause is not a passed clause');
+    if (problems.length) defectFails.push({ id: d.id, problems, ranClean });
+  }
+
+  // ── output ─────────────────────────────────────────────────────────────────
+  L.push(`epic ${EPIC}   successor: ${SUCCESSOR}`);
+  L.push(`roster: ${children.length} children  ${JSON.stringify(byStatus)}`);
+  L.push('');
+  L.push(`CLAUSE (a) forwarding — live rows ${live.length}`);
+  L.push(`  forwarded under successor : ${fwd.length}`);
+  L.push(`  permanent human gate      : ${gatedLive.length}  [${gatedLive.join(', ') || '-'}]`);
+  L.push(`  UNNAMED RESIDUE (orphans) : ${orphans.length}`);
+  orphans.slice(0, 8).forEach((o) => L.push(`      ✗ ${o}`));
+  if (orphans.length > 8) L.push(`      … and ${orphans.length - 8} more`);
+  L.push('');
+  L.push('BUCKET (c) permanent human gates');
+  for (const g of gateReport)
+    L.push(`  ${g.resolved ? '✓' : '✗'} ${g.id}  status=${g.status} parent=${g.parent} in-epic-roster=${g.inRoster}`);
+  L.push('');
+  L.push(`CLAUSE (b) known user-facing defects — ${KNOWN_DEFECTS.length} registered`);
+  for (const d of KNOWN_DEFECTS) {
+    const f = defectFails.find((x) => x.id === d.id);
+    L.push(`  ${f ? '✗' : '✓'} ${d.id}`);
+    if (f) f.problems.forEach((p) => L.push(`        ${p}`));
+  }
+  L.push('');
+
+  const gateMissing = gateReport.filter((g) => !g.resolved);
+  const ok = orphans.length === 0 && defectFails.length === 0 && gateMissing.length === 0;
+
+  if (ok) {
+    L.push('VERDICT: SEAL');
+    L.push('');
+    L.push(`SCOPE — what this green does and does NOT claim, read at ${STAMP}:`);
+    L.push(`  Sealed ${children.length} children: ${byStatus.done || 0} evidence-closed, ${fwd.length} forwarded by name`);
+    L.push(`  to ${SUCCESSOR}, and ${Object.keys(PERMANENT_HUMAN_GATES).length} permanent human gate(s) disclosed by hardcoded name.`);
+    L.push('  Zero unnamed residue. Zero known user-facing defect, each re-measured in a browser.');
+    L.push('');
+    L.push('  NOT asserted by this green:');
+    L.push('   1. Defect coverage is bounded by what was REGISTERED. Clause (b) certifies the word');
+    L.push(`      KNOWN over ${KNOWN_DEFECTS.length} hand-registered defects. A defect nobody looked for is invisible to it.`);
+    L.push(`   2. The overflow sweep covered ${SWEEP.scenariosSwept}/${SWEEP.scenariosTotal} scenarios x ${SWEEP.themes} themes at ${SWEEP.width}px (default accent),`);
+    L.push(`      plus ${SWEEP.accentScenarios}/${SWEEP.scenariosTotal} scenarios x ${SWEEP.accents} accents. NOT swept: ${SWEEP.notSwept}.`);
+    L.push('   3. 21 clean-CAS children are sealed on evidence nobody read. 0 of 39 checked failed,');
+    L.push('      which bounds the true material-failure rate at ~8% upper 95% — so up to ~2 of the 21');
+    L.push('      may carry one. They are enumerated BY NAME in the charter, not described as a subtraction.');
+    L.push('   4. The crown is DARK. The operator console shipped fully built and unreachable;');
+    L.push('      gr-ops-platform-admin-emails is a human act. "Seal" here means CODE seal, never');
+    L.push('      "this feature is live for any human".');
   } else {
-    const r = spawnSync('node', [guardPath, '--defect', d.id], { encoding: 'utf8', timeout: 300000 });
-    if (r.status !== 0) problems.push(`guard exited ${r.status} — the defect is still measurable at origin/main`);
+    L.push('VERDICT: NO SEAL');
+    if (orphans.length) L.push(`  - ${orphans.length} live row(s) carry no forwarding address and no gate label (clause a)`);
+    if (defectFails.length) L.push(`  - ${defectFails.length} known user-facing defect(s) unlanded or still measurable (clause b)`);
+    if (gateMissing.length) L.push(`  - ${gateMissing.length} hardcoded human gate(s) failed to resolve (bucket c)`);
+    L.push('  This is an acceptable, pre-committed outcome. The named successor is the honest handoff.');
   }
-  if (problems.length) defectFails.push({ id: d.id, problems });
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${orphans.length === 0 ? 'PASS' : 'FAIL'} b=${defectFails.length === 0 ? 'PASS' : 'FAIL'} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} successor=${SUCCESSOR}`);
+  console.log(L.join('\n'));
+  return ok ? 0 : 1;
 }
 
-// ---------------------------------------------------------------------------
-const L = [];
-L.push('=== SEAL PREDICATE — Cloud GUI Remake phase 5 ===');
-L.push(`read at ${STAMP}${fixture ? '  (LEDGER FIXTURE — not live)' : '  (live ledger)'}`);
-L.push(`epic ${EPIC}   successor: ${SUCCESSOR || '(none filed)'}`);
-L.push(`roster: ${children.length} children  ${JSON.stringify(byStatus)}`);
-L.push('');
-L.push(`CLAUSE (a) forwarding — live rows ${live.length}`);
-L.push(`  forwarded under successor : ${fwd.length}`);
-L.push(`  permanent human gate      : ${gatedLive.length}  [${gatedLive.join(', ') || '-'}]`);
-L.push(`  UNNAMED RESIDUE (orphans) : ${orphans.length}`);
-orphans.slice(0, 8).forEach((o) => L.push(`      ✗ ${o}`));
-if (orphans.length > 8) L.push(`      … and ${orphans.length - 8} more`);
-L.push('');
-L.push('BUCKET (c) permanent human gates');
-for (const g of gateReport)
-  L.push(`  ${g.resolved ? '✓' : '✗'} ${g.id}  status=${g.status} parent=${g.parent} in-epic-roster=${g.inRoster}`);
-L.push('');
-L.push(`CLAUSE (b) known user-facing defects — ${KNOWN_DEFECTS.length} registered`);
-for (const d of KNOWN_DEFECTS) {
-  const f = defectFails.find((x) => x.id === d.id);
-  L.push(`  ${f ? '✗' : '✓'} ${d.id}`);
-  if (f) f.problems.forEach((p) => L.push(`        ${p}`));
+let code = 2;
+try {
+  code = main();
+} catch (e) {
+  const stamp = new Date().toISOString();
+  console.log('=== SEAL PREDICATE — Cloud GUI Remake phase 5 ===');
+  if (e instanceof Refusal) {
+    // A refusal IS a verdict — NO SEAL — but reached before any clause ran, so no
+    // clause may be reported PASS. The predicate refuses to evaluate; it never seals.
+    console.log(`REFUSED at ${stamp}, before any clause was evaluated: ${e.message}`);
+    console.log('VERDICT: NO SEAL — REFUSED');
+    console.log('  Nothing was certified. This is a pre-committed outcome: a predicate that prints an');
+    console.log('  honest sentence and still exits 0 is the same defect as one that lies.');
+    console.log(`VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=${e.code} a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED`);
+    code = 1;
+  } else {
+    console.log(`INFRA FAULT at ${stamp}: ${e instanceof Infra ? e.message : `unexpected ${e.name}: ${e.message}`}`);
+    console.log('  This is NOT a verdict. Nothing was measured, so nothing is claimed — the whole point');
+    console.log('  of a third exit code is that this can never be read as NO SEAL.');
+    console.log('VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN');
+    code = 2;
+  }
 }
-L.push('');
-
-const gateMissing = gateReport.filter((g) => !g.resolved);
-const ok = orphans.length === 0 && defectFails.length === 0 && gateMissing.length === 0;
-
-if (ok) {
-  L.push('VERDICT: SEAL');
-  L.push('');
-  L.push(`SCOPE — what this green does and does NOT claim, read at ${STAMP}:`);
-  L.push(`  Sealed ${children.length} children: ${byStatus.done || 0} evidence-closed, ${fwd.length} forwarded by name`);
-  L.push(`  to ${SUCCESSOR}, and ${Object.keys(PERMANENT_HUMAN_GATES).length} permanent human gate(s) disclosed by hardcoded name.`);
-  L.push('  Zero unnamed residue. Zero known user-facing defect, each re-measured in a browser.');
-  L.push('');
-  L.push('  NOT asserted by this green:');
-  L.push('   1. Defect coverage is bounded by what was REGISTERED. Clause (b) certifies the word');
-  L.push(`      KNOWN over ${KNOWN_DEFECTS.length} hand-registered defects. A defect nobody looked for is invisible to it.`);
-  L.push(`   2. The overflow sweep covered ${SWEEP.scenariosSwept}/${SWEEP.scenariosTotal} scenarios x ${SWEEP.themes} themes at ${SWEEP.width}px (default accent),`);
-  L.push(`      plus ${SWEEP.accentScenarios}/${SWEEP.scenariosTotal} scenarios x ${SWEEP.accents} accents. NOT swept: ${SWEEP.notSwept}.`);
-  L.push('   3. 21 clean-CAS children are sealed on evidence nobody read. 0 of 39 checked failed,');
-  L.push('      which bounds the true material-failure rate at ~8% upper 95% — so up to ~2 of the 21');
-  L.push('      may carry one. They are enumerated BY NAME in the charter, not described as a subtraction.');
-  L.push('   4. The crown is DARK. The operator console shipped fully built and unreachable;');
-  L.push('      gr-ops-platform-admin-emails is a human act. "Seal" here means CODE seal, never');
-  L.push('      "this feature is live for any human".');
-} else {
-  L.push('VERDICT: NO SEAL');
-  if (orphans.length) L.push(`  - ${orphans.length} live row(s) carry no forwarding address and no gate label (clause a)`);
-  if (defectFails.length) L.push(`  - ${defectFails.length} known user-facing defect(s) unlanded or still measurable (clause b)`);
-  if (gateMissing.length) L.push(`  - ${gateMissing.length} hardcoded human gate(s) failed to resolve (bucket c)`);
-  L.push('  This is an acceptable, pre-committed outcome. The named successor is the honest handoff.');
-}
-console.log(L.join('\n'));
-process.exit(ok ? 0 : 1);
+process.exit(code);
