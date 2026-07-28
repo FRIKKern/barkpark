@@ -122,7 +122,16 @@ Elixir security gates, path-triggered on `api/**`:
 9. **`sobelow` job** — Phoenix-aware static analysis (XSS.Raw / SendResp,
    SQL injection, unsafe `String.to_atom`, missing CSRF/CSP, hardcoded secrets,
    `binary_to_term`, directory traversal…). **Advisory** (`continue-on-error:
-   true`) because Sobelow fingerprints are not stable across Elixir toolchains.
+   true`) because the reviewed baseline is not drained — see the amended flip
+   verdict below. The rationale this line used to give ("fingerprints are not
+   stable across Elixir toolchains") is **REFUTED** and must not be reused:
+   felix-pristine **D140** measured byte-identical 51-finding sets across
+   1.18.1/OTP27 and 1.19.5/OTP28, a wider gap than the pinned pair, and
+   `Finding.fingerprint/1` is `:erlang.phash2/1` over AST from
+   `Code.string_to_quoted`, not compiler output. What *is* unstable is the
+   **line number**, which is inside the hash: a pure renumber invalidates every
+   waiver in the file. That is a reason to migrate waivers to AST-bound inline
+   annotations, not a reason to stay advisory.
    `mix sobelow --skip --exit Low` reads the reviewed `api/.sobelow-skips`
    baseline and reds on a fresh unskipped finding. CI also runs a pinned
    Elixir 1.18.1/OTP27 reconcile in the only safe order: `--clear-skip`, then
