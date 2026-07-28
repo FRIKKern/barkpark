@@ -29,6 +29,14 @@ func TestSupportResetDefaultWorkspaceStep_DeleteTolerantScript(t *testing.T) {
 		// The delete itself, slug-resolved…
 		`Barkpark.Tenancy.get_workspace_by_slug("default")`,
 		"Barkpark.Tenancy.delete_workspace(ws)",
+		// …REPORTING the measured doc count on the output path BEFORE deleting
+		// (the seed size was unmeasured "~27 docs" folklore; this narrated
+		// count is the only observation of the image seed that survives the
+		// reset — PDF-D103's honest-reporting half)…
+		"require Ecto.Query",
+		`doc_count = Barkpark.Repo.aggregate(Ecto.Query.where(Barkpark.Content.Document, workspace_id: ^ws.id), :count)`,
+		`IO.puts("default workspace carries #{doc_count} document(s) - deleting them with the workspace")`,
+		`IO.puts("default workspace deleted - #{doc_count} document(s) destroyed (measured, not folklore)")`,
 		// …tolerating absent (nil → narrated no-op, exit 0)…
 		`nil -> IO.puts("default workspace already absent`,
 		// …and failing LOUD on a delete error (never a half-reset import target).

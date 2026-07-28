@@ -240,6 +240,12 @@ const SupportDefaultWorkspaceSlug = "default"
 // reach the import. No token rides this step (mix run is DB-direct), but it
 // sources .env, so env secrets are pattern-scrubbed from any captured output.
 //
+// The step REPORTS the document count it is about to delete (one
+// Repo.aggregate on documents.workspace_id before the delete): the seed size
+// was unmeasured folklore ("~27 docs", never observed), and this line is the
+// only observation of the image seed that survives the reset — it converts
+// the folklore into a measured number at zero cost (PDF-D103's second half).
+//
 // CASCADE WARNING for callers: the box admin token is scoped to the default
 // workspace (api_tokens.workspace_id is ON DELETE CASCADE since migration
 // 20260527140000), so this delete KILLS it — always follow with
@@ -247,13 +253,16 @@ const SupportDefaultWorkspaceSlug = "default"
 func SupportResetDefaultWorkspaceStep() CaddyStep {
 	const elixir = `case Barkpark.Tenancy.get_workspace_by_slug("default") do ` +
 		`nil -> IO.puts("default workspace already absent - reset is a no-op"); ` +
-		`ws -> case Barkpark.Tenancy.delete_workspace(ws) do ` +
-		`{:ok, _} -> IO.puts("default workspace deleted"); ` +
+		`ws -> require Ecto.Query; ` +
+		`doc_count = Barkpark.Repo.aggregate(Ecto.Query.where(Barkpark.Content.Document, workspace_id: ^ws.id), :count); ` +
+		`IO.puts("default workspace carries #{doc_count} document(s) - deleting them with the workspace"); ` +
+		`case Barkpark.Tenancy.delete_workspace(ws) do ` +
+		`{:ok, _} -> IO.puts("default workspace deleted - #{doc_count} document(s) destroyed (measured, not folklore)"); ` +
 		`other -> IO.inspect(other, label: "default workspace reset failed"); System.halt(1) end end`
 	script := `set -a; . /opt/barkpark/.env; set +a; . /root/.asdf/asdf.sh && cd /opt/barkpark/api && mix run -e '` + elixir + `'`
 	return CaddyStep{
-		Title: "reset the seeded default workspace to a provably-empty import target (Tenancy.delete_workspace — absent is a no-op)",
-		Cmd:   "mix run -e 'Tenancy.delete_workspace(default)' (tolerates absent)",
+		Title: "reset the seeded default workspace to a provably-empty import target (Tenancy.delete_workspace — reports the measured doc count; absent is a no-op)",
+		Cmd:   "mix run -e 'Tenancy.delete_workspace(default)' (counts docs first; tolerates absent)",
 		Argv:  []string{"bash", "-lc", script},
 		// This step sources /opt/barkpark/.env — a failure could echo the DB
 		// password / SECRET_KEY_BASE / cloak key. Pattern-scrub those.
