@@ -30,9 +30,17 @@
 #
 # The remaining cases are synthetic payloads for states main has not produced on
 # a frozen sha: the cannot-tell residue, the three-valued cancelled
-# classification, an unreadable gh, and the shallow-clone guard (which builds
+# classification, an unreadable gh, the shallow-clone guard (which builds
 # real git repos, because that is the only way to make `git rev-parse
-# --is-shallow-repository` actually answer true).
+# --is-shallow-repository` actually answer true), and the argv ceiling (H),
+# which builds a repo whose commit range is deliberately larger than Linux's
+# MAX_ARG_STRLEN so the 2026-07-28 "dead on Linux" outage stays reproducible
+# after the next release tag shrinks the real range back under it.
+#
+# The G fixture asserts ITSELF first (G0). A bare origin built without `-b main`
+# leaves an unborn HEAD on a runner whose init.defaultBranch is `master`, and
+# every G assertion then passes over an EMPTY clone at exit 0 — the fixture must
+# prove it is real before its results mean anything.
 #
 # Set RELEASE_SCAN_TEST_LIVE=1 to ALSO replay the two pinned shas against the
 # real GitHub API — the anti-rot check that the recorded payloads still match
@@ -307,35 +315,72 @@ fi
 # ── G. the shallow-clone guard, proven BY MUTATION in real git repos ─────────
 # release-scan.sh always scans ITS OWN checkout, so the only way to exercise the
 # guard is to stand up real repos and copy the script into them.
+#
+# THE FIXTURE ITSELF IS ASSERTED FIRST (G0). The original of this block built
+# its origin with `git init -q --bare` and no `-b main`, so on a runner whose
+# `init.defaultBranch` is `master` the bare repo kept an UNBORN HEAD pointing at
+# refs/heads/master. `git push origin main` does not move an unborn bare HEAD,
+# and `git clone --depth 1` implies `--single-branch` and clones HEAD — so the
+# clone landed EMPTY: exit 0, `is-shallow-repository` FALSE, no origin/main.
+# Every behavioural G assertion below then tested nothing on Linux while passing
+# on macOS. Note what does NOT catch this: un-muting the clone's exit status,
+# which is 0. Only a POSITIVE assertion on the refs can, and it has to run
+# before the behavioural ones so a broken fixture reads as "fixture broken"
+# instead of as a broken script. Construction stderr goes to a log, not
+# /dev/null, so a fixture that fails to build says why.
 echo "── G. shallow clone: loud failure, not an empty commits[] at exit 0 ──"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@e GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@e
+GITLOG="$TMP/git-fixture.log"
+: >"$GITLOG"
 ORIGIN="$TMP/origin"
-git init -q --bare "$ORIGIN" >/dev/null 2>&1
+git init -q --bare -b main "$ORIGIN" >>"$GITLOG" 2>&1
 SEED="$TMP/seed"
-git init -q -b main "$SEED" >/dev/null 2>&1
+git init -q -b main "$SEED" >>"$GITLOG" 2>&1
 (
-  cd "$SEED"
+  cd "$SEED" || exit 1
   for i in 1 2 3; do
-    echo "$i" >"f$i"; git add "f$i" >/dev/null 2>&1
-    git commit -qm "feat: commit $i" >/dev/null 2>&1
+    echo "$i" >"f$i"; git add "f$i"
+    git commit -qm "feat: commit $i"
     [ "$i" = "1" ] && git tag v0.1.0
   done
-  git remote add origin "$ORIGIN" >/dev/null 2>&1
-  git push -q origin main --tags >/dev/null 2>&1
-) >/dev/null 2>&1
+  git remote add origin "$ORIGIN"
+  git push -q origin main --tags
+) >>"$GITLOG" 2>&1
 
 DEEP="$TMP/deep"
-git clone -q "$ORIGIN" "$DEEP" >/dev/null 2>&1
+git clone -q "$ORIGIN" "$DEEP" >>"$GITLOG" 2>&1
 mkdir -p "$DEEP/scripts"; cp "$SCAN" "$DEEP/scripts/release-scan.sh"
+
+SHALLOW="$TMP/shallow"
+git clone -q --depth 1 "file://$ORIGIN" "$SHALLOW" >>"$GITLOG" 2>&1
+mkdir -p "$SHALLOW/scripts"; cp "$SCAN" "$SHALLOW/scripts/release-scan.sh"
+
+# ── G0. is the fixture even real? ────────────────────────────────────────────
+g0_fails_before=$fails
+assert_eq "G0a the bare origin HEAD is main, not the runner's init.defaultBranch" \
+  "refs/heads/main" "$(git --git-dir="$ORIGIN" symbolic-ref HEAD 2>/dev/null)"
+assert_eq "G0b the seed actually pushed its 3 commits to the origin" \
+  "3" "$(git --git-dir="$ORIGIN" rev-list --count refs/heads/main 2>/dev/null)"
+assert_eq "G0c …and its tag v0.1.0 (without it the range under test is empty)" \
+  "yes" "$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/tags/v0.1.0 >/dev/null 2>&1 && echo yes || echo no)"
+assert_eq "G0d the deep clone resolved origin/main" \
+  "yes" "$(git -C "$DEEP" rev-parse -q --verify origin/main >/dev/null 2>&1 && echo yes || echo no)"
+assert_eq "G0e the shallow clone is ACTUALLY shallow (an empty clone is not)" \
+  "true" "$(git -C "$SHALLOW" rev-parse --is-shallow-repository 2>/dev/null)"
+assert_eq "G0f …and carries origin/main, so the guard has something to refuse" \
+  "yes" "$(git -C "$SHALLOW" rev-parse -q --verify origin/main >/dev/null 2>&1 && echo yes || echo no)"
+if [ "$fails" -ne "$g0_fails_before" ]; then
+  echo "  !! G FIXTURE IS BROKEN — read every G1-G7 result below as 'fixture broken',"
+  echo "     not as a release-scan.sh defect. git construction log:"
+  sed 's/^/       /' "$GITLOG"
+fi
+
 out_g="$(GH_FIXTURE_DIR="$FE" bash "$DEEP/scripts/release-scan.sh" origin/main 2>/dev/null)"; rc_g=$?
 assert_eq "G1 a full clone scans clean (exit 0)" "0" "$rc_g"
 assert_eq "G2 …and declares shallow:false" "false" "$(jq_of "$out_g" '.shallow')"
 assert_eq "G3 …and actually sees the history (2 commits since v0.1.0)" \
   "2" "$(jq_of "$out_g" '.commit_count')"
 
-SHALLOW="$TMP/shallow"
-git clone -q --depth 1 "file://$ORIGIN" "$SHALLOW" >/dev/null 2>&1
-mkdir -p "$SHALLOW/scripts"; cp "$SCAN" "$SHALLOW/scripts/release-scan.sh"
 err_g="$(GH_FIXTURE_DIR="$FE" bash "$SHALLOW/scripts/release-scan.sh" origin/main 2>&1 >/dev/null)"; rc_s=$?
 assert_eq "G4 a shallow clone FAILS loudly instead of shrugging in green" \
   "3" "$rc_s"
@@ -349,15 +394,64 @@ assert_eq "G6 the documented override proceeds (exit 0)" "0" "$rc_o"
 assert_eq "G7 …but the output DECLARES its own degradation: shallow:true" \
   "true" "$(jq_of "$out_s" '.shallow')"
 
-# ── H. optional live re-record check (anti-rot for the recorded payloads) ────
+# ── H. the argv ceiling, in a repo the harness OWNS (honest-gates D44) ───────
+# The 2026-07-28 outage — release-scan.sh exiting 126 with empty stdout on every
+# Linux runner — was invisible to every case above, because A–G scan ranges of
+# 0–3 commits. It only became reproducible because v0.2.25 was 1900 commits
+# stale. THAT IS A DISAPPEARING TEST: the next release tag shrinks the real
+# range back under the ceiling and the regression stops being observable.
+#
+# So this case owns its own repo and manufactures the ceiling deterministically:
+# COMMITS commits whose subjects are SUBJECT_LEN bytes each, folded to > 131072
+# bytes of JSON — Linux's MAX_ARG_STRLEN, the per-argument cap that ARG_MAX does
+# not describe and that macOS does not have at all. H1 asserts the payload is
+# ACTUALLY over the ceiling, so this case can never pass vacuously by quietly
+# shrinking; H4 asserts commits[] is a FLAT array of objects, which is the
+# `--slurpfile` contract trap ($commits vs $commits[0]) that the real-repo run
+# cannot distinguish from correct output.
+echo "── H. a commit range over Linux MAX_ARG_STRLEN still scans (argv ceiling) ──"
+MAX_ARG_STRLEN=131072
+COMMITS=100
+SUBJECT_LEN=4000
+BIG="$TMP/bigrange"
+git init -q -b main "$BIG" >>"$GITLOG" 2>&1
+(
+  cd "$BIG" || exit 1
+  pad="$(head -c "$SUBJECT_LEN" /dev/zero | tr '\0' 'x')"
+  git commit -q --allow-empty -m "chore: base"
+  git tag v0.1.0
+  for i in $(seq 1 "$COMMITS"); do
+    git commit -q --allow-empty -m "feat: commit $i $pad"
+  done
+) >>"$GITLOG" 2>&1
+mkdir -p "$BIG/scripts"; cp "$SCAN" "$BIG/scripts/release-scan.sh"
+
+# The exact bytes the pre-fix script handed to execve as ONE argv word.
+argv_bytes="$(git -C "$BIG" log --format='%H%x09%s' v0.1.0..main 2>/dev/null \
+  | jq -R -s 'split("\n") | map(select(length > 0))
+      | map(split("\t") | {sha: (.[0][0:12]), subject: (.[1] // ""), pr: null})' \
+  | wc -c | tr -d ' ')"
+assert_eq "H1 the fixture range really exceeds MAX_ARG_STRLEN (${argv_bytes}B > ${MAX_ARG_STRLEN}B)" \
+  "true" "$([ "${argv_bytes:-0}" -gt "$MAX_ARG_STRLEN" ] && echo true || echo false)"
+out_h="$(GH_FIXTURE_DIR="$FE" bash "$BIG/scripts/release-scan.sh" main 2>/dev/null)"; rc_h=$?
+assert_eq "H2 the scan survives it (exit 0 — was 126, execve E2BIG, on Linux)" \
+  "0" "$rc_h"
+assert_eq "H3 …and reports every commit in the range" \
+  "$COMMITS" "$(jq_of "$out_h" '.commit_count')"
+assert_eq "H4 …with commits[] a FLAT array of objects (--slurpfile needs \$commits[0])" \
+  "object" "$(jq_of "$out_h" '.commits[0] | type')"
+assert_eq "H5 …and commits[] length matches commit_count (no silent truncation)" \
+  "$COMMITS" "$(jq_of "$out_h" '.commits | length')"
+
+# ── I. optional live re-record check (anti-rot for the recorded payloads) ────
 if [ "${RELEASE_SCAN_TEST_LIVE:-0}" = "1" ]; then
-  echo "── H. live replay of the two pinned shas against the real GitHub API ──"
+  echo "── I. live replay of the two pinned shas against the real GitHub API ──"
   live_a="$(PATH="${PATH#"$BIN":}" RELEASE_SCAN_ALLOW_SHALLOW=1 bash "$SCAN" "$SHA_GREEN_SUITES" 2>/dev/null)"
   live_b="$(PATH="${PATH#"$BIN":}" RELEASE_SCAN_ALLOW_SHALLOW=1 bash "$SCAN" "$SHA_RED_SUITE" 2>/dev/null)"
-  assert_eq "H1 live 025c2497 still success" "success" "$(jq_of "$live_a" '.ci.status')"
-  assert_eq "H2 live 2c8fe0da still failure" "failure" "$(jq_of "$live_b" '.ci.status')"
+  assert_eq "I1 live 025c2497 still success" "success" "$(jq_of "$live_a" '.ci.status')"
+  assert_eq "I2 live 2c8fe0da still failure" "failure" "$(jq_of "$live_b" '.ci.status')"
 else
-  echo "── H. live replay SKIPPED (set RELEASE_SCAN_TEST_LIVE=1 to re-verify the recordings) ──"
+  echo "── I. live replay SKIPPED (set RELEASE_SCAN_TEST_LIVE=1 to re-verify the recordings) ──"
 fi
 
 echo
