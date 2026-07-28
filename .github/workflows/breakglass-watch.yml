@@ -1,0 +1,105 @@
+# breakglass-watch — the scream. It reds for as long as main's admin-bypass
+# glass is open, and it is a SEPARATE workflow from required-checks-drift on
+# purpose (honest-gates D61).
+#
+# WHY NOT JUST DROP continue-on-error ON required-checks-drift
+#
+# That job is paths-filtered and reads three GitHub endpoints. Making it a hard
+# failure makes it ELIGIBLE for the required set on flip day — an API-reading
+# check gating every merge, which is exactly the shape this epic refuses. So the
+# scream ships here, and this workflow never renders a check name on a PR head
+# the generator samples: the watch job carries `if: github.event_name !=
+# 'pull_request'`, and the pull_request trigger is paths-filtered besides (S4).
+#
+# WHY THERE IS NO continue-on-error ANYWHERE IN THIS FILE
+#
+# Job-level `continue-on-error: true` still renders a RED check run, but it
+# launders the WORKFLOW RUN to success — and the run conclusion is what
+# notifications, `gh run list` and the rollup read. A scream nobody is paged for
+# is not a scream. This run fails.
+#
+# WHY A SCHEDULE AND NOT `on: branch_protection_rule`
+#
+# `branch_protection_rule` is an EDGE trigger: it fires once when the rule
+# changes, then is silent forever. A glass LEFT open needs a LEVEL trigger. The
+# residual is stated in numbers in docs/ops/break-glass-log.md: a 30-minute
+# observation window, silence during an Actions outage, and GitHub's 60-day
+# auto-disable of scheduled workflows in an inactive repo.
+
+name: breakglass-watch
+
+on:
+  schedule:
+    # Every 30 minutes. GitHub queues cron under load, so treat this as "within
+    # ~30-45 minutes", never "at :00 and :30".
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    # Deliberately narrow: this trigger exists ONLY so the harness below is not
+    # orphaned (D26). Being paths-filtered also keeps every name in this file
+    # out of the required set (generator stage S4), belt and braces with the
+    # watch job's `if:`.
+    paths:
+      - "scripts/breakglass.sh"
+      - "scripts/breakglass-watch.sh"
+      - "scripts/breakglass.test.sh"
+      - ".github/workflows/breakglass-watch.yml"
+      - "docs/ops/break-glass-log.md"
+
+permissions:
+  contents: read
+  # Reading branch protection needs admin scope. If the run token does not have
+  # it, the reader returns UNKNOWN (a warning, never a green) and the committed
+  # log authority still runs — set BREAKGLASS_TOKEN to a PAT that can read it.
+  administration: read
+
+concurrency:
+  group: breakglass-watch-${{ github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the watch dark.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  breakglass-watch:
+    name: Break-glass watch
+    # Never on pull_request: a name that never renders on a PR head can never be
+    # sampled into the required-check spec.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The scream's own tripwire. If the harness stops being able to fail, the
+      # watch below is decoration — and this run says so first.
+      - name: Prove the glass can be shown open (breakglass.test.sh)
+        run: bash scripts/breakglass.test.sh
+
+      - name: Is the break-glass open?
+        env:
+          GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/breakglass-watch.sh || rc=$?
+          case "$rc" in
+            0) exit 0 ;;
+            1) echo "::error::BREAK-GLASS OPEN on main. This run fails, and it will keep failing every 30 minutes until it is closed."; exit 1 ;;
+            2) echo "::warning::protection could not be read — UNKNOWN, not green. See docs/ops/break-glass-log.md for why an unreadable API is not a red here."; exit 0 ;;
+            *) echo "::error::breakglass-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
+          esac
+
+  breakglass-harness:
+    name: Break-glass harness
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Shell syntax
+        run: |
+          bash -n scripts/breakglass.sh
+          bash -n scripts/breakglass-watch.sh
+      - name: Mutation proofs (breakglass.test.sh)
+        run: bash scripts/breakglass.test.sh
