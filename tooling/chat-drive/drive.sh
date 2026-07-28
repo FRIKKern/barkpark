@@ -37,6 +37,11 @@
 #      allowlist BEFORE allowing); DENY the ExitPlanMode plan card. ANY
 #      unexpected card is denied. Proof = approval_status on message re-read,
 #      and session.mode still "plan" at the end.
+#   6b. PROGRESSIVE PROSE (D59): ONE uninterrupted blank-line-separated prose
+#      turn, the only shape whose live document crosses a stable boundary more
+#      than once — proven by >= 2 `event: stable` frames plus a
+#      `stable_end reason=settled` in the RAW byte log, which
+#      tooling/chat-drive/assert-stable-capture.py then re-checks offline.
 #   6. HYGIENE: archive the session (absent from default list, present under
 #      ?archived=true); revoke the minted token BY BODY {"token": raw} and
 #      prove revocation by the member token failing closed (401) after.
@@ -45,6 +50,10 @@
 #   BARKPARK_ADMIN_TOKEN=... ./drive.sh            # server defaults to guerrilla
 #   BARKPARK_SERVER=https://guerrilla.barkpark.cloud BARKPARK_ADMIN_TOKEN=... ./drive.sh
 #   (BARKPARK_ADMIN_TOKEN falls back to .token in ~/.config/barkpark/config.json)
+#   DRIVE_CAPTURE_ONLY=1 ./drive.sh              # phases 0-3 + 7b + 8-10 only:
+#                                                # re-capture the D59 frames
+#                                                # without re-paying for the
+#                                                # interrupt/allow/deny legs
 #
 # Output: a masked transcript (tokens redacted) + raw SSE event log in
 # DRIVE_OUT (default: ./drive-out-<utc-ts>). The transcript is the committed
@@ -124,9 +133,14 @@ session_field() { printf '%s' "$BODY" | jq -r "$1"; }
 events_offset() { wc -c < "$EVENTS" | tr -d ' '; }
 events_since() { tail -c "+$(( $1 + 1 ))" "$EVENTS"; }
 
+# `grep -c … >/dev/null`, never `grep -q`, everywhere the EVENT LOG is the input:
+# -q exits at the first match, which SIGPIPEs the `tail` feeding it, which under
+# `set -o pipefail` makes the pipeline report 141 — i.e. "not found" — so a
+# pattern that HAS arrived can read as still-missing and the wait spins to its
+# timeout. -c consumes the whole input and answers 0/1 on the match alone.
 wait_for_pattern() { # offset pattern timeout_s label
   local off="$1" pat="$2" timeout="$3" label="$4" waited=0
-  while ! events_since "$off" | grep -q "$pat"; do
+  while ! events_since "$off" | grep -c "$pat" >/dev/null; do
     sleep 0.5; waited=$((waited + 1))
     [ "$waited" -lt $((timeout * 2)) ] || fail "timeout waiting for $label (pattern: $pat)"
   done
@@ -138,7 +152,7 @@ delta_count_since() { events_since "$1" | grep -c '"type":"stream_event"' || tru
 # The permission ask (data line) that follows the first `event: permission`
 # beyond the offset. SSE frame shape: "event: permission\ndata: {...}\n\n".
 permission_ask_since() {
-  events_since "$1" | grep -A1 '^event: permission' | grep '^data: ' | head -1 | sed 's/^data: //'
+  events_since "$1" | grep -A1 '^event: permission' | grep '^data: ' | sed -n '1s/^data: //p'
 }
 
 wait_turn_end() { # offset timeout_s — the claude stream-json result frame
@@ -153,8 +167,8 @@ wait_turn_end() { # offset timeout_s — the claude stream-json result frame
 wait_card_or_end() { # offset timeout_s
   local off="$1" timeout="$2" waited=0
   while :; do
-    if events_since "$off" | grep -q '^event: permission'; then echo card; return 0; fi
-    if events_since "$off" | grep -q '"type":"result"'; then echo end; return 0; fi
+    if events_since "$off" | grep -c '^event: permission' >/dev/null; then echo card; return 0; fi
+    if events_since "$off" | grep -c '"type":"result"' >/dev/null; then echo end; return 0; fi
     sleep 0.5; waited=$((waited + 1))
     [ "$waited" -lt $((timeout * 2)) ] || { echo timeout; return 0; }
   done
@@ -188,7 +202,10 @@ approval_status_of() { # request_id
 }
 
 # ── Cleanup (never leave residue: interrupt, archive, revoke, kill SSE) ───────
+CLEANED=0
 cleanup_best_effort() {
+  [ "$CLEANED" = "1" ] && return 0
+  CLEANED=1
   set +e
   if [ -n "$SID" ] && [ -n "$MEMBER_TOKEN" ]; then
     curl -sS -o /dev/null -X POST -H "Authorization: Bearer $MEMBER_TOKEN" \
@@ -205,7 +222,15 @@ cleanup_best_effort() {
   [ -n "$SSE_PID" ] && kill "$SSE_PID" 2>/dev/null
   set -e
 }
-trap 'cleanup_best_effort' INT TERM
+# EXIT, not just INT/TERM (run-proven 2026-07-28): under `set -euo pipefail` a
+# `cmd | head -n` pipeline exits 141 the moment head closes the pipe, and `set
+# -e` then killed the drive mid-turn — PAST the mint, BEFORE archive and revoke,
+# so a live prod session and a live [read,write,chat] token were stranded and had
+# to be cleared by hand. D41 says residue ≈ zero, which no `fail`-path-only
+# cleanup can promise. Every early-closing `head` on the event log is now a
+# `sed -n` (sed reads to EOF, so there is no SIGPIPE to trip over), and this trap
+# is the belt: it runs once (CLEANED), on ANY exit.
+trap 'cleanup_best_effort' EXIT INT TERM
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 0 — preflight
@@ -238,9 +263,21 @@ CREATED_MODE="$(session_field '.mode')"
 log "session created out-of-band: id=$SID mode=$CREATED_MODE (member token, closed key set)"
 
 TITLE="D41 e2e drive $TS_UTC — mob-seal-real-send (auto; will be archived)"
-member_req PATCH "$SERVER/v1/chat/sessions/$SID" \
-  "$(jq -cn --arg t "$TITLE" '{title:$t}')"
-[ "$STATUS" = "200" ] || fail "title patch returned $STATUS"
+# Bounded retry, and ONLY here: the title is cosmetic-but-required hygiene ("a
+# clearly-titled session", D41), and a 500 from a momentarily saturated DB pool
+# is not a contract failure — run-observed 2026-07-28, when concurrent SSR site
+# builds on the box had the Repo shedding queued requests. Three tries, then the
+# drive still fails loudly rather than running an untitled session.
+TITLE_TRIES=0
+while :; do
+  member_req PATCH "$SERVER/v1/chat/sessions/$SID" \
+    "$(jq -cn --arg t "$TITLE" '{title:$t}')"
+  [ "$STATUS" = "200" ] && break
+  TITLE_TRIES=$((TITLE_TRIES + 1))
+  [ "$TITLE_TRIES" -lt 3 ] || fail "title patch returned $STATUS on 3 consecutive tries"
+  log "title patch returned $STATUS — retrying ($TITLE_TRIES/3)"
+  sleep 3
+done
 proof "session $SID created out-of-band by MEMBER token, mode=plan, model=haiku, titled: $TITLE"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -251,6 +288,22 @@ curl -sSN -H "Authorization: Bearer $MEMBER_TOKEN" -H "Accept: text/event-stream
 SSE_PID=$!
 log "SSE stream open (pid $SSE_PID) -> $EVENTS"
 sleep 2
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phases 4–7 — the D41 approve/deny drive. DRIVE_CAPTURE_ONLY=1 skips them and
+# runs mint → session → SSE → the progressive-prose capture → spend → archive →
+# revoke, which is how the D59 frames are re-captured without re-paying for (or
+# re-exposing prod to) the interrupt and card legs. Every SAFETY leg is still in
+# force: a capture-only run mints no card to allow, and archive + revoke-by-body
+# are downstream of this block, not inside it.
+#
+# The guarded body is DELIBERATELY left at its original indentation: re-indenting
+# ~130 lines of proven drive would bury the one thing that changed in a diff
+# nobody can review.
+# ══════════════════════════════════════════════════════════════════════════════
+if [ "${DRIVE_CAPTURE_ONLY:-0}" = "1" ]; then
+log "DRIVE_CAPTURE_ONLY=1 — skipping phases 4-7 (real send, interrupt, allow, deny)"
+else
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 4 — REAL SEND: streamed deltas over /events, state advanced on re-read
@@ -265,7 +318,7 @@ wait_for_pattern "$OFF1" '"type":"stream_event"' 120 "turn-1 streamed deltas"
 wait_for_pattern "$OFF1" 'text_delta' 120 "turn-1 text_delta"
 wait_turn_end "$OFF1" 180
 T1_DELTAS="$(delta_count_since "$OFF1")"
-T1_EXCERPT="$(events_since "$OFF1" | grep 'text_delta' | head -3)"
+T1_EXCERPT="$(events_since "$OFF1" | grep 'text_delta' | sed -n '1,3p')"
 session_read
 T1_COUNT="$(session_field '.message_count')"
 T1_COST="$(session_field '.total_cost_usd')"
@@ -393,6 +446,48 @@ session_read
 END_MODE="$(session_field '.mode')"
 [ "$END_MODE" = "plan" ] || fail "session mode flipped to '$END_MODE' — autopilot engaged, LAW VIOLATED"
 proof "DENY: ExitPlanMode card denied; re-read approval_status=denied; session mode still '$END_MODE' (never flipped to auto)"
+
+fi  # end of the DRIVE_CAPTURE_ONLY guard opened before phase 4
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 7b — PROGRESSIVE PROSE: one UNINTERRUPTED turn shaped so the live
+# document can actually emit MID-TURN stable frames (mobile charter D59/D62).
+#
+# Why a phase of its own: a stable boundary is ONLY a blank line outside every
+# open fence (StreamTail.advance/3). None of the turns above is blank-line-
+# separated prose, so each emits exactly ONE frame at settle and a bare
+# `reason=settled` is a VACUOUS oracle — it cannot tell a progressive stream
+# from a single-shot one.
+#
+# The prompt forbids the two shapes StreamSegments names as DEGRADE terminators
+# (D60) rather than filtering them out afterwards: a link reference definition
+# (it rewrites an already-committed paragraph at unbounded distance) and an odd
+# number of inline backtick runs (it swallows later paragraph breaks into the
+# committed block). Either one lands the turn on `reason=degraded`, which is an
+# honest server answer but not the frame sequence this capture exists to record.
+#
+# This turn is never interrupted and answers no cards: an interrupt ends the
+# turn BEFORE its settle, and the settle is half of the contract.
+# ══════════════════════════════════════════════════════════════════════════════
+spend_guard
+PROSE_PROMPT='WITHOUT using any tools, write exactly five short paragraphs of plain prose explaining why a headless CMS separates content from presentation. Separate every paragraph with one COMPLETELY BLANK LINE. Plain sentences only: no headings, no bullet or numbered lists, no code, no backtick characters anywhere, no square brackets, no URLs, and no link reference definition lines. Do not stop early and do not ask any questions.'
+OFF5="$(events_offset)"
+member_req POST "$SERVER/v1/chat/sessions/$SID/messages" \
+  "$(jq -cn --arg c "$PROSE_PROMPT" '{content:$c}')"
+[ "$STATUS" = "202" ] || fail "prose-turn send returned $STATUS: $BODY"
+log "prose turn sent (202 recorded, not cited as proof) — waiting for the first stable frame"
+# An IDLE stream emits ZERO bytes on connect BY DESIGN and the first keepalive
+# lands at 30 s, so every timeout here is minutes, never seconds: a short one
+# reads a healthy stream as dead.
+wait_for_pattern "$OFF5" '^event: stable$' 180 "prose-turn first stable frame"
+wait_turn_end "$OFF5" 240
+wait_for_pattern "$OFF5" '^event: stable_end$' 120 "prose-turn stable_end"
+PROSE_STABLE_N="$(events_since "$OFF5" | grep -c '^event: stable$' || true)"
+PROSE_TURN="$(events_since "$OFF5" | grep -A1 '^event: stable$' | grep '^data: ' | sed -n '1s/^data: //p' | jq -r '.turn')"
+PROSE_END="$(events_since "$OFF5" | grep -A1 '^event: stable_end$' | grep '^data: ' | sed -n '1s/^data: //p' | jq -r '.reason')"
+[ "$PROSE_STABLE_N" -ge 2 ] || fail "prose turn emitted only $PROSE_STABLE_N stable frame(s) — no MID-TURN boundary, so the capture would be a vacuous oracle"
+[ "$PROSE_END" = "settled" ] || fail "prose turn ended reason='$PROSE_END' (wanted settled)"
+proof "PROGRESSIVE: turn $PROSE_TURN emitted $PROSE_STABLE_N stable frames then stable_end reason=$PROSE_END over /events — raw bytes in $EVENTS (assert with tooling/chat-drive/assert-stable-capture.py)"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 8 — spend cap (D41: total recorded spend <= \$2.00)
