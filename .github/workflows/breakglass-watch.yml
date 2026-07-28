@@ -50,10 +50,21 @@ on:
 
 permissions:
   contents: read
-  # Reading branch protection needs admin scope. If the run token does not have
-  # it, the reader returns UNKNOWN (a warning, never a green) and the committed
-  # log authority still runs — set BREAKGLASS_TOKEN to a PAT that can read it.
-  administration: read
+  # THERE IS DELIBERATELY NO `administration: read` HERE, and the omission is
+  # load-bearing (wave 4 review). `administration` is NOT one of the scopes the
+  # workflow `permissions:` key accepts for GITHUB_TOKEN — GitHub rejects the
+  # whole file as invalid and the workflow NEVER RUNS. A scream that fails to
+  # parse is the exact silence this slice exists to abolish, so it was removed.
+  #
+  # The consequence, stated rather than papered over: GITHUB_TOKEN cannot read
+  # branch protection at all (that read needs repo-admin scope, which a
+  # repo-scoped run token never carries). Without the BREAKGLASS_TOKEN secret
+  # the live-protection authority returns UNKNOWN on every scheduled run — a
+  # ::warning, never a green tick claiming the glass is shut — and the check
+  # rests entirely on authority 1, the committed log, which needs no token and
+  # is the authority that catches the recorded case. Provision BREAKGLASS_TOKEN
+  # (a PAT with repo admin read) to arm the second authority; until then the
+  # UNRECORDED-open case is caught only by a human reading the warning.
 
 concurrency:
   group: breakglass-watch-${{ github.ref }}

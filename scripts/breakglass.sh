@@ -384,7 +384,9 @@ main() {
       --repo)   REPO_OVERRIDE="${2:-}";   shift 2 ;;
       --branch) BRANCH_OVERRIDE="${2:-}"; shift 2 ;;
       --dry-run) DRY_RUN=1; shift ;;
-      -h|--help) sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      # By SHAPE, not a hard-coded line range: the range silently truncates the
+      # moment anyone adds a line to a comment above it.
+      -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
       *) fail "unknown argument: $1 (try --help)" ;;
     esac
   done

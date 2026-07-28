@@ -123,7 +123,7 @@ main() {
       --repo) REPO_OVERRIDE="${2:-}"; shift 2 ;;
       --branch) BRANCH_OVERRIDE="${2:-}"; shift 2 ;;
       --attempts) ATTEMPTS="${2:-}"; shift 2 ;;
-      -h|--help) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
       *) red "unknown argument: $1"; exit 2 ;;
     esac
   done

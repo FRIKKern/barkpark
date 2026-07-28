@@ -68,7 +68,8 @@ laundering the run to success, and the run conclusion is what notifications and
 
 ## The residual, in numbers
 
-Three gaps, stated rather than papered over:
+Five gaps, stated rather than papered over (three named at build, two added by
+the wave-4 review — an incomplete residual list is itself a residual):
 
 - **A 30-minute observation window.** A glass opened at 14:01 can go unseen
   until 14:31, and GitHub queues scheduled runs under load — treat it as
@@ -82,6 +83,23 @@ Three gaps, stated rather than papered over:
   activity. This repo merges dozens of PRs a day, so it will not trigger today —
   but a dormant fork inherits a watch that is off, and nothing announces it.
   `workflow_dispatch` is the manual re-arm.
+- **The record is only an authority once it is COMMITTED AND PUSHED.** Between
+  the local append and the push, the offline authority is blind and only the
+  live-protection read can see the glass — i.e. the 30-minute window plus a
+  token dependency. `breakglass.sh` prints "commit and push … NOW" and cannot
+  enforce it. It deliberately does not commit for you: a tool that commits
+  mid-incident is one surprise too many, and it could not push to a protected
+  main anyway until the glass is down.
+- **The live-protection authority is UNARMED until `BREAKGLASS_TOKEN` exists.**
+  Reading branch protection needs repo-admin scope, which `GITHUB_TOKEN` never
+  carries and no workflow `permissions:` key can grant (`administration` is not
+  an accepted scope — writing it makes the whole workflow file invalid, so the
+  scream would never run; `scripts/breakglass.test.sh` 6.8b pins that). Until
+  the secret is provisioned, every scheduled run reports **UNKNOWN** for the
+  live read — a `::warning`, never a green claiming the glass is shut — and the
+  check rests on the committed log alone. That covers every glass opened
+  THROUGH the script; a glass opened by hand is caught by a human reading the
+  warning, or by the next `required-checks-verify.sh --ci` run.
 
 An unreadable protection API after three attempts is reported as **UNKNOWN** and
 warns rather than reds. That is a deliberate fourth gap: a GitHub blip that reds

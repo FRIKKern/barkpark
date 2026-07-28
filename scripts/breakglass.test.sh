@@ -295,6 +295,28 @@ if ! grep -qE '^\s*continue-on-error: true' "$REPO_ROOT/.github/workflows/requir
   bad "6.8 required-checks-drift.yml lost its continue-on-error — that makes an API-reading check eligible for the required set"
 else ok "6.8 required-checks-drift.yml still carries continue-on-error (untouched on purpose)"; fi
 
+# 6.9 (wave 4 review). The scream shipped with `administration: read` under
+# `permissions:`. That scope is NOT accepted for GITHUB_TOKEN — GitHub rejects
+# the file as invalid and the workflow never runs at all, which is a scream that
+# is silent by construction. bash -n and every script assertion above stay green
+# through it, so it gets its own row. The allow-set below is GitHub's documented
+# GITHUB_TOKEN scope list; a scope outside it fails here rather than on the
+# runner. The live-protection authority is armed by the BREAKGLASS_TOKEN secret,
+# not by a permissions key.
+BG_BAD_SCOPES=""
+while IFS= read -r scope; do
+  case "$scope" in
+    actions|attestations|checks|contents|deployments|discussions|id-token|issues|models|packages|pages|pull-requests|repository-projects|security-events|statuses) ;;
+    "") ;;
+    *) BG_BAD_SCOPES="$BG_BAD_SCOPES $scope" ;;
+  esac
+done <<EOF
+$(awk '/^permissions:/{p=1;next} p && /^[a-z]/{p=0} p && /^  [a-z-]+:/{gsub(/^  /,"");sub(/:.*/,"");print}' "$WF")
+EOF
+if [ -z "$BG_BAD_SCOPES" ]; then
+  ok "6.8b every permissions: scope is one GITHUB_TOKEN actually accepts (an invalid scope makes the whole workflow unparseable, i.e. a scream that never runs)"
+else bad "6.8b unsupported permissions scope(s) in $WF:$BG_BAD_SCOPES — GitHub rejects the workflow file outright"; fi
+
 section "6b. the generator can never sample these names into the required set"
 GWF="$TMP/wf"; GFX="$TMP/fx"; mkdir -p "$GWF" "$GFX"
 cp "$WF" "$GWF/breakglass-watch.yml"
