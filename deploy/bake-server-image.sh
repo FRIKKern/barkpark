@@ -184,7 +184,7 @@ elif DOCS="$(psql "$DB_URL" -tAc 'SELECT count(*) FROM documents')" \
   && MEDIA="$(psql "$DB_URL" -tAc 'SELECT count(*) FROM media_files')" \
   && TOKENS="$(psql "$DB_URL" -tAc 'SELECT count(*) FROM api_tokens')"; then
   echo "[image-bake][seed-reset] deleting the baked seed: $DOCS document(s), $MEDIA media file(s), $TOKENS api token(s) (measured, not folklore)"
-  if TRUNC_OUT="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -c 'TRUNCATE TABLE documents, media_files, api_tokens CASCADE' 2>&1)"; then
+  if TRUNC_OUT="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -c "SET lock_timeout='60s'" -c 'TRUNCATE TABLE documents, media_files, api_tokens CASCADE' 2>&1)"; then
     printf '%s\n' "$TRUNC_OUT" | sed 's/^/[image-bake][seed-reset] /'
     MIGS="$(psql "$DB_URL" -tAc 'SELECT count(*) FROM schema_migrations' || echo 0)"
     if [ "${MIGS:-0}" -gt 0 ] 2>/dev/null; then
