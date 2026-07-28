@@ -545,13 +545,14 @@ else bad "9b.6 the mutant did not take the narrow path; 9b.2 proves nothing: rc=
 world d7
 # Disarm the delegation itself: --disable goes back to deleting protection by
 # hand. The record is what disappears — which is the whole point of the routing.
-awk '/^    exec bash "\$REPO_ROOT\/scripts\/breakglass.sh"/ {
-       print "    gh api -X DELETE \"repos/$repo/branches/$branch/protection\" >/dev/null 2>&1; return 0";
-       skip = 1
-     }
-     skip && /--reason "\$REASON" --task "\$TASK"/ { skip = 0; next }
-     skip { next }
-     { print }' "$APPLY" > "$MUT"
+# The delegation is ONE line — `exec bash … "${glass_args[@]}"` — so the mutant
+# is a single substitution. (It used to be a multi-line exec and this was an awk
+# skip-range; a range that never finds its terminator silently eats the rest of
+# the file and the mutant then "passes" for the wrong reason.)
+sed 's@^    exec bash "\$REPO_ROOT/scripts/breakglass.sh" .*@    gh api -X DELETE "repos/$repo/branches/$branch/protection" >/dev/null 2>\&1; return 0@' \
+  "$APPLY" > "$MUT"
+grep -q 'gh api -X DELETE "repos/\$repo' "$MUT" \
+  || bad "9b.7 SETUP: the delegation mutant did not apply — the exec line's shape changed and this proof is vacuous"
 out="$(bash "$MUT" --spec "$SPEC" --log "$BG_LOG" --disable --confirm --reason x --task t 2>&1)"; rc=$?
 if grep -q "DELETE" <<<"$(calls)" && ! grep -q "BG-" "$BG_LOG"; then
   ok "9b.7 disarm the delegation ⇒ the total DELETE fires with NO record on disk — exactly the silent open that shipped on main. The routing is load-bearing."

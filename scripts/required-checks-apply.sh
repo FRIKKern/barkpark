@@ -136,11 +136,13 @@ main() {
   branch="${BRANCH_OVERRIDE:-$(jq -r '.branch' "$SPEC")}"
 
   if [ "$DISABLE" -eq 1 ]; then
-    # BREAK-GLASS, TOTAL SCOPE — and it does not happen here. This used to
-    # DELETE the protection object directly after echoing
-    # the actor's login at the operator's own terminal, with a fallback that
-    # printed the literal string "unknown" when the read failed: no record, and
-    # an UNATTRIBUTABLE actor let through, which is not a break-glass at all. Every clause of that is now breakglass.sh's:
+    # BREAK-GLASS, TOTAL SCOPE — and it does not happen here. This used to DELETE
+    # the protection object directly after echoing the actor's login at the
+    # operator's own terminal, with a fallback that printed the literal string
+    # "unknown" when the read failed: no record, and an UNATTRIBUTABLE actor let
+    # through, which is not a break-glass at all.
+    #
+    # Every clause of that is now breakglass.sh's:
     # it refuses without --reason and --task before any API call, hard-fails on
     # an unreadable actor (read_actor), writes the record and READS IT BACK OFF
     # DISK before the DELETE, and stamps `scope: total` so --close restores the
@@ -150,11 +152,18 @@ main() {
     [ -n "$TASK" ]   || fail "--disable needs --task; the record must point at the work that justified it"
 
     echo "BREAK-GLASS (total) — delegating to scripts/breakglass.sh, which records BEFORE it deletes."
-    exec bash "$REPO_ROOT/scripts/breakglass.sh" \
-      --open --total --spec "$SPEC" \
-      ${LOG_OVERRIDE:+--log "$LOG_OVERRIDE"} \
-      ${BRANCH_OVERRIDE:+--branch "$branch"} \
-      --reason "$REASON" --task "$TASK"
+    # Built as an ARRAY. `${LOG_OVERRIDE:+--log "$LOG_OVERRIDE"}` has to stay
+    # unquoted to vanish when empty, which also means it WORD-SPLITS when set —
+    # so a log or branch path containing a space would have reached breakglass.sh
+    # as two arguments and been refused, at the worst possible moment.
+    # `if`, not `[ … ] && …`: under `set -e` an AND-list whose FIRST command is
+    # false makes the whole list the failing pipeline, and the script would exit
+    # 1 — silently doing nothing — in the ordinary case where no override is set.
+    local -a glass_args=(--open --total --spec "$SPEC")
+    if [ -n "$LOG_OVERRIDE" ]; then    glass_args+=(--log "$LOG_OVERRIDE"); fi
+    if [ -n "$BRANCH_OVERRIDE" ]; then glass_args+=(--branch "$branch"); fi
+    glass_args+=(--reason "$REASON" --task "$TASK")
+    exec bash "$REPO_ROOT/scripts/breakglass.sh" "${glass_args[@]}"
   fi
 
   local payload

@@ -65,10 +65,23 @@ permissions:
   # integration". Until wave 5 that 403 collapsed into UNKNOWN and the run
   # concluded SUCCESS, so a watch with no live authority reported green. It no
   # longer does: a 401/403 is a CONFIGURATION fault, exits 3, and FAILS this
-  # run. Provision BREAKGLASS_TOKEN (a PAT with repo admin read) to arm the
-  # second authority. Until it exists this workflow reds every 30 minutes, and
-  # that is the honest state of a watch that cannot read what it watches — not
-  # a false alarm to silence.
+  # run.
+  #
+  # BREAKGLASS_TOKEN WAS PROVISIONED 2026-07-28T22:33:20Z by the flip slice
+  # (hgw2-s7), so the second authority is ARMED and this workflow is not
+  # expected to red. Read the two halves together before concluding anything
+  # from a green tick here: if the secret is ever removed, rotated or revoked,
+  # the `|| github.token` fallback keeps the job RUNNABLE and it then reds every
+  # 30 minutes on the protection read. That red is the honest state of a watch
+  # that cannot read what it watches — it is not a false alarm to silence, and
+  # the fix is to restore the secret, never to soften this classification.
+  #
+  # The token is a broad user PAT (`repo`, `workflow`) in a PUBLIC repository:
+  # far more authority than the `administration: read` this job needs. Fork PRs
+  # cannot read it, but any workflow change merged to main can. The correct
+  # credential is a fine-grained PAT scoped to this repo with Administration:
+  # Read-only, mintable only in the web UI — an OPEN human gate, not a closed
+  # one.
 
 concurrency:
   group: breakglass-watch-${{ github.ref }}
