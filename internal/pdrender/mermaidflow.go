@@ -597,7 +597,12 @@ func renderEdgeLegend(g *mmGraph, rank map[string]int, deferred []mmEdge, W int,
 	sort.SliceStable(items, func(i, j int) bool { return items[i].text < items[j].text })
 	out := []string{ctx.Theme.Dim.Render("· also")}
 	for _, it := range items {
-		out = append(out, ctx.Theme.Dim.Render("  "+truncateANSI(it.text, W-2)))
+		for _, line := range hardBoundDisplayLines(
+			[]string{ctx.Theme.Dim.Render(it.text)},
+			W-2,
+		) {
+			out = append(out, "  "+line)
+		}
 	}
 	return out
 }

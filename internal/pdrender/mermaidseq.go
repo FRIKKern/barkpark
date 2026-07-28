@@ -11,12 +11,11 @@ import (
 // The brief's poster child for the shared Flex solver: participants are COLUMNS,
 // time flows DOWN, and every row is just the lifelines (│ at each column centre)
 // with a message shaft stamped across it. Because each row is assembled in a
-// fixed-width rune buffer and padded to ctx.Width, rectangularity is free — the
-// ladder can never misalign. Column positions come from the same Measure/Arrange
-// divide-formula the columns/grid/board surfaces use (seqFlex), so a narrow
-// terminal tightens the gaps and ellipsizes labels rather than overflowing; when
-// even the participant boxes can't fit side by side we fall back to the honest
-// folded-source box (renderSequence returns nil).
+// fixed-width single-cell-rune buffer and padded to ctx.Width, rectangularity is
+// free for admitted text. Column positions come from the same Measure/Arrange
+// divide-formula the columns/grid/board surfaces use (seqFlex). A narrow terminal,
+// oversized label, or wide/zero-width glyph declines the native ladder and falls
+// back to the honest complete-source box (renderSequence returns nil).
 
 // seqFlex is the shared solver tuned for lifeline columns: a modest gutter and a
 // MinWidth floor below which the boxes would collide and we degrade to folded
@@ -25,8 +24,8 @@ var seqFlex = Flex{Gutter: 2, MinWidth: 8}
 
 // seqFlexTight is the compaction fallback (scenario heuristics): when the roomy
 // solve doesn't fit — many participants, narrow terminal — the ladder shrinks
-// its gutter and lets boxes go narrower (names truncate) before giving up to
-// the folded-source box. Compact but legible beats absent.
+// its gutter and lets boxes go narrower before giving up to the folded-source
+// box. It never clips names: complete source beats a misleading partial ladder.
 var seqFlexTight = Flex{Gutter: 1, MinWidth: 6}
 
 // renderSequence lays a parsed sequence into a participant header band + a
@@ -66,6 +65,50 @@ func renderSequence(s *mmSequence, ctx RenderCtx) []string {
 		idx[a] = i
 	}
 
+	// A native ladder is only truthful when every actor and message fits its
+	// geometric slot. The ladder buffer indexes one terminal cell per rune, so
+	// any wide or zero-width rune declines native placement rather than mixing
+	// incompatible coordinate systems. Otherwise the caller renders the complete
+	// folded source.
+	actorInner := cellW - 2
+	for _, actor := range s.actors {
+		label := s.label[actor]
+		if label == "" {
+			label = actor
+		}
+		if s.isActor[actor] {
+			label = "○ " + label
+		}
+		label = sanitizeText(label)
+		if !singleCellRunes(label) || lipgloss.Width(label) > actorInner {
+			return nil
+		}
+	}
+	for _, message := range s.messages {
+		fi, okf := idx[message.from]
+		ti, okt := idx[message.to]
+		if !okf || !okt || message.text == "" {
+			continue
+		}
+		available := 0
+		if fi == ti {
+			available = W - xOf[fi] - 1
+		} else {
+			available = xOf[fi] - xOf[ti]
+			if available < 0 {
+				available = -available
+			}
+			available--
+		}
+		text := sanitizeText(message.text)
+		if fi == ti {
+			text = "↺ " + text
+		}
+		if !singleCellRunes(text) || available < 1 || lipgloss.Width(text) > available {
+			return nil
+		}
+	}
+
 	var out []string
 	out = append(out, renderActorHeads(s, cellW, gutter, leftPad, W, ctx)...)
 	// A breathing lifeline row under the heads.
@@ -86,6 +129,18 @@ func renderSequence(s *mmSequence, ctx RenderCtx) []string {
 		out[i] = padRight(out[i], W)
 	}
 	return out
+}
+
+// singleCellRunes reports whether the native sequence buffer's one-rune ==
+// one-terminal-cell coordinate model is valid for s. Wide CJK/emoji and
+// zero-width combining/joiner runes return false and trigger complete source.
+func singleCellRunes(s string) bool {
+	for _, r := range s {
+		if lipgloss.Width(string(r)) != 1 {
+			return false
+		}
+	}
+	return true
 }
 
 // renderActorHeads draws each participant as a boxed column header with a ┬ tick
@@ -174,8 +229,7 @@ func renderMessage(m mmMessage, fi, ti int, xOf []int, cellW, W int, ctx RenderC
 	labelRow := blankRow(W)
 	stampLifelines(labelRow, xOf)
 	if m.text != "" {
-		span := hi - lo - 1
-		txt := []rune(truncateToWidth(sanitizeText(m.text), span))
+		txt := []rune(sanitizeText(m.text))
 		center := (lo + hi) / 2
 		start := center - len(txt)/2
 		if start <= lo {

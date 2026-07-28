@@ -1,7 +1,10 @@
 package pdrender
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ── scenario heuristics — measure the graph, choose the strategy ─────────────
@@ -174,6 +177,22 @@ func renderFlowchartAuto(g *mmGraph, ctx RenderCtx) []string {
 // cycle-only component is never dropped). Every line is padded to ctx.Width.
 func renderFlowTree(g *mmGraph, ctx RenderCtx) []string {
 	W := clampWidth(ctx.Width)
+	treePrefix := func(prefix string) string {
+		// Reserve eight cells for relation/body text after the two-cell branch.
+		// Once nesting exhausts that budget, keep a stable continuation marker
+		// instead of growing indentation beyond the surface.
+		maxPrefix := W - 10
+		if maxPrefix < 0 {
+			maxPrefix = 0
+		}
+		if runeWidth(prefix) <= maxPrefix {
+			return prefix
+		}
+		if maxPrefix < 2 {
+			return strings.Repeat(" ", maxPrefix)
+		}
+		return strings.Repeat(" ", maxPrefix-2) + "↳ "
+	}
 
 	indeg := map[string]int{}
 	for _, e := range g.edges {
@@ -182,12 +201,28 @@ func renderFlowTree(g *mmGraph, ctx RenderCtx) []string {
 	expanded := map[string]bool{} // node already expanded somewhere in the output
 
 	var out []string
-	emit := func(prefix, wire, label, mark string) {
-		line := ctx.Theme.Dim.Render(prefix+wire) + ctx.Theme.Body.Render(label)
+	emit := func(prefix, branch, relation, label, mark string) {
+		prefix = treePrefix(prefix)
+		head := ctx.Theme.Dim.Render(prefix + branch)
+		body := ctx.Theme.Dim.Render(relation) + ctx.Theme.Body.Render(label)
 		if mark != "" {
-			line += ctx.Theme.Dim.Render(mark)
+			body += ctx.Theme.Dim.Render(mark)
 		}
-		out = append(out, truncateANSI(line, W))
+		headW := ansi.StringWidth(head)
+		bodyW := W - headW
+		if bodyW < 1 {
+			bodyW = 1
+		}
+		wrapped := hardBoundDisplayLines([]string{body}, bodyW)
+		if len(wrapped) == 0 {
+			out = append(out, head)
+			return
+		}
+		out = append(out, head+wrapped[0])
+		continuation := strings.Repeat(" ", headW)
+		for _, line := range wrapped[1:] {
+			out = append(out, continuation+line)
+		}
 	}
 
 	// children returns g's out-edges from id in source order.
@@ -211,26 +246,26 @@ func renderFlowTree(g *mmGraph, ctx RenderCtx) []string {
 				branch, cont = "└─", "   "
 			}
 			// The wire: branch + optional label + arrow (or plain for open links).
-			wire := branch
+			relation := ""
 			if e.label != "" {
-				wire += " " + sanitizeText(e.label) + " ─"
+				relation += " " + sanitizeText(e.label) + " ─"
 			}
 			if e.head {
-				wire += "▶ "
+				relation += "▶ "
 			} else {
-				wire += "─ "
+				relation += "─ "
 			}
 			label := labelFor(g, e.to)
 			switch {
 			case onPath[e.to]: // true cycle back to an ancestor
-				emit(prefix, wire, label, " ↺")
+				emit(prefix, branch, relation, label, " ↺")
 			case expanded[e.to]: // shown elsewhere — reference, don't re-expand
-				emit(prefix, wire, label, " ·↑")
+				emit(prefix, branch, relation, label, " ·↑")
 			default:
-				emit(prefix, wire, label, "")
+				emit(prefix, branch, relation, label, "")
 				expanded[e.to] = true
 				onPath[e.to] = true
-				walk(e.to, prefix+cont, onPath)
+				walk(e.to, treePrefix(prefix+cont), onPath)
 				delete(onPath, e.to)
 			}
 		}
@@ -250,7 +285,13 @@ func renderFlowTree(g *mmGraph, ctx RenderCtx) []string {
 		if len(out) > 0 {
 			out = append(out, "")
 		}
-		out = append(out, truncateANSI(ctx.Theme.Body.Render(labelFor(g, n.id)), W))
+		out = append(
+			out,
+			hardBoundDisplayLines(
+				[]string{ctx.Theme.Body.Render(labelFor(g, n.id))},
+				W,
+			)...,
+		)
 		expanded[n.id] = true
 		walk(n.id, "", map[string]bool{n.id: true})
 	}

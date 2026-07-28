@@ -96,6 +96,72 @@ func TestHeuristicTreeCycleOnlyComponent(t *testing.T) {
 	}
 }
 
+// TestFlowTreePreservesLongLabelsAndLegend proves the tree/legend degradation
+// tier adds continuation rows instead of silently clipping graph semantics.
+func TestFlowTreePreservesLongLabelsAndLegend(t *testing.T) {
+	src := "flowchart TD\n" +
+		" Root[Dispatcher coordinating every production reader]-->Child[Revision fenced correction outcome]\n" +
+		" Child-->Root\n" +
+		" Root-->|requires exact current revision evidence|Far[Immutable reconciliation ledger]"
+	g := parseMermaid(src).graph
+	out := renderFlowTree(g, RenderCtx{Width: 34, Theme: DarkTheme(), Profile: NoColor})
+	plain := ansi.Strip(strings.Join(out, "\n"))
+	compact := semanticCompact(plain)
+	for _, want := range []string{
+		"Dispatcher coordinating every production reader",
+		"Revision fenced correction outcome",
+		"requires exact current revision evidence",
+		"Immutable reconciliation ledger",
+	} {
+		if !strings.Contains(compact, semanticCompact(want)) {
+			t.Errorf("tree lost %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "…") {
+		t.Errorf("tree introduced ellipsis:\n%s", plain)
+	}
+	for i, line := range out {
+		if width := ansi.StringWidth(line); width != 34 {
+			t.Errorf("tree line %d width %d != 34: %q", i, width, ansi.Strip(line))
+		}
+	}
+}
+
+// TestFlowTreeCapsDeepIndentation proves generated tree chrome can never consume
+// the final content cell, even for a dependency chain deeper than the surface.
+func TestFlowTreeCapsDeepIndentation(t *testing.T) {
+	var src strings.Builder
+	src.WriteString("flowchart TD\n")
+	for i := 0; i < 40; i++ {
+		src.WriteString("N")
+		src.WriteString(itoa(i))
+		src.WriteString("[node")
+		src.WriteString(itoa(i))
+		src.WriteString("]-->N")
+		src.WriteString(itoa(i + 1))
+		src.WriteString("[node")
+		src.WriteString(itoa(i + 1))
+		src.WriteString("]\n")
+	}
+	g := parseMermaid(src.String()).graph
+	out := renderFlowTree(g, RenderCtx{Width: 20, Theme: DarkTheme(), Profile: NoColor})
+	plain := ansi.Strip(strings.Join(out, "\n"))
+	if strings.Contains(plain, "…") {
+		t.Fatalf("deep tree introduced ellipsis:\n%s", plain)
+	}
+	for i := 0; i <= 40; i++ {
+		want := "node" + itoa(i)
+		if !strings.Contains(plain, want) {
+			t.Errorf("deep tree lost %q:\n%s", want, plain)
+		}
+	}
+	for i, line := range out {
+		if width := ansi.StringWidth(line); width != 20 {
+			t.Errorf("tree line %d width %d != 20: %q", i, width, ansi.Strip(line))
+		}
+	}
+}
+
 // TestSequenceCompactsBeforeFolding: six participants at a width the roomy solve
 // rejects renders via the tight solve (boxes + arrows present); only a truly
 // unworkable width folds.

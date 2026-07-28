@@ -3,9 +3,19 @@ package pdrender
 import (
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
 )
+
+func semanticCompact(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, s)
+}
 
 // TestParseFlowchartShapesAndEdges covers the node-shape + edge-style + label
 // grammar the layout engine depends on.
@@ -160,5 +170,48 @@ func TestDiagramDispatch(t *testing.T) {
 	got2 := ansi.Strip(strings.Join(diagramRenderer{}.Render(other, ctx), "\n"))
 	if !strings.Contains(got2, "◇ Mermaid diagram (stateDiagram-v2)") {
 		t.Errorf("unsupported kind should fold:\n%s", got2)
+	}
+}
+
+// TestDiagramFallbackAndCaptionPreserveAuthoredText locks the reader contract:
+// a narrow terminal may add rows, but it must not replace Mermaid source or a
+// figure caption with renderer-authored ellipsis.
+func TestDiagramFallbackAndCaptionPreserveAuthoredText(t *testing.T) {
+	ctx := RenderCtx{Width: 40, Theme: DarkTheme(), Profile: NoColor}
+	sourceLine := "Idle --> WaitingForExplicitHumanApprovalBeforeDeployment"
+	caption := "The complete deployment approval path remains readable at narrow widths."
+	block := Block{Type: "diagram", Attrs: map[string]any{
+		"source":  "stateDiagram-v2\n" + sourceLine,
+		"caption": caption,
+	}}
+	got := ansi.Strip(strings.Join(diagramRenderer{}.Render(block, ctx), "\n"))
+	compact := semanticCompact(got)
+	for _, want := range []string{sourceLine, caption} {
+		wantCompact := semanticCompact(want)
+		if !strings.Contains(compact, wantCompact) {
+			t.Errorf("narrow fallback lost authored text %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "…") {
+		t.Errorf("narrow fallback introduced ellipsis:\n%s", got)
+	}
+}
+
+// TestDrawnDiagramCaptionWrapsWithoutLoss covers the native-art path separately
+// from the folded-source path above.
+func TestDrawnDiagramCaptionWrapsWithoutLoss(t *testing.T) {
+	ctx := RenderCtx{Width: 40, Theme: DarkTheme(), Profile: NoColor}
+	caption := "Every stage in the correction ledger keeps its complete explanation."
+	block := Block{Type: "diagram", Attrs: map[string]any{
+		"source":  "flowchart TD\n A[Start]-->B[Finish]",
+		"caption": caption,
+	}}
+	got := ansi.Strip(strings.Join(diagramRenderer{}.Render(block, ctx), "\n"))
+	compact := semanticCompact(got)
+	if !strings.Contains(compact, semanticCompact(caption)) {
+		t.Fatalf("drawn diagram caption was not preserved:\n%s", got)
+	}
+	if strings.Contains(got, "…") {
+		t.Fatalf("drawn diagram caption introduced ellipsis:\n%s", got)
 	}
 }
