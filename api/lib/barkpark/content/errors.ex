@@ -123,6 +123,10 @@ defmodule Barkpark.Content.Errors do
                          "missing_slug",
                          "invalid_kind",
                          "conflict_retry",
+                         # Session-conversations slice: a touch_session_conversation
+                         # call with a nil/non-binary/empty conversation id
+                         # (`Barkpark.Content.Sessions.touch_conversation/5`).
+                         "invalid_conversation",
                          # Sheets ops API — plugins/sheets/web/ops_controller.ex
                          "malformed_ops",
                          "batch_too_large",

@@ -360,7 +360,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
         json(
           conn,
           Map.merge(
-            Map.take(doc.content || %{}, @session_keys ++ ["events"]),
+            Map.take(doc.content || %{}, @session_keys ++ ["events", "conversations"]),
             %{"slug" => slug, "rev" => doc.rev}
           )
         )
@@ -496,6 +496,54 @@ defmodule BarkparkWeb.BulldocsIngestController do
             code: "invalid_kind",
             message: "kind must be one of the allowed session event kinds",
             allowed: Barkpark.Content.Sessions.event_kinds()
+          }
+        })
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: %{code: "not_found", message: "no session for slug #{slug}"}})
+
+      {:error, :stale} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{
+          error: %{code: "conflict_retry", message: "session was updated concurrently; retry"}
+        })
+    end
+  end
+
+  @doc """
+  Register or refresh a harness conversation on a session's registry
+  (session-conversations slice), via
+  `Barkpark.Content.Sessions.touch_conversation/5`. `params["conversation"]`
+  is the conversation id; the rest of `params` is passed through as attrs and
+  whitelisted inside the context (`harness`/`account`/`machine`/`cwd`) — the
+  server always stamps `first_seen`/`last_active`, never the caller. Scoped by
+  the SAME `session_scope_opts/2` the other session actions thread.
+  """
+  def touch_session_conversation(conn, %{"slug" => slug} = params) do
+    dataset = params["dataset"] || Content.paper_default_dataset()
+
+    case Barkpark.Content.Sessions.touch_conversation(
+           slug,
+           params["conversation"],
+           params,
+           dataset,
+           session_scope_opts(conn, params)
+         ) do
+      {:ok, %{count: count}} ->
+        conn
+        |> put_status(:ok)
+        |> json(%{ok: true, slug: slug, count: count})
+
+      {:error, :invalid_conversation} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{
+            code: "invalid_conversation",
+            message: "conversation id must be a non-empty string"
           }
         })
 

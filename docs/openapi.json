@@ -125,6 +125,7 @@
                   "import_constraint_violation",
                   "import_failed",
                   "internal_error",
+                  "invalid_conversation",
                   "invalid_enrollment",
                   "invalid_filter",
                   "invalid_grant",
@@ -2521,6 +2522,75 @@
           "graph"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/plugins/bulldocs/sessions/{slug}/conversations": {
+      "post": {
+        "operationId": "session.touch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Register or refresh a harness conversation on a session (server stamps first_seen/last_active).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
       }
     },
     "/v1/media/{dataset}/{id}": {
