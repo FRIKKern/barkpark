@@ -27,7 +27,11 @@ import { LegendList } from '@legendapp/list/react-native'
 import { getChatSession, streamChatEvents, type ChatStreamOptions } from '../src/api/chat'
 import type { InstanceConnection } from '../src/api/instance'
 import type { ChatMessage } from '../src/chat/wire'
-import { ChatSessionScreen, TRANSCRIPT_FOLLOW } from '../src/screens/ChatSessionScreen'
+import {
+  ChatSessionScreen,
+  TRANSCRIPT_FOLLOW,
+  transcriptItemType,
+} from '../src/screens/ChatSessionScreen'
 
 // (hoisted by jest above the imports)
 // The factory must cover EVERY api/chat binding the screen's stack reaches —
@@ -150,6 +154,18 @@ test('PROBE A — the transcript IS a LegendList carrying the ratified follow co
     // Without these the list boots mid-transcript and re-measures every row.
     expect(l.props.initialScrollAtEnd).toBe(true)
     expect(typeof l.props.renderItem).toBe('function')
+    // THE RECYCLING TRIPWIRE (charter D56/D65). `false` is the library default,
+    // so this pins the LITERAL rather than the behaviour: the danger is not
+    // that recycling is on today, it is that turning it on is a one-word edit
+    // whose damage is invisible — recycled rows are rendered WITHOUT a key
+    // (`key: recycleItems ? undefined : itemKey`), which voids the identity
+    // contract memo(TranscriptRow) is built on. `toBe(false)` and not
+    // `toBeFalsy()`: an ABSENT prop is the state this replaces, and toBeFalsy
+    // would have passed on it.
+    expect(l.props.recycleItems).toBe(false)
+    // Identity, not shape: an inline arrow would type-check, satisfy any
+    // `typeof === 'function'` probe, and re-mint every render.
+    expect(l.props.getItemType).toBe(transcriptItemType)
   } finally {
     await act(async () => tree.unmount())
   }
