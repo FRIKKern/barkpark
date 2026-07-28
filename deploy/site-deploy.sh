@@ -564,6 +564,46 @@ RCF
     grep -q 'BARKPARK_SITE_ROUTE:stuck' "$TR/Caddyfile"
   check "rejected teardown left the Caddyfile brace-balanced" \
     bash -c "[ \$(grep -c '{' '$TR/Caddyfile') = \$(grep -c '}' '$TR/Caddyfile') ]"
+  # …and it says the route is STILL LIVE, because this run WATCHED it survive.
+  check "rejected teardown claims a MEASURED still-live route" \
+    grep -q 'STILL LIVE' "$TR/out"
+  check "rejected teardown does NOT hedge — it made the measurement" \
+    absent 'NEVER CHECKED' "$TR/out"
+
+  # -------------------------------------------------------------------------
+  # TEARDOWN, LOCK NEVER TAKEN (D77) — the OTHER non-zero from with_caddy_lock,
+  # and a DIFFERENT claim. Nothing read the Caddyfile, so "the route is still
+  # live" would be an assertion this run never made. Same refusal (no TORN_DOWN=,
+  # exit 25, tree kept) but the operator is told the state is UNKNOWN.
+  # -------------------------------------------------------------------------
+  echo "[selftest] --teardown says UNKNOWN, not 'still live', when the Caddyfile lock was never taken (D77)"
+  TL="$TD/teardown-lock"; mkdir -p "$TL/bin" "$TL/sites/stuck/releases/b1"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TL/bin/caddy"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TL/bin/systemctl"
+  # THE fixture: a flock that grants the non-blocking DEPLOY lock (`flock -n 9`,
+  # whose own refusal is the separate exit 23) but never the WAITING Caddyfile lock
+  # (`flock -w 120 8`). with_caddy_lock then returns 1 out of its own guard and
+  # disarm_caddy_site_route is never even entered — which is exactly the state in
+  # which "the route is still live" would be an unmade measurement.
+  printf '#!/usr/bin/env bash\ncase "$1" in -w) exit 1;; *) exit 0;; esac\n' > "$TL/bin/flock"
+  chmod +x "$TL/bin/"*
+  cp "$TR/Caddyfile" "$TL/Caddyfile"
+  env PATH="$TL/bin:$PATH" SITE_SLUG=stuck BARKPARK_SITES_DIR="$TL/sites" \
+    BARKPARK_CADDYFILE="$TL/Caddyfile" BARKPARK_SITE_DEPLOY_LOCK="$TL/lock" \
+    BARKPARK_CADDYFILE_LOCK="$TL/cflock" BARKPARK_SITE_LOG_FILE="$TL/log" \
+    bash "$SELF" --teardown > "$TL/out" 2>&1; tdrc4=$?
+  check "lock-starved teardown exits 25 (not 0)"    [ "$tdrc4" = 25 ]
+  check "lock-starved teardown printed NO TORN_DOWN=" absent 'TORN_DOWN=' "$TL/out"
+  check "lock-starved teardown logged NO TORN_DOWN=" absent 'TORN_DOWN=' "$TL/log"
+  check "lock-starved teardown printed the typed failure" \
+    grep -q '^TEARDOWN_FAILED=stuck detail="' "$TL/out"
+  check "lock-starved teardown says the route was NEVER CHECKED" \
+    grep -q 'NEVER CHECKED' "$TL/out"
+  check "lock-starved teardown does NOT claim a still-live route it never read" \
+    absent 'STILL LIVE' "$TL/out"
+  check "lock-starved teardown KEPT the release tree" [ -d "$TL/sites/stuck/releases/b1" ]
+  check "lock-starved teardown left the Caddyfile byte-identical" \
+    cmp -s "$TR/Caddyfile" "$TL/Caddyfile"
 
   # -------------------------------------------------------------------------
   # HEALTH finder integrity — the gate must refuse a finder build whose seed is
@@ -956,11 +996,17 @@ fi
 # removal is REVERTED (the site stays) and never breaks the live FQDN block.
 # Runs under with_caddy_lock (the caller wraps it) — the marker read + rewrite is
 # a read-modify-write another writer must not interleave.
-# RETURNS: 0 the route is gone (or was never armed / no caddy on this box), 1 the
-# route is STILL LIVE because the excision was rejected and reverted. The caller
-# MUST branch on this (D77): a revert used to be the function's LAST `mv`, i.e.
-# exit status 0, so "the site is still serving" was not representable at the
-# function boundary and the teardown printed TORN_DOWN= over it.
+# RETURNS: 0 the route is gone (or was never armed / no caddy on this box), 2 the
+# route is STILL LIVE and this run OBSERVED that (the excision was rejected or
+# unwritable, and the Caddyfile was restored). The caller MUST branch on this
+# (D77): a revert used to be the function's LAST `mv`, i.e. exit status 0, so "the
+# site is still serving" was not representable at the function boundary and the
+# teardown printed TORN_DOWN= over it.
+# 2 and NOT 1 on purpose: `with_caddy_lock` returns 1 out of its OWN guards when
+# the lock cannot be taken, and that is a different fact — the route was never
+# LOOKED at. Collapsing the two would make this function's caller assert a
+# measurement it never made, which is the whole defect class this change exists
+# to remove.
 disarm_caddy_site_route() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG disarm"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — nothing to disarm"; return 0; }
@@ -982,7 +1028,7 @@ disarm_caddy_site_route() {
     { print }
   ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE" || {
     log "could not rewrite $CADDYFILE for the /sites/$SITE_SLUG disarm — restoring the backup, Caddy untouched"
-    rm -f "$tmp"; mv "$bak" "$CADDYFILE"; return 1
+    rm -f "$tmp"; mv "$bak" "$CADDYFILE"; return 2
   }
   chmod --reference="$bak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
   chown --reference="$bak" "$CADDYFILE" 2>/dev/null || true
@@ -993,7 +1039,7 @@ disarm_caddy_site_route() {
   else
     log "caddy validate rejected the /sites/$SITE_SLUG disarm — reverting, Caddy untouched"
     mv "$bak" "$CADDYFILE"
-    return 1
+    return 2
   fi
 }
 
@@ -1020,8 +1066,17 @@ teardown_failed() { # <detail>
 
 if [ "$MODE" = teardown ]; then
   setup_caddy_lock   # resolve CADDY_LOCK before with_caddy_lock (deploy does this later)
-  if ! with_caddy_lock disarm_caddy_site_route; then
-    teardown_failed "the caddy /sites/$SITE_SLUG route is STILL LIVE (the disarm was rejected and reverted, or the Caddyfile lock was unavailable) — the release tree is kept at $ROOT so the site still serves real bytes; fix the Caddyfile and re-run --teardown"
+  # TWO different failures, and they are NOT the same claim. 2 = the disarm ran and
+  # the route demonstrably survived it. 1 = with_caddy_lock's own guard fired, so
+  # nothing ever read the Caddyfile and the route's state is UNKNOWN to this run.
+  # Either way no TORN_DOWN=, exit 25, tree kept — but the operator is told which
+  # one, because "still live" is a measurement and this run only made it in one case.
+  disarm_rc=0
+  with_caddy_lock disarm_caddy_site_route || disarm_rc=$?
+  if [ "$disarm_rc" = 1 ]; then
+    teardown_failed "the caddy /sites/$SITE_SLUG route was NEVER CHECKED — the shared Caddyfile lock could not be taken, so whether this site is still routed is UNKNOWN to this run. Nothing was removed (the release tree is kept at $ROOT); re-run --teardown once the lock is free"
+  elif [ "$disarm_rc" != 0 ]; then
+    teardown_failed "the caddy /sites/$SITE_SLUG route is STILL LIVE — this run tried to remove it, the change was rejected, and the Caddyfile was reverted to the serving config; the release tree is kept at $ROOT so the site still serves real bytes; fix the Caddyfile and re-run --teardown"
   fi
   if [ -d "$ROOT" ]; then
     rm -rf "$ROOT" && log "TORE DOWN — removed release tree $ROOT"
