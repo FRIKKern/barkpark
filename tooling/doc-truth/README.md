@@ -419,6 +419,52 @@ Wired into the `codebase-intel.yml` drift-guard job (it already regenerates
 `quality-report.json`). Run `--fix` after a recompute and the grade can never
 silently rot.
 
+## P7 — printed `bp` commands (`verify-bp-commands.mjs` + `bp-cli-sources.mjs`)
+
+**This gate proves a printed command PARSES. It never claims the command
+SUCCEEDS** — no server is contacted, no token is resolved, nothing is run. A
+command that parses can still 401, 404, or do the wrong thing to the right
+dataset.
+
+It replaces the verifier's one vacuous green: `verifyCommand` used to return
+`confirmed` for ANY `bp …` on `which bp` alone, so every wrong `bp` command in
+the tree read as verified. Resolution now runs against a **union of the CLI's
+own sources**, because no single one knows the whole surface:
+
+| | source | file | what only it knows |
+|---|---|---|---|
+| A | manifest rows | `docs/cli/fixtures/full-manifest.json` | the server-declared noun/verb tree (`doc`, `task`, `workspace`, …). Drop it and manifest-driven commands go falsely RED |
+| B | `completionNouns` | `internal/cli/builtins.go` | the built-in top-level nouns. B knows `cloud` is a noun — and nothing more |
+| C | `parseHzArgs` allowlists | `internal/cli/*.go` | a leaf's declared value/bool flags |
+| D | router switch tables | `internal/cli/*.go` (`case "x":` + `if verb == "x"`) | the DEPTH. **Not optional**: `bp cloud barkpark ls` cannot be RED from A+B+C, because B has `cloud` and nothing left can adjudicate the token after it |
+| E | `"--flag"` literals | `internal/cli/*.go`, file-scoped | hand-rolled parsers that declare no allowlist. Without E, `bp login --device` and every `bp vercel quick-setup` flag is UNPROVEN |
+
+**Laws.** A token that resolves in NO source is UNRESOLVED and the gate FAILS —
+it never skips what it cannot adjudicate. A source that cannot be LOADED fails
+the run outright. Absence may be DECLARED, never assumed: `--offline` drops [A],
+is accepted only when every target is under `templates/**` (a shipped template
+has no manifest fixture in its tree), and PRINTS `SOURCE A DECLARED ABSENT`.
+**UNPROVEN is not a pass** — a flag set no source enumerates is reported by name
+and by count, and is a different verdict from UNRESOLVED.
+
+Two extractor fixes it depends on, both in `verify-docs.mjs`: fenced lines are
+joined across a trailing `\` (a shell continuation is one command, not two
+fragments — unjoined, the one correct multi-line command in the tree reds for
+the flags on its second line), and required-flag checks run on **fenced lines
+only, by bracket DEPTH** (a flag printed inside `[…]` is shown optional, so it
+is neither required by a synopsis nor supplied by a doc line; an inline prose
+fragment naming one flag is an illustration, not an invocation).
+
+```bash
+node tooling/doc-truth/verify-bp-commands.mjs --selftest        # 25 cases, every law proved BY MUTATION
+node tooling/doc-truth/verify-bp-commands.mjs templates/**/*.md # exit 1 on any UNRESOLVED, 2 on a dead source
+node tooling/doc-truth/verify-bp-commands.mjs --json <doc>...
+```
+
+The selftest is mutation-shaped on purpose: each law's negative half (drop D,
+drop A, drop E, drop the continuation join, drop the depth rule) must FAIL, or
+its positive half proves nothing.
+
 ## Meta-lesson
 
 The verifier is a **lead generator, not an authority.** It earns trust through

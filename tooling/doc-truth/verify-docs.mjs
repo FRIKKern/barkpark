@@ -22,8 +22,16 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadBpSources as loadBpSourcesRaw, resolveBpCommand } from "./bp-cli-sources.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+// One scan of the CLI tree per process — the Go walk is ~200 files.
+let _bpSources = null;
+function loadBpSources(opts) {
+  if (!_bpSources) _bpSources = loadBpSourcesRaw(opts);
+  return _bpSources;
+}
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
   .toString()
   .trim();
@@ -194,6 +202,26 @@ function extractSpans(text) {
       continue;
     }
     if (inFence) {
+      // A trailing `\` is a SHELL LINE CONTINUATION, not the end of a command.
+      // Emitting the physical lines separately splits one invocation into two
+      // fragments, and every checker downstream then judges half a command —
+      // which reds the one correctly-written multi-line command in the tree
+      // (templates/astro-search-starter/README.md:28-29) for missing the flags
+      // that live on its second line. Join them, and stamp the span with the
+      // line the command STARTS on.
+      if (/\\\s*$/.test(line)) {
+        let joined = line.replace(/\\\s*$/, "");
+        let j = i + 1;
+        while (j < lines.length && !/^\s*```/.test(lines[j])) {
+          const next = lines[j];
+          joined += " " + next.trim().replace(/\\\s*$/, "");
+          j++;
+          if (!/\\\s*$/.test(next)) break;
+        }
+        spans.push({ raw: joined.replace(/\s+/g, " ").trim(), line: ln, fenced: true, srcLine: joined });
+        i = j - 1;
+        continue;
+      }
       spans.push({ raw: line, line: ln, fenced: true, srcLine: line });
       continue;
     }
@@ -464,7 +492,7 @@ function claimsFromSpan(doc, span) {
   const cmdHead = raw.split(/\s+/)[0];
   if (KNOWN_CMD_HEADS.has(cmdHead) && /\s/.test(raw)) {
     out.push({
-      doc, line: span.line, type: "command", raw,
+      doc, line: span.line, type: "command", raw, fenced: !!span.fenced,
       target: { head: cmdHead, sub: raw.split(/\s+/)[1] || null, full: raw },
     });
     return out;
@@ -888,7 +916,35 @@ function verifyCommand(claim) {
     }
     return tag(claim, "unverifiable", "low", `make target not found in Makefile: ${sub || "(none)"}`);
   }
-  // bp / bd / mix / npm / pnpm etc. — only check the tool resolves; subcommand
+  // `bp` used to be confirmed on `which bp` ALONE — a vacuous green: the binary
+  // existing says nothing about whether the printed command parses, so every
+  // wrong `bp …` in the tree read as verified. Resolve it against the CLI's own
+  // four sources instead (bp-cli-sources.mjs). The dedicated gate
+  // (verify-bp-commands.mjs) is the enforcing surface; here the verdict stays
+  // LOW confidence by construction so this lead-generator's repo-wide report
+  // routes bp findings to the human queue rather than auto-emitting them.
+  if (head === "bp" || head === "barkpark") {
+    let sources;
+    try {
+      sources = loadBpSources({ root: ROOT });
+    } catch (e) {
+      return tag(claim, "unverifiable", "low", `bp sources unavailable: ${e.message}`);
+    }
+    if (!sources.ok) {
+      return tag(claim, "unverifiable", "low", `bp sources unavailable: ${sources.errors.join("; ")}`);
+    }
+    const r = resolveBpCommand(sources, claim.target.full, { fenced: !!claim.fenced });
+    if (r.verdict === "proven") {
+      return tag(claim, "confirmed", "low",
+        `bp command parses: \`bp ${r.path.join(" ")}\` via source(s) ${[...new Set(r.via)].join("+")} ` +
+        `(parses — not proof it succeeds)`);
+    }
+    if (r.verdict === "unproven") {
+      return tag(claim, "unverifiable", "low", `bp command UNPROVEN: ${r.unproven.join("; ")}`);
+    }
+    return tag(claim, "false", "low", `bp command does not parse: ${r.reasons.join("; ")}`);
+  }
+  // bd / mix / npm / pnpm etc. — only check the tool resolves; subcommand
   // surfaces are dynamic, so don't over-claim.
   if (onPath(head)) {
     return tag(claim, "confirmed", "low", `tool resolves on PATH: ${head}`);
