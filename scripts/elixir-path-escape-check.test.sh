@@ -33,6 +33,22 @@ no() {
   echo "  FAIL — $1" >&2
 }
 
+# ── charter D37: never `printf … | grep -q` ────────────────────────────────
+# `printf '%s\n' "$x" | grep -q …` under `set -o pipefail` is a SIGPIPE trap on
+# BSD grep (macOS): grep exits 0 the instant it matches, printf is killed by
+# SIGPIPE, pipefail promotes 141 over grep's success, and the `if` takes the
+# ELSE branch — reporting a FALSE failure for a match that did occur. Six
+# consecutive local runs gave 6, 4, 3, 4, 5, 5 failures, never zero, while the
+# same harness was 12/12 green on ubuntu/bash-5. That is wave 1's disease
+# inverted: an assertion inside the anti-vacuous-pass harness returning a
+# verdict for a reason foreign to what it tests.
+#
+# A here-string has no writer process to kill, so these are deterministic on
+# every platform. Use them for EVERY match against a captured string; matches
+# against a FILE (`grep -q … "$f"`) were never at risk and stay as they are.
+has()      { grep -q  -- "$2" <<<"$1"; }   # substring/BRE anywhere in $1
+has_line() { grep -qx -- "$2" <<<"$1"; }   # a whole line of $1 equals the BRE
+
 TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/elixir-path-escape-test.XXXXXX")"
 cleanup() { rm -rf "$TMPROOT"; }
 trap cleanup EXIT
@@ -75,7 +91,7 @@ echo
 echo "case 1: the real repository is clean"
 out="$("$SCRIPT" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -eq 0 ]; then ok "exit 0 on the real repo"; else no "expected exit 0, got $rc: $out"; fi
-if printf '%s' "$out" | grep -q "OK: every repo-root read"; then
+if has "$out" "OK: every repo-root read"; then
   ok "prints the OK verdict"
 else
   no "missing OK verdict: $out"
@@ -88,7 +104,7 @@ if [ "${n:-0}" -ge 20 ]; then
 else
   no "resolved only ${n:-0} repo-root reads — scanner is under-matching"
 fi
-if printf '%s' "$out" | grep -q "exempt: scripts/claude-pinned-version.txt"; then
+if has "$out" "exempt: scripts/claude-pinned-version.txt"; then
   ok "the :real_binary-only read is reported as exempt, not silently dropped"
 else
   no "exemption not reported"
@@ -100,7 +116,7 @@ echo "case 2: the census carries the three easily-missed families"
 census="$("$SCRIPT" --list-escapes | cut -f1 | sort -u)"
 for want in internal/taskboard/components.go internal/chat/testdata \
   .codex/skills/epic-cycle/scripts/run_concurrency_benchmark.py; do
-  if printf '%s\n' "$census" | grep -qx -- "$want"; then
+  if has_line "$census" "$want"; then
     ok "census carries $want"
   else
     no "census MISSES $want"
@@ -108,12 +124,12 @@ for want in internal/taskboard/components.go internal/chat/testdata \
 done
 # and the two measured over-inclusions are absent from the declared sets
 sets="$("$SCRIPT" --print-set test)"
-if printf '%s\n' "$sets" | grep -qx 'templates/\*\*'; then
+if has_line "$sets" 'templates/\*\*'; then
   no "repo-root templates/** is declared — measured over-inclusion"
 else
   ok "repo-root templates/** is not declared"
 fi
-if printf '%s\n' "$sets" | grep -qx 'scripts/claude-pinned-version.txt'; then
+if has_line "$sets" 'scripts/claude-pinned-version.txt'; then
   no "scripts/claude-pinned-version.txt is declared — measured over-inclusion"
 else
   ok "scripts/claude-pinned-version.txt is not declared"
@@ -131,12 +147,12 @@ cat >"$FX/api/test/barkpark/escaping_test.exs" <<'EX'
 EX
 out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -ne 0 ]; then ok "exit $rc (non-zero) on an uncovered read"; else no "PASSED with an uncovered read — vacuous"; fi
-if printf '%s' "$out" | grep -q "UNCOVERED repo-root read: nowhere/secret.json"; then
+if has "$out" "UNCOVERED repo-root read: nowhere/secret.json"; then
   ok "names the uncovered path"
 else
   no "did not name the uncovered path: $out"
 fi
-if printf '%s' "$out" | grep -q "read from: api/test/barkpark/escaping_test.exs"; then
+if has "$out" "read from: api/test/barkpark/escaping_test.exs"; then
   ok "names the file that reads it"
 else
   no "did not attribute the read: $out"
@@ -170,7 +186,7 @@ if [ "$rc" -ne 0 ]; then
 else
   no "PASSED on an untracked uncovered read — this is the git ls-files vacuous pass (D31)"
 fi
-if printf '%s' "$out" | grep -q "read from: api/test/barkpark/untracked_escape_test.exs"; then
+if has "$out" "read from: api/test/barkpark/untracked_escape_test.exs"; then
   ok "attributes the read to the untracked file"
 else
   no "did not attribute the untracked read: $out"
@@ -191,7 +207,7 @@ if [ "$rc" -ne 0 ]; then
 else
   no "reported CLEAN with 1 read — a neutered scanner would pass"
 fi
-if printf '%s' "$out" | grep -q "SCANNER is broken, not the repo clean"; then
+if has "$out" "SCANNER is broken, not the repo clean"; then
   ok "says the scanner is broken, not that the repo is clean"
 else
   no "wrong diagnosis: $out"
@@ -207,7 +223,7 @@ echo
 
 # ── case 6: --match, the predicate elixir.yml actually dispatches on ────────
 echo "case 6: --match agrees with the declared sets"
-m() { printf '%s\n' "$1" | "$SCRIPT" --match "$2"; }
+m() { "$SCRIPT" --match "$2" <<<"$1"; }
 check_match() {
   local got
   got="$(m "$1" "$2")"
@@ -233,8 +249,12 @@ check_match "docs/api-v1.md" test true
 # exact-file entries must not match by prefix
 check_match "docs/openapi.json.bak" test false
 check_match "scripts/async_env_seam_scan.exs.orig" test false
-# every compile path is also a test path (the shim relies on this containment:
-# mix-prod-compile needs mix-test, so compile==true must imply test==true)
+# Every compile path is also a test path. The invariant belongs to the SETS,
+# not to any `needs` edge between the jobs: compile ⊆ test must hold however
+# the graph is wired. elixir.yml's dispatcher asserts it at runtime and hard-
+# fails ("compile=true but test=…"), so a set edit that broke containment would
+# deadlock every api/** PR rather than mis-dispatch one. Proven statically here
+# so that failure lands in the harness instead of on a stranger's PR.
 while IFS= read -r g; do
   [ -n "$g" ] || continue
   probe="${g%/\*\*}"
@@ -247,7 +267,7 @@ echo
 
 # ── case 7: a bad set name is an error, not a silent false ──────────────────
 echo "case 7: an unknown set name errors"
-out="$(printf 'api/x\n' | "$SCRIPT" --match nonsense 2>&1)" && rc=0 || rc=$?
+out="$("$SCRIPT" --match nonsense <<<'api/x' 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -ne 0 ]; then ok "exit $rc on an unknown set"; else no "unknown set returned '$out' instead of failing"; fi
 out="$("$SCRIPT" --bogus-flag 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -ne 0 ]; then ok "exit $rc on an unknown flag"; else no "unknown flag silently accepted"; fi
@@ -263,9 +283,15 @@ if [ ! -f "$WF" ]; then
 else
   # Written to a file, not captured inline: bash 3.2 (macOS, and therefore the
   # local gate) mis-parses a heredoc inside a command substitution.
+  #
+  # The emitter itself is a FILE rather than an inline heredoc so the mutation
+  # proof below can run the very same code over deliberately-broken copies of
+  # elixir.yml. A detector that is never pointed at a broken input has not been
+  # shown to detect anything.
   FACTS="$TMPROOT/elixir-yml-facts.txt"
-  python3 - "$WF" "$FACTS" <<'PY'
-import sys, yaml
+  EMIT="$TMPROOT/emit-elixir-yml-facts.py"
+  cat >"$EMIT" <<'PY'
+import re, sys, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
 out = open(sys.argv[2], "w")
 on = wf.get(True, wf.get("on"))            # PyYAML parses bare `on:` as True
@@ -292,6 +318,38 @@ emit("coe_in_needs", ",".join(sorted(set(coe) & set(agg.get("needs", [])))))
 blocking = {n for n, j in jobs.items()
             if j.get("continue-on-error") is not True and n != "elixir-gate"}
 emit("blocking_not_in_needs", ",".join(sorted(blocking - set(agg.get("needs", [])))))
+# D36 — THE OTHER HALF OF THAT GUARD. `blocking_not_in_needs` proves a job
+# reached the aggregator's `needs`. Nothing proved the step body actually
+# JUDGES it, and reaching `needs` alone changes nothing: `needs.<job>.result`
+# is only consulted if the job is bound to a step env var AND that var is
+# passed to `decide`. Measured: add a blocking job, wire it into `needs` and
+# into `env:` as R_CEILING but omit its `decide` line, and every fact above is
+# byte-identical to a clean tree while the real extracted step body greens at
+# EXIT=0 with R_CEILING=failure. So walk the whole chain per job —
+#   needs entry -> env var bound to needs.<job>.result -> decide's 2nd argument
+# — and name every job that falls out of it. The decide side keys on the
+# SECOND positional argument, which is label-independent: the first argument is
+# a human label ("changes (dispatcher)") that deliberately does not match the
+# job name, so matching on it would be a guard that reds on a rename.
+agg_needs = list(agg.get("needs", []))
+step = next((s for s in agg.get("steps", []) if "run" in s), {})
+var_for = {}
+for var, expr in (step.get("env") or {}).items():
+    m = re.search(r"needs\.([A-Za-z0-9_.-]+)\.result", str(expr))
+    if m:
+        var_for[m.group(1)] = var
+consumed = set(re.findall(
+    r'^\s*decide\s+"[^"]*"\s+"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"',
+    step.get("run", ""), re.M))
+emit("needs_without_decide",
+     ",".join(sorted(j for j in agg_needs if var_for.get(j) not in consumed)))
+# Companion cardinalities. An empty difference is only meaningful if the three
+# sets it is computed from are populated: a regex that stops matching, or a
+# `needs` list read as empty, would report a serene "" forever. These make a
+# NEUTERED detector red instead of clean.
+emit("needs_count", len(agg_needs))
+emit("needs_results_count", len(var_for))
+emit("decide_consumes_count", len(consumed))
 disp = jobs.get("changes", {})
 emit("dispatcher_if", str(disp.get("if", "")))
 emit("dispatcher_matrix", "strategy" in disp)
@@ -303,9 +361,26 @@ for n in ("mix-test", "mix-prod-compile", "validation-perf"):
     emit(f"if::{n}", str(jobs.get(n, {}).get("if", "")))
 out.close()
 PY
+  python3 "$EMIT" "$WF" "$FACTS"
   fact() { sed -n "s|^$1=||p" "$FACTS"; }
   assert_fact() {
     if [ "$(fact "$1")" = "$2" ]; then ok "$1 = $2"; else no "$1 = '$(fact "$1")', wanted '$2'"; fi
+  }
+  # A lower bound, never an equality: pinning the exact roster here would red
+  # this harness the day a legitimate blocking job is added (S4's format
+  # ceiling is the next one), which is churn, not safety. The bound only has
+  # to exclude ZERO — the value a broken parser returns.
+  assert_fact_min() {
+    local got
+    got="$(fact "$1")"
+    case "$got" in
+      '' | *[!0-9]*) no "$1 = '$got' — not a number, the emitter is broken" ;;
+      *)
+        if [ "$got" -ge "$2" ]; then ok "$1 = $got (>= $2)"; else
+          no "$1 = $got, wanted >= $2 — the detector is neutered, not the tree clean"
+        fi
+        ;;
+    esac
   }
   assert_fact workflow_paths False
   assert_fact agg_present True
@@ -319,6 +394,14 @@ PY
   # and the required context stays green while that job reds — the aggregator's
   # one structural blind spot, closed here rather than left to a reviewer's eye.
   assert_fact blocking_not_in_needs ""
+  # …and every job that IS in needs must actually be judged (D36). Empty means
+  # every needs entry survives needs -> env -> decide. The three cardinalities
+  # are the anti-vacuity companions: without them a detector that matched
+  # nothing would report this same serene "".
+  assert_fact needs_without_decide ""
+  assert_fact_min needs_count 5
+  assert_fact_min needs_results_count 5
+  assert_fact_min decide_consumes_count 5
   assert_fact dispatcher_if ""
   assert_fact dispatcher_matrix False
   assert_fact dispatcher_outputs "compile,test"
@@ -327,6 +410,55 @@ PY
   assert_fact "if::mix-test" "needs.changes.outputs.test == 'true'"
   assert_fact "if::mix-prod-compile" "needs.changes.outputs.compile == 'true'"
   assert_fact "if::validation-perf" "needs.changes.outputs.compile == 'true'"
+
+  # ── D36 mutation proof: the fifth fact must FIRE, and must go quiet ────────
+  # Four deliberately-broken copies of the REAL elixir.yml, one per direction
+  # the guard has to tell apart. This is the only thing separating a guard from
+  # a decoration: `needs_without_decide = ""` above proves nothing unless the
+  # same emitter, on the same file, returns a non-empty answer when the wiring
+  # is genuinely broken. The mutation is the one measured in charter D36 — a
+  # blocking `format-ceiling` job, added in three increasingly-complete stages.
+  MUT="$TMPROOT/mutate-elixir-yml.py"
+  cat >"$MUT" <<'PY'
+import sys, yaml
+src, dst, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+wf = yaml.safe_load(open(src))
+agg = wf["jobs"]["elixir-gate"]
+step = next(s for s in agg["steps"] if "run" in s)
+assert mode in ("clean", "needs", "env", "wired"), mode   # a typo'd mode is not a pass
+if mode in ("needs", "env", "wired"):
+    # a BLOCKING job (no continue-on-error), wired into the aggregator's needs
+    wf["jobs"]["format-ceiling"] = {"runs-on": "ubuntu-latest",
+                                    "steps": [{"run": "exit 1"}]}
+    agg["needs"] = list(agg["needs"]) + ["format-ceiling"]
+if mode in ("env", "wired"):
+    step.setdefault("env", {})["R_CEILING"] = "${{ needs.format-ceiling.result }}"
+if mode == "wired":
+    step["run"] = step["run"].replace(
+        'decide "changes (dispatcher)"',
+        'decide "format ceiling"         "${R_CEILING}" "NEVER"\n'
+        'decide "changes (dispatcher)"', 1)
+yaml.safe_dump(wf, open(dst, "w"))
+PY
+  # direction <mode> <expected needs_without_decide>
+  direction() {
+    local mode="$1" want="$2" f="$TMPROOT/mut-$1.yml" ff="$TMPROOT/mut-$1.facts" got
+    # `clean` goes through the same load/dump round-trip as the three broken
+    # copies, so the ONLY variable between the four is the mutation itself —
+    # not a YAML-dumper artefact.
+    python3 "$MUT" "$WF" "$f" "$mode"
+    python3 "$EMIT" "$f" "$ff"
+    got="$(sed -n 's|^needs_without_decide=||p' "$ff")"
+    if [ "$got" = "$want" ]; then
+      ok "  mutation[$mode]: needs_without_decide = '${got}'"
+    else
+      no "  mutation[$mode]: needs_without_decide = '${got}', wanted '${want}'"
+    fi
+  }
+  direction clean ""                             # untouched tree — silent
+  direction needs "format-ceiling"               # in needs, no env binding
+  direction env   "format-ceiling"               # in needs + env, never decided
+  direction wired ""                             # fully wired — silent again
 fi
 echo
 
@@ -359,6 +491,24 @@ gate() {
     ok "$label -> exit $rc"
   else
     no "$label -> exit $rc, wanted $want"
+    sed 's/^/        /' "$GATE_OUT" >&2
+  fi
+  # The exit code ALONE is not a verdict. Eight of the ten cases below expect
+  # exit 1 — and a step body that never decided anything exits 1 too: an
+  # unbound variable under `set -u`, a syntax error, a `decide` that was
+  # renamed out from under its call sites. Every one of those would have read
+  # as `ok` here while proving nothing about the allow-set. So also require the
+  # aggregator to have reached its own conclusion, in the polarity expected.
+  local verdict
+  if [ "$want" -eq 0 ]; then
+    verdict="Elixir gate: every upstream job either succeeded"
+  else
+    verdict="::error::Elixir gate: at least one upstream job is not in the allow-set"
+  fi
+  if grep -qF -- "$verdict" "$GATE_OUT"; then
+    ok "  …and reached its own verdict line"
+  else
+    no "  …but printed NO verdict line — the step body crashed rather than decided"
     sed 's/^/        /' "$GATE_OUT" >&2
   fi
 }
