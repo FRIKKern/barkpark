@@ -1323,6 +1323,47 @@ test("THE PROJECTION GUARANTEE: entries[] is a TWELVE-named-field allowlist, so 
   assert.ok(forged.entries.every((e) => e.recipes.every((r) => !("value" in r))), "no entry recipe may ever carry `value`");
 });
 
+test("the level-restatement split is DIRECTIONAL, and the DOWN bucket is empty because admitRecipe REFUSES those rows — not because none exist", () => {
+  // REVIEW ADDITION (wave 11). The D89 control below asserts
+  // `level_restated_down === 0` over the WHOLE store. Read alone that looks
+  // like a live launder detector; it is not, and the difference matters enough
+  // to be executed rather than believed.
+  //
+  // A DOWN restatement is a row whose STORED level is STRONGER than what its
+  // own command re-derives — which is exactly the shape `checkCeiling` names
+  // LEVEL-SKIP, and the fold runs `admitRecipe` BEFORE it ever reaches the
+  // restatement counter (ledger.mjs, the read-path re-admission). So the row is
+  // rejected and never counted: `down === 0` is enforced by the ADJUDICATOR,
+  // and the assertion that can actually fail on a forged store is the
+  // LEVEL-SKIP rejection landing in `unreadable[]`.
+  //
+  // This test pins BOTH halves against one synthetic run, so neither half can
+  // be deleted without a red:
+  //   UP   stored L4, `git show origin/main:… | wc -l` re-derives L2 → ADMITTED,
+  //        counted in level_restatements.up, reported and not rejected.
+  //   DOWN stored L1, a local `grep -c` re-derives L3 → REJECTED LEVEL-SKIP,
+  //        not folded, and the DOWN bucket stays empty for that REASON.
+  const dir = tmpLedger();
+  const up = { subject: "api/mix.exs", quantity: "line count", rerun: "git show origin/main:api/mix.exs | wc -l", deps: ["api/mix.exs"], observed_at: "2026-07-20T12:00:00Z", derived_level: "L4" };
+  const down = goodRow({ derived_level: "L1" }); // rerun is a purely local grep → L3
+  writeFileSync(join(dir, "grip-directional.json"), JSON.stringify({ run_id: "grip-directional", recipes: [up, down] }));
+
+  const folded = foldLedger(dir, { now: "2026-07-28T00:00:00Z", screen: screenCommand });
+
+  assert.equal(folded.stats.level_restated_up, 1, "a conservative author corrected by the ladder is an UP, reported not rejected");
+  assert.deepEqual(
+    folded.level_restatements.up.map((r) => [r.stored_level, r.derived_level]),
+    [["L4", "L2"]],
+    "the UP row carries BOTH levels, so a reader can name the row instead of counting it",
+  );
+
+  assert.equal(folded.stats.level_restated_down, 0, "the DOWN row never reaches the counter");
+  assert.equal(folded.stats.rows, 1, "the over-claiming row is NOT folded; the honest one is");
+  const levelSkips = folded.unreadable.filter((u) => u.reason === "LEVEL-SKIP");
+  assert.equal(levelSkips.length, 1, `THIS is the assertion that fires on a forged store: ${JSON.stringify(folded.unreadable)}`);
+  assert.equal(levelSkips[0].index, 1);
+});
+
 // Re-derived 2026-07-28 in a clean git worktree at origin/main 072978af0:
 // 78 .json files → 40 grip-owned runs / 27 foreign runs / 11 NOT-A-RUN
 // documents; 22 of the 40 owned runs are WRITE-PATH ATTESTED, carrying 319 of
@@ -1388,6 +1429,15 @@ test("CONTROL: the committed rows fold CLEAN under the hardening — unreadable 
   //          Asserted 0, over the WHOLE store, not just the attested scope.
   //   UP   — stored L4, the command re-derives L2: a conservative author being
   //          corrected by the ladder. Harmless, and NAMED rather than counted.
+  // READ THE DOWN ASSERTION FOR WHAT IT IS (review addition, wave 11). It is a
+  // STANDING STATEMENT, not a live tripwire: the fold runs `admitRecipe` before
+  // the restatement counter, and a DOWN-shaped row IS the LEVEL-SKIP shape, so
+  // it is rejected into `unreadable[]` and never counted. The assertion that
+  // actually fires on a forged store is that rejection — pinned, both
+  // directions, by the directional test above. Keeping this line is still
+  // right: if the read path ever stopped re-admitting, this is the assertion
+  // that would go red.
+  //
   // Today the whole store holds exactly one, and it is an UP:
   // grip-20260726T000000Z-v-corpus-identity-call.json, subject
   // internal/cli/cloud_site_cmd.go, stored L4 → derived L2 (`git show
