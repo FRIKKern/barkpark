@@ -2106,6 +2106,65 @@ Backlog filed: `task-felix-w22-bl-recorder-bounds` (P2), `task-felix-w22-bl-webh
 
 ## Wave log
 
+### Wave 2026-07-28 — Wave 23 BUILT + REVIEWED, grade A−. "The Blind Gate."
+
+All four round-1 slices built green, reviewed, gate-re-run on the reviewer's final state, and
+**pushed with PRs open** — #6616 S1, #6617 S2, #6618 S3, #6619 S4. Round-2 `felix-w23-s5-blobstore-migration`
+is unbuilt BY DESIGN (sequenced-rounds law: it edits `api/.sobelow-skips`, which S1 owns).
+
+**What landed.** S1 (`felix-w23-s1-drift-migration`, branch
+`loop-epic/drift-migration-19-sobelow-fingerprints--0`, unchanged by review) migrated the 19 pure
+line-drift fingerprints to inline annotations with per-site reachability verdicts; baseline 108 → 89,
+shipped-baseline findings 51 → 32. S2 (`felix-w23-s2-staleness-ratchet`, branch
+`loop-epic/blocking-baseline-staleness-ratchet-sobe-1-r`) added the orthogonal text-only staleness
+ratchet with a DERIVED detector→token table, plus the `parse.ex:61`-exact regex fix that closes an
+unsafe-direction bug in the overlap checker. S3 (`felix-w23-s3-amend-d75`, branch
+`loop-epic/amend-d75-by-name-floor-is-10-not-0-108--2-r`) amended D75 by name — floor 10 not 0, 108
+not 137, and the S4/SR-1 topology proven by the blocking `mix-audit` job being S4-excluded too. S4
+(`felix-w23-s4-fresh-guard-selftest`, branch `loop-epic/fresh-finding-guard-selftest-make-the-mu-3`,
+unchanged by review) converted the fresh-finding guard from an unattributable exit-status assertion
+to a TRANSITION assertion with a mutation-proven `--selftest`.
+
+**REVIEW'S BIGGEST FIND, and the reason this is A− not A.** S2's new step was BLOCKING and the builder
+flagged "must merge after S1". Re-measured at review with S1's pruned baseline **and** S1's sources
+applied *together*: **31 entries are still stale** — S1's added comment lines shift line numbers
+inside the very files it edits, so its 19 deletions do not clear the check. Merging after S1 would
+still have turned `sobelow-inline-overlap` — a job that is green and meaningful today — permanently
+red on every PR in the repo, reintroducing the exact blind-gate disease the wave exists to cure. Fixed
+in place (commit `9ac576278`): the real-baseline step is `continue-on-error: true` with its measured
+numbers, a one-line flip condition, and a tracking task; the hermetic `--selftest` stays blocking.
+Second review fix (`3f26f57e7`): merge-gates §9 still gave D140's REFUTED toolchain-instability claim
+as the reason the sobelow job is advisory, three paragraphs above S3's own amendment — replaced with
+the real reason and the real instability (the line number, which is inside the fingerprint hash).
+
+**Independently re-derived at review** (the HIGH-FLIP-RISK protocol): S1's D141(c) transfer proof was
+re-run from scratch with a real `mix sobelow` 0.14.1 against two empty-baseline twin trees — 109 → 90,
+19 removed / 0 added, and 51 → 32 with the shipped baseline; every number reproduced exactly. The
+reachability verdicts were re-derived from source (`validate_slug/1` is the only entry to the
+DeployRunner state files; every `fetch/2` call site resolves to a literal; `@allowlist %{}` makes
+`delete_allowlist_scoped/3` dead). S2's regex tightening was mutation-proved by reverting it, which
+reds the new malformed-annotation fixture. A genuinely INDEPENDENT second reviewer is still owed on
+S1's reachability verdicts before merge — that dispatch is a manual lead step.
+
+**On the wish's standing sore.** Main's Sobelow cannot be made honest without a human gate this wave,
+and now we know *why* in two independent senses: S3 proved that even a fully drained baseline cannot
+make Sobelow block a merge (SR-1 + stage-S4 paths-filter exclusion), and S2's ratchet measured that
+the baseline itself is 50/100 dead promises — 31 after S1. The sore is real, it is measured, and it is
+now instrumented; it is not closed.
+
+**Ledger.** Honest across all four slices — 4/5 criteria stamped with real evidence, merge-gated
+criterion left open, lifecycle `in_progress`. One correction applied: S2's criterion-2 evidence
+asserted a blocking step, which review changed; the evidence now carries the correction and the
+re-measured 31. Two backlog rows filed at review: `felix-w23-bl-staleness-blocking-flip` (P1, the
+flip) and `felix-w23-bl-sobelow-transfer-proof-harness` (P2, filed on behalf of S1's builder, whose
+six attempts timed out on `/v1/data/mutate`).
+
+**NEXT WAVE.** Merge in order S1 → S2 → S3 → S4 (S1 first: S2's ratchet reads the baseline S1
+prunes), then dispatch `felix-w23-s5-blobstore-migration` — 15 findings, 10 of which are NEW code no
+baseline ever reviewed, so it needs FRESH verdicts and is HIGH-FLIP-RISK. After S5 the staleness
+residue drops to ~16, and `felix-w23-bl-staleness-blocking-flip` becomes the one row that turns the
+new ratchet into a real gate.
+
 - **Wave 23 — 2026-07-28 — DECIDED (building). "The Blind Gate."** Ratified D135–D146. The wave
   repairs the instrument rather than adding one more resource bound: Sobelow's JOB has been
   `failure` on main for **8d17h / ~185 runs** while the workflow rolled up `success`, so the gate
