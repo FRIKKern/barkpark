@@ -116,6 +116,22 @@ export function tailOnlyGrowth(prev: ChatState, next: ChatState): boolean {
     next.wedgeAtMs === prev.wedgeAtMs &&
     next.gen === prev.gen &&
     next.tailGen === prev.tailGen &&
+    // The live-document fields (D59): a `stable` frame never moves the tail, so
+    // it already flushes immediately by the first guard above. They are listed
+    // anyway because this comparison's whole contract is EXHAUSTIVENESS — the
+    // day a delta starts touching one of them, the coalesced path must open
+    // rather than quietly keep swallowing a structural change.
+    next.segments === prev.segments &&
+    next.stableTurn === prev.stableTurn &&
+    next.committedBytes === prev.committedBytes &&
+    next.committedChars === prev.committedChars &&
+    next.skeleton === prev.skeleton &&
+    next.stableStopped === prev.stableStopped &&
+    next.stableEnd === prev.stableEnd &&
+    next.stableGap === prev.stableGap &&
+    next.tailCarried === prev.tailCarried &&
+    next.settleArm === prev.settleArm &&
+    next.suppressed === prev.suppressed &&
     next.notice === prev.notice &&
     next.exited === prev.exited
   )

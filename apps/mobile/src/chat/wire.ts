@@ -110,7 +110,15 @@ export type StableSkeletonKind =
   | 'block'
 
 export interface StableSkeleton {
-  kind: StableSkeletonKind
+  /** WIDER than StableSkeletonKind on purpose, and it is the same distinction
+   * messageBlocks draws below: that type is what the server sends TODAY, this is
+   * what a client must be able to hold. A newer server's eighth label has to
+   * render honestly — StreamSkeleton's `skeletonLabel` degrades any unknown kind
+   * to the generic "block" shape, exactly as the server's own `skeleton_label/1`
+   * fallback arm does — and a consumer that narrowed here would instead have to
+   * reject the frame and lose a whole turn's worth of settled document over a
+   * word it did not recognise. */
+  kind: string
   /** The PROSE ABOVE the forming component — the source bytes between `to` and
    * the component's first triggering line, verbatim. It is `StreamTail`'s
    * `classify/1` third element (charter D62/D67), and the client renders it as
