@@ -1290,6 +1290,30 @@ defmodule BarkparkCloud.Web.RouterTest do
       refute conn.resp_body =~ "tok"
     end
 
+    test "the row carries updated_at, so a rotation is not a byte-identical payload" do
+      {user, team} = user_with_team()
+      {:ok, _p} = Registry.connect_provider(team, "hetzner", "tok", label: "main")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      [fresh] = json_body(call(:get, "/v1/providers", nil, token))["providers"]
+      assert is_binary(fresh["updated_at"])
+      # A first connect fills both stamps from one autogenerate entry — the
+      # console reads that as "never rotated" and shows no update line.
+      assert fresh["updated_at"] == fresh["inserted_at"]
+
+      {:ok, _} = Registry.connect_provider(team, "hetzner", "rotated-tok")
+
+      [after_rotation] = json_body(call(:get, "/v1/providers", nil, token))["providers"]
+      assert after_rotation["id"] == fresh["id"]
+      assert after_rotation["inserted_at"] == fresh["inserted_at"]
+
+      assert after_rotation["updated_at"] > fresh["updated_at"],
+             "without updated_at the payload is byte-identical across a rotation and the console cannot show it"
+
+      refute after_rotation["updated_at"] == after_rotation["inserted_at"]
+      refute call(:get, "/v1/providers", nil, token).resp_body =~ "rotated-tok"
+    end
+
     test "empty team → 200 {providers: []}" do
       {user, _team} = user_with_team()
       {:ok, token} = Accounts.create_user_session_token(user)

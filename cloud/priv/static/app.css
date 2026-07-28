@@ -1777,7 +1777,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* gr-p4 G-02 — the inline connect card: a provider picker (.seg) → the armed
    kind's credential subform → the .set-save-row. An already-connected kind is
-   shown but not selectable (its seg-btn ships disabled + a "connected" note). */
+   fully selectable (its seg-btn carries a "connected" note, never `disabled`):
+   re-arming it rotates the credential in place, per GR44. */
 .prov-connect-picker { margin: var(--space-2) 0 var(--space-4); }
 .prov-connect-form { display: flex; flex-direction: column; gap: var(--space-3); }
 .prov-seg-note { font-size: var(--text-xs); color: var(--dim); margin-left: 4px; }

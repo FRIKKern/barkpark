@@ -139,6 +139,61 @@ defmodule BarkparkCloud.RegistryProviderUpsertTest do
     end
   end
 
+  describe "the rotation signal the console renders" do
+    @app_js Path.expand("../../priv/static/app.js", __DIR__)
+
+    test "BOTH replace arms move updated_at past inserted_at — the only visible mark of a rotation" do
+      team = team_fixture()
+
+      # The nameless re-submit (the SPA omits `label` when the box is blank) →
+      # {:replace, [:encrypted_token, :updated_at]}.
+      {:ok, first} = Registry.connect_provider(team, "hetzner", "hz-a", label: "prod key")
+
+      assert DateTime.compare(first.inserted_at, first.updated_at) == :eq,
+             "a FIRST connect fills both stamps from one autogenerate entry — nothing to report"
+
+      {:ok, nameless} = Registry.connect_provider(team, "hetzner", "hz-b")
+
+      assert nameless.inserted_at == first.inserted_at
+
+      assert DateTime.compare(nameless.inserted_at, nameless.updated_at) == :lt,
+             "dropping :updated_at from the no-label replace arm leaves the row looking untouched"
+
+      # The named re-submit → {:replace, [:label, :encrypted_token, :updated_at]}.
+      {:ok, named} = Registry.connect_provider(team, "cloudflare", "cf-a")
+      {:ok, renamed} = Registry.connect_provider(team, "cloudflare", "cf-b", label: "rotated key")
+
+      assert renamed.inserted_at == named.inserted_at
+      assert renamed.label == "rotated key"
+
+      assert DateTime.compare(renamed.inserted_at, renamed.updated_at) == :lt,
+             "dropping :updated_at from the labelled replace arm leaves the row looking untouched"
+    end
+
+    test "the console still OFFERS the rotation this upsert makes safe (client↔server drift guard)" do
+      # The server half of this pair has been true since the unique index landed;
+      # the client half was stale for weeks, telling operators to destroy a
+      # working credential first. Reading app.js here is what makes the pair fail
+      # together: relax either side and this test reds.
+      src = File.read!(@app_js)
+
+      refute src =~ "Disconnect one above to replace its credentials",
+             "the destroy-first copy is back — the card no longer offers in-place rotation"
+
+      refute src =~ "o.kind === selected && !o.connected",
+             "an armed-selection filter is excluding connected kinds again (check BOTH copies)"
+
+      refute src =~ "silently ADDITIVE server-side",
+             "the pre-index explanation is back, and it is false"
+
+      assert src =~ "credential updated ",
+             "the roster stopped rendering the rotation, so a successful replace is invisible"
+
+      assert src =~ "p.updated_at !== p.inserted_at",
+             "the roster stopped reading updated_at — provider_json/1's rotation signal is unused"
+    end
+  end
+
   describe "the migration's dedup DELETE" do
     test "collapses a genuine duplicate pair to the NEWEST row" do
       team = team_fixture()

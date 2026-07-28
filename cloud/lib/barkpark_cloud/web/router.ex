@@ -8321,14 +8321,29 @@ defmodule BarkparkCloud.Web.Router do
 
   defp provider_json(p) do
     # encrypted_token is NEVER serialized — the connected token stays at rest.
+    #
+    # `updated_at` is not decoration: `connect_provider/4` is an upsert, so a
+    # credential ROTATION mutates :encrypted_token and :updated_at while leaving
+    # :id and :inserted_at exactly where they were. Serialize only the five
+    # original fields and the payload is BYTE-IDENTICAL before and after a
+    # successful rotation — the console would have no way to show that anything
+    # happened. `updated_at > inserted_at` is the rotation signal the roster
+    # renders as "credential updated <rel>".
     %{
       id: p.id,
       kind: p.kind,
       label: p.label,
       team_id: p.team_id,
-      inserted_at: p.inserted_at
+      inserted_at: p.inserted_at,
+      updated_at: p.updated_at
     }
   end
+
+  # Did this connect REPLACE an existing credential? Read off the row Postgres
+  # returned (`returning: true`), so it reports what actually happened rather
+  # than what a pre-read predicted.
+  defp provider_rotated?(provider),
+    do: DateTime.compare(provider.inserted_at, provider.updated_at) == :lt
 
   ## Provider-neutral connect + catalog helpers ────────────────────────────────
   ## Hetzner and Azure are peers: one connect endpoint (verify-before-save), one
@@ -8369,6 +8384,19 @@ defmodule BarkparkCloud.Web.Router do
       # audit event share ONE transaction. The detail map carries only the
       # provider KIND and LABEL — NEVER the credential material (the token /
       # service-principal blob never reaches an audit row or a log line).
+      #
+      # Rotation is recorded as `rotated: true|false` METADATA, never as a second
+      # `provider.rotated` ACTION: `action` lives in the base attrs and is fixed
+      # before the transaction runs, and a new action string would widen the
+      # closed `noun.verb` vocabulary that `list_audit_events`' `:action_prefix`
+      # filter reads. The signal costs nothing and cannot race — the upsert
+      # replaces :updated_at on the conflict branch only, while a fresh insert
+      # fills both timestamps from ONE autogenerate entry, so
+      # `inserted_at < updated_at` IS "this was a replacement". A `Repo.exists?`
+      # pre-read would cost a round trip AND read pre-state, mislabelling a
+      # rotation as a first connect under a concurrent connect.
+      # `target_fun`'s map merges OVER the base attrs, so the whole distinction
+      # is one key and `Accounts.audit/3` is untouched.
       audited =
         Accounts.audit(
           %{
@@ -8381,7 +8409,12 @@ defmodule BarkparkCloud.Web.Router do
           fn ->
             Registry.connect_provider(conn.assigns.current_team, kind, credential, label: label)
           end,
-          fn provider -> %{target_id: provider.id} end
+          fn provider ->
+            %{
+              target_id: provider.id,
+              metadata: %{kind: kind, label: label, rotated: provider_rotated?(provider)}
+            }
+          end
         )
 
       case audited do
