@@ -681,7 +681,20 @@ write_slot_env green "$GREEN_PORT" "$APP/api/_build_green"
 # slot, so --rollback knows what the idle slot holds after the next flip. STATE
 # is one global sha and the env files carry only port+build-root — without the
 # stamp a box has slot amnesia and rollback would flip to an unknown build.
-echo "$NEW" > "$APP/.slots/$TARGET.sha"
+#
+# ORDERING (D291): the stamp is DEFINED here but WRITTEN only after the health
+# gate. It used to be written right here — before deps.get/deps.compile/compile/
+# ecto.migrate — and no exit-12/13 path reverted it, so a deploy that never
+# built left `.slots/<slot>.sha` claiming a build the slot does not hold, and
+# `--rollback` reads exactly that file (see the preflight above) to pick its
+# target. Same discipline as $STATE, which is written only after health + flip.
+SLOT_SHA_FILE="$APP/.slots/$TARGET.sha"
+PREV_SLOT_SHA="$(cat "$SLOT_SHA_FILE" 2>/dev/null || true)"
+stamp_slot_sha() { echo "$NEW" > "$SLOT_SHA_FILE"; }
+restore_slot_sha() { # any post-stamp failure path: the slot is being retired
+  if [ -n "$PREV_SLOT_SHA" ]; then printf '%s\n' "$PREV_SLOT_SHA" > "$SLOT_SHA_FILE"
+  else rm -f "$SLOT_SHA_FILE"; fi
+}
 systemctl daemon-reload
 
 # ---- Clean-build the idle slot's root while the active slot keeps serving
@@ -735,6 +748,10 @@ if [ "$ok" != "1" ]; then
   git reset --hard "$OLD"   # keep sources in step with the still-serving old build
   exit 14
 fi
+# The slot booted and answered — only NOW may it claim this sha as a rollback
+# target (D291). Every earlier failure (exit 12/13) leaves the previous stamp,
+# and the flip failures below restore it.
+stamp_slot_sha
 
 # ---- Hot swap: point Caddy at the new slot (graceful reload, no drops).
 # UNDER THE SHARED CADDYFILE LOCK (fd 8, D27): site-deploy.sh rewrites this same
@@ -747,6 +764,7 @@ exec 8>"$CADDY_LOCK"
 if ! flock -w 120 8; then
   log "gave up waiting for the Caddyfile lock ($CADDY_LOCK) — no swap; slot $TARGET stopped, :$ACTIVE_PORT still serving (no downtime)"
   systemctl disable --now "barkpark-slot@$TARGET" 2>/dev/null || true
+  restore_slot_sha
   git reset --hard "$OLD"; exit 14
 fi
 # Re-read the live upstream INSIDE the lock. ACTIVE_PORT was read BEFORE a
@@ -760,12 +778,14 @@ if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
   log "Caddyfile invalid after port flip — restoring, no swap"
   cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"
   systemctl disable --now "barkpark-slot@$TARGET" 2>/dev/null || true
+  restore_slot_sha
   git reset --hard "$OLD"; exit 14
 fi
 if ! systemctl reload caddy; then
   log "caddy reload failed — restoring, no swap"
   cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"; systemctl reload caddy || true
   systemctl disable --now "barkpark-slot@$TARGET" 2>/dev/null || true
+  restore_slot_sha
   git reset --hard "$OLD"; exit 14
 fi
 exec 8>&-   # leaf lock: released the moment the flip is written + reloaded, so
