@@ -81,7 +81,14 @@ defmodule Barkpark.Media do
 
     with {:ok, %{size: size}} <- File.stat(temp_path),
          :ok <- validate_upload(mime_type, original_name, size),
-         :ok <- Blobstore.put_file(relative_path, temp_path, content_type: mime_type) do
+         # `{:ok, receipt}` — the backend's write ACK plus its post-condition
+         # read (see Blobstore.receipt/3). The row's `size` stays the SOURCE
+         # size (what the client uploaded); the receipt is not persisted here,
+         # it is the seam that lets a store which ACKs but does not store fail
+         # as {:error, :not_stored} → the 503 below, instead of inserting a row
+         # over bytes that are not there.
+         {:ok, _receipt} <-
+           Blobstore.put_file(relative_path, temp_path, content_type: mime_type) do
       # Create DB record. Tenancy scope (workspace_id/project_id) is stamped from
       # `opts` when the caller supplied a resolved scope — mirrors
       # `Barkpark.Content` write scoping so a new blob is owned by the workspace
@@ -531,7 +538,16 @@ defmodule Barkpark.Media do
   allowlist (`@blob_segment` per segment; `.`/`..`/absolute/empty rejected) so a
   malicious or malformed path can never escape the media root:
 
-    * `{:ok, relative_path}` — bytes written (parent dirs created).
+    * `{:ok, relative_path, receipt}` — the backend took the bytes (parent dirs
+      created) and answered a `t:Barkpark.Media.Blobstore.receipt/0`: how many
+      bytes were RECEIVED, and how many a post-condition read of the STORE
+      found (or the named `:unverified` when that read could not be performed).
+      The two numbers are never merged — see `Blobstore.receipt/3`.
+    * `{:error, :not_stored}` — the store ACKed the write and a read-back then
+      proved the bytes are ABSENT (502).
+    * `{:error, {:storage_mismatch, received, stored}}` — the read-back
+      succeeded and DISAGREED with the received count (502). A disagreement is
+      a failure, never a 200 with a discrepancy field.
     * `{:error, :invalid_path}` — the path is not a safe server-blob shape (422).
     * `{:error, :empty_body}` — a zero-byte body (422). No real media blob is
       empty; the common cause is a caller mislabeling the content-type (e.g.
@@ -544,14 +560,37 @@ defmodule Barkpark.Media do
   typed error, never a bare 500.
   """
   @spec put_blob(String.t(), binary()) ::
-          {:ok, String.t()} | {:error, :invalid_path | :empty_body | :storage_unavailable}
+          {:ok, String.t(), Blobstore.receipt()}
+          | {:error,
+             :invalid_path
+             | :empty_body
+             | :storage_unavailable
+             | :not_stored
+             | {:storage_mismatch, non_neg_integer(), non_neg_integer()}}
   def put_blob(_relative_path, ""), do: {:error, :empty_body}
 
   def put_blob(relative_path, body) when is_binary(relative_path) and is_binary(body) do
     if valid_blob_path?(relative_path) do
+      # The read-back lives BELOW this line, inside the backend (Blobstore's
+      # stat_blob/1 callback) — deliberately not here. This module also owns
+      # `file_path/1`, and a File.stat against that path is exactly the check
+      # the S3 backend's write-through cache defeats: it returns the expected
+      # size for an object the bucket never took.
       case Blobstore.put_bytes(relative_path, body, []) do
-        :ok -> {:ok, relative_path}
-        {:error, _reason} -> {:error, :storage_unavailable}
+        {:ok, %{stored: :unverified} = receipt} ->
+          {:ok, relative_path, receipt}
+
+        {:ok, %{stored: stored, received: received} = receipt} when stored == received ->
+          {:ok, relative_path, receipt}
+
+        {:ok, %{stored: stored, received: received}} ->
+          {:error, {:storage_mismatch, received, stored}}
+
+        {:error, :not_stored} ->
+          {:error, :not_stored}
+
+        {:error, _reason} ->
+          {:error, :storage_unavailable}
       end
     else
       {:error, :invalid_path}
