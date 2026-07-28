@@ -733,9 +733,16 @@ describe('memo(TranscriptRow) is not decoration', () => {
     // Reachability: this is the seam the screen’s renderItem calls, so an
     // edit that drops memo() (or re-inlines an arrow closure) reds here rather
     // than passing silently as a performance regression nobody measures.
+    //
+    // The seam returns the row inside its LEAD WRAPPER (mob-lm-s5: the
+    // transcript's rhythm moved off contentContainerStyle and onto the rows),
+    // so the memo is one level down — and reading it through the wrapper is
+    // the point: an edit that drops the wrapper reds the spacing-parity suite,
+    // and an edit that drops the memo reds here.
     const item = transcriptItem(messageRows(messages)[0]!, ctx)
-    expect(item.type).toBe(MemoTranscriptRow)
-    expect((item.props as TranscriptRowProps).onToggleLog).toBe(ctx.onToggleLog)
+    const memoed = (item.props as { children: ReactElement }).children
+    expect(memoed.type).toBe(MemoTranscriptRow)
+    expect((memoed.props as TranscriptRowProps).onToggleLog).toBe(ctx.onToggleLog)
     // React stores the comparator on the memo object; the public type does not
     // surface it, so the cast is the only way to assert the memo is EXPLICIT
     // rather than falling back to a shallow compare that would silently start
