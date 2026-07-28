@@ -2874,7 +2874,7 @@ export const SCENARIOS = {
   },
   // ── MVP-0 Personal Dev Fleet (PDF-D84/D88/D92): the fleet card states ──────
   "fleet-support-provisioning": {
-    label: "Fleet card — a support mid-provision: the SUPPORT theater (5 rungs, no secure) under the main",
+    label: "Fleet card — a support mid-provision: the SUPPORT theater (6 rungs, secure included) under the main",
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
