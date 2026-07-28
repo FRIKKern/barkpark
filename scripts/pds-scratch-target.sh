@@ -102,7 +102,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(cd -P -- "$SCRIPT_DIR/.." && pwd)"
 API_DIR="$REPO_ROOT/api"
-BARKPARK_BIN="$REPO_ROOT/bin/barkpark"
+# Overridable ONLY so pds-scratch-target_test.sh can drive the real verbs
+# against a stub instead of stopping a real server. Nothing in normal use sets
+# it; `up`'s executability check still runs against whatever it resolves to.
+BARKPARK_BIN="${PDS_SCRATCH_BARKPARK_BIN:-$REPO_ROOT/bin/barkpark}"
 PG_BIN_SCRIPT="$REPO_ROOT/bin/barkpark-pg"
 
 # Pointer to the most recent scratch root, so `verify`/`teardown`/`env` work in
@@ -111,17 +114,93 @@ PG_BIN_SCRIPT="$REPO_ROOT/bin/barkpark-pg"
 # CONCURRENT TARGETS (the spare-target recipe — two proven coexisting live on
 # 2026-07-20, disjoint HTTP ports :22940/:30540 and disjoint Postgres :41596/
 # :20104, with the host dev server on :4000 untouched across BOTH teardowns,
-# because free_port() probes before binding):
+# because free_port() probes before binding).
 #
-#   PDS_SCRATCH_POINTER=/tmp/pds-scratch-spare.last \
-#     BARKPARK_HOME=<pinned spare root> scripts/pds-scratch-target.sh up
+# THE POINTER USED TO BE THE ONLY MAP, AND IT LOST TARGETS (PDS-D318).
+# Reproduced end to end: `up` writes this ONE global path UNCONDITIONALLY, so a
+# second `up` CLOBBERS it; `teardown` then resolves the SECOND root, destroys
+# it, prints `---- teardown: PASS`, and clears the pointer — after which all
+# four read verbs die with "no scratch target known" while the FIRST root is
+# still standing, fully live, with a Postgres nobody can now find. The clear was
+# never the bug (it is guarded to fire only on its own root); the CLOBBER was,
+# and clearing the last remaining slot is what turned it into a strand.
 #
-# BOTH vars must be pinned, not just one. `up` writes the pointer path
-# UNCONDITIONALLY (see the `printf ... >"$POINTER_FILE"` below), and the pointer
-# is ONE global path — so a second `up` on the default pointer silently
-# repoints `teardown`/`env` at the new root and STRANDS the first target's
-# Postgres. Details: scripts/pds-scratch-target-cost-2026-07-20.md.
+# So the pointer is no longer the map. It is kept as a "most recent" hint for
+# roots booted before this change; the REGISTRY below is the truth.
 POINTER_FILE="${PDS_SCRATCH_POINTER:-/tmp/pds-scratch-target.last}"
+
+# ── the live-target REGISTRY (PDS-D318) ──────────────────────────────────────
+#
+# One file per live root: filename is a derived key, CONTENT is the canonical
+# root path. `up` adds an entry, `teardown` removes ONLY its own, and
+# resolve_home REFUSES WITH A LIST when more than one survives rather than
+# guessing (guessing is what the single pointer did).
+#
+# Derived from POINTER_FILE on purpose: the crown launcher already exports a
+# PER-RUN PDS_SCRATCH_POINTER (pds-crown-launch.sh fire_detached), so a pinned
+# pointer keeps getting its own private registry and stays isolated from the
+# default one — the existing spare-target recipe keeps working unchanged.
+REGISTRY_DIR="${PDS_SCRATCH_REGISTRY:-$POINTER_FILE.d}"
+
+# Entries are matched BY CONTENT, never by filename, so the key scheme can
+# change (or a caller can seed an entry by hand) without orphaning rows.
+registry_add() {
+  local key
+  mkdir -p "$REGISTRY_DIR"
+  key="$(printf '%s' "$1" | cksum | awk '{print $1}')"
+  printf '%s\n' "$1" > "$REGISTRY_DIR/$key"
+}
+
+registry_remove() {
+  local f
+  [ -d "$REGISTRY_DIR" ] || return 0
+  for f in "$REGISTRY_DIR"/*; do
+    [ -f "$f" ] || continue
+    if [ "$(cat "$f" 2>/dev/null || true)" = "$1" ]; then rm -f "$f"; fi
+  done
+  return 0
+}
+
+# Every registered root whose tree still EXISTS, one per line. An entry whose
+# root is gone (removed by hand, or by a teardown that died before its own
+# removal) is pruned here rather than left to make the map lie.
+registry_live() {
+  local f root
+  [ -d "$REGISTRY_DIR" ] || return 0
+  for f in "$REGISTRY_DIR"/*; do
+    [ -f "$f" ] || continue
+    root="$(cat "$f" 2>/dev/null || true)"
+    if [ -n "$root" ] && [ -d "$root" ]; then
+      printf '%s\n' "$root"
+    else
+      rm -f "$f"
+    fi
+  done
+  return 0
+}
+
+registry_count() { registry_live | grep -c . || true; }
+
+# Read one exported value out of a root's scratch.env WITHOUT sourcing it —
+# sourcing here would overwrite the caller's own PORT/BARKPARK_HOME mid-verb.
+env_field() { # $1 = root · $2 = var name
+  local f v
+  f="$(scratch_env_file "$1")"
+  [ -f "$f" ] || { printf '?\n'; return 0; }
+  v="$(sed -n "s/^export $2=\"\{0,1\}\([^\"]*\)\"\{0,1\}\$/\1/p" "$f" | tail -1)"
+  printf '%s\n' "${v:-?}"
+}
+
+# The human-readable map: root, HTTP port, Postgres port. Ports come from each
+# root's OWN scratch.env, which is also what teardown needs to stop it safely.
+registry_lines() {
+  local root
+  registry_live | while IFS= read -r root; do
+    [ -n "$root" ] || continue
+    printf '  %s  PORT=%s  BARKPARK_PG_PORT=%s\n' \
+      "$root" "$(env_field "$root" PORT)" "$(env_field "$root" BARKPARK_PG_PORT)"
+  done
+}
 
 # Postgres caps a unix-socket path at 103 bytes (see TRAP 3). barkpark-pg puts
 # the socket at $BARKPARK_HOME/.s.PGSQL.<port> — that suffix is up to 18 bytes,
@@ -246,10 +325,29 @@ new_scratch_home() {
 scratch_env_file() { printf '%s/scratch.env\n' "$1"; }
 
 # Resolve an EXISTING scratch root for verify/status/teardown/env.
+#
+# THREE sources, in this order (PDS-D318):
+#   1. $BARKPARK_HOME — an explicit caller always wins.
+#   2. the REGISTRY — exactly one live entry resolves; TWO OR MORE REFUSE with
+#      the list, because picking one is the guess that stranded the other.
+#   3. the legacy pointer — only when the registry knows nothing, so a root
+#      booted before this change is still reachable.
 resolve_home() {
-  local home="${BARKPARK_HOME:-}"
-  if [ -z "$home" ] && [ -f "$POINTER_FILE" ]; then
-    home="$(cat "$POINTER_FILE")"
+  local home="${BARKPARK_HOME:-}" n
+  if [ -z "$home" ]; then
+    n="$(registry_count)"
+    if [ "${n:-0}" -gt 1 ]; then
+      die "$n scratch targets are live — REFUSING to guess which one you mean.
+$(registry_lines)
+  Name one explicitly:
+    BARKPARK_HOME=<root> $0 <verb>
+  (The single pointer this replaced would have silently picked the most recent
+  one and stranded the rest.)"
+    elif [ "${n:-0}" -eq 1 ]; then
+      home="$(registry_live | head -1)"
+    elif [ -f "$POINTER_FILE" ]; then
+      home="$(cat "$POINTER_FILE")"
+    fi
   fi
   [ -n "$home" ] || die "no scratch target known — set BARKPARK_HOME=... or run \`$0 up\` first"
   [ -d "$home" ] || die "scratch root $home does not exist (already torn down?)"
@@ -378,7 +476,11 @@ export PDS_SCRATCH_TREE="$REPO_ROOT"
 # rows, not only the bundle bytes) without re-deriving barkpark-pg's defaults.
 export PDS_SCRATCH_DB="$pg_conninfo"
 EOF
+  # The pointer stays a "most recent" hint (and stays clobberable — that is all
+  # it ever was). The REGISTRY is the map: this root gets its own entry, so a
+  # second `up` ADDS rather than REPLACES (PDS-D318).
   printf '%s\n' "$home" >"$POINTER_FILE"
+  registry_add "$home"
 
   hr "ready"
   printf 'base:  http://%s:%s\n' "$PHX_HOST" "$port"
@@ -518,6 +620,28 @@ cmd_env() {
 
 # ── teardown ─────────────────────────────────────────────────────────────────
 
+# What is still standing after this teardown, and how to reach it.
+#
+# TWO COUNTS, AND THEY MEASURE DIFFERENT THINGS — say which:
+#   * the REGISTRY count is exact for roots THIS registry knows (i.e. booted
+#     with this PDS_SCRATCH_POINTER / PDS_SCRATCH_REGISTRY).
+#   * the GLOB count sees only roots matching the DEFAULT mktemp pattern
+#     /tmp/pds.*; a root booted with a pinned BARKPARK_HOME somewhere else is
+#     invisible to it. So it is reported as "N under the default pattern",
+#     NEVER as "all" — the glob cannot back the word "all".
+report_survivors() {
+  local n glob_n
+  n="$(registry_count)"
+  if [ "${n:-0}" -eq 0 ]; then
+    log "no other scratch target is registered live in $REGISTRY_DIR"
+  else
+    log "$n other scratch target(s) still registered LIVE — reach one with BARKPARK_HOME=<root>:"
+    registry_lines
+  fi
+  glob_n="$(ls -d /tmp/pds.*/scratch.env 2>/dev/null | grep -c . || true)"
+  log "$glob_n root(s) carry a scratch.env under the default /tmp/pds.* pattern (that glob sees ONLY default-pattern roots — a root booted with a pinned BARKPARK_HOME elsewhere is not counted)"
+}
+
 cmd_teardown() {
   local home envf port pg_port fails=0
   home="$(resolve_home)"
@@ -643,6 +767,10 @@ cmd_teardown() {
     log "removed $home"
   fi
 
+  # Deregister THIS root and nothing else (PDS-D318). Matching is by content, so
+  # a concurrent session's entry cannot be removed by accident.
+  registry_remove "$home"
+
   # Clear the pointer ONLY if it names the root we just removed. Both sides are
   # canonicalised (TRAP 7) so the two spellings of one root match; a pointer
   # naming a DIFFERENT root is another concurrent session's live target and is
@@ -651,6 +779,11 @@ cmd_teardown() {
     rm -f "$POINTER_FILE"
     log "cleared scratch pointer $POINTER_FILE"
   fi
+
+  # NAME THE SURVIVORS. Emptying the map silently is how the strand used to
+  # happen; a teardown that removes one of two roots must say the other is still
+  # there, and say how to reach it.
+  report_survivors
 
   hr "teardown: $([ "$fails" -eq 0 ] && echo PASS || echo "FAIL ($fails)")"
   [ "$fails" -eq 0 ]
