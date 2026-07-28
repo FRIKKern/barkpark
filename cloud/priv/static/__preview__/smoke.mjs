@@ -2069,11 +2069,11 @@ const EXPECTATIONS = {
   },
   // ── MVP-0 Personal Dev Fleet (pdf-mvp0-fleet-card-spa): the fleet card ─────
   "fleet-support-provisioning": {
-    what: "the fleet card with a support mid-provision — the 5-rung SUPPORT theater, never a secure rung",
+    what: "the fleet card with a support mid-provision — the 6-rung SUPPORT theater, secure included, never a freshen rung",
     container: "instance-body",
     includes: ["fleet-support-card", "fleet-support-theater", "new-steps",
-      "Configuring the runtime", 'data-step="verify"'],
-    excludes: ['data-step="secure"', 'data-step="freshen"'],
+      "Configuring the runtime", 'data-step="secure"', 'data-step="verify"'],
+    excludes: ['data-step="freshen"'],
   },
   "fleet-support-online": {
     what: "the fleet card with an ONLINE support — the BYO-model-key step in the card; the roster read answers the documents envelope and the presence pipeline renders --online from THAT fixture",
