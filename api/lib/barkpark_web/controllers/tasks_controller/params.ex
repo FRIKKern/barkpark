@@ -614,6 +614,15 @@ defmodule BarkparkWeb.TasksController.Params do
   # Stamp (and any future holder-gated verb) on a task with no live claim —
   # mirror the invalid_lifecycle wire shape instead of leaking inspect() output.
   def reason_to_string({:not_in_progress, s}), do: "not_in_progress:#{s}"
+  # Close honesty gates (PDS-D288/D289/D290). Each gets a STABLE wire token —
+  # `inspect/1` on the tuple would leak Elixir syntax (`{:not_holder, "w"}`) into
+  # a JSON `reason` field that the bp CLI and the pr-task gate both string-match.
+  def reason_to_string({:not_holder, held}), do: "not_holder:#{held || "?"}"
+
+  def reason_to_string({:criteria_unmet, indices}) when is_list(indices),
+    do: "criteria_unmet:#{Enum.join(indices, ",")}"
+
+  def reason_to_string({:sentinel_worker_id, worker}), do: "sentinel_worker_id:#{worker}"
   def reason_to_string(other), do: inspect(other)
 
   # ─── Criteria-conflict hints (D56 — the guard must TEACH, not just refuse) ──
@@ -648,6 +657,31 @@ defmodule BarkparkWeb.TasksController.Params do
   def criteria_hint(:criteria_index_out_of_range, _surface),
     do:
       ~s|that criterion index is past the end of acceptance_criteria. The index is 0-BASED: the FIRST criterion is 0. Nothing was written.|
+
+  # Close honesty gates (PDS-D288/D289/D290). Same law as the D56 hints above:
+  # a refusal that does not teach the escape hatch is just a wall. Each names the
+  # exact body field to add — both overrides are plain close-body params, so on
+  # the CLI they ride `--set <field>="<reason>"`.
+  def criteria_hint({:not_holder, held}, :close),
+    do:
+      ~s|this task's claim is held by "#{held || "someone else"}", not by the worker you named, so closing it | <>
+        ~s|would record THEM as having finished the work. If that is deliberate (a lead sealing a merge-gated | <>
+        ~s|task is the normal case), say so and it lands, recorded: | <>
+        ~s|--set holder_override="<why you are closing someone else's claim>". | <>
+        ~s|This is an HONESTY gate, not authorization — it stops accidents and makes deliberate foreign closes auditable.|
+
+  def criteria_hint({:criteria_unmet, indices}, :close) when is_list(indices),
+    do:
+      ~s|acceptance criteria #{Enum.join(indices, ", ")} (0-BASED) are not met on the task AS STORED, and criteria | <>
+        ~s|flipped in this very close command do not count — that would be the closer grading its own homework. | <>
+        ~s|Stamp them as you prove them (`bp task stamp <id> <worker> <epoch> --criterion N --criterion-text "…" | <>
+        ~s|--met --evidence "…"`), or close over them on the record: --set criteria_override="<why it is done anyway>".|
+
+  def criteria_hint({:sentinel_worker_id, worker}, _surface),
+    do:
+      ~s|"#{worker}" is not a worker id — it is a missing value wearing a worker's clothes (empty, "None", | <>
+        ~s|"null", "nil" or "-"). A close attributed to it reads as a real close to every downstream gate. | <>
+        ~s|Pass the worker that actually holds the claim.|
 
   def criteria_hint(_reason, _surface), do: nil
 
