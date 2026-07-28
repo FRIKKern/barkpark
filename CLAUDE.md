@@ -93,7 +93,7 @@ bp task close <id> <worker> <epoch>   # Complete work (CAS on the claim epoch)
 5. Clean up stashes, prune remote branches
 6. Hand off context for the next session
 
-NEVER stop before pushing — it strands work locally. NEVER say "ready to push when you are" — YOU push. A push protection refuses (GH006) is CORRECT, not a retry cue.
+NEVER stop before pushing — it strands work locally. NEVER say "ready to push when you are" — YOU push. A push protection refusal (GH006) is CORRECT, not a retry cue.
 
 ## Doc contract
 
