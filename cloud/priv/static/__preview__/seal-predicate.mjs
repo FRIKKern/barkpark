@@ -316,10 +316,14 @@ function main() {
     throw new Refusal('GUARD-OVERRIDE-WITHOUT-FIXTURE',
       '--guard-cmd was given without --ledger. The override is applied once per registered defect and carries no defect id, so on a LIVE run it would certify clause (b) over a stub instead of the committed guard. Mutation proofs inject a ledger fixture; live runs use the committed guard.');
 
-  const SUCCESSOR = arg('--successor') || (fixture ? fixture.successor : null) || null;
-  if (typeof SUCCESSOR !== 'string' || SUCCESSOR.trim() === '')
+  // Trimmed BEFORE R4 compares it: `--successor " cloud-console-hardening-epic"` must
+  // not slip past the self-successor refusal on a space.
+  const SUCCESSOR_RAW = arg('--successor') || (fixture ? fixture.successor : null) || null;
+  if (typeof SUCCESSOR_RAW !== 'string' || SUCCESSOR_RAW.trim() === '')
     throw new Refusal('NO-SUCCESSOR',
       `no successor named (--successor <id>, --successor ${TERMINAL}, or \`successor\` in the ledger fixture). Clause (a) certifies that residue has a forwarding address; with none there is nothing to forward TO, and with zero live rows the absence would otherwise cost nothing and seal.`);
+
+  const SUCCESSOR = SUCCESSOR_RAW.trim();
 
   // R4 — forwarding to yourself is not forwarding. `forwarded` is the SUCCESSOR's own
   // roster, so a successor equal to the epic makes clause (a) structurally unfailable.
@@ -386,8 +390,13 @@ function main() {
 
     if (!commit) problems.push('NO COMMIT — defect is known and unlanded');
     else {
+      // The note may claim "verified" ONLY if verifyCommit raised no problem of its
+      // own. Printing `verified by ancestry + diff` beside a diff mismatch would be a
+      // success line over a read that failed — this file's whole subject.
+      const before = problems.length;
       const how = verifyCommit(d, commit, fixture, problems);
-      if (how) notes.push(`commit ${commit} verified by ancestry + ${how}`);
+      if (how && problems.length === before) notes.push(`commit ${commit} verified by ancestry + ${how}`);
+      else if (how) notes.push(`commit ${commit} IS an ancestor of origin/main, but its DIFF did not verify — see below; nothing about this fix is certified`);
     }
 
     // ── THE MEASUREMENT LADDER ──────────────────────────────────────────────
@@ -435,6 +444,10 @@ function main() {
       }
     } else if (d.measured_by && d.measured_in_ci) {
       rung = 2;
+      // Scoped to THIS rung's own problems: a commit-verification failure above must
+      // not suppress the measurement report, or the output would go silent about the
+      // very leg it did check.
+      const mBefore = problems.length;
       const missing = d.measured_by.filter((p) => !existsSync(`${REPO}/${p}`));
       if (missing.length === d.measured_by.length)
         problems.push(`measured_by names ${missing.join(', ')} and NONE of them exist — the measurement is asserted, not present`);
@@ -447,7 +460,7 @@ function main() {
         if (!src.includes(d.measured_in_ci.paths))
           problems.push(`${d.measured_in_ci.workflow} does not filter on \`${d.measured_in_ci.paths}\` — the job exists but this code path would not trigger it`);
       }
-      if (problems.length === 0)
+      if (problems.length === mBefore)
         notes.push(`MEASURED-ELSEWHERE by ${d.measured_by.filter((p) => existsSync(`${REPO}/${p}`)).join(', ')}, run by ${d.measured_in_ci.workflow} job \`${d.measured_in_ci.job}\` on ${d.measured_in_ci.paths}. THIS RUN DID NOT EXECUTE IT — it verified only that the test file and the CI job exist.`);
     } else if (waivers.has(d.id)) {
       // FIXTURE-ONLY. Named, printed, and unreachable on a live run (a waiver can only
