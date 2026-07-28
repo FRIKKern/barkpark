@@ -110,6 +110,21 @@ defmodule Barkpark.Tasks.TtlSweeper do
       map is NOT a candidate (otherwise the sweep would re-lapse it
       every minute forever).
 
+  ### What the lapse may and may not eat (PDS wave 23)
+
+  The lapse deletes EXACTLY ONE key by name — `content.engagement` — and that
+  map is an EPHEMERAL ownership lease. A durable adjudication reason ("parked
+  because X") belongs on `content.disposition_reason`, which no sweeper owns;
+  `Tasks.Stage` routes `--note` there for exactly this reason. Measured on
+  guerrilla before the split: a row staged at 20:02:00.455593 lost its
+  `engagement.note` at 20:17:01.430503 (15m00.97 s) while the lifecycle flip it
+  accompanied survived — a durable claim on a field with a 15-minute half-life.
+
+  Rows written BEFORE the split still carry `engagement.note`, so `apply_lapse`
+  PROMOTES a non-blank legacy note into `disposition_reason` on the way out
+  (never overwriting a reason already there). After the promotion the lapse
+  clears the lease as always.
+
   Each lapse emits an additive `task.engagement_lapsed` mutation event
   (payload mirrors `task.lease_expired` MINUS the epoch fields:
   previous_rev, rev, previous_holder, from_status, to_status, plus the
@@ -534,8 +549,13 @@ defmodule Barkpark.Tasks.TtlSweeper do
     # (a no-op key-wise when it already was) and the engagement map is
     # CLEARED — deleted, not blanked, so the brief card's omit-when-absent
     # law reads the row as unowned. NO claim/epoch fields are touched.
+    #
+    # …but a legacy `engagement.note` (written before the durable/ephemeral
+    # split) is PROMOTED to the durable key first, so the lapse releases the
+    # lease without eating the adjudication that rode on it.
     new_content =
       doc.content
+      |> promote_legacy_note(engagement)
       |> Map.put("lifecycle_status", to_status)
       |> Map.delete("engagement")
 
@@ -567,6 +587,28 @@ defmodule Barkpark.Tasks.TtlSweeper do
         :skipped
     end
   end
+
+  # Move a pre-split `engagement.note` onto the durable key the stage verb now
+  # writes (`Tasks.Stage.durable_reason_key/0`). Deliberately conservative: only
+  # a non-blank legacy note, and only when the row carries no durable reason
+  # yet — a reason already adjudicated outranks a lease's leftover text.
+  defp promote_legacy_note(content, engagement) when is_map(engagement) do
+    key = Barkpark.Tasks.Stage.durable_reason_key()
+
+    with note when is_binary(note) <- Map.get(engagement, "note"),
+         false <- String.trim(note) == "",
+         true <- blank_reason?(Map.get(content, key)) do
+      Map.put(content, key, note)
+    else
+      _ -> content
+    end
+  end
+
+  defp promote_legacy_note(content, _engagement), do: content
+
+  defp blank_reason?(nil), do: true
+  defp blank_reason?(reason) when is_binary(reason), do: String.trim(reason) == ""
+  defp blank_reason?(_), do: false
 
   # Mirror of insert_lease_expired_event! MINUS the epoch fields (charter D4:
   # thought is not contended work — there is no fence to record).

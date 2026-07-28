@@ -540,6 +540,22 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
   defp iso_ago(seconds),
     do: DateTime.utc_now() |> DateTime.add(-seconds, :second) |> DateTime.to_iso8601()
 
+  # Force a task's engagement.ts `seconds_ago` seconds into the past — the
+  # engagement-sweep twin of age_claim!/2, so a stage written through the real
+  # verb can be swept without sleeping.
+  defp age_engagement!(doc, seconds_ago) do
+    import Ecto.Query
+
+    new_engagement = Map.put(doc.content["engagement"], "ts", iso_ago(seconds_ago))
+    new_content = Map.put(doc.content, "engagement", new_engagement)
+
+    {1, _} =
+      from(d in Document, where: d.id == ^doc.id)
+      |> Repo.update_all(set: [content: new_content])
+
+    Repo.get!(Document, doc.id)
+  end
+
   defp mk_thought_task!(doc_id, scope, status, engagement) do
     extra =
       case engagement do
@@ -698,6 +714,93 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
         assert reloaded.content["engagement"] == stale
         assert events_for(task.doc_id, TtlSweeper.engagement_event_kind()) == []
       end
+    end
+
+    # ─── The durable/ephemeral split (PDS wave 23) ──────────────────────────
+    #
+    # The lapse releases the LEASE. It must not eat the ADJUDICATION. Measured
+    # on guerrilla before the split: a row staged at 20:02:00.455593 lost its
+    # engagement.note at 20:17:01.430503 (15m00.97 s) while the lifecycle flip
+    # survived — `bp task stage --note` returning ok:true on a field with a
+    # 15-minute half-life. These two reds are the guard.
+    test "a reason written through the stage verb SURVIVES the lapse that clears its lease",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      reason = "parked: waiting on the crown proof — reopen when pds-w20-crown-fire closes"
+      task = mk_task!(uniq("eng-durable"), scope)
+
+      {:ok, staged} =
+        Tasks.stage(task.id, "considering",
+          object: "research",
+          holder: "cycle-w23",
+          note: reason
+        )
+
+      # The reason is NOT on the lease the sweeper deletes…
+      refute Map.has_key?(staged.content["engagement"], "note")
+      assert staged.content["disposition_reason"] == reason
+
+      # …so a sweep past the TTL takes the lease and leaves the reason.
+      staged = age_engagement!(staged, 600)
+      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+
+      reloaded = Repo.get!(Document, staged.id)
+      refute Map.has_key?(reloaded.content, "engagement")
+      assert reloaded.content["lifecycle_status"] == "considering"
+
+      assert reloaded.content["disposition_reason"] == reason,
+             "the lapse ate the durable adjudication reason — a park that reports " <>
+               "success and then forgets why is exactly the lie this epic closes"
+
+      # And the lapse is honest about what it took: the event carries the lease.
+      [ev] = events_for(staged.doc_id, TtlSweeper.engagement_event_kind())
+      assert ev.document["engagement_lapsed"]["engagement"]["object"] == "research"
+      assert ev.document["content"]["disposition_reason"] == reason
+    end
+
+    test "a LEGACY engagement.note is promoted to disposition_reason on the way out",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      # A row written BEFORE the split: the reason still rides the lease.
+      engagement = %{
+        "object" => "research",
+        "holder" => "cycle-old",
+        "ts" => iso_ago(600),
+        "note" => "parked in wave 22: blocked on the status read-path"
+      }
+
+      task = mk_thought_task!(uniq("eng-legacy"), scope, "considering", engagement)
+
+      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+
+      reloaded = Repo.get!(Document, task.id)
+      refute Map.has_key?(reloaded.content, "engagement")
+
+      assert reloaded.content["disposition_reason"] ==
+               "parked in wave 22: blocked on the status read-path"
+    end
+
+    test "promotion never overwrites a reason already adjudicated", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("eng-nooverwrite"), scope, %{
+          "lifecycle_status" => "considering",
+          "disposition_reason" => "the adjudicated reason",
+          "engagement" => %{
+            "object" => "research",
+            "holder" => "cycle-old",
+            "ts" => iso_ago(600),
+            "note" => "a stale lease leftover"
+          }
+        })
+
+      assert %{swept: 1, skipped: 0} = TtlSweeper.sweep_engagement(300)
+
+      assert Repo.get!(Document, task.id).content["disposition_reason"] ==
+               "the adjudicated reason"
     end
 
     test "perform/1 runs BOTH sweeps: lease reap + engagement lapse in one job",
