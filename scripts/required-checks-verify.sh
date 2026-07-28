@@ -282,8 +282,15 @@ EOF
     # Here-string for the same SIGPIPE reason as above; the tuple is already in
     # hand, this only stops discarding it.
     concl="$(awk -F'\t' -v c="$ctx" '$1 == c { print $2 }' <<<"$names")"
+    # `skipped` is DELIBERATELY ABSENT from this set, and the omission is the
+    # reviewed decision (wave 4 review). GitHub counts a required check whose
+    # conclusion is `skipped` as SATISFYING protection — so listing it here
+    # would make the merge verb refuse a head GitHub would happily merge, which
+    # is a lie in the opposite direction inside an epic about honest gates. The
+    # states below share one property `skipped` does not: GitHub blocks on them
+    # AND nothing re-reports them on its own. Probe 16/16 pins this both ways.
     case "$concl" in
-      cancelled|skipped|timed_out|stale|action_required)
+      cancelled|timed_out|stale|action_required)
         cancelled="$cancelled$ctx (concluded $concl)
 "
         ;;
@@ -474,49 +481,49 @@ JSON
 
   echo "── verify selftest: every clause proven by mutation ──"
 
-  probe "1/15 honest read-back passes" 0 \
+  probe "1/16 honest read-back passes" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks[0].context = "Elixir gat"' "$good_spec" > "$tmp/typo.json"
-  probe "2/15 a typo'd context reds (GitHub accepts it; we must not)" 1 \
+  probe "2/16 a typo'd context reds (GitHub accepts it; we must not)" 1 \
     --spec "$tmp/typo.json" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = null' "$good_rb" > "$tmp/nullapp.json"
-  probe "3/15 app_id:null where the spec pins an id is HARD" 1 \
+  probe "3/16 app_id:null where the spec pins an id is HARD" 1 \
     --spec "$good_spec" --readback "$tmp/nullapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = 8329' "$good_rb" > "$tmp/wrongapp.json"
-  probe "4/15 a wrong app_id reds" 1 \
+  probe "4/16 a wrong app_id reds" 1 \
     --spec "$good_spec" --readback "$tmp/wrongapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.enforce_admins.enabled = false' "$good_rb" > "$tmp/breakglass.json"
-  probe "5/15 a left-open break-glass (enforce_admins false) reds" 1 \
+  probe "5/16 a left-open break-glass (enforce_admins false) reds" 1 \
     --spec "$good_spec" --readback "$tmp/breakglass.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_linear_history.enabled = true' "$good_rb" > "$tmp/oob.json"
-  probe "6/15 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
+  probe "6/16 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
     --spec "$good_spec" --readback "$tmp/oob.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '. + {"required_deployments": {"enabled": true}}' "$good_rb" > "$tmp/extra.json"
-  probe "7/15 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
+  probe "7/16 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
     --spec "$good_spec" --readback "$tmp/extra.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.strict = true' "$good_rb" > "$tmp/strict.json"
-  probe "8/15 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
+  probe "8/16 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
     --spec "$good_spec" --readback "$tmp/strict.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks += [{"context":"No workflow emits me","app_id":15368}]' "$good_spec" > "$tmp/deadspec.json"
-  probe "9/15 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
+  probe "9/16 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
     --spec "$tmp/deadspec.json" --readback "$good_rb" --runs "$good_runs" --sha probe --deadlock || rc=1
 
-  probe "10/15 an unreadable protection read-back FAILS (never skips)" 1 \
+  probe "10/16 an unreadable protection read-back FAILS (never skips)" 1 \
     --spec "$good_spec" --readback "$tmp/does-not-exist.json" --runs "$good_runs" --sha probe || rc=1
 
-  probe "11/15 an unreadable check-run feed FAILS (never skips)" 1 \
+  probe "11/16 an unreadable check-run feed FAILS (never skips)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/no-runs.json" --sha probe || rc=1
 
   echo '{ "check_runs": [] }' > "$tmp/emptyruns.json"
-  probe "12/15 an EMPTY check-run feed FAILS — agreement against nothing is the vacuous pass this epic exists for" 1 \
+  probe "12/16 an EMPTY check-run feed FAILS — agreement against nothing is the vacuous pass this epic exists for" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/emptyruns.json" --sha probe || rc=1
 
   # 13 & 14 are the D56 clause: the detector used to match on `cut -f1` and
@@ -526,7 +533,7 @@ JSON
   # 13 must be 4 and 14 must be 0, and reverting the clause makes 13 return 0.
   jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "cancelled"' \
     "$good_runs" > "$tmp/cancelledruns.json"
-  probe "13/15 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
+  probe "13/16 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --deadlock || rc=1
 
   # The mirror clause: cancellation on a NON-required check is none of our
@@ -534,14 +541,25 @@ JSON
   # checks are cancelled by concurrency groups all day.
   jq '(.check_runs[] | select(.name == "Boundary gate (advisory)") | .conclusion) = "cancelled"' \
     "$good_runs" > "$tmp/advcancelled.json"
-  probe "14/15 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
+  probe "14/16 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/advcancelled.json" --sha probe --deadlock || rc=1
 
   # The caller-scope clause above, proven rather than asserted: --ci must NOT
   # turn a cancelled run on an arbitrary sampled head into a red, while
   # --deadlock (13/15) still exits 4 on the identical input.
-  probe "15/15 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
+  probe "15/16 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --ci || rc=1
+
+  # 16 pins the scope of the RE-RUN set from the other side. GitHub counts a
+  # required check concluding `skipped` as SATISFYING protection, so a detector
+  # that called it RE-RUN would refuse a head GitHub would merge — a false stall
+  # in a wrapper whose whole promise is that it never lies about the merge. The
+  # builder had `skipped` in the set as an unmeasured guess; the review took it
+  # out and pinned the removal here, so re-adding it reds this probe.
+  jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "skipped"' \
+    "$good_runs" > "$tmp/skippedruns.json"
+  probe "16/16 a required context concluding SKIPPED is NOT RE-RUN (GitHub treats skipped as satisfying; refusing it would be a false stall)" 0 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$tmp/skippedruns.json" --sha probe --deadlock || rc=1
 
   rm -rf "$tmp"
   echo

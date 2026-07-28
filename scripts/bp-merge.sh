@@ -56,7 +56,12 @@
 #   level. Re-run first. It is thirty seconds and it is right most of the time.
 #
 # EXIT CODES (this script's own; unrelated to gh's, which is always 1)
-#   0 merged · 1 refused (see the quoted message) · 2 over budget · 3 deadlock
+#   0 merged · 1 refused (see the quoted message) · 2 over budget
+#   3 the PRE-FLIGHT or the set-difference detector refused: this head can never
+#     go green as it stands (DEADLOCK, or a required context concluded in a
+#     state nothing re-reports). Precise scope, stated because it is easy to
+#     misread: a DEADLOCK or RERUN learned from GH's OWN refusal string mid-loop
+#     exits 1 like every other quoted refusal — 3 means the DETECTOR said so.
 #
 # USAGE
 #   scripts/bp-merge.sh              # no arguments; the PR is derived from HEAD
@@ -105,7 +110,7 @@ refusal_advice() {
   case "$state" in
     CLIENT_BLOCK)
       printf 'gh blocked this CLIENT-SIDE from its own read of the base branch policy; the merge API was never called.\n'
-      printf 'RESOLVE: gh pr view %s --json mergeStateStatus,mergeable,mergeStateStatus\n' "$pr"
+      printf 'RESOLVE: gh pr view %s --json mergeStateStatus,mergeable,statusCheckRollup\n' "$pr"
       ;;
     PLURAL)
       printf 'A plural refusal carries COUNTS and CATEGORIES, never names — and the categories DO NOT SUM\n'
@@ -254,7 +259,11 @@ merge_loop() {
 
 main() {
   case "${1:-}" in
-    -h|--help) sed -n '2,70p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # Print the header block by SHAPE, not by a hard-coded line range: the
+    # range version silently truncated --help the moment anyone added a line
+    # to a comment above, which is the same class of quiet wrongness this
+    # script exists to refuse.
+    -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
     "") : ;;
     *) die "this command takes NO arguments (got '$1'); the PR is derived from the current branch." ;;
   esac
