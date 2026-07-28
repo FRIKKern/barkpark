@@ -288,6 +288,46 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   @spec import_bundle(binary(), keyword()) ::
           {:ok, stats()} | {:error, {:workspace_slug_conflict, map()} | term()}
   def import_bundle(bundle, opts \\ []) when is_binary(bundle) do
+    mode = import_mode!(opts)
+    {manifest, dumps} = Archive.unpack(bundle)
+    import_unpacked(manifest, dumps, mode)
+  end
+
+  @doc """
+  Re-import a bundle from a FILE, streaming each member off disk.
+
+  The production import path (PDS wave 23). Same manifest, same stats, same
+  errors as `import_bundle/2` — the difference is that neither the bundle nor
+  any member is ever a binary in the BEAM: the tar is extracted into a scratch
+  directory and each `COPY … FROM STDIN` is fed from `File.stream!/2` in 64 KiB
+  chunks. `COPY FROM STDIN` is a byte stream, so chunk boundaries need not be
+  line-aligned.
+
+  Peak is **1x the largest single member**, not constant memory — `:erl_tar`
+  has no chunked extract API, so the largest member is materialised once while
+  it is written out. On guerrilla that is ~1.31 GB (`mutation_events`), against
+  ~3x the whole ~2.6 GB archive for `import_bundle/2`.
+
+  Each member file is deleted the MOMENT its COPY completes, and the extraction
+  directory is `rm_rf`'d in an `after` clause; a SIGKILL that outruns both is
+  collected by `Janitor` via the `bp-ws-import-` prefix. THE CALLER still owns
+  `bundle_path` — this function never deletes it.
+  """
+  @spec import_bundle_file(Path.t(), keyword()) ::
+          {:ok, stats()} | {:error, {:workspace_slug_conflict, map()} | term()}
+  def import_bundle_file(bundle_path, opts \\ []) when is_binary(bundle_path) do
+    mode = import_mode!(opts)
+    dir = Path.join(Path.dirname(bundle_path), "members-#{System.unique_integer([:positive])}")
+
+    try do
+      {manifest, paths} = Archive.unpack_to_dir(bundle_path, dir)
+      import_unpacked(manifest, Map.new(paths, fn {t, p} -> {t, {:file, p}} end), mode)
+    after
+      File.rm_rf(dir)
+    end
+  end
+
+  defp import_mode!(opts) do
     mode = Keyword.get(opts, :mode, :clean)
 
     unless mode in [:clean, :merge] do
@@ -295,8 +335,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             "unknown import mode #{inspect(mode)} (expected :clean or :merge)"
     end
 
-    {manifest, dumps} = Archive.unpack(bundle)
+    mode
+  end
 
+  defp import_unpacked(manifest, dumps, mode) do
     # A readable tar whose manifest names a DIFFERENT format is a caller
     # mistake, not an engine fault — InvalidBundleError so the HTTP edge
     # answers 422 invalid_bundle instead of the opaque 500 the old
@@ -1008,7 +1050,29 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         0
   end
 
-  defp import_member(%{"row_count" => 0}, _dump, _mode), do: 0
+  # ── COPY sources: a binary dump or a member file on disk ─────────────────────
+  #
+  # `import_bundle/2` hands each member as BYTES; `import_bundle_file/2` hands
+  # `{:file, path}` and the bytes never enter the BEAM whole. Both end in the
+  # same `Enum.into(source, stream)` — `Ecto.Adapters.SQL.stream/4` collects any
+  # enumerable of iodata into `COPY … FROM STDIN`, and COPY FROM STDIN is a BYTE
+  # stream, so a 64 KiB chunk boundary mid-row is safe (it is exactly what the
+  # wire protocol does anyway).
+  @copy_chunk_bytes 65_536
+
+  defp copy_source({:file, path}), do: File.stream!(path, @copy_chunk_bytes)
+  defp copy_source(dump) when is_binary(dump), do: [dump]
+
+  # Free the member the MOMENT it is in Postgres. Peak transient disk is what
+  # this slice trades BEAM peak for, so holding every extracted member until the
+  # import finishes would make the scratch as large as the whole bundle again.
+  defp release_member({:file, path}), do: File.rm(path)
+  defp release_member(dump) when is_binary(dump), do: :ok
+
+  defp import_member(%{"row_count" => 0}, dump, _mode) do
+    release_member(dump)
+    0
+  end
 
   defp import_member(entry, dump, mode) do
     table = entry["name"]
@@ -1029,6 +1093,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         insert_on_conflict(table, col_list, dump)
     end
 
+    release_member(dump)
+
     entry["row_count"]
   end
 
@@ -1038,7 +1104,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     stream =
       Ecto.Adapters.SQL.stream(Repo, "COPY #{qualified_table} (#{col_list}) FROM STDIN", [])
 
-    Enum.into([dump], stream)
+    Enum.into(copy_source(dump), stream)
   end
 
   # Idempotent import (charter D7): COPY into a temp shaped like the target, then
@@ -1054,7 +1120,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     )
 
     stream = Ecto.Adapters.SQL.stream(Repo, "COPY #{qi(tmp)} (#{col_list}) FROM STDIN", [])
-    Enum.into([dump], stream)
+    Enum.into(copy_source(dump), stream)
 
     Repo.query!(
       "INSERT INTO #{qi(table)} (#{col_list}) SELECT #{col_list} FROM #{qi(tmp)} " <>
@@ -1085,7 +1151,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     )
 
     stream = Ecto.Adapters.SQL.stream(Repo, "COPY #{qi(tmp)} (#{col_list}) FROM STDIN", [])
-    Enum.into([dump], stream)
+    Enum.into(copy_source(dump), stream)
 
     arbiter = order_cols |> Enum.map(&qi/1) |> Enum.join(", ")
 
