@@ -4412,3 +4412,69 @@ crown-blocked rows + the D300 housekeeping evidence) and R1 `pds-w22-triage-rema
 remaining ~82 rows adjudicated one at a time by content, plus the D297 orphan re-parent). The two triage
 slices partition the 136 rows disjointly and both close under D298's re-read proof. **NO CROWN RE-FIRE. NO
 FABLE ANYWHERE** (monthly spend limit — every slice is opus at medium).
+
+### Wave 2026-07-27 (22) — SUCCESS MUST BE OBSERVABLE — round 1 built + reviewed, grade B+ (paper `pds-wave-22-2026-07-27`)
+
+**WHAT LANDED — 7 slices, all gate-green on their final branch, all pushed, PRs #6420–#6426 open (the lead merges).**
+
+| slice | final branch | PR |
+|---|---|---|
+| `pds-w22-close-holder-criteria-honesty` | `…closer-held-the-0-r` | #6420 |
+| `pds-w22-deploy-stamp-and-harness` | `…fail-on-advance-a-1` | #6421 |
+| `pds-w22-status-commit-read-path` | `…read-the-runni-2` | #6422 |
+| `pds-w22-receipt-and-sidecar-honesty` | `…the-rows-it-mo-3` | #6423 |
+| `pds-w22-triage-harness-and-crown-family` | `…and-the-crown--4` | #6424 |
+| `pds-w22-triage-remaining-rows` | `…is-adjudica-5` | #6425 |
+| `pds-w22-manifest-and-counts-honesty` | `…stops-advertis-6-r` | #6426 |
+
+Five product verbs stopped lying: the close ledger (holder + criteria + sentinel gates), the deploy slot
+stamp (written only after the health gate) and its harness (a stateful fake HEAD, so ADVANCE and STALL are
+finally distinguishable), the public running-commit read path, the import receipt and blob byte-verify, and
+the capabilities `writes` bit (16 mutators were advertised read-only to MCP clients) + a counts perspective
+that was silently discarded. Every one was proven by mutation, not by reading.
+
+- **PDS-D305 — MERGING #6420 CHANGES HOW EVERY SEAL CLOSE WORKS, INCLUDING THIS WAVE'S OWN.** `api/**`
+  auto-deploys on merge, so the moment #6420 lands, guerrilla enforces the holder gate. Every wave-22 slice
+  row's last holder is its BUILDER, so a lead sealing them is a foreign close: `409 not_holder:<builder>`
+  unless the close carries `--set holder_override="<why>"`. A close over a still-unmet criterion needs
+  `--set criteria_override="<why>"`. Both ride the ordinary close body (`bp task close … --set`); the
+  reviewer wired them through `tasks_controller` close/2 because the builder's slice left the gates
+  REFUSE-ONLY over the wire — a lead could not have sealed anything and nobody could have closed over an
+  honest unmet criterion at all. **Merge #6420 LAST, or seal the other six rows before it deploys.**
+- **PDS-D306 — `content.engagement.note` IS NOT A DURABLE FIELD; `content.disposition_reason` IS.** The
+  reviewer's independent census over the whole epic scope (265 rows) measured **engagement.note survival 0
+  of 31** parked rows and **disposition_reason survival 12 of 12**. The harness/crown slice's 8 parks all
+  survived because it wrote BOTH; the remaining-rows slice's 23 parks were written with `bp task stage
+  --note` alone and **19 lost their reason within hours**. All 31 rows carry a `content.github` key,
+  consistent with a reconciler rebuilding `content` wholesale. The reviewer re-parked all 19 into
+  `disposition_reason` (19/19 re-read and confirmed), but their ORIGINAL adjudication text is
+  unrecoverable — Truth-Grip wave 10's failure reproduced INSIDE the wave that wrote D298 against it.
+  Ruling: **every park reason is written to `content.disposition_reason`. `bp task stage --note` alone is
+  never a disposition.** `pds-bl-stage-note-evaporates` was closed as a duplicate into
+  `pds-bl-park-note-evaporates`, which now carries the census.
+- **PDS-D307 — THE BLOCKING SET SHRANK 145 → ~124 OPEN, AND ONLY 5 OF THAT IS A FIX.** 137 rows were
+  adjudicated by content (101 OPEN-with-a-named-owner, 31 PARKED, 5 CLOSED). That is an honest triage, not
+  a burn-down: 31 are parks carrying reactivation triggers and the closes are dedup/already-fixed. The
+  D300 housekeeping closed on evidence (both w21 rows already done 7/7 and 6/6, both SELF closes; the
+  `barkpark-w21-fire` worktree absent from disk AND from all 1,466 registered worktrees).
+  **`git worktree prune` was NOT run and stays forbidden.**
+- **PDS-D308 — THE LARGE-TASK WRITE CEILING IS LIVE AND BIT THE REVIEWER TOO.** A ~1 KB
+  `disposition_reason` patch onto `pds-w22-triage-harness-and-crown-family` published `422
+  validation_failed`; the same field at ~260 B published first try. `pds-bl-large-task-write-500` is real,
+  reproducible, and now has two independent witnesses.
+
+**WHAT DID NOT LAND.** `pds-w22-deploy-readback` (round 2 by design — it reads the `/status.json` field
+#6422 adds, so it dispatches only after #6422 merges). The deploy verb still exits 0 and logs HEALTHY on a
+stall: wave 22 made that VISIBLE to the harness, it did not make the verb refuse. And the four named
+starting points are 2 of 4 done — `deploy-success-without-advance` is half-closed (observable, not refused),
+`close-holder-and-criteria-gate` is BUILT, `streaming-workspace-export` was re-scoped to its import half
+(`pds-bl-bounded-import-unpack`), and **`pds-bl-scratch-pointer-concurrency` was taken by NO slice** — its
+defect 2 was stamped already-fixed and defect 1 is still open.
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** (1) Dispatch `pds-w22-deploy-readback` the moment #6422 merges. (2) Fix
+the evaporation defect (`pds-bl-park-note-evaporates`) — the ledger is this epic's spine and 19 lost
+adjudications is the wave's own failure class. (3) Take the correctness rows the triage named as the
+strongest build candidates: `pds-bl-scratch-pointer-concurrency` (defect 1), `pds-bl-w16-full-meta-permissive-default`,
+`pds-bl-w16-failed-refetch-destroys-parked-bundle`, `pds-bl-bounded-import-unpack` — all report-success-while-wrong
+shapes, all mutation-provable without any fire. (4) Decide whether D289's doc-as-read criteria gate is wider
+than the defect it closes; that judgment is flagged HIGH-FLIP-RISK and an independent second reviewer is owed.
