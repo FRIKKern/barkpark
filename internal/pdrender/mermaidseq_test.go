@@ -107,3 +107,52 @@ func TestSequenceDispatch(t *testing.T) {
 		t.Errorf("sequence render missing lifelines/arrow/caption:\n%s", got)
 	}
 }
+
+// TestSequenceFallsBackRatherThanEllipsizing requires the native ladder to yield
+// to the complete folded-source representation when actor or message text cannot
+// fit its geometric slot.
+func TestSequenceFallsBackRatherThanEllipsizing(t *testing.T) {
+	ctx := RenderCtx{Width: 48, Theme: DarkTheme(), Profile: NoColor}
+	source := "sequenceDiagram\n" +
+		" participant Client as Authenticated Production Reader\n" +
+		" participant API as Revision Fenced Content API\n" +
+		" Client->>API: verify the complete current revision before shipping"
+	block := Block{Type: "diagram", Attrs: map[string]any{
+		"source": source,
+	}}
+	got := ansi.Strip(strings.Join(diagramRenderer{}.Render(block, ctx), "\n"))
+	compact := semanticCompact(got)
+	if !strings.Contains(got, "◇ Mermaid diagram") {
+		t.Fatalf("oversized sequence should use complete folded source:\n%s", got)
+	}
+	for _, want := range []string{
+		"Authenticated Production Reader",
+		"Revision Fenced Content API",
+		"verify the complete current revision before shipping",
+	} {
+		if !strings.Contains(compact, semanticCompact(want)) {
+			t.Errorf("sequence fallback lost %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "…") {
+		t.Errorf("sequence fallback introduced ellipsis:\n%s", got)
+	}
+}
+
+// TestSequenceWideGlyphsUseCompleteSourceFallback locks the geometry boundary:
+// the native rune buffer is single-cell-only, so CJK/combining labels must
+// decline before placement and let the complete Mermaid source render.
+func TestSequenceWideGlyphsUseCompleteSourceFallback(t *testing.T) {
+	for _, src := range []string{
+		"sequenceDiagram\n participant A as 東京\n participant B as Oslo\n A->>B: 状態確認",
+		"sequenceDiagram\n participant A as Cafe\u0301\n participant B as Oslo\n A->>B: ready",
+	} {
+		parsed := parseMermaid(src)
+		if out := renderSequence(parsed.seq, RenderCtx{
+			Width: 80, Theme: DarkTheme(), Profile: NoColor,
+		}); out != nil {
+			t.Fatalf("wide/combining glyph sequence must decline native placement:\n%s",
+				ansi.Strip(strings.Join(out, "\n")))
+		}
+	}
+}

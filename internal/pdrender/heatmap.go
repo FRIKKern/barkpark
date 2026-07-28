@@ -49,8 +49,9 @@ import (
 //	            marginals and values engage the quantile dual-encode cell path; with
 //	            NEITHER set the legacy grid renders byte-identically.
 //	  - row/colLabels  optional string arrays; rows down the left gutter, cols as a
-//	            compact dim header (truncated to ≤4 chars in the new modes). Omitted
-//	            gracefully when absent.
+//	            compact dim header when short. Long labels wrap or move to a numbered
+//	            legend; authored label text is never discarded. Omitted gracefully
+//	            when absent.
 //
 // AUTO-DEGRADE (load-bearing): the truecolor ramp emits lipgloss 24-bit colour
 // ONLY when ctx.Profile == TrueColor. Under NoColor / ANSI16 / ANSI256 the block
@@ -489,9 +490,10 @@ func heatRenderCalendar(grid [][]float64, attrs map[string]any, ctx RenderCtx) [
 // heatRenderMatrixExtras draws the small rows×cols heat matrix with the opt-in
 // marginals (Σ row + Σ column of sums, grand total in the corner) and/or exact
 // values. Cells dual-encode through the quantile bins; with values:true each cell
-// shows its right-aligned number (colour still reinforcing the bin). Labels are
-// truncated to ≤4 chars. Reached only when marginals||values is set, so the legacy
-// grid stays byte-identical.
+// shows its right-aligned number (colour still reinforcing the bin). Long column
+// labels move into a numbered, wrapped legend; long row labels wrap in their
+// gutter. No authored label is replaced with an ellipsis. Reached only when
+// marginals||values is set, so the legacy grid stays byte-identical.
 func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCtx) []string {
 	bins := HeatQuantileBins(grid)
 	showVals := attrBool(attrs, "values")
@@ -525,7 +527,8 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 		}
 	}
 
-	// Left gutter = widest row label (≤4), plus the Σ label if marginals.
+	// Left gutter = widest row label, capped to a third of the surface. A label
+	// beyond the cap wraps onto continuation rows rather than being truncated.
 	labelW := 0
 	for _, l := range rowLabels {
 		if n := runeWidth(l); n > labelW {
@@ -535,17 +538,44 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 	if showMarg && labelW < 1 {
 		labelW = 1
 	}
-	if labelW > 4 {
-		labelW = 4
+	labelCap := clampWidth(ctx.Width) / 3
+	if labelCap < 4 {
+		labelCap = 4
+	}
+	if labelCap > 24 {
+		labelCap = 24
+	}
+	if labelW > labelCap {
+		labelW = labelCap
 	}
 
-	// Per-column width: enough for the label (≤4), and for the widest value in the
-	// column (incl. its Σ sum) when values are shown; else 1 for a pure shade cell.
+	// Labels wider than the historical four-cell header move into a complete
+	// numbered legend. The matrix header then uses those compact indices, keeping
+	// the data grid narrow without sacrificing the authored vocabulary.
+	numberedCols := false
+	for j := 0; j < nCols && j < len(colLabels); j++ {
+		if runeWidth(colLabels[j]) > 4 {
+			numberedCols = true
+			break
+		}
+	}
+
+	// Per-column width: enough for the compact header (label or numbered index)
+	// and for the widest value in the column (incl. its Σ sum) when values are
+	// shown; else 1 for a pure shade cell.
 	colW := make([]int, nCols)
 	for j := 0; j < nCols; j++ {
 		w := 1
 		if j < len(colLabels) {
-			if n := runeWidth(padOrTruncate(colLabels[j], 4)); n > w {
+			header := colLabels[j]
+			if numberedCols {
+				header = strconv.Itoa(j + 1)
+			} else {
+				// Preserve the established four-cell compact header geometry for
+				// already-short labels.
+				w = 4
+			}
+			if n := runeWidth(header); n > w {
 				w = n
 			}
 		}
@@ -583,8 +613,37 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 	if labelW > 0 {
 		gutter = labelW + 2
 	}
+	matrixW := gutter
+	for _, width := range colW {
+		matrixW += width
+	}
+	if nCols > 1 {
+		matrixW += nCols - 1
+	}
+	if showMarg {
+		matrixW += 2 + margW
+	}
+	if matrixW > clampWidth(ctx.Width) {
+		return heatMatrixLedger(
+			grid, rowLabels, colLabels, rowSum, colSum, grand, showVals, showMarg, ctx,
+		)
+	}
 
 	var out []string
+
+	if numberedCols {
+		legend := make([]string, 0, nCols)
+		for j := 0; j < nCols && j < len(colLabels); j++ {
+			legend = append(legend, strconv.Itoa(j+1)+" "+colLabels[j])
+		}
+		out = append(
+			out,
+			hardBoundDisplayLines(
+				[]string{ctx.Theme.Dim.Render("Columns: " + strings.Join(legend, " · "))},
+				clampWidth(ctx.Width),
+			)...,
+		)
+	}
 
 	// Header row: col labels (dim), plus a Σ header over the marginal column.
 	if len(colLabels) > 0 || showMarg {
@@ -593,7 +652,11 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 		for j := 0; j < nCols; j++ {
 			lbl := ""
 			if j < len(colLabels) {
-				lbl = padOrTruncate(colLabels[j], 4)
+				if numberedCols {
+					lbl = strconv.Itoa(j + 1)
+				} else {
+					lbl = padOrTruncate(colLabels[j], 4)
+				}
 			}
 			if j > 0 {
 				sb.WriteString(" ")
@@ -607,19 +670,14 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 		out = append(out, ctx.Theme.Dim.Render(sb.String()))
 	}
 
-	// Body rows: label gutter + a cell per column + optional Σ row-sum.
+	// Body rows: wrapped label gutter + a cell per column + optional Σ row-sum.
+	// Data sits on the label's final continuation row so the full label reads
+	// uninterrupted before its values.
 	for i, row := range grid {
-		var sb strings.Builder
-		if labelW > 0 {
-			label := ""
-			if i < len(rowLabels) {
-				label = rowLabels[i]
-			}
-			sb.WriteString(ctx.Theme.Dim.Render(padOrTruncate(label, labelW)) + "  ")
-		}
+		var data strings.Builder
 		for j := 0; j < nCols; j++ {
 			if j > 0 {
-				sb.WriteString(" ")
+				data.WriteString(" ")
 			}
 			bin := -1
 			var v float64
@@ -627,20 +685,36 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 				bin = bins[i][j]
 				v = row[j]
 			}
-			sb.WriteString(heatMatrixCell(bin, v, colW[j], showVals, ctx))
+			data.WriteString(heatMatrixCell(bin, v, colW[j], showVals, ctx))
 		}
 		if showMarg {
-			sb.WriteString("  ")
-			sb.WriteString(ctx.Theme.Body.Render(heatPadLeft(heatSumField(rowSum[i], margW, showVals), margW)))
+			data.WriteString("  ")
+			data.WriteString(ctx.Theme.Body.Render(heatPadLeft(heatSumField(rowSum[i], margW, showVals), margW)))
 		}
-		out = append(out, sb.String())
+
+		if labelW == 0 {
+			out = append(out, data.String())
+			continue
+		}
+		label := ""
+		if i < len(rowLabels) {
+			label = rowLabels[i]
+		}
+		labelLines := hardBoundDisplayLines([]string{label}, labelW)
+		for j, line := range labelLines {
+			rendered := ctx.Theme.Dim.Render(padRight(line, labelW))
+			if j == len(labelLines)-1 {
+				rendered += "  " + data.String()
+			}
+			out = append(out, rendered)
+		}
 	}
 
 	// Σ footer: column sums + grand total.
 	if showMarg {
 		var sb strings.Builder
 		if labelW > 0 {
-			sb.WriteString(ctx.Theme.Dim.Render(padOrTruncate("Σ", labelW)) + "  ")
+			sb.WriteString(ctx.Theme.Dim.Render(padRight("Σ", labelW)) + "  ")
 		}
 		for j := 0; j < nCols; j++ {
 			if j > 0 {
@@ -653,6 +727,90 @@ func heatRenderMatrixExtras(grid [][]float64, attrs map[string]any, ctx RenderCt
 		out = append(out, sb.String())
 	}
 
+	out = append(out, heatDualLegend(ctx))
+	return out
+}
+
+// heatMatrixLedger is the complete narrow-surface representation for a matrix
+// whose row-label gutter plus aligned columns cannot fit. It preserves every
+// actual column and authored label in a numbered vertical ledger; values:true
+// carries exact numbers, while values:false keeps the quantile shade contract.
+// This avoids letting the generic document boundary wrap a matrix row and sever
+// its header mapping.
+func heatMatrixLedger(
+	grid [][]float64,
+	rowLabels, colLabels []string,
+	rowSum, colSum []float64,
+	grand float64,
+	showVals bool,
+	showMarg bool,
+	ctx RenderCtx,
+) []string {
+	w := clampWidth(ctx.Width)
+	bins := HeatQuantileBins(grid)
+	out := hardBoundDisplayLines(
+		[]string{ctx.Theme.Dim.Render("Matrix ledger · complete narrow fallback")},
+		w,
+	)
+	if len(colLabels) > 0 {
+		legend := make([]string, 0, len(colSum))
+		for j := 0; j < len(colSum) && j < len(colLabels); j++ {
+			legend = append(legend, strconv.Itoa(j+1)+" "+colLabels[j])
+		}
+		out = append(out, hardBoundDisplayLines(
+			[]string{ctx.Theme.Dim.Render("Columns: " + strings.Join(legend, " · "))},
+			w,
+		)...)
+	}
+	for i, row := range grid {
+		label := "Row " + strconv.Itoa(i+1)
+		if i < len(rowLabels) && rowLabels[i] != "" {
+			label += ": " + rowLabels[i]
+		}
+		out = append(out, hardBoundDisplayLines(
+			[]string{ctx.Theme.Body.Render(label)},
+			w,
+		)...)
+
+		values := make([]string, 0, len(colSum)+1)
+		for j := 0; j < len(colSum); j++ {
+			value := 0.0
+			bin := -1
+			if j < len(row) {
+				value = row[j]
+				bin = bins[i][j]
+			}
+			display := heatNum(value)
+			if !showVals {
+				display = heatDualCell(bin, 1, ctx)
+			}
+			values = append(values, strconv.Itoa(j+1)+"="+display)
+		}
+		if showMarg {
+			values = append(
+				values,
+				"Σ="+heatSumField(rowSum[i], 1, showVals),
+			)
+		}
+		out = append(out, hardBoundDisplayLines(
+			[]string{ctx.Theme.Dim.Render(strings.Join(values, " · "))},
+			w,
+		)...)
+	}
+	if showMarg {
+		totals := make([]string, 0, len(colSum)+1)
+		for j, value := range colSum {
+			totals = append(
+				totals,
+				strconv.Itoa(j+1)+"="+heatSumField(value, 1, showVals),
+			)
+		}
+		totals = append(totals, "total="+heatSumField(grand, 1, showVals))
+		out = append(out, hardBoundDisplayLines(
+			[]string{ctx.Theme.Body.Render("Σ columns: " + strings.Join(totals, " · "))},
+			w,
+		)...)
+	}
 	out = append(out, heatDualLegend(ctx))
 	return out
 }

@@ -50,10 +50,10 @@ func innerWidth(ctx RenderCtx) int {
 
 // ── diagram (Mermaid) ───────────────────────────────────────────────────────
 // Mirrors compose_block(diagram)'s EMAIL-mode degradation: a bordered box with
-// a header naming the detected Mermaid kind, the folded source (dim, each line
-// truncated to the inner width), and a "Figure N." caption noting the limit.
-// The article-mode `<pre class="mermaid">` browser render has no terminal
-// analogue — no library draws mermaid — so the box IS the honest ceiling.
+// a header naming the detected Mermaid kind, the complete wrapped source, and a
+// "Figure N." caption noting the limit. The article-mode `<pre class="mermaid">`
+// browser render has no full terminal analogue, so the box is the honest
+// complete-source ceiling for kinds the native renderer cannot draw.
 //
 // The SEAM is now realized for the kinds we can draw well: a native, dependency-
 // free layout engine turns `flowchart`/`graph` source into ranked boxes + a
@@ -86,7 +86,7 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 			art = renderSequence(doc.seq, ctx)
 		}
 		if len(art) > 0 {
-			return append(art, diagramCaption(n, caption, ctx))
+			return append(art, diagramCaption(n, caption, ctx)...)
 		}
 	}
 
@@ -95,10 +95,17 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 	var sb strings.Builder
 	sb.WriteString(ctx.Theme.FieldLabel.Render("◇ Mermaid diagram (" + sanitizeText(kind) + ")"))
 
-	// Folded source: each line dim + truncated so nothing overflows the box.
+	// Folded source: preserve every authored token. A narrow terminal may add
+	// continuation rows, but it must not replace source with renderer ellipsis.
 	for _, line := range strings.Split(strings.TrimRight(source, "\n"), "\n") {
-		sb.WriteString("\n")
-		sb.WriteString(ctx.Theme.Dim.Render(truncateANSI(sanitizeCodeText(line), inner)))
+		wrapped := hardBoundDisplayLines(
+			[]string{ctx.Theme.Dim.Render(sanitizeCodeText(line))},
+			inner,
+		)
+		for _, continuation := range wrapped {
+			sb.WriteString("\n")
+			sb.WriteString(continuation)
+		}
 	}
 
 	// "Figure N." caption — shares the document-global counter, like figure —
@@ -118,12 +125,15 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 // the same document-global figure counter figure/asciicast share. A drawn
 // diagram needs no "view in Studio" suffix (it IS the render), unlike the folded
 // fallback box which states its ceiling.
-func diagramCaption(n int, caption string, ctx RenderCtx) string {
+func diagramCaption(n int, caption string, ctx RenderCtx) []string {
 	cap := "Figure " + itoa(n) + "."
 	if caption != "" {
 		cap += " " + caption
 	}
-	return ctx.Theme.Caption.Render(truncateANSI(cap, clampWidth(ctx.Width)))
+	return hardBoundDisplayLines(
+		wrapLines(ctx.Theme.Caption.Render(cap), clampWidth(ctx.Width)),
+		ctx.Width,
+	)
 }
 
 // mermaidKind detects the diagram kind from the FIRST non-empty, non-directive
