@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -474,14 +475,159 @@ func TestRunSupportWith_ClaimsAndDispatchesHappyPath(t *testing.T) {
 	}
 }
 
-// TestRunOnceSupport_NoMintTokenID_OmitsSucceedKey proves the additive succeed
-// contract stays byte-tolerant (task-5866ec745efcd7f7): a mint response that
-// carries NO token_id yields a succeed body WITHOUT the token_id key — the
-// pre-fix ip-only shape — so an old parent main degrades cleanly instead of
-// sending an empty-string id the CP would persist as garbage.
-func TestRunOnceSupport_NoMintTokenID_OmitsSucceedKey(t *testing.T) {
+// TestRunOnceSupport_NoMintTokenID_FailsLoudly proves PDF-D102: a mint that
+// SUCCEEDS but returns no token id is a NAMED, FATAL failure of the content
+// step — never a green provision. Before this, an empty id flowed silently
+// into r.tokenID, succeedSupport omitted the key, the CP's blank-tolerant
+// fleet_token_id_opts(nil) stored nothing, and the provision reported GREEN
+// over a LIVE, unrevocable ledger token on the parent main — the orphan-token
+// window PDF-D68 exists to close (task-b9c0f988cd0019d4, round 5).
+//
+// This test SUPERSEDES the old tolerance assert (a no-id mint used to yield an
+// ip-only succeed body). The CP-side tolerance is still correct for back-compat;
+// it was the WORKER's silence that was the defect.
+func TestRunOnceSupport_NoMintTokenID_FailsLoudly(t *testing.T) {
 	h := newSupportHarness(t)
 	h.mintTokenID = "" // the mint envelope has no id to report
+	runner := &supportFakeRunner{capacityJSON: `{"size_class":"standard"}`}
+	var deleted []string
+	w := h.worker(runner, &deleted)
+
+	if _, err := w.RunOnceSupport(context.Background()); err != nil {
+		t.Fatalf("RunOnceSupport: %v", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.succeeds) != 0 {
+		t.Fatalf("a mint with no token id must NEVER succeed, got: %v", h.succeeds)
+	}
+	if len(h.fails) != 1 {
+		t.Fatalf("want exactly one fail report, got %d: %v", len(h.fails), h.fails)
+	}
+	var fb map[string]any
+	if err := json.Unmarshal([]byte(h.fails[0]), &fb); err != nil {
+		t.Fatalf("fail body not JSON: %v", err)
+	}
+	msg, _ := fb["error"].(string)
+
+	// The text must be usable by an operator who has never read the charter:
+	// what exists (a live token), why it is dangerous (nothing can revoke it),
+	// and WHERE to clean it by hand (the parent main + the mint moment).
+	for _, want := range []string{
+		"live support token WAS minted",
+		"parent main " + h.main.URL,
+		"no token id",
+		"nothing can revoke it automatically",
+		"revoke it BY HAND",
+		`worker "helper"`,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("fail text missing %q — an operator cannot act on it.\ngot: %s", want, msg)
+		}
+	}
+	// The mint moment must be a real RFC3339 stamp, not a placeholder.
+	if !supportRFC3339InTextRe.MatchString(msg) {
+		t.Fatalf("fail text carries no RFC3339 mint moment: %s", msg)
+	}
+	// Custody holds even on this path: the minted token VALUE never rides the
+	// fail body or any console line.
+	if strings.Contains(msg, h.mintToken) {
+		t.Fatal("CUSTODY VIOLATION: the fail body carried the ledger token VALUE")
+	}
+	for _, line := range h.console {
+		if strings.Contains(line, h.mintToken) {
+			t.Fatalf("CUSTODY VIOLATION: console line carried the ledger token VALUE: %s", line)
+		}
+	}
+	// failStep tore the billed box down — it cannot revoke the token (it never
+	// received the id), but it must not leave a paid box running either.
+	if len(deleted) != 1 {
+		t.Fatalf("want the half-built box torn down exactly once, deleted: %v", deleted)
+	}
+	// The failure is attributed to the CONTENT step, where the mint lives.
+	var sawContentFailed bool
+	for _, s := range h.steps {
+		if s == "content/failed" {
+			sawContentFailed = true
+		}
+		if strings.HasPrefix(s, "verify/") || strings.HasPrefix(s, "ready/") {
+			t.Fatalf("the chain continued past the lost token id: step %s (all: %v)", s, h.steps)
+		}
+	}
+	if !sawContentFailed {
+		t.Fatalf("want a content/failed step report, got: %v", h.steps)
+	}
+}
+
+// supportRFC3339InTextRe finds an RFC3339 UTC stamp embedded in prose.
+var supportRFC3339InTextRe = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z`)
+
+// TestSupportMintToken_BlankTokenIDIsFatal drives contentMintToken directly over
+// the mint envelopes that matter, so the guard is pinned at the SEAM and not
+// only end to end. A whitespace-only id is the same lost-custody state as an
+// absent key: supportParseMint already skips blank strings, so both land here.
+func TestSupportMintToken_BlankTokenIDIsFatal(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{"top-level token_id (the live shape)", `{"token":"sup-ledger-tok-abc123","token_id":"tid-1"}`, false},
+		{"nested wrapper id", `{"support_token":{"token":"sup-ledger-tok-abc123","id":"tid-2"}}`, false},
+		{"no id key at all", `{"token":"sup-ledger-tok-abc123"}`, true},
+		{"empty id", `{"token":"sup-ledger-tok-abc123","token_id":""}`, true},
+		{"whitespace-only id", `{"token":"sup-ledger-tok-abc123","token_id":"   "}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			main := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, tc.body)
+			}))
+			defer main.Close()
+
+			r := &supportRun{
+				seams:     SupportSeams{}.withSupportDefaults(),
+				name:      "helper",
+				parentURL: main.URL,
+				console:   newConsoleEmitter(context.Background(), "job-mint", nil),
+			}
+			err := r.contentMintToken(context.Background())
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want a fatal error for %s, got nil (tokenID=%q)", tc.name, r.tokenID)
+				}
+				if r.tokenID != "" || r.ledgerToken != "" {
+					t.Fatalf("a fatal mint must leave the run's custody fields unset, got id=%q token set=%v", r.tokenID, r.ledgerToken != "")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("the green mint shape must still succeed, got: %v", err)
+			}
+			if strings.TrimSpace(r.tokenID) == "" {
+				t.Fatalf("green mint left tokenID empty for %s", tc.name)
+			}
+			if r.ledgerToken != "sup-ledger-tok-abc123" {
+				t.Fatalf("green mint did not carry the token value, got %q", r.ledgerToken)
+			}
+		})
+	}
+}
+
+// TestRunOnceSupport_TokenIDSurvivesEndToEnd pins the plumbing audit: the id
+// parsed at the mint seam survives r.tokenID → SupportProvisionFunc's return →
+// RunOnceSupport's local → succeedSupportWithRetry → the succeed BODY, with no
+// intermediate reset. Paired with the guard above, that makes a nil
+// fleet_token_id on a GREEN provision unreachable through this chain.
+//
+// The retry-path audit (recorded here because there is no code to change):
+// RunOnceSupport claims a FRESH job each pass and always runs the WHOLE chain —
+// there is no resume-mid-chain entry point, so no path reaches succeed having
+// skipped contentMintToken. The only retry loop around succeed is
+// reportWithRetry, which re-sends the SAME captured tokenID.
+func TestRunOnceSupport_TokenIDSurvivesEndToEnd(t *testing.T) {
+	h := newSupportHarness(t)
+	h.mintTokenID = "tid-end-to-end-9f8e"
 	runner := &supportFakeRunner{capacityJSON: `{"size_class":"standard"}`}
 	var deleted []string
 	w := h.worker(runner, &deleted)
@@ -499,8 +645,8 @@ func TestRunOnceSupport_NoMintTokenID_OmitsSucceedKey(t *testing.T) {
 	if err := json.Unmarshal([]byte(h.succeeds[0]), &sb); err != nil {
 		t.Fatalf("succeed body not JSON: %v", err)
 	}
-	if _, present := sb["token_id"]; present {
-		t.Fatalf("token_id must be ABSENT when the mint carried no id, got: %s", h.succeeds[0])
+	if tid, _ := sb["token_id"].(string); tid != "tid-end-to-end-9f8e" {
+		t.Fatalf("the minted token id did not survive to succeed: got %q in %s", tid, h.succeeds[0])
 	}
 }
 
