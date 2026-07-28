@@ -231,6 +231,12 @@ defmodule Barkpark.Plugins.Bulldocs do
       # advisory-lock + CAS-on-rev, never an update/delete.
       {:post, "/bulldocs/sessions/:slug/events", BarkparkWeb.BulldocsIngestController,
        :append_session_event, auth: :ingest},
+      # session-conversations slice: registry of harness conversations that
+      # touched this session (`Barkpark.Content.Sessions.touch_conversation/5`)
+      # — same advisory-lock + CAS-on-rev posture as the events route above,
+      # upsert-by-id rather than append-only.
+      {:post, "/bulldocs/sessions/:slug/conversations", BarkparkWeb.BulldocsIngestController,
+       :touch_session_conversation, auth: :ingest},
       # lvw-t4 — the AI-proposes loop: insert-only draft edits with provenance.
       {:post, "/bulldocs/papers/:slug/proposals", BarkparkWeb.BulldocsIngestController, :propose,
        auth: :ingest},
@@ -287,6 +293,14 @@ defmodule Barkpark.Plugins.Bulldocs do
   is the ingest-tier event-append; `session.link-task` sits at `read`-tier
   (it rides the `/v1/tasks` bearer scope, not the ingest token) — so, unlike
   the paper verbs above, NOT every command in this list is ingest-tier.
+
+  The session-conversations slice adds a sixth session verb, `session.touch`
+  (`bp session touch <slug> --conversation … --harness … --account … --machine
+  … --cwd …`) — ingest-tier, over the sibling
+  `POST /v1/plugins/bulldocs/sessions/:slug/conversations` route registered
+  ABOVE. It upserts-by-id into the session's harness-conversation registry
+  (`Barkpark.Content.Sessions.touch_conversation/5`), server-stamping
+  `first_seen`/`last_active` — never taken from the caller.
   """
   @impl Barkpark.Plugin
   def cli_commands do
@@ -525,6 +539,42 @@ defmodule Barkpark.Plugins.Bulldocs do
         ],
         flags: [
           %{name: "add", type: "string", summary: "Session slug to add."}
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.touch",
+        noun: "session",
+        verb: "touch",
+        summary:
+          "Register or refresh a harness conversation on a session (server stamps first_seen/last_active).",
+        http: %{
+          method: "POST",
+          path_template: "/v1/plugins/bulldocs/sessions/:slug/conversations"
+        },
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Session slug."}
+        ],
+        flags: [
+          %{
+            name: "conversation",
+            type: "string",
+            summary: "Harness-native conversation/session uuid."
+          },
+          %{name: "harness", type: "string", summary: "claude-code | codex | other."},
+          %{
+            name: "account",
+            type: "string",
+            summary: "Account holding the conversation (email or best-effort id)."
+          },
+          %{name: "machine", type: "string", summary: "Hostname."},
+          %{name: "cwd", type: "string", summary: "Working directory."}
         ],
         writes: true,
         batch: false,

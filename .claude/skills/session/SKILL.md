@@ -14,9 +14,15 @@ tooling required):
   arg is not injected into the body (a slug-less payload 422s with `missing_slug`).
   On CREATE, `blocks` defaults to `[]`; on subsequent metadata-only
   updates, existing `blocks` are left untouched (the upsert only replaces what you send).
-- `bp session log <slug> --kind <k> [--ref <r>] [--note <n>]` — append one event to the
-  trail. The server stamps `ts`. `kind` MUST be exactly one of `paper-published`,
-  `task-closed`, `epic-wave-complete`, `push`, `note` — anything else is a 422.
+- `bp session touch <slug> --conversation <uuid> --harness <h> --account <a> --machine <m>
+  --cwd <c>` — register or refresh this harness conversation on the session's
+  conversation registry (upsert by `--conversation` id). The server stamps
+  `first_seen` (once) and `last_active` (every touch) — never client-supplied.
+- `bp session log <slug> --kind <k> [--ref <r>] [--note <n>] [--conversation <uuid>]` —
+  append one event to the trail. The server stamps `ts`. `kind` MUST be exactly one of
+  `paper-published`, `task-closed`, `epic-wave-complete`, `push`, `note` — anything else
+  is a 422. `--conversation` is optional provenance (which conversation logged the
+  event), not required.
 - `bp session publish <slug> --file <session.json>` — same upsert endpoint as `open`, used
   for checkpoints and the final close. Send `blocks` + whatever fields changed
   (`status`, `ended_at`, `transcript`, …). A metadata-only payload (no `blocks` key) does
@@ -87,6 +93,24 @@ Tags on a session are free-form — the server does not require them to be regis
 `type:tag` docs (that check is the publish wall, which sessions are outside of). If you
 want a session's tags to line up with the rest of the corpus, pick from what's already
 there: `bp doc ls tag`.
+
+**Register this conversation.** Right after `open`, touch the session's conversation
+registry so it's visible which harness conversations have worked on it. `$CONV_UUID` is
+the same value the transcript-locating step above derives (`$CANDIDATE_UUID`) — if that
+came back empty, generate one now and reuse it for the rest of this conversation (do not
+regenerate per touch, or every checkpoint spawns a new registry entry):
+
+```bash
+CONV_UUID="${CANDIDATE_UUID:-$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')}"
+ACCOUNT=$(jq -r '.oauthAccount.emailAddress // empty' ~/.claude.json 2>/dev/null)
+[ -z "$ACCOUNT" ] && ACCOUNT=$(jq -r '..|.email? // empty' ~/.codex/auth.json 2>/dev/null | head -1)
+[ -z "$ACCOUNT" ] && ACCOUNT=$(git config user.email 2>/dev/null)
+[ -z "$ACCOUNT" ] && ACCOUNT="$USER@$(hostname -s)"
+bp session touch "$SLUG" --conversation "$CONV_UUID" --harness claude-code --account "$ACCOUNT" --machine "$(hostname -s)" --cwd "$(pwd)"
+```
+
+(Verify the `~/.claude.json` jq path against the real file on this machine — `jq
+'.oauthAccount'` — and correct the snippet above if the key differs there.)
 
 **Capture the full active thread, immediately.** Open is NOT just metadata: unless this
 is genuinely turn one of a fresh conversation, run a first checkpoint (§3) right after
@@ -179,6 +203,12 @@ jq -s '.[0] * .[1]' "$WORK/checkpoint.json" <(echo "$EXTRA_FIELDS") > "$WORK/che
 bp session publish "$SLUG" --file "$WORK/checkpoint-final.json"
 ```
 
+Touch the conversation registry again (bumps `last_active`, reusing the SAME `$CONV_UUID` from §1 — never a fresh one):
+
+```bash
+bp session touch "$SLUG" --conversation "$CONV_UUID" --harness claude-code --account "$ACCOUNT" --machine "$(hostname -s)" --cwd "$(pwd)"
+```
+
 ## 4. Close (session end)
 
 Repeat step 3 in full (fresh blocks, fresh transcript checkpoint), but override
@@ -189,6 +219,12 @@ EXTRA_FIELDS=$(jq -n --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{status: "closed"
 [ -n "$TRANSCRIPT_ID" ] && EXTRA_FIELDS=$(echo "$EXTRA_FIELDS" | jq --arg t "$TRANSCRIPT_ID" '. + {transcript: $t}')
 jq -s '.[0] * .[1]' "$WORK/checkpoint.json" <(echo "$EXTRA_FIELDS") > "$WORK/checkpoint-final.json"
 bp session publish "$SLUG" --file "$WORK/checkpoint-final.json"
+```
+
+Touch the conversation registry one last time (same `$CONV_UUID`), so its final `last_active` reflects the close:
+
+```bash
+bp session touch "$SLUG" --conversation "$CONV_UUID" --harness claude-code --account "$ACCOUNT" --machine "$(hostname -s)" --cwd "$(pwd)"
 ```
 
 Then link every task this session claimed, stamped, or closed — note the calling

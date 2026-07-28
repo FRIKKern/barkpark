@@ -20,11 +20,29 @@ bp doc query session -o json | jq -r '.documents[] | select(.status != "supersed
 bp session view <slug> -o json
 ```
 
-This returns metadata, the event trail, the synthesis `blocks`, and `rev`. Read the
-`blocks` into context as the primary "what was happening" summary — that's the whole
-point of the checkpoint template (current task / progress / key files / decisions / next
-steps / learnings). Skim the event trail for milestones (pushes, task closes, paper
-publishes, epic waves) to sanity-check the blocks against what actually happened.
+This returns metadata, the event trail, the synthesis `blocks`, `conversations` (the
+harness-conversation registry), and `rev`. Read the `blocks` into context as the primary
+"what was happening" summary — that's the whole point of the checkpoint template (current
+task / progress / key files / decisions / next steps / learnings). Skim the event trail
+for milestones (pushes, task closes, paper publishes, epic waves) to sanity-check the
+blocks against what actually happened.
+
+Register THIS (the resuming) conversation on the registry — same detect-and-touch block
+the `session` skill uses at open/checkpoint/close, with a FRESH `$CONV_UUID` (this is a
+new conversation, not a continuation of the one that opened the session):
+
+```bash
+CONV_UUID=$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')
+ACCOUNT=$(jq -r '.oauthAccount.emailAddress // empty' ~/.claude.json 2>/dev/null)
+[ -z "$ACCOUNT" ] && ACCOUNT=$(jq -r '..|.email? // empty' ~/.codex/auth.json 2>/dev/null | head -1)
+[ -z "$ACCOUNT" ] && ACCOUNT=$(git config user.email 2>/dev/null)
+[ -z "$ACCOUNT" ] && ACCOUNT="$USER@$(hostname -s)"
+bp session touch <slug> --conversation "$CONV_UUID" --harness claude-code --account "$ACCOUNT" --machine "$(hostname -s)" --cwd "$(pwd)"
+```
+
+Surface the registry to the human in your summary — one line per entry, e.g. "conversations
+on this session: scaffy@jarl.no · claude-code · mbp-2 · last active 2026-07-25T10:03Z" —
+so it's visible at a glance who else (or what other machine) has touched this session.
 
 ## 3. Warn on mismatch — don't silently proceed
 

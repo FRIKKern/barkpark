@@ -1565,10 +1565,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # caller merely echoing a session's own read payload back as an update body)
   # would silently overwrite the append-only trail via the same merge this
   # function performs for every other unreserved key.
+  #
+  # "conversations" is reserved for the same reason (session-conversations
+  # slice): the harness-conversation registry is written ONLY through
+  # `Barkpark.Content.Sessions.touch_conversation/5`'s advisory-lock + CAS
+  # path — never through this generic metadata passthrough.
   @blocks_doc_reserved_attrs ~w(
     slug dataset blocks workspace_id project_id template style
     source_doc goal_id event_type tags description body_html payload_html
-    branch bypass_wall events
+    branch bypass_wall events conversations
   )
 
   # Session-handoff Task 2 ("generalized upsert"): `write_encrypted_blocks_doc`'s
