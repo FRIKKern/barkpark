@@ -23,8 +23,8 @@
 //    src/papers/portabledoc/registry.tsx:43-64. A reader who has met the
 //    "Unsupported block" card already knows how to read this one: dashed means
 //    "this is the app being honest about what it cannot show you yet".
-//    Every colour is a `theme` member and the label's type geometry is a
-//    `scale` token — the package's type guard is an inverted whitelist, so a
+//    Every colour is a `theme` member and every type geometry is a `scale` or
+//    `roles` token — the package's type guard is an inverted whitelist, so a
 //    hand-typed fontSize/lineHeight anywhere in here reds the lint.
 //
 // 3. THE BARS ARE NEVER TEXT. Every shape is a `View` — no glyphs, no lorem, no
@@ -50,7 +50,7 @@ import { useEffect, useState } from 'react'
 import { Animated, Text, View, type ViewStyle } from 'react-native'
 
 import { useTheme, type Theme } from '../ui/theme'
-import { scale } from '../ui/typography'
+import { roles, scale } from '../ui/typography'
 
 /* ── the server's vocabulary ────────────────────────────────────────────── */
 
@@ -139,7 +139,13 @@ export function StreamSkeleton({ kind, prose }: StreamSkeletonProps) {
   return (
     <View>
       {shownProse === undefined ? null : (
-        <Text style={{ ...scale.base, color: theme.text }}>{shownProse}</Text>
+        // `roles.chatBody`, the SETTLED assistant measure — deliberately NOT a
+        // notch smaller. This prose is the same sentence flow as the live tail
+        // Text directly above it and it becomes a settled paragraph the moment
+        // the block closes, so any other rung makes one paragraph change size
+        // mid-turn and then change back at settle. The liveness signal is the
+        // pulsing box and the "rendering …" label, never the type size.
+        <Text style={{ ...roles.chatBody, color: theme.text }}>{shownProse}</Text>
       )}
       <View
         testID={`rendering ${label}`}

@@ -389,11 +389,12 @@ const CENSUS: Record<string, Record<string, number>> = {
   // The forming-block placeholder (mob-rt-s6). Two references, two registers:
   // `scale.xs` is the italic muted "rendering chart…" label — the same rung
   // registry.tsx's honest-degrade card uses, because this IS that card's
-  // sibling; `scale.base` is the partial prose above the box, one notch under
-  // the settled chat measure since it is still being written. The bars carry
-  // no type at all — they are Views, never Text.
+  // sibling; `roles.chatBody` is the partial prose above the box, at the SAME
+  // settled assistant measure as the live tail Text directly above it — a
+  // smaller rung would make one paragraph change size mid-turn and change back
+  // at settle. The bars carry no type at all — they are Views, never Text.
   'chat/StreamSkeleton.tsx': {
-    'scale.base': 1,
+    'roles.chatBody': 1,
     'scale.xs': 1,
   },
   // mob-zb-s4's five nav/code natives. The three chatApparatus references are
