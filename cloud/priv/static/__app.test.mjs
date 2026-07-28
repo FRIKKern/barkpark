@@ -577,6 +577,34 @@ test("cch-bl: the subscription tick repaints the whole sub-dependent Overview, n
   });
 });
 
+test("cch-bl: the not-current claim is OVERVIEW-scoped — Fleet's topbar does not inherit it", async () => {
+  // The flag is set by loadOverview and cleared by an Overview read, so without
+  // a scope the chip would keep disclaiming currency on Fleet — a view that
+  // fetched its own data successfully. That is a NEW lie wearing the fix for an
+  // old one, which is the exact trade this slice exists not to make.
+  const priorHash = sandbox.location.hash;
+  await overviewHarness(async ({ net }) => {
+    const chip = hooks.ensureLivenessChip();
+    net.state.fail.add("/v1/barkparks");
+    hooks.handleLiveEvent("fleet");
+    await settleOverview();
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+
+    sandbox.location.hash = "#fleet";
+    hooks.renderLivenessChip(); // what the 1s chip ticker does on every view
+    assert.equal(chip.getAttribute("data-state"), "live",
+      "Fleet must not wear the Overview's staleness");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Live");
+
+    // …and it is not forgotten either: back on Overview the claim stands until
+    // a read lands.
+    sandbox.location.hash = "#overview";
+    hooks.renderLivenessChip();
+    assert.equal(chip.getAttribute("data-state"), "refresh_failed");
+  });
+  sandbox.location.hash = priorHash;
+});
+
 test("cch-bl: off-Overview, a subscription tick paints no Overview and still costs one read", async () => {
   // The new arm is VIEW-scoped like every other: a tick arriving on Billing must
   // not paint into an Overview nobody is looking at.

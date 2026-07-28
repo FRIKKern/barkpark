@@ -3938,6 +3938,12 @@
   function applyRoute() {
     var r = parseHash();
     if (r.view !== "instance") stopInstanceTicker(); // C3: leave the timeline ticker with its view
+    // The "Not current" chip is OVERVIEW-scoped: only loadOverview sets it, and
+    // only an Overview read clears it. Carrying it onto Fleet would make the
+    // topbar disclaim data that view just fetched successfully — a fresh lie
+    // inside the fix for an old one. Leaving Overview drops the claim; coming
+    // back re-runs loadOverview(full), which re-answers it honestly.
+    if (r.view !== "overview") clearRefreshStale();
     var detail = DETAIL_VIEWS.indexOf(r.view) !== -1;
     // Which PRIMARY nav entry stays highlighted. A drill-down keeps its parent
     // lit; the four Settings pages light the single "settings" cluster trigger.
@@ -12483,7 +12489,13 @@
     var errored = o ? !!o.evtErrored : evtErrored;
     var dead = o ? !!o.evtDead : evtDead;
     var last = o ? (o.lastEventMs != null ? o.lastEventMs : null) : lastEventMs;
-    var refreshed = o ? !!o.refreshStale : refreshStale;
+    // OVERVIEW-SCOPED, and this is the whole of the rule. Only loadOverview
+    // sets the flag and only an Overview read clears it, so asserting it from
+    // the Fleet topbar would disclaim data that Fleet just fetched
+    // successfully — a fresh lie wearing the fix for an old one. applyRoute
+    // also drops the flag on the way out (immediate, rather than by the next
+    // 1s tick); this read is the invariant that makes the scope assertable.
+    var refreshed = o ? !!o.refreshStale : refreshStale && currentView() === "overview";
     var state = liveDotState(errored, last, now, dead, refreshed);
     chip.setAttribute("data-state", state);
     // No "as of" on a down stream: a recency stamp beside a dead dot reads as
