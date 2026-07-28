@@ -215,6 +215,14 @@ jobs:
           TASK_ID: ${{ steps.ref.outputs.task_id }}
           EXPECTED_WORKER: ${{ steps.worker.outputs.expected }}
           LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          # The lease predicate is PR-relative (charter D58): a lapsed claim
+          # backs this PR iff it was still live when the PR was OPENED. created_at
+          # is the right stamp and the only stable one — it does not move on
+          # synchronize/edited/reopened (verified on #6414: created_at
+          # 2026-07-27T21:27:32Z vs updated_at 2026-07-28T07:13:05Z), so a
+          # re-fire cannot decay a verdict. The gate REFUSES rather than falls
+          # open if this is ever empty or unreadable.
+          PR_OPENED_AT: ${{ github.event.pull_request.created_at }}
         run: |
           # `set -uo pipefail` does NOT clear the -e in GitHub's `bash -e {0}`,
           # so a bare `bash scripts/pr-task-gate.sh` on a non-zero exit aborts
