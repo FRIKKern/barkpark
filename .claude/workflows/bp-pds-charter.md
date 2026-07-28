@@ -4767,3 +4767,75 @@ evaporation fix merges is lost within 15 minutes — exactly wave 22's failure, 
 HIGH-FLIP-RISK (an independent second reviewer is owed before merge): **#1** (the UNPERFORMABLE
 classification — four shapes, three of them not "unreachable"), **#2** (the guard is the wave's own
 candidate success-lie), **#5** (the File.stat fake green is proven and the obvious fix is the trap).
+
+### Wave 2026-07-28 (23) — FINISH WHAT 22 STARTED — round 1 built + reviewed, grade A− (paper `pds-wave-23-2026-07-28`)
+
+**SEVEN OF SEVEN ROUND-1 SLICES BUILT, GATED, REVIEWED, PUSHED AND PR'd — #6548–#6554.** That last
+clause is the one that has been missing from six previous waves; this wave did not end with work on
+local-only branches in a shared checkout. Round 2 (`pds-w23-triage-round`) is deferred BY DESIGN and
+must wait for #6550.
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `pds-w22-deploy-readback` | `…bp-cloud-deploy-proves-the-box-advanced--0` | #6548 | four named outcomes; live-fixture proven, no real ssh deploy (honest miss) |
+| `pds-w23-success-claim-registry` | `…success-claims-prove-themselves-a-behavi-1` | #6549 | behavioral gate, mutation re-proven by the reviewer; census corrects the brief's own numbers |
+| `pds-bl-park-note-evaporates` | `…the-ledger-stops-eating-its-own-adjudica-2-r` | #6550 | key split shipped; reviewer fixed the manifest that still described `engagement.note` |
+| `pds-bl-bounded-import-unpack` | `…bounded-import-spill-the-body-extract-to-3-r` | #6551 | both halves; reviewer named the two 500-shaped failure paths |
+| `pds-bl-blob-storage-readback` | `…the-blob-receipt-stops-claiming-stored-a-4-r` | #6552 | the warm-cache trap is pinned as a test; reviewer proved the 502 over HTTP |
+| `pds-w23-harness-liveness-and-registry` | `…the-pds-harnesses-stop-lying-armed-prove-5` | #6553 | ARMED reads a marker the child wrote; registry replaces the single pointer |
+| `pds-w23-cold-owner-verb-honesty` | `…the-two-verbs-a-cold-owner-types-first-s-6` | #6554 | `bp export` WORKS now (it 406'd against every server); status reads the port |
+
+- **PDS-D324 — THE LAW GENERALISED, AND IT FOUND LIES NOBODY HAD FILED.** Wave 22's direction predicted
+  "the success-claim census will surface lies nobody has filed" and it did, twice over, both invisible
+  to any glyph census because neither printed one: `bp export` could not reach ANY server (a bare
+  `Accept: application/x-ndjson` against `plug(:accepts, ["json"])` → 406 BEFORE auth; `bp export >
+  backup.ndjson` wrote an EMPTY FILE and said "unknown error"), and `barkpark status` decided liveness
+  from a `kill -0` on a pidfile while `listener_pid()` sat four lines above. Both directions were
+  observed on a real box. The generalisation is the finding: **the checkmark is not the lie — the
+  unread post-condition is**, and the verbs a cold owner types first carried the worst ones.
+- **PDS-D325 — A BEHAVIORAL REGISTRY BEATS A CLASSIFICATION LINT, AND ITS OWN WEAKNESS IS NAMED.** The
+  gate asks one mechanical question per enrolled receipt — *would the printed sentence change if the
+  response said the opposite?* — and `TestSuccessClaimRegistryCarriesNoProse` reflects over the entry
+  struct so a "classification" field cannot be added. Mutation re-proven by the reviewer, not quoted.
+  **What it does NOT prove**: that the response was itself a post-condition read. The A1/A2/A3 class
+  judgment still lives in prose in `docs/decisions/success-claim-census.md`, and several enrolled rows
+  (`hzDone`, `emitDeviceLoginSuccess`) differ only by an identifier, so they guard "the render reads
+  its argument", not the law. The registry is a FLOOR that can only grow, and it should be read as one.
+- **PDS-D326 — THE CENSUS CORRECTED THE BRIEF THAT COMMISSIONED IT.** The wave brief asserted shell
+  non-proof checkmarks = 0 and `api/lib` `IO.puts` checkmarks = 0 and told the builder to write those
+  denominators down. Re-measurement says 2 and 1. The builder shipped the corrected numbers with the
+  correction stated, because writing a number measured to be false would have been the slice's own
+  success-lie. **The conclusion the brief wanted — no gate on shell or Elixir — survives the correction
+  and is argued from the corrected figures.** Re-derive, never quote, applies to the brief too.
+- **PDS-D327 — THE 1× BOUND, NOT THE BEST SAMPLE.** The disk-backed import measured 0.01×–1.01× of the
+  largest member across runs (OTP 28's extract path sometimes chunks) against 2.01× for the binary
+  shape. The claim shipped is **1× the largest member**, never "constant memory" and never the best
+  sample, because `:erl_tar` exposes no chunked EXTRACT API and whether a given member is held whole is
+  an implementation detail. The number that actually binds on guerrilla is now the ~5.2 GB peak
+  TRANSIENT DISK, not the memory figure — which is why the 507 free-space precondition shipped with it.
+- **PDS-D328 — EXTRACTION-TO-DISK BUYS A NEW FAILURE CLASS AND IT MUST BE NAMED.** The trade swaps a
+  diagnosable BEAM OOM for an ENOSPC. The builder shipped the free-space precondition; the reviewer
+  found that the spill loop still crashed on the two shapes that actually happen — a client disconnect
+  (`read_body` → `{:error, _}` → FunctionClauseError) and a mid-spill ENOSPC (`:ok = IO.binwrite` →
+  MatchError) — both surfacing as an opaque 500. **An opaque 500 is a failure claim as uninformative as
+  a false success.** Now `400 import_body_read_failed` and `507 import_spill_write_failed`, each naming
+  the reason and the byte count reached. Neither is test-covered (Plug.Test cannot answer `{:error,_}`
+  to `read_body`, and the suite does not fill a filesystem) and the commit says so.
+- **PDS-D329 — THE OBVIOUS BLOB READ-BACK IS A PROVEN FAKE GREEN, AND THE TEST SUITE NOW HOLDS THE
+  TRAP.** Against a black-hole bucket (200 on PUT, stores nothing), `File.stat(Media.file_path(rel))`
+  returns the EXACT expected byte count — because `put_file` warm-caches the SOURCE there — and
+  `ensure_local/1` also passes with ZERO bucket requests. Both traps are now pinned as assertions in
+  one test, and bucket emptiness is re-proven by dropping the cache copy. The honest read is a NEW
+  per-backend `stat_blob/1` callback (presigned HEAD for S3). Cost stated: 2 requests per blob, not 1.
+- **PDS-D330 — THE EPIC'S OWN EVIDENCE CHAIN HAS AN UNEXPLAINED HOLE.** A `bp task stamp` returned
+  ok:true at 5/6 and a later re-read showed that criterion back at `met:false` with EMPTY evidence; a
+  second stamp plus a settle held. This is a DIFFERENT clobber from the engagement-lease evaporation
+  wave 23 fixed. It was caught ONLY because the builder re-read and COUNTED — which is exactly why that
+  proof standard exists. Filed P2 as `pds-bl-stamp-writeback-reverts-a-stamped-criterion`; until it is
+  understood, **every "stamped" claim in this epic rests on a write that can silently revert.**
+
+**WHAT THE NEXT WAVE TAKES.** (1) `pds-w23-triage-round`, the moment #6550 merges — it is round 2 by
+necessity, not caution. (2) The ~116 open rows on the same standard, and D330 first among them, because
+it undermines the standard itself. (3) The three HIGH-FLIP-RISK slices (#6548, #6549, #6552) are owed an
+INDEPENDENT second reviewer before merge — this workflow spawns exactly one, so that dispatch is a
+manual lead step.

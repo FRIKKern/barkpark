@@ -48,13 +48,46 @@ defmodule Barkpark.Media.Blobstore do
   @type serve_strategy ::
           {:file, String.t()} | {:redirect, String.t()} | {:error, :not_found}
 
-  @doc "Persist a temp file's bytes at `relative_path`. `opts`: `:content_type`."
-  @callback put_file(relative_path(), source_path :: String.t(), opts :: keyword()) ::
-              :ok | {:error, term()}
+  @typedoc """
+  What a write can honestly claim about the bytes afterwards.
 
-  @doc "Persist in-memory bytes at `relative_path` (cross-instance blob push)."
+    * `:received` — how many bytes this instance handed to the backend. This is
+      a fact about THIS process, never about the store.
+    * `:stored` — how many bytes a POST-CONDITION READ found in the store, or
+      `:unverified` when no read-back could be performed. It is NEVER the
+      received count copied across.
+    * `:verified_by` — which read produced `:stored`: `:stat` (the local
+      backend's `File.stat` on the real store) or `:head` (an S3 HEAD that
+      bypasses the write-through cache). `nil` when `:stored` is `:unverified`.
+      `:etag` is reserved and deliberately unused: a PUT's ETag is
+      response-backed, absent under SSE-KMS and multipart, and therefore
+      strictly weaker than a post-condition read.
+    * `:unverified_reason` — the NAMED reason the read-back could not answer
+      (e.g. `:no_content_length`, a transport error). `nil` when verified.
+  """
+  @type receipt :: %{
+          received: non_neg_integer(),
+          stored: non_neg_integer() | :unverified,
+          verified_by: :stat | :head | :etag | nil,
+          unverified_reason: term() | nil
+        }
+
+  @doc """
+  Persist a temp file's bytes at `relative_path`. `opts`: `:content_type`.
+
+  Answers `{:ok, receipt}` — the write ACK plus whatever the post-condition
+  read could prove — or `{:error, :not_stored}` when the read-back proves the
+  bytes are ABSENT despite an accepted write.
+  """
+  @callback put_file(relative_path(), source_path :: String.t(), opts :: keyword()) ::
+              {:ok, receipt()} | {:error, term()}
+
+  @doc """
+  Persist in-memory bytes at `relative_path` (cross-instance blob push).
+  Same receipt contract as `c:put_file/3`.
+  """
   @callback put_bytes(relative_path(), body :: binary(), opts :: keyword()) ::
-              :ok | {:error, term()}
+              {:ok, receipt()} | {:error, term()}
 
   @doc "Best-effort removal of the blob (and any local cache copy)."
   @callback delete(relative_path()) :: :ok | {:error, term()}
@@ -65,6 +98,31 @@ defmodule Barkpark.Media.Blobstore do
   Local: a plain path join. S3: download into the write-through cache once.
   """
   @callback ensure_local(relative_path()) :: {:ok, String.t()} | {:error, term()}
+
+  @doc """
+  Read the blob's size back FROM THE STORE — the post-condition read behind
+  every `t:receipt/0`.
+
+  This callback exists because the two obvious cheap checks are both fooled by
+  the S3 backend's write-through cache and would report a store that never
+  happened:
+
+    * `File.stat(Media.file_path(rel))` passes with the EXACT expected byte
+      count, because `S3.put_file/3` warm-caches the source at that path.
+    * `ensure_local/1` also passes, with ZERO bucket requests, because it
+      short-circuits on `File.regular?`.
+
+  So the contract is: answer from the STORE, never from the cache. `Local`
+  stats the real store (there is no cache to bypass — the disk IS the store);
+  `S3` sends a presigned HEAD.
+
+    * `{:ok, %{size: n}}` — the store holds `n` bytes at that path.
+    * `{:error, :not_found}` — the store PROVABLY does not hold it.
+    * `{:error, reason}` — the read-back could not be performed; the caller
+      degrades to a NAMED `:unverified`, never to the received count.
+  """
+  @callback stat_blob(relative_path()) ::
+              {:ok, %{size: non_neg_integer()}} | {:error, :not_found | term()}
 
   @doc "Resolve how to answer an HTTP request for the blob. See `t:serve_strategy/0`."
   @callback serve_strategy(relative_path(), opts :: keyword()) :: serve_strategy()
@@ -78,6 +136,37 @@ defmodule Barkpark.Media.Blobstore do
   def delete(relative_path), do: impl().delete(relative_path)
 
   def ensure_local(relative_path), do: impl().ensure_local(relative_path)
+
+  def stat_blob(relative_path), do: impl().stat_blob(relative_path)
+
+  @doc """
+  Assemble a `t:receipt/0` from a write's received count and the backend's own
+  post-condition read — the ONE place the received/stored distinction is
+  resolved, so no backend can accidentally answer the question with its own
+  input.
+
+  A read-back that proves ABSENCE is not a degraded receipt, it is a failed
+  write: `{:error, :not_stored}`. A read-back that could not be PERFORMED is a
+  receipt whose `:stored` is the named `:unverified` — the received count is
+  never copied into it.
+  """
+  @spec receipt(
+          non_neg_integer(),
+          :stat | :head,
+          {:ok, %{size: non_neg_integer()}} | {:error, term()}
+        ) ::
+          {:ok, receipt()} | {:error, :not_stored}
+  def receipt(received, verified_by, read_back)
+
+  def receipt(received, verified_by, {:ok, %{size: size}}) do
+    {:ok, %{received: received, stored: size, verified_by: verified_by, unverified_reason: nil}}
+  end
+
+  def receipt(_received, _verified_by, {:error, :not_found}), do: {:error, :not_stored}
+
+  def receipt(received, _verified_by, {:error, reason}) do
+    {:ok, %{received: received, stored: :unverified, verified_by: nil, unverified_reason: reason}}
+  end
 
   def serve_strategy(relative_path, opts \\ []),
     do: impl().serve_strategy(relative_path, opts)

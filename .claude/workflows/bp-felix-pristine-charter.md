@@ -1913,6 +1913,186 @@ Backlog filed: `task-felix-w21-bl-claudechat-buffer-parity` (P3),
   (P3 — the dead is_binary branch means codex never appends a live completion row from the
   socket; latent, codex dark in prod).
 
+- **D135 — THE BLIND GATE IS REAL, AND OLDER THAN ANYONE SAID.** Sobelow's JOB conclusion on
+  main's newest security run (30342320311, headSha 49c495a44, 2026-07-28T08:25Z) is `failure`
+  while the WORKFLOW conclusion reads `success` — `continue-on-error: true` at
+  `.github/workflows/security.yml:55` is the mask, confirmed live on six sampled main runs. Last
+  green JOB = run 29692484044, 2026-07-19T15:15:46Z (`d58dd6c3b`): **8d17h blind, ~185 main runs,
+  zero green in between**. The introducing merge is `f899ef2e9` (#4383), whose OWN security run
+  (29692488581) was CANCELLED — two merges 6s apart is exactly how the rebaseline obligation got
+  skipped. Before 07-19 the repo rebaselined reflexively (`aefba0809`, `efc02d635`, `d5db09e57`,
+  `238fb58e7`); the practice did not decay, it stopped dead behind a cancelled run. Findings grew
+  **9 → 51** under that cover. NAMED FAILURE MODE: *a permanently-red regression gate cannot report
+  a regression* — the repo's own existing name for this class is "reds for reasons nobody believes".
+- **D136 — CLASS (c) IS REFUTED FOR 7 OF 12 SQL SITES, AND HALF-SURVIVES FOR 5.** The direction
+  sized S2 on "12 raw-SQL findings in never-security-reviewed code, plausibly a hidden injection."
+  Two independent verifiers killed the injection hypothesis and one arithmetic proof split the set:
+  (a) `tenancy.ex`'s 3 (`delete_e3_doc_keyed`/`delete_e3_dataset_keyed`/`delete_allowlist_scoped`)
+  carry a **uniform +213 offset** from their baselined anchors (1154/1167/1178 → 1367/1380/1391)
+  over **byte-identical** surrounding source — pure drift, and `delete_allowlist_scoped/3` is dead
+  code (`Catalog.allowlist/0` is `%{}`); (b) 5 of `workspace_bundle.ex`'s 10 carry a uniform +711
+  (328/340/345/348/354 → 1039/1051/1056/1059/1065) — also drift; (c) the other 5 (`merge_upsert`
+  ×4, `scalar!` ×1) have preimages 371–411 in a file that was **368 lines long** at the last
+  reconcile, so they cannot be drift by construction — genuinely new, never-baselined SQL that
+  landed ~1h after the last green job (`9b4b50784`, #4385, 2026-07-19T18:21). BUT the injection is
+  dead regardless: `workspace_bundle.ex:1020` reads `copy_into(qi(table), col_list, dump)` and
+  `:1016` qi-maps every column; `qi/1` at `:1144` is correct Postgres quote-doubling; `merge_upsert`
+  qi's `cols`, `order_cols`, `arbiter` and both sides of the DO UPDATE SET; `scalar!` is a pure
+  false positive (both call sites pass static SQL with a `$1` bind). Honest Gates **D30** already
+  ruled these ten sites on 2026-07-27 and the qi/1 comment correction is ALREADY on origin/main
+  (`:1128`, "REQUEST-DERIVED, not catalog-derived"). **S2 as scoped does not exist.** Reachability
+  is admin-only besides: `POST /api/workspaces/:slug/import` sits behind `:require_admin`
+  (`Auth.has_permission?(token,"admin")`), and no HTTP surface in `api/` mints that permission.
+- **D137 — GAP A IS REAL, EXECUTION-PROVEN, AND FENCED AWAY FROM FELIX.** Verify found what nobody
+  was hunting: `import_member/3` (`workspace_bundle.ex:1013`) dispatches `entry["name"]` /
+  `entry["columns"]` from the UPLOADED manifest straight into COPY/INSERT with **no membership
+  check** — `table_exists?/1` (`:350-353`) gates only the DDL passes. Proven by running two hostile
+  bundles through the real engine against a real Postgres: a manifest naming `schema_migrations`
+  returned `{:ok, %{tables: %{"schema_migrations" => 1}}}` with the row present, and one naming
+  `users` wrote an attacker-chosen identity row with an attacker-chosen `hashed_password`, inside
+  the transaction that has already DROPped member FKs and DISABLEd triggers. This violates `qi/1`'s
+  own written invariant (`:1141-1143`), and `table_exists?` would be insufficient anyway —
+  existence is not membership; `users` exists. A 19-line `Catalog`-derived member guard was
+  prototyped and the full adjacent suite ran **237 tests / 0 failures** with it applied. Severity is
+  tenant→instance escalation-from-admin (a workspace owner can self-mint a PAT carrying global
+  `admin` via `@pat_allowed_admin_permissions`), and clean-mode import is NOT behind
+  `:allow_bundle_import`. **RULING: Felix does not build it.** D82 fences this epic strictly OFF
+  `tenancy/workspace_bundle` (PDS crown, charter :917), and PR #6551 (PDS, OPEN) is rewriting
+  `workspace_bundle.ex`, `archive.ex`, `janitor.ex`, `workspace_controller.ex` and both test files
+  right now. Filed as a P0 backlog row naming the PDS parent and the sequencing. Building it here
+  would commit the silent-substitution sin this wave exists to correct.
+- **D138 — "BLOCKING" IS STRUCTURALLY IMPOSSIBLE IN security.yml; S5 CLAIMS VISIBILITY ONLY.** Two
+  independent walls, both measured. (1) SR-1 live: `branches/main/protection` → 404 "Branch not
+  protected", `rulesets` → `[]`, and `.github/required-checks.json` carries `"enforced": false` — so
+  even the two SELECTED contexts are not applied. (2) `scripts/required-checks-generate.sh` stage
+  **S4** excludes every check defined in a `pull_request`-paths-filtered workflow, and the flag is
+  computed at WORKFLOW level (`:231`), so it binds every job in the file. Proof it is not an artifact
+  of the advisory flag: the sibling `mix-audit` job carries NO `continue-on-error`, is blocking by
+  intent, and is nevertheless excluded with `S4 PATHS-FILTERED`. Dropping `continue-on-error` moves
+  the sobelow job from the S2 bucket to the S4 bucket — same outcome, excluded. **Therefore: any
+  claim that this wave "makes Sobelow blocking" is false in the present tense.** The honest claim is
+  that the failure becomes VISIBLE in the PR check list and truthful to `needs.<job>.result`. A
+  fourth option nobody named — delete security.yml's workflow-level `paths:` and adopt elixir.yml's
+  documented job-level skip shim (`:23-33`), since a job skipped by a job-level `if:` publishes a
+  `skipped` check that GitHub counts as passing — is recorded as the cheap escape path, untested.
+- **D139 — D75 IS UNSATISFIABLE AS WRITTEN AND IS AMENDED BY NAME THIS WAVE.** D75's only extant
+  text is `docs/ops/merge-gates.md:136-142` (introduced by `34b9b25d3`, #5474): the flip is gated on
+  "the baseline file:line entries reaching **0**". The floor is not 0, it is **10** — 6
+  `Config.CSRF` + 1 `Config.Headers` + 1 `Config.HTTPS` (`config/prod.exs:0`) + 2 `.heex` `XSS.Raw`,
+  all structurally unannotatable and each for a mechanical reason read in Sobelow's source:
+  `Sobelow.Config.*` never routes through `combine_skips` (it iterates router pipelines directly),
+  and `Parse.get_meta_template_funs/1` calls `File.read!` instead of the skip-rewriting `read_file/1`
+  so a template's source never sees the `# → @` substitution. 98 of 108 are annotatable. Also
+  recorded: D75 has **no defining charter entry** — it is cited at charter :904 and :2165 and at
+  merge-gates :137, but this charter's own D75 (:1163) is a different subject entirely
+  ("Fresh-eyes last corner honestly clean"). The number is a dangling citation and the wave says so
+  rather than propagating it. The amendment restates the precondition as "the baseline holds ONLY
+  entries that provably cannot carry an inline annotation, enumerated by type and count", records
+  the S4/SR-1 topology so the implicit "then it blocks" promise stops being made, and fixes the
+  doc's stale count (it still says **137**; main holds **108**).
+- **D140 — THE FINGERPRINT REGIME IS TOOLCHAIN-STABLE; THE INSTABILITY IS THE LINE NUMBER.**
+  security.yml's stated rationale ("fingerprints are NOT stable across Elixir toolchains") is
+  REFUTED by measurement on an identical tree: CI (1.18.1/OTP27) and local (1.19.5/OTP28 — a wider
+  gap than the pinned pair) produced **byte-identical** 51-finding sets, and a local regeneration
+  reproduced the CI artifact's 106 entries with **57/57 shared fingerprints identical, 0 differing**.
+  `Finding.fingerprint/1` is `:erlang.phash2([type, vuln_source, filename, vuln_line_no])` — phash2
+  is Erlang's portable hash and the AST comes from `Code.string_to_quoted`, not the compiler. The
+  line number is IN the hash, which is the whole disease: a pure renumber invalidates every waiver
+  in a file. Proven by mutation — inserting two lines moved three baselined findings and all three
+  re-reported, while two INLINE-annotated functions in the same file stayed suppressed across the
+  same shift. **Consequence: the matched-toolchain ceremony buys nothing, and the human gate cannot
+  rest on toolchain provenance — only on review.** Inline annotation is AST-bound and survives.
+- **D141 — ANNOTATION SEMANTICS, PROVEN BY A REAL `mix sobelow` (0.14.1, the pinned version), AND
+  ONE OF THEM IS A TRAP.** (a) A one-line `defp f(p), do: File.read!(p)` DOES bind. (b) A
+  multi-clause `def`/`defp` binds **ONE CLAUSE ONLY** — each flagged clause needs its own comment.
+  (c) An annotation placed INSIDE a function body is not a silent no-op — it **TRANSFERS the waiver
+  to the NEXT `def` in the file**, silently waiving a different, unreviewed function (mechanism:
+  `parse.ex:55-67` textually rewrites `# sobelow_skip [...]` → `@sobelow_skip [...]`, then
+  `combine_skips` pairs the attribute with the adjacent def in source order). (d) Sobelow's regex is
+  `~r/#\s?sobelow_skip (\[...\])/` — **at most one space after `#`, EXACTLY one space before `[`**;
+  `# sobelow_skip["X"]` and `#  sobelow_skip ["X"]` are both silently ignored. A blank line or an
+  intervening `@doc` is harmless. Privacy is no bar: 26 of 39 existing directives already sit on a
+  `defp`. **Therefore no annotation migration may be reviewed by eye alone — every migration PR must
+  be gated by a before/after scan diff**, and `# sobelow_skip [` is the only accepted spelling.
+- **D142 — THE OVERLAP GATE IS BLIND TO EXACTLY WHAT THIS WAVE MIGRATES; THE STALENESS RATCHET IS
+  THE WAVE'S REAL NEW INSTRUMENT.** `api/scripts/sobelow-inline-overlap-check.sh` is blocking and
+  its `--selftest` genuinely reds under three independent mutations (neutered range comparison,
+  broken prefix derivation, removed fail-closed branch) — it is a real ratchet and needs no work.
+  But it is BASELINE-DRIVEN and SPAN-BASED: it fires only when a baseline entry's line falls INSIDE
+  an annotation's span. Fixture-proven PASS on both drift and file-move — which is 100% of what this
+  wave migrates — and PASS for a file carrying annotations with zero baseline rows (the janitor's
+  exact case). It also cannot force a fingerprint deletion under those conditions, refuting the
+  direction's "the migration is forced to DELETE each fingerprint". Two further defects: its
+  annotation regex is LOOSER than Sobelow's in the UNSAFE direction (isolated fixture: it
+  manufactures an OVERLAP on a Sobelow-ignored annotation and orders deletion of a load-bearing
+  entry; tightening is a proven no-op on main today), and `entries++` counts rows, not parsed rows.
+  **The genuine gap: 52 of 108 committed entries (48%) no longer resolve** — measured two
+  independent ways that agree entry-for-entry (text-anchor resolution vs CI's own same-toolchain
+  rescan artifact, `52 deletions / 50 additions`, disagreeing only on one `Config.CSRF` the text
+  method deliberately skips). Phantoms are INERT, not live guns — a fingerprint hashes
+  `[type, source, file, line]`, so a drifted entry waives nothing unless an AST-identical call
+  reappears at the identical line — but that is precisely the collision a refactor can produce, with
+  no signal. A text-only staleness check was prototyped and mutation-proven in four directions (red
+  on main at 50/100, green on a cleaned baseline, red again on a single seeded +1 shift, exit-2
+  fail-closed on empty). It runs in ~1s with no BEAM, so it can sit in the existing blocking job.
+- **D143 — GREEN IS NOT REACHABLE THIS WAVE, AND SAYING SO IS THE DECISION.** The direction framed
+  this as all-or-nothing on a green job. Of the 51 reddening findings, **16 sit in files Felix may
+  not touch**: `workspace_bundle.ex` (10) and `workspace_bundle/janitor.ex` (6) are inside D82's PDS
+  fence AND inside open PR #6551's diff. One more (`router.ex` `Config.Headers`) is structurally
+  unannotatable. That leaves **34 buildable**: deploy_runner 12, blobstore local+s3 15, tenancy.ex 3,
+  and 4 singletons (validation, titles, bulldocs, renditions). Dropping `continue-on-error` while
+  still red buys a red badge and nothing else, so the flip is NOT in this wave — it is a filed
+  round-3 row gated on the fenced 16 landing. **The wave ships the 34, the instrument, and the honest
+  doc; it does not claim green.** Refusing to fake the deliverable is the doctrine working.
+- **D144 — CROSS-EPIC ADOPTION, NOT RE-FILING.** `hg-bl-sobelow-fingerprint-to-inline-migration`
+  (Honest Gates backlog item 6, open, P2, GH #6403) already IS this migration and already owns S5's
+  criterion verbatim ("continue-on-error is dropped from the Sobelow job only once the baseline is
+  falsifiable and green on main"). Two more open rows say the same thing from two more epics:
+  `hg-bl-sobelow-red-under-green` and `pds-bl-sobelow-baseline-line-shift-reconcile`/`-tenancy`.
+  Felix ADOPTS the Honest Gates row by stamping it with this wave's Paper and parenting its wave-23
+  children under the epic, and closes the duplicates BY CONTENT rather than filing a fourth copy.
+  `hg-bl-sobelow-inline-annotation-reversion` is closed by content outright: its whole premise (the
+  reconciler runs `--mark-skip-all` WITHOUT `--skip`) was fixed on main by `c69cc0b1e` (#6412), which
+  also shrank the baseline 134→108 by pure deletion and landed the blocking overlap job.
+- **D145 — SEVERITY LANGUAGE IS BOUND, BECAUSE TWO CANDIDATES ARE WEAKER THAN FILED.** (a) The
+  janitor's `ps` probe is not merely "unbounded-but-contained" per D128 — it is **UNREACHABLE in
+  production**: `Janitor.own/1` and `disown/1` have ZERO callers in `api/lib` (the only four are in
+  the test file), nothing else writes a `.owner` sidecar, so `owner_alive?/1` always takes the
+  `:enoent` branch and `System.cmd(ps, …)` is never invoked. The moduledoc's claim that "the export
+  engine calls this beside each temp file it creates" is FALSE on main, and the whole liveness guard
+  is inert — already filed as `pds-w11-janitor-engine-handshake` (P1, open). Any future janitor slice
+  must say "bounded a probe that is unreachable on main", never "removed a live hang". (b)
+  `readiness.ex:42` is ALREADY bounded (`Task.Supervisor.async_nolink` + `Task.yield ||
+  Task.shutdown(:brutal_kill)`); only the annotation remains. **D129 IS CORRECTED**: readiness.ex is
+  not "the ONE holdout" — it is one of 108 line-anchored entries, one of 98 annotatable ones, and
+  even scoped to `CI.System` there are two (the sibling is `studio_chat/titles.ex:366`). D129 was a
+  detector-scoped observation inside the W21 fence promoted to a repo-scoped absolute.
+- **D146 — WAVE SHAPE + BACKLOG.** 4 round-1 slices, all opus (fable unavailable), file-disjoint by
+  construction: the migration owns `api/.sobelow-skips` alone, so no other slice may touch it. One
+  round-2 slice (blobstore, `after: felix-w23-s1-drift-migration`) sequenced ONLY because it shares
+  the baseline file — its code is disjoint. HIGH-FLIP-RISK is stamped on S1 (per-site reachability
+  verdicts) and S5 (blobstore path provenance). Gates are local, BEAM-free where possible, and every
+  one was dry-run before filing. Backlog filed as published epic children: GAP A (P0, fenced to PDS,
+  sequenced after #6551), the fenced 16 (P1), the continue-on-error flip (P2, round 3), the
+  overlap gate's unbound-annotation blindness (P2), `Dataset.changeset/2` slug format validation
+  (P3), and the corpus gap — the Phoenix Mastery Corpus mentions Sobelow exactly once, as the last
+  word of ch 56's title, and ch 63 universalised vacuous-green for TESTS and nobody carried it to
+  TOOLING (P3).
+
+### Wave 23 roadmap (4 slices round 1 + 1 slice round 2 — `api/.sobelow-skips` is owned by S1 alone)
+
+| # | Slice | Task | Model | Size | Round |
+|---|-------|------|-------|------|-------|
+| S1 | Drift migration — 19 findings to inline annotations, 19 fingerprints deleted, per-site verdicts, scan-diff proven. HIGH-FLIP-RISK | `felix-w23-s1-drift-migration` | opus | large | 1 |
+| S2 | Baseline staleness ratchet — text-only resolution check in the blocking job + Sobelow-exact regex fix + fixtures | `felix-w23-s2-staleness-ratchet` | opus | medium | 1 |
+| S3 | Amend D75 by name + merge-gates truth (floor 10 not 0, 108 not 137, S4/SR-1 topology) | `felix-w23-s3-amend-d75` | opus | small | 1 |
+| S4 | Fresh-finding guard `--selftest` — make the mutation proof able to fail | `felix-w23-s4-fresh-guard-selftest` | opus | small | 1 |
+| S5 | Blobstore migration — 15 findings, fresh reachability verdicts (new S3 code, not a pure move). HIGH-FLIP-RISK | `felix-w23-s5-blobstore-migration` | opus | medium | 2 |
+
+Backlog filed: `felix-w23-bl-bundle-member-guard` (P0), `felix-w23-bl-fenced-sixteen` (P1),
+`felix-w23-bl-continue-on-error-flip` (P2), `felix-w23-bl-overlap-unbound-annotation` (P2),
+`felix-w23-bl-dataset-slug-format` (P3), `felix-w23-bl-corpus-gate-integrity` (P3).
+
 ### Wave 22 roadmap (2 slices, round 1, parallel — disjoint files)
 
 | # | Slice | Task | Model | Size |
@@ -1926,6 +2106,85 @@ Backlog filed: `task-felix-w22-bl-recorder-bounds` (P2), `task-felix-w22-bl-webh
 
 ## Wave log
 
+### Wave 2026-07-28 — Wave 23 BUILT + REVIEWED, grade A−. "The Blind Gate."
+
+All four round-1 slices built green, reviewed, gate-re-run on the reviewer's final state, and
+**pushed with PRs open** — #6616 S1, #6617 S2, #6618 S3, #6619 S4. Round-2 `felix-w23-s5-blobstore-migration`
+is unbuilt BY DESIGN (sequenced-rounds law: it edits `api/.sobelow-skips`, which S1 owns).
+
+**What landed.** S1 (`felix-w23-s1-drift-migration`, branch
+`loop-epic/drift-migration-19-sobelow-fingerprints--0`, unchanged by review) migrated the 19 pure
+line-drift fingerprints to inline annotations with per-site reachability verdicts; baseline 108 → 89,
+shipped-baseline findings 51 → 32. S2 (`felix-w23-s2-staleness-ratchet`, branch
+`loop-epic/blocking-baseline-staleness-ratchet-sobe-1-r`) added the orthogonal text-only staleness
+ratchet with a DERIVED detector→token table, plus the `parse.ex:61`-exact regex fix that closes an
+unsafe-direction bug in the overlap checker. S3 (`felix-w23-s3-amend-d75`, branch
+`loop-epic/amend-d75-by-name-floor-is-10-not-0-108--2-r`) amended D75 by name — floor 10 not 0, 108
+not 137, and the S4/SR-1 topology proven by the blocking `mix-audit` job being S4-excluded too. S4
+(`felix-w23-s4-fresh-guard-selftest`, branch `loop-epic/fresh-finding-guard-selftest-make-the-mu-3`,
+unchanged by review) converted the fresh-finding guard from an unattributable exit-status assertion
+to a TRANSITION assertion with a mutation-proven `--selftest`.
+
+**REVIEW'S BIGGEST FIND, and the reason this is A− not A.** S2's new step was BLOCKING and the builder
+flagged "must merge after S1". Re-measured at review with S1's pruned baseline **and** S1's sources
+applied *together*: **31 entries are still stale** — S1's added comment lines shift line numbers
+inside the very files it edits, so its 19 deletions do not clear the check. Merging after S1 would
+still have turned `sobelow-inline-overlap` — a job that is green and meaningful today — permanently
+red on every PR in the repo, reintroducing the exact blind-gate disease the wave exists to cure. Fixed
+in place (commit `9ac576278`): the real-baseline step is `continue-on-error: true` with its measured
+numbers, a one-line flip condition, and a tracking task; the hermetic `--selftest` stays blocking.
+Second review fix (`3f26f57e7`): merge-gates §9 still gave D140's REFUTED toolchain-instability claim
+as the reason the sobelow job is advisory, three paragraphs above S3's own amendment — replaced with
+the real reason and the real instability (the line number, which is inside the fingerprint hash).
+
+**Independently re-derived at review** (the HIGH-FLIP-RISK protocol): S1's D141(c) transfer proof was
+re-run from scratch with a real `mix sobelow` 0.14.1 against two empty-baseline twin trees — 109 → 90,
+19 removed / 0 added, and 51 → 32 with the shipped baseline; every number reproduced exactly. The
+reachability verdicts were re-derived from source (`validate_slug/1` is the only entry to the
+DeployRunner state files; every `fetch/2` call site resolves to a literal; `@allowlist %{}` makes
+`delete_allowlist_scoped/3` dead). S2's regex tightening was mutation-proved by reverting it, which
+reds the new malformed-annotation fixture. A genuinely INDEPENDENT second reviewer is still owed on
+S1's reachability verdicts before merge — that dispatch is a manual lead step.
+
+**On the wish's standing sore.** Main's Sobelow cannot be made honest without a human gate this wave,
+and now we know *why* in two independent senses: S3 proved that even a fully drained baseline cannot
+make Sobelow block a merge (SR-1 + stage-S4 paths-filter exclusion), and S2's ratchet measured that
+the baseline itself is 50/100 dead promises — 31 after S1. The sore is real, it is measured, and it is
+now instrumented; it is not closed.
+
+**Ledger.** Honest across all four slices — 4/5 criteria stamped with real evidence, merge-gated
+criterion left open, lifecycle `in_progress`. One correction applied: S2's criterion-2 evidence
+asserted a blocking step, which review changed; the evidence now carries the correction and the
+re-measured 31. Two backlog rows filed at review: `felix-w23-bl-staleness-blocking-flip` (P1, the
+flip) and `felix-w23-bl-sobelow-transfer-proof-harness` (P2, filed on behalf of S1's builder, whose
+six attempts timed out on `/v1/data/mutate`).
+
+**NEXT WAVE.** Merge in order S1 → S2 → S3 → S4 (S1 first: S2's ratchet reads the baseline S1
+prunes), then dispatch `felix-w23-s5-blobstore-migration` — 15 findings, 10 of which are NEW code no
+baseline ever reviewed, so it needs FRESH verdicts and is HIGH-FLIP-RISK. After S5 the staleness
+residue drops to ~16, and `felix-w23-bl-staleness-blocking-flip` becomes the one row that turns the
+new ratchet into a real gate.
+
+- **Wave 23 — 2026-07-28 — DECIDED (building). "The Blind Gate."** Ratified D135–D146. The wave
+  repairs the instrument rather than adding one more resource bound: Sobelow's JOB has been
+  `failure` on main for **8d17h / ~185 runs** while the workflow rolled up `success`, so the gate
+  whose job is finding the NEXT fifty could not report a regression, and 41 findings accumulated
+  under that cover. Verification substantially rewrote the direction's causal story and the wave
+  followed the evidence: the raw-SQL injection hypothesis is DEAD (`copy_into` quotes at the call
+  site, `qi/1` is correct quote-doubling, Honest Gates D30 already ruled these sites and the comment
+  fix is already on main), the phantom count is **52 of 108** not 4, and "blocking" is
+  STRUCTURALLY impossible inside security.yml (SR-1 live + stage-S4 paths-filter exclusion, proven
+  by the blocking `mix-audit` job being excluded too). Verification also found what nobody was
+  hunting — GAP A, an execution-proven arbitrary-table write through `import_member/3` that lands an
+  attacker-chosen row in `users` — and the wave REFUSED to build it, because D82 fences Felix off
+  `tenancy/workspace_bundle` and PDS PR #6551 is open across the same files; it ships as a P0 backlog
+  row instead. Hardest call: **green is not reachable this wave** (16 of 51 findings sit in fenced,
+  collided files; 1 more is unannotatable), so the wave ships the 34 it may honestly touch, the new
+  staleness ratchet, and an amendment to D75 by name — and does not claim green. 4 round-1 slices +
+  1 round-2, all opus (fable unavailable), `api/.sobelow-skips` owned by S1 alone. Cross-epic:
+  Honest Gates' `hg-bl-sobelow-fingerprint-to-inline-migration` is ADOPTED by name, not re-filed,
+  and its sibling `-inline-annotation-reversion` is closed by content (fixed by `c69cc0b1e`/#6412).
+  Grade: pending build+review.
 - **Wave 22 — 2026-07-23 — BUILT + REVIEWED, grade A. Arm: E (E6+E7 winning recipe — barkpark_web
   resource-bound sweep).** Both round-1 slices built green, reviewed, and re-proven by the
   reviewer's OWN mutations (not just the builders'): S1 claude_chat transport buffer cap

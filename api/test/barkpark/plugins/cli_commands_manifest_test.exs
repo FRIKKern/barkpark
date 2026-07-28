@@ -33,6 +33,9 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                      "/v1/plugins/bulldocs/sessions",
                      "/v1/plugins/bulldocs/sessions/:slug",
                      "/v1/plugins/bulldocs/sessions/:slug/events",
+                     # session-conversations slice: the harness-conversation
+                     # registry touch route (session.touch).
+                     "/v1/plugins/bulldocs/sessions/:slug/conversations",
                      "/v1/tasks/:doc_id/sessions"
                    ])
 
@@ -117,17 +120,18 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert Enum.any?(patch.flags, &(&1.name == "if-rev"))
     end
 
-    test "declares the five session.* verbs (task 6), grounded in real routes" do
+    test "declares the six session.* verbs (task 6 + session-conversations), grounded in real routes" do
       cmds = Bulldocs.cli_commands()
       by_id = Map.new(cmds, &{&1.id, &1})
 
-      for id <- ~w(session.open session.log session.publish session.view session.link-task) do
+      for id <-
+            ~w(session.open session.log session.publish session.view session.link-task session.touch) do
         assert Map.has_key?(by_id, id), "missing #{id}"
       end
 
       session_cmds = Enum.filter(cmds, &(&1.noun == "session"))
-      assert length(session_cmds) == 5
-      assert Enum.all?(session_cmds, &(&1.verb in ~w(open log publish view link-task)))
+      assert length(session_cmds) == 6
+      assert Enum.all?(session_cmds, &(&1.verb in ~w(open log publish view link-task touch)))
 
       # Every session verb is grounded in a route the plugin (or, for
       # link-task, the Tasks plugin's own /v1/tasks mount, task 5) actually
@@ -144,12 +148,14 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       publish = by_id["session.publish"]
       view = by_id["session.view"]
       link_task = by_id["session.link-task"]
+      touch = by_id["session.touch"]
 
       assert open.auth_tier == "ingest"
       assert log.auth_tier == "ingest"
       assert publish.auth_tier == "ingest"
       assert view.auth_tier == "ingest"
       assert link_task.auth_tier == "read"
+      assert touch.auth_tier == "ingest"
 
       assert open.http == %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions"}
       assert publish.http == %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions"}
@@ -163,6 +169,20 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
 
       assert link_task.http == %{method: "POST", path_template: "/v1/tasks/:doc_id/sessions"}
 
+      assert touch.http == %{
+               method: "POST",
+               path_template: "/v1/plugins/bulldocs/sessions/:slug/conversations"
+             }
+
+      touch_flags = Map.new(touch.flags, &{&1.name, &1})
+      assert touch_flags["conversation"].type == "string"
+      assert touch_flags["harness"].type == "string"
+      assert touch_flags["account"].type == "string"
+      assert touch_flags["machine"].type == "string"
+      assert touch_flags["cwd"].type == "string"
+      refute touch.batch
+      assert touch.writes
+
       # session.log carries the three event-shape flags (kind/ref/note) — the
       # server reads them off conn.params, which Phoenix merges from the query
       # string for a non-batch write (commandFlagBelongsInBody only routes
@@ -172,6 +192,11 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert log_flags["kind"].type == "string"
       assert log_flags["ref"].type == "string"
       assert log_flags["note"].type == "string"
+      # session-conversations slice review fix: session.log must declare
+      # --conversation, or the manifest-driven CLI hard-errors (unknown flag,
+      # run.go:474) on the documented `bp session log ... --conversation`
+      # provenance invocation — the event-provenance half was unreachable.
+      assert log_flags["conversation"].type == "string"
       refute log.batch
 
       # session.link-task's --add flag reaches TasksController.sessions/2's
@@ -183,7 +208,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
 
       # view is a read (GET), the rest write.
       refute view.writes
-      assert Enum.all?([open, log, publish, link_task], & &1.writes)
+      assert Enum.all?([open, log, publish, link_task, touch], & &1.writes)
     end
   end
 

@@ -7,7 +7,10 @@
 #   barkpark reload    restart the server so config changes take effect.
 #                      (See "CONFIG-RELOAD FOOTGUN" below.)
 #   barkpark stop      stop the server and the managed Postgres.
-#   barkpark status    report Postgres + server state.
+#   barkpark status    report Postgres + the OBSERVED server state — one of
+#                      ANSWERING / PROCESS-ALIVE-NOT-ANSWERING / STOPPED /
+#                      UNKNOWN, decided from the port and an HTTP answer,
+#                      never from a pidfile alone.
 #   barkpark psql ...  open a psql shell on the managed Postgres.
 #
 # ── CONFIG-RELOAD FOOTGUN ─────────────────────────────────────────────────────
@@ -237,13 +240,79 @@ cmd_stop() {
   "$PG" stop
 }
 
+# Does the server ANSWER? The same probe wait_server uses to decide the boot
+# succeeded — liveness is "it serves HTTP", never "a pid exists".
+server_answering() {
+  curl -sf "http://$PHX_HOST:$PORT/api/schemas" >/dev/null 2>&1
+}
+
+# version + commit of the RUNNING server, read back from its own /status.json
+# (public, unauthenticated). Empty when the endpoint is absent or unparseable —
+# an older build answers /api/schemas but may not carry /status.json.
+running_version() {
+  local body version commit
+  body="$(curl -sf "http://$PHX_HOST:$PORT/status.json" 2>/dev/null || true)"
+  [ -n "$body" ] || return 0
+  version="$(printf '%s' "$body" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+  commit="$(printf '%s' "$body" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')"
+  # The server reports version "unknown" when it was not built from a tag; the
+  # commit sha is then the only real identity — do not print "running unknown".
+  [ "$version" = "unknown" ] && version=""
+  [ "$commit" = "unknown" ] && commit=""
+  if [ -n "$version" ] && [ -n "$commit" ]; then
+    echo "$version ($commit)"
+  elif [ -n "$commit" ]; then
+    echo "$commit"
+  elif [ -n "$version" ]; then
+    echo "$version"
+  fi
+}
+
+# `status` reports what it can OBSERVE, never what a pidfile asserts. A pidfile
+# is a claim; the port and an HTTP answer are the state. Both failure directions
+# were observed on a dev box before this: a pidfile pointing at an unrelated
+# `sleep` printed "server running", and with no pidfile at all it printed
+# "server stopped" while beam.smp held :4000 and /api/schemas returned 200.
+#
+# FOUR OUTCOMES — there is no bare "running":
+#   ANSWERING                    port held AND /api/schemas answers (+ version/commit)
+#   PROCESS-ALIVE-NOT-ANSWERING  port held, HTTP does not answer (booting or wedged)
+#   STOPPED                      nothing holds the port
+#   UNKNOWN                      pidfile claims a live pid that does NOT hold the port
 cmd_status() {
   "$PG" status || true
-  if server_running; then
-    log "server running (pid $(cat "$SERVER_PID_FILE")) — http://$PHX_HOST:$PORT"
-  else
-    log "server stopped"
+
+  local lpid ppid_claim ver
+  # `|| true`: lsof exits non-zero when nothing holds the port, and under
+  # `set -euo pipefail` that would abort status before it could report STOPPED.
+  lpid="$(listener_pid || true)"
+  ppid_claim="$(cat "$SERVER_PID_FILE" 2>/dev/null || true)"
+
+  if [ -n "$lpid" ]; then
+    if server_answering; then
+      ver="$(running_version)"
+      if [ -n "$ver" ]; then
+        log "server ANSWERING (pid $lpid) — http://$PHX_HOST:$PORT — running $ver"
+      else
+        log "server ANSWERING (pid $lpid) — http://$PHX_HOST:$PORT — version unknown (/status.json not served)"
+      fi
+    else
+      log "server PROCESS-ALIVE-NOT-ANSWERING — pid $lpid holds port $PORT but http://$PHX_HOST:$PORT/api/schemas did not answer — see $SERVER_LOG"
+    fi
+    if [ -n "$ppid_claim" ] && [ "$ppid_claim" != "$lpid" ]; then
+      log "note: $SERVER_PID_FILE claims pid $ppid_claim, which is NOT the process holding port $PORT"
+    fi
+    return 0
   fi
+
+  # Nothing is listening. A pidfile pointing at a live process is then a claim
+  # we cannot corroborate — that process is not serving Barkpark on this port.
+  if [ -n "$ppid_claim" ] && kill -0 "$ppid_claim" 2>/dev/null; then
+    log "server UNKNOWN — $SERVER_PID_FILE claims pid $ppid_claim is alive, but nothing is listening on port $PORT (stale pidfile, or the server is on another port)"
+    return 0
+  fi
+
+  log "server STOPPED — nothing is listening on port $PORT"
 }
 
 case "${1:-up}" in

@@ -7048,10 +7048,19 @@
   // surface serializes it as `s.url` (the CP loads the instance there); the LIST
   // surfaces skip that N+1, so we reconstruct it from the instance the row
   // already carries. Null when neither is available (never invent a dead link).
+  // ssw8: this MANUFACTURES a URL nobody fetched, so the least it owes is the
+  // right characters. It used to esc() the slug and THEN strip to the URL-safe
+  // class — HTML-escaping first turns `&` into `&amp;`, whose letters SURVIVE the
+  // strip, so a slug `a&b` produced `/sites/aampb/`: a confidently-wrong link to a
+  // site that does not exist. Strip FIRST; the surviving class is already
+  // HTML-inert, and siteOpenLink esc()s the finished href regardless.
+  // LATENT, not live: Site's changeset pins slugs to ^[a-z0-9][a-z0-9-]*$, so no
+  // stored row can reach the bad branch today. This removes the trap, it does not
+  // fix an incident.
   function siteLiveUrl(s, bp) {
     if (s && s.url) return s.url;
     if (bp && bp.url && s && s.slug) {
-      return String(bp.url).replace(/\/+$/, "") + "/sites/" + esc(s.slug).replace(/[^A-Za-z0-9._-]/g, "") + "/";
+      return String(bp.url).replace(/\/+$/, "") + "/sites/" + String(s.slug).replace(/[^A-Za-z0-9._-]/g, "") + "/";
     }
     return null;
   }
@@ -7196,6 +7205,105 @@
     });
   }
 
+  // ── ssw8 (charter D82): THE CONTENT BINDING, RENDERED FROM THE PAYLOAD ONLY ──
+  //
+  // `site_json/2` (router.ex ~9675) serializes ELEVEN binding fields; the console
+  // rendered exactly ONE of them (`doc_type`, W10's readback). Everything below
+  // reads the rest — and NOTHING the payload does not carry.
+  //
+  // THE INVARIANT this slice exists to install: A SITE SURFACE MUST RENDER NO
+  // CLAIM NO PAYLOAD FIELD BACKS. Three consequences, each pinned in
+  // __app.test.mjs ("ssw8 INVARIANT: …"):
+  //
+  //  1. an ABSENT field reads as an honest placeholder ("—", "unknown") and
+  //     never as a plausible default — "production" is the documented default
+  //     dataset everywhere else in this product, which is exactly what makes it
+  //     the tempting lie here;
+  //  2. site_json/2 sends the SAME three columns under TWO vocabularies
+  //     (`bootstrap_workspace/project/dataset` and the CLI's
+  //     `workspace/project/dataset`). They are cross-checked: when they disagree
+  //     the surface SAYS SO and shows BOTH. A self-contradictory payload is a
+  //     defect to report, never a tie for the renderer to break silently;
+  //  3. `content_bound` is server-side literally `not is_nil(read_token_encrypted)`
+  //     — it promises A READ TOKEN EXISTS, never that the site HAS content. Every
+  //     label below says "read token"; none says "bound"/"has content", because
+  //     no field in this payload backs that.
+  //
+  // ZERO CSS: the pill is the shared `.status-pill status-pill--{ok,danger,neutral}`
+  // (app.css, dynamic head already ALLOW_PREFIXES-listed in __css_check.mjs), so
+  // this slice adds no rule head and the CSSOM ratchet is untouched.
+  var SITE_BINDING_PARTS = [
+    ["workspace", "bootstrap_workspace"],
+    ["project", "bootstrap_project"],
+    ["dataset", "bootstrap_dataset"],
+  ];
+  function siteBindingModel(s) {
+    s = s || {};
+    var parts = [], missing = 0, mismatch = false;
+    SITE_BINDING_PARTS.forEach(function (pair) {
+      var seen = [s[pair[0]], s[pair[1]]]
+        .filter(function (v) { return v != null && v !== ""; })
+        .map(String);
+      if (!seen.length) { missing++; parts.push("—"); return; }
+      // Both spellings present and DIFFERENT: show both, resolve neither.
+      if (seen.length === 2 && seen[0] !== seen[1]) {
+        mismatch = true;
+        parts.push(seen[0] + " ≠ " + seen[1]);
+        return;
+      }
+      parts.push(seen[0]);
+    });
+    var pathState = mismatch ? "mismatch"
+      : missing === 3 ? "unknown"
+      : missing ? "partial" : "ok";
+    // A boolean the control plane always sends; ABSENT means an older control
+    // plane, and "we do not know" is then the only honest answer.
+    var token = typeof s.content_bound === "boolean"
+      ? (s.content_bound ? "present" : "absent") : "unknown";
+    var tokenLabel = token === "present" ? "Read token stored"
+      : token === "absent" ? "No read token" : "Read token unknown";
+    var role = "neutral", label = "Binding unknown";
+    if (pathState === "mismatch") { role = "danger"; label = "Binding mismatch"; }
+    else if (pathState === "partial") { role = "danger"; label = "Binding incomplete"; }
+    else if (pathState === "ok") { role = token === "present" ? "ok" : token === "absent" ? "danger" : "neutral"; label = tokenLabel; }
+    else if (token === "present") { role = "danger"; label = "Dataset unknown"; }
+    else if (token === "absent") { role = "neutral"; label = "No content binding"; }
+    var path = pathState === "unknown" ? "—" : parts.join("/");
+    return {
+      path: path,
+      pathState: pathState,
+      token: token,
+      tokenLabel: tokenLabel,
+      role: role,
+      label: label,
+      title: (pathState === "unknown" ? "No content dataset on this site" : "Content dataset " + path) +
+        " · " + tokenLabel +
+        // A mismatch renders as "a ≠ b" and the two sides are otherwise
+        // indistinguishable — the hover has to say WHICH payload field each one
+        // came from, or "report, don't resolve" hands the operator a
+        // contradiction they cannot act on.
+        (mismatch
+          ? " · this payload contradicts itself: the left value is the site row's workspace/project/dataset, the right is its bootstrap_* twin of the same column"
+          : ""),
+      // A LIST chip is signal, not decoration: a row whose payload names no
+      // triple AND holds no token has nothing to say about a binding, so it says
+      // nothing. The DETAIL rail still spells the unknown out — a surface you
+      // opened on purpose owes you the state, blank or not.
+      silent: pathState === "unknown" && token !== "present",
+    };
+  }
+  // The binding as a shared status pill. Role ∈ ok | danger | neutral.
+  function siteBindingPill(m) {
+    return '<span class="status-pill status-pill--' + esc(m.role) + '" title="' + esc(m.title) + '">' +
+      '<span class="status-pill-dot" aria-hidden="true"></span>' +
+      '<span class="status-pill-label">' + esc(m.label) + "</span></span>";
+  }
+  // The compact row chip — "" when the payload says nothing about a binding.
+  function siteBindingChip(s) {
+    var m = siteBindingModel(s);
+    return m.silent ? "" : siteBindingPill(m);
+  }
+
   function siteRow(s, bp) {
     var domain = (s.domains && s.domains[0]) || s.slug || s.name || "—";
     var fw = s.framework ? esc(s.framework) : "site";
@@ -7208,6 +7316,7 @@
       '<div class="site-meta">' + fw + " &middot; " + repo + "</div>" +
       '</div><div class="fleet-badges">' +
         siteOpenLink(siteLiveUrl(s, bp)) +
+        siteBindingChip(s) +
         freshnessBadge(s) +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
@@ -9342,6 +9451,8 @@
   function siteDetailHtml(site, bp, deployments, domain, previews) {
     previews = previews || [];
     var auto = site.github_webhook_configured;
+    // ssw8 (D82): the content binding, derived once for the rail rows below.
+    var binding = siteBindingModel(site);
     var repo = site.github_repo
       ? '<span class="mono">' + esc(site.github_repo) + (site.github_branch ? "@" + esc(site.github_branch) : "") + "</span>"
       : "—";
@@ -9404,10 +9515,18 @@
           railRowHtml("Theme",
             '<select class="rail-select" id="site-theme-select" aria-label="Deploy theme">' +
               siteThemeOptionsHtml(site.theme || "") + "</select>") +
+          // ssw8 (D82): the content BINDING — the dataset triple the build reads
+          // and what `content_bound` actually promises. Both derive from
+          // siteBindingModel, which renders payload fields only: an absent triple
+          // reads "—" (never "default/default/production"), a payload that
+          // disagrees with ITSELF shows both spellings, and the pill says "read
+          // token", never "this site has content".
+          railRow("Content dataset", binding.path) +
           // W10: the featured content type the build reads. The create form has
           // always WRITTEN doc_type and no surface read it back — "—" when the
           // control plane predates the field, never an invented default.
           railRow("Content type", site.doc_type || "—") +
+          railRowHtml("Content binding", siteBindingPill(binding)) +
           railRowHtml("Repository", repo) +
           // E-03: the env editor affordance. Write-only truth (POST …/env is a
           // full-blob replace; reveal_site_env has zero route callers) means the
@@ -18362,6 +18481,17 @@
       deployDuration: deployDuration,
       siteStatusChip: siteStatusChip,
       siteDetailHtml: siteDetailHtml,
+      // ssw8 (D82): the content-binding model + its two renderers, and siteRow —
+      // the FIRST site row a stranger sees, which had zero hooks and zero
+      // assertions until this slice. These are what the "no claim unbacked by a
+      // payload field" invariant is asserted against.
+      siteBindingModel: siteBindingModel,
+      siteBindingPill: siteBindingPill,
+      siteBindingChip: siteBindingChip,
+      siteRow: siteRow,
+      // …and the URL the LIST surfaces manufacture when the payload carries none.
+      // Unasserted until ssw8 despite being the "Visit ↗" a stranger clicks first.
+      siteLiveUrl: siteLiveUrl,
       // G-04 Notifications (the crown, GR33/GR34/GR36): the pure builders for the
       // settings-anatomy page — cell/channel state, the matrix + roster + email +
       // delivery-log markup, and the routing-write helpers. DOM mounts

@@ -25,7 +25,11 @@
 #      failed to run, and saying "PASS" there is the vacuous pass this epic
 #      exists to remove.
 #
-# SCOPE / KNOWN LIMIT. Coverage is computed from source text, not from
+# SCOPE / KNOWN LIMIT. An annotation counts here only if Sobelow itself would
+# honour it: the comment form is matched with parse.ex:61's regex verbatim, so
+# a near-miss like `# sobelow_skip["X"]` (no space before the bracket) is NOT
+# an annotation and the baseline entry covering it stays load-bearing.
+# Coverage is computed from source text, not from
 # Sobelow's own AST: an annotation covers from its own line to the line before
 # the next `def`/`defp` at or after it. Nested `def`s inside a covered function
 # therefore END the span early, which makes this ratchet CONSERVATIVE — it can
@@ -98,10 +102,22 @@ scan_annotations() {
           for (i = 1; i <= NR; i++)
             if (line[i] ~ /^[[:space:]]*defp?[[:space:](]/) defline[++ndef] = i
 
+          # The comment form must match Sobelow parse.ex:61 EXACTLY —
+          #   ~r/#\s?sobelow_skip (\[(\"[^"]+\"(,|, )?)+\])/
+          # — because that regex is what rewrites `# sobelow_skip [...]` into
+          # the `@sobelow_skip` attribute Sobelow actually reads. A LOOSER
+          # regex here fails in the UNSAFE direction: it sees an annotation
+          # Sobelow silently ignores (e.g. `# sobelow_skip["X"]`, no space
+          # before the bracket), calls the baseline entry a duplicate, and
+          # orders the deletion of a load-bearing waiver. Note `#\s?` really
+          # does allow `#sobelow_skip`, and the match is NOT anchored to the
+          # start of the line, so both are honoured here too.
+          skip_comment = "#[[:space:]]?sobelow_skip \\[(\"[^\"]+\"(, ?)?)+\\]"
           for (i = 1; i <= NR; i++) {
             s = line[i]
-            if (s !~ /^[[:space:]]*#[[:space:]]?sobelow_skip[[:space:]]*\[/ &&
-                s !~ /^[[:space:]]*@sobelow_skip[[:space:]]*\[/) continue
+            is_comment = (match(s, skip_comment) > 0)
+            mstart = RSTART; mlen = RLENGTH
+            if (!is_comment && s !~ /^[[:space:]]*@sobelow_skip[[:space:]]*\[/) continue
 
             # The annotation binds to the next def; its span ends where the
             # following def begins (or at end of file).
@@ -113,7 +129,9 @@ scan_annotations() {
             }
             if (span_end == 0) continue   # dangling annotation, binds to nothing
 
-            rest = s
+            # Read the waived types out of the matched bracket only, so text
+            # after a valid annotation cannot smuggle in extra types.
+            rest = is_comment ? substr(s, mstart, mlen) : s
             while (match(rest, /"[^"]+"/)) {
               printf "%s\t%s\t%d\t%d\n", rel,
                      substr(rest, RSTART + 1, RLENGTH - 2), i, span_end
@@ -223,6 +241,20 @@ defmodule Barkpark.Fixture do
   end
 end
 FIXTURE
+
+  # A MALFORMED annotation: no space before the bracket. Sobelow's rewrite
+  # regex (parse.ex:61) requires that space, so Sobelow ignores this line
+  # entirely and the finding is NOT waived inline — which makes the baseline
+  # entry covering it load-bearing. A checker that accepts this shape
+  # manufactures an OVERLAP and orders that entry deleted.
+  cat > "$dir/lib/barkpark/malformed.ex" <<'MALFORMED'
+defmodule Barkpark.Malformed do
+  # sobelow_skip["Traversal.FileModule"]
+  def not_waived_at_all(path) do
+    File.read!(path)
+  end
+end
+MALFORMED
 }
 
 expect_status() {
@@ -255,12 +287,23 @@ run_selftest() {
     > "$clean"
   : > "$empty"
 
+  # The malformed annotation sits at malformed.ex:2 and its `File.read!` at
+  # line 4. Sobelow ignores the annotation, so this entry is load-bearing and
+  # must NOT be reported as an overlap. Under the pre-parse.ex:61 regex this
+  # fixture exits 1 and orders a live waiver deleted.
+  local malformed="$tmp/malformed"
+  printf '%s\n' \
+    'Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/malformed.ex:4,CCCCCC' \
+    > "$malformed"
+
   echo "selftest: mutation fixtures"
   local failures=0
   expect_status "baseline carries a waived finding" 1 \
     "${BASH_SOURCE[0]}" --baseline "$overlapping" --lib "$tmp/lib" || failures=1
   expect_status "same baseline minus that line" 0 \
     "${BASH_SOURCE[0]}" --baseline "$clean" --lib "$tmp/lib" || failures=1
+  expect_status "malformed annotation is NOT an overlap" 0 \
+    "${BASH_SOURCE[0]}" --baseline "$malformed" --lib "$tmp/lib" || failures=1
   expect_status "zero baseline entries fails closed" 2 \
     "${BASH_SOURCE[0]}" --baseline "$empty" --lib "$tmp/lib" || failures=1
 

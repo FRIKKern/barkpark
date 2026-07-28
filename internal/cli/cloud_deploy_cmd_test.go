@@ -3,10 +3,14 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // recordFeeder is the fake per-host runner the deploy tests inject in place of
@@ -354,6 +358,350 @@ func TestRunCloudDeployRejectsBothRefFlags(t *testing.T) {
 	code := runCloudDeploy(w, globals{dryRun: true}, []string{"staging", "--host", "1.2.3.4", "--branch", "x", "--pr", "9"})
 	if code != exitUsage {
 		t.Fatalf("both --branch and --pr should be a usage error, got exit %d", code)
+	}
+}
+
+// --- the read-back: proving the box advanced -------------------------------
+
+// stubDeployStatus swaps the /status.json fetcher for a scripted sequence of
+// responses (the LAST one repeats, so a retry loop can be driven precisely) and
+// returns a pointer to the call counter so a test can prove reads happened —
+// or, on the --host path, that NONE did.
+type statusReply struct {
+	code int
+	body string
+	err  error
+}
+
+func stubDeployStatus(t *testing.T, replies ...statusReply) *int {
+	t.Helper()
+	calls := 0
+	prev := deployStatusFetch
+	deployStatusFetch = func(host string) (int, string, error) {
+		r := replies[len(replies)-1]
+		if calls < len(replies) {
+			r = replies[calls]
+		}
+		calls++
+		return r.code, r.body, r.err
+	}
+	t.Cleanup(func() { deployStatusFetch = prev })
+	return &calls
+}
+
+// stubDeployLsRemote swaps the expectation resolver's git call. Returns the call
+// counter so a test can prove the --host path resolves nothing.
+func stubDeployLsRemote(t *testing.T, out string, err error) *int {
+	t.Helper()
+	calls := 0
+	prev := deployLsRemote
+	deployLsRemote = func(fqref string) (string, error) {
+		calls++
+		return out, err
+	}
+	t.Cleanup(func() { deployLsRemote = prev })
+	return &calls
+}
+
+// stubDeploySleep makes the read-back retry instant.
+func stubDeploySleep(t *testing.T) {
+	t.Helper()
+	prev := deploySleep
+	deploySleep = func(time.Duration) {}
+	t.Cleanup(func() { deploySleep = prev })
+}
+
+const readbackSha = "c73f22a0b1f3d9e5a41c0b2d6e8f7a90b1c2d3e4"
+
+func statusBody(commit string) string {
+	if commit == "" {
+		return `{"ok":true,"version":"1.2.3"}`
+	}
+	return `{"ok":true,"version":"1.2.3","commit":"` + commit + `"}`
+}
+
+// TestQualifyDeployRef pins that BOTH ref shapes are queried FULLY QUALIFIED —
+// a bare `main` is suffix-matched by git ls-remote and can answer with a tag
+// path that also ends in /main.
+func TestQualifyDeployRef(t *testing.T) {
+	cases := []struct{ ref, want string }{
+		{"main", "refs/heads/main"},
+		{"feature-x", "refs/heads/feature-x"},
+		{"pull/42/head", "refs/pull/42/head"},
+		{"refs/heads/already", "refs/heads/already"},
+	}
+	for _, c := range cases {
+		if got := qualifyDeployRef(c.ref); got != c.want {
+			t.Errorf("qualifyDeployRef(%q) = %q, want %q", c.ref, got, c.want)
+		}
+		if got := qualifyDeployRef(c.ref); !strings.HasPrefix(got, "refs/") {
+			t.Errorf("qualifyDeployRef(%q) must never hand git a bare name, got %q", c.ref, got)
+		}
+	}
+}
+
+// TestPickLsRemoteSha proves the sha is taken by EXACT ref match, never "the
+// first line" — ls-remote can answer with more than one row.
+func TestPickLsRemoteSha(t *testing.T) {
+	two := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\trefs/tags/v1/main\n" +
+		readbackSha + "\trefs/heads/main\n"
+	if got := pickLsRemoteSha(two, "refs/heads/main"); got != readbackSha {
+		t.Errorf("ambiguous ls-remote: got %q, want %q", got, readbackSha)
+	}
+	if got := pickLsRemoteSha("", "refs/heads/main"); got != "" {
+		t.Errorf("empty ls-remote must yield no sha, got %q", got)
+	}
+}
+
+// TestResolveExpectedDeployShaEmptyIsUnperformable is the anti-success-lie guard
+// on the EXPECTATION itself: `git ls-remote origin refs/heads/nope` exits 0 with
+// EMPTY output, so trusting the exit code would compare against "" and match
+// nothing forever. Empty stdout must route to a stated problem.
+func TestResolveExpectedDeployShaEmptyIsUnperformable(t *testing.T) {
+	stubDeployLsRemote(t, "", nil) // exit 0, no output — the unknown-ref shape
+	sha, problem := resolveExpectedDeploySha("no-such-branch")
+	if sha != "" {
+		t.Errorf("unknown ref must yield no sha, got %q", sha)
+	}
+	if problem == "" || !strings.Contains(problem, "refs/heads/no-such-branch") {
+		t.Errorf("unknown ref must state the problem naming the ref, got %q", problem)
+	}
+}
+
+// TestReadDeployCommitFourUnperformableShapes covers the FOUR live shapes with
+// FOUR distinct sentences — collapsing them loses the actionable difference.
+func TestReadDeployCommitFourUnperformableShapes(t *testing.T) {
+	cases := []struct {
+		name  string
+		reply statusReply
+		want  string
+	}{
+		{"host unresolvable", statusReply{err: errors.New("dial tcp: no such host")}, "could not reach"},
+		{"route 404", statusReply{code: 404, body: "not found"}, "not served (404)"},
+		{"commit key absent", statusReply{code: 200, body: statusBody("")}, "predates the status-commit build"},
+		{"literal unknown", statusReply{code: 200, body: statusBody("unknown")}, `commit "unknown"`},
+	}
+	seen := map[string]bool{}
+	for _, c := range cases {
+		stubDeployStatus(t, c.reply)
+		got := readDeployCommit("box.barkpark.cloud")
+		if got.commit != "" {
+			t.Errorf("%s: must yield no usable commit, got %q", c.name, got.commit)
+		}
+		if !strings.Contains(got.problem, c.want) {
+			t.Errorf("%s: problem %q missing %q", c.name, got.problem, c.want)
+		}
+		if seen[got.problem] {
+			t.Errorf("%s: reuses another shape's sentence %q", c.name, got.problem)
+		}
+		seen[got.problem] = true
+	}
+}
+
+// TestReadDeployCommitOverHTTP drives the real fetcher shape against an httptest
+// server, so the JSON path is exercised end to end and not just in the classifier.
+func TestReadDeployCommitOverHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/status.json" {
+			w.WriteHeader(404)
+			return
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(statusBody(readbackSha[:9])))
+	}))
+	t.Cleanup(srv.Close)
+
+	prev := deployStatusFetch
+	deployStatusFetch = func(host string) (int, string, error) {
+		resp, err := http.Get(srv.URL + "/status.json")
+		if err != nil {
+			return 0, "", err
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b), nil
+	}
+	t.Cleanup(func() { deployStatusFetch = prev })
+
+	got := readDeployCommit("box.barkpark.cloud")
+	if got.problem != "" || got.commit != readbackSha[:9] {
+		t.Fatalf("httptest read-back = %+v", got)
+	}
+}
+
+// TestDeployShaMatchesAdaptiveLength is the trap that would manufacture a false
+// MISMATCH: the SAME commit is abbreviated to 7 chars in a --depth 1 clone and 9
+// on a full one, while ls-remote answers 40. Comparison must be served-is-a-
+// prefix-of-expected, and the reverse direction must NOT be accepted.
+func TestDeployShaMatchesAdaptiveLength(t *testing.T) {
+	for _, n := range []int{7, 9, 12, 40} {
+		if !deployShaMatches(readbackSha[:n], readbackSha) {
+			t.Errorf("%d-char abbreviation must MATCH the full sha", n)
+		}
+	}
+	if deployShaMatches(readbackSha, readbackSha[:9]) {
+		t.Error("expected-is-prefix-of-served is the wrong direction and must not match")
+	}
+	if deployShaMatches("", readbackSha) || deployShaMatches(readbackSha, "") {
+		t.Error("an empty side must never match")
+	}
+}
+
+// TestClassifyDeployReadbackOutcomes pins the four verdicts (plus the mismatch
+// shape) off pure inputs.
+func TestClassifyDeployReadbackOutcomes(t *testing.T) {
+	old := "1111111111111111111111111111111111111111"
+	cases := []struct {
+		name                      string
+		expected, expectedProblem string
+		before, after             deployCommitRead
+		want                      string
+	}{
+		{"advanced", readbackSha, "", deployCommitRead{commit: old[:9]}, deployCommitRead{commit: readbackSha[:7]}, deployAdvanced},
+		{"already-at", readbackSha, "", deployCommitRead{commit: readbackSha[:9]}, deployCommitRead{commit: readbackSha[:7]}, deployAlreadyAt},
+		{"stall", readbackSha, "", deployCommitRead{commit: old[:9]}, deployCommitRead{commit: old[:9]}, deployStall},
+		{"mismatch", readbackSha, "", deployCommitRead{commit: old[:9]}, deployCommitRead{commit: "2222222222"}, deployMismatch},
+		{"unperformable-expectation", "", "no such ref", deployCommitRead{commit: old}, deployCommitRead{commit: old}, deployUnperformable},
+		{"unperformable-read", readbackSha, "", deployCommitRead{commit: old}, deployCommitRead{problem: "404"}, deployUnperformable},
+	}
+	for _, c := range cases {
+		got := classifyDeployReadback(c.expected, c.expectedProblem, c.before, c.after)
+		if got.outcome != c.want {
+			t.Errorf("%s: outcome = %q, want %q", c.name, got.outcome, c.want)
+		}
+	}
+}
+
+// runReadbackDeploy drives a full non-dry-run deploy through the fleet path
+// (via=control-plane, so the read-back is performable) with every seam stubbed.
+func runReadbackDeploy(t *testing.T) (string, string, int) {
+	t.Helper()
+	withTempConfigHome(t)
+	stubResolveStagingHost(t, "5.6.7.8", "https://guerrilla.barkpark.cloud", true, nil)
+	stubDeployScript(t, "deploy/instance-deploy.sh", "#!/usr/bin/env bash\n")
+	stubDeployFeeder(t)
+	stubDeploySleep(t)
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	code := runCloudDeploy(w, globals{}, []string{"guerrilla"})
+	return stdout.String(), stderr.String(), code
+}
+
+// TestRunCloudDeployAdvancedNamesTheSha proves the success line is backed by a
+// post-condition read: it names the served sha and what it advanced FROM.
+func TestRunCloudDeployAdvancedNamesTheSha(t *testing.T) {
+	stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+	stubDeployStatus(t,
+		statusReply{code: 200, body: statusBody("1111111111")}, // before
+		statusReply{code: 200, body: statusBody(readbackSha[:9])},
+	)
+	stdout, stderr, code := runReadbackDeploy(t)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitOK, stderr)
+	}
+	for _, want := range []string{"ADVANCED", readbackSha[:9], "1111111111"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("advanced line missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+// TestRunCloudDeployStallIsNamedNonZero proves an ssh exit 0 with an unmoved box
+// FAILS — the flagship success-lie this slice kills.
+func TestRunCloudDeployStallIsNamedNonZero(t *testing.T) {
+	stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+	stubDeployStatus(t, statusReply{code: 200, body: statusBody("1111111111")})
+	stdout, stderr, code := runReadbackDeploy(t)
+	if code == exitOK {
+		t.Fatalf("a stalled deploy must not exit 0\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "STALL") {
+		t.Errorf("stall must be NAMED:\n%s", stderr)
+	}
+	if strings.Contains(stdout, "✓") {
+		t.Errorf("no checkmark may survive a stall:\n%s", stdout)
+	}
+}
+
+// TestRunCloudDeployRetriesBeforeStall proves the AFTER read is retried before a
+// stall is declared — a slow Caddy flip must not be reported as a failure.
+func TestRunCloudDeployRetriesBeforeStall(t *testing.T) {
+	stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+	calls := stubDeployStatus(t,
+		statusReply{code: 200, body: statusBody("1111111111")}, // before
+		statusReply{code: 200, body: statusBody("1111111111")}, // after #1: not yet flipped
+		statusReply{code: 200, body: statusBody(readbackSha[:7])},
+	)
+	stdout, stderr, code := runReadbackDeploy(t)
+	if code != exitOK {
+		t.Fatalf("the retry must rescue a slow flip: exit %d\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "ADVANCED") {
+		t.Errorf("retried read must report ADVANCED:\n%s", stdout)
+	}
+	if *calls < 3 {
+		t.Errorf("expected a retried read, got %d status reads", *calls)
+	}
+}
+
+// TestRunCloudDeployCoalescePrintsAlreadyAt proves a no-op run is not dressed as
+// a deploy.
+func TestRunCloudDeployCoalescePrintsAlreadyAt(t *testing.T) {
+	stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+	stubDeployStatus(t, statusReply{code: 200, body: statusBody(readbackSha[:9])})
+	stdout, stderr, code := runReadbackDeploy(t)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, "already at "+readbackSha[:9]) {
+		t.Errorf("coalesce must print `already at <sha>`:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "deployed") || strings.Contains(stdout, "ADVANCED") {
+		t.Errorf("a coalesce must not claim a deploy:\n%s", stdout)
+	}
+}
+
+// TestRunCloudDeployUnperformableSaysSo proves a box that cannot be read back
+// gets an explicit UNPERFORMABLE sentence instead of a bare checkmark.
+func TestRunCloudDeployUnperformableSaysSo(t *testing.T) {
+	stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+	stubDeployStatus(t, statusReply{code: 200, body: statusBody("")}) // pre-dependency box
+	stdout, stderr, code := runReadbackDeploy(t)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitOK, stderr)
+	}
+	if !strings.Contains(stdout, "UNPERFORMABLE") || !strings.Contains(stdout, "predates the status-commit build") {
+		t.Errorf("unperformable read-back must say so in the same breath:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "✓") {
+		t.Errorf("no bare checkmark may back an unperformable read-back:\n%s", stdout)
+	}
+}
+
+// TestRunCloudDeployHostFlagDeclaresUnperformable proves --host never borrows the
+// on-box gate's confidence: the health FQDN is INVENTED there, the box gates
+// itself with curl --resolve, so the CLI reads nothing and says so.
+func TestRunCloudDeployHostFlagDeclaresUnperformable(t *testing.T) {
+	withTempConfigHome(t)
+	stubDeployScript(t, "deploy/instance-deploy.sh", "#!/usr/bin/env bash\n")
+	stubDeployFeeder(t)
+	lsCalls := stubDeployLsRemote(t, readbackSha+"\trefs/heads/main\n", nil)
+	statusCalls := stubDeployStatus(t, statusReply{code: 200, body: statusBody(readbackSha)})
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	code := runCloudDeploy(w, globals{}, []string{"staging", "--host", "1.2.3.4"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d\n%s", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "UNPERFORMABLE") || !strings.Contains(stdout.String(), "--host") {
+		t.Errorf("--host must declare UNPERFORMABLE:\n%s", stdout.String())
+	}
+	if *lsCalls != 0 || *statusCalls != 0 {
+		t.Errorf("--host must perform no reads, got ls=%d status=%d", *lsCalls, *statusCalls)
 	}
 }
 

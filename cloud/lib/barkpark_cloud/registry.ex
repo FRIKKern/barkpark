@@ -3690,27 +3690,70 @@ defmodule BarkparkCloud.Registry do
         {:error, :decrypt_failed}
 
       {:ok, admin_token} ->
-        request = %{
-          method: method,
-          url: String.trim_trailing(url, "/") <> path,
-          headers: instance_headers(admin_token),
-          body: encode_relay_body(body)
-        }
-
-        case studio_link_http_client().request(request) do
-          {:ok, %{status: status, body: body}} when is_integer(status) ->
-            case Jason.decode(body) do
-              {:ok, %{} = decoded} -> {:ok, status, decoded}
-              _ -> {:ok, status, %{}}
-            end
-
-          _ ->
-            {:error, :instance_error}
-        end
+        relay_with(url, method, path, body, admin_token)
     end
   end
 
   def relay_admin(_bp, _method, _path, _body), do: {:error, :not_live}
+
+  @doc """
+  site-spawner W8 (charter D74): relay a scoped instance READ with a
+  CALLER-SUPPLIED bearer — the sibling of `relay_admin/4` for a credential the
+  control plane is holding in hand rather than reading out of the row.
+
+  Same transport, same `{:ok, status, decoded_body}` / `{:error, reason}`
+  contract; the ONLY difference is whose token goes on the wire. There is no
+  `:no_admin_token` / `:decrypt_failed` outcome here — the caller already has the
+  plaintext — so a non-live box (or a blank bearer) is the single `:not_live`.
+
+  WHY it cannot just be `relay_admin/4`: the site's own public-read token is
+  CLAMPED (published + public-visibility, `Plugs.PublicRead` admits exactly
+  `query/:ds/:type` and `doc/:ds/:type/:id`). An admin relay reports content the
+  build's token cannot see, so a "verified" binding read over the admin token
+  would be a NEW false green — a green preflight followed by an empty site. The
+  only credential that can answer "what will the SITE see" is the site's own.
+
+  Caller: the `POST /v1/sites` binding verification, which probes the just-minted
+  read token over the SAME scoped route the build later fetches with
+  (`Sites.Deploy` `scoped_api_url/2` + `BARKPARK_TOKEN`).
+  """
+  @spec relay_as(Barkpark.t(), :get | :post | :put | :delete, String.t(), String.t()) ::
+          {:ok, non_neg_integer(), map()} | {:error, :not_live | :instance_error}
+  def relay_as(bp, method, path, bearer)
+
+  def relay_as(%Barkpark{url: url}, method, path, bearer)
+      when is_binary(url) and url != "" and method in [:get, :post, :put, :delete] and
+             is_binary(bearer) and bearer != "" do
+    relay_with(url, method, path, nil, bearer)
+  end
+
+  def relay_as(_bp, _method, _path, _bearer), do: {:error, :not_live}
+
+  # The shared body of `relay_admin/4` and `relay_as/4`: build the request against
+  # the instance's base URL, send it over the `studio_link_http_client()` seam, and
+  # keep the instance's own verdict intact. A body that is not a JSON OBJECT (or
+  # not JSON at all) collapses to `%{}` — the status still travels, so a caller can
+  # tell "the box answered 200 with something I cannot read" from "I never reached
+  # the box".
+  defp relay_with(url, method, path, body, bearer) do
+    request = %{
+      method: method,
+      url: String.trim_trailing(url, "/") <> path,
+      headers: instance_headers(bearer),
+      body: encode_relay_body(body)
+    }
+
+    case studio_link_http_client().request(request) do
+      {:ok, %{status: status, body: body}} when is_integer(status) ->
+        case Jason.decode(body) do
+          {:ok, %{} = decoded} -> {:ok, status, decoded}
+          _ -> {:ok, status, %{}}
+        end
+
+      _ ->
+        {:error, :instance_error}
+    end
+  end
 
   defp encode_relay_body(nil), do: ""
   defp encode_relay_body(body) when is_map(body), do: Jason.encode!(body)

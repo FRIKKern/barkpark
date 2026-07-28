@@ -385,6 +385,10 @@ defmodule Barkpark.StudioChat.Titles do
     `System.cmd` blocks with no timeout. Swapped in tests.
     """
     @spec run(String.t(), [String.t()]) :: {:ok, String.t()} | {:error, term()}
+    # Reachability: `binary` is the operator-config name resolved through
+    # `System.find_executable/1`, and `args` is `cli_args/1`'s fixed argv list —
+    # `System.cmd/3` spawns without a shell, so no argument can inject a command.
+    # sobelow_skip ["CI.System"]
     def run(binary, args) do
       case System.find_executable(binary) do
         nil ->
