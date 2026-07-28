@@ -27,6 +27,19 @@ import { approvalStatus, requestId } from './wire'
 // instead of wedging in "interrupting…" forever.
 export const WEDGE_TIMEOUT_MS = 8_000
 
+/** The live tail's display cap in UTF-8 BYTES (charter D64's number). The
+ * server does NOT enforce this for us: the LiveView caps its own accumulator
+ * (chat_live.ex advance_streaming) but chat_controller forwards raw frames, so
+ * every client bounds its own tail or a runaway turn grows an unbounded string
+ * that re-measures on every delta. */
+export const MAX_TAIL_BYTES = 262_144
+
+/** What a frozen tail says — the same honest promise the web's capped bubble
+ * makes (chat_live.ex `data-streaming-capped`). It is appended INTO the tail
+ * because the tail is the only text the transcript row renders. */
+export const TAIL_CAP_NOTICE =
+  '\n\n— live preview truncated — the full response arrives on completion'
+
 /** Where the session's current turn stands, from the client's point of view.
  * The server does not carry this state (charter D12) — it is derived from the
  * frames we've seen. */
@@ -67,6 +80,12 @@ export interface ChatState {
   gen: number
   /** D77: the generation the current tail's deltas belong to. */
   tailGen: number
+  /** UTF-8 byte length of the STREAMED text in `tail` (the freeze notice is not
+   * counted) — carried so the cap check is O(delta), not O(tail). */
+  tailBytes: number
+  /** The freeze latch: once the tail breaches MAX_TAIL_BYTES it stops growing.
+   * Cleared with the tail at the settle boundary. */
+  tailCapped: boolean
 
   /** request_id → decision ("allow"/"deny") POSTed but not yet confirmed by a
    * refetch — the immediate-feedback layer. */
@@ -91,6 +110,8 @@ export function initialChatState(sessionId: string): ChatState {
     wedgeAtMs: 0,
     gen: 0,
     tailGen: 0,
+    tailBytes: 0,
+    tailCapped: false,
     answerInFlight: {},
     notice: '',
     exited: false,
@@ -314,6 +335,8 @@ function reduceFrame(st: ChatState, ev: FrameEvent): ReduceResult {
     }
     case 'chat':
       return reduceClaudeFrame(st, ev.data)
+    case 'runtime':
+      return reduceRuntimeFrame(st, ev.data)
     case 'permission':
       // The ask row is persisted by the Recorder — refetch the tail so the
       // answerable card renders from replay truth (request_id + pending status
@@ -388,11 +411,9 @@ function reduceClaudeFrame(st: ChatState, data: string): ReduceResult {
     // carries the equivalent weakness — any fix must land on both surfaces
     // together (parity-preserving). Do NOT re-add the removed phase guard
     // here; it was the wrong fix (it silently dropped streamed text).
-    const next: ChatState = { ...st, tail: st.tail + delta.text, tailGen: st.gen }
-    if (next.phase === 'idle' || next.phase === 'waiting') next.phase = 'streaming'
     // While interrupting, deltas may keep landing until the CLI actually
     // stops — keep accumulating (the truth is the result frame).
-    return { state: next, effects: none }
+    return { state: appendTail(st, delta.text), effects: none }
   }
 
   if (type === 'result') {
@@ -415,6 +436,101 @@ function reduceClaudeFrame(st: ChatState, data: string): ReduceResult {
   }
 
   return { state: st, effects: none }
+}
+
+// Handles one normalized Runtime.Event frame (event: runtime) — the codex and
+// remote/RemoteRef text lane, the sibling of `event: chat`. The wire is the
+// serialized %Runtime.Event{} struct (chat_controller.ex sse_runtime_frame):
+// `kind` is the normalized verb and `native` retains the lossless provider
+// envelope, so the text lives at native.params.delta.
+//
+// kind is matched EXACTLY, and that is load-bearing: codex's protocol maps
+// item/reasoning/textDelta → thinking_delta and item/commandExecution/
+// outputDelta → tool_delta to the SAME native.params.delta location. A loose
+// match would splice reasoning and command output into the answer. Everything
+// that is not text_delta or turn_completed is inert here — those rows arrive as
+// persisted truth at the turn boundary, exactly as on the claude lane.
+function reduceRuntimeFrame(st: ChatState, data: string): ReduceResult {
+  const frame = parseJson(data)
+  if (frame === undefined) return { state: st, effects: none }
+  const kind = typeof frame.kind === 'string' ? frame.kind : ''
+
+  if (kind === 'text_delta') {
+    const native = (frame.native ?? {}) as Record<string, unknown>
+    const params = (native.params ?? {}) as Record<string, unknown>
+    const delta = params.delta
+    if (typeof delta !== 'string' || delta === '') return { state: st, effects: none }
+    // Stamped with the current gen exactly as the claude lane stamps it, so the
+    // D77 settle guard sees the same shape on both lanes. (Residual, recorded:
+    // gen advances only on a claude system/init frame, so a codex turn keeps
+    // the generation it started in — the fence is inert rather than wrong there,
+    // and advancing it on runtime turn boundaries is a separate parity slice.)
+    return { state: appendTail(st, delta), effects: none }
+  }
+
+  if (kind === 'turn_completed') {
+    // The codex turn boundary — the sibling of the claude `result` frame, and
+    // the ONLY settle a codex turn gets. Without it the phase never returns to
+    // idle and the Recorder's persisted answer (recorder.ex persist_runtime_text)
+    // never reaches the screen.
+    const terminal = typeof frame.terminal_state === 'string' ? frame.terminal_state : ''
+    const interrupted = st.phase === 'interrupting' || terminal === 'interrupted'
+    let notice: string
+    if (interrupted) notice = '⊘ Interrupted — session live'
+    else if (terminal === 'failed') notice = 'the turn ended with an error'
+    else notice = ''
+    return {
+      state: { ...st, phase: 'idle', wedgeAtMs: 0, settling: true, notice },
+      effects: [{ type: 'fetchTail', sinceSeq: st.lastSeq, gen: st.gen }],
+    }
+  }
+
+  return { state: st, effects: none }
+}
+
+// Appends streamed text to the live tail — the ONE accumulator both lanes share,
+// so the D77 stamp and the display cap can never diverge between providers.
+//
+// FREEZE semantics at MAX_TAIL_BYTES (parity with the web's capped bubble): the
+// tail stops growing, everything already shown is KEPT, and one honest line says
+// the preview was truncated. The stream is neither closed nor shed — deltas keep
+// arriving, the turn still settles, and the settle refetch brings the full
+// untruncated answer from Postgres.
+function appendTail(st: ChatState, text: string): ChatState {
+  const next: ChatState = { ...st, tailGen: st.gen }
+  if (next.phase === 'idle' || next.phase === 'waiting') next.phase = 'streaming'
+  if (st.tailCapped) return next
+  const bytes = st.tailBytes + utf8ByteLength(text)
+  if (bytes > MAX_TAIL_BYTES) {
+    next.tail = st.tail + TAIL_CAP_NOTICE
+    next.tailCapped = true
+    return next
+  }
+  next.tail = st.tail + text
+  next.tailBytes = bytes
+  return next
+}
+
+// UTF-8 byte length of a JS string, counted without allocating (TextEncoder is
+// not guaranteed on every Hermes build, and the cap must be measured in the same
+// unit the server's D64 number is stated in).
+function utf8ByteLength(s: string): number {
+  let n = 0
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 0x80) n += 1
+    else if (c < 0x800) n += 2
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      const lo = s.charCodeAt(i + 1)
+      if (lo >= 0xdc00 && lo <= 0xdfff) {
+        n += 4
+        i++
+      } else {
+        n += 3
+      }
+    } else n += 3
+  }
+  return n
 }
 
 // Merges the turn-boundary GET: new rows append (seq-asc, monotonic), rows we
@@ -473,8 +589,12 @@ function reduceTailFetched(st: ChatState, ev: TailFetchedEvent): ReduceResult {
       title: title !== '' ? title : st.title,
       mode: mode !== '' ? mode : st.mode,
       // D77 clear guard: this fetch settles the painted tail only if it was
-      // issued for the tail's own turn generation.
+      // issued for the tail's own turn generation. Clearing the tail also
+      // releases the freeze latch — the cap bounds ONE turn's preview, never
+      // the session.
       tail: ev.gen === st.tailGen ? '' : st.tail,
+      tailBytes: ev.gen === st.tailGen ? 0 : st.tailBytes,
+      tailCapped: ev.gen === st.tailGen ? false : st.tailCapped,
     },
     effects: none,
   }
