@@ -127,7 +127,14 @@ function callArgs(src, needle) {
     }
     if (c === '"' || c === "'" || c === "`") { quote = c; cur += c; continue; }
     if (c === "/" && src[i + 1] === "/") { while (i < src.length && src[i] !== "\n") i++; continue; }
-    if (c === "/" && src[i + 1] === "*") { i = src.indexOf("*/", i) + 1; continue; }
+    if (c === "/" && src[i + 1] === "*") {
+      const end = src.indexOf("*/", i + 2);
+      // An unterminated block comment would send indexOf to -1, i to 0, and this
+      // walk into an infinite loop — a hung test is worse than a red one.
+      assert.ok(end !== -1, `unterminated block comment while scanning "${needle}" in mock.js`);
+      i = end + 1;
+      continue;
+    }
     if (c === "(" || c === "[" || c === "{") depth++;
     if (c === ")" && depth === 0) { args.push(cur.trim()); break; }
     if (c === ")" || c === "]" || c === "}") depth--;
