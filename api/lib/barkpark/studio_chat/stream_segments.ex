@@ -50,6 +50,14 @@ defmodule Barkpark.StudioChat.StreamSegments do
       into the committed block (run-verified: `"Use the ` operator\\n\\n"` then
       `"Then it works.\\n\\n"` converts to ONE paragraph).
 
+  A third class is not a converter fault but a BYTE-SPACE fault, and stops the
+  turn the same way: a stream carrying `\\r\\n`. Our offsets index StreamTail's
+  CRLF-normalized text while the client walks its RAW tail counting `to - from`
+  bytes, so the two spaces drift one byte per collapsed `\\r\\n` — invisibly,
+  because the client's `from == cursor` check counts the SERVER's space on both
+  sides. Both providers emit `\\n` today; a second offset space would be
+  complexity for a hypothetical, so a CRLF turn degrades to plain instead.
+
   ## The settle self-check (D61)
 
   At turn completion the emitter compares `concat(emitted blocks)` against
@@ -119,6 +127,8 @@ defmodule Barkpark.StudioChat.StreamSegments do
           reason: binary() | nil,
           guard_pos: non_neg_integer(),
           linkref: boolean(),
+          crlf: boolean(),
+          pending_cr: boolean(),
           backtick_runs: non_neg_integer(),
           converter: (binary() -> [map()])
         }
@@ -162,6 +172,8 @@ defmodule Barkpark.StudioChat.StreamSegments do
       reason: nil,
       guard_pos: 0,
       linkref: false,
+      crlf: false,
+      pending_cr: false,
       backtick_runs: 0,
       converter: Keyword.get(opts, :converter, &FromMarkdown.blocks/1)
     }
@@ -188,6 +200,7 @@ defmodule Barkpark.StudioChat.StreamSegments do
 
     state =
       %{state | tail: tail}
+      |> scan_crlf(delta)
       |> track_unit_start(boundary_before)
       |> scan_link_references()
 
@@ -197,6 +210,9 @@ defmodule Barkpark.StudioChat.StreamSegments do
       # would silently shorten the byte space our offsets live in).
       byte_size(tail.text) > max_stream_display_bytes() or tail.capped ->
         terminate(state, "capped")
+
+      state.crlf ->
+        terminate(state, "degraded")
 
       state.linkref ->
         terminate(state, "degraded")
@@ -452,6 +468,35 @@ defmodule Barkpark.StudioChat.StreamSegments do
   defp continues?(:list, remainder), do: remainder in [:list, :indented_code]
   defp continues?(:callout, remainder), do: remainder == :callout
   defp continues?(:indented_code, remainder), do: remainder == :indented_code
+
+  # ── D60 degrade class (c): the client's byte space is not ours ───────────
+
+  # Our offsets index StreamTail's CRLF-NORMALIZED text; the client walks its RAW
+  # tail counting `to - from` bytes. Identical for a `\n` stream — both providers
+  # today — and one byte apart per collapsed `\r\n` otherwise, which the client's
+  # `from == cursor` check structurally CANNOT see: both sides count the SERVER's
+  # space, so the gap detector stays silent while the plain remainder repeats
+  # bytes a segment already drew, and `settled` then licenses suppressing the
+  # persisted row. A second offset space would be complexity for a hypothetical
+  # provider; degrading onto the plain floor is the answer the other two classes
+  # already give, and never silently mis-renders.
+  #
+  # The pending-`\r` holdback mirrors StreamTail's, and must: a delta can split
+  # between `\r` and `\n`, and detection without it misses exactly that case.
+  # This is raw-space bookkeeping, not a second normalizer — StreamTail's state
+  # is normalized and so cannot answer a raw-space question.
+  defp scan_crlf(%{crlf: true} = state, _delta), do: state
+
+  defp scan_crlf(state, delta) do
+    raw = if state.pending_cr, do: "\r" <> delta, else: delta
+    size = byte_size(raw)
+
+    %{
+      state
+      | crlf: :binary.match(raw, "\r\n") != :nomatch,
+        pending_cr: size > 0 and binary_part(raw, size - 1, 1) == "\r"
+    }
+  end
 
   # ── D60 degrade class (a): link reference definitions ────────────────────
 

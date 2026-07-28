@@ -440,6 +440,46 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       assert reasons(paired) == ["settled"]
     end
 
+    test "DEGRADE (c): a CRLF-carrying stream stops emission for the turn" do
+      # The BYTE SPACES diverge. Our offsets index StreamTail's CRLF-NORMALIZED
+      # text; the client walks its RAW tail counting `to - from` bytes. Prove the
+      # divergence from the two modules rather than asserting it:
+      crlf = "## Head\r\n\r\nA paragraph.\r\n\r\n"
+      normalized = StreamTail.advance(StreamTail.new(), crlf, fn _ -> nil end).text
+
+      # Hand-derived, deliberately not computed: 7 + 2 + 2 + 12 + 2 + 2 raw, and
+      # 7 + 1 + 1 + 12 + 1 + 1 once each "\r\n" collapses.
+      assert byte_size(crlf) == 27
+
+      assert byte_size(normalized) == 23,
+             "StreamTail no longer normalizes CRLF — this guard's reason is gone"
+
+      # 4 bytes is exactly what the client would under-trim: it would leave four
+      # bytes of already-rendered source in its plain tail, DUPLICATED under the
+      # blocks. And its `from == cursor` check cannot see it — both sides count
+      # the SERVER's space, so the gap detector stays silent. Silence is why this
+      # degrades instead of shipping offsets the client will mis-apply.
+      {_state, frames} = turn(crlf)
+      assert stables(frames) == [], "no segment may be committed once CRLF is seen"
+      assert reasons(frames) == ["degraded"]
+
+      # The SPLIT case, which a per-delta scan without a pending-`\r` holdback
+      # misses: the "\r" ends one delta and the "\n" opens the next.
+      state = StreamSegments.new(1)
+      {state, first} = StreamSegments.advance(state, "## Head\r", 10_000)
+      assert first == []
+      {state, second} = StreamSegments.advance(state, "\n\r\nA paragraph.\r\n\r\n", 11_000)
+      assert stables(second) == []
+      assert reasons(second) == ["degraded"]
+      assert state.phase == :ended
+
+      # And the CONTROL: the same document with `\n` endings — every provider
+      # today — still settles whole, so the guard is not a blanket kill.
+      {_state, clean} = turn("## Head\n\nA paragraph.\n\n")
+      assert reasons(clean) == ["settled"]
+      assert stables(clean) != []
+    end
+
     test "backticks INSIDE a fence do not count toward parity" do
       # Stripping fences is StreamTail's law, reused rather than reimplemented.
       # The fence holds exactly ONE inline run, so an unstripped count would be
