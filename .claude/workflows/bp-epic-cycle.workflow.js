@@ -782,7 +782,7 @@ const built = (await parallel(
 
 ${USER_WISH_BLOCK}
 
-Read the epic charter at ${CHARTER_PATH} first — your slice must respect its decisions. The wave Paper (${WAVE_PAPER}) carries this wave's story — decisions, verification proofs, the other slices; read it for context, NEVER write it (your bp task is your voice).
+Read the epic charter at ${CHARTER_PATH} first — your slice must respect its decisions. ${architect.charter_pr ? `HEADS UP, and this is not a formality: THIS wave's charter is still an OPEN PULL REQUEST (${architect.charter_pr}), because \`main\` is protected and Decide no longer pushes to it. Your worktree branched from origin/main, so the ${CHARTER_PATH} on your disk is the PREVIOUS wave's — it will read as plausible and be silently out of date. Get this wave's decisions from the wave Paper (${WAVE_PAPER}), which is current, and from your bp task brief; if you need the charter diff itself, \`gh pr diff ${String(architect.charter_pr).replace(/[^0-9]/g, '') || architect.charter_pr}\`.` : ''} The wave Paper (${WAVE_PAPER}) carries this wave's story — decisions, verification proofs, the other slices; read it for context, NEVER write it (your bp task is your voice).
 
 SLICE: ${item.title}
 BP TASK: ${item.task_id}
@@ -829,7 +829,7 @@ if (built.length > 0) {
 
 ${USER_WISH_BLOCK}
 
-Read the epic charter at ${CHARTER_PATH} first. Epic parent task: ${architect.epic_task_id}.
+Read the epic charter at ${CHARTER_PATH} first. Epic parent task: ${architect.epic_task_id}.${architect.charter_pr ? ` NOTE: this wave's charter is an OPEN PR (${architect.charter_pr}) — \`main\` is protected and Decide publishes by PR, so the copy on your disk is the PREVIOUS wave's. Read this wave's decisions from the wave Paper (${WAVE_PAPER}) and from \`gh pr diff\` on that PR. Your step-8 wave-log entry therefore belongs on the CHARTER PR's branch, not on a copy of main: check the PR out into your own worktree, append there, and push — appending to the stale local file silently drops this wave's charter changes.` : ''}
 
 BUILT SLICES (review every green one):
 ${JSON.stringify(greenBuilt.map((b) => ({ task_id: b.task_id, branch: b.branch, gate: b.gate_command, summary: b.summary, builder_review: b.review, files: b.files_changed })), null, 2)}
