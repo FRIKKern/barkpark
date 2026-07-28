@@ -60,7 +60,7 @@ function pendingCardRow(seq: number, role: string, rid: string): ChatMessage {
   }
 }
 
-// D8/D9: deltas form the live plain-text tail; ONLY the terminal result frame
+// chat-TUI charter D8/D9: deltas form the live plain-text tail; ONLY the terminal result frame
 // is the turn boundary, and it alone asks for the ?since= refetch that
 // settles the tail into persisted rows.
 test('delta tail accumulates and settles at result', () => {
@@ -82,7 +82,7 @@ test('delta tail accumulates and settles at result', () => {
   expect(state.tail).toBe('Hello')
 })
 
-// D8/D15: the turn-boundary GET appends the persisted rows, clears the
+// chat-TUI charter D8/D15: the turn-boundary GET appends the persisted rows, clears the
 // settled tail, and lands the (AI-refreshed) title.
 test('tailFetched settles and refreshes title', () => {
   const st: ChatState = {

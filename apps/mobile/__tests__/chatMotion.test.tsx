@@ -1,7 +1,7 @@
 // The motion layer (t3w2-s4): follow mode, the turn-scoped work log, the
 // notify coalescer, and the memo that makes a streaming transcript cheap.
 //
-// FIVE law families are pinned here, each because a plausible future edit
+// SEVEN law families are pinned here, each because a plausible future edit
 // breaks it SILENTLY — the suite is the only thing that would notice:
 //
 //   1. FOLLOW IS THE USER'S. Scrolling up disengages; a DRAG back to the bottom
@@ -27,7 +27,14 @@
 //      bodyRender, one level BELOW where a regression would land: a row that
 //      resolves to text and then renders blocks anyway would pass those. This
 //      walks the rendered `user` row itself.
+//   6. THE TWO-PHASE FLOOR AT ROW LEVEL — the same correction, applied to the
+//      streaming tail, where it is worse: bodyRender's tail arm is DEAD for the
+//      UI (TranscriptRow returns before calling it), so the plain-tail law had
+//      no pin at all on the arm that paints.
+//   7. EVERY ROW KIND HAS ITS OWN SIZE BUCKET (D65). Without getItemType the
+//      list averages a log handle and a forty-line tool row together.
 import type { ReactElement, ReactNode } from 'react'
+import { Text, View } from 'react-native'
 
 import { getChatSession, streamChatEvents, type ChatStreamOptions } from '../src/api/chat'
 import type { InstanceConnection } from '../src/api/instance'
@@ -75,6 +82,7 @@ import {
   rowRole,
   TranscriptRow,
   transcriptItem,
+  transcriptItemType,
   transcriptRowPropsEqual,
   workLogRows,
   type Row,
@@ -82,6 +90,7 @@ import {
   type TranscriptRowProps,
 } from '../src/screens/ChatSessionScreen'
 import { light, type Theme } from '../src/ui/theme'
+import { roles } from '../src/ui/typography'
 
 // (hoisted by jest above the imports)
 jest.mock('../src/api/chat', () => ({
@@ -744,6 +753,10 @@ interface Walk {
   styles: Record<string, unknown>[]
   presses: (() => void)[]
   labels: string[]
+  /** Every element TYPE in the subtree, by identity (RN's Text/View objects) —
+   * what a row is BUILT from, which is the only way to say "no document
+   * container here" without guessing at a style shape. */
+  types: unknown[]
 }
 
 function isElement(node: unknown): node is ReactElement {
@@ -763,6 +776,7 @@ function walkNode(node: ReactNode, acc: Walk): void {
     return
   }
   if (!isElement(node)) return
+  acc.types.push(node.type)
   const p = node.props as Record<string, unknown>
   if (typeof p.onPress === 'function') acc.presses.push(p.onPress as () => void)
   if (typeof p.accessibilityLabel === 'string') acc.labels.push(p.accessibilityLabel)
@@ -774,7 +788,7 @@ function walkNode(node: ReactNode, acc: Walk): void {
 }
 
 function walk(node: ReactNode): Walk {
-  const acc: Walk = { text: '', styles: [], presses: [], labels: [] }
+  const acc: Walk = { text: '', styles: [], presses: [], labels: [], types: [] }
   walkNode(node, acc)
   return acc
 }
@@ -808,6 +822,121 @@ describe('the #6126 bubble law, pinned at ROW level', () => {
     const row: Row = { key: 'm-2', kind: 'message', message: msg(2, 'assistant') }
     const w = walk(TranscriptRow(props(row)))
     expect(w.styles.some((s) => s.backgroundColor === theme.bubble)).toBe(false)
+  })
+})
+
+/* ── 6. the two-phase floor at ROW level: the live tail stays PLAIN ─────────── */
+
+// THE SAME LESSON AS SECTION 5, applied where it was never applied. The plain
+// tail's only guard lives on `bodyRender` — and for the tail that function is
+// DEAD CODE: TranscriptRow returns the tail's Text before it ever calls
+// bodyRender, and bodyRender has no other caller in src/. Measured: inverting
+// bodyRender's tail arm reds one test in the whole run; replacing the arm that
+// actually PAINTS with a document render reds nothing. So the law could be
+// deleted from the UI while its test stayed green. These pins sit on the render
+// arm itself.
+//
+// WHY STRUCTURE AND NOT TEXT. The tempting assertion — "the tail text comes out
+// verbatim, unparsed" — is VACUOUS-GREEN by construction: renderBlockNative's
+// paragraph takes pre-parsed inline structure and does not re-parse markdown
+// out of a string, so a paragraph-block tail would ALSO emit `**bold` verbatim
+// and pass. What actually separates the two futures is the SHAPE: one Text in
+// the assistant measure carrying a liveness cursor, versus a View wrapping
+// block renderers. So: the cursor glyph, the assistantText measure, and the
+// absence of any View.
+/** The liveness cursor, written out as a LITERAL rather than imported from the
+ * screen — importing the glyph would pin it to itself and stay green through
+ * its own deletion. */
+const CURSOR = ' ▍'
+
+const tailStyle = (w: Walk): Record<string, unknown> | undefined =>
+  w.styles.find((s) => s.fontSize === roles.chatBody.fontSize)
+
+describe('the two-phase floor, pinned at ROW level (chat-TUI charter D8/D9)', () => {
+  it('an OPEN markup run: one plain Text in the assistant measure — no document container', () => {
+    const w = walk(TranscriptRow(props({ key: 'tail', kind: 'tail', text: 'half a **bol' })))
+
+    // Phase 1 is a Text, full stop. A blocks path would put styles.assistantDoc
+    // — a View — around the row, so the View is the tell.
+    expect(w.types).toContain(Text)
+    expect(w.types).not.toContain(View)
+    // The assistant measure, on the body colour: the tail must be visually the
+    // SAME turn it becomes at settle, not a distinct chrome register.
+    const style = tailStyle(w)
+    expect(style).toBeDefined()
+    expect(style!.lineHeight).toBe(roles.chatBody.lineHeight)
+    expect(style!.color).toBe(theme.text)
+    // And it is unbubbled — the tail is the assistant's, never the user's.
+    expect(w.styles.some((s) => s.backgroundColor === theme.bubble)).toBe(false)
+  })
+
+  it('the liveness cursor is PRESENT, muted, and rides the end of the tail', () => {
+    // The one mark that says "still writing". It appears exactly once in the
+    // app and, until this test, in zero suites — so dropping it was free.
+    const w = walk(TranscriptRow(props({ key: 'tail', kind: 'tail', text: 'forming' })))
+    expect(w.text.endsWith(CURSOR)).toBe(true)
+    expect(w.text.split('▍')).toHaveLength(2) // exactly one cursor, never doubled
+    // Quiet, not loud: the cursor is the muted tone, so a long tail does not
+    // end in a second emphasis.
+    expect(w.styles.some((s) => s.color === theme.textMuted)).toBe(true)
+  })
+
+  it('a COMPLETED fence in the prefix does not promote the tail to a document', () => {
+    // The most tempting shape to special-case: everything before the last fence
+    // is unambiguous markdown, so a "render the settled prefix" edit lands
+    // here first. Phase 1 says no — the tail is one plain Text until settle.
+    const text = '```js\nconst a = 1\n```\n\nand then I was saying'
+    const w = walk(TranscriptRow(props({ key: 'tail', kind: 'tail', text })))
+
+    expect(w.types).not.toContain(View)
+    expect(w.types.filter((t) => t === Text)).toHaveLength(2) // the body + the cursor
+    expect(tailStyle(w)?.lineHeight).toBe(roles.chatBody.lineHeight)
+    expect(w.text.endsWith(CURSOR)).toBe(true)
+  })
+})
+
+/* ── 7. the list's size buckets (charter D65) ───────────────────────────────── */
+
+describe('transcriptItemType — one size bucket per render arm', () => {
+  it('message rows split on the arm that draws them, not on the row kind', () => {
+    // Four different render arms with four unrelated height distributions. One
+    // bucket for all of them is the state this replaces: legend-list averages
+    // them together and positions a forty-line tool row off a paragraph.
+    expect(transcriptItemType({ key: 'm-1', kind: 'message', message: msg(1, 'assistant') }))
+      .toBe('message:assistant')
+    expect(transcriptItemType({ key: 'm-2', kind: 'message', message: msg(2, 'user') }))
+      .toBe('message:user')
+    expect(transcriptItemType({ key: 'm-3', kind: 'message', message: msg(3, 'tool') }))
+      .toBe('message:block')
+    expect(transcriptItemType({ key: 'm-4', kind: 'message', message: msg(4, 'approval') }))
+      .toBe('message:card')
+    expect(transcriptItemType({ key: 'm-5', kind: 'message', message: msg(5, 'system') }))
+      .toBe('message:structural')
+    // Forward-compatible: an unknown future role buckets with the structural
+    // line it actually renders as, never with the documents.
+    expect(transcriptItemType({ key: 'm-6', kind: 'message', message: msg(6, 'from-the-future') }))
+      .toBe('message:structural')
+  })
+
+  it('the synthetic rows carry their own buckets — and no two kinds collide', () => {
+    const rows: Row[] = [
+      { key: 'm-1', kind: 'message', message: msg(1, 'assistant') },
+      { key: 'm-2', kind: 'message', message: msg(2, 'user') },
+      { key: 'l-0', kind: 'local', content: 'x', queued: false },
+      { key: 'tail', kind: 'tail', text: 'x' },
+      { key: 'log-m-3', kind: 'log', group: { key: 'm-3', members: [], roles: [] }, open: false },
+    ]
+    expect(rows.map(transcriptItemType)).toEqual([
+      'message:assistant',
+      'message:user',
+      'local',
+      'tail',
+      'log',
+    ])
+    // The mutant this kills: a mapping that returns a constant (or drops a
+    // kind onto a neighbour's bucket) is exactly the blended average again,
+    // and it would still type-check.
+    expect(new Set(rows.map(transcriptItemType)).size).toBe(rows.length)
   })
 })
 

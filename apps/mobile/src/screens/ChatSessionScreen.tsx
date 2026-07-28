@@ -2,8 +2,8 @@
 // assistant turns, interrupt, approve/deny. The transcript is the reducer's
 // truth: settled rows (Postgres, via the turn-boundary refetch), optimistic
 // local echoes (queued-badged mid-turn, D12), and the live streaming tail
-// (D9). Cards (approval / plan / question) answer through the same
-// allow/deny-only contract as the TUI and Studio — one row, one truth.
+// (chat-TUI charter D9). Cards (approval / plan / question) answer through
+// the same allow/deny-only contract as the TUI and Studio — one row, one truth.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import {
@@ -233,6 +233,29 @@ export function roleKind(role: string): RoleKind {
 export function rendersBlocks(role: string): boolean {
   const kind = roleKind(role)
   return kind === 'assistant' || kind === 'card' || kind === 'block'
+}
+
+/** THE LIST'S SIZE BUCKET for a row — LegendList's `getItemType` (charter D65).
+ *
+ * Without it every row shares ONE bucket (legend-list keys its running average
+ * on `itemType`, which is the empty string when no `getItemType` is given), so
+ * the per-type averages are a single blended number and ESTIMATED_ROW_HEIGHT
+ * — 180px, sized for a short assistant paragraph — is the last-resort estimate
+ * for a one-line log handle and a forty-line code turn alike. Bucketed, each
+ * kind learns its OWN average and the list positions off that.
+ *
+ * The buckets are the kinds a row is actually DRAWN by, which is why message
+ * rows split on `roleKind`: a user bubble, an assistant document, an approval
+ * card and a tool row leave TranscriptRow through four different arms with four
+ * unrelated height distributions, and averaging them together is exactly the
+ * dishonesty this fixes. `getFixedItemSize` is deliberately NOT used — these
+ * heights are unknown, not fixed.
+ *
+ * A module-level function, not an inline arrow: the list prop stays identity-
+ * stable across renders, and the mapping is reachable by jest. */
+export function transcriptItemType(row: Row): string {
+  if (row.kind === 'message') return `message:${roleKind(row.message.role)}`
+  return row.kind
 }
 
 /** Does this blocks array have anything the renderer can actually DRAW?
@@ -578,6 +601,17 @@ export function ChatSessionScreen({
         keyExtractor={(row: Row) => row.key}
         dataKey={sessionId}
         estimatedItemSize={ESTIMATED_ROW_HEIGHT}
+        // Per-kind size buckets — without this every row is averaged together
+        // and positioned off ESTIMATED_ROW_HEIGHT (see transcriptItemType).
+        getItemType={transcriptItemType}
+        // EXPLICIT, and load-bearing (charter D56/D65 — the comment D56 promised
+        // at crown). false is legend-list's default, but leaving it implicit
+        // leaves the transcript one prop away from silent breakage: recycling
+        // drops the row key (`key: recycleItems ? undefined : itemKey`), and a
+        // keyless row voids memo(TranscriptRow)'s identity contract — the whole
+        // reason a tail tick costs one render instead of the transcript. The
+        // rows are heterogeneous documents; there is no pool to reuse.
+        recycleItems={false}
         initialScrollAtEnd
         maintainScrollAtEnd={TRANSCRIPT_FOLLOW}
         maintainScrollAtEndThreshold={FOLLOW_THRESHOLD}

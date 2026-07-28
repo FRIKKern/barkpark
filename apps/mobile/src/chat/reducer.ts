@@ -41,7 +41,7 @@ export interface LocalSend {
 }
 
 /** The whole reducible session state. `messages` are settled Postgres truth;
- * `tail` is the live-delta carve-out (charter D9); everything else is
+ * `tail` is the live-delta carve-out (chat-TUI charter D9); everything else is
  * client-derived turn/queue/notice state. */
 export interface ChatState {
   sessionId: string
@@ -405,7 +405,7 @@ function reduceClaudeFrame(st: ChatState, data: string): ReduceResult {
     else if (frame.is_error === true) notice = `the turn ended with an error (${subtype})`
     else notice = ''
     // Settle: refetch the tail so the plain-text stream becomes persisted rows
-    // AND the AI title lands (charter D8/D15). The tail stays painted until
+    // AND the AI title lands (chat-TUI charter D8/D15). The tail stays painted until
     // the fetch returns — never a blank flash. The effect carries this turn's
     // gen (D77): only a fetch for the tail's own generation may clear it.
     return {
