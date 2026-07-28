@@ -95,6 +95,10 @@ a lying harness and a lying rate limiter are the same defect class pointed at di
   CAS path is structurally immune.
 - `design/emit.mjs`, `design/check.mjs` — the emit-marker fence. A correct fix cannot live inside
   `cloud/`; 15 of the 18 emitted artifacts are outside both fenced paths.
+  **Wave-6 widening (exactly two files, D75):** `design/exemptions.json` and
+  `design/emit-manifest.json`. Any tokenization of an app.css hand-stamp SHRINKS the literal ledger
+  and reds `check.mjs` Part E unless the baseline moves in the same diff; the manifest is a
+  `--write` by-product. Do not widen further.
 - `.github/workflows/console-harness.yml` — CI wiring for console instruments.
 
 **Wave-2 dispensations** (granted at wave-2 Decide, narrow, stated out loud):
@@ -190,6 +194,18 @@ fake it, or file work that depends on it being lit. Same disposition for the QR 
 | D69 | **Three "D41-violation" candidates are ALREADY ENFORCED/LANDED — they are triage-CLOSES, not builds** | `cch-bl-css-check-states-boundary` (#5438): the D49 "IF #5438's E2 comment is unenforced prose" conditional is **FALSE** — the comment is paired to `__app.test.mjs:4713` (paint-rule loop) + `:4360` (closed-enum), mutation-proven (delete `app.css:3470-3471` → #313 reds "no paint rule for stale"). Evidence-close on `069c6e986`. `cch-bl-replace-upsert-tripwire`: the test `"replace against a non-existent id is 404 and creates NOTHING"` landed via #5435 (`a893c3821`); reverting the `mutations.ex` with-chain guard flips it 404→200 (upsert). Evidence-close, do not rebuild. `cch-bl-get-census-rederive`: subsumed by #5434 (D64). Dispatching any of the three as a build burns an opus slice on shipped work. |
 | D70 | **`close-fence-epoch-only` + `task-birth-attribution` stay BACKLOG; `claim-overwrite-fence` ships (in-fence via the `mutations.ex` dispensation)** | `cch-bl-close-fence-epoch-only` targets `api/lib/barkpark/tasks/close.ex` (`check_fencing/2` compares epoch only, never `worker_id`) — that path is `barkpark` CORE, out of this epic's fence (`cloud/` + `web/live/`) and inside felix-pristine's active surface; do not touch it this wave. `cch-w3-task-birth-attribution` is an explicit design task (three undecided attribution shapes) — not a mechanical D41 payment. `cch-w3-claim-overwrite-fence` pays D52's residue at the `ensure_claim_not_dropped/4` "A REPLACED claim is out of scope" boundary — `mutations.ex` + `mutate_controller_test.exs` are the standing wave-2 dispensation, so it is in-fence and ships. |
 | D71 | **The smoke-shim boundary is TRIPLE-FILED — keep the combined row, cancel the two splits, DEFER the build** | `cch-bl-smoke-shim-fidelity` (both defects) + `cch-bl-shim-models-no-detachment` + `cch-bl-shim-dispatches-to-disabled` (filed 9s apart) cover ONE fix-pair in one file (`smoke.mjs`). Cancel the two narrow splits as duplicates; keep the combined row. Defer its build off this wave — it collides with `source-citation-line-drift`'s `smoke.mjs` comment re-anchor (D67) and needs the detachment-vs-declare-the-gap design call. |
+| D73 | **The `--ok`/`--danger` hue invariant is CUT as chartered — it is a VACUOUS GREEN over a token the destroy button does not wear, and the only working fix overturns GR6/GR77/GR90 by stealth** | Three verifiers converge. `--danger` is `var(--cc-red-strong)` (`app.css:69`) / `var(--cc-red)` (`:106`) and is **NOT** derived from `--danger-hsl`, which feeds only `--danger-soft`; mutating `--danger-hsl` left `__css_check` at **exit 0**. `--ok-hsl` sits INSIDE app.css's generated region (45-232), so a hand edit is *also* a fence break (`design/check.mjs` exit 1 `UNATTRIBUTED cloud SPA`, `emit --check` exit 1). The invariant as filed would therefore pass over a hue the operator's destroy button never wears — the exact disease inside the row meant to cure it. The only fix that works is an emit-side `--ok` fallback, and that reverses GR90's explicit written ruling ("`--ok-hsl` is NOT touched (it must keep tracking the brand)"), made after a ~1,585-shot accent matrix, whose census also found "no other genuinely colour-only case". The residual question — does ember's success chip going green while its accent stays orange *look* right — is open-ended aesthetic judgment, and Fable is unavailable. **REWRITE the row with the measured facts and the three options (overturn GR6 / gate a perceptual distance / ratify as decision-not-defect); do not build it this wave.** Worst-case proof that it is unguarded today: emitting ember's `--ok-hsl` as PURE RED (hue 0, mode-correct lightness) keeps `check.mjs`, `emit --check` and `__css_check` all at exit 0. |
+| D74 | **`--ring-soft` is PROMOTED into `design/emit.mjs`; the in-place fix is VACUOUS and silently reskins evergreen** | Mutation-proven both ways. With the cheap in-place fix applied, re-pointing it at `--warn-hsl` — an AMBER focus ring under every identity — leaves `check.mjs`, `__css_check` and `emit --check` **all exit 0**: the ledger ratchet guards literal-vs-var, never WHICH var. Under promotion, re-hardcoding evergreen green into the ember block reds the fence (`emit --check` exit 1, `DRIFT cloud SPA`). Two further grounds: `--primary-hsl` is NOT the ring channel (evergreen light ring `163 42% 30%` vs primary `151.96 71.81% 29.22%` — different hue AND +30 saturation), so the in-place route smuggles an unratified reskin of the DEFAULT identity inside an invariant; and `emit.mjs:1651` already derives `--ring-soft` from `c.ring` for the login surface, so this applies a shipped convention rather than inventing one. Derive all 19 consumers — carve out nothing: every non-focus consumer (`.tier-current`, `.prov-overall-track`, the step-dot conic-gradient, `new-next-pulse`, `.new-step-spin`) is paired with a `--primary`/`--ring` consumer in the same rule and none carries a GR57-style freeze comment. Name the evergreen-DARK shift in the brief: today's hand-stamped `160 42% 62%` matches NEITHER channel — it is unowned drift, and promotion reproduces evergreen LIGHT byte-for-byte while moving dark. |
+| D75 | **The `--ring-soft` diff MUST carry `design/exemptions.json` 33→31 in the SAME commit — this is the single most likely way the slice stalls** | Measured three ways (in-place var swap, outright delete, full promotion): all produce the identical Part E red, `SHRANK 33 → 31 (-2) — a literal was tokenized (good!). LOWER the baseline to 31 … IN THIS SAME DIFF`. The ratchet fires on the GOOD direction, and a builder will read it as an unrelated break. With the baseline at 31 the full promotion is green end to end: `check.mjs` PASS, `emit --check` 19/19 in sync, `__css_check` 0 errors (91→92 tokens), `emit-fence` 5/5, `derive` 48/48, `theme-emit` 13/13. Correction to a prior belief: `--ring-soft` is **not** unguarded — deleting both declarations reds `__css_check` with 19 `E1 … consumed but not defined` errors. It is EXISTENCE-guarded and VALUE-unguarded, which is why the hand-stamps cannot simply be dropped without an emitted replacement in the same diff. |
+| D76 | **`gr-p5r7`'s contrast criterion is DOWNGRADED off the slice and FILED** | Its criterion 2 ("focus-ring contrast clears the declared accessibility threshold in light and dark for all five identities") is asserted by NOTHING today: `check.mjs` Part H covers 27 curated Studio pairings and `--ring-soft` over `--bg` is not among them, and an alpha-0.15/0.2 tint's effective contrast is not derivable from that pair table. Building a contrast engine for a tint is open-ended work, not an invariant — the category this wave defers. The slice ships the derivation invariant + the ledger shrink; the contrast assertion is a filed row. Do not let the slice close claiming it. Criterion 1 ("the ruling is recorded in the charter") is satisfied by D74/D75/D76 — the charter mentioned `--ring-soft` **zero** times before this wave. |
+| D77 | **The providers slice EXECUTES GR44 — it does not overturn GR36 — and its true scope is 5 client sites + `updated_at` + a rotation audit flag** | GR44 (`bp-cloud-gui-remake-charter.md:67`, git-shown on origin/main) already ruled: "connect_provider becomes an UPSERT … G-02's 'Connected — disconnect to replace' copy **relaxes to allow re-connect in place**." GR36 was a stopgap that cited the then-live backend state as its reason and named its own successor row in the same sentence. **Cite the GUI-Remake charter BY PATH** — this charter carries zero GR numbers, so a bare "GR44" is a phantom wearing a number. Scope corrections, all measured: (a) the pins are on `providerConnectModel`'s `connected` flag — mutating it reds `__app.test.mjs:5999` and `:6013`; mutating the armed-selection filters (the prescribed mutation) left **699/699 green**, i.e. the prescribed proof was itself a vacuous green. (b) BOTH armed filters must change — a one-sided fix ships **699/699 green** because `wireConnectCard`/`submitInlineProviderCred` are not exported to the test hooks and have ZERO unit reachability. (c) `provider_json/1` must gain `updated_at`: the payload is byte-identical before and after a successful rotation, so without it the console trades the lie "you must disconnect first" for the lie "nothing happened". (d) The rotation signal is FREE — `DateTime.compare(inserted_at, updated_at) == :lt` ⟺ the conflict branch, structural because Ecto fills both timestamps from ONE grouped autogenerate entry and both `replace` arms include `:updated_at`. |
+| D78 | **Rotation carries `rotated: true\|false` in audit METADATA, never a new `provider.rotated` ACTION — and the replace path takes NO confirm modal** | `action` lives in `base_attrs`, computed BEFORE the transaction, so an outcome-dependent action requires restructuring `Accounts.audit/3`; and a new action string widens the closed `noun.verb` vocabulary that `list_audit_events`' `:action_prefix` filter reads. `target_fun`'s map already merges OVER `base_attrs` (`accounts.ex:394`, proven), so the whole change is one line and `audit/3` is untouched. Prefer the timestamp signal over a `Repo.exists?` pre-read: the pre-read costs a round trip and reads PRE-state, so under a concurrent connect it mislabels a rotation as a first connect. No modal, for three measured reasons: `preflight_provider` (`router.ex:8364`) runs a live authenticated call BEFORE any write, so a dead credential returns 422 and nothing is saved; POST and DELETE `/v1/providers` carry the IDENTICAL `require_team_admin` gate (`:3560`/`:3581`) and `connect_provider` is already `~w(owner admin)`; and adding friction to the SAFE one-step path while removing the two-step destructive path inverts the gradient. The residual risk (a VALID token for the WRONG cloud account) is real, but a modal asks "are you sure", not "is this the right account" — the honest mitigation is identity ECHO, which is NOT cheap (the Provider schema has no account-identity column and the hetzner preflight returns none, while Azure's `verify/1` returns meta the router discards). FILED, not built. |
+| D79 | **Session provenance ships WHOLE at all six write sites, and its acceptance criterion is an END-TO-END ROUND TRIP — never column-existence or suite-green** | The six-site set is CLOSED and every site funnels through `Accounts.create_user_session_token/2` (`accounts.ex:524`), each caller holding its answer as a literal; no impersonation and no magic-link path exists (`grep -rni 'impersonat\|magic_link'` → zero). The "three or fewer sites" go/no-go was a proxy for plumbing cost, and the measured cost is one keyword per site inside an opts list that already exists. **THE TRIPWIRE, mutation-proven both directions:** `UserToken.changeset/2`'s cast allowlist does not include `:origin`, so a slice that lands the migration + schema field + write-site attr and forgets the cast list runs **141 tests / 0 failures while writing NULL on every row** — no Ecto warning, no compiler warning, `cast/3` silently discards it. Adding the cast gives 144/0 including an e2e probe driving the real device-link exchange; removing it again reds that probe with `left: nil / right: "device_link"`. So the criterion must assert the value round-trips out of Postgres (raw SQL leg included — it is the only assertion a struct default cannot satisfy), plus a never-invent assertion (no `:origin` opt ⇒ column stays nil) which passes in BOTH the dead and live states and therefore can never be the slice's only test. |
+| D80 | **`origin` must NOT be pushed into `session_opts/1`; backfill NOTHING; render ONLY when present** | Five of the six sites share that helper, so pushing origin into it makes ONE shared helper answer for FIVE different origins — a complete provenance that invents, inside the wave that exists to remove invention. Append at each call site instead. `session_json/2` emits the key ALWAYS (null when unknown) so the client can tell "unknown" from "old client". The PAT surface cannot leak it: `pat_changeset/2` has a separate cast list, `pat_json/1` and `session_json/2` are explicit-key maps, and `UserToken` has no `@derive Jason.Encoder`. "approved 2d ago" uses the token's OWN `inserted_at` — the device request row carries no approval timestamp and is DELETED before the mint, so mint time is the only available clock and it is the token's own truth; do not add an `approved_at` column to chase it. Migration is additive-nullable with in-tree precedent (`20260629120100` added seven columns to this table), and blue/green-safe in ONE direction only: an OLD node against the NEW schema is fine, a NEW node against an un-migrated DB fails every `UserToken` select — so the migration lands before or with the deploy, never after. |
+| D81 | **The two Overview honesty rows ship as ONE slice, and the freshness fix is CHIP-SIDE, not a body repaint** | Three measured collisions force the merge: both fixes edit `app.js`; both tests need the SAME two new fixture capabilities (a per-path failure switch inside `overviewNet()` and a topbar-capable DOM merged with `fakeDom()`, so `#billing-chip` and `#liveness-chip` live in one document); and they are one defect class stated twice. Two builders would collide on the fixture on their first commit. On the silent-refresh half the SILENCE IS CORRECT — a background blip must not blank a working screen — but the justifying comment ("the liveness chip already reports a broken stream") is measurably FALSE for a REST failure: at the instant of the failure the chip reads `data-state="live"`, label `"Live"`, ago `"· just now"`, because `es.onmessage` stamps `lastEventMs` and repaints BEFORE dispatching the refetch. **The console does not merely fail to report staleness; it CERTIFIES freshness it lacks.** Mutation-proven: a `markRefreshStale()` seam in the `!full` arm reds the chip assertion while the body-unchanged assertion stays GREEN. On the band half use `paintOverviewData(overviewData.list)` — it covers the slots meter, the instances grid (also sub-dependent, also stale) AND the state band — not `paintOverviewState`; 3 lines, and it passes all **699** existing tests, which means **no committed test pins the lie today**. E11 binds: cite by function name, never `app.js:<digits>`. |
+| D82 | **`cch-bl-get-census-rederive` does NOT close on D64/D69's "subsumed by `#5434`" rationale — it closes as SUPERSEDED BY D46, or not at all** | Its criterion 0 demands "the classifier committed as a re-runnable script (`scripts/` or `tooling/`) rather than a one-off grep". `git ls-tree -r --name-only origin/main scripts tooling \| grep -i census` returns four files — a PDS schema-row census doc, `tooling/grip/census.mjs`, a grip ledger row and its test — **none of them a router GET classifier**. Criterion 2 ("state whether the 45-writer class GREW") is unanswered anywhere on main. `#5434` shipped the deny clause and two tests; it shipped no classifier. Closing on the stated rationale would be a vacuous close inside the epic whose vision sentence is "the console stops lying" — the second reflexive instance this epic has caught (standing law 2 was written for the first). D46 already reconciles 56 vs 62 as two correct populations and records that D34's `56/50/5/45` reproduces byte-identically and stands; **that** is the honest close text. |
+| D83 | **Naming a successor does NOT clear the seal predicate's clause (a) — forwarding is MEMBERSHIP IN THE SUCCESSOR'S ROSTER, so the residue must be RE-PARENTED** | Run live, not read: `seal-predicate.mjs --successor cloud-console-hardening-epic` still reports **4 orphans, exit 1**, because `:131` resolves forwarding via `fetchRoster(SUCCESSOR)`. Filing a charter and passing a flag is not a forwarding address to this program. Two corrections to D72 while here: (a) the predicate calls `task-47bc4168392dec17` "the SEALED predecessor", but its own predicate returns **NO SEAL** at origin/main today (76 done / 4 open / 2 cancelled, clause (a) blocking) — D72's substantive claim (no retarget flag) is correct, the word SEALED is not; (b) the unbanded census target is **60** (53 `cch-*` + 7 misc), not 50, and the `gr-*` band is FROZEN at 69 — no new `gr-*` row has been filed since D72, so that band only shrinks. Also: clause (a)'s live set is `open\|\|in_progress` ONLY, so this epic's 2 `considering` rows are invisible to it and would seal SILENTLY. And 4 of the live rows are not console rows at all (branch protection, async test modules, a pr-task-gate trailer) — re-parent them to their true owners, which is a free reduction before anyone builds. |
+| D84 | **The seal predicate's null-successor silent seal is REAL, fires exactly at the moment of SUCCESS, and ships this wave** | Reproduced against five fixtures. With ≥1 live row a null successor orphans it and reds — the behaviour a code-read sees, and the half that does not matter. With **ZERO** live rows `forwarded` is never consulted, `ok=true`, **exit 0**, and the SCOPE paragraph prints "0 forwarded by name **to null**". A fixture omitting the key prints a THIRD rendering, "to undefined", also exit 0. A bogus `--successor task-DOES-NOT-EXIST-9999` is accepted verbatim, exit 0, and printed as the forwarding address. Separately, a copy with `KNOWN_DEFECTS = []` seals at exit 0 having spawned NO guard at all. The defect fires on the one run anybody will ever quote, and next wave files the successor — so an unfixed predicate would manufacture the epic's first false seal. NOT-FOUND recorded: the console predicate has **ZERO tests** anywhere in the repo (`tooling/grip/test/seal.test.mjs` covers grip's predicate only), so every prior claim about its behaviour was contract-read. Port grip's shape while there: three exit codes (0/1/**2 = infra fault**, whose header names THIS predicate as the prior art whose exit 1 carries two meanings) and a machine-readable `VERDICT-TOKEN:` line. |
 | D72 | **Movement-2 seal verdict: NOT YET SEALABLE — and that is a pre-authorized, honest outcome** | This epic has **no seal predicate of its own** — the only `seal-predicate.mjs` hardcodes `EPIC = 'task-47bc4168392dec17'`, the SEALED predecessor, with no retarget flag. 121 children = 113 open / 7 done / 1 cancelled; 69 `gr-*` (banded by the six-band census in the epic description) + 50 `cch-*` (entirely UNBANDED) + 2 misc. The shortest sealable path: (a) Movement 0 closes ~15 landed slices + their `gr-*` twins with SHAs, (b) Movement 2 censuses+bands the 50 `cch-*`, (c) a NAMED successor forwards genuine live residue (mirroring GUI-Remake→this epic). Filing that successor + retargeting the predicate is NEXT wave, not this one. Do not chase a false green by widening scope (the wave-4 death pattern); NO SEAL is acceptable and non-negotiable. |
 
 ## Roadmap
@@ -223,7 +239,7 @@ Recorded so no future wave re-inherits the error:
 | `cch-w1-cssom-ci-wiring` | shipped (real reds) | **LANDED** — via `#5307`, not `#5290` | `console-harness.yml:90 cssom-parity`. `#5290` is CLOSED as a duplicate; its "genuine reds" were **cancelled** check-runs from a concurrency collision with its own `-r` sibling — a SUCCESS pair existed on the same SHA, and a clean rerun of the cancelled run returned `conclusion=success` for both named checks. There was never a fix to make. |
 | `cch-w1-peer-ip-pin` | shipped | **NOT LANDED** | `router.ex:377-379` still the original three `loopback_peer?/1` clauses. Open `#5305`. |
 | `cch-w1-ledger-close-guard` | shipped | **NOT LANDED** | `grep -c lifecycle_status` on `mutations.ex` = 0. Open `#5309`. |
-| `cch-w1-refetch-storm` | shipped | **NOT LANDED** | no `OVERVIEW_FLEET` on main. Open `#5308`. |
+| `cch-w1-refetch-storm` | shipped | **NOT LANDED** *(row STALE — corrected wave 6)* | Was: "no `OVERVIEW_FLEET` on main. Open `#5308`." **It landed**: `481d6f231` (#5308), `OVERVIEW_FLEET` at `app.js:4905`, scope machinery `:4910-5018`. |
 
 Two corrections a future wave must not re-inherit: **`#5307` reverted nothing live** (origin/main's
 `app.css` was clean; its net `app.css` diff is empty — the break-and-revert both happened inside the
@@ -352,9 +368,139 @@ fence (`cch-bl-close-fence-epoch-only`, out of fence — D70); `task-birth-attri
 `cch-bl-lifecycle-token-reaper`; the cross-language citation-drift follow-up
 (`cch-bl-citation-drift-cross-language`).
 
+### Wave 6 — the console stops lying to its OPERATOR
+
+Waves 1-5 spent themselves on INSTRUMENTS. That was right and it is finished (wave 5 landed all five
+D41 payments, green and mutation-proven). Wave 5's own review instructs the successor plainly: *"then
+triage the remaining LIVE claim/reality divergences over further instrument hardening."* Wave 6 obeys.
+Builder model is **`opus` for EVERY slice** — Fable is unavailable and forbidden this cycle, which is
+why the two design candidates were re-judged on the invariant axis and one of them was CUT (D73).
+
+**Movement 0 (LEAD, mechanical — the finishing bulk, not builder budget).** Evidence-close each row
+below with a MERGE SHA + `file:line` (standing law 2). Thirteen confirmed, re-derived at Verify:
+
+| Row | Merge SHA | Anchor |
+|---|---|---|
+| `cch-bl-close-fence-epoch-only` | `448749cf1` (#6420) | `close.ex:319` `check_close_holder/3`. D70 bars TOUCHING `api/`; an evidence-close is a ledger write, not a code touch — close, never build. |
+| `gr-backlog-provider-reconnect` | `382f23540` (#4481) | `registry.ex:2635` upsert + `20260719203000_unique_provider_per_team_kind.exs` |
+| `gr-blk-oauth-head-mint` | `26acc7a91` (#5378) | `router.ex:547` and `:551` — both oauth legs fenced |
+| `gr-blk-console-refetch-storm` | `481d6f231` (#5308) | `app.js:4905` `OVERVIEW_FLEET`. **Close text says 40→12, NOT "each endpoint once"** — the landed pin is `__app.test.mjs:302` "…cost 12 requests, not 40"; the criterion's literal wording (5) is not met. |
+| `gr-blk-smoke-click-inert` | `8c9c116c5` (#5379) | `smoke.mjs:35`/`:155-169`; residue already forwarded to `cch-bl-smoke-shim-fidelity` |
+| `gr-blk-revoke-harness-gap` | `8c9c116c5` (#5379) | `smoke.mjs:461` click oracle, honest-failure text `:486-489` |
+| `gr-blk-cssom-parity-harden` | — (content) | `cssom-parity.mjs:97` count-mismatch is fatal + `:92` `CSS=…` widens past app.css. Pull criteria before stamping. |
+| `gr-backlog-cssom-parity-count-skew` | — (content) | the decision shipped as D65's committed sidecar (`:209`/`:476`) |
+| `gr-backlog-css-brace-detector` | — (content) | E10 implemented `__css_check.mjs:421-474` with a live error emitter |
+| `cch-bl-appcss-wound-owner` | point-in-time | tree clean, app.css diff vs origin/main **0 lines**. Closes at **2 of 3** — criterion 2's RED half needs a worktree mutation. Say so. |
+| `cch-bl-appcss-orphan-comment-live` | point-in-time | delimiters **289/289 balanced** (filed as 274/275); `__css_check` 0 errors AND `cssom-parity` PARITY PASS 1233/1233 MISSES 0 — cite the output, it satisfies criterion 2 |
+| `gr-blk-primary-checkout-reconcile` | point-in-time | `HEAD == origin/main`, 0 ahead / 0 behind, clean. Closes on the STATE, not the procedure — whether the 1095 lines of foreign work were preserved is unknowable from here. Say so. |
+| `cch-bl-get-census-rederive` | — | **close as SUPERSEDED BY D46, never "subsumed by #5434"** (D82) |
+
+Two are NOT free: `gr-blk-ledger-close-bypass-audit` has criteria 0/1 met by content
+(`ensure_task_close_is_cas` at four call sites; `sync/applier.ex:177` passes `source: :sync`) but
+criteria 0/2 both say *"proven by re-running the live probe"* — a five-minute lead action against
+guerrilla. `cch-bl-unpushed-base-branches` has criteria 0 and 2 MET (all four base contents on main;
+all four refs still at the recorded SHAs, so no sibling force-push) and criterion 1 NOT — all four are
+still absent from origin AND each is prefixed `+` in `git branch --list`, i.e. **checked out in a live
+worktree**, so a bare `git branch -d` refuses. Hygiene, not risk; not a one-liner.
+
+**Movement 1 — five round-1 opus slices. All dependency-free; the lead pays merge order.**
+
+| Slice | Task | Round | Size | Surface | Model |
+|---|---|---|---|---|---|
+| The providers card stops telling the operator to destroy a working credential (D77/D78) | `gr-bl-provider-reconnect-client-guard` | 1 | large | cloud SPA + router + tests | opus |
+| Sessions carry honest provenance — column, six write sites, never a guess (D79/D80) | `gr-p5-session-provenance` | 1 | medium | cloud accounts + router + migration + SPA | opus |
+| `--ring-soft` becomes identity-derived by PROMOTION, not in place (D74/D75/D76) | `gr-p5r7-ring-soft-accent-invariant` | 1 | medium | `design/emit.mjs` + app.css + exemptions | opus |
+| Overview stops certifying freshness it lacks, and its band stops going stale (D81) | `cch-bl-overview-subscription-band-stale` | 1 | medium | cloud SPA + harness | opus |
+| The seal predicate refuses a null or unresolvable successor (D84) | `gr-bl-predicate-null-successor-silent-seal` | 1 | small | `seal-predicate.mjs` | opus |
+
+**File truth (D25 governs — merge order is a lead cost, not a build-order one).** Slices 3 and 5 are
+fully disjoint from everything. Slices 1, 2 and 4 share `cloud/priv/static/app.js` and
+`__app.test.mjs` at genuinely distant regions — sessions ~`1076-1087`, providers ~`1980-2210`,
+overview ~`4931` and ~`12727`; slices 1 and 2 share `router.ex` at `~8322/8377` vs
+`652/713/1061/1535/7848/10714`. Grep for anchors at build time; never trust a line number.
+
+**HIGH-FLIP-RISK (E2) — two slices, named for the reviewer.** Slice 1: *"rotation claims no new
+authority surface and needs no confirm step"* — a security/authz judgment (D78). Slice 2: *"each of
+the six write sites reports its own true origin"* — the `session_opts/1` trap (D80), where a wrong
+call makes every test pass while five sites report one answer. Both warrant a genuinely INDEPENDENT
+second re-derivation before merge; that dispatch is a manual lead step.
+
+**Movement 2 (Paper spine, no build slice).** The honest seal arithmetic after Movement 0 (~82 → ~69
+open), D83's re-parenting requirement, and the `gr-backlog-e02-deploy-actor` ruling: **RATIFY
+TRIGGER-ONLY**. Grounds, measured: five code paths create deployments and only TWO write
+`site.deploy_requested` (a coalesced manual deploy stamps nothing; promotion writes a different verb;
+the GitHub push webhook writes no audit at all), so the join can never attribute more than 2 of 5;
+`list_audit_events` has no `target_id IN (…)` filter, so a page of deployments is N+1 or a misaligned
+200-row sweep — a new server-side batch filter, not a UI join; it acquires a 90-day retention cliff
+the deployment row does not have; and the attribution operators want ALREADY exists, backend-true and
+filterable, in Activity (`ACTION_LABELS["site.deploy_requested"]`, the `site.deploy` filter chip, actor
+chips built from the member list, falling back to `"system"`). GR27/GR28 ratified trigger-only *for
+that wave only*, so this is a genuinely new decision — do not cite them as having made it. If a future
+wave wants ladder attribution anyway, the honest build is an `actor_user_id` column on `deployments`
+stamped where the write site already holds it and rendered only when present — same rule as D80 — not
+the join.
+
+**Handed OFF, deliberately not adopted:** the repo-wide Vercel red is **diagnosed** and belongs to
+Honest Gates (`hg-bl-vercel-legacy-statuses-red-repo-wide`, open, unclaimed, 1/8) — adopting it would
+recreate the duplicate-ownership defect that cancelling `gr-blk-vercel-checks-ungoverned` cured. The
+diagnosis, run with `vercel inspect --logs --scope guerrilla` (the default scope
+`frikk-jarls-projects` cannot see these deployments, which is probably why nobody got the log): six
+`Module not found` on `@barkpark/react` and `@barkpark/core`, because their entry points are `./dist/*`,
+`dist/` is gitignored, and nothing builds the workspace packages before `next build` — diff-independent,
+hence red on every sha. The complete fix is `workspace:*` (in-tree precedent:
+`apps/mobile/package.json:15-16`) **plus** a `prebuild` in `web/package.json`; `prebuild` alone leaves
+2 errors because pnpm INJECTS a copy of `@barkpark/react` (it has peerDependencies + `files:[dist]`)
+while `@barkpark/core` is symlinked and heals. Both red checks are two Vercel projects rooted at the
+same `web/` directory — deleting one removes a permanent red with no code change.
+
+**Deferred, FILED as backlog:** the `--ok`/`--danger` ruling (D73, row rewritten with the measured
+facts, awaits Fable); focus-ring contrast across 5 identities × 2 modes (D76); provider identity echo
+on rotation (D78); the seal predicate's epic retarget + its first tests (D84); `smoke.mjs` red on main
+and CI-invisible; `console-harness.yml:7` claiming 415 tests for a 699-test suite. Also unchanged and
+NOT built: `gr-blk-worktree-registry-bloat` does not reproduce as filed — 1511 registrations, **ZERO**
+prunable, all directories present, 260 dirty of which ~170 hold real tracked edits, and the safe
+`clean AND merged` predicate bites **18 (1.2%)**. It is a source-side leak (the agent harness never
+removes what it creates, growing ~1 entry per few minutes under load) wanting a rewrite, not a build.
+
 ## Wave log
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
+
+### 2026-07-28 — wave 6 DECIDE (build in flight)
+
+The thesis survived; most of its detail did not. Direction: **the console stops lying to its
+OPERATOR** — five consecutive instrument waves left the user-facing lies untouched, and wave 5's own
+review said to triage those next. Confirmed and about twice its apparent size: the providers card
+still instructs a human to destroy a working cloud credential, nine days after the server shipped safe
+one-step rotation, and it is held by THREE client pins whose NAMES encode the false rationale, so the
+slice rewrites a specification (D77). Session provenance came in CHEAPER than feared — all six write
+sites funnel through one function, the set is closed, and its one silent-failure mode is now a test
+that reds on command (D79).
+
+**Three of four slice framings were refuted, and one slice was CUT.** The `--ok`/`--danger` invariant
+would have been a vacuous green over a hue the destroy button does not wear, inside a generated region
+a hand edit cannot touch, and its only working fix reverses a written GR90 ruling made after a
+~1,585-shot accent matrix — so it is rewritten and deferred to a Fable-available wave (D73), which is
+exactly the wish's own instruction about open-ended aesthetics. `--ring-soft` was aimed at the right
+token but the wrong home: the cheap in-place fix is provably vacuous (an AMBER focus ring passes all
+three gates) and silently reskins evergreen, so it is PROMOTED into the emitter, where re-hardcoding
+one identity reds the fence (D74) — and the diff must carry the exemptions baseline 33→31 or the
+ratchet fires on the good direction (D75). A fifth candidate arrived from the survey and is sharper
+than two of the originals: the Overview **certifies freshness it lacks** — the liveness chip repaints
+to "Live · just now" at the instant a failed background refetch freezes the dashboard, because the SSE
+frame that dispatched it advanced `lastEventMs` first (D81).
+
+Two reflexive catches, both the epic's own predicate turned on itself: the planned Movement-0 close of
+`cch-bl-get-census-rederive` on the "subsumed by #5434" rationale is **unsupported** — that PR shipped
+no classifier, and the row's criterion demands one (D82); and the seal predicate **silently seals with
+a null successor at exit 0, printing "to null"**, precisely when there are zero live rows — the one run
+anybody quotes — while naming a successor does NOT clear clause (a) at all, because forwarding means
+membership in the successor's ROSTER (D83/D84). Next wave files the successor, so that predicate is
+fixed this wave or the epic's first seal is manufactured.
+
+Five round-1 opus slices, two flagged HIGH-FLIP-RISK. Movement 2 ratifies deploy-actor as
+trigger-only permanently, on measured grounds (the join can attribute at most 2 of 5 creation paths).
+Fable unavailable — every slice opus. Paper: `cloud-console-hardening-wave-6-2026-07-28`.
 
 ### 2026-07-21 — wave 5 DECIDE (build in flight)
 
