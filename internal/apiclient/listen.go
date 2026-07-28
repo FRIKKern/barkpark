@@ -139,7 +139,9 @@ func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, d
 		cbErr := scanListenFrames(resp.Body, &lastEventID, &backoff, floorBackoff, onEvent, nil)
 		resp.Body.Close()
 
-		// onEvent asked to stop (e.g. a broken stdout pipe) — propagate it.
+		// onEvent asked to stop (e.g. a broken stdout pipe), or the reader hit
+		// ErrFrameTooLarge — permanent loss, not a drop. Either way, propagate:
+		// reconnecting past an over-cap frame would silently skip it forever.
 		if cbErr != nil {
 			return cbErr
 		}

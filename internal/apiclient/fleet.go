@@ -125,7 +125,7 @@ func (c *Client) FleetEventsWithCursor(ctx context.Context, lastEventID string, 
 		resp.Body.Close()
 
 		if cbErr != nil {
-			return cbErr // onEvent asked to stop
+			return cbErr // onEvent asked to stop, or ErrFrameTooLarge (permanent loss, not a drop)
 		}
 		// Check ctx BEFORE reconnecting: a cancelled ctx mid-read surfaces as the
 		// scan-loop end, otherwise indistinguishable from a server drop.
