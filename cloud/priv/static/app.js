@@ -4934,12 +4934,17 @@
       if (!r.ok) {
         // A BACKGROUND refresh that fails keeps the last good dashboard —
         // replacing a working screen with an error state on one blip is the
-        // louder lie, and the liveness chip already reports a broken stream.
-        if (!full) return;
+        // louder lie. But that silence must not read as freshness: the liveness
+        // chip is driven by the STREAM alone, and es.onmessage stamps
+        // lastEventMs and repaints the chip BEFORE dispatching this refetch, so
+        // at the instant of the failure it says "Live · just now" over data
+        // that never arrived. Mark the staleness; never blank the body.
+        if (!full) { markRefreshStale(); return; }
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load your fleet</h2><p>' +
           esc(friendly(r.data)) + "</p></div>";
         return;
       }
+      clearRefreshStale(); // the read landed — what's on screen is current again
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
       overviewData.list = list;
@@ -12360,6 +12365,13 @@
   // EventSource NEVER surfaces to onmessage, so this only advances on genuine
   // invalidations — it is the honest "as of Xs ago" the liveness chip reads.
   var lastEventMs = null;
+  // A BACKGROUND refetch failed while the stream itself stayed healthy — what is
+  // on screen is older than the event that asked for it. This is NOT derivable
+  // from any signal above: onmessage stamps lastEventMs and repaints the chip
+  // BEFORE dispatching the refetch, so the stream reads perfectly live at the
+  // exact instant the data went stale. Set by markRefreshStale, cleared by the
+  // next refresh that lands (and by closeEvents with the rest of the session).
+  var refreshStale = false;
 
   // ── Liveness chip (OC6): topbar SSE health dot, honest reconnect ────────────
   // Pure state machine for the topbar dot, driven ONLY by the existing
@@ -12370,6 +12382,10 @@
   //                  "Reconnecting…" forever over a permanently closed stream.
   //   reconnecting — onerror fired and we ARE retrying (remint + reopen on a
   //                  capped backoff — no longer a claim about the browser).
+  //   refresh_failed — the stream is fine and an event DID arrive; the refetch
+  //                  it triggered is what failed. The screen keeps its last good
+  //                  data (blanking it would be worse) but it is NOT current, and
+  //                  no stream signal can say so — hence its own state.
   //   stale        — stream is up but no data frame in LIVE_STALE_MS (we cannot
   //                  PROVE currency, so we say so — a quiet fleet, not a lie);
   //   live         — connected, recently confirmed (or freshly connected).
@@ -12378,10 +12394,13 @@
   // LIVE_DOT_STATES pins the return set as a CLOSED enum — without that, JS's
   // permissive arity lets a new state land while every equality test stays green.
   var LIVE_STALE_MS = 90000; // 90s of silence → "stale" (well past the 25s heartbeat)
-  var LIVE_DOT_STATES = ["live", "stale", "reconnecting", "dead"];
-  function liveDotState(evtErrored, lastEventMs, nowMs, evtDead) {
+  var LIVE_DOT_STATES = ["live", "stale", "reconnecting", "dead", "refresh_failed"];
+  function liveDotState(evtErrored, lastEventMs, nowMs, evtDead, refreshStale) {
     if (evtDead) return "dead"; // outranks everything: retrying would be a lie
     if (evtErrored) return "reconnecting";
+    // A failed refetch outranks both freshness reads below: it is a MEASURED
+    // failure, where "live"/"stale" are only inferences from stream timing.
+    if (refreshStale) return "refresh_failed";
     if (lastEventMs == null) return "live"; // connected; sparse events ≠ trouble
     if (nowMs - lastEventMs > LIVE_STALE_MS) return "stale";
     return "live";
@@ -12400,11 +12419,15 @@
   }
   var LIVE_CHIP_COPY = {
     live: "Live", stale: "Live", reconnecting: "Reconnecting…", dead: "Not live",
+    // NOT "Live": the stream is live, the SCREEN is not, and the chip speaks for
+    // what the operator is reading.
+    refresh_failed: "Not current",
   };
   var LIVE_CHIP_ARIA = {
     live: "Live updates connected", stale: "Live updates connected but quiet",
     reconnecting: "Live updates interrupted, reconnecting",
     dead: "Live updates stopped, sign in again to resume",
+    refresh_failed: "Live updates connected but the last refresh failed, showing older data",
   };
   // A state with no entry must NEVER fall through to the word "Live" — that was
   // the old `LIVE_CHIP_COPY[state] || "Live"` fallback, which would have made an
@@ -12446,7 +12469,8 @@
   // every state transition AND once per second by the chip ticker (so the "as of"
   // label counts up and a quiet stream ages honestly into "stale").
   //
-  // `override` is the TEST SEAM: {evtErrored, evtDead, lastEventMs, nowMs}. The
+  // `override` is the TEST SEAM: {evtErrored, evtDead, lastEventMs, nowMs,
+  // refreshStale}. The
   // stream signals are private closure state, so without it the terminal state's
   // DOM contract (which data-state, which label, which announced sentence) is
   // literally unassertable from node. Absent in production — every real caller
@@ -12459,11 +12483,15 @@
     var errored = o ? !!o.evtErrored : evtErrored;
     var dead = o ? !!o.evtDead : evtDead;
     var last = o ? (o.lastEventMs != null ? o.lastEventMs : null) : lastEventMs;
-    var state = liveDotState(errored, last, now, dead);
+    var refreshed = o ? !!o.refreshStale : refreshStale;
+    var state = liveDotState(errored, last, now, dead, refreshed);
     chip.setAttribute("data-state", state);
     // No "as of" on a down stream: a recency stamp beside a dead dot reads as
-    // reassurance ("2s ago") for data that has stopped arriving.
-    var ago = state === "reconnecting" || state === "dead" ? "" : liveFreshness(last, now);
+    // reassurance ("2s ago") for data that has stopped arriving. Same for a
+    // failed refresh — "· just now" beside "Not current" is the exact lie this
+    // state exists to stop (the EVENT was just now; the DATA was not).
+    var ago = state === "reconnecting" || state === "dead" || state === "refresh_failed"
+      ? "" : liveFreshness(last, now);
     var label = chip.querySelector(".live-chip-label");
     if (label) label.textContent = liveChipCopy(state);
     var agoEl = chip.querySelector(".live-chip-ago");
@@ -12474,6 +12502,21 @@
     // ticking recency rides the title (a hover tooltip, not an announcement).
     chip.setAttribute("aria-label", liveChipAria(state));
     chip.setAttribute("title", liveChipAria(state) + (ago ? ", last event " + ago : ""));
+  }
+
+  // The refresh-honesty seam. loadOverview's background-failure arm deliberately
+  // keeps the last good dashboard on screen — silence about the FAILURE is the
+  // right call, but silence must not be read as freshness. These two mark and
+  // clear "what you are looking at did not refresh", which the chip renders.
+  function markRefreshStale() {
+    if (refreshStale) return;
+    refreshStale = true;
+    renderLivenessChip();
+  }
+  function clearRefreshStale() {
+    if (!refreshStale) return;
+    refreshStale = false;
+    renderLivenessChip();
   }
 
   // A fresh data frame arrived — snap the dot's one-shot ping so motion signals
@@ -12659,6 +12702,7 @@
     evtErrored = false;
     evtDead = false;
     lastEventMs = null;
+    refreshStale = false; // a new session starts with nothing left un-refreshed
     stopChipTicker();     // the topbar chip's clock dies with the session
     renderLivenessChip(); // reset to a neutral "live/—" before the shell hides
     stopInstanceTicker(); // C3: no orphaned timeline ticker after logout
@@ -12727,6 +12771,17 @@
     subscription: function (v) {
       loadSubscription().then(function () {
         if (v === "billing") renderBilling();
+        // The Overview's state band, slots meter and instance cards ALL read
+        // subCache, so refreshing the cache and repainting only the topbar chip
+        // left the band rendering the old trial card directly beneath a chip
+        // that had already flipped to "Payment failed". paintOverviewData is the
+        // ONE painter covering every sub-dependent region, and it repaints from
+        // the snapshot — no refetch, so the narrowing holds. (Mirrors
+        // refreshOverviewOnboarding: an empty fleet is the runway, whose only
+        // sub-derived text refreshRunwaySubline below already handles.)
+        else if (v === "overview" && overviewData.list && overviewData.list.length) {
+          paintOverviewData(overviewData.list);
+        }
         // A4: the welcome runway's trial subline reads the same cache — keep any
         // mounted runway honest when the subscription flips (no-op otherwise).
         refreshRunwaySubline(document);

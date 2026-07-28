@@ -3501,6 +3501,20 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .live-chip[data-state="dead"] .live-dot { background: var(--danger); }
 
+/* refresh_failed (cch-bl) — the stream is HEALTHY and an event did arrive; the
+   refetch it triggered is what failed, so the dashboard on screen is older than
+   the event that asked for it. Amber like "reconnecting" (same severity: not
+   current, recoverable) but deliberately STATIC — nothing is retrying on a
+   timer here; the next event that lands clears it. The label ("Not current")
+   carries the difference in cause. Same load-bearing note as the dead rule
+   above: without this the fifth data-state matches zero author rules and
+   inherits .live-dot { background: var(--dim) } — a calm grey for a warning. */
+.live-chip[data-state="refresh_failed"] {
+  border-color: hsl(var(--warn-hsl) / 0.35);
+  background: var(--warn-soft);
+}
+.live-chip[data-state="refresh_failed"] .live-dot { background: var(--warn); }
+
 @media (prefers-reduced-motion: reduce) {
   /* Motion is redundant with colour + label here — drop it entirely. */
   .live-chip[data-state="reconnecting"] .live-dot { animation: none; }
