@@ -34,11 +34,22 @@ name: pr-task-gate
 #     passing with a warning nobody reads. A bypass with no attributable record
 #     is indistinguishable from the gate being off.
 #
-# Enforcement note: `main` has no branch protection today, so a red check here
-# does not yet mechanically block a merge. To make it binding, add this job to
-# the required-status-checks list BY NAME (see merge-gates.md). Required-by-name
-# is load-bearing (D3): a workflow that silently never runs on a conflicted PR
-# must read as "not satisfied", not as a passing/absent check.
+# Enforcement note: THIS CHECK IS BINDING. As of 2026-07-28 `main` is protected
+# with `enforce_admins: true`, and `PR references an active task` is one of
+# exactly two required contexts pinned by name in `.github/required-checks.json`
+# (the other is `Elixir gate`). A red here blocks the merge server-side for
+# everyone, admins included — `gh pr merge --admin` is refused. The merge verb is
+# `scripts/bp-merge.sh`.
+#
+# Two consequences the rest of this file is written against, and neither is
+# hypothetical any more:
+#   * Required-by-name is load-bearing (D3): a workflow that silently never runs
+#     on a conflicted PR must read as "not satisfied", not as a passing/absent
+#     check. A required context that never renders reports `is expected.`
+#     forever, which is a DEADLOCK — hence no paths filter below, ever.
+#   * The emergency lane is now the only way past a red on a genuinely urgent
+#     PR, so it must actually engage (the `labeled` trigger) and must leave a
+#     record (the `hotfix_record` step's hard failure). See merge-gates.md.
 
 on:
   pull_request:
