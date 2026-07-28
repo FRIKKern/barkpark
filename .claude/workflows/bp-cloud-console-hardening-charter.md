@@ -519,12 +519,19 @@ in copy or state.
 with real evidence as the builders worked, every merge-gated criterion left open for the lead, and
 the epic roster shows exactly those five in flight — no foreign row was touched.
 
-**Server caveat, recorded because it cost this wave real work**: `guerrilla`'s
-`/v1/data/mutate` timed out on **every** attempt during Review (8 retries over ~6 minutes,
-plus intermittent 500s on `/v1/capabilities`), while `/v1/tasks` reads and `bp task pulse` worked
-throughout. Two builders hit the same thing mid-run. Follow-ups that would normally be filed as
-rows are named in the debrief Paper instead; the next wave should file them and should not read
-their absence as an oversight.
+**Server defect, isolated during Review and recorded because it will cost the next wave the same**:
+on `guerrilla`, **creating a `task` document fails every time** — 500 or client timeout on
+`POST /v1/data/mutate`, reproduced with a four-field minimal task doc, so it is not payload size.
+Everything else on that endpoint is healthy: PATCHING an existing task (the epic heartbeat landed
+fine), patching and publishing the wave Paper, `bp task pulse`, `bp task stamp` and every read all
+return in well under a second. Two builders hit the same wall mid-run — one lost two criterion
+stamps and re-stamped after verifying STATE, one could not file a follow-up at all — and both read
+it as flaky rather than isolating it. Consequence for the board: **four real follow-ups this wave
+surfaced are named in the debrief Paper instead of filed as rows.** The next wave files them the
+moment task create recovers and must not read their absence as an oversight. (Separate and
+self-inflicted, worth the line: several early `bp doc mutate` calls returned `malformed` because
+the patch payload omitted the required `type` key — `docs/api-v1.md` §6 documents it; that was not
+the outage.)
 
 **Next wave takes**, in this order: (1) merge round 1 — no inter-slice deps, but land #6539's
 migration with its deploy; (2) `cch-bl-seal-predicate-retarget-and-reparent` plus the actual
@@ -532,7 +539,9 @@ re-parenting D83 demands, because the predicate is now honest and the successor 
 is the wave that can genuinely move the seal; (3) the two operator-truth rows this wave did not
 reach — `gr-backlog-e02-deploy-actor` and `gr-blk-vercel-checks-ungoverned`, the latter still
 reddening every PR repo-wide and governed by nobody, which standing law 7 already says must be
-LANDED as a sentence rather than asserted; (4) the provider identity-echo mitigation, promoted.
+LANDED as a sentence rather than asserted; (4) FILE the four follow-ups the Paper names and task
+create could not — 2FA origin granularity, refresh-staleness beyond the Overview, the
+`.form-input:focus` channel, and the provider identity-echo mitigation (promoted).
 Held for a Fable-available wave: D73's `--ok`/`--danger` hue question and D76's focus-ring contrast
 engine — both open-ended aesthetic judgment, which is exactly the category this wave deferred.
 
