@@ -325,6 +325,24 @@ defmodule Barkpark.StudioChat.StreamTailTest do
       assert state.stable_html == nil
     end
 
+    test "a capped state stays COHERENT — classify/1 cannot raise on it" do
+      # freeze/2 truncates `text`; if the scan kept pointing past the new end,
+      # `classify/1` would `binary_part` out of bounds. The HEEx guards on
+      # `capped` today, but an SSE producer resuming a capped holder must not
+      # have to.
+      capped = stream(["```go\n"] ++ List.duplicate(String.duplicate("x", 64) <> "\n", 40))
+      assert capped.capped == true
+      assert capped.scan.pos <= byte_size(capped.text)
+      assert capped.scan.fence_start == nil
+      assert {:text, ""} = StreamTail.classify(capped)
+
+      # …and the same for a state that DID commit a prefix before freezing.
+      with_prefix = stream(List.duplicate(String.duplicate("a", 48) <> "\n\n", 60))
+      assert with_prefix.capped == true
+      assert with_prefix.scan.pos == byte_size(with_prefix.text)
+      assert {:text, ""} = StreamTail.classify(with_prefix)
+    end
+
     test "the state stays a BARE MAP so the HEEx Access brackets work" do
       state = stream("hello\n\n")
 

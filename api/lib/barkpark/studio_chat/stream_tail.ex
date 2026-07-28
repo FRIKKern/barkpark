@@ -184,7 +184,15 @@ defmodule Barkpark.StudioChat.StreamTail do
   # full text is unaffected.
   defp freeze(state, render_fun) do
     state = commit(state, render_fun)
-    %{state | text: binary_part(state.text, 0, state.stable_len), capped: true}
+
+    # The scan is reset to the truncated text's own end, not left pointing past
+    # it: `capped` is terminal today, but a `scan.pos`/`fence_start` beyond
+    # `byte_size(text)` would make `classify/1` raise on any caller that forgets
+    # the `capped` guard — and an SSE producer resuming a capped holder is
+    # exactly the shape this wave's round 2 builds. Coherent state costs 5 lines.
+    scan = %{new_scan() | pos: state.stable_len, boundary: state.stable_len}
+
+    %{state | text: binary_part(state.text, 0, state.stable_len), capped: true, scan: scan}
   end
 
   # ── CRLF on the carry ───────────────────────────────────────────────────
