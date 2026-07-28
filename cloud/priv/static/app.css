@@ -73,6 +73,8 @@
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(163 42% 30%);
   --primary-hsl: 151.96 71.81% 29.22%;
+  --ring-hsl: 163 42% 30%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --ok-hsl: 151.96 71.81% 29.22%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -110,6 +112,8 @@
   --primary-fg: hsl(163 45% 8%);
   --ring: hsl(152.92 60% 52.94%);
   --primary-hsl: 152.92 60% 52.94%;
+  --ring-hsl: 152.92 60% 52.94%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --ok-hsl: 152.92 60% 52.94%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -134,6 +138,8 @@ html[data-bp-theme="evergreen"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(163 42% 30%);
   --primary-hsl: 151.96 71.81% 29.22%;
+  --ring-hsl: 163 42% 30%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --ok-hsl: 151.96 71.81% 29.22%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -144,6 +150,8 @@ html[data-bp-theme="evergreen"][data-theme="dark"] {
   --primary-fg: hsl(163 45% 8%);
   --ring: hsl(152.92 60% 52.94%);
   --primary-hsl: 152.92 60% 52.94%;
+  --ring-hsl: 152.92 60% 52.94%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --ok-hsl: 152.92 60% 52.94%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -154,6 +162,8 @@ html[data-bp-theme="charple"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(282.39 44.23% 48.78%);
   --primary-hsl: 282.39 44.23% 40.78%;
+  --ring-hsl: 282.39 44.23% 48.78%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --ok-hsl: 282.39 44.23% 40.78%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -164,6 +174,8 @@ html[data-bp-theme="charple"][data-theme="dark"] {
   --primary-fg: hsl(282.56 45% 8%);
   --ring: hsl(282.56 58.11% 70.98%);
   --primary-hsl: 282.56 58.11% 70.98%;
+  --ring-hsl: 282.56 58.11% 70.98%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --ok-hsl: 282.56 58.11% 70.98%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -174,6 +186,8 @@ html[data-bp-theme="ember"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(19.33 71.29% 48.98%);
   --primary-hsl: 19.33 71.29% 40.98%;
+  --ring-hsl: 19.33 71.29% 48.98%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --ok-hsl: 19.33 71.29% 40.98%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -184,6 +198,8 @@ html[data-bp-theme="ember"][data-theme="dark"] {
   --primary-fg: hsl(19.01 45% 8%);
   --ring: hsl(19.01 75.53% 63.14%);
   --primary-hsl: 19.01 75.53% 63.14%;
+  --ring-hsl: 19.01 75.53% 63.14%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --ok-hsl: 19.01 75.53% 63.14%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -194,6 +210,8 @@ html[data-bp-theme="fjord"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(191.6 80.95% 36.82%);
   --primary-hsl: 191.6 80.95% 28.82%;
+  --ring-hsl: 191.6 80.95% 36.82%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --ok-hsl: 191.6 80.95% 28.82%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -204,6 +222,8 @@ html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary-fg: hsl(193.27 45% 8%);
   --ring: hsl(193.27 62.43% 64.51%);
   --primary-hsl: 193.27 62.43% 64.51%;
+  --ring-hsl: 193.27 62.43% 64.51%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --ok-hsl: 193.27 62.43% 64.51%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -214,6 +234,8 @@ html[data-bp-theme="iris"] {
   --primary-fg: hsl(0 0% 100%);
   --ring: hsl(248.75 63.72% 62%);
   --primary-hsl: 248.75 63.72% 55.69%;
+  --ring-hsl: 248.75 63.72% 62%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.15);
   --ok-hsl: 248.75 63.72% 55.69%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
@@ -224,6 +246,8 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --primary-fg: hsl(248.87 45% 8%);
   --ring: hsl(248.87 100% 77.45%);
   --primary-hsl: 248.87 100% 77.45%;
+  --ring-hsl: 248.87 100% 77.45%;
+  --ring-soft: hsl(var(--ring-hsl) / 0.2);
   --ok-hsl: 248.87 100% 77.45%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
@@ -286,7 +310,6 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --btn-fg: var(--primary-fg);
   --btn-danger-bg: var(--danger);
   --btn-danger-fg: hsl(0 0% 100%);
-  --ring-soft: hsl(163 42% 30% / 0.15);
 
   /* Legacy aliases — existing rules still reference these; they resolve to the
      generated semantic roles. New rules use --ok / --danger directly. */
@@ -359,7 +382,8 @@ html[data-bp-theme="iris"][data-theme="dark"] {
      block above (color.cloudChrome + per-identity accent). The re-declarations
      below stay hand-authored ONLY for the tokens the emitter does not yet own,
      and MUST re-declare any :root alias that references a dark-re-themed role
-     (E8): --btn-*, --ring-soft, --success, --destructive. */
+     (E8): --btn-*, --success, --destructive. (--ring-soft left this list in
+     gr-p5r7 — the emitter now owns it per identity × mode.) */
 
   /* Solid button fills, dark: IDENTITY-AWARE (GR37, gr-p4-hygiene) — --btn-bg/fg
      follow the identity primary pair exactly as light mode does (:root above),
@@ -373,7 +397,6 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --btn-fg: var(--primary-fg);
   --btn-danger-bg: hsl(0 65% 48%);
   --btn-danger-fg: hsl(0 0% 100%);
-  --ring-soft: hsl(160 42% 62% / 0.2);
 
   /* Alias re-declarations — REQUIRED, not redundant. var() inside a custom
      property substitutes where the property is DECLARED, so a :root-only alias
@@ -531,8 +554,11 @@ select.form-input {
   padding-right: 32px;
 }
 .form-input::placeholder { color: var(--dim); }
-/* Focus rides the IDENTITY accent (not the evergreen-frozen --ring-soft): the
-   ring recolours across all 5 skins × both modes for free (gr-p2-front-door). */
+/* Focus rides the IDENTITY accent: the ring recolours across all 5 skins × both
+   modes for free (gr-p2-front-door). This rule predates the --ring-soft
+   promotion (gr-p5r7) and tints from the PRIMARY channel rather than the RING
+   channel — both are identity-derived; the two channels differ only for
+   evergreen. Not re-pointed here: that would change this input's rendered tint. */
 .form-input:focus {
   outline: none;
   border-color: var(--ring);
@@ -1777,7 +1803,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* gr-p4 G-02 — the inline connect card: a provider picker (.seg) → the armed
    kind's credential subform → the .set-save-row. An already-connected kind is
-   shown but not selectable (its seg-btn ships disabled + a "connected" note). */
+   fully selectable (its seg-btn carries a "connected" note, never `disabled`):
+   re-arming it rotates the credential in place, per GR44. */
 .prov-connect-picker { margin: var(--space-2) 0 var(--space-4); }
 .prov-connect-form { display: flex; flex-direction: column; gap: var(--space-3); }
 .prov-seg-note { font-size: var(--text-xs); color: var(--dim); margin-left: 4px; }
@@ -3500,6 +3527,20 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   background: var(--danger-soft);
 }
 .live-chip[data-state="dead"] .live-dot { background: var(--danger); }
+
+/* refresh_failed (cch-bl) — the stream is HEALTHY and an event did arrive; the
+   refetch it triggered is what failed, so the dashboard on screen is older than
+   the event that asked for it. Amber like "reconnecting" (same severity: not
+   current, recoverable) but deliberately STATIC — nothing is retrying on a
+   timer here; the next event that lands clears it. The label ("Not current")
+   carries the difference in cause. Same load-bearing note as the dead rule
+   above: without this the fifth data-state matches zero author rules and
+   inherits .live-dot { background: var(--dim) } — a calm grey for a warning. */
+.live-chip[data-state="refresh_failed"] {
+  border-color: hsl(var(--warn-hsl) / 0.35);
+  background: var(--warn-soft);
+}
+.live-chip[data-state="refresh_failed"] .live-dot { background: var(--warn); }
 
 @media (prefers-reduced-motion: reduce) {
   /* Motion is redundant with colour + label here — drop it entirely. */

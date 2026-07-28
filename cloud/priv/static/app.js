@@ -1056,6 +1056,27 @@
     });
   }
 
+  // Pure: the human phrasing of a session's `origin`, or "" when the server has
+  // no answer. NULL origin renders as NOTHING — every session minted before the
+  // column existed is genuinely unknown, and "via password" would be a guess on
+  // a security surface. Unrecognised values fall through to the raw string
+  // rather than being dropped: a newer server that mints an origin this client
+  // has never heard of should still show it, slightly ugly and entirely true.
+  function originLabel(origin) {
+    if (!origin) return "";
+    // OAuth reports the provider itself ("oauth:github"), so the tail IS the
+    // label — one arm covers every provider, present and future.
+    if (origin.indexOf("oauth:") === 0) return "via " + origin.slice(6);
+    var known = {
+      password: "via password",
+      two_factor: "via two-factor",
+      password_change: "via password change",
+      register: "via sign-up",
+      device_link: "via device link"
+    };
+    return known[origin] || "via " + origin;
+  }
+
   // Pure: one active-session row. Extracted from loadSessions so the TALL modal
   // shape (9+ sessions — the shape that put Log out out of reach on live, GR63)
   // is reachable from node without a fetch. The current device is badged and its
@@ -1073,12 +1094,16 @@
   // the SPA it happened). REVERT this suppression — restore the ip_address lead
   // on this row and the "IP address" rail row in renderActivateConfirm — once
   // task gr-bl-peer-ip-container lands a genuine per-client peer IP.
+  // The row's `origin` rides the SAME .session-meta line (no new class, no new
+  // rail) — provenance is a qualifier on "Active <when>", not a second fact.
   function sessionRowHtml(x) {
+    var origin = originLabel(x.origin);
     return '<div class="session-row">' +
       '<div class="session-main">' +
         '<div class="session-device">' + esc(deviceLabel(x.user_agent)) +
           (x.current ? ' <span class="badge badge-current">This device</span>' : "") + "</div>" +
-        '<div class="session-meta">Active ' + esc(relTime(x.last_used_at || x.inserted_at)) + "</div>" +
+        '<div class="session-meta">Active ' + esc(relTime(x.last_used_at || x.inserted_at)) +
+          (origin ? " · " + esc(origin) : "") + "</div>" +
       "</div>" +
       (x.current
         ? '<button class="btn btn-sm" type="button" disabled>Current</button>'
@@ -1969,23 +1994,34 @@
   }
 
   // The connected-roster rows. Each server row is {id,kind,label,team_id,
-  // inserted_at} — there is NO health/verified field, so a row shows kind + label
-  // + WHEN it was connected and NEVER a live-validity badge (backend truth: the
-  // roster cannot know whether the stored credential still works). `canDisconnect`
-  // gates the typed-confirm Disconnect… affordance (admin-only; a member sees none).
+  // inserted_at,updated_at} — there is NO health/verified field, so a row shows
+  // kind + label + WHEN it was connected and NEVER a live-validity badge (backend
+  // truth: the roster cannot know whether the stored credential still works).
+  // `updated_at` is the ROTATION clock: connect_provider/4's upsert replaces
+  // :encrypted_token and :updated_at on the existing row while :inserted_at stays
+  // put, so `updated_at > inserted_at` is exactly "this credential was replaced
+  // after it was first connected" — the only visible difference a rotation makes,
+  // and the reason the roster renders a second line for it. Equal timestamps mean
+  // a first connect and render NOTHING (a "updated" line on an untouched row would
+  // be noise, not truth). `canDisconnect` gates the typed-confirm Disconnect…
+  // affordance (admin-only; a member sees none).
   function providerRosterHtml(list, canDisconnect) {
     var rows = Array.isArray(list) ? list : [];
     if (!rows.length) return '<p class="set-empty">No providers connected yet.</p>';
     return '<ul class="prov-roster">' + rows.map(function (p) {
       var m = providerMeta(p.kind || "hetzner");
       var when = p.inserted_at ? relTime(p.inserted_at) : "";
+      var rotated = p.updated_at && p.inserted_at && p.updated_at !== p.inserted_at
+        ? relTime(p.updated_at) : "";
       return '<li class="prov-row">' +
         '<span class="choice-ico sm ' + m.cls + '">' + esc(m.mark) + "</span>" +
         '<span class="prov-row-main">' +
           '<span class="prov-row-name">' + esc(m.name) +
             (p.label ? ' <span class="prov-row-label">' + esc(p.label) + "</span>" : "") + "</span>" +
           '<span class="prov-row-meta"><span class="prov-row-kind">' + esc(p.kind || "") + "</span>" +
-            (when ? '<span class="prov-row-when">connected ' + esc(when) + "</span>" : "") + "</span>" +
+            (when ? '<span class="prov-row-when">connected ' + esc(when) + "</span>" : "") +
+            (rotated ? '<span class="prov-row-when" data-prov-rotated>credential updated ' +
+              esc(rotated) + "</span>" : "") + "</span>" +
         "</span>" +
         (canDisconnect
           ? '<button class="btn btn-ghost btn-sm" type="button" data-prov-disconnect data-prov-kind="' +
@@ -1995,12 +2031,24 @@
     }).join("") + "</ul>";
   }
 
-  // Which available providers can still be connected. Duplicate connect is
-  // silently ADDITIVE server-side (no unique index, no 409), so the UI refuses a
-  // second connect: an already-connected kind is shown but NOT selectable
-  // ("Connected — disconnect to replace"; replace semantics = backlog
-  // gr-backlog-provider-reconnect). `selectable` = the first still-open kind (the
-  // default armed selection); allConnected → the card shows the replace note only.
+  // Which available providers the picker can arm. EVERY available kind is
+  // selectable, connected or not: a second connect of a connected kind is a
+  // credential ROTATION, not a duplicate. The server has enforced one provider
+  // per (team, kind) since the unique index landed — Registry.connect_provider/4
+  // is an upsert that replaces the credential (and the label, when one is named)
+  // on the existing row — and GR44 in
+  // .claude/workflows/bp-cloud-gui-remake-charter.md rules that this card's
+  // "disconnect to replace" copy relaxes to allow re-connect in place. Telling
+  // the operator to destroy a working credential first would invent a downtime
+  // window the platform does not require.
+  //   options[].connected → the COPY switch (connect vs replace). It gates
+  //                         nothing: it never disables a button and never
+  //                         removes a kind from the picker.
+  //   selectable          → the default armed kind: the first still-open one,
+  //                         else the first option (all-connected is a rotation
+  //                         state, never a dead end).
+  //   allConnected        → every available kind is connected. A copy signal for
+  //                         callers; it no longer suppresses the form.
   function providerConnectModel(list) {
     var connected = {};
     (Array.isArray(list) ? list : []).forEach(function (p) { if (p && p.kind) connected[p.kind] = true; });
@@ -2008,38 +2056,57 @@
       return { kind: p.kind, name: p.name, connected: !!connected[p.kind] };
     });
     var firstOpen = options.filter(function (o) { return !o.connected; })[0] || null;
-    return { options: options, selectable: firstOpen ? firstOpen.kind : null, allConnected: !firstOpen };
+    var fallback = options[0] || null;
+    return {
+      options: options,
+      selectable: firstOpen ? firstOpen.kind : fallback ? fallback.kind : null,
+      allConnected: !firstOpen && !!fallback,
+    };
+  }
+
+  // Is `kind` already connected on this team? The single source of the connect-
+  // vs-replace copy split, so the card, its wiring and the submit toast can never
+  // disagree about which verb the operator just pressed.
+  function providerIsConnected(list, kind) {
+    return (Array.isArray(list) ? list : []).some(function (p) { return p && p.kind === kind; });
   }
 
   // The inline connect card body (GR33 hybrid: verify+save in a .set-save-row).
-  // A segmented provider picker (already-connected kinds shown but not selectable),
-  // the armed kind's credential subform (reused verbatim from the launch flow's
-  // builder so the two never drift), an in-card remediation slot, and the save-row.
-  // Pure — wireConnectCard() binds the picker + submit. `selected` is the armed
-  // kind, falling back to the first still-open provider.
+  // A segmented provider picker (EVERY available kind armable — a connected one
+  // arms a rotation), the armed kind's credential subform (reused verbatim from
+  // the launch flow's builder so the two never drift), an in-card remediation
+  // slot, and the save-row. Pure — wireConnectCard() binds the picker + submit.
+  // `selected` is the armed kind, falling back to the first still-open provider.
+  // When the armed kind is already connected the card says so in its own words
+  // and its verb becomes "Verify & replace": the credential is only swapped once
+  // preflight_provider has authenticated the NEW one, so the stored one keeps
+  // working right up to the moment it is replaced.
   function providerConnectCardHtml(list, selected) {
     var model = providerConnectModel(list);
-    if (model.allConnected) {
-      return '<p class="set-empty">Every supported provider is connected. ' +
-        "Disconnect one above to replace its credentials.</p>";
-    }
-    var armed = selected && model.options.filter(function (o) { return o.kind === selected && !o.connected; })[0]
+    var armed = selected && model.options.filter(function (o) { return o.kind === selected; })[0]
       ? selected : model.selectable;
+    if (!armed) return '<p class="set-empty">No providers are available to connect right now.</p>';
     var p = providerMeta(armed);
+    var rotating = model.options.filter(function (o) { return o.kind === armed && o.connected; }).length > 0;
     var seg = model.options.map(function (o) {
       return '<button class="seg-btn" type="button" data-connect-kind="' + esc(o.kind) + '"' +
-        (o.connected ? " disabled" : "") + ' aria-pressed="' + (o.kind === armed ? "true" : "false") + '">' +
+        ' aria-pressed="' + (o.kind === armed ? "true" : "false") + '">' +
         esc(o.name) + (o.connected ? ' <span class="prov-seg-note">connected</span>' : "") + "</button>";
     }).join("");
     return '<div class="prov-connect-picker seg" role="group" aria-label="Provider to connect">' + seg + "</div>" +
       '<div class="prov-connect-form">' +
+        (rotating
+          ? '<p class="field-hint" data-connect-rotating>Replaces the stored ' + esc(p.name) +
+            " credential. We verify the new one first — the current one keeps working until it does.</p>"
+          : "") +
         '<div class="field"><label class="label" for="cred-label">Profile name <span class="dim">(optional)</span></label>' +
           '<input class="form-input" id="cred-label" type="text" placeholder="main" /></div>' +
         credentialFieldsHtml(p) +
         '<div class="cred-remediation" id="cred-remediation" role="alert" hidden></div>' +
       "</div>" +
       '<div class="set-save-row">' +
-        '<button class="btn btn-primary" id="cred-submit" type="button" data-connect-submit>Verify &amp; connect</button>' +
+        '<button class="btn btn-primary" id="cred-submit" type="button" data-connect-submit>' +
+          (rotating ? "Verify &amp; replace" : "Verify &amp; connect") + "</button>" +
       "</div>";
   }
 
@@ -2165,10 +2232,12 @@
     var connect = $("#provider-connect");
     if (!connect) return;
     var model = providerConnectModel(list);
-    var armed = selected && model.options.filter(function (o) { return o.kind === selected && !o.connected; })[0]
+    // The SAME arming rule as providerConnectCardHtml, including the connected
+    // kinds: this function has zero unit reachability (it is not exported to the
+    // test hooks), so a filter that drifted from the render side would ship green.
+    var armed = selected && model.options.filter(function (o) { return o.kind === selected; })[0]
       ? selected : model.selectable;
     connect.querySelectorAll("[data-connect-kind]").forEach(function (btn) {
-      if (btn.disabled) return;
       btn.addEventListener("click", function () {
         renderConnectCard(list, btn.getAttribute("data-connect-kind"));
         var f = $("#cred-token") || $("#cred-az-tenant_id");
@@ -2186,10 +2255,15 @@
   // The inline verify-before-save submit (GR33 hybrid). Reuses the launch flow's
   // pure builders so the credential shape + server-owned remediation copy never
   // fork. On 201 the whole page repaints (the roster gains the kind, the connect
-  // picker drops it, the matrix is unaffected but refreshed for good measure); a
-  // 422 provider_unverified renders the server remediation IN the card verbatim.
+  // picker keeps it — now armed as a rotation — the matrix is unaffected but
+  // refreshed for good measure); a 422 provider_unverified renders the server
+  // remediation IN the card verbatim. Connect and replace are ONE request: the
+  // server's upsert decides which happened, and the toast reports the verb the
+  // operator actually pressed rather than always claiming a first connect.
   function submitInlineProviderCred(kind, list) {
     var p = providerMeta(kind);
+    var rotating = providerIsConnected(list, kind);
+    var verb = rotating ? "Verify & replace" : "Verify & connect";
     var fields = readCredentialFields(p);
     var label = (($("#cred-label") || {}).value || "").trim();
     var valid = p.fields === "azure" ? azureFieldsValid(fields) : !!(fields.token || "").trim();
@@ -2203,13 +2277,14 @@
     if (btn) { btn.disabled = true; btn.textContent = "Verifying…"; }
     api("POST", "/v1/providers", providerCredBody(kind, fields, label)).then(function (r) {
       if (r.status === 201) {
-        toast({ kind: "success", title: "Provider connected",
-          body: "Connected " + p.name + (label ? " (" + label + ")" : "") + "." });
+        toast({ kind: "success", title: rotating ? "Credential replaced" : "Provider connected",
+          body: (rotating ? "Replaced the stored credential for " : "Connected ") +
+            p.name + (label ? " (" + label + ")" : "") + "." });
         loadProviders();
         loadCapabilityMatrix();
         return;
       }
-      if (btn) { btn.disabled = false; btn.textContent = "Verify & connect"; }
+      if (btn) { btn.disabled = false; btn.textContent = verb; }
       // Verify-before-save failure carries server-owned remediation (naming the
       // exact console fix). ALL preflight failures collapse server-side to one
       // provider_unverified, so the copy frames the honest single cause and
@@ -3938,6 +4013,12 @@
   function applyRoute() {
     var r = parseHash();
     if (r.view !== "instance") stopInstanceTicker(); // C3: leave the timeline ticker with its view
+    // The "Not current" chip is OVERVIEW-scoped: only loadOverview sets it, and
+    // only an Overview read clears it. Carrying it onto Fleet would make the
+    // topbar disclaim data that view just fetched successfully — a fresh lie
+    // inside the fix for an old one. Leaving Overview drops the claim; coming
+    // back re-runs loadOverview(full), which re-answers it honestly.
+    if (r.view !== "overview") clearRefreshStale();
     var detail = DETAIL_VIEWS.indexOf(r.view) !== -1;
     // Which PRIMARY nav entry stays highlighted. A drill-down keeps its parent
     // lit; the four Settings pages light the single "settings" cluster trigger.
@@ -4934,12 +5015,17 @@
       if (!r.ok) {
         // A BACKGROUND refresh that fails keeps the last good dashboard —
         // replacing a working screen with an error state on one blip is the
-        // louder lie, and the liveness chip already reports a broken stream.
-        if (!full) return;
+        // louder lie. But that silence must not read as freshness: the liveness
+        // chip is driven by the STREAM alone, and es.onmessage stamps
+        // lastEventMs and repaints the chip BEFORE dispatching this refetch, so
+        // at the instant of the failure it says "Live · just now" over data
+        // that never arrived. Mark the staleness; never blank the body.
+        if (!full) { markRefreshStale(); return; }
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load your fleet</h2><p>' +
           esc(friendly(r.data)) + "</p></div>";
         return;
       }
+      clearRefreshStale(); // the read landed — what's on screen is current again
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
       overviewData.list = list;
@@ -12360,6 +12446,13 @@
   // EventSource NEVER surfaces to onmessage, so this only advances on genuine
   // invalidations — it is the honest "as of Xs ago" the liveness chip reads.
   var lastEventMs = null;
+  // A BACKGROUND refetch failed while the stream itself stayed healthy — what is
+  // on screen is older than the event that asked for it. This is NOT derivable
+  // from any signal above: onmessage stamps lastEventMs and repaints the chip
+  // BEFORE dispatching the refetch, so the stream reads perfectly live at the
+  // exact instant the data went stale. Set by markRefreshStale, cleared by the
+  // next refresh that lands (and by closeEvents with the rest of the session).
+  var refreshStale = false;
 
   // ── Liveness chip (OC6): topbar SSE health dot, honest reconnect ────────────
   // Pure state machine for the topbar dot, driven ONLY by the existing
@@ -12370,6 +12463,10 @@
   //                  "Reconnecting…" forever over a permanently closed stream.
   //   reconnecting — onerror fired and we ARE retrying (remint + reopen on a
   //                  capped backoff — no longer a claim about the browser).
+  //   refresh_failed — the stream is fine and an event DID arrive; the refetch
+  //                  it triggered is what failed. The screen keeps its last good
+  //                  data (blanking it would be worse) but it is NOT current, and
+  //                  no stream signal can say so — hence its own state.
   //   stale        — stream is up but no data frame in LIVE_STALE_MS (we cannot
   //                  PROVE currency, so we say so — a quiet fleet, not a lie);
   //   live         — connected, recently confirmed (or freshly connected).
@@ -12378,10 +12475,13 @@
   // LIVE_DOT_STATES pins the return set as a CLOSED enum — without that, JS's
   // permissive arity lets a new state land while every equality test stays green.
   var LIVE_STALE_MS = 90000; // 90s of silence → "stale" (well past the 25s heartbeat)
-  var LIVE_DOT_STATES = ["live", "stale", "reconnecting", "dead"];
-  function liveDotState(evtErrored, lastEventMs, nowMs, evtDead) {
+  var LIVE_DOT_STATES = ["live", "stale", "reconnecting", "dead", "refresh_failed"];
+  function liveDotState(evtErrored, lastEventMs, nowMs, evtDead, refreshStale) {
     if (evtDead) return "dead"; // outranks everything: retrying would be a lie
     if (evtErrored) return "reconnecting";
+    // A failed refetch outranks both freshness reads below: it is a MEASURED
+    // failure, where "live"/"stale" are only inferences from stream timing.
+    if (refreshStale) return "refresh_failed";
     if (lastEventMs == null) return "live"; // connected; sparse events ≠ trouble
     if (nowMs - lastEventMs > LIVE_STALE_MS) return "stale";
     return "live";
@@ -12400,11 +12500,15 @@
   }
   var LIVE_CHIP_COPY = {
     live: "Live", stale: "Live", reconnecting: "Reconnecting…", dead: "Not live",
+    // NOT "Live": the stream is live, the SCREEN is not, and the chip speaks for
+    // what the operator is reading.
+    refresh_failed: "Not current",
   };
   var LIVE_CHIP_ARIA = {
     live: "Live updates connected", stale: "Live updates connected but quiet",
     reconnecting: "Live updates interrupted, reconnecting",
     dead: "Live updates stopped, sign in again to resume",
+    refresh_failed: "Live updates connected but the last refresh failed, showing older data",
   };
   // A state with no entry must NEVER fall through to the word "Live" — that was
   // the old `LIVE_CHIP_COPY[state] || "Live"` fallback, which would have made an
@@ -12446,7 +12550,8 @@
   // every state transition AND once per second by the chip ticker (so the "as of"
   // label counts up and a quiet stream ages honestly into "stale").
   //
-  // `override` is the TEST SEAM: {evtErrored, evtDead, lastEventMs, nowMs}. The
+  // `override` is the TEST SEAM: {evtErrored, evtDead, lastEventMs, nowMs,
+  // refreshStale}. The
   // stream signals are private closure state, so without it the terminal state's
   // DOM contract (which data-state, which label, which announced sentence) is
   // literally unassertable from node. Absent in production — every real caller
@@ -12459,11 +12564,21 @@
     var errored = o ? !!o.evtErrored : evtErrored;
     var dead = o ? !!o.evtDead : evtDead;
     var last = o ? (o.lastEventMs != null ? o.lastEventMs : null) : lastEventMs;
-    var state = liveDotState(errored, last, now, dead);
+    // OVERVIEW-SCOPED, and this is the whole of the rule. Only loadOverview
+    // sets the flag and only an Overview read clears it, so asserting it from
+    // the Fleet topbar would disclaim data that Fleet just fetched
+    // successfully — a fresh lie wearing the fix for an old one. applyRoute
+    // also drops the flag on the way out (immediate, rather than by the next
+    // 1s tick); this read is the invariant that makes the scope assertable.
+    var refreshed = o ? !!o.refreshStale : refreshStale && currentView() === "overview";
+    var state = liveDotState(errored, last, now, dead, refreshed);
     chip.setAttribute("data-state", state);
     // No "as of" on a down stream: a recency stamp beside a dead dot reads as
-    // reassurance ("2s ago") for data that has stopped arriving.
-    var ago = state === "reconnecting" || state === "dead" ? "" : liveFreshness(last, now);
+    // reassurance ("2s ago") for data that has stopped arriving. Same for a
+    // failed refresh — "· just now" beside "Not current" is the exact lie this
+    // state exists to stop (the EVENT was just now; the DATA was not).
+    var ago = state === "reconnecting" || state === "dead" || state === "refresh_failed"
+      ? "" : liveFreshness(last, now);
     var label = chip.querySelector(".live-chip-label");
     if (label) label.textContent = liveChipCopy(state);
     var agoEl = chip.querySelector(".live-chip-ago");
@@ -12474,6 +12589,21 @@
     // ticking recency rides the title (a hover tooltip, not an announcement).
     chip.setAttribute("aria-label", liveChipAria(state));
     chip.setAttribute("title", liveChipAria(state) + (ago ? ", last event " + ago : ""));
+  }
+
+  // The refresh-honesty seam. loadOverview's background-failure arm deliberately
+  // keeps the last good dashboard on screen — silence about the FAILURE is the
+  // right call, but silence must not be read as freshness. These two mark and
+  // clear "what you are looking at did not refresh", which the chip renders.
+  function markRefreshStale() {
+    if (refreshStale) return;
+    refreshStale = true;
+    renderLivenessChip();
+  }
+  function clearRefreshStale() {
+    if (!refreshStale) return;
+    refreshStale = false;
+    renderLivenessChip();
   }
 
   // A fresh data frame arrived — snap the dot's one-shot ping so motion signals
@@ -12659,6 +12789,7 @@
     evtErrored = false;
     evtDead = false;
     lastEventMs = null;
+    refreshStale = false; // a new session starts with nothing left un-refreshed
     stopChipTicker();     // the topbar chip's clock dies with the session
     renderLivenessChip(); // reset to a neutral "live/—" before the shell hides
     stopInstanceTicker(); // C3: no orphaned timeline ticker after logout
@@ -12727,6 +12858,17 @@
     subscription: function (v) {
       loadSubscription().then(function () {
         if (v === "billing") renderBilling();
+        // The Overview's state band, slots meter and instance cards ALL read
+        // subCache, so refreshing the cache and repainting only the topbar chip
+        // left the band rendering the old trial card directly beneath a chip
+        // that had already flipped to "Payment failed". paintOverviewData is the
+        // ONE painter covering every sub-dependent region, and it repaints from
+        // the snapshot — no refetch, so the narrowing holds. (Mirrors
+        // refreshOverviewOnboarding: an empty fleet is the runway, whose only
+        // sub-derived text refreshRunwaySubline below already handles.)
+        else if (v === "overview" && overviewData.list && overviewData.list.length) {
+          paintOverviewData(overviewData.list);
+        }
         // A4: the welcome runway's trial subline reads the same cache — keep any
         // mounted runway honest when the subscription flips (no-op otherwise).
         refreshRunwaySubline(document);
@@ -17839,6 +17981,7 @@
       // loadCapabilityMatrix) are browser-verified.
       providerDisplayName: providerDisplayName, providerRosterHtml: providerRosterHtml,
       providerConnectModel: providerConnectModel, providerConnectCardHtml: providerConnectCardHtml,
+      providerIsConnected: providerIsConnected,
       capabilityMatrixModel: capabilityMatrixModel, capabilityMatrixHtml: capabilityMatrixHtml,
       capabilityVerbs: CAPABILITY_VERBS.map(function (v) { return v.key; }),
       // S11b (azure-hetzner hosting): the console lifecycle action-row pure

@@ -1025,6 +1025,34 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       refute Enum.any?(Map.values(ev.metadata), &(&1 == "secret-hz-token"))
       refute Map.has_key?(ev.metadata, "token")
       refute Map.has_key?(ev.metadata, "credential")
+      # A first connect is NOT a rotation, and says so.
+      assert ev.metadata["rotated"] == false
+    end
+
+    test "a re-connect stamps rotated: true — METADATA, never a second action string" do
+      {_user, team, token} = logged_in()
+
+      assert call(:post, "/v1/providers", %{kind: "hetzner", token: "hz-first"}, token).status ==
+               201
+
+      assert call(
+               :post,
+               "/v1/providers",
+               %{kind: "hetzner", token: "hz-rotated", label: "main"},
+               token
+             ).status == 201
+
+      # Two events, ONE action: the closed noun.verb vocabulary that
+      # list_audit_events' :action_prefix filter reads is not widened, so the
+      # rotation is legible without a `provider.rotated` action existing.
+      assert [newer, older] = events(team, "provider.connected")
+      assert older.metadata["rotated"] == false
+      assert newer.metadata["rotated"] == true
+      assert newer.metadata["kind"] == "hetzner"
+      assert newer.metadata["label"] == "main"
+      # …and the rotation reuses the ONE row, so both events point at it.
+      assert newer.target_id == older.target_id
+      refute Enum.any?(Map.values(newer.metadata), &(&1 == "hz-rotated"))
     end
   end
 

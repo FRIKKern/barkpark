@@ -466,6 +466,92 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-07-28 — wave 6 REVIEW (five slices land on the OPERATOR, grade A)
+
+The first wave in six to point the epic's own predicate at the user rather than at the
+instruments. **All five round-1 slices green, all five pushed, all five PR'd** (#6538-#6542) —
+which is itself the wave's second result: six consecutive waves ended with reviewed,
+gate-passing work sitting on local-only branches in a shared checkout. That stopped here.
+
+- **gr-bl-provider-reconnect-client-guard** → `loop-epic/the-providers-card-lets-an-operator-rota-0`
+  (#6538, no fixes needed). Executes GR44 nine days after the server shipped the upsert: all five
+  client sites, BOTH armed filters (the one-sided fix ships 700/700 green), plus the half the JS
+  harness cannot see — `provider_json/1` gains `updated_at` and the roster a "credential updated"
+  line, because without it the console trades "you must disconnect first" for "nothing happened".
+  Audit carries `rotated:` metadata, no new action string. **HIGH-FLIP-RISK re-derived
+  independently in review**: `POST` and `DELETE /v1/providers` carry the identical
+  `require_team_admin` gate and `preflight_provider` sits ahead of every write, so D78's no-modal
+  ruling holds. The residual — a VALID token for the WRONG account — is real, unmitigated, and
+  filed; it deserves higher priority than its current filing.
+- **gr-p5-session-provenance** → `…-ori-1-r` (#6539, 2 review fixes). Six write sites, six
+  literals, nothing inferred and nothing backfilled; the cast-allowlist tripwire is proven by a
+  raw-SQL round trip. Review moved `originLabel()` out from between `sessionRowHtml`'s doc comment
+  and `sessionRowHtml` (the GR63/GR81 block, REVERT instruction and all, had been re-anchored onto
+  the wrong function) and added the closed-set source guard the builder himself named as the soft
+  spot — six call sites, each carrying an `:origin`. **Lead: the migration lands BEFORE or WITH the
+  deploy. A new node against an un-migrated DB fails every `UserToken` select, i.e. all
+  authenticated traffic. Nothing in CI enforces that ordering.**
+- **gr-p5r7-ring-soft-accent-invariant** → `…-pr-2` (#6540, no fixes needed). D74/D75 executed
+  exactly: promotion into `cloudAccentVars()`, 19 consumers, zero carve-outs, exemptions 33→31 in
+  the same diff. The VALUE mutation was re-derived independently in review — re-pointing
+  `--ring-hsl` at the primary channel reds `emit --check` and `check.mjs DRIFT`, which the in-place
+  home provably could not do. Dark evergreen MOVES (unowned drift corrected); D76's contrast
+  assertion is NOT claimed.
+- **cch-bl-overview-subscription-band-stale** → `…-l-3-r` (#6541, 1 review fix). The fifth
+  `live-dot` state, `refresh_failed` / "Not current", with the "as of" suppressed — the console
+  stops certifying freshness it lacks — plus the subscription band's missing `overview` arm. Review
+  scoped the claim: `refreshStale` is set only by `loadOverview`, so an un-scoped chip disclaimed
+  currency on **Fleet**, a view that had just fetched successfully. A new lie wearing the fix for an
+  old one, now `currentView() === "overview"`-gated and pinned.
+- **gr-bl-predicate-null-successor-silent-seal** → `…-unr-4-r` (#6542, 1 review fix). Four
+  refusals before any clause runs, grip's exit triad ported, and the instrument's FIRST tests — 11
+  over 4 committed fixtures, all 10 originals verified RED against the pre-fix copy. Review closed
+  the `--guard-cmd` hole the builder named and could not file (mutate was down): the override is
+  now REFUSED without `--ledger`, so the live run cannot substitute a stub for the browser guard.
+
+**Cross-slice**: three slices share `app.js`, three share `app.css`, three share `__app.test.mjs`.
+All five merge sequentially with **zero conflicts**, and the integrated tree is green on every
+gate (710/710 node, 386/0 elixir, `check.mjs` PASS, `emit --check` 19/19, `__css_check` 0 errors,
+seal 11/11, design 66/66). No shared helper was duplicated and no two slices contradict each other
+in copy or state.
+
+**Ledger**: clean on everything that matters, with two corrections. Five tasks `in_progress` and
+published, every provable criterion stamped with real evidence as the builders worked, every
+merge-gated criterion left open for the lead, and the epic roster shows exactly those five in
+flight — no foreign row was touched. But two builder claims had LAPSED by the end of Review
+(`cch-bl-overview-subscription-band-stale`, `gr-bl-predicate-null-successor-silent-seal`), each
+leaving a now-line reading "Not pushed" over work that is now pushed and PR'd — our own board
+telling a small version of the lie this epic exists to remove. Both were re-claimed as
+`wave-reviewer-cch-w6` and corrected. **Lead consequence**: those two hold a REVIEWER claim, not the
+builder's, so their merge-gated close needs `wave-reviewer-cch-w6` at the CURRENT epoch — read it
+from `bp task get`, never from a remembered number.
+
+**Server defect, isolated during Review and recorded because it will cost the next wave the same**:
+on `guerrilla`, **creating a `task` document fails every time** — 500 or client timeout on
+`POST /v1/data/mutate`, reproduced with a four-field minimal task doc, so it is not payload size.
+Everything else on that endpoint is healthy: PATCHING an existing task (the epic heartbeat landed
+fine), patching and publishing the wave Paper, `bp task pulse`, `bp task stamp` and every read all
+return in well under a second. Two builders hit the same wall mid-run — one lost two criterion
+stamps and re-stamped after verifying STATE, one could not file a follow-up at all — and both read
+it as flaky rather than isolating it. Consequence for the board: **four real follow-ups this wave
+surfaced are named in the debrief Paper instead of filed as rows.** The next wave files them the
+moment task create recovers and must not read their absence as an oversight. (Separate and
+self-inflicted, worth the line: several early `bp doc mutate` calls returned `malformed` because
+the patch payload omitted the required `type` key — `docs/api-v1.md` §6 documents it; that was not
+the outage.)
+
+**Next wave takes**, in this order: (1) merge round 1 — no inter-slice deps, but land #6539's
+migration with its deploy; (2) `cch-bl-seal-predicate-retarget-and-reparent` plus the actual
+re-parenting D83 demands, because the predicate is now honest and the successor is filed, so this
+is the wave that can genuinely move the seal; (3) the two operator-truth rows this wave did not
+reach — `gr-backlog-e02-deploy-actor` and `gr-blk-vercel-checks-ungoverned`, the latter still
+reddening every PR repo-wide and governed by nobody, which standing law 7 already says must be
+LANDED as a sentence rather than asserted; (4) FILE the four follow-ups the Paper names and task
+create could not — 2FA origin granularity, refresh-staleness beyond the Overview, the
+`.form-input:focus` channel, and the provider identity-echo mitigation (promoted).
+Held for a Fable-available wave: D73's `--ok`/`--danger` hue question and D76's focus-ring contrast
+engine — both open-ended aesthetic judgment, which is exactly the category this wave deferred.
+
 ### 2026-07-28 — wave 6 DECIDE (build in flight)
 
 The thesis survived; most of its detail did not. Direction: **the console stops lying to its

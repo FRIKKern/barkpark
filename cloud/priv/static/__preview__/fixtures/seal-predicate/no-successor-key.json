@@ -1,0 +1,33 @@
+{
+  "_comment": "DEFECT 2. The `successor` key is absent entirely — the THIRD rendering: pre-fix this printed 'to undefined' and still exited 0.",
+  "tasks": {},
+  "children": [
+    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" }
+  ],
+  "forwarded": [],
+  "gates": {
+    "cloud-console-billing-live-gate": {
+      "_id": "cloud-console-billing-live-gate",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    },
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "task-47bc4168392dec17"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "task-47bc4168392dec17"
+    }
+  },
+  "landed": ["0261ace15"],
+  "defectCommits": {}
+}
