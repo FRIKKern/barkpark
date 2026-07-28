@@ -1,0 +1,45 @@
+{
+  "id": "tgw11-v7-seal-launder-and-fixture",
+  "wave": "truth-grip wave 11 (2026-07-28)",
+  "author": "verifier[v7-seal-launder-and-fixture]",
+  "purpose": "Re-derivation recipes for tgw9-s3's retarget of cloud/priv/static/__preview__/seal-predicate.mjs. Proves all THREE launder shapes of `r.status !== 0` fire (override :171, default node-spawn :176, and the null-status shape D111 never names), plus a FOURTH: the live run crashes to exit 1 without BP_TOKEN, indistinguishable from NO SEAL. Also pins that NO committed --ledger fixture exists anywhere in the tree.",
+  "tree": "/Volumes/SATECHI/github/barkpark primary checkout, HEAD a9638ecef, clean (git status --porcelain empty at read)",
+  "facts": [
+    {
+      "claim": "The laundering line is DUPLICATED byte-identically at :171 (override branch) and :176 (default node-spawn branch) — a sed fixing one carries the other",
+      "rerun": "git -C /Volumes/SATECHI/github/barkpark grep -n 'status !== 0' -- cloud/priv/static/__preview__/seal-predicate.mjs"
+    },
+    {
+      "claim": "LAUNDER 1 — override branch :171 turns a nonzero exit into 'the defect is still measurable at origin/main' (exit 3 -> 'guard exited 3'), NO SEAL exit 1",
+      "rerun": "node cloud/priv/static/__preview__/seal-predicate.mjs --ledger <fixture> --guard-cmd 'exit 3'; echo RC=$?"
+    },
+    {
+      "claim": "LAUNDER 2 — default branch :176 does the same for a real spawned guard ('guard exited 7' from a stub guard under --repo)",
+      "rerun": "mkdir -p /tmp/fakerepo/cloud/priv/static/__preview__ && printf 'process.exit(7);\\n' > /tmp/fakerepo/cloud/priv/static/__preview__/overflow-guard.mjs && node cloud/priv/static/__preview__/seal-predicate.mjs --ledger <fixture> --repo /tmp/fakerepo; echo RC=$?"
+    },
+    {
+      "claim": "LAUNDER 3 (unnamed by D111) — spawnSync status:null (signal kill, timeout, or ENOENT on a direct spawn) also satisfies status !== 0 and prints the SAME sentence, rendering as 'guard exited null'. Fires on BOTH branches.",
+      "rerun": "node cloud/priv/static/__preview__/seal-predicate.mjs --ledger <fixture> --guard-cmd 'kill -9 $$'   # then the default-branch twin: stub guard doing process.kill(process.pid,'SIGKILL') under --repo"
+    },
+    {
+      "claim": "spawnSync semantics behind LAUNDER 3: timeout -> status null / signal SIGTERM; ENOENT -> status null with .error set. Both satisfy status !== 0.",
+      "rerun": "node -e 'const{spawnSync}=require(\"node:child_process\");const r=spawnSync(\"sleep\",[\"5\"],{timeout:300});console.log(r.status,r.signal,r.status!==0);const e=spawnSync(\"nosuchbinary-xyz\",[]);console.log(e.status,!!e.error,e.status!==0)'"
+    },
+    {
+      "claim": "LAUNDER 4 (found here, named nowhere) — any non-JSON HTTP response throws inside JSON.parse at seal-predicate.mjs:116 and node exits 1: an INFRA crash wearing NO SEAL's exit code. Observed unprompted at 2026-07-28T01:53Z against the real server (guerrilla returned an HTML error page), and reproducible on demand. Any CI use of exit code alone is vacuous.",
+      "rerun": "BP_SERVER=https://example.com node cloud/priv/static/__preview__/seal-predicate.mjs; echo RC=$?   # RC=1, stdout is a SyntaxError stack, not a verdict"
+    },
+    {
+      "claim": "Live today the file exits 1 NO SEAL and the failing clause is (a): 4 orphan live rows (gr-p5r7-badcode-shot-nondeterministic, gr-blk-shootsh-scen-suggester, gr-blk-false-done-audit-closed-children, gr-blk-studio-presence-perf-flake); successor is '(none filed)'. Clause (b) PASSES and bucket (c) resolves 3/3.",
+      "rerun": "node cloud/priv/static/__preview__/seal-predicate.mjs; echo RC=$?   # BP_TOKEN not required: guerrilla answers this query unauthenticated"
+    },
+    {
+      "claim": "NO committed --ledger fixture exists anywhere in the tree: 'defectCommits' occurs in exactly one tracked file (seal-predicate.mjs itself) and no tracked *.json carries the 'landed' key. seal-predicate's 'mutation-proven in both directions' credential is NOT re-derivable from main — tgw9-s3 must AUTHOR and COMMIT its own fixture.",
+      "rerun": "git -C /Volumes/SATECHI/github/barkpark grep -ln defectCommits; git -C /Volumes/SATECHI/github/barkpark grep -ln '\"landed\"' -- '*.json'"
+    },
+    {
+      "claim": "Fixture shape required by the reader (derived from source, lines 125-165): {children[], successor, forwarded[], gates{id->doc}, defectCommits{id->sha}, landed[sha]}. With fixture present, clause (b)'s ancestry check reads fixture.landed and NEVER shells to git.",
+      "rerun": "sed -n '125,168p' cloud/priv/static/__preview__/seal-predicate.mjs"
+    }
+  ]
+}
