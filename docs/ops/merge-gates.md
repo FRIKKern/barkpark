@@ -55,26 +55,38 @@ A PR targeting `main` must clear:
    **hotfix lane** — a `hotfix!` label passes AND auto-files an override
    task (needs the `BARKPARK_TASK_TOKEN` secret; without it the lane still
    passes but logs that the record was not filed);
-   **lapsed-claim grace** — the claim lease (~45min) is shorter than PR dwell,
-   so the TTL sweeper reaps claims out from under PRs that were green when they
+   **lapsed-claim rule — "live when this PR opened"** (charter D58; the
+   `LAPSE_GRACE_SECONDS` wall-clock grace it replaced is GONE, and there is no
+   tunable left to set). The claim lease (~45min) is shorter than PR dwell, so
+   the TTL sweeper reaps claims out from under PRs that were green when they
    opened (11 of the gate's last 15 reds). A task that is `open` because its
-   claim was **reaped** still passes for `LAPSE_GRACE_SECONDS` (default 21600 =
-   6h), read straight off the document's `claim.previous_worker` /
-   `claim.expired_at`. A task that was never claimed, or whose claim was
-   voluntarily **released** (`released_at ≥ expired_at`), or whose lapse is
-   older than the grace, still fails — the grace forgives the sweeper, not the
-   author;
+   claim was **reaped** passes iff `claim.expired_at ≥ pull_request.created_at`
+   — the claim was still live at the instant the PR was opened — read straight
+   off the document's `claim.previous_worker` / `claim.expired_at` and the PR's
+   own `created_at` (plumbed as `PR_OPENED_AT`; absent or unparseable is a
+   **refusal**, never a fall-open). The verdict is therefore fixed for a given
+   PR: the same unchanged PR can no longer go green in the morning and red in
+   the afternoon merely by sitting. A task that was never claimed, whose claim
+   was voluntarily **released** (`released_at ≥ expired_at`), whose
+   `expired_at` is in the FUTURE (a reap cannot stamp one; −300s of skew slack),
+   or that had ALREADY lapsed before the PR was opened, still fails. Stated
+   cost: a PR opened under a live claim stays backed however long it then sits —
+   the gate certifies how the PR started, not that work continued;
    **ledger outage = a red that says so** — a 5xx / unreachable ledger is
    retried (3 attempts) and then **fails** with "task backing UNVERIFIED …
-   re-run this check once the ledger is up". It does not pass. GitHub has no
+   re-run this check once the ledger is up". It does not pass. A `2xx` whose
+   `result` envelope carries **no document** is the same UNCHECKED state (D59),
+   not an accusation: a task that genuinely does not exist answers `404`, which
+   reds definitively, so the old "task does not exist" message on the empty
+   envelope could only ever have been false. GitHub has no
    `neutral` conclusion for exit codes, so the only alternative to red would be
    a green check that verified nothing (the old `exit 0` handler was, in fact,
    unreachable dead code under GitHub's `bash -e`, and every outage already red
    — under a misleading label).
    Optional `.github/pr-task-workers.json` (`{ "<gh-login>": "<worker>" }`)
    tightens the check to require the task be claimed by the author's mapped
-   worker (matched against the lapsed claim's `previous_worker` when the grace
-   applies). The file does not exist today. **Currently advisory** until made
+   worker (matched against the lapsed claim's `previous_worker` when the
+   lapsed-claim rule applies). The file does not exist today. **Currently advisory** until made
    required-by-name (below).
 
 8. **`reland-check` CI job** — `.github/workflows/reland-check.yml`. **Advisory
