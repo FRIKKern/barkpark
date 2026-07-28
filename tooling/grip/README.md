@@ -55,6 +55,36 @@ the fact shape, the fields that are dropped, the required mint, the
 all-or-nothing rule and the `.ok`-not-`.safe` trap — is documented beside the
 write target in [`ledger/README.md`](./ledger/README.md#how-to-write-a-row).
 
+## Reading the store back — three shapes, and the scope that is not a pin
+
+`tooling/grip/ledger/` is a **shared append-only commons**: four epics write
+into it, most of them by hand, and none of them may delete another's file. So a
+reader has to say which population it is reading. `readLedgerRuns` names three
+file shapes and the fold prints all of them on **every** run, pass included
+(`[grip-fold] …` on stderr; `stats.not_a_run` / `stats.malformed_run` in the
+JSON):
+
+| shape | what it is |
+|---|---|
+| `NOT-A-RUN` | carries neither `run_id` nor `recipes` — a foreign note parked here. Never a run file, so never a defect report. |
+| `MALFORMED-RUN` | claims the run shape (`run_id` or `recipes` present) and fails it. A real defect report. |
+| a run | `recipes[]` present. A `run_id` string makes it grip-**owned**; without one it is a foreign `{claim, rerun}` row set. |
+
+`node ledger.mjs fold [dir] [--scope=all|owned|attested]` narrows by **shape**,
+never by filename. `attested` is the strongest: `writeLedgerRun` names every
+file it writes `<run_id>-<digest of its own serialised bytes>.json`, so a file
+whose name reproduces that digest **demonstrably came out of the write path**,
+which means every row in it crossed `admitRecipe`. That is the population the
+D89 control asserts folds clean, and it grows automatically — every honestly
+written run attests itself.
+
+**Why not a pinned file list.** Re-pointing the mint regression floor at
+`binding.test.mjs`'s three census files turns "307 of 631 rows moved" into
+"0 of 62" and passes: 9.8% of the rows carrying 0.0% of the drift, invisible
+because the counts only ever printed inside the failure message while the test
+name still promised "every committed ledger row". Scoped tests here therefore
+**print what they walked on PASS** and assert growth with `>=`, never `===`.
+
 ## The node refusal — a reach bound this epic CHOOSES, stated honestly
 
 `screen.mjs` refuses every command whose head is `node`, with the reason string
@@ -175,11 +205,22 @@ exits **0** with a clean `# fail 0`:
 
 ```
 $ node --test tooling/grip/test/ledger.test.mjs tooling/grip/test/DOES-NOT-EXIST.test.mjs
-# tests 60
-# pass 60
+# tests 78
+# pass 78
 # fail 0
 EXIT=0
 ```
+
+Re-derived 2026-07-28 in a clean git worktree at origin/main `072978af0` plus
+`tgw9-s1`. **The `78` is not the point and will move** — the carrier file grows
+as the suite does, and this block last read `60/60` from a day when
+`ledger.test.mjs` was both smaller and RED, so a reader re-deriving it got
+`77/76/1` and `EXIT=1` and could reasonably have concluded the trap did not
+exist. The point is the pair of facts that do NOT move: **`EXIT=0`**, and **no
+line anywhere in the output names `DOES-NOT-EXIST.test.mjs`** (`node --test … |
+grep -c DOES-NOT-EXIST` → `0`). Take the exit code from `node` itself, never
+from the tail of a pipe: `cmd | grep …; echo $?` reports *grep's* status and
+prints a cheerful `EXIT=0` for a failing `node`.
 
 No line names the file that was not run. So a gate written as
 `node --test tooling/grip/test/a.test.mjs tooling/grip/test/b.test.mjs` goes

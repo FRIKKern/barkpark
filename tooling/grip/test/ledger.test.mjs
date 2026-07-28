@@ -909,6 +909,51 @@ test("an unparseable ledger file is REPORTED, never silently skipped (D6)", () =
   assert.equal(folded.stats.unreadable, 2, "a fold that hides a corrupt file reports a smaller, cleaner, wrong world");
 });
 
+test("a document that never claimed to be a run is NOT-A-RUN, DISTINCT from MALFORMED-RUN, and both stay counted", () => {
+  // THE SHARED COMMONS HAS THREE SHAPES, NOT TWO (D118). A foreign epic's
+  // verifier note parked in tooling/grip/ledger/ is not a corrupt run file —
+  // it was never a run file. Reporting both as MALFORMED-RUN read as "grip's
+  // store is rotting" when the true statement is "another epic parked a note
+  // here", and the two need different responses: one is a defect report, the
+  // other is a boundary.
+  //
+  // The line is CLAIMING the shape: a document carrying `run_id` or `recipes`
+  // claims to be a run and is held to it; a document carrying neither never
+  // claimed and is named for what it is.
+  const dir = tmpLedger();
+  writeLedgerRun({ run_id: "good", recipes: [goodRow()], dir });
+  writeFileSync(join(dir, "foreign-note.json"), JSON.stringify({ id: "v-note", claim: "a verifier note", rerun: "git show origin/main:README.md | wc -l" }));
+  writeFileSync(join(dir, "unwrapped-row.json"), JSON.stringify(goodRow()));
+  writeFileSync(join(dir, "claims-and-fails.json"), JSON.stringify({ run_id: "x", recipes: "not an array" }));
+  writeFileSync(join(dir, "an-array.json"), JSON.stringify([goodRow()]));
+
+  const { runs, unreadable, shape } = readLedgerRuns(dir);
+  assert.equal(runs.length, 1, "only the honestly written run folds");
+  assert.deepEqual(
+    unreadable.map((u) => `${u.file}:${u.reason}`).sort(),
+    ["an-array.json:MALFORMED-RUN", "claims-and-fails.json:MALFORMED-RUN", "foreign-note.json:NOT-A-RUN", "unwrapped-row.json:NOT-A-RUN"],
+  );
+
+  // BOTH counts are visible in the fold's OWN output, on a pass as much as on a
+  // failure — a class you can only see when something breaks is a class that
+  // gets quietly emptied.
+  const folded = foldLedger(dir);
+  assert.equal(folded.stats.not_a_run, 2);
+  assert.equal(folded.stats.malformed_run, 2);
+  assert.equal(folded.stats.unreadable, 4);
+  assert.deepEqual([shape.not_a_run, shape.malformed_run, shape.runs], [2, 2, 1]);
+
+  // A RECIPE-SHAPED BUT UNWRAPPED document (unwrapped-row.json above is exactly
+  // that: one recipe's fields at top level, no wrapper, no run_id) stays
+  // NOT-A-RUN. Two such files sit in the committed store today. The fold does
+  // NOT infer the wrapper, because the one thing that row lacks is its chain of
+  // custody: a run_id synthesised at READ time is an L6 claim wearing an L2
+  // uniform (R1). Naming the class is what makes them findable rather than lost
+  // inside a corruption count; re-recording them through writeLedgerRun is the
+  // append-only-legal repair, filed as tgw11-bl-unwrapped-recipe-rows-unread.
+  assert.equal(folded.entries.length, 1, "the unwrapped row is REPORTED, never guessed into the fold");
+});
+
 test("folding an absent directory is an empty fold, not a throw", () => {
   const folded = foldLedger(join(tmpLedger(), "does-not-exist"));
   assert.deepEqual(folded.entries, []);
@@ -1278,17 +1323,101 @@ test("THE PROJECTION GUARANTEE: entries[] is a TWELVE-named-field allowlist, so 
   assert.ok(forged.entries.every((e) => e.recipes.every((r) => !("value" in r))), "no entry recipe may ever carry `value`");
 });
 
+// Re-derived 2026-07-28 in a clean git worktree at origin/main 072978af0:
+// 78 .json files → 40 grip-owned runs / 27 foreign runs / 11 NOT-A-RUN
+// documents; 22 of the 40 owned runs are WRITE-PATH ATTESTED, carrying 319 of
+// the 423 owned rows. GROWTH floors, never equalities: every honestly written
+// run attests automatically, so these can only rise. A DROP means the scope
+// stopped seeing runs it used to see — which is the exact way a scoped control
+// dies quietly, and is why the mutation proof in the PR body drives it.
+const ATTESTED_RUNS_FLOOR = 22;
+const ATTESTED_ROWS_FLOOR = 319;
+
 test("CONTROL: the committed rows fold CLEAN under the hardening — unreadable 0, and 0 rows restate level (D89, #5442)", () => {
   // A hardening that rejects the epic's own real store is broken, not strict.
   // Folded WITH both bounds armed exactly as the CLI arms them (a REAL clock,
   // stripped to Z like `date -u` — a fixed past `now` would read the committed
-  // rows as future). Also CONFIRMS derived_level is re-derived at fold time
-  // (tgw2-fold-reread-derived-level, shipped #5442): stats.level_restated is 0
-  // because every committed row's stored level already equals what its command
-  // re-derives today — stated, not assumed.
+  // rows as future).
+  //
+  // ── WHAT "THE COMMITTED ROWS" MEANS, RE-ARGUED (this test was RED) ─────────
+  // Armed over the WHOLE directory this fold reports 422 unreadable entries,
+  // and NONE of them is repairable, because the store is append-only and shared
+  // by four epics (D118) — deleting or rewriting another epic's row is
+  // forbidden (D26/D99). The 422 are three populations and the contract is
+  // different for each:
+  //
+  //   219 FOREIGN — 208 MALFORMED-ROW in 27 borrowed `{claim, rerun}` run files
+  //        plus 11 NOT-A-RUN documents. Grip never wrote them and cannot fix
+  //        them. Asserting they fold clean asserts a contract over rows this
+  //        epic does not own; that assertion is RETIRED here, and the counts
+  //        stay printed below so retiring it is not the same as hiding it.
+  //   203 GRIP-OWNED, across 95 DISTINCT ROWS of 18 HAND-AUTHORED run files
+  //        (rejections ACCUMULATE per row — ledger.mjs:772-782 — so an entry
+  //        count is 2.1× the row count; the arithmetic closes: 423 owned rows =
+  //        328 admitted + 95 rejected). These are a REAL HARDENING CATCH:
+  //        LEVEL-SKIP 80, REFUSED-COMMAND 54, UNKNOWN-FIELD 45, VALUE-STORED 24
+  //        are exactly what `admitRecipe` exists to refuse, and every one sits
+  //        in a file that never crossed the write path. The rows stay, the
+  //        rejections stay reported, and the honest statement is "the write
+  //        path refuses these; they got in around it" — not "the store is
+  //        clean". That is a defect in HOW they were written, and the
+  //        append-only-legal repair is to re-record them through
+  //        `writeLedgerRun`, never to soften this gate.
+  //     0 WRITE-PATH ATTESTED — the 22 runs whose filename reproduces the digest
+  //        of their own bytes, i.e. the runs `writeLedgerRun` demonstrably
+  //        produced. THIS is the population the D89 control was always about:
+  //        every row that crossed the gate still crosses it today. It folds
+  //        clean, and it is 319 rows deep, so the pass is not vacuous.
+  //
+  // The scope is a SHAPE computed from each file's own bytes, never a pinned
+  // list of filenames, and it grows with the store by construction.
   const realNow = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-  const folded = foldLedger(DEFAULT_LEDGER_DIR, { now: realNow, screen: screenCommand });
-  assert.equal(folded.unreadable.length, 0, `the committed store must fold clean: ${JSON.stringify(folded.unreadable.slice(0, 3))}`);
-  assert.ok(folded.stats.rows >= 1, "the store is non-empty — a vacuous clean fold proves nothing");
-  assert.equal(folded.stats.level_restated, 0, "0 of the committed rows change level under re-derivation");
+  const folded = foldLedger(DEFAULT_LEDGER_DIR, { now: realNow, screen: screenCommand, scope: "attested" });
+  assert.equal(folded.unreadable.length, 0, `every row the write path admitted must still fold clean: ${JSON.stringify(folded.unreadable.slice(0, 3))}`);
+  assert.ok(folded.stats.runs >= ATTESTED_RUNS_FLOOR, `the attested scope must not SHRINK: ${folded.stats.runs} run(s) < floor ${ATTESTED_RUNS_FLOOR}`);
+  assert.ok(folded.stats.rows >= ATTESTED_ROWS_FLOOR, `a vacuous clean fold proves nothing: ${folded.stats.rows} row(s) < floor ${ATTESTED_ROWS_FLOOR}`);
+
+  // ── THE SECOND ASSERTION, RE-ARGUED BY DIRECTION ──────────────────────────
+  // CONFIRMS derived_level is re-derived at fold time (tgw2-fold-reread-
+  // derived-level, shipped #5442). The old form asserted `level_restated === 0`
+  // over the whole store and was RED at 1 — and "0 restatements" was never the
+  // property worth having anyway, because it cannot tell the two directions
+  // apart. LEVELS runs L1 (strongest) … L6, so:
+  //   DOWN — stored L2, the command only supports L4: the LAUNDER this whole
+  //          substrate exists to prevent, arriving through the READ path.
+  //          Asserted 0, over the WHOLE store, not just the attested scope.
+  //   UP   — stored L4, the command re-derives L2: a conservative author being
+  //          corrected by the ladder. Harmless, and NAMED rather than counted.
+  // Today the whole store holds exactly one, and it is an UP:
+  // grip-20260726T000000Z-v-corpus-identity-call.json, subject
+  // internal/cli/cloud_site_cmd.go, stored L4 → derived L2 (`git show
+  // origin/main:… | grep -n …` is an origin/main read, which IS L2). Ruling it
+  // a defect would be wrong; the contract the control should assert is the
+  // direction, and it now does.
+  const whole = foldLedger(DEFAULT_LEDGER_DIR, { now: realNow, screen: screenCommand });
+  assert.equal(
+    whole.stats.level_restated_down,
+    0,
+    `no admitted row may re-derive WEAKER than its stored level — that is the launder: ${JSON.stringify(whole.level_restatements.down.slice(0, 3))}`,
+  );
+
+  // WHAT THIS RUN DECLINED, PRINTED ON PASS. A scope that is only visible in a
+  // failure message is a scope that gets quietly narrowed; the same blindness
+  // made the mint floor pin-able. Both file classes and every grip-owned
+  // rejection class are here on a GREEN run.
+  const ownedRejections = {};
+  const ownedRows = new Set();
+  for (const u of foldLedger(DEFAULT_LEDGER_DIR, { now: realNow, screen: screenCommand, scope: "owned" }).unreadable) {
+    ownedRejections[u.reason] = (ownedRejections[u.reason] ?? 0) + 1;
+    ownedRows.add(`${u.file}#${u.index}`);
+  }
+  const s = whole.stats;
+  console.log(
+    `\n  [D89 control] scope=attested — ${folded.stats.rows} row(s) over ${folded.stats.runs} run file(s), 0 unreadable` +
+      `\n  [D89 control] store: ${s.files} file(s) = ${s.owned_runs} grip-owned (${s.attested_runs} attested) + ${s.foreign_runs} foreign run(s) + ${s.not_a_run} NOT-A-RUN + ${s.malformed_run} MALFORMED-RUN + ${s.unparseable} UNPARSEABLE` +
+      `\n  [D89 control] grip-owned rejections OUTSIDE the attested scope (reported, NOT asserted — hand-authored rows the write path would refuse): ` +
+      `${Object.values(ownedRejections).reduce((a, b) => a + b, 0)} rejection(s) across ${ownedRows.size} row(s) → ${JSON.stringify(ownedRejections)}` +
+      `\n  [D89 control] level restatements: ${whole.level_restatements.down.length} DOWN (asserted 0), ${whole.level_restatements.up.length} UP → ` +
+      `${JSON.stringify(whole.level_restatements.up.map((r) => `${r.file}#${r.index} ${r.subject} ${r.stored_level}→${r.derived_level}`))}\n`,
+  );
 });
