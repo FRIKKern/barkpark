@@ -2786,3 +2786,79 @@ one; widens the open `tgw4-screen-git-global-option-audit`, does not duplicate i
 Nothing in this wave's cut rests on an unanswered question. The corners the survey named and verify
 closed are recorded in D121-D129; the ones still open are the "53 minutes" mechanism (D125) and
 whether `GRIP_LIVE=1` inverts D113's skip canary — neither is load-bearing for any slice here.
+
+### Wave 2026-07-28 — wave 11 REVIEW: all four refire slices built, fixed and merged-ready. Grade A−.
+
+Paper `truth-grip-wave-11-2026-07-28`. Parent `truth-grip-epic`. The refire worked: the four briefs
+wave 10 wrote and lost to a dispatch hole were claimed and built as written, no re-cut, no re-survey.
+**Four of four green.** Every branch is PUSHED and has a PR — the six-wave streak of stranded local
+branches is broken.
+
+| Slice | Final branch | PR | What |
+|---|---|---|---|
+| `tgw9-s1-ledger-commons-honest` | `…the-grip-commons-folds-honest-two-nested-0-r` | #6505 | Write-path ATTESTATION (`isAttestedRun`: the filename reproduces the digest of the file's own bytes), NOT-A-RUN split from MALFORMED-RUN, `foldLedger(scope)`, directional level restatements. Three standing reds green without softening. |
+| `tgw5-bl-level-mention-promotion` | `…a-purely-local-grep-of-a-document-stops--1-r` | #6506 | The security item. A local grep quoting `ssh`/`gh api`/`git show origin/` no longer derives L1/L2. Reviewer fixed three false demotions the builder's own evidence missed. |
+| `tgw9-s3-criteria-adjudicated` | `…the-seal-becomes-a-command-that-ships-sa-2-r` | #6507 | `tooling/grip/seal.mjs` — D94-as-amended, mechanical, four clauses named, live `rc=1`, SEALED nowhere. |
+| `tgw2-acceptance-suite` | `…criterion-2b-keeps-its-frozen-fixture-th-3-r` | #6508 | Criterion 2b's buildable half after five waves of declining it: the frozen `screenCommand` table, the REACHABLE-WRONG-ROUTE plant, the automated exit-3 mutations. Needed no reviewer fix. |
+
+**INTEGRATION PROVEN, NOT ASSUMED.** All four `-r` branches merged into one scratch branch off
+`origin/main`: **686 tests / 685 pass / 0 fail / 1 skipped over 18 files**, against a `644/640/3/1`
+baseline. D113's `# skipped 1` clause holds.
+
+**THE FINDING THAT JUSTIFIED THE REVIEW: two file-disjoint slices were semantically coupled, and the
+pair would have reddened main whichever merged second.** `seal.test.mjs` pinned
+`deriveLevel(CHARTER_GREP_SPECIMEN) === "L2"`; `tgw5` closes exactly that promotion, so the same
+command re-derives L3 once it lands. The file-truth collision check cannot see this class — the two
+slices share no file. **The lesson is a rule: a slice that PINS a value another slice's brief says it
+will CHANGE is collided even when their file sets are disjoint. Dispatch must collide on asserted
+VALUES, not only on paths.** Fixed by asserting the property that holds in both worlds (the PATH rule
+refuses a charter grep whatever the level grammar says) — which is what defence in depth means.
+
+**Other defects the review found and fixed in place:**
+
+1. **Three false demotions in the security slice** (`tgw5`). Reading the blessed tokens off the
+   quote-mask for EVERY head demoted `ssh "root@host" uptime` L1→L6, `git show 'origin/main:…'`
+   L2→L3 and `timeout 30 ssh "root@h"` L1→L6. Quoting a HOST or a REF is quoting an argument. The
+   builder's criterion-3 evidence said "8/8 HOLD rows identical" — true of the rows it walked, false
+   of the criterion it claimed, because the HOLD table never contained a quoted destination. Rule is
+   now head-keyed: a segment headed by the command ITSELF reads its raw bytes.
+2. **A near-vacuous assertion in the D89 control** (`tgw9-s1`). `level_restated_down === 0` reads
+   like a live launder detector and is not one: the fold runs `admitRecipe` before the restatement
+   counter, and a DOWN-shaped row IS the LEVEL-SKIP shape, so it is rejected and can never reach the
+   counter. Now executed both halves against one synthetic run, with the D89 control saying out loud
+   which assertion actually fires on a forged store.
+3. **Clause (c) misreported a non-closed root** (`tgw9-s3`). It read "closes LAST" as CLAIMABLE, so
+   an `in_progress` root printed "the root is already closed" — a false statement in the program
+   whose whole job is refusing false statements. Now reads the two genuinely closed statuses.
+
+**HIGH-FLIP-RISK, re-derived independently and CLEARED — with one thing still owed.** The reviewer
+re-derived `tgw9-s3`'s namespace lens by a different method: 153 recursive **server-side**
+`filter[parent_id]` queries rather than a client-side closure over a walked corpus. Closure 152 /
+prefix 150 / union 152 / claimable 34 / root-in-pool true — identical, and it covers depth 2+, the
+hole the builder named in his own depth-1 reconciliation. **Still owed to a human:** both derivations
+fence to `_type == "task"`, so a `tgw*`-named row of another type carrying a `lifecycle_status` is
+invisible to both. That is one shared assumption, and one reviewer cannot break it.
+
+**Ledger fixes.** `tgw5`'s claim lease had lapsed, so the board read a built-and-unmerged slice as
+`open` — re-claimed, `in_progress`, now-line rewritten. Criterion 3 carries a review-correction
+`--miss` note recording that its stamped evidence overstated. The other three tasks were honest:
+in_progress, merge-gated criteria left open for the lead, no task outside the wave touched.
+`tgw6-bl-grip-suite-has-no-ci` is untouched at 0/11, as D128 requires.
+
+**GUERRILLA'S DOC-CREATE IS DOWN, AND ONE ROW IS THEREFORE UNFILED.** `/v1/data/mutate` doc-CREATE
+returned 500/timeout on every attempt during the review (request ids `GMZYbJhOxSPzcsMACkxR`,
+`GMZYdmeCBah-FP4ACz6y`); reads, claims, pulses and stamps all worked. Same fault `tgw9-s1`'s builder
+hit. The residual it would have filed — an UNQUOTED mention under a NON-reader head (`echo ssh
+root@h` still derives L1; zero of 631 committed rows have the shape) — is PINNED BY ASSERTION in
+`level.test.mjs` and cites no task id, because citing a task that does not exist is the dangling
+pointer this epic refuses. **File it when the server recovers.**
+
+**WHAT THE NEXT WAVE TAKES.** Merge round 1 in any order (integration is proven green in all four
+together; there is no merge-order constraint left). Then, as their deps land:
+`tgw6-bl-grip-suite-has-no-ci` the moment `tgw9-s1` is on main AND the Honest Gates branch-protection
+run has settled — it is the last thing standing between this suite and a gate that can actually
+fail. Then `tgw9-s3`'s criterion 10 (stamping the root's four criteria) inside a lead close-window,
+and `tgw4-absence-veto-stops-at-the-rerun-seam`, which `seal.mjs` now cites by file:line rather than
+works around. **The epic still does not seal — but for the first time the reason is DERIVABLE BY
+COMMAND: `node tooling/grip/seal.mjs` exits 1 and prints `a=FAIL b=FAIL b'=PASS c=PASS blocking=34`.
+The predicate stopped being prose.**
