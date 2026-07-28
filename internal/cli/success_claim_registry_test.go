@@ -59,8 +59,11 @@ package cli
 // the types its methods return and fails any pinned site row probed with anything
 // else — swap a row's Backed to cloudclient.SpawnSiteCreate (a request body) and it
 // goes red, which is the mutation that proves the guard is not decorative.
-// Pre-W8 rows predate the convention and are grandfathered by NAME (only the pinned
-// site rows are checked), never by prose on the row itself.
+// Pre-W8 rows predate the convention and are grandfathered by NAME — only the
+// pinned site rows and anything named renderSite* are checked — never by prose on
+// the row itself. The prefix half matters: an enumerated list would leave the NEXT
+// site receipt unchecked until someone remembered it, which is the same
+// nobody-looked shape the registry exists to kill.
 //
 // MUTATION-PROVEN: reverting the cloud_autoupdate_cmd.go fix (each verb's sentence
 // keyed on the local verb again) turns TestSuccessClaimsChangeWhenTheResponseDoes
@@ -409,6 +412,16 @@ var requiredEnrollments = []string{
 // types internal/cloudclient returns (the provenance convention in this file's
 // header). Pinned by name, and the names are also in requiredEnrollments, so a
 // rename that would dodge this check fails the floor first.
+//
+// This list is a FLOOR, not the scope. On its own it grandfathers by enumeration:
+// the SIXTH site receipt someone adds next wave would be uncovered until a human
+// remembered to append it here, which is the same "a claim nobody checked" shape
+// the registry exists to kill. So the check ALSO covers every registry row whose
+// name carries siteRenderPrefix — the list makes deletion fail, the prefix makes
+// omission fail. A future site render that legitimately cannot be probed with a
+// response type is a real finding, not an exemption to add here.
+const siteRenderPrefix = "renderSite"
+
 var siteResponseTypedRows = []string{
 	"renderSiteCreated",
 	"renderSiteDeployVerdict",
@@ -544,7 +557,9 @@ func TestSiteClaimsAreProbedWithResponseTypes(t *testing.T) {
 	seen := map[string]bool{}
 	for _, site := range successClaimRegistry() {
 		base := strings.SplitN(site.Name, "/", 2)[0]
-		if !pinned[base] {
+		// Pinned by name (the floor) OR by the site-render prefix (the scope), so a
+		// receipt added later is covered without anyone remembering to enrol it here.
+		if !pinned[base] && !strings.HasPrefix(base, siteRenderPrefix) {
 			continue
 		}
 		seen[base] = true
@@ -580,7 +595,10 @@ func cloudclientReturnedTypes(t *testing.T) map[string]bool {
 	if err != nil {
 		t.Fatalf("read internal/cloudclient sources: %v", err)
 	}
-	re := regexp.MustCompile(`\)\s*\(\*?(?:\w+\.)?(\w+), error\)`)
+	// `) (T, error)`, `) (*T, error)` and `) ([]T, error)` — a method that hands back
+	// a slice returns that element type just as surely as one that hands back a value,
+	// and missing it would fail a legitimate row with a confusing message.
+	re := regexp.MustCompile(`\)\s*\((?:\[\])?\*?(?:\w+\.)?(\w+), error\)`)
 	out := map[string]bool{}
 	for _, e := range entries {
 		name := e.Name()
