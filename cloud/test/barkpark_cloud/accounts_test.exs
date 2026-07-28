@@ -309,6 +309,71 @@ defmodule BarkparkCloud.AccountsTest do
     end
   end
 
+  describe "create_user_session_token/2 origin (gr-p5-session-provenance)" do
+    # THE ROUND TRIP. Column existence proves nothing here: the migration, the
+    # schema field and the write-site keyword all land happily while `cast/3`
+    # silently DISCARDS `:origin` — no Ecto warning, no compiler warning — and
+    # the whole suite stays green while every row is written NULL. So this reads
+    # the value back TWICE: off the loaded struct, and via raw SQL against the
+    # actual column. The raw-SQL leg is the one a struct default could never
+    # satisfy, and it is what reds when `:origin` leaves UserToken.changeset/2's
+    # cast allowlist (`left: nil, right: "device_link"`).
+    test "a real mint round-trips the origin to the COLUMN, not just the struct" do
+      user = user_fixture()
+
+      {:ok, plaintext} =
+        Accounts.create_user_session_token(user, user_agent: "bp/agent", origin: "device_link")
+
+      hash = UserToken.hash_token(plaintext)
+
+      # Leg 1 — off the struct, through the normal read path the UI uses.
+      [row] = Accounts.list_user_sessions(user)
+      assert row.origin == "device_link"
+
+      # Leg 2 — the column itself, bypassing Ecto's field defaults entirely.
+      assert %Postgrex.Result{rows: [["device_link"]]} =
+               Repo.query!("SELECT origin FROM user_tokens WHERE token_hash = $1", [hash])
+    end
+
+    test "omitting :origin stores NULL — it is never inferred from the other opts" do
+      user = user_fixture()
+
+      {:ok, plaintext} =
+        Accounts.create_user_session_token(user, ip_address: "203.0.113.7", user_agent: "Chrome")
+
+      [row] = Accounts.list_user_sessions(user)
+      assert is_nil(row.origin)
+
+      assert %Postgrex.Result{rows: [[nil]]} =
+               Repo.query!("SELECT origin FROM user_tokens WHERE token_hash = $1", [
+                 UserToken.hash_token(plaintext)
+               ])
+    end
+
+    test "nothing backfills: a pre-existing NULL row stays NULL when a NEW row is minted" do
+      user = user_fixture()
+      {:ok, legacy} = Accounts.create_user_session_token(user)
+      {:ok, _fresh} = Accounts.create_user_session_token(user, origin: "password")
+
+      assert %Postgrex.Result{rows: [[nil]]} =
+               Repo.query!("SELECT origin FROM user_tokens WHERE token_hash = $1", [
+                 UserToken.hash_token(legacy)
+               ])
+    end
+
+    test "a PAT can neither receive nor expose an origin (separate cast list)" do
+      {user, team} = user_with_team()
+
+      {:ok, _plaintext, pat} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "ci-token",
+          origin: "device_link"
+        })
+
+      assert is_nil(Repo.get!(UserToken, pat.id).origin)
+    end
+  end
+
   describe "revoke_user_session/2 (ownership-scoped row revoke)" do
     test "revokes the caller's own row by id" do
       user = user_fixture()

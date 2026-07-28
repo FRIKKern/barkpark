@@ -649,7 +649,9 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{error: "invalid", details: errors(cs)})
         end
       else
-        case Accounts.create_user_session_token(user, session_opts(conn)) do
+        # ORIGIN "password": this branch is reached only when 2FA is OFF, so the
+        # password check above is the whole of what established the session.
+        case Accounts.create_user_session_token(user, session_opts(conn) ++ [origin: "password"]) do
           {:ok, token} ->
             team = Accounts.primary_team(user)
             json(conn, 200, %{token: token, team_id: team && team.id})
@@ -710,7 +712,16 @@ defmodule BarkparkCloud.Web.Router do
             if ok? do
               Accounts.delete_two_factor_pending_tokens(user)
 
-              case Accounts.create_user_session_token(user, session_opts(conn)) do
+              # ORIGIN "two_factor": reaching here means the password leg ALREADY
+              # passed (it minted the challenge token) and a second factor — an
+              # OTP or a recovery code — cleared too. Deliberately not split into
+              # otp-vs-recovery: the `ok?` cond above collapses both to a boolean
+              # before this point, and re-deriving which one fired would be a
+              # guess.
+              case Accounts.create_user_session_token(
+                     user,
+                     session_opts(conn) ++ [origin: "two_factor"]
+                   ) do
                 {:ok, token} ->
                   team = Accounts.primary_team(user)
                   json(conn, 200, %{token: token, team_id: team && team.id})
@@ -1058,7 +1069,14 @@ defmodule BarkparkCloud.Web.Router do
            :ok <- OAuth.verify_state(state, provider),
            {:ok, identity} <- OAuth.fetch_identity(provider, code),
            {:ok, user} <- Accounts.get_or_create_user_from_oauth(identity),
-           {:ok, token} <- Accounts.create_user_session_token(user, session_opts(conn)) do
+           # ORIGIN "oauth:<provider>": `provider` is already bound by this
+           # with-chain and IS the answer — no inference, and each provider
+           # reports itself rather than collapsing to a generic "oauth".
+           {:ok, token} <-
+             Accounts.create_user_session_token(
+               user,
+               session_opts(conn) ++ [origin: "oauth:#{provider}"]
+             ) do
         team = Accounts.primary_team(user)
         redirect_to(conn, "/#oauth=#{token}&team=#{team && team.id}")
       else
@@ -1532,7 +1550,16 @@ defmodule BarkparkCloud.Web.Router do
           # the in-flight request never lost its own auth mid-call. Revoke it now
           # and hand back a fresh one so the SPA swaps and stays authenticated.
           _ = Accounts.revoke_user_session_token(old_token)
-          {:ok, fresh} = Accounts.create_user_session_token(user, session_opts(conn))
+
+          # ORIGIN "password_change": this row is NOT a login — it is the
+          # replacement token handed back after "sign out everywhere", and
+          # calling it "password" would misreport a re-mint as a fresh sign-in.
+          {:ok, fresh} =
+            Accounts.create_user_session_token(
+              user,
+              session_opts(conn) ++ [origin: "password_change"]
+            )
+
           json(conn, 200, %{ok: true, token: fresh})
 
         {:error, :invalid_current_password} ->
@@ -7845,7 +7872,16 @@ defmodule BarkparkCloud.Web.Router do
              # auto-create). A lazy get_or_create_settings/1 backstops any team
              # that predates this.
              {:ok, _settings} <- Notifications.ensure_settings(team),
-             {:ok, token} <- Accounts.create_user_session_token(user, session_opts) do
+             # ORIGIN "register": stamped HERE, at the write site, not by the
+             # caller — `register/4` has exactly one caller and this insert is
+             # the account's very first session, so "register" is the whole
+             # truth about it. Appending to the passed-in `session_opts` keeps
+             # `session_opts/1` itself origin-free.
+             {:ok, token} <-
+               Accounts.create_user_session_token(
+                 user,
+                 session_opts ++ [origin: "register"]
+               ) do
           %{user: user, team: team, token: token}
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -10716,6 +10752,12 @@ defmodule BarkparkCloud.Web.Router do
       id: t.id,
       ip_address: t.ip_address,
       user_agent: t.user_agent,
+      # ALWAYS emitted, `null` when unknown — a present-and-null key lets the SPA
+      # tell "this server does not know where the session came from" apart from
+      # "this server is too old to have the field at all". Rows minted before the
+      # `origin` column existed are exactly the first case, and nothing guesses
+      # on their behalf.
+      origin: t.origin,
       last_used_at: t.last_used_at,
       inserted_at: t.inserted_at,
       current: t.token_hash == current_hash

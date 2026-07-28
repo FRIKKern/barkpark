@@ -245,10 +245,16 @@ defmodule BarkparkCloud.DeviceAuth do
 
     with 1 <- count,
          %{} = user <- Accounts.get_user(row.user_id),
+         # ORIGIN "device_link": the only mint site outside the router, and the
+         # one the SPA most needs — a session that appeared without anyone
+         # typing a password into this browser. The row's own captured IP + UA
+         # ride along as before; `client_name` is NOT folded in here, because
+         # the origin answers HOW the session was established, not WHO asked.
          {:ok, token} <-
            Accounts.create_user_session_token(user,
              ip_address: row.ip_address,
-             user_agent: row.user_agent
+             user_agent: row.user_agent,
+             origin: "device_link"
            ) do
       {:ok, token, Accounts.primary_team(user)}
     else
