@@ -95,6 +95,14 @@ jobs:
           # three-dot diff below. A shallow checkout makes `git cat-file -e`
           # miss it, which this step treats as a hard failure.
           fetch-depth: 0
+          # THE PR HEAD, NOT THE MERGE REF. With no `ref:`, checkout@v4 checks
+          # out `refs/pull/N/merge` — a merge of the PR head into the CURRENT
+          # base tip. `base.sha` in the event payload is older than that tip, so
+          # `base...HEAD` sweeps in main's entire advance and the dispatcher
+          # reports compile=true on a docs-only PR (measured: PR #6427 changed
+          # ONE file, the dispatcher printed ten). On push-to-main the payload
+          # has no pull_request, so fall back to github.sha.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - id: sets
         name: Compute the changed-path sets
