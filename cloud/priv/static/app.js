@@ -1056,23 +1056,6 @@
     });
   }
 
-  // Pure: one active-session row. Extracted from loadSessions so the TALL modal
-  // shape (9+ sessions — the shape that put Log out out of reach on live, GR63)
-  // is reachable from node without a fetch. The current device is badged and its
-  // Revoke button disabled: a signed-in user can never revoke themselves by
-  // accident from here.
-  // GR81 — the session IP is SUPPRESSED here, deliberately, not forgotten. Every
-  // session the control plane records carries 172.18.0.1 (the Docker bridge
-  // gateway): trust_forwarded_ip honours X-Forwarded-For only from a LOOPBACK
-  // peer, and the control plane runs containerized behind Caddy, so the peer the
-  // Plug sees is always the bridge. The value is uniform garbage — identical for
-  // every client — so it can never separate "my usual login" from "a stranger",
-  // which is the only reason an IP earns a place on a security surface. No
-  // heuristic guard (an RFC1918 test would flag real corporate/VPN users AND
-  // would silently stop firing the day the router is fixed, with nothing telling
-  // the SPA it happened). REVERT this suppression — restore the ip_address lead
-  // on this row and the "IP address" rail row in renderActivateConfirm — once
-  // task gr-bl-peer-ip-container lands a genuine per-client peer IP.
   // Pure: the human phrasing of a session's `origin`, or "" when the server has
   // no answer. NULL origin renders as NOTHING — every session minted before the
   // column existed is genuinely unknown, and "via password" would be a guess on
@@ -1094,6 +1077,25 @@
     return known[origin] || "via " + origin;
   }
 
+  // Pure: one active-session row. Extracted from loadSessions so the TALL modal
+  // shape (9+ sessions — the shape that put Log out out of reach on live, GR63)
+  // is reachable from node without a fetch. The current device is badged and its
+  // Revoke button disabled: a signed-in user can never revoke themselves by
+  // accident from here.
+  // GR81 — the session IP is SUPPRESSED here, deliberately, not forgotten. Every
+  // session the control plane records carries 172.18.0.1 (the Docker bridge
+  // gateway): trust_forwarded_ip honours X-Forwarded-For only from a LOOPBACK
+  // peer, and the control plane runs containerized behind Caddy, so the peer the
+  // Plug sees is always the bridge. The value is uniform garbage — identical for
+  // every client — so it can never separate "my usual login" from "a stranger",
+  // which is the only reason an IP earns a place on a security surface. No
+  // heuristic guard (an RFC1918 test would flag real corporate/VPN users AND
+  // would silently stop firing the day the router is fixed, with nothing telling
+  // the SPA it happened). REVERT this suppression — restore the ip_address lead
+  // on this row and the "IP address" rail row in renderActivateConfirm — once
+  // task gr-bl-peer-ip-container lands a genuine per-client peer IP.
+  // The row's `origin` rides the SAME .session-meta line (no new class, no new
+  // rail) — provenance is a qualifier on "Active <when>", not a second fact.
   function sessionRowHtml(x) {
     var origin = originLabel(x.origin);
     return '<div class="session-row">' +

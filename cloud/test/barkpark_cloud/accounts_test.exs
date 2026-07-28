@@ -372,6 +372,49 @@ defmodule BarkparkCloud.AccountsTest do
 
       assert is_nil(Repo.get!(UserToken, pat.id).origin)
     end
+
+    # The CLOSED-SET guard. Three of the six mint sites (login, password change,
+    # device link) carry end-to-end round-trip probes above; the OAuth callback
+    # and `register/4` do not — one needs a stubbed provider exchange, the other
+    # the full billing/trial transaction. This reads the source instead, so a
+    # seventh mint site added without an origin, or a literal typo'd at either
+    # untested site, reds HERE rather than shipping a silently-NULL column.
+    # Source-text by construction: it is refactor-brittle on purpose, and the
+    # failure message is its documentation.
+    test "every Accounts.create_user_session_token/2 call site stamps an origin (closed set of six)" do
+      lib = Path.expand("../../lib/barkpark_cloud", __DIR__)
+
+      sources =
+        for f <- ["web/router.ex", "device_auth.ex"], do: File.read!(Path.join(lib, f))
+
+      calls =
+        sources
+        |> Enum.flat_map(&(String.split(&1, "Accounts.create_user_session_token(") |> tl()))
+
+      assert length(calls) == 6,
+             "the mint-site set moved (#{length(calls)} call sites, expected 6) — a NEW site must " <>
+               "stamp its own origin, and this count must move with it"
+
+      for {tail, i} <- Enum.with_index(calls) do
+        assert String.contains?(String.slice(tail, 0, 400), "origin:"),
+               "mint call site ##{i} passes no :origin — it would write NULL silently"
+      end
+
+      router = hd(sources)
+
+      for literal <- ~w(password two_factor password_change register),
+          do:
+            assert(
+              String.contains?(router, "origin: \"#{literal}\""),
+              "the #{literal} origin literal is gone from router.ex"
+            )
+
+      assert String.contains?(router, ~S|origin: "oauth:#{provider}"|),
+             "the oauth callback stopped reporting its own provider"
+
+      assert String.contains?(List.last(sources), ~s|origin: "device_link"|),
+             "device_auth stopped stamping device_link"
+    end
   end
 
   describe "revoke_user_session/2 (ownership-scoped row revoke)" do
