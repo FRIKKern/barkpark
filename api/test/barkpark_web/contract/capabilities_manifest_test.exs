@@ -1251,4 +1251,65 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "the non-chat etag must not 304 the chat body; got status #{resp.status}"
     end
   end
+
+  describe "`writes` honesty: no core mutator is advertised read-only (PDS-D302)" do
+    # `writes` is the ONE side-effect signal the MCP bridge sees:
+    # internal/cli/mcp_bridge.go derives `ReadOnlyHint` straight from it. It used
+    # to default to `false` at the builder (`Keyword.get(opts, :writes, false)`),
+    # and 16 non-GET core commands never passed it — so an MCP client was told
+    # `chat.send_message` and `auth.mfa-disable` were safe read-only calls. The
+    # builder now takes `Keyword.fetch!(opts, :writes)`, which can only catch a
+    # MISSING bit; a wrong `false` is caught here and nowhere else.
+    #
+    # Deliberately anchored on the SERVED manifest, not the source: what an MCP
+    # client is told is what matters.
+    @previously_mislabelled ~w(
+      auth.register auth.login auth.verify-email auth.request-reset auth.reset
+      auth.logout auth.mfa-enroll auth.mfa-verify auth.mfa-disable
+      chat.create_session chat.update_session chat.send_message chat.interrupt
+      chat.approve chat.archive chat.unarchive
+    )
+
+    test "every core command whose HTTP method is not GET carries writes == true",
+         %{conn: conn} do
+      liars =
+        capabilities(conn)["commands"]
+        |> Enum.filter(&(&1["source"] == "core"))
+        |> Enum.filter(&(&1["http"]["method"] != "GET"))
+        |> Enum.reject(&(&1["writes"] == true))
+        |> Enum.map(&{&1["id"], &1["http"]["method"], &1["writes"]})
+        |> Enum.sort()
+
+      assert liars == [],
+             """
+             These core commands mutate over a non-GET method but are advertised
+             read-only — an MCP client reads `writes` as ReadOnlyHint and will call
+             them without confirmation:
+
+                 #{inspect(liars, pretty: true)}
+             """
+    end
+
+    test "the 16 commands that shipped mislabelled are present and now honest",
+         %{conn: conn} do
+      commands = capabilities(conn)["commands"]
+
+      for id <- @previously_mislabelled do
+        cmd = Enum.find(commands, &(&1["id"] == id))
+        assert cmd != nil, "#{id} is missing from the manifest (admin token sees every tier)"
+        refute cmd["http"]["method"] == "GET", "#{id} is expected to be a non-GET mutator"
+
+        assert cmd["writes"] == true,
+               "#{id} is still advertised writes == #{inspect(cmd["writes"])}"
+      end
+    end
+
+    test "a GET command still reports writes == false (the flag stayed a signal)",
+         %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "doc.get")
+
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["writes"] == false
+    end
+  end
 end

@@ -15,7 +15,10 @@
 #   3. Boot a bake box FROM the newest snapshot, fast-forward it to
 #      origin/main, run the full deploy-rebuild, pre-run migrations (throwaway
 #      keys, stripped before the snapshot — no secrets ever ship in an image),
-#      clean build residue, verify HEAD, power off.
+#      reset the inherited demo seed (delete-only TRUNCATE after the key
+#      restore, counts reported, schema_migrations kept — PDF-D103; a reset
+#      failure warns loudly but never kills the bake), clean build residue,
+#      verify HEAD, power off.
 #   4. Snapshot it with labels role=warm-image + commit=<sha>. The provisioner
 #      resolves the newest labeled snapshot DYNAMICALLY (cloud.ResolveWarmImage),
 #      so the fresh bake goes live with no env edit and no worker restart, and
@@ -153,6 +156,51 @@ cd /opt/barkpark/api
   || echo "[image-bake] WARNING: migrate skipped (provision-time migrate still covers it)"
 cp /tmp/env.pre-bake /opt/barkpark/.env
 rm -f /tmp/env.bake /tmp/env.pre-bake
+
+# ── Seed reset (delete-only, OUTSIDE the throwaway-key bracket) ──────────────
+# The whole-disk snapshot loop makes generation N+1's Postgres byte-for-byte
+# generation N's, so the demo seed the lineage's ancestor received is
+# transitively immortal unless the bake removes it (PDF-D103). This reset is
+# DELETE-ONLY — TRUNCATE writes no rows, encrypted or otherwise — and it runs
+# AFTER the /tmp/env.pre-bake restore above, so even a hypothetical write could
+# not mint rows under the throwaway keys. CASCADE is deliberate: documents has
+# ON DELETE RESTRICT referencers (epic_assignment_tasks, …) and SET NULL ones
+# (revisions) that a bare DELETE would trip or orphan; TRUNCATE CASCADE empties
+# them all and psql NOTICEs name every cascaded table in the journal.
+# schema_migrations is untouched (nothing references it, it is not in the
+# list): the pre-run migrate above exists precisely so a provisioned box's
+# migrate stays a no-op, and the assertion below proves the rows survived.
+# A reset failure must NOT kill the bake — this heredoc is set -euo pipefail
+# and the outer EXIT trap would tear the box down snapshot-less, leaving the
+# provisioner silently resolving the older image — so every command is guarded:
+# on any failure the bake WARNS loudly and continues carrying the seed one more
+# night, with the provision-time SupportResetDefaultWorkspaceStep as backstop.
+SEED_RESET_OK=0
+DB_URL="$(grep -m1 '^DATABASE_URL=' /opt/barkpark/.env | cut -d= -f2- || true)"
+DB_URL="${DB_URL%\"}"; DB_URL="${DB_URL#\"}"
+if [ -z "$DB_URL" ] || ! command -v psql >/dev/null 2>&1; then
+  echo "[image-bake][seed-reset] WARNING: skipped (no DATABASE_URL in /opt/barkpark/.env or no psql) — this generation still carries the demo seed"
+elif DOCS="$(psql "$DB_URL" -tAc 'SELECT count(*) FROM documents')" \
+  && MEDIA="$(psql "$DB_URL" -tAc 'SELECT count(*) FROM media_files')" \
+  && TOKENS="$(psql "$DB_URL" -tAc 'SELECT count(*) FROM api_tokens')"; then
+  echo "[image-bake][seed-reset] deleting the baked seed: $DOCS document(s), $MEDIA media file(s), $TOKENS api token(s) (measured, not folklore)"
+  if TRUNC_OUT="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -c "SET lock_timeout='60s'" -c 'TRUNCATE TABLE documents, media_files, api_tokens CASCADE' 2>&1)"; then
+    printf '%s\n' "$TRUNC_OUT" | sed 's/^/[image-bake][seed-reset] /'
+    MIGS="$(psql "$DB_URL" -tAc 'SELECT count(*) FROM schema_migrations' || echo 0)"
+    if [ "${MIGS:-0}" -gt 0 ] 2>/dev/null; then
+      echo "[image-bake][seed-reset] done — schema_migrations intact ($MIGS rows), a provisioned box's migrate stays a no-op"
+      SEED_RESET_OK=1
+    else
+      echo "[image-bake][seed-reset] WARNING: schema_migrations read EMPTY after the reset — every provision from this image would re-run the full migration set"
+    fi
+  else
+    printf '%s\n' "$TRUNC_OUT" | sed 's/^/[image-bake][seed-reset] /'
+    echo "[image-bake][seed-reset] WARNING: TRUNCATE failed — baking anyway; this generation STILL CARRIES the demo seed (the provision-time reset step remains the backstop)"
+  fi
+else
+  echo "[image-bake][seed-reset] WARNING: could not count documents/media_files/api_tokens — baking anyway; this generation STILL CARRIES the demo seed"
+fi
+[ "$SEED_RESET_OK" = 1 ] || echo "[image-bake][seed-reset] NOTE: bake continues WITHOUT a clean seed reset — see the WARNING above"
 
 rm -rf /opt/barkpark/api/_build_next
 apt-get clean 2>/dev/null || true

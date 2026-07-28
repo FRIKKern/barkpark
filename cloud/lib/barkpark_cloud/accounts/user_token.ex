@@ -100,6 +100,15 @@ defmodule BarkparkCloud.Accounts.UserToken do
     # session device metadata (account-sessions)
     field :ip_address, :string
     field :user_agent, :string
+    # session PROVENANCE: HOW this session was established, stamped at mint by
+    # the write site that already knows the answer ("password", "two_factor",
+    # "oauth:<provider>", "password_change", "register", "device_link"). NULL
+    # means "we do not know" — every row minted before the column existed, and
+    # any future mint site that has no honest answer. It is never inferred and
+    # never backfilled: a partial provenance that cannot lie beats a complete one
+    # that invents. Session-only; `pat_changeset/2` has its own cast list and can
+    # neither receive nor expose it.
+    field :origin, :string
 
     belongs_to :user, BarkparkCloud.Accounts.User
     belongs_to :team, BarkparkCloud.Accounts.Team
@@ -164,6 +173,12 @@ defmodule BarkparkCloud.Accounts.UserToken do
       :revoked_at,
       :ip_address,
       :user_agent,
+      # `:origin` MUST stay on this allowlist. `cast/3` silently DISCARDS any key
+      # that is not listed — no Ecto warning, no compiler warning — so dropping
+      # it here writes NULL on every row while the whole suite stays green. The
+      # round-trip probe in accounts_test.exs (struct read AND raw SQL read) is
+      # the only thing that reds when this line goes.
+      :origin,
       :last_used_at,
       :sent_to,
       :failed_attempts,

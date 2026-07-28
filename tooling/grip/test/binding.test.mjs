@@ -22,7 +22,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +35,7 @@ import {
   PORTABLE_SCOPES,
   EXIT_MASK_RULES,
 } from "../binding.mjs";
+import { readLedgerRuns, inScope } from "../ledger.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GRIP = resolve(HERE, "..");
@@ -44,6 +45,14 @@ const GRIP = resolve(HERE, "..");
 // no delete verb), so a later wave's run file is a LATER corpus. Pinning these
 // three keeps this a regression test instead of a number that drifts out from
 // under the charter it encodes.
+//
+// READ THE SCOPE OF THAT SANCTION NARROWLY. It licenses a pin for a test that
+// asserts FROZEN COUNTS over a frozen corpus, and nothing else. It does NOT
+// license pinning a test whose name promises the whole store — re-pointing the
+// mint REGRESSION FLOOR at this same list turns "307 of 631 rows moved" into
+// "0 of 62" and passes, because these three files are 9.8% of the rows and
+// carry 0.0% of the drift. That test walks by run SHAPE and prints what it
+// walked; see mint.test.mjs.
 const CENSUS_RUN_FILES = [
   "grip-20260721T034616Z-f6119a27ebcf62cf.json",
   "grip-20260721T054733Z-2dce8ffd806cfc3d.json",
@@ -447,10 +456,21 @@ test("the WHOLE ledger directory stays internally consistent, however many runs 
   // growth — a class↔scope mismatch or an unregistered rule name is a defect in
   // any corpus — while the counts stay in the pinned test above, where they
   // cannot drift out from under the charter.
-  const files = readdirSync(resolve(GRIP, "ledger")).filter((name) => name.endsWith(".json"));
-  assert.ok(files.length >= CENSUS_RUN_FILES.length);
+  //
+  // WHY THIS WALKS `readLedgerRuns` AND NOT `readdirSync`. It used to do the
+  // latter and `rows.push(...run.recipes)` at :57, which did not fail an
+  // assertion — it CRASHED, `TypeError: run.recipes is not iterable`, the first
+  // time a neighbouring epic parked a non-run JSON document in the shared
+  // commons (D118: four epics write here and none may delete another's file).
+  // The fix is the SHAPE predicate the ledger module already owns — a run is
+  // `Array.isArray(recipes) && typeof run_id === "string"` — never a pinned
+  // list of filenames. A pin would have made this green and blind: the store
+  // grows, the pin does not, and nothing says so.
+  const { runs, shape } = readLedgerRuns(resolve(GRIP, "ledger"));
+  const owned = runs.filter((run) => inScope(run, "owned"));
+  assert.ok(owned.length >= CENSUS_RUN_FILES.length, `the store must still hold at least the ${CENSUS_RUN_FILES.length} census runs — found ${owned.length}`);
   const registered = new Set(BINDING_RULES.map((entry) => entry.rule));
-  const census = classifyAll(ledgerRows(files));
+  const census = classifyAll(owned.flatMap((run) => run.recipes));
   for (const verdict of census.verdicts) {
     assert.ok(registered.has(verdict.rule), `unregistered rule ${verdict.rule}`);
     if (verdict.binding_class === null) {
@@ -461,9 +481,14 @@ test("the WHOLE ledger directory stays internally consistent, however many runs 
     assert.equal(verdict.portable_scope, PORTABLE_SCOPES[verdict.binding_class]);
     assert.equal(typeof verdict.exit_masked, "boolean");
   }
+  // THE WALKED SCOPE IS PRINTED ON PASS, not only inside a failure message.
+  // What a green run declines to read is exactly as load-bearing as what it
+  // reads, and a reviewer must be able to see the decline without editing the
+  // test.
   console.log(
-    `\n  [ledger dir] ${files.length} run file(s), ${census.total} rows → ${JSON.stringify(census.by_class)}` +
-      `, unclassified ${census.unclassified}, else-branch ${census.default_rule.count}\n`,
+    `\n  [ledger dir] scope=owned — walked ${owned.length} of ${shape.runs} run file(s), ${census.total} rows → ${JSON.stringify(census.by_class)}` +
+      `, unclassified ${census.unclassified}, else-branch ${census.default_rule.count}` +
+      `\n  [ledger dir] declined: ${shape.foreign} foreign run file(s) with no run_id, ${shape.not_a_run} NOT-A-RUN document(s), ${shape.malformed_run} MALFORMED-RUN, ${shape.unparseable} UNPARSEABLE\n`,
   );
 });
 

@@ -4,6 +4,31 @@ defmodule Barkpark.Tasks.Close do
   # facade (which defdelegates close/3 here). Fencing-epoch CAS, the
   # already-terminal guard, and the dependent-unblock walk all live together so
   # the close contract is one cohesive unit.
+  #
+  # THE CLOSE HONESTY GATES (PDS-D288/D289/D290) — READ THIS BEFORE CHANGING THEM.
+  # Three checks ride the same in-lock `with` chain as the epoch fence:
+  #
+  #   * HOLDER — the closer must be (or have been) the lease holder. A foreign
+  #     close is not refused outright forever: it is refused UNTIL the caller
+  #     passes `:holder_override` with a reason, which is written into the doc as
+  #     `close_override.holder` (actor + held_by + reason + ts). That shape is
+  #     deliberate: 76 of 2,064 recorded closes are foreign and EVERY foreign
+  #     closer is a LEAD sealing a merge-gated task, so a hard refusal would
+  #     break the epic-cycle seal ritual. What changes is that the deliberate
+  #     ones are now LOUD and the accidental ones stop.
+  #   * CRITERIA — a `done` close over unmet acceptance criteria needs
+  #     `:criteria_override` with a reason, recorded as `close_override.criteria`
+  #     (actor + the unmet rows + reason + ts). `cancelled` and `blocked` are
+  #     EXEMPT BY NAME — abandoning criteria is the point of cancelling. There is
+  #     no third criterion state: this is accept-unmet-with-a-recorded-reason.
+  #   * WORKER ID — sentinel ids (`""`, `None`, `null`, `nil`, `-`) are refused.
+  #
+  # NONE OF THIS IS AUTHORIZATION. `worker_id` arrives as a client-supplied body
+  # param (`tasks_controller.ex` close/2), never from the api_token, so a caller
+  # who wants to close someone else's task can simply claim to be them. These
+  # gates stop ACCIDENTS and make deliberate foreign/unproven closes AUDITABLE
+  # for the first time; they are not an access-control boundary and must never
+  # be described as one.
 
   import Ecto.Query, only: [from: 2]
 
@@ -15,7 +40,10 @@ defmodule Barkpark.Tasks.Close do
       caller_stamp: 1,
       merge_criteria: 2,
       task_broadcast: 4,
-      emit_broadcasts: 1
+      emit_broadcasts: 1,
+      close_holder: 2,
+      unmet_criteria: 1,
+      check_worker_id: 1
     ]
 
   alias Barkpark.Content.{Document, Scope}
@@ -47,10 +75,21 @@ defmodule Barkpark.Tasks.Close do
     # Audit stamp: the api_token id that drove this close (nil for internal
     # callers), threaded into the task.closed mutation_event's document map.
     caller_token_id = Keyword.get(opts, :caller_token_id)
+    # The two LOUD overrides (PDS-D288/D289). Each is a non-empty reason string;
+    # absent (or blank) means "no override", and the corresponding gate refuses.
+    overrides = %{
+      holder: override_reason(Keyword.get(opts, :holder_override)),
+      criteria: override_reason(Keyword.get(opts, :criteria_override))
+    }
 
     cond do
       new_status not in @closed_lifecycle_statuses ->
         {:error, {:invalid_lifecycle, new_status}}
+
+      # Sentinel worker ids die before the DB — a close attributed to "None" is
+      # a missing value wearing a worker's clothes (PDS-D290).
+      match?({:error, _}, check_worker_id(worker_id)) ->
+        check_worker_id(worker_id)
 
       true ->
         do_close_txn(
@@ -62,10 +101,23 @@ defmodule Barkpark.Tasks.Close do
           reason,
           criteria,
           landed,
-          caller_token_id
+          caller_token_id,
+          overrides
         )
     end
   end
+
+  # A reason only overrides when it has words. `nil`, `""`, whitespace and
+  # non-strings are NOT an override — an unexplained override is exactly the
+  # silent foreign close this gate exists to end.
+  defp override_reason(reason) when is_binary(reason) do
+    case String.trim(reason) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp override_reason(_), do: nil
 
   @doc """
   Merge-event bridge (ledger-merge-criterion-autostamp): auto-stamp a task's
@@ -223,7 +275,8 @@ defmodule Barkpark.Tasks.Close do
          reason,
          criteria,
          landed,
-         caller_token_id
+         caller_token_id,
+         overrides
        ) do
     result =
       Repo.transaction(fn ->
@@ -254,8 +307,23 @@ defmodule Barkpark.Tasks.Close do
                 {:error, :stale_claim}
 
               true ->
+                # The honesty gates sit HERE, on the `doc` read at the top of
+                # this txn under the per-task advisory lock — the only place
+                # where the PRE-close state is visible, the read is serialized,
+                # and a refusal aborts before any content is written. Anywhere
+                # downstream of `merge_criteria` (which runs inside
+                # `apply_close_update`'s single rev-CAS write) is decorative by
+                # construction: a closer that flips its own criteria in the
+                # closing command would gate against its own claim.
                 with :ok <- check_fencing(doc, observed_epoch),
+                     {:ok, holder_record} <- check_close_holder(doc, worker_id, overrides.holder),
+                     # The work-digest fence stays AHEAD of the criteria gate:
+                     # if the brief itself moved under the claim, "your criteria
+                     # are unmet" is the wrong thing to say — re-read first.
                      :ok <- check_work_digest(doc, observed_rev_opt),
+                     :ok <- check_criteria_payload(doc, criteria),
+                     {:ok, criteria_record} <-
+                       check_criteria_proven(doc, new_status, landed, overrides.criteria),
                      {:ok, updated} <-
                        apply_close_update(
                          doc,
@@ -264,7 +332,8 @@ defmodule Barkpark.Tasks.Close do
                          new_status,
                          reason,
                          criteria,
-                         landed
+                         landed,
+                         compose_override_record(holder_record, criteria_record, worker_id)
                        ) do
                   ev =
                     insert_mutation_event!(
@@ -314,6 +383,110 @@ defmodule Barkpark.Tasks.Close do
     end
   end
 
+  # HOLDER GATE (PDS-D288). `check_fencing/2` above proves the caller observed
+  # the CURRENT epoch; it never once compares WHO is closing, so worker-B closing
+  # worker-A's task on A's epoch has always been `{:ok, doc}` with
+  # `claim.worker = "worker-A", claim.closed_by = "worker-B"` — a ledger row that
+  # reads like A finished the work. `Internal.close_holder/2` carries the three
+  # allow-arms (unclaimed / holder / self-resume). A foreign close is refused
+  # UNLESS the caller passes an explicit reason, in which case it succeeds and
+  # the reason + both identities are written into the close. Refusal is the
+  # DEFAULT, the override is the escape hatch — never the other way round.
+  defp check_close_holder(%Document{} = doc, worker_id, override_reason) do
+    case close_holder(doc, worker_id) do
+      {:ok, _arm} ->
+        {:ok, nil}
+
+      {:error, {:not_holder, held}} when is_nil(override_reason) ->
+        {:error, {:not_holder, held}}
+
+      {:error, {:not_holder, held}} ->
+        {:ok, %{"held_by" => held, "reason" => override_reason}}
+    end
+  end
+
+  # A malformed criteria payload keeps its OWN error, ahead of the unmet gate.
+  # `merge_criteria/2` is pure over the content map, so running it here as a
+  # dry-run costs one map walk and buys precedence: a caller whose index is out
+  # of range, whose text guard is stale, or whose met-flip carries no text hears
+  # about THAT (`:criteria_index_out_of_range` / `:criteria_mismatch` /
+  # `:criterion_text_required`) rather than a confusing "criteria unmet". The
+  # real write still runs the same merge inside `apply_close_update/8` — this
+  # discards its result and only propagates the error.
+  defp check_criteria_payload(_doc, []), do: :ok
+
+  defp check_criteria_payload(%Document{content: content}, criteria) do
+    case merge_criteria(content, criteria) do
+      {:ok, _dry_run} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # CRITERIA GATE (PDS-D289). Scoped to `done` ONLY: `cancelled` and `blocked`
+  # are exempt BY NAME below — abandoning acceptance criteria is precisely what
+  # cancelling a task MEANS, and a blocked close is an honest partial. Unmet is
+  # measured on the doc AS READ, so the closing command's own criteria payload
+  # cannot satisfy the gate it is being measured against.
+  #
+  # ONE deduction: criteria the merge-gate auto-stamp is about to prove ON ITS
+  # OWN AUTHORITY (an explicit `"merge_gate" => true` marker plus a land digest
+  # riding this close — `autostamp_merge_gate/6`) are not counted. Those are not
+  # a closer asserting its own proof; the marker + the merge artifact ARE the
+  # proof, and counting them would refuse every lead seal close and re-break the
+  # exact ritual D288 protects.
+  defp check_criteria_proven(%Document{} = doc, "done", landed, override_reason) do
+    case unmet_after_autostamp(doc, landed) do
+      [] ->
+        {:ok, nil}
+
+      unmet when is_nil(override_reason) ->
+        {:error, {:criteria_unmet, Enum.map(unmet, &Map.get(&1, "index"))}}
+
+      unmet ->
+        {:ok, %{"unmet" => unmet, "reason" => override_reason}}
+    end
+  end
+
+  # Exempt BY NAME — not by falling through a catch-all.
+  defp check_criteria_proven(%Document{}, status, _landed, _override)
+       when status in ~w(cancelled blocked),
+       do: {:ok, nil}
+
+  defp unmet_after_autostamp(%Document{content: content}, landed) do
+    autostamped =
+      if is_map(landed) and map_size(landed) > 0 do
+        content
+        |> merge_gate_synthetics("", MapSet.new())
+        |> MapSet.new(&Map.get(&1, "index"))
+      else
+        MapSet.new()
+      end
+
+    content
+    |> unmet_criteria()
+    |> Enum.reject(&MapSet.member?(autostamped, Map.get(&1, "index")))
+  end
+
+  # The durable override record, or nil when neither gate was overridden. ONE
+  # `close_override` map so a re-read of the closed doc answers "was this close
+  # honest?" in a single key — `actor` is who closed, `held_by` is who the ledger
+  # thought held the lease, `reason` is why they overrode it anyway.
+  defp compose_override_record(nil, nil, _worker_id), do: nil
+
+  defp compose_override_record(holder_record, criteria_record, worker_id) do
+    ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    %{}
+    |> maybe_put_override("holder", holder_record, worker_id, ts_iso)
+    |> maybe_put_override("criteria", criteria_record, worker_id, ts_iso)
+  end
+
+  defp maybe_put_override(acc, _key, nil, _worker_id, _ts_iso), do: acc
+
+  defp maybe_put_override(acc, key, record, worker_id, ts_iso) do
+    Map.put(acc, key, Map.merge(record, %{"actor" => worker_id, "ts" => ts_iso}))
+  end
+
   # "Edited-under-you becomes a 409, never a silent close." When the caller did
   # NOT pin an explicit observed_rev AND the claim carries a work_digest, the
   # doc's current work-defining fields (title/brief/description/acceptance_criteria —
@@ -357,7 +530,8 @@ defmodule Barkpark.Tasks.Close do
          new_status,
          reason,
          criteria,
-         landed
+         landed,
+         override_record
        ) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -393,6 +567,10 @@ defmodule Barkpark.Tasks.Close do
     # writes; a blank/absent digest never clobbers an existing one (a re-close or
     # a CI backfill can add it later without erasing a prior write).
     new_content = merge_landed(new_content, landed)
+
+    # The loud override record rides the SAME rev-CAS write as the lifecycle
+    # flip — an overridden close and its confession land together or not at all.
+    new_content = merge_override_record(new_content, override_record)
 
     # Expectation close-out (living-values §8/§9 — "task proves paper"):
     # acceptance-criteria met/evidence updates ride the SAME rev-CAS write as
@@ -458,6 +636,21 @@ defmodule Barkpark.Tasks.Close do
   end
 
   defp merge_landed(content, _), do: content
+
+  # A close that overrode nothing writes nothing (no empty `close_override` key
+  # to make an honest close look confessed). A prior override on a re-closed
+  # task is merged over, never erased.
+  defp merge_override_record(content, record) when is_map(record) and map_size(record) > 0 do
+    existing =
+      case Map.get(content, "close_override") do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
+    Map.put(content, "close_override", Map.merge(existing, record))
+  end
+
+  defp merge_override_record(content, _record), do: content
 
   # Merge-gate auto-stamp (Felix wave-9). Kills the recurring ledger toil where
   # the final "PR merged"/LEAD-CLOSED acceptance criterion is left met=false at

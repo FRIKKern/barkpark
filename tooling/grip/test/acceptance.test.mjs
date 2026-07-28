@@ -22,7 +22,10 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runAcceptance, checkProbes, parseLevelSkip, READ_LEVEL_PROBES, EXPECTED, DECLARED_DIVERGENCES, FIXTURE } from "../acceptance.mjs";
+import { runAcceptance, checkProbes, parseLevelSkip, READ_LEVEL_PROBES, EXPECTED, SCREEN_EXPECTED, DECLARED_DIVERGENCES, FIXTURE } from "../acceptance.mjs";
+import { screenCommand } from "../screen.mjs";
+// Imported to MEASURE the difference between the two gates, never to run one.
+import { classifySafety } from "../rerun.mjs";
 
 /** Write a mutated copy of the fixture and hand back its path. */
 function withMutatedFixture(mutate, fn) {
@@ -246,20 +249,34 @@ test("parseLevelSkip reads both the plain and the straddling forms", () => {
 // absolute file:// URLs of the REAL modules — the module under test is still
 // the shipped source plus one mutation, not a stub.
 let declGuardSeq = 0;
-const mutatedModule = async (mutate) => {
-  const srcUrl = new URL("../acceptance.mjs", import.meta.url);
+
+/**
+ * Import a mutated COPY of a tooling/grip module, from a temp dir.
+ *
+ * Generalised from the acceptance-only form so the same house pattern can
+ * mutate cli.mjs (the exit-3 control below). Returns the namespace, or throws
+ * whatever the mutated module threw on import.
+ */
+const importMutated = async (relPath, mutate) => {
+  const srcUrl = new URL(`../${relPath}`, import.meta.url);
   const gripDir = new URL("../", import.meta.url).href.replace(/\/$/, "");
   const src = mutate(readFileSync(srcUrl, "utf8")).replace(/(from\s*")\.\//g, `$1${gripDir}/`);
-  const dir = mkdtempSync(join(tmpdir(), "grip-declguard-"));
-  const path = join(dir, `acceptance-${declGuardSeq++}.mjs`);
+  const dir = mkdtempSync(join(tmpdir(), "grip-mutated-"));
+  const path = join(dir, `${relPath.replace(/\.mjs$/, "")}-${declGuardSeq++}.mjs`);
   writeFileSync(path, src, "utf8");
   try {
-    await import(`file://${path}`);
+    return await import(`file://${path}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+const mutatedModule = async (mutate) => {
+  try {
+    await importMutated("acceptance.mjs", mutate);
     return null; // imported clean — the guard did NOT fire
   } catch (err) {
     return err;
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
   }
 };
 
@@ -279,4 +296,235 @@ test("a declaration whose label does not actually diverge is FATAL", async () =>
 test("the shipped declaration passes its own guard — the check is not simply always-fatal", async () => {
   const err = await mutatedModule((s) => s);
   assert.equal(err, null, `the unmutated module failed its own declaration guard: ${err?.message}`);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// C5 — THE SPECIMEN'S OWN `rerun` IS SCREENED, AND THE ANSWER IS FROZEN (D116)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The one-word hazard this section exists to hold off: a reword saying "every
+// specimen rerun goes through runRerun" would ssh to production from the test
+// suite. `runRerun`'s step 1 is `classifySafety` (rerun.mjs:676), NOT
+// `screenCommand`. The tests below MEASURE that difference rather than
+// asserting it in prose.
+
+const RATIFIED = JSON.parse(readFileSync(FIXTURE, "utf8")).specimens.filter((s) => s.ratified === true);
+
+test("the six-row screen table is FROZEN VERBATIM — {ok, reason} per specimen, refusals included", () => {
+  assert.equal(RATIFIED.length, 6, "the ratified table has six rows; the frozen screen table must cover all of them");
+
+  // Measured, not restated: screenCommand is called here on the fixture's own
+  // `rerun` strings and the answer is compared to the frozen table.
+  const measured = Object.fromEntries(RATIFIED.map((s) => {
+    const r = screenCommand(s.rerun ?? "");
+    return [s.id, { ok: r.ok === true, reason: String(r.reason ?? "") }];
+  }));
+
+  assert.deepEqual(measured, {
+    1: { ok: false, reason: "host bound: names ssh (remote execution)" },
+    2: { ok: true, reason: "admitted: within the host bound, allowlisted head and sub-verb, no write shape" },
+    3: { ok: true, reason: "admitted: within the host bound, allowlisted head and sub-verb, no write shape" },
+    4: { ok: false, reason: "host bound: names barkpark.cloud" },
+    5: { ok: true, reason: "admitted: within the host bound, allowlisted head and sub-verb, no write shape" },
+    6: { ok: false, reason: "not allowlisted: node executes arbitrary JavaScript (including fs writes)" },
+  });
+
+  // …and the module's own frozen table is the SAME table, so acceptance.mjs
+  // cannot drift away from this file while both stay green.
+  assert.deepEqual(Object.fromEntries(Object.entries(SCREEN_EXPECTED).map(([k, v]) => [k, { ...v }])), measured);
+
+  // The suite reports it too — a freeze nobody reads is a freeze nobody keeps.
+  const outcome = runAcceptance();
+  for (const row of outcome.results) {
+    assert.deepEqual(row.screen, measured[row.id], `specimen ${row.id}'s reported screen must match the measurement`);
+  }
+  assert.equal(outcome.results.filter((r) => !r.screen.ok).length, 3, "exactly three specimen reruns are refused");
+});
+
+test("the three refusals are NOT one class — specimen 6 is HEAD-ALLOWLIST, specimens 1 and 4 are HOST-BOUND", () => {
+  // Collapsing them under a single "refused" label would let the head allowlist
+  // be deleted entirely while the table stayed green, because the host bound
+  // alone still refuses 1 and 4. They are different rules with different failure
+  // modes, and the freeze keeps them apart by REASON, not by count.
+  const reasonOf = (id) => SCREEN_EXPECTED[id].reason;
+
+  for (const id of [1, 4]) {
+    assert.match(reasonOf(id), /^host bound: /, `specimen ${id} is refused for leaving this box`);
+  }
+  assert.match(reasonOf(6), /^not allowlisted: /, "specimen 6 is refused for WHAT it runs, not WHERE");
+  assert.notEqual(reasonOf(1), reasonOf(4), "the two host-bound refusals name different bounds (ssh vs a hostname)");
+
+  // Specimen 6's rerun never leaves the loopback and is refused anyway — that is
+  // the whole categorical difference, and it is also this slice's own L3
+  // ceiling: every command in this file's gate starts with `node`.
+  const localNode = screenCommand("node tooling/grip/cli.mjs --selftest");
+  assert.equal(localNode.ok, false);
+  assert.equal(localNode.reason, reasonOf(6),
+    "grip refuses to screen its own execution under exactly the rule that refuses specimen 6 (screen.mjs:1096)");
+});
+
+test("TIGHTENING, MEASURED: classifySafety admits all six specimens; screenCommand refuses three", () => {
+  // This is the measurement behind the claim that screening TIGHTENS the fixture
+  // rather than softening it. `runRerun` gates on classifySafety, which says
+  // safe:true for the ssh-to-production specimen and for the arbitrary-JS one.
+  // adjudicate.mjs:90-96 calls that path, left to itself, "a default-on RCE".
+  // Nothing below executes: both functions are pure string judgements.
+  const admittedBySafety = [];
+  for (const s of RATIFIED) {
+    const v = classifySafety(s.rerun);
+    assert.equal(v.safe, true,
+      `classifySafety is expected to admit specimen ${s.id} — that permissiveness IS the finding`);
+    assert.equal(v.reason, "no write shape detected");
+    admittedBySafety.push(s.id);
+  }
+  assert.deepEqual(admittedBySafety, [1, 2, 3, 4, 5, 6], "classifySafety admits 6 of 6, ssh-to-production included");
+
+  const refusedByScreen = RATIFIED.filter((s) => screenCommand(s.rerun).ok !== true).map((s) => s.id);
+  assert.deepEqual(refusedByScreen, [1, 4, 6], "screenCommand refuses 3 of 6 — strictly more refusals, never fewer");
+
+  // The strict-superset statement, asserted rather than narrated.
+  const safeSet = new Set(admittedBySafety);
+  for (const id of refusedByScreen) {
+    assert.ok(safeSet.has(id), `specimen ${id} is refused by the screen and admitted by classifySafety`);
+  }
+  assert.ok(refusedByScreen.length > 0, "a screen that refused nothing would not be a tightening");
+});
+
+test("MUTATION: a permissive screen (admitAll) turns the acceptance suite RED under SCREEN-DRIFT", async () => {
+  // The freeze has to be ABLE TO FAIL. Swap screenCommand for one that admits
+  // everything — the shape a well-meaning "make the fixture runnable" edit would
+  // take — and the three refusals must be reported by name, not absorbed.
+  const mod = await importMutated("acceptance.mjs", (src) => {
+    const patched = src.replace(
+      /import \{ screenCommand \} from "\.\/screen\.mjs";/,
+      'const screenCommand = () => ({ ok: true, reason: "admitted: within the host bound, allowlisted head and sub-verb, no write shape" });',
+    );
+    assert.notEqual(patched, src, "the screenCommand import moved — this mutation no longer mutates anything");
+    return patched;
+  });
+
+  // The copy lives in a temp dir, so it is handed the REAL fixture path
+  // explicitly — the module under test is the shipped source plus one mutation,
+  // read against the shipped fixture.
+  const outcome = mod.runAcceptance(FIXTURE);
+  assert.equal(outcome.ok, false, "an admit-everything screen reported PASS — the freeze is not enforcing itself");
+
+  const drifted = outcome.results.filter((r) => r.failures.some((f) => f.kind === "SCREEN-DRIFT")).map((r) => r.id);
+  assert.deepEqual(drifted, [1, 4, 6], "exactly the three refused specimens must go red, and only them");
+
+  const detail = outcome.results.find((r) => r.id === 6).failures.find((f) => f.kind === "SCREEN-DRIFT").detail;
+  assert.match(detail, /node executes arbitrary JavaScript/, "the failure must quote the reason string it lost");
+});
+
+test("MUTATION: a specimen whose rerun is rewritten drifts against the frozen screen", () => {
+  // The other direction. The freeze pins the SPECIMEN's command as much as the
+  // screen's rules: editing specimen 1's ssh into a local grep would quietly
+  // make the fixture tamer, and the frozen refusal is what notices.
+  const outcome = withMutatedFixture((fixture) => {
+    specimen(fixture, 1).rerun = "grep -c reason tooling/grip/record.mjs";
+  }, (path) => runAcceptance(path));
+
+  assert.equal(outcome.ok, false);
+  const drift = rowFor(outcome, 1).failures.find((f) => f.kind === "SCREEN-DRIFT");
+  assert.ok(drift, `expected SCREEN-DRIFT, got ${rowFor(outcome, 1).failures.map((f) => f.kind).join("+") || "none"}`);
+  assert.match(drift.detail, /host bound: names ssh/);
+
+  // ATTRIBUTION — only the rewritten specimen drifts.
+  const others = outcome.results.filter((r) => r.id !== 1 && r.failures.length > 0);
+  assert.deepEqual(others, [], "the rerun rewrite leaked into other specimens");
+});
+
+test("a ratified specimen with no frozen screen row is a NO-SCREEN-EXPECTATION failure", () => {
+  // The same never-skip-what-you-do-not-recognise rule EXPECTED already has.
+  const outcome = withMutatedFixture((fixture) => {
+    specimen(fixture, 101).ratified = true;
+  }, (path) => runAcceptance(path));
+
+  const row = rowFor(outcome, 101);
+  assert.ok(row.failures.some((f) => f.kind === "NO-SCREEN-EXPECTATION"),
+    `expected NO-SCREEN-EXPECTATION, got ${row.failures.map((f) => f.kind).join("+")}`);
+});
+
+test("SCREEN_EXPECTED carries no phantoms — one row per ratified specimen, no more", () => {
+  const ids = new Set(RATIFIED.map((s) => s.id));
+  for (const id of Object.keys(SCREEN_EXPECTED)) {
+    assert.ok(ids.has(Number(id)), `SCREEN_EXPECTED pins specimen ${id}, which is not ratified`);
+  }
+  assert.equal(Object.keys(SCREEN_EXPECTED).length, ids.size);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// C2 — THE EXIT-3 OUTCOME CLASS IS RE-DERIVABLE, NOT A ONE-TIME HAND RUN
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// "CONTROL DID NOT BEHAVE AS A CONTROL" was proven once, by hand, by breaking a
+// fixture in the working tree. A third outcome class whose only evidence is a
+// paragraph in a wave log is exactly the shape this epic refuses, so the
+// mutation is automated here on the same house pattern the declaration-guard
+// tests use: import a mutated COPY of cli.mjs and call its real `selftest()`.
+
+/** Run a (possibly mutated) cli.mjs selftest, capturing stdout instead of printing it. */
+const runSelftest = async (mutate) => {
+  const mod = await importMutated("cli.mjs", mutate);
+  const chunks = [];
+  const write = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (chunk) => { chunks.push(String(chunk)); return true; };
+  try {
+    return { code: mod.selftest(), out: chunks.join("") };
+  } finally {
+    process.stdout.write = write;
+  }
+};
+
+test("MUTATION: breaking a control's PRECONDITION yields exit 3, not a pass and not a guard failure", async () => {
+  // The LEVEL-SKIP control only tests a level SKIP if its clean twin's command
+  // really derives L2. Point the clean twin at a local command and the
+  // precondition breaks: the poisoned twin's rejection would then prove nothing,
+  // so the run must VOID it rather than count it.
+  const { code, out } = await runSelftest((src) => {
+    const patched = src.replace(
+      'clean: withField({ rerun: "git show origin/main:tooling/grip/record.mjs", level: "L2" }),',
+      'clean: withField({ rerun: "git rev-parse --short HEAD", level: "L2" }),',
+    );
+    assert.notEqual(patched, src, "the LEVEL-SKIP clean twin moved — this mutation no longer mutates anything");
+    return patched;
+  });
+
+  assert.equal(code, 3, `expected EXIT.CONTROL_INVALID (3), got ${code}\n${out}`);
+  assert.match(out, /CONTROL DID NOT BEHAVE AS A CONTROL \(1\)/);
+  assert.match(out, /VOID {2}LEVEL-SKIP/, "the voided control must be named, not merely counted");
+  assert.match(out, /the clean twin's command must derive L2/);
+
+  // 1-vs-3 is the whole point: an invalid experiment is NOT a guard failure.
+  assert.doesNotMatch(out, /^GUARD FAILURE/m);
+  // …and the other controls still ran. A harness that reddens everything on one
+  // broken fixture cannot tell you which fixture broke.
+  assert.ok(out.split("\n").filter((l) => l.startsWith("  ok")).length >= 10,
+    "the surviving controls must still fire — only the voided one is withheld");
+});
+
+test("MUTATION: a control that stops REJECTING its planted defect yields exit 1, never exit 3", async () => {
+  // The discriminator, in the other direction. Exit 3 says "we do not know";
+  // exit 1 says "we know, and the guard is broken". A harness that answered 3 to
+  // both would launder a real guard failure into an inconclusive.
+  const { code, out } = await runSelftest((src) => {
+    const patched = src.replace(
+      'poisoned: withField({ subject: "   " }),',
+      'poisoned: withField({}),',
+    );
+    assert.notEqual(patched, src, "the MISSING-SUBJECT poisoned twin moved — this mutation no longer mutates anything");
+    return patched;
+  });
+
+  assert.equal(code, 1, `expected EXIT.GUARD_FAILURE (1), got ${code}\n${out}`);
+  assert.match(out, /GUARD FAILURE \(1\)/);
+  assert.doesNotMatch(out, /CONTROL DID NOT BEHAVE AS A CONTROL/);
+});
+
+test("the UNMUTATED selftest is clean at exit 0 — the exit-3 path is not simply always-on", async () => {
+  const { code, out } = await runSelftest((s) => s);
+  assert.equal(code, 0, `the shipped selftest must be clean; got ${code}\n${out}`);
+  assert.match(out, /grip --selftest — clean/);
+  assert.match(out, /all \d+ controls fired as designed\./,
+    "the verdict line must be present — capture the selftest to a FILE, never a pipe (tgw11-bl-cli-selftest-pipe-truncation)");
 });

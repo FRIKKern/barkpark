@@ -774,7 +774,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -1305,7 +1305,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -2102,7 +2102,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3111,7 +3111,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3171,7 +3171,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6082,7 +6082,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -6867,7 +6867,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -7256,7 +7256,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -7363,7 +7363,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -8260,7 +8260,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8911,7 +8911,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -9082,7 +9082,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -9650,7 +9650,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -11282,7 +11282,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -11780,7 +11780,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -12159,7 +12159,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"

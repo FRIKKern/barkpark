@@ -31,6 +31,119 @@ defmodule Barkpark.Tasks.Internal do
     end
   end
 
+  # ─── Close-honesty predicates (PDS-D288 / D289 / D290) ────────────────────
+  #
+  # THESE ARE HONESTY GATES, NOT AUTHORIZATION. `worker_id` is a client-supplied
+  # body param (`tasks_controller.ex` close/2 reads it straight out of the JSON
+  # body), never derived from the api_token — anyone who can call close can name
+  # any worker. What these predicates buy is that the LEDGER stops recording a
+  # close as if the closer held the lease and the criteria were proven when
+  # neither was true: an ACCIDENT is refused, and a DELIBERATE foreign close has
+  # to say so out loud and is auditable afterwards. Do not sell them as access
+  # control.
+
+  # Close-holder predicate (PDS-D288). Deliberately NOT `check_holder/2` above:
+  # that one fails on a nil claim, which would refuse every never-claimed
+  # root/container close AND every self-resume close. Three allow-arms:
+  #
+  #   * `:unclaimed`   — no claim map at all. Nothing was ever leased, so there
+  #     is no holder to contradict (this is what `Close.check_fencing/2`'s bare
+  #     `_ -> :ok` has always permitted, preserved verbatim).
+  #   * `:holder`      — `claim.worker == worker_id`. The ordinary close.
+  #   * `:self_resume` — the lease was given up (`claim.worker` nil) and THIS
+  #     worker is the one who gave it up. BOTH keys are checked on purpose: a
+  #     TTL reap writes `previous_worker` (`ttl_sweeper.ex`) while a voluntary
+  #     release writes `released_by` (`release.ex`), so keying on one silently
+  #     refuses the other path.
+  #
+  # Anything else is `{:error, {:not_holder, held_by}}` — the caller may retry
+  # with an explicit, recorded override (see `Tasks.Close`), never silently.
+  def close_holder(%Document{content: content}, worker_id) when is_binary(worker_id) do
+    case claim_map(content) do
+      nil ->
+        {:ok, :unclaimed}
+
+      claim ->
+        cond do
+          Map.get(claim, "worker") == worker_id ->
+            {:ok, :holder}
+
+          is_nil(Map.get(claim, "worker")) and
+              worker_id in [Map.get(claim, "previous_worker"), Map.get(claim, "released_by")] ->
+            {:ok, :self_resume}
+
+          true ->
+            {:error, {:not_holder, held_by(claim)}}
+        end
+    end
+  end
+
+  # Who the ledger believes holds (or last held) the lease — the `held_by` the
+  # override record has to name. nil when the claim map names nobody at all.
+  def held_by(claim) when is_map(claim) do
+    Map.get(claim, "worker") || Map.get(claim, "previous_worker") ||
+      Map.get(claim, "released_by")
+  end
+
+  def held_by(_), do: nil
+
+  defp claim_map(content) do
+    case Map.get(content || %{}, "claim") do
+      claim when is_map(claim) -> claim
+      _ -> nil
+    end
+  end
+
+  # Every acceptance criterion that is NOT proven, as
+  # `[%{"index" => i, "criterion" => text_or_nil}]` in list order. Counting
+  # matches `Tasks.Criteria.progress/1` exactly: `met` must be EXACTLY `true`,
+  # and garbage (a non-map entry, a missing key, `"yes"`, `1`) counts as UNMET
+  # rather than crashing — an unreadable criterion is not a proven one. Absent
+  # or non-list criteria yield `[]` (nothing to prove, never "0/0").
+  def unmet_criteria(content) do
+    case Map.get(content || %{}, "acceptance_criteria") do
+      list when is_list(list) ->
+        list
+        |> Enum.with_index()
+        |> Enum.reject(fn {entry, _i} -> met?(entry) end)
+        |> Enum.map(fn {entry, i} -> %{"index" => i, "criterion" => criterion_text(entry)} end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp met?(entry) when is_map(entry),
+    do: Map.get(entry, "met") == true or Map.get(entry, :met) == true
+
+  defp met?(_entry), do: false
+
+  defp criterion_text(entry) when is_map(entry) do
+    case Map.get(entry, "criterion") || Map.get(entry, :criterion) do
+      text when is_binary(text) -> text
+      _ -> nil
+    end
+  end
+
+  defp criterion_text(_entry), do: nil
+
+  # Sentinel worker ids (PDS-D290). 21 recorded closes carry the literal string
+  # `"None"` as `closed_by` — a stringified null from some caller's templating,
+  # accepted because `Params.fetch_string/2` only asks for a non-empty binary.
+  # A close attributed to "None" reads as a real close to every downstream gate,
+  # so refuse the shapes that can only be a missing value, at the engine.
+  @sentinel_worker_ids ~w(none null nil -)
+
+  def check_worker_id(worker_id) when is_binary(worker_id) do
+    trimmed = String.trim(worker_id)
+
+    if trimmed == "" or String.downcase(trimmed) in @sentinel_worker_ids do
+      {:error, {:sentinel_worker_id, worker_id}}
+    else
+      :ok
+    end
+  end
+
   # ─── Acceptance-criteria merge (shared by Close and Stamp) ────────────────
   #
   # Applies `[%{"index" => i, ...}]` updates onto content["acceptance_criteria"].

@@ -78,6 +78,109 @@ export interface ChatSessionSummary {
   updated_at?: string
 }
 
+// ---------------------------------------------------------------------------
+// The LIVE-DOCUMENT stream (charter D59)
+//
+// While a turn is answering, the server emits SETTLED SEGMENTS of the reply as
+// PortableDoc blocks instead of raw markdown deltas, so the phone renders the
+// same block trees Studio and the TUI do while the answer is still being
+// written. Both frames are id-LESS — a frame's identity is its (turn, from)
+// pair — and both ALWAYS carry a data: line whose payload is JSON, never raw
+// markdown (the Go SSE reader trims every data line while this client strips
+// only one leading space, so raw text would differ per surface).
+//
+// The frozen wire, its offset arithmetic, and the exact per-sequence client
+// outcomes are recorded ONCE at internal/pdrender/testdata/chat_stable_frames.json
+// and consumed by both this app (__tests__/stableFrameContract.test.ts) and the
+// Go TUI (internal/pdrender/chat_stable_frames_test.go). Change the contract
+// there first.
+// ---------------------------------------------------------------------------
+
+/** What the still-unsettled tail after `to` is SHAPED like, so the client can
+ * draw a shape-appropriate placeholder rather than a half-open ``` fence. The
+ * classifier is server-side on purpose: it belongs to the one converter, so
+ * every surface skeletons the same tail the same way. */
+export type StableSkeletonKind =
+  | 'code'
+  | 'diagram'
+  | 'chart'
+  | 'stats'
+  | 'table'
+  | 'callout'
+  | 'block'
+
+export interface StableSkeleton {
+  /** WIDER than StableSkeletonKind on purpose, and it is the same distinction
+   * messageBlocks draws below: that type is what the server sends TODAY, this is
+   * what a client must be able to hold. A newer server's eighth label has to
+   * render honestly — StreamSkeleton's `skeletonLabel` degrades any unknown kind
+   * to the generic "block" shape, exactly as the server's own `skeleton_label/1`
+   * fallback arm does — and a consumer that narrowed here would instead have to
+   * reject the frame and lose a whole turn's worth of settled document over a
+   * word it did not recognise. */
+  kind: string
+  /** The PROSE ABOVE the forming component — the source bytes between `to` and
+   * the component's first triggering line, verbatim. It is `StreamTail`'s
+   * `classify/1` third element (charter D62/D67), and the client renders it as
+   * live text ABOVE the placeholder box so a paragraph that happens to sit
+   * under a forming table keeps streaming instead of vanishing behind it.
+   *
+   * NOT a caption, NOT the component's own body, and legitimately the EMPTY
+   * STRING whenever the component starts exactly at `to` — a consumer must
+   * handle '' and must never require it non-empty. */
+  prose: string
+}
+
+/** `event: stable` — one settled segment of the answering turn.
+ *
+ * `to` is not redundant with `blocks`: block text is NOT source bytes (a
+ * four-segment run proof measured 53 source vs 42 derived), so a client that
+ * tried to advance its cursor by the rendered length would reject a PERFECT
+ * stream at frame 2. `turn` is not redundant with `from` either: `from` alone
+ * false-accepts across a turn boundary, splicing the next turn's tail onto the
+ * previous message. */
+export interface StableFrame {
+  turn: number
+  /** Inclusive UTF-8 byte offset into the turn's source markdown. */
+  from: number
+  /** Exclusive end offset — the client's next expected `from`. */
+  to: number
+  blocks: Block[]
+  skeleton: StableSkeleton | null
+}
+
+/** Why the turn stopped producing settled segments. `settled` is the clean
+ * end; `capped` means the segmenter hit its size cap (reachable with ZERO
+ * stable frames ever emitted, which is why this is its own event and not a
+ * field); `degraded` means the SERVER distrusts its own segmentation, so the
+ * client drops the segments it holds and renders the persisted row. */
+export type StableEndReason = 'settled' | 'capped' | 'degraded'
+
+/** `event: stable_end` — the turn's terminal frame. */
+export interface StableEndFrame {
+  turn: number
+  from: number
+  reason: StableEndReason
+}
+
+export interface StableEvent {
+  event: 'stable'
+  data: StableFrame
+}
+
+export interface StableEndEvent {
+  event: 'stable_end'
+  data: StableEndFrame
+}
+
+/** The tagged envelope a consumer switches on after reading the event name. */
+export type StableWireEvent = StableEvent | StableEndEvent
+
+/** Narrows the envelope to a settled segment. */
+export function isStableEvent(e: StableWireEvent): e is StableEvent {
+  return e.event === 'stable'
+}
+
 /** GET /v1/chat/rollup (herd charter D64h): agent_state counts + the one
  * precedence state, DB-scoped by the token's chat_scope. */
 export interface ChatRollup {

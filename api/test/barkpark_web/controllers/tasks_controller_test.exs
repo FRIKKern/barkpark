@@ -502,10 +502,15 @@ defmodule BarkparkWeb.TasksControllerTest do
           ]
         })
 
+      # PDS-D289: the criterion is unmet on the doc AS READ and this close flips
+      # it in its own command, so the close needs a recorded reason. The
+      # ATOMICITY under test is unchanged — the override rides the same rev-CAS
+      # write, which is exactly why it is the right place to prove it.
       close_body =
         Jason.encode!(%{
           worker_id: "bd-shim",
           observed_epoch: 1,
+          criteria_override: "criteria-merge atomicity under test, not criteria proof",
           criteria: [
             %{
               index: 0,
@@ -580,7 +585,7 @@ defmodule BarkparkWeb.TasksControllerTest do
 
     # Graduated enforcement (§12): unmet criteria SURFACE as a warning on a
     # close that still succeeds — never a gate, never a non-200.
-    test "close with unmet criteria succeeds AND surfaces a soft warning",
+    test "close with unmet criteria succeeds (on the record) AND still surfaces a soft warning",
          %{conn: conn, scope: scope} do
       task =
         mk_task!(uniq("close-criteria-unmet"), scope, %{
@@ -594,19 +599,92 @@ defmodule BarkparkWeb.TasksControllerTest do
         Jason.encode!(%{
           worker_id: "bd-shim",
           observed_epoch: 1,
+          criteria_override: "criterion 1 is genuinely out of scope; closing on the record",
           criteria: [
             %{index: 0, met: true, evidence: "partial", criterion: "will be met"}
           ]
         })
 
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
-      assert resp.status == 200, "closing with unmet criteria stays LEGAL"
+      assert resp.status == 200, "closing with unmet criteria stays LEGAL — with a reason"
 
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == true
       assert payload["doc"]["lifecycle_status"] == "done"
+      # The lvw-t6 advisory warning SURVIVES beside the D289 gate: the gate makes
+      # the unmet close deliberate, the warning still says how much is unproven.
       assert [warning] = payload["warnings"]
       assert warning =~ "1/2 met"
+
+      assert payload["doc"]["content"]["close_override"]["criteria"]["reason"] =~
+               "genuinely out of scope"
+    end
+
+    test "an unmet-criteria close with NO reason is REFUSED, and the 409 teaches the escape hatch",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("close-criteria-nogate"), scope, %{
+          "acceptance_criteria" => [%{"criterion" => "never proven", "met" => false}]
+        })
+
+      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+
+      assert resp.status == 409
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == false
+      assert payload["reason"] == "criteria_unmet:0"
+      assert payload["message"] =~ "criteria_override"
+
+      reread = conn |> authed() |> get("/v1/tasks/#{task.doc_id}") |> Map.get(:resp_body)
+
+      assert Jason.decode!(reread)["doc"]["lifecycle_status"] == "open",
+             "the refusal wrote nothing"
+    end
+
+    test "a foreign close is REFUSED, and holder_override lands it on the record",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("close-foreign"), scope, %{"acceptance_criteria" => []})
+
+      claim_body = Jason.encode!(%{worker_id: "worker-A"})
+
+      claim_resp =
+        conn |> authed() |> post("/v1/tasks/#{task.doc_id}/claim", claim_body)
+
+      assert claim_resp.status == 200
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+      assert is_integer(epoch)
+
+      refused =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{worker_id: "oc-lead", observed_epoch: epoch})
+        )
+
+      assert refused.status == 409
+      refused_payload = Jason.decode!(refused.resp_body)
+      assert refused_payload["reason"] == "not_holder:worker-A"
+      assert refused_payload["message"] =~ "holder_override"
+
+      landed =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{
+            worker_id: "oc-lead",
+            observed_epoch: epoch,
+            holder_override: "lead seal on merge"
+          })
+        )
+
+      assert landed.status == 200
+      override = Jason.decode!(landed.resp_body)["doc"]["content"]["close_override"]["holder"]
+      assert override["actor"] == "oc-lead"
+      assert override["held_by"] == "worker-A"
+      assert override["reason"] == "lead seal on merge"
     end
 
     test "malformed criteria is a 400 (shape), out-of-range index a 409 (state)",
@@ -1082,17 +1160,25 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert child["criteria_progress"] == %{"met" => 1, "total" => 1}
     end
 
-    test "close done with UNMET criteria returns advisory warnings (2xx, ok:true, no gate)",
+    test "close done with UNMET criteria (on the record) still returns advisory warnings",
          %{conn: conn, scope: scope} do
       task =
         mk_task!(uniq("crit-close-warn"), scope, criteria([crit_entry(true), crit_entry(false)]))
 
-      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      # PDS-D289 made the unmet close deliberate rather than free; the lvw-t6
+      # advisory warning is unchanged and still rides the 2xx beside it.
+      close_body =
+        Jason.encode!(%{
+          worker_id: "bd-shim",
+          observed_epoch: 1,
+          criteria_override: "warning-surface under test"
+        })
+
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
       assert resp.status == 200
 
       payload = Jason.decode!(resp.resp_body)
-      # No gate: the close COMMITTED.
+      # The close COMMITTED (the reason is on the record).
       assert payload["ok"] == true
       assert payload["doc"]["lifecycle_status"] == "done"
       assert [warning] = payload["warnings"]

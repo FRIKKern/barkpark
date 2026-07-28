@@ -4412,3 +4412,358 @@ crown-blocked rows + the D300 housekeeping evidence) and R1 `pds-w22-triage-rema
 remaining ~82 rows adjudicated one at a time by content, plus the D297 orphan re-parent). The two triage
 slices partition the 136 rows disjointly and both close under D298's re-read proof. **NO CROWN RE-FIRE. NO
 FABLE ANYWHERE** (monthly spend limit — every slice is opus at medium).
+
+### Wave 2026-07-27 (22) — SUCCESS MUST BE OBSERVABLE — round 1 built + reviewed, grade B+ (paper `pds-wave-22-2026-07-27`)
+
+**WHAT LANDED — 7 slices, all gate-green on their final branch, all pushed, PRs #6420–#6426 open (the lead merges).**
+
+| slice | final branch | PR |
+|---|---|---|
+| `pds-w22-close-holder-criteria-honesty` | `…closer-held-the-0-r` | #6420 |
+| `pds-w22-deploy-stamp-and-harness` | `…fail-on-advance-a-1` | #6421 |
+| `pds-w22-status-commit-read-path` | `…read-the-runni-2` | #6422 |
+| `pds-w22-receipt-and-sidecar-honesty` | `…the-rows-it-mo-3` | #6423 |
+| `pds-w22-triage-harness-and-crown-family` | `…and-the-crown--4` | #6424 |
+| `pds-w22-triage-remaining-rows` | `…is-adjudica-5` | #6425 |
+| `pds-w22-manifest-and-counts-honesty` | `…stops-advertis-6-r` | #6426 |
+
+Five product verbs stopped lying: the close ledger (holder + criteria + sentinel gates), the deploy slot
+stamp (written only after the health gate) and its harness (a stateful fake HEAD, so ADVANCE and STALL are
+finally distinguishable), the public running-commit read path, the import receipt and blob byte-verify, and
+the capabilities `writes` bit (16 mutators were advertised read-only to MCP clients) + a counts perspective
+that was silently discarded. Every one was proven by mutation, not by reading.
+
+- **PDS-D305 — MERGING #6420 CHANGES HOW EVERY SEAL CLOSE WORKS, INCLUDING THIS WAVE'S OWN.** `api/**`
+  auto-deploys on merge, so the moment #6420 lands, guerrilla enforces the holder gate. Every wave-22 slice
+  row's last holder is its BUILDER, so a lead sealing them is a foreign close: `409 not_holder:<builder>`
+  unless the close carries `--set holder_override="<why>"`. A close over a still-unmet criterion needs
+  `--set criteria_override="<why>"`. Both ride the ordinary close body (`bp task close … --set`); the
+  reviewer wired them through `tasks_controller` close/2 because the builder's slice left the gates
+  REFUSE-ONLY over the wire — a lead could not have sealed anything and nobody could have closed over an
+  honest unmet criterion at all. **Merge #6420 LAST, or seal the other six rows before it deploys.**
+- **PDS-D306 — `content.engagement.note` IS NOT A DURABLE FIELD; `content.disposition_reason` IS.** The
+  reviewer's independent census over the whole epic scope (265 rows) measured **engagement.note survival 0
+  of 31** parked rows and **disposition_reason survival 12 of 12**. The harness/crown slice's 8 parks all
+  survived because it wrote BOTH; the remaining-rows slice's 23 parks were written with `bp task stage
+  --note` alone and **19 lost their reason within hours**. All 31 rows carry a `content.github` key,
+  consistent with a reconciler rebuilding `content` wholesale. The reviewer re-parked all 19 into
+  `disposition_reason` (19/19 re-read and confirmed), but their ORIGINAL adjudication text is
+  unrecoverable — Truth-Grip wave 10's failure reproduced INSIDE the wave that wrote D298 against it.
+  Ruling: **every park reason is written to `content.disposition_reason`. `bp task stage --note` alone is
+  never a disposition.** `pds-bl-stage-note-evaporates` was closed as a duplicate into
+  `pds-bl-park-note-evaporates`, which now carries the census.
+- **PDS-D307 — THE BLOCKING SET SHRANK 145 → ~124 OPEN, AND ONLY 5 OF THAT IS A FIX.** 137 rows were
+  adjudicated by content (101 OPEN-with-a-named-owner, 31 PARKED, 5 CLOSED). That is an honest triage, not
+  a burn-down: 31 are parks carrying reactivation triggers and the closes are dedup/already-fixed. The
+  D300 housekeeping closed on evidence (both w21 rows already done 7/7 and 6/6, both SELF closes; the
+  `barkpark-w21-fire` worktree absent from disk AND from all 1,466 registered worktrees).
+  **`git worktree prune` was NOT run and stays forbidden.**
+- **PDS-D308 — THE LARGE-TASK WRITE CEILING IS LIVE AND BIT THE REVIEWER TOO.** A ~1 KB
+  `disposition_reason` patch onto `pds-w22-triage-harness-and-crown-family` published `422
+  validation_failed`; the same field at ~260 B published first try. `pds-bl-large-task-write-500` is real,
+  reproducible, and now has two independent witnesses.
+
+**WHAT DID NOT LAND.** `pds-w22-deploy-readback` (round 2 by design — it reads the `/status.json` field
+#6422 adds, so it dispatches only after #6422 merges). The deploy verb still exits 0 and logs HEALTHY on a
+stall: wave 22 made that VISIBLE to the harness, it did not make the verb refuse. And the four named
+starting points are 2 of 4 done — `deploy-success-without-advance` is half-closed (observable, not refused),
+`close-holder-and-criteria-gate` is BUILT, `streaming-workspace-export` was re-scoped to its import half
+(`pds-bl-bounded-import-unpack`), and **`pds-bl-scratch-pointer-concurrency` was taken by NO slice** — its
+defect 2 was stamped already-fixed and defect 1 is still open.
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** (1) Dispatch `pds-w22-deploy-readback` the moment #6422 merges. (2) Fix
+the evaporation defect (`pds-bl-park-note-evaporates`) — the ledger is this epic's spine and 19 lost
+adjudications is the wave's own failure class. (3) Take the correctness rows the triage named as the
+strongest build candidates: `pds-bl-scratch-pointer-concurrency` (defect 1), `pds-bl-w16-full-meta-permissive-default`,
+`pds-bl-w16-failed-refetch-destroys-parked-bundle`, `pds-bl-bounded-import-unpack` — all report-success-while-wrong
+shapes, all mutation-provable without any fire. (4) Decide whether D289's doc-as-read criteria gate is wider
+than the defect it closes; that judgment is flagged HIGH-FLIP-RISK and an independent second reviewer is owed.
+
+---
+
+## WAVE 23 — THE LAW GETS TEETH (2026-07-28)
+
+Wave 22 proved the law five times by hand. Wave 23 makes the repo enforce it on the surface where an
+honest gate is buildable, pays the eight measured debts, and fixes the ledger defect that ate wave 22's
+own adjudications. Wave Paper: `pds-wave-23-2026-07-28`. Fence: `api/**`, `internal/**`, `deploy/**`,
+`bin/**`, `scripts/pds-*`, `docs/**`, the `pds-*` namespace. **`cloud/**` and `.github/workflows/**` are
+OUT** (see PDS-D312). Fable unavailable — all 8 slices are Opus.
+
+### The verify round's headline: three briefed premises REFUTED, one charter decision REFUTED
+
+- **PDS-D309 — THE LEDGER'S DELETER IS OUR OWN `TtlSweeper`, NOT A GITHUB RECONCILER, AND PDS-D298 IS
+  REFUTED.** Proven at runtime against guerrilla's own Postgres: `pds-bl-bp-search-false-negative` was
+  staged at 20:02:00.455593 (event 124105) and lapsed at 20:17:01.430503 (event 124308) — **15m00.97s**.
+  `ttl_sweeper.ex:540` is `Map.delete("engagement")` against `@default_engagement_ttl_seconds 900`
+  (:144), swept every minute; guerrilla sets no `BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS`, so 900s is live.
+  The GitHub hypothesis is dead — there is no content merge in `plugins/github/`, and `content.github`
+  sits on **90/90** open rows, a base-rate confound with zero discriminating power. `disposition_reason`
+  survives *structurally*, because the sweeper deletes exactly one key by name.
+  **The defect is a CATEGORY ERROR**: a DURABLE adjudication reason piggy-backed onto an EPHEMERAL 900s
+  ownership lease, with `bp task stage --note` returning `ok:true` on a field with a 15-minute half-life
+  and saying nothing. That is this epic's own law violated on the ledger the epic is audited on.
+  **PDS-D298 IS REFUTED AND SUPERSEDED**: it ruled Truth-Grip wave 10's 45 parks "never used" by
+  re-reading the ROW. Exactly **45** `tgw*` rows carry a recoverable staged note and **all 45** contain a
+  `REACTIVATE:` trigger. Wave 10 DID write them; the sweeper ate them 15 minutes later. D298's verdict was
+  itself rendered on a read that structurally could not see the state it judged. D298's *proof standard*
+  (re-read and COUNT after every disposition write) STANDS and is reaffirmed; only its factual verdict on
+  wave 10 is withdrawn.
+  **The notes are RECOVERABLE** — both the `task.staged` payload (`stage.ex:230`) and the
+  `task.engagement_lapsed` payload (`ttl_sweeper.ex:598`) carry them verbatim; 158 rows have a recoverable
+  note and **0** still carry `content.engagement`. But `bp task events` structurally CANNOT reach them:
+  `events.ex:90-96` projects `%{id,event,doc_id,rev,at}` and drops the payload by design. Recovery
+  therefore needs DB access or a new endpoint — **filed, NOT built this wave** (`pds-bl-recover-lost-park-notes`).
+- **PDS-D310 — `put_bytes` IS A WRITE-ACK, NOT AN EXIT CODE, AND THE CHEAP FIX IS A PROVEN FAKE GREEN.**
+  S3 gates on HTTP 2xx (`s3.ex:190`), Local on `File.write`'s syscall (`local.ex:33`) — writing "reports
+  success on an exit code" is refutable in one grep and must not be written. The honest claim is
+  **RECEIVED vs STORED with no post-condition read**. Proven by running against a black-hole bucket (200
+  on PUT, stores nothing): `File.stat(Media.file_path(rel))` returns `{:ok, %File.Stat{size: 11}}` — it
+  PASSES — because `S3.put_file/3` warm-caches the SOURCE to that exact path (`s3.ex:70`). Worse,
+  `S3.ensure_local/1` short-circuits on `File.regular?` (`s3.ex:117`) and returns `{:ok, path}` with ZERO
+  bucket requests, so "read it back through the abstraction" is a SECOND fake green. The bucket is
+  provably empty: drop the cache copy and `ensure_local` = `{:error, :not_found}`.
+- **PDS-D311 — THE TICKETS "OTP-28 DIVERGENCE" IS REFUTED; AN AMENDED-IN-PLACE MIGRATION IS THE CAUSE, AND
+  `mix ecto.migrations` IS ITSELF A SUCCESS-LIE.** A virgin partitioned DB, migrated fresh, ran the
+  tickets suite **161 tests, 0 failures** on Elixir 1.19.5 / **OTP 28** / PostgreSQL 17.9 — green on the
+  toolchain the row blames. Root cause found by content: `2e0ca88c7` (2026-07-19 02:19) shipped
+  `barkpark_bind_document_revision()` with the exact-equality predicate `document.doc_id = NEW.doc_id`;
+  **`a0357fff3` (06:11, four hours later) EDITED THAT SAME ALREADY-SHIPPED MIGRATION FILE** to add
+  `drafts.`-prefix stripping. Both are ancestors of origin/main. Migrations never re-run, so any database
+  created in that window keeps the broken trigger forever and raises `P0001 revision snapshot does not
+  exactly match its document` on every draft revision. A 242-database sweep inverts the briefed premise:
+  the md5 treated as canonical (`5a285095…`) exists in **exactly one** DB — `barkpark_test`, the one the
+  prior investigation hand-replaced — while 31 carry the real migration output `7ce03b36…` and 210 predate
+  the migration. The two texts differ only in leading whitespace (`diff -w` exits 0), so the surviving
+  "drift" is inert.
+  **The generalisable finding outranks the row**: `mix ecto.migrations` reporting zero pending is a
+  success claim backed by a version-number bookkeeping row, never by a read of the object the migration
+  claims to have produced — and it lied here. In-place amendment of a shipped migration is a silent,
+  permanent divergence class, and prod auto-deploys on `api/**`, so the window was live. Charter
+  PDS-D304's "27 from a Tickets/OTP-28 divergence" attribution is **CORRECTED** by this entry.
+- **PDS-D312 — THE FENCE HOLDS OFF `.github/workflows/**`, BUT ALL THREE SURFACES ALREADY HAVE A FREE
+  RIDE, SO GATE-VS-DOCUMENT IS RULED PER SURFACE, NOT PER TRACK.** `go-tests.yml` fires on `**/*.go` for
+  push AND pull_request — a Go test under `internal/cli/` rides free, in fence, mutation-provable.
+  `elixir.yml` carries NO workflow-level `paths:` **by design** (D18/D31 skip-shim), so an ExUnit test
+  rides free too — the digest's "the Elixir surface has no free ride" is REFUTED.
+  `deploy-harnesses.yml` already enumerates `deploy/instance-deploy_test.sh`, so assertions added INSIDE
+  it ride free — **PR-only, no push-to-main leg, and any slice claiming that coverage must say so.**
+  What is genuinely out of fence is a NEW standalone harness wired by a new `run:` step:
+  `shell-harnesses.yml` is path-pinned to `doctor.sh`/`doctor.test.sh` alone. **`scripts/pds-*` has ZERO
+  CI coverage today** (`grep -rln 'pds-' .github/workflows/` is EMPTY), so the two harness fixes are
+  LOCAL-HARNESS slices and the wave must not imply a gate.
+
+### The rulings that shape the build
+
+- **PDS-D313 — "RESPONSE-BACKED" IS NOT ONE CLASS. IT IS THREE, AND THE AXIS IS THE MEASUREMENT POINT.**
+  Not response-vs-second-read, and not record-vs-running-box. The charter already reasons this way:
+  PDS-D295 ruled the blob count must say "received" **because `byte_size(body)` is measured BEFORE
+  `Blobstore.put_bytes/3`**. Generalised:
+  - **A1 RELAYED POST-CONDITION — SATISFIES THE LAW, no second read required.** The response field was
+    measured by the server AFTER the state change, FROM the state itself. `bp cloud site rollback`'s "is
+    now serving deployment %s" (`cloud_site_cmd.go:542`) is A1: `Sites.Deploy.rollback/2`
+    (`deploy.ex:714`) BLOCKS until the box confirms the flip and resolves the id from the sha the BOX
+    reported about itself. A CLI-side second read here buys nothing and would INTRODUCE a flip race.
+  - **A2 PERSISTED-RECORD ECHO — satisfies the law for claims about THE RECORD.** `autoupdate pin`
+    printing `policy.PinnedRelease`: the response IS the record; a second GET reads the same row.
+  - **A3 VERB-DERIVED / REQUEST ECHO — VIOLATES THE LAW even though a response exists.** `autoupdateReceipt`
+    (`cloud_autoupdate_cmd.go:142-154`) takes `policy` and, for `unpin`/`pause`/`resume`/`default`, reads
+    **nothing from it** — `✓ <ref> autoupdate paused` prints unchanged if the server returned
+    `paused:false`. Re-derived on origin/main this run. This is D295's "the echo exists and is discarded",
+    and NO test pins those strings today.
+  **THE MECHANICAL REVIEWER TEST, and it is the deliverable rather than the taxonomy:** *would the printed
+  sentence change if the server's response said the opposite?* No → unbacked, regardless of round trips.
+  Yes → ask what the field measured. This is mechanically assertable — feed a contradicting response into
+  the render function and assert the printed line changes — and **that is the guard's shape.**
+- **PDS-D314 — THE GUARD IS A BEHAVIORAL REGISTRY TEST, NOT A CHECKMARK RATCHET, AND SHELL + ELIXIR SHIP A
+  CENSUS DOCUMENT WITH NO GATE.** Measured: the shell surface carries **12** `✓` glyphs and every one is
+  inside a `site-spawner-*-proof.sh` harness — `TOTAL_NONPROOF` is literally **0**, so a shell guard would
+  green vacuously, which is the exact failure this epic names. `api/lib` carries **47** glyphs and **ZERO**
+  in `IO.puts`/`IO.write` — all LiveView chrome, so a glyph-keyed Elixir guard yields 47 false positives.
+  Go: 94 glyphs = 13 noise + 81 real (56 in a remote-calling function, 17 DECOUPLED emitters, 8 genuinely
+  local). A function-scoped ratchet is blind to the 17 emitters AND its evasion is a two-line refactor.
+  **Ruling: the Go gate is a table-driven test over an enrolled registry of receipt-RENDER functions,
+  keyed on the claim, never the glyph** — which inverts the emitter problem, since a decoupled emitter is
+  precisely a render function and is the EASIEST thing to enroll. A registry entry cannot be satisfied by
+  a non-empty classification string. Shell and Elixir get a census document with per-site evidence, NO
+  gate, and a plain statement that the law is unenforced there. **Refusing to ship a fake green is the
+  successful outcome for those surfaces.**
+- **PDS-D315 — THE DEPLOY READ-BACK NEEDS AN EXPECTED SHA; BEFORE/AFTER ALONE CANNOT PRODUCE THREE OF THE
+  FOUR OUTCOMES.** A coalesce exits 0 early with no rebuild (`instance-deploy.sh:311-315`), byte-identical
+  to a STALL from the CLI's vantage, and MISMATCH is underivable without an expectation. `git ls-remote`
+  works fully unauthenticated (proven with `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL=/dev/null HOME=/nonexistent
+  -c credential.helper=`; the repo is public) for `refs/heads/<b>` AND `refs/pull/N/head`. Four traps, all
+  run-proven, each of which ships a mirror-image lie if missed:
+  1. `git ls-remote <url> main` returns **TWO** lines (the pattern is suffix-matched against a tag path
+     ending `/main`). Query `refs/heads/<branch>`, never the bare name.
+  2. `git ls-remote origin refs/heads/no-such-branch` **EXITS 0 WITH EMPTY OUTPUT** — gating on `err != nil`
+     is itself a success-claim on an exit code, inside the anti-success-lie slice. Empty stdout routes to
+     UNPERFORMABLE(unknown ref), never to a comparison against `""`.
+  3. Short-sha length is **ADAPTIVE**: 7 chars in a real `--depth 1` clone, 9 on guerrilla, 40 from
+     ls-remote, for the same commit (`core.abbrev` unset). `==` manufactures a false MISMATCH. Compare the
+     SERVED short sha as a PREFIX of the EXPECTED full sha, never the reverse.
+  4. UNPERFORMABLE has **FOUR** live shapes needing four distinct messages: key ABSENT (a pre-`c73f22a0b`
+     build — `status.ex:98-107` guarantees a post-dependency build renders `"unknown"` rather than
+     omitting, so ABSENT *proves* a stale build and must say exactly that), route ABSENT (404), host
+     UNRESOLVABLE (000), and the legal string `"unknown"`. Collapsing them to one string is itself a mild
+     information-lie.
+  **The AFTER-read race is REFUTED and the window is NEGATIVE**: `instance-deploy.sh` health-gates the new
+  slot on its own port for up to 40×5s (:739-743), reloads Caddy (:784), then runs ~290 more lines before
+  `exit 0` (:1075); there is `set -uo pipefail` with NO `-e` and ZERO non-zero exits after :790, and the
+  served `commit` is a COMPILE-TIME module attribute (`build_info.ex:100`) so it cannot advance off a
+  `git reset --hard`. No caching anywhere (`max-age=0, private, must-revalidate`, no `age`/`x-cache`/`etag`,
+  three reads = three origin hits). A 3×5s retry is free insurance and is required anyway. **PDS-D304's
+  shallow-clone hazard does NOT reach `commit`** — `rev-parse` survives a shallow clone, `describe` does
+  not: read `commit`, never `version`.
+  **Field reality the acceptance criteria must state or a reviewer reads correct output as a broken
+  feature:** there is NO default target (`resolveDeployHost` errors out); `staging` and `prod` resolve to
+  NOTHING (no fleet row, no DNS) so the wish's own `bp cloud deploy staging` example is a phantom; and
+  **3 of the 4 real fleet boxes serve `/status.json` with `commit` ABSENT**, so the first live run against
+  anything but guerrilla is correctly UNPERFORMABLE. The slice is self-healing — deploy a stale box once
+  and the read-back works from then on. All four rows have `autoupdate_enabled:true`, so **re-derive the
+  commit-key census immediately before stamping evidence, never from this charter.**
+  Last trap: `--host` INVENTS the health FQDN (`deriveHealthHost`) and the on-box gate curls with
+  `--resolve HOST:443:127.0.0.1`, bypassing public DNS — the box's own gate and a CLI read-back do not
+  resolve the same name, so the `--host` path must declare UNPERFORMABLE loudly rather than borrow the
+  script's confidence. `gyldendal`'s health host is `gyldendal-506f035e.barkpark.cloud`, NOT
+  `gyldendal.barkpark.cloud`.
+- **PDS-D316 — BOUNDED IMPORT KEEPS ITS BODY HALF, AND THE REAL HAZARD IS 20 TRIPWIRES NOBODY NAMED.**
+  The row that the body half would be deferred into — `pds-backlog-streamed-bundle-channel` — is `done`
+  with **0/4** criteria met, closed by wave 22; deferring would strand it permanently. Its AC #1 already
+  IS the 413, and `read_full_body/2` (`workspace_controller.ex:590-594`) loops on `:more` with `length:`
+  as a per-CALL chunk hint and no cumulative cap, so the whole ~2.6 GB body materialises BEFORE
+  `Archive.unpack/1` is reached: shipping disk-backed extract alone would report "bounded import" with the
+  single largest allocation untouched.
+  **The hazard**: `dumps` is consumed at 42 sites and **20 of them are `refute dumps[...] =~ "<marker>"`**
+  cross-tenant isolation tripwires. Proven by running — under a path-valued `dumps`,
+  `dumps["documents"] =~ "B-ONLY-CIPHERTEXT-xyz"` is **false** while the bytes on disk DO contain it. The
+  loud md5 assert reds; **all 20 refutes pass VACUOUSLY**, silently disarming the epic's tenancy-leak
+  suite. **Ruling: `unpack/1` KEEPS its binary contract at the test boundary; the engine gets a new
+  `unpack_to_dir/2`.** One production caller changes (`workspace_bundle.ex:298`), not 42 tests, and the 20
+  refutes stay real. Do NOT accept `:crypto.hash(:md5, File.read!(path))` as the incremental rewrite — it
+  passes AND re-materialises the 1.31 GB member.
+  Say **"1× the LARGEST MEMBER"**, never "constant memory": measured 1.00× for one 600 MB member vs 3.0×
+  for today's `[:memory]` shape. Peak transient disk is **~5.2 GB** (body spill + extracted members held
+  together), not 3.9; guerrilla has 12.09 GiB free on ONE filesystem carrying `/`, `/tmp` AND
+  `/opt/barkpark`, while running at 2176 MB available with **1468 of 2047 MB swap already consumed**. There
+  is **ZERO free-space precondition anywhere in the bundle path**, so the slice ships one or it trades a
+  diagnosable OOM for an undiagnosable ENOSPC. The janitor sweeps two FILE prefixes and would not collect
+  an import scratch DIRECTORY. This slice does **NOT** unblock the crown (that is the EXPORT's 2235 MiB
+  peak) — reporting it as crown progress would itself be a success-lie.
+- **PDS-D317 — HARNESS ARM-TIME LIVENESS IS SETTLE-THEN-CLASSIFY, AND THE CHECK MUST BE AN EXTRACTED
+  FUNCTION.** A bare `pid_live` at t+0 is a **COIN FLIP**, measured: armed with a payload that is literally
+  `exit 0`, run 1 returned rc=0 (LIVE) while `classify` microseconds later on the same line already said
+  KILLED; three consecutive re-runs returned rc=1. A t+0 check would print green over a dead climb roughly
+  half the time. The honest shape uses pieces already in the file: the generated child's FIRST action is
+  `stamp "child up — pid=…"`, so after a short settle the launcher READS THE TRANSCRIPT for a marker the
+  child itself produced, then runs `classify` (KILLED at t+1s and t+3s, 4/4). **The banner must say "child
+  is UP as of <t>", never "the climb will complete"** — a green read at t+N is necessary, not sufficient.
+  The check MUST be extracted (e.g. `assert_child_up`) because the selftest reaches `fire_detached`
+  directly and never `cmd_arm`; inlined, it ships untested by the harness that exists. The failure was
+  PREDICTED in-repo — `pds-climb-preflight.sh:397` (PDS-D258) describes it verbatim and shipped a WARNING
+  instead of a read.
+- **PDS-D318 — THE SCRATCH POINTER IS ONE DEFECT WEARING THREE ROWS, AND TEARDOWN'S PASS IS SCOPE-TRUE
+  BUT READ AS INSTRUMENT-CLEAN.** Reproduced offline end-to-end: a second `up` clobbers the single global
+  `POINTER_FILE` (`:124`, written unconditionally at `:381`); `teardown` then destroys the WRONG root,
+  prints `---- teardown: PASS`, clears the pointer, and ALL FOUR verbs die with `no scratch target known`
+  while root A still stands. Teardown's clear is ALREADY guarded to fire only when the pointer names the
+  root it removed — the strand comes from the CLOBBER, not a careless clear, so fixing either half alone
+  leaves it intact (`resolve_home` has exactly TWO sources: `$BARKPARK_HOME` or the pointer). Ruling: ONE
+  registry directory (one file per live root; `up` adds, `teardown` removes only its own, `resolve_home`
+  refuses-with-a-list when more than one survives), retiring `pds-bl-scratch-pointer-concurrency`,
+  `pds-bl-scratch-teardown-strands-the-survivor` and `pds-bl-scratch-pointer-explicit-default` — whose own
+  reason already reads "MERGE CANDIDATE, not independent work". There is no scratch test file anywhere in
+  the repo; `deploy/instance-deploy_test.sh` is the pattern to copy. The crown launcher already practises
+  the fix (`fire_detached` exports a per-run `PDS_SCRATCH_POINTER`).
+- **PDS-D319 — TWO UNFILED SUCCESS-LIES ARE INVISIBLE TO A GLYPH CENSUS, AND `bp export` IS ALSO 100%
+  BROKEN.** `barkpark status` decides liveness from a bare `kill -0` on a pidfile (`bin/barkpark:139-141`)
+  while `listener_pid()` — `lsof -tiTCP:$PORT -sTCP:LISTEN` — sits FOUR LINES above and is already used by
+  both `start_server` and `stop_server`. Both directions observed: a pidfile pointing at a `sleep`
+  reported "server running … http://localhost:4000" exit 0; and with ZERO setup this box reported "server
+  stopped" exit 0 while `beam.smp` pid 8004 held :4000 and `/api/schemas` returned 200. `bp export` — the
+  documented BACKUP verb — emits no document count and exits 0 by explicit design
+  (`export_cmd.go:61`) on a Ctrl-C-truncated file. Neither carries a `✓`, so a glyph-keyed census finds
+  neither.
+  **AND THE SEQUENCING RULING:** `bp export` cannot succeed against ANY server today — the client
+  hardcodes `Accept: application/x-ndjson` (`apiclient/export.go:47`) while `:scoped_api` is
+  `plug(:accepts, ["json"])` (`router.ex:143`), so Phoenix 406s before auth and the operator sees only
+  `export: unknown error`. Proven on guerrilla (`ndjson=406` vs `json=401`, same URL) and locally (the
+  body names `Phoenix.NotAcceptableError`). `bp export > backup.ndjson` writes an EMPTY FILE today.
+  **The Accept fix lands FIRST**, or a truncation test greens a path no operator can reach — the exact
+  vacuous green this epic distrusts. Server-side adjacent: `export_controller.ex:22` is
+  `{:ok, acc} = chunk(acc, line)`, a MatchError on `{:error, :closed}` inside a `Repo.transaction`.
+- **PDS-D320 — ONE ROW CLOSES FOR FREE; THREE DO NOT, AND THE ONE THAT LOOKS FIXED FROM THE COMMIT LOG IS
+  NOT.** `pds-bl-blob-sidecar-byte-verify` is CLOSE-ELIGIBLE **verified by content, not by a PR subject
+  line**: both legs verify (`putOneBlob` fails by name on a missing echo AND on a mismatch;
+  `fetchOneBlob` fails on `n != ref.size` and reports `verified=false` when the size is NULL), the wording
+  stays RECEIVED-not-STORED, and three tests pass including `TestBlobFetchSizeMismatchIsANamedFailure`
+  which serves `TRUNCATED` against a declared 9999. **Record the honest deviation when closing**: AC #1
+  says "both legs compare against the bundle's `media_files.size`" and the PUSH leg cannot — on import
+  there is no bundle-declared size, so it compares the local stat against the target's echo, which is the
+  stronger available comparison.
+  **DO NOT CLOSE**: `pds-bl-manifest-writes-fails-open` — #6426 shipped D302's SERVER half
+  (`Keyword.fetch!(opts, :writes)` + the non-GET guard test) but the row's OWN criteria 1-2 are the Go
+  tri-state, and `manifest.go` still declares a plain `Writes bool` while `usage.go:309` infers on the
+  zero value; worse, `normalize_command/1` (`capabilities.ex:438-444`) applies NO writes default, so
+  plugin commands STILL fail open (`plugin.ex:536`'s `required(:writes)` is a TYPESPEC, dialyzer-only).
+  `pds-bl-close-audit-gaps` — both holes stand: `apply_close_update/8`'s fallthrough writes only
+  `lifecycle_status`, and `board_live.ex:459` passes no `caller_token_id` though `close.ex:77` accepts it;
+  60 close tests pass and cover NEITHER, which is itself the finding.
+  `pds-bl-deploy-success-without-advance` — closes only when the read-back lands.
+- **PDS-D321 — THE OWNER-WALK SEED RUNS UNDER PROD, AND IT IS A FOUR-ROW CLUSTER WITH A CRASH IN IT.**
+  Proven: with cmd_up's post-`load_env` environment, `mix run --no-start` printed
+  `PROD_RUNTIME_OK ensure_loaded=true seed1=true` — `cmd_up` ALREADY runs `mix ecto.migrate` under the
+  same exported `MIX_ENV=prod`, and the `MIX_ENV=dev` carve-out is scoped to `ensure_secrets` alone
+  (which runs before the env file exists). Ordering is load-bearing: seed strictly AFTER `ensure_secrets`.
+  Booting for the seed does NOT bind PORT (`server: true` only under `PHX_SERVER`).
+  **Two things the row does not say.** (1) `admin_token_present?/1` requires `is_nil(revoked_at)`, so an
+  unconditional up-seed RE-MINTS after a revoke — which directly contradicts
+  `pds-bl-admin-token-mint-path` AC #3 ("cannot mint another admin token after the bootstrap gate
+  closes"). (2) `api_tokens.token_hash` is unique-indexed and `mint_admin_token!` hard-matches
+  `{:ok, _token}`, so a FIXED `BARKPARK_SEED_ADMIN_TOKEN` that is later revoked makes the next `up`
+  MatchError and die under `set -euo pipefail` — a boot verb bricked by a revoke.
+  Cluster: `pds-bl-owner-walk-reaches-the-mint` is the survivor; `pds-bl-admin-token-mint-path` is
+  superseded (**migrate its AC #3 before parking it — it is the only security requirement in the
+  cluster**); `pds-bl-personal-local-doc-staleness` and `task-5c4f2673778d5ff0` are the doc half, and that
+  premise is **2/3 already fixed on main** (`personal-local.md:88-89` already carries `BARKPARK_MEDIA_DIR`
+  and `BARKPARK_ALLOW_BUNDLE_IMPORT`; only KEK is missing from the Overrides TABLE). **FILED, NOT BUILT
+  this wave** — the wave is already at 8 slices.
+- **PDS-D322 — THE LEDGER'S PARKS ARE HOLLOW: WAVE 23's OWN STANDARD IS MET BY ZERO ROWS.** All 8 direct
+  children carrying `disposition=parked` hold a `disposition_reason` of **exactly 644 bytes, MD5-identical
+  across all 8** — the reviewer's generic evaporation notice, not a row-specific reason, and **0 of 8**
+  carries a reopen trigger. 12 further rows carry NO `disposition` key at all (never adjudicated),
+  including two the wish names as measured debts. D307's "31 PARKED" is not observable in the direct-child
+  set. The write ceiling (PDS-D308) tracks **TOTAL DOCUMENT SIZE, not field length**: a 902 B reason
+  landed on a 32,659 B doc while the row that 422'd at ~1 KB is 36,804 B, the largest in the set. Longest
+  reason that has ever landed is **969 B** across 163 rows. **Operating bound: ≤900 B, and check the
+  target doc's size first; on docs >35 KB split the write.**
+- **PDS-D323 — SCHEDULING RACE, NOT A FILE CONFLICT: HONEST GATES S8 WOULD KILL THIS PHASE.** An Honest
+  Gates wave is mid-flight (round 1 merged 04:18-04:22 UTC today, #6500-#6503; rounds 2-3 unbuilt). Its S8
+  enables branch protection with `enforce_admins:true`, and its own D39 is L1-measured that protection
+  REJECTS a direct `git push` — naming `bp-epic-cycle.workflow.js:726-727`, the Decide phase that commits
+  the charter and grip ledger rows straight to main. Verified NOT yet on (`branches/main/protection` →
+  404, `rulesets` → `[]`), so today it works. **Decide publishes EARLY.** Also: no open PR touches
+  `internal/cli/`, `deploy/` or `scripts/pds-*`; `origin/loop-epic/r3b-trusted-proxies-deploy` is
+  squash-landed and now BEHIND main — **merging or cherry-picking from it would DELETE wave 22's own D291
+  slot-sha fix** (1 insertion / 21 deletions against main). Exactly ONE live foreign claim exists ledger-
+  wide (`mob-rt-s7-stable-emitter`), outside the fence. `bp task ls --status` DOES NOT EXIST — use
+  `bp task prime`, and never derive live claims from `claim.expired_at` (stamped by the REAP, so the
+  filter returns ZERO across all 3,415 rows).
+
+### The wave — 8 slices, 7 in round 1
+
+| # | Task | Surface | Round |
+|---|---|---|---|
+| 1 | `pds-w22-deploy-readback` | `internal/cli/cloud_deploy_cmd.go` | 1 |
+| 2 | `pds-w23-success-claim-registry` | `internal/cli/` + census doc | 1 |
+| 3 | `pds-bl-park-note-evaporates` | `api/lib/barkpark/tasks/` | 1 |
+| 4 | `pds-bl-bounded-import-unpack` | `api/lib/barkpark/tenancy/workspace_bundle/` | 1 |
+| 5 | `pds-bl-blob-storage-readback` | `api/lib/barkpark/media/blobstore/` | 1 |
+| 6 | `pds-w23-harness-liveness-and-registry` | `scripts/pds-*.sh` | 1 |
+| 7 | `pds-w23-cold-owner-verb-honesty` | `bin/barkpark`, `internal/cli/export_cmd.go`, router | 1 |
+| 8 | `pds-w23-triage-round` | ledger only — AFTER #3 merges | 2 |
+
+Slice 8 is round 2 **by necessity, not caution**: PDS-D309 means any disposition written before the
+evaporation fix merges is lost within 15 minutes — exactly wave 22's failure, repeated.
+HIGH-FLIP-RISK (an independent second reviewer is owed before merge): **#1** (the UNPERFORMABLE
+classification — four shapes, three of them not "unreachable"), **#2** (the guard is the wave's own
+candidate success-lie), **#5** (the File.stat fake green is proven and the obvious fix is the trap).

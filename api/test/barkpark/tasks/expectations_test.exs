@@ -151,6 +151,11 @@ defmodule Barkpark.Tasks.ExpectationsTest do
     assert {:ok, _closed} =
              Tasks.close(published.id, "fable-w8",
                observed_epoch: epoch,
+               # PDS-D289: both criteria are unmet on the doc AS READ and this
+               # close flips them in its own command, so it lands only with a
+               # recorded reason. The lvw-t9 single-write mechanism under test
+               # is unchanged — the override rides the same rev-CAS write.
+               criteria_override: "reverse-view close-out under test, not criteria proof",
                # D56: a met-flip names its criterion — the 0-based index alone is
                # unverifiable, so an unguarded flip is :criterion_text_required.
                criteria: [
