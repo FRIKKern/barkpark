@@ -135,6 +135,21 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
     |> then(&%{&1 | outcome: if(&1.outcome == "settled", do: :settled, else: &1.outcome)})
   end
 
+  # Walk the emitted order and fail if any turn produces a stable frame after its
+  # own stable_end.
+  defp assert_no_same_turn_frame_after_end(frames) do
+    Enum.reduce(frames, MapSet.new(), fn
+      {:stable_end, p}, ended ->
+        MapSet.put(ended, p.turn)
+
+      {:stable, p}, ended ->
+        refute MapSet.member?(ended, p.turn),
+               "turn #{p.turn} emitted a stable frame AFTER its stable_end"
+
+        ended
+    end)
+  end
+
   defp adopt(%{turn: turn} = acc, turn), do: acc
   defp adopt(acc, turn), do: %{acc | turn: turn, cursor: 0}
 
@@ -224,6 +239,38 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       end
     end
 
+    test "offsets are UTF-8 BYTES, not UTF-16 code units — pinned on non-ASCII" do
+      # The frozen fixture is STRUCTURALLY BLIND here: every source string in it is
+      # pure ASCII, so byte length equals code-unit length and a code-unit cursor
+      # passes every recorded sequence, then splits mid-character on the first
+      # non-ASCII turn in production. The consumer measures its remainder in UTF-8
+      # bytes, so the server must speak the same unit.
+      #
+      # The expected offsets below are HAND-DERIVED, deliberately not computed by
+      # byte_size/1 — a count produced by the same primitive the emitter uses would
+      # agree with a bug. "## Størrelse\n\n" is 3+1+1+2+1+1+1+1+1+1+1+1 = 15 bytes
+      # (ø is TWO bytes); the second paragraph adds 43 more (å two, — three), so the
+      # boundaries land at 15 and 58.
+      head = "## Størrelse\n\n"
+      body = "En paragraf på norsk — med tankestrek.\n\n"
+
+      {_state, frames} = turn(head <> body, chunk: 7)
+
+      assert Enum.map(stables(frames), &{&1.from, &1.to}) == [{0, 15}, {15, 58}]
+      assert reasons(frames) == ["settled"]
+
+      # The discrimination, made explicit: a UTF-16 code-unit cursor would have
+      # produced 14 and 54, so this assertion CANNOT pass for a code-unit emitter.
+      assert String.length(head) == 14
+      assert String.length(head <> body) == 54
+
+      # And no segment splits a character: every emitted slice is valid UTF-8.
+      for %{from: from, to: to} <- stables(frames) do
+        slice = binary_part(head <> body, from, to - from)
+        assert String.valid?(slice), "segment [#{from},#{to}) split a multi-byte character"
+      end
+    end
+
     test "a real turn's frames pass the fixture's own cursor rule and are append-only" do
       text = "## Streaming stables\n\nThe reply commits in segments.\n\n- a cursor\n- a turn\n\n"
       {_state, frames} = turn(text)
@@ -245,6 +292,28 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
         {_last, nil} -> :ok
         {{_f1, to1}, {f2, _t2}} -> assert f2 == to1, "segments must not overlap or skip"
       end)
+    end
+
+    test "no SAME-TURN stable frame is ever emitted after that turn's stable_end" do
+      # The consumer treats a same-turn frame after stable_end as INERT — it does
+      # not append, because appending to a turn whose suppression is already armed
+      # would reflow a document it just promised not to reflow. So the server must
+      # never emit one; a silently dropped frame is a hole nobody can see.
+      {state, frames} = turn("first para\n\nsecond para\n\n")
+
+      assert reasons(frames) == ["settled"]
+      assert state.phase == :ended
+
+      # Terminal is terminal: further deltas AND a second settle both yield nothing.
+      {state, more} = StreamSegments.advance(state, "late bytes\n\nand more\n\n", 99_999)
+      assert more == []
+
+      {_state, more2} = StreamSegments.settle(state, "anything at all\n\n")
+      assert more2 == []
+
+      # Structural form of the same claim: in the emitted order, no stable frame of
+      # turn T follows a stable_end of turn T.
+      assert_no_same_turn_frame_after_end(frames)
     end
 
     test "wire bytes are O(total), not O(n^2) — the whole prefix is never re-sent" do
@@ -714,6 +783,16 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
        }}
     end
 
+    # Every topic message in ARRIVAL ORDER — the stable frames interleaved with the
+    # claude frames, which is what an ordering claim has to be made against.
+    defp collect_ordered(acc \\ []) do
+      receive do
+        msg -> collect_ordered([msg | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+
     defp collect_stable(acc \\ []) do
       receive do
         {:chat_stable, frame} -> collect_stable([frame | acc])
@@ -853,6 +932,126 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
         |> Enum.uniq()
 
       assert turns == [1, 2], "turn identity must be server-authored and monotone"
+    end
+
+    test "turn N's stable_end precedes turn N+1's first stable frame, AND the settle row",
+         %{recorder: recorder} do
+      # Two reasons this ordering matters, both from the consumer's side. (1) If the
+      # next turn's segments arrive while the finished turn's text is still painted,
+      # their offsets index a string that starts with someone else's bytes and the
+      # client refuses that turn WHOLE, falling back to plain. (2) stable_end must
+      # also precede the assistant `message` frame that triggers the settle refetch,
+      # so the client knows the turn settled before it starts reconciling.
+      for text <- ["turn one\n\nmore one\n\n", "turn two\n\nmore two\n\n"] do
+        send_frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+        send_frame(recorder, claude_delta(text))
+
+        send_frame(
+          recorder,
+          {:claude_chat_event,
+           %{
+             "type" => "assistant",
+             "message" => %{"content" => [%{"type" => "text", "text" => text}]}
+           }}
+        )
+      end
+
+      ordered = collect_ordered()
+
+      # Every stable frame of turn 2 comes after turn 1's stable_end.
+      assert_no_same_turn_frame_after_end(for {:chat_stable, f} <- ordered, do: f)
+
+      end1 = Enum.find_index(ordered, &match?({:chat_stable, {:stable_end, %{turn: 1}}}, &1))
+      first2 = Enum.find_index(ordered, &match?({:chat_stable, {:stable, %{turn: 2}}}, &1))
+      assert is_integer(end1) and is_integer(first2)
+      assert end1 < first2, "turn 2 began streaming before turn 1 settled"
+
+      # And turn 1's stable_end precedes the assistant row that triggers the refetch.
+      msg1 = Enum.find_index(ordered, &match?({:claude_chat_event, %{"type" => "assistant"}}, &1))
+      assert end1 < msg1, "the settle refetch was triggered before stable_end landed"
+    end
+
+    test "a text -> tool -> text turn yields TWO independently settled turns",
+         %{sid: sid, recorder: recorder} do
+      # This is the common multi-part shape, and it is NOT the ambiguous one: because
+      # the accumulator settles at each ASSISTANT FRAME, each text run becomes its own
+      # turn with its own single persisted assistant row — so the consumer's
+      # exactly-one-fresh-row suppression still fires for both halves.
+      send_frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+
+      send_frame(recorder, claude_delta("Before the tool.\n\nStill before.\n\n"))
+
+      send_frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => "Before the tool.\n\nStill before.\n\n"},
+               %{"type" => "tool_use", "id" => "t1", "name" => "Read", "input" => %{}}
+             ]
+           }
+         }}
+      )
+
+      send_frame(recorder, claude_delta("After the tool.\n\nStill after.\n\n"))
+
+      send_frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [%{"type" => "text", "text" => "After the tool.\n\nStill after.\n\n"}]
+           }
+         }}
+      )
+
+      frames = collect_stable()
+
+      assert reasons(frames) == ["settled", "settled"], "both halves must settle"
+      assert frames |> Enum.map(fn {_k, p} -> p.turn end) |> Enum.uniq() == [1, 2]
+
+      # Each half persisted exactly ONE assistant row, which is what makes the
+      # consumer's narrow suppression applicable to both.
+      assistant_rows =
+        sid |> StudioChat.list_messages() |> Enum.count(&(&1.role == "assistant"))
+
+      assert assistant_rows == 2
+    end
+
+    test "a single assistant frame with TWO text blocks is the ambiguous shape",
+         %{sid: sid, recorder: recorder} do
+      # The narrow-suppression gap, pinned so its scope is documented rather than
+      # guessed: ONE assistant frame carrying two text blocks persists TWO assistant
+      # rows for ONE settled turn, so the consumer sees an ambiguous batch, drops the
+      # segments and renders plain. The server still reports `settled` honestly — the
+      # ambiguity is a client-side row-counting judgment, not a server divergence.
+      send_frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      send_frame(recorder, claude_delta("Part one.\n\nPart two.\n\n"))
+
+      send_frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => "Part one.\n\n"},
+               %{"type" => "text", "text" => "Part two.\n\n"}
+             ]
+           }
+         }}
+      )
+
+      frames = collect_stable()
+      assert reasons(frames) == ["settled"]
+
+      rows = sid |> StudioChat.list_messages() |> Enum.count(&(&1.role == "assistant"))
+
+      assert rows == 2,
+             "two text blocks in one frame persist two rows for one turn — the ambiguous batch"
     end
 
     test "a derivation FAULT degrades the segments and NEVER ends the recording",
