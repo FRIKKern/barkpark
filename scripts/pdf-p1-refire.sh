@@ -336,6 +336,15 @@ teardown_cred_name() {
   fi
 }
 
+# Is the DNS hcloud context actually listed? ANCHORED on the column shape
+# ("ACTIVE   NAME" header; the active row is "*        <name>") — a loose
+# substring grep would let a context named e.g. 'domain-x' pass for 'main'
+# and then fail the rrset call into a false "none". Used by 0i AND census
+# leg 5 so the two checks can never disagree.
+dns_ctx_listed() {
+  hcloud context list 2>/dev/null | grep -qE "(^|[[:space:]]|\*)${DNS_HC_CTX}([[:space:]]|\$)"
+}
+
 # PDF-D75 raw last resort, regained: list-then-delete by the fleet label.
 # `hcloud server delete` has NO --selector, so scan first, then delete each id.
 # `bp cloud support remove` is itself under test this wave — the reaper must
@@ -787,7 +796,7 @@ info "teardown-capability PROVEN: $(teardown_cred_name) reaches the CP's provisi
 # 0i. DNS census credential — informational only (leg 5 reports honestly).
 if [ -n "$DNS_HC_TOKEN" ]; then
   info "DNS census credential: BARKPARK_DNS_HCLOUD_TOKEN (env) — leg 5 will sweep $DNS_ZONE by value"
-elif hcloud context list 2>/dev/null | grep -q "^$DNS_HC_CTX\$\|[[:space:]]$DNS_HC_CTX\$\|^$DNS_HC_CTX[[:space:]]\|\*$DNS_HC_CTX\$"; then
+elif dns_ctx_listed; then
   info "DNS census credential: hcloud '$DNS_HC_CTX' context — leg 5 will sweep $DNS_ZONE by value"
 else
   info "DNS census credential: NONE resolved (no BARKPARK_DNS_HCLOUD_TOKEN, no '$DNS_HC_CTX' context) — leg 5 will be a NAMED SKIP (the fleet token sees zero zones, PDF-D101)"
@@ -1061,7 +1070,7 @@ if [ -z "$BOX_IP" ]; then
   info "5. DNS: SKIPPED — the box never recorded a host IP on the CP row (the chain died before"
   info "   create finished), so there is no VALUE to sweep by. The chain's own DNS write happens"
   info "   after the IP exists, so no rrset can point at a box that never got one."
-elif [ -z "$DNS_HC_TOKEN" ] && ! hcloud context list 2>/dev/null | grep -q "$DNS_HC_CTX"; then
+elif [ -z "$DNS_HC_TOKEN" ] && ! dns_ctx_listed; then
   info "5. DNS: SKIPPED — no DNS credential in scope (no BARKPARK_DNS_HCLOUD_TOKEN, no hcloud"
   info "   '$DNS_HC_CTX' context). The FLEET teardown credential cannot see the zone (zones: [],"
   info "   PDF-D101) — a one-token census fails this leg silently, so it is named instead. The"
