@@ -76,6 +76,13 @@
 //       name plus a grep. Cross-language `router.ex:<line>` cites are OUT — the
 //       boundary is stated in full on bannedSourceCitationErrors below (filed
 //       follow-up cch-bl-citation-drift-cross-language).
+//   E12 translucent focus indicator (WCAG SC 1.4.11): a `:focus`/`:focus-visible`
+//       rule whose SOLE indicator band — the outermost box-shadow layer, or the
+//       painted `outline` — resolves to alpha < 1 in any theme state. E5 asserts
+//       TOKEN pairs and cannot see which token a RULE consumes, so before this
+//       check 19 focus rules painted a 1.19–1.52:1 band while E5 was green. A
+//       rule carrying an opaque border-color is compliant (that border IS the
+//       indicator); full predicate on focusIndicatorErrors below.
 //
 // REPORTS (printed, never exit-affecting):
 //   R2  tokens defined in app.css that nothing consumes yet.
@@ -319,7 +326,18 @@ const CONTRAST_PAIRS = [
   { fg: "--danger", bg: "--muted-surface", min: 3, why: "danger status dot" },
   { fg: "--info", bg: "--surface", min: 3, why: "active-step ring / probe dot" },
   { fg: "--cc-amber", bg: "--surface", min: 3, why: "branch-preview amber edge (--accent retired, reads --cc-amber directly)" },
-  { fg: "--ring", bg: "--bg", min: 3, why: "focus-ring visibility" },
+  // The focus ring (SC 1.4.11, min 3:1) against EVERY backdrop a focusable
+  // control actually sits on — --bg alone was the wrong backdrop for seven
+  // consumers: the three sidebar controls (.ws-switch/.nav-find/.nav-account)
+  // spacer against --cc-bg-side, and the card-embedded ones (.copy-btn,
+  // .site-inst-link, .site-open, .actfilter-chip) paint straight onto the
+  // card / hover-row / modal with no opaque spacer at all. These fan over all
+  // theme states; E12 below is what ties them to the rules that consume them.
+  { fg: "--ring", bg: "--bg", min: 3, why: "focus ring on the page backdrop (.btn, .scope-switch spacer)" },
+  { fg: "--ring", bg: "--surface", min: 3, why: "focus ring on cards (.copy-btn, .site-inst-link, .site-open)" },
+  { fg: "--ring", bg: "--muted-surface", min: 3, why: "focus ring on muted/hover rows (.actfilter-chip)" },
+  { fg: "--ring", bg: "--cc-bg-side", min: 3, why: "focus ring in the sidebar (.ws-switch, .nav-find, .nav-account spacer)" },
+  { fg: "--ring", bg: "--cc-modal", min: 3, why: "focus ring inside modals (.modal-x, .btn in modal footers)" },
   { fg: "--primary-fg", bg: "--ok", min: 4.5, why: ".badge-current text / toast-success glyph / done step-dot" },
   { fg: "--primary-fg", bg: "--danger", min: 4.5, why: "toast-error glyph / failed step-dot" },
   { fg: "--primary-fg", bg: "--muted-text", min: 3, why: "toast-info icon glyph" },
@@ -824,9 +842,11 @@ for (const id of IDENTITY_RAMPS) {
 
 // EVERY theme state the SPA actually renders (charter GR5): base light/dark
 // plus each discovered identity's light/dark. Every CONTRAST_PAIRS entry is
-// resolved against all of them — with today's 4 identities the manifest fans
-// from 2 states to 10 (34 pairs → 340 evaluations); a 5th identity fans it
-// further automatically, so a ramp cannot ship an unreadable pairing unseen.
+// resolved against all of them — the fanout is base light/dark + 2 states per
+// discovered identity, and the run's own summary line reports the live counts
+// (states × CONTRAST_PAIRS) rather than a number pinned in this comment, which
+// went stale the moment a 5th identity landed. A new ramp fans the manifest
+// automatically, so it cannot ship an unreadable pairing unseen.
 const THEME_STATES = [
   ["base-light", lightTokens],
   ["base-dark", darkTokens],
@@ -935,6 +955,131 @@ function runContrast(errs) {
   }
 }
 
+// ── Focus-indicator opacity (E12) ────────────────────────────────────────────
+// WHY THIS EXISTS, and why CONTRAST_PAIRS alone is not enough: the pairs assert
+// TOKENS ("--ring clears 3:1 over --surface"). They cannot see which token a
+// RULE consumes. Measured on the pre-fix tree: with all five --ring pairs
+// present this file exited 0 while 19 focus rules still painted a
+// --ring-soft band at 1.19–1.52:1. A token ratchet that the rules can walk away
+// from is a vacuous green, so E12 closes the loop at the RULE level.
+//
+// THE PREDICATE: a `:focus` / `:focus-visible` rule's indicator band — the
+// OUTERMOST box-shadow layer (inner layers are the opaque spacer that lifts the
+// ring off the control), or the `outline` colour when one is painted — must
+// resolve to alpha 1 in every theme state. An α<1 tint is an ARITHMETIC ceiling:
+// over ANY opaque backdrop α=0.15 tops out at 1.617:1 and α=0.20 at 1.918:1, so
+// no accent value can ever lift it to the 3:1 SC 1.4.11 floor.
+//
+// THE ESCAPE: a rule that ALSO carries an opaque `border-color` / `outline-color`
+// is compliant — its indicator is that border, and the translucent shadow is a
+// decorative halo around it (.fleet-row[data-id]:focus-visible and
+// .site-row[data-id]:focus-visible are exactly this shape and must stay green).
+// A rule that paints no band at all is out of scope: it is styling something
+// else on focus and inherits the shared ring block.
+
+/** Substitute var() in an arbitrary declaration value until it is literal. */
+function resolveLiteralValue(value, map) {
+  let v = String(value).trim();
+  for (let i = 0; i < 10 && /var\(/.test(v); i++) {
+    v = v.replace(/var\(\s*(--[A-Za-z0-9_-]+)\s*\)/g, (_, t) => {
+      const r = resolveValue(t, map);
+      return r === undefined ? "UNRESOLVED" : r;
+    });
+  }
+  return v;
+}
+
+// Colour functions FIRST so `hsl(var(--x) / 0.15)` is taken whole rather than
+// as the bare var() nested inside it.
+const COLOR_ATOM = /hsla?\([^()]*(?:\([^()]*\)[^()]*)*\)|rgba?\([^()]*(?:\([^()]*\)[^()]*)*\)|color-mix\([^()]*(?:\([^()]*\)[^()]*)*\)|#[0-9a-fA-F]{3,8}\b|var\(\s*--[A-Za-z0-9_-]+\s*\)/g;
+
+/** The colour of a shadow layer / outline value: the last colour atom in it. */
+function colorAtomOf(value) {
+  const atoms = String(value).match(COLOR_ATOM);
+  return atoms ? atoms[atoms.length - 1] : null;
+}
+
+/** Split a value on TOP-LEVEL commas (box-shadow layers). */
+function splitLayers(value) {
+  const out = [];
+  let depth = 0, cur = "";
+  for (const ch of value) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (ch === "," && depth === 0) { out.push(cur); cur = ""; } else cur += ch;
+  }
+  if (cur.trim()) out.push(cur);
+  return out;
+}
+
+/** Lowest alpha this colour atom takes across every theme state; null = unparseable. */
+function minAlphaAcrossThemes(atom) {
+  let min = null;
+  for (const [, map] of THEME_STATES) {
+    const col = parseColor(resolveLiteralValue(atom, map));
+    if (!col) continue;
+    min = min === null ? col.a : Math.min(min, col.a);
+  }
+  return min;
+}
+
+export function focusIndicatorErrors() {
+  const errs = [];
+  for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selector = m[1].trim();
+    if (!/:focus\b|:focus-visible\b/.test(selector)) continue;
+    const body = m[2];
+
+    const decls = {};
+    for (const d of body.split(";")) {
+      const i = d.indexOf(":");
+      if (i < 0) continue;
+      const prop = d.slice(0, i).trim().toLowerCase();
+      if (prop.startsWith("--")) continue;
+      decls[prop] = d.slice(i + 1).trim(); // last declaration wins, as in the cascade
+    }
+
+    // The band: the outermost box-shadow layer, else the outline colour.
+    let band = null, bandProp = null;
+    const shadow = decls["box-shadow"];
+    if (shadow && !/^none\b/i.test(shadow)) {
+      const layers = splitLayers(shadow);
+      band = colorAtomOf(layers[layers.length - 1]);
+      bandProp = "box-shadow";
+    }
+    if (!band) {
+      const outline = decls["outline"] || decls["outline-color"];
+      if (outline && !/^(none|0)\b/i.test(outline)) {
+        band = colorAtomOf(outline);
+        bandProp = decls["outline-color"] ? "outline-color" : "outline";
+      }
+    }
+    if (!band) continue; // paints no indicator band — inherits the shared ring
+
+    const alpha = minAlphaAcrossThemes(band);
+    if (alpha === null || alpha >= 1) continue;
+
+    // The escape: an opaque border/outline colour IS the indicator.
+    const escape = ["border-color", "outline-color", "border"]
+      .map((p) => decls[p] && colorAtomOf(decls[p]))
+      .filter(Boolean)
+      .some((atom) => {
+        const a = minAlphaAcrossThemes(atom);
+        return a !== null && a >= 1;
+      });
+    if (escape) continue;
+
+    errs.push(
+      `E12 app.css:${lineOf(css, m.index)}  focus rule ${JSON.stringify(selector.replace(/\s+/g, " "))} paints its ` +
+        `SOLE indicator band from ${band} (${bandProp}), which resolves to alpha ${alpha} — ` +
+        `a translucent band can never reach the 3:1 SC 1.4.11 floor over an opaque backdrop ` +
+        `(alpha 0.15 ceils at 1.62:1). Point the band at an OPAQUE token (--ring), or give the ` +
+        `rule an opaque border-color and keep the tint as a decorative halo`,
+    );
+  }
+  return errs;
+}
+
 // ── External-host lint (E7) ──────────────────────────────────────────────────
 // Resource LOADS only — <a href> navigation is allowed. Covers load-bearing
 // HTML elements, CSS url(...) and @import in all three surfaces.
@@ -1018,6 +1163,11 @@ for (const b of badTokens) {
 
 // E5 — the contrast manifest, both themes.
 runContrast(errors);
+
+// E12 — rule-level focus-indicator opacity. E5 asserts TOKENS; this asserts
+// which token each focus RULE actually consumes, so the ratchet cannot be
+// walked away from (measured: 19 rules at 1.19–1.52:1 with E5 green).
+for (const e of focusIndicatorErrors()) errors.push(e);
 
 // E9 — parse-completeness: declarations a comment mis-close swallowed (#4251).
 for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
@@ -1139,7 +1289,8 @@ for (const s of staleRawAllows) {
 }
 
 // E5 summary: worst pair per theme state, so drift toward the threshold is
-// visible across all ten (base + 4 identities × light/dark).
+// visible across every discovered state (base + each identity × light/dark) —
+// one line per state, so the count is the output's, never this comment's.
 for (const [theme] of THEME_STATES) {
   const rows = contrastResults.filter((r) => r.theme === theme);
   if (!rows.length) continue;
