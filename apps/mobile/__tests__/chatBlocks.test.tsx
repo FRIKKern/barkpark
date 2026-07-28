@@ -24,6 +24,7 @@ import {
   CardRow,
   chatBlockCtx,
   TranscriptRow,
+  type BodyRow,
   type Row,
 } from '../src/screens/ChatSessionScreen'
 import { messageBlocks, type ChatMessage } from '../src/chat/wire'
@@ -292,20 +293,38 @@ describe('screen wiring (the register actually reaches the transcript)', () => {
 
 /* ── 3. the two-phase floor (chat-TUI charter D8/D9) ────────────────────────── */
 
-function assistantRow(m: Partial<ChatMessage>): Row {
+function assistantRow(m: Partial<ChatMessage>): BodyRow {
   return { key: 'm-1', kind: 'message', message: { seq: 1, role: 'assistant', ...m } }
 }
 
 describe('two-phase floor: plain tail, blocks at settle', () => {
   const blocks = [{ type: 'paragraph', text: 'settled' }]
 
-  it('the streaming tail is plain text at EVERY prefix — no partial-markdown path', () => {
+  // NARROWED DELIBERATELY (mob-w3-rich-tail, charter D59), and the narrowing is
+  // named in the PR rather than left for a reader to notice.
+  //
+  // What it used to say: "the whole tail is plain at every prefix". That claim
+  // stopped being the law when the SERVER started settling the answer in
+  // segments — but worse, it had already stopped being CHECKED where it matters:
+  // this arm of bodyRender is dead code for the UI (TranscriptRow returns the
+  // tail's Text before it ever calls bodyRender), which is why mob-rt-s3 had to
+  // go and pin the plain-tail law on the arm that actually paints, in
+  // chatMotion.test.tsx §6. Left as it was, this loop would have kept asserting
+  // a decoy: green through any change to what the reader sees.
+  //
+  // What it says now: the UNSETTLED REMAINDER is plain at every prefix. That is
+  // the whole of the original anti-flash intent — a half-written `**bold` marker
+  // can never flash as markup, because the row that carries it holds a STRING and
+  // has no blocks field to render — and it is the part that survives the
+  // progressive tail, since the row's text is now the remainder rather than the
+  // whole turn. What is settled is a document; what is unfinished is plain.
+  it('the unsettled REMAINDER is plain text at EVERY prefix — no partial-markdown path', () => {
     const full = '**bold** and `code` and\n\n- a list\n\n```js\nx\n```'
     for (let i = 1; i <= full.length; i++) {
-      const row: Row = { key: 'tail', kind: 'tail', text: full.slice(0, i) }
+      const row: BodyRow = { key: 'tail', kind: 'tail', text: full.slice(0, i) }
       const body = bodyRender(row)
       expect(body.kind).toBe('text')
-      // Verbatim: the tail is never re-parsed, reflowed or partially marked up.
+      // Verbatim: the remainder is never re-parsed, reflowed or partially marked up.
       expect(body).toEqual({ kind: 'text', text: full.slice(0, i) })
     }
   })
