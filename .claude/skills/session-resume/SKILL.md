@@ -33,8 +33,9 @@ new conversation, not a continuation of the one that opened the session):
 
 ```bash
 CONV_UUID=$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')
-ACCOUNT=$(jq -r '.oauthAccount.emailAddress // empty' ~/.claude.json 2>/dev/null)
-[ -z "$ACCOUNT" ] && ACCOUNT=$(jq -r '..|.email? // empty' ~/.codex/auth.json 2>/dev/null | head -1)
+ACCOUNT=""
+ACCOUNT=$(jq -r '.oauthAccount.emailAddress // empty' ~/.claude.json 2>/dev/null || true)
+[ -z "$ACCOUNT" ] && ACCOUNT=$(jq -r '..|.email? // empty' ~/.codex/auth.json 2>/dev/null | head -1 || true)
 [ -z "$ACCOUNT" ] && ACCOUNT=$(git config user.email 2>/dev/null)
 [ -z "$ACCOUNT" ] && ACCOUNT="$USER@$(hostname -s)"
 bp session touch <slug> --conversation "$CONV_UUID" --harness claude-code --account "$ACCOUNT" --machine "$(hostname -s)" --cwd "$(pwd)"

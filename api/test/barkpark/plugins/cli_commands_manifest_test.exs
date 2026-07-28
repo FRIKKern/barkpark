@@ -192,6 +192,11 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert log_flags["kind"].type == "string"
       assert log_flags["ref"].type == "string"
       assert log_flags["note"].type == "string"
+      # session-conversations slice review fix: session.log must declare
+      # --conversation, or the manifest-driven CLI hard-errors (unknown flag,
+      # run.go:474) on the documented `bp session log ... --conversation`
+      # provenance invocation — the event-provenance half was unreachable.
+      assert log_flags["conversation"].type == "string"
       refute log.batch
 
       # session.link-task's --add flag reaches TasksController.sessions/2's

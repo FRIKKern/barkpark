@@ -102,15 +102,16 @@ regenerate per touch, or every checkpoint spawns a new registry entry):
 
 ```bash
 CONV_UUID="${CANDIDATE_UUID:-$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')}"
-ACCOUNT=$(jq -r '.oauthAccount.emailAddress // empty' ~/.claude.json 2>/dev/null)
-[ -z "$ACCOUNT" ] && ACCOUNT=$(jq -r '..|.email? // empty' ~/.codex/auth.json 2>/dev/null | head -1)
+ACCOUNT=""
+ACCOUNT=$(jq -r '.oauthAccount.emailAddress // empty' ~/.claude.json 2>/dev/null || true)
+[ -z "$ACCOUNT" ] && ACCOUNT=$(jq -r '..|.email? // empty' ~/.codex/auth.json 2>/dev/null | head -1 || true)
 [ -z "$ACCOUNT" ] && ACCOUNT=$(git config user.email 2>/dev/null)
 [ -z "$ACCOUNT" ] && ACCOUNT="$USER@$(hostname -s)"
 bp session touch "$SLUG" --conversation "$CONV_UUID" --harness claude-code --account "$ACCOUNT" --machine "$(hostname -s)" --cwd "$(pwd)"
 ```
 
-(Verify the `~/.claude.json` jq path against the real file on this machine — `jq
-'.oauthAccount'` — and correct the snippet above if the key differs there.)
+(`.oauthAccount.emailAddress` is the correct `~/.claude.json` path — verified against the
+real file.)
 
 **Capture the full active thread, immediately.** Open is NOT just metadata: unless this
 is genuinely turn one of a fresh conversation, run a first checkpoint (§3) right after
@@ -127,12 +128,15 @@ covers it in full.
 Fire one of these right after the milestone happens — don't batch them up for later:
 
 ```bash
-bp session log "$SLUG" --kind paper-published    --ref <paper-slug>
-bp session log "$SLUG" --kind task-closed        --ref <task-doc-id>
-bp session log "$SLUG" --kind epic-wave-complete --ref <wave-paper-slug>
-bp session log "$SLUG" --kind push               --ref "$(git rev-parse HEAD)"
-bp session log "$SLUG" --kind note               --note "<short free text>"
+bp session log "$SLUG" --kind paper-published    --ref <paper-slug>          --conversation "$CONV_UUID"
+bp session log "$SLUG" --kind task-closed        --ref <task-doc-id>         --conversation "$CONV_UUID"
+bp session log "$SLUG" --kind epic-wave-complete --ref <wave-paper-slug>     --conversation "$CONV_UUID"
+bp session log "$SLUG" --kind push               --ref "$(git rev-parse HEAD)" --conversation "$CONV_UUID"
+bp session log "$SLUG" --kind note               --note "<short free text>" --conversation "$CONV_UUID"
 ```
+
+`--conversation` is optional provenance (which conversation logged the event), not
+required — omit it if `$CONV_UUID` isn't set for some reason, the log still succeeds.
 
 Keep `--note` short — it rides the query string, not a JSON body.
 

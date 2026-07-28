@@ -475,7 +475,12 @@ defmodule Barkpark.Plugins.Bulldocs do
             type: "string",
             summary: "Related doc id (task id, paper slug, commit SHA)."
           },
-          %{name: "note", type: "string", summary: "Short free-text note."}
+          %{name: "note", type: "string", summary: "Short free-text note."},
+          %{
+            name: "conversation",
+            type: "string",
+            summary: "Conversation that logged this event (provenance)."
+          }
         ],
         writes: true,
         batch: false,
