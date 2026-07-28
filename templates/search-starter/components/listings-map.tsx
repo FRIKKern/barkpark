@@ -762,7 +762,7 @@ export function ListingsMap({
             type="button"
             aria-label="Close"
             onClick={() => setSelected(null)}
-            className="absolute right-2 top-2 text-zinc-400 hover:text-zinc-700"
+            className="absolute right-2 top-2 text-muted-text hover:text-zinc-700"
           >
             ✕
           </button>

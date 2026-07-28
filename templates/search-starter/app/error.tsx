@@ -18,13 +18,15 @@ export default function Error({
       <h1 className="text-lg font-medium text-zinc-900 dark:text-zinc-100">
         Something went wrong
       </h1>
-      <p className="max-w-md text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="max-w-md text-sm text-muted-text">
         {error.message || "An unexpected error occurred while rendering this page."}
       </p>
+      {/* `reset` is the only control on this screen — a keyboard visitor who
+          lands here must be able to see where they are. */}
       <button
         type="button"
         onClick={reset}
-        className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+        className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
       >
         Try again
       </button>

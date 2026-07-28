@@ -279,7 +279,7 @@ function highlight(text: string, terms: string[]): ReactNode {
  * = understood after correcting a typo). Shown once above the results. */
 function HighlightLegend() {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.7rem] text-zinc-500 dark:text-zinc-400">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.7rem] text-muted-text">
       <span className="flex items-center gap-2">
         <span className="uppercase tracking-widest">match</span>
         <span>fuzzy</span>
@@ -310,7 +310,7 @@ function HighlightLegend() {
 
 function TypeChip({ type }: { type: string }) {
   return (
-    <span className="rounded-full bg-zinc-200/70 px-2 py-0.5 font-mono text-[0.7rem] uppercase tracking-wide text-zinc-500 dark:bg-zinc-800/70 dark:text-zinc-400">
+    <span className="rounded-full bg-zinc-200/70 px-2 py-0.5 font-mono text-[0.7rem] uppercase tracking-wide text-muted-text dark:bg-zinc-800/70">
       {type}
     </span>
   );
@@ -388,7 +388,7 @@ const ResultRow = memo(function ResultRow({
         {hit.href ? (
           <span
             aria-hidden
-            className="translate-x-0 text-zinc-400 opacity-0 transition-all group-hover:translate-x-1 group-hover:opacity-100"
+            className="translate-x-0 text-muted-text opacity-0 transition-all group-hover:translate-x-1 group-hover:opacity-100"
           >
             →
           </span>
@@ -402,16 +402,16 @@ const ResultRow = memo(function ResultRow({
         ) : null}
       </span>
       {snippetNodes ? (
-        <span className="line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
+        <span className="line-clamp-2 text-sm text-muted-text">
           {snippetNodes}
         </span>
       ) : null}
-      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-400">
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-text">
         <TypeChip type={hit.type} />
         {date ? <span>{date}</span> : null}
         {hit.slug ? <span className="font-mono">/{hit.slug}</span> : null}
         {!hit.href ? (
-          <span className="italic text-zinc-400">view-only (no reader)</span>
+          <span className="italic text-muted-text">view-only (no reader)</span>
         ) : null}
       </span>
     </>
@@ -432,7 +432,7 @@ const ResultRow = memo(function ResultRow({
       <div
         data-nav-result=""
         tabIndex={0}
-        className={`${cls}${stateCls} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500`}
+        className={`${cls}${stateCls} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
         onMouseEnter={onHoverEnter}
         onMouseLeave={onHoverLeave}
         onFocus={onHoverEnter}
@@ -464,7 +464,7 @@ const ResultRow = memo(function ResultRow({
       onFocus={onHoverEnter}
       onBlur={onBlurOut}
       aria-current={selected ? "page" : undefined}
-      className={`${cls}${stateCls} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500`}
+      className={`${cls}${stateCls} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
     >
       {inner}
     </Link>
@@ -1059,7 +1059,7 @@ export function Finder({
             ← Barkpark
           </Link>
           <h1 className="text-4xl font-semibold tracking-tight">Find anything</h1>
-          <p className="text-zinc-500 dark:text-zinc-400">
+          <p className="text-muted-text">
             Search across every document type in the{" "}
             <code className="rounded bg-zinc-200/70 px-1.5 py-0.5 font-mono text-[0.8em] dark:bg-zinc-800/70">
               production
@@ -1074,7 +1074,7 @@ export function Finder({
         // same words, but the search box — the only thing a visitor came for —
         // stays above the fold instead of being pushed out by display type.
         <header className="flex flex-col gap-2 border-b border-zinc-200 pb-5 md:gap-4 md:pb-8 dark:border-zinc-800">
-          <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
+          <span className="text-xs font-medium uppercase tracking-widest text-muted-text">
             {SITE_EYEBROW}
           </span>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">
@@ -1092,7 +1092,7 @@ export function Finder({
           <div className="relative flex-1">
             <span
               aria-hidden
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400"
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-text"
             >
               ⌕
             </span>
@@ -1118,7 +1118,12 @@ export function Finder({
               data-lpignore="true"
               placeholder='Try: headless · "cli guide" · phoenex · report -draft'
               autoFocus={variant === "page"}
-              className="w-full rounded-lg border border-zinc-300 bg-transparent py-2.5 pl-9 pr-3 text-base outline-none transition-colors focus:border-zinc-500 dark:border-zinc-700 dark:focus:border-zinc-400"
+              // The flagship's PRIMARY control: it must announce focus with more
+              // than a 1px border tint. `outline-none` alone left a keyboard
+              // visitor with no perceptible focus indicator (WCAG 2.4.7); the
+              // ring rides --color-ring so it is the same affordance on all four
+              // theme identities instead of an off-theme hardcoded hue.
+              className="w-full rounded-lg border border-zinc-300 bg-transparent py-2.5 pl-9 pr-3 text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus:border-zinc-500 dark:border-zinc-700 dark:focus:border-zinc-400"
             />
           </div>
           {/* The engine pill is RETIRED: the demo no longer advertises an
@@ -1130,7 +1135,7 @@ export function Finder({
             chips when searching, + the fuzzy pill — with the Options toggle on
             the right. The benchmark/advanced controls tuck into the panel below,
             collapsed by default so the primary surface stays clean. */}
-        <div className="flex min-h-11 items-center justify-between gap-3 text-sm text-zinc-500 md:min-h-7 dark:text-zinc-400">
+        <div className="flex min-h-11 items-center justify-between gap-3 text-sm text-muted-text md:min-h-7">
           {/* Phone: ONE scrollable strip rather than a wrapping block — the
               chips are 44px tall here, and six of them wrapped would bury the
               results under a wall of pills. Desktop wraps exactly as before. */}
@@ -1141,7 +1146,7 @@ export function Finder({
               // Default (idle) state: Popular shortcuts live HERE instead of the
               // old engine tagline.
               <>
-                <span className="shrink-0 text-zinc-400">Popular:</span>
+                <span className="shrink-0 text-muted-text">Popular:</span>
                 {popular.map((p) => (
                   <button
                     key={p.query}
@@ -1178,7 +1183,7 @@ export function Finder({
             type="button"
             onClick={() => setOptionsOpen((o) => !o)}
             aria-expanded={optionsOpen}
-            className="flex min-h-11 shrink-0 items-center gap-1 pl-2 text-xs text-zinc-400 transition-colors hover:text-zinc-600 md:min-h-0 md:pl-0 dark:hover:text-zinc-300"
+            className="flex min-h-11 shrink-0 items-center gap-1 pl-2 text-xs text-muted-text transition-colors hover:text-zinc-600 md:min-h-0 md:pl-0 dark:hover:text-zinc-300"
           >
             Options
             <svg
@@ -1199,7 +1204,7 @@ export function Finder({
         </div>
         {optionsOpen ? (
           <div className="flex flex-col gap-3 border-l-2 border-zinc-200 pl-3 dark:border-zinc-800">
-            <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-text">
               <span>
                 <code className="font-mono">&quot;exact phrase&quot;</code> phrase
               </span>
@@ -1296,7 +1301,7 @@ export function Finder({
           {facetCount > 0 ? (
             <button
               onClick={resetFacets}
-              className="inline-flex min-h-11 items-center self-start text-xs text-zinc-400 transition-colors hover:text-zinc-700 md:min-h-0 dark:hover:text-zinc-200"
+              className="inline-flex min-h-11 items-center self-start text-xs text-muted-text transition-colors hover:text-zinc-700 md:min-h-0 dark:hover:text-zinc-200"
             >
               clear filters ({facetCount})
             </button>
@@ -1304,7 +1309,7 @@ export function Finder({
 
           {facetGroups.map((g) => (
             <div key={g.key} className="flex flex-col gap-2">
-              <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-400">
+              <h2 className="text-xs font-medium uppercase tracking-widest text-muted-text">
                 {g.label}
               </h2>
               <ul className="flex flex-col gap-0.5">
@@ -1317,7 +1322,7 @@ export function Finder({
                         data-nav-facet=""
                         aria-pressed={on}
                         onClick={() => toggleFacet(g.key, b.label)}
-                        className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 md:min-h-0 ${
+                        className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:min-h-0 ${
                           on
                             ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900"
                             : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900/60"
@@ -1325,7 +1330,7 @@ export function Finder({
                       >
                         <span className="truncate">{display}</span>
                         <span
-                          className={`shrink-0 font-mono text-xs ${on ? "" : "text-zinc-400"}`}
+                          className={`shrink-0 font-mono text-xs ${on ? "" : "text-muted-text"}`}
                         >
                           {b.count}
                         </span>
@@ -1338,9 +1343,9 @@ export function Finder({
           ))}
 
           {facetsFromIndx ? (
-            <p className="text-[0.7rem] leading-snug text-zinc-400">
+            <p className="text-[0.7rem] leading-snug text-muted-text">
               Counts computed by{" "}
-              <span className="font-medium text-zinc-500 dark:text-zinc-400">
+              <span className="font-medium text-muted-text">
                 {data?.engineUsed === "postgres" ? "Postgres" : "Indx"}
               </span>{" "}
               across the {q ? "matches" : "dataset"}.
@@ -1354,7 +1359,7 @@ export function Finder({
               sort tabs stay put and the row doesn't grow/shrink between the
               loading and loaded states. The left metadata CLIPS rather than
               pushing the tabs to a second line. */}
-          <div className="flex min-h-8 items-center justify-between gap-3 text-sm text-zinc-400">
+          <div className="flex min-h-8 items-center justify-between gap-3 text-sm text-muted-text">
             {showSkeleton ? (
               <span className="min-w-0 truncate">Searching…</span>
             ) : (
@@ -1396,7 +1401,7 @@ export function Finder({
                   </span>
                 ) : null}
                 {loading ? (
-                  <span className="animate-pulse text-zinc-400">
+                  <span className="animate-pulse text-muted-text">
                     · searching…
                   </span>
                 ) : null}
@@ -1462,7 +1467,7 @@ export function Finder({
                 <Fragment key={`${hit.type}:${hit.id}`}>
                   {boundary === i ? (
                     <li className="py-3">
-                      <div className="flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-widest text-zinc-400">
+                      <div className="flex items-center gap-3 text-[0.7rem] font-medium uppercase tracking-widest text-muted-text">
                         <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
                         confident matches ↑ · related below
                         <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
