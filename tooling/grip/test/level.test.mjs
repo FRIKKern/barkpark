@@ -783,3 +783,47 @@ test("KNOWN L1 SHAPES: the ssh forms the corpus actually uses are never demoted"
   // tgw3-bl-ssh-bare-host-alias. Pinned here so the gap is visible, not silent.
   assert.equal(deriveLevel("ssh guerrilla systemctl status barkpark"), "L6");
 });
+
+// --- mention-immunity for the OTHER blessed remote tokens --------------------
+// The curl/wget branch was deliberately head-gated (see the https:// mention
+// test above). SSH_READ / GIT_SHOW_REMOTE / GH_API were not: they were tested
+// against the RAW segment, so a local grep that merely QUOTES a production
+// command was promoted to L1/L2 — and record.mjs's admitFact then ACCEPTED an
+// author's false L1 claim, defeating the ceiling. These pin the symmetry.
+
+test("MENTION-IMMUNITY: a grep quoting an ssh command is L3, not L1", () => {
+  assert.equal(deriveLevel(`grep -rn "ssh root@89.167.28.206" docs/ops/PROD_OPS.md`), "L3");
+  assert.equal(deriveLevel(`rg -n 'ssh root@prod' docs/`), "L3");
+  // unquoted, too — quote-masking alone cannot see this one
+  assert.equal(deriveLevel(`grep -rn ssh root@host docs/`), "L3");
+});
+
+test("MENTION-IMMUNITY: a grep quoting `gh api` or `git show origin/…` is L3, not L2", () => {
+  assert.equal(deriveLevel(`grep -n "gh api repos/x/y/pulls" docs/ops/merge-gates.md`), "L3");
+  assert.equal(deriveLevel(`grep -n "git show origin/main:api/lib/foo.ex" docs/cards/js-sdk.md`), "L3");
+  assert.equal(deriveLevel(`rg -n "git show origin/main:" docs/`), "L3");
+});
+
+test("MENTION-IMMUNITY does not demote a real invocation", () => {
+  // the standing zero-false-demotion bar, for exactly the shapes now gated
+  assert.equal(deriveLevel(`ssh root@89.167.28.206 "cd /opt/barkpark && git pull"`), "L1");
+  assert.equal(deriveLevel(`cd /opt && ssh root@h uptime`), "L1");
+  assert.equal(deriveLevel(`timeout 30 ssh root@h uptime`), "L1");
+  assert.equal(deriveLevel(`gh api repos/o/r/pulls --jq .`), "L2");
+  assert.equal(deriveLevel(`git show origin/main:api/mix.exs | head -20`), "L2");
+  // a reader head with a PROCESS SUBSTITUTION really does read origin — the
+  // corpus contains this shape and it must keep its L2.
+  assert.equal(deriveLevel(`diff <(git show origin/main:a.md) a.md`), "L2");
+});
+
+test("MENTION-IMMUNITY: the ceiling holds — admitFact rejects a false L1 on a quoting grep", () => {
+  const admitted = admitFact({
+    subject: "docs/ops/PROD_OPS.md",
+    claim: "the documented prod deploy host appears at docs/ops/PROD_OPS.md:17",
+    evidence: "read the doc",
+    rerun: `grep -rn "ssh root@89.167.28.206" docs/ops/PROD_OPS.md`,
+    level: "L1",
+  });
+  assert.equal(admitted.ok, false);
+  assert.equal(admitted.rejections[0].reason, "LEVEL-SKIP");
+});

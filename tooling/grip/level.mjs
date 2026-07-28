@@ -464,13 +464,25 @@ const READER_HEADS = new Set(["cat", "head", "tail", "less", "more", "jq", "grep
 
 // The level of ONE segment of a compound, or null when the segment classifies
 // nothing (a `cd`, a loop keyword, an unknown head).
-function segmentLevel(text) {
+function segmentLevel(text, maskText = text) {
   const command = trimSegment(text);
   if (command === "") return null;
+  // Mention-immunity: the blessed remote tokens are read from the QUOTE-MASKED
+  // segment, exactly as curl/wget is head-gated. `grep -rn "ssh root@host" doc.md`
+  // MENTIONS a production command; it does not run one.
+  const masked = trimSegment(maskText);
+  const { head, raw, rest } = headToken(command);
+  // A READER head can never itself BE an ssh/gh/git-show invocation, so a
+  // blessed token under one is always a mention — including the unquoted
+  // `grep -rn ssh root@host docs/`, which quote-masking alone cannot see.
+  // …but a process/command substitution under a reader head is a REAL
+  // invocation, not a mention: `diff <(git show origin/main:x) x` genuinely
+  // reads origin. The corpus contains exactly that shape, and demoting it
+  // would break the standing zero-false-demotion bar.
+  const mentionOnly = READER_HEADS.has(head) && !/[<>$]\(/.test(masked);
 
   // L1 — a running system was touched.
-  if (SSH_READ.test(command)) return "L1";
-  const { head, raw, rest } = headToken(command);
+  if (!mentionOnly && SSH_READ.test(masked)) return "L1";
   if (head === "curl" || head === "wget") {
     // The URL is read from the ORIGINAL segment, quotes and all: `curl 'https://…'`
     // is a real remote target. The head gate is what keeps a MENTIONED url —
@@ -480,7 +492,7 @@ function segmentLevel(text) {
   if (!head) return null;
 
   // L2 — origin/main, or another remote read through a remote-API client.
-  if (GIT_SHOW_REMOTE.test(command) || GH_API.test(command)) return "L2";
+  if (!mentionOnly && (GIT_SHOW_REMOTE.test(masked) || GH_API.test(masked))) return "L2";
   if (REMOTE_API_HEADS.has(head)) return hasOnlyLoopbackTargets(command) ? "L3" : "L2";
 
   // L4 — the read's TARGET is a known generated artifact. Checked before the
@@ -523,7 +535,7 @@ export function deriveLevel(rerun) {
   let best = null;
   let sawArtifactRead = false;
   for (const segment of splitSegments(command, mask)) {
-    const level = segmentLevel(segment.raw);
+    const level = segmentLevel(segment.raw, segment.mask);
     if (level === null) continue;
     if (level === "L4") { sawArtifactRead = true; continue; }
     if (best === null || LEVELS[level] < LEVELS[best]) best = level;
