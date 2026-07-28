@@ -334,7 +334,7 @@ if printf '%s' "$PAYLOAD" | jq -e '[.required_status_checks.checks[].app_id] | a
   ok "every check pins app_id 15368 (an omitted app_id reads back null on a new name = spoofable)"
 else bad "a check is missing its app_id pin"; fi
 if printf '%s' "$PAYLOAD" | jq -e '.enforce_admins == true' >/dev/null; then
-  ok "enforce_admins:true — every merge here is --admin, so false would be a gate that cannot block"
+  ok "enforce_admins:true — an admin bypass would skip the required set entirely, so false is a gate that cannot block (the fleet merges with scripts/bp-merge.sh)"
 else bad "enforce_admins is not true"; fi
 if printf '%s' "$PAYLOAD" | jq -e '.required_pull_request_reviews == null and .restrictions == null' >/dev/null; then
   ok "required_pull_request_reviews and restrictions are explicit nulls (restrictions is org-only; this repo is user-owned)"
@@ -351,10 +351,20 @@ fi
 
 section "5b. apply refuses to protect anything from an enforced:false spec"
 
-if bash "$APPLY" --confirm --spec "$SPEC" >/dev/null 2>&1; then
+# THE SPECIMEN IS DISARMED EXPLICITLY, never borrowed from $SPEC (same class as
+# the D77 defect in section 11). While the committed spec said `enforced:false`,
+# passing $SPEC here was a safe refusal probe. The moment hgw2-s7 commits
+# `enforced: true` the identical line becomes `apply --confirm` against the REAL
+# spec — a live branch-protection PUT on main, executed by the test harness, on
+# every CI run, and then reported as a FAILURE because it succeeded. A guard
+# whose disarmed specimen is whatever the repo currently commits is not a
+# specimen at all.
+DISARMED="$TMP/enforced-false.json"
+jq '.enforced = false' "$SPEC" > "$DISARMED"
+if bash "$APPLY" --confirm --spec "$DISARMED" >/dev/null 2>&1; then
   bad "apply wrote protection from an enforced:false spec"
 else
-  ok "apply refuses while the committed spec says enforced=false"
+  ok "apply refuses a spec that says enforced=false, even with --confirm"
 fi
 cat > "$TMP/enforced.json" <<JSON
 $(jq '.enforced = true' "$SPEC")
@@ -510,24 +520,234 @@ else
   fi
 fi
 
-section "11. full mode tracks the spec's enforced flag in BOTH directions"
+section "11. full mode tracks the COMMITTED spec against reality, in BOTH eras"
 
 # hgw2-s7's own slice gate is the bare `scripts/required-checks-verify.sh`, so
-# full mode has to be meaningful on both sides of the flip: green today (no live
-# config to diff, deadlock detector still run against a real head) and RED the
-# moment the spec claims a protection that does not exist. Asserted by mutation
-# rather than by reading the code — a spec whose only difference is the flag.
-FULLMUT="$TMP/enforced-true.json"
-jq '.enforced = true' "$SPEC" > "$FULLMUT"
+# full mode has to be meaningful on both sides of the flip: green on whatever
+# the spec commits, and RED on a spec that disagrees with the live world.
+# Asserted by mutation, never by reading the code.
+#
+# THE MUTATION DIRECTION IS DERIVED, NOT TYPED (honest-gates D77). This section
+# used to write `jq '.enforced = true'`. That was correct for exactly as long as
+# the committed spec said `false`: the moment hgw2-s7 commits `enforced: true`,
+# `= true` produces a file BYTE-IDENTICAL to $SPEC, and the section then asserts
+# that one file both passes (first clause) and fails (second) — a permanent,
+# self-contradictory red on the very PR that installs protection. `|= not`
+# always yields a genuinely different spec.
+#
+# AND THE EXPECTATION IS ERA-AWARE, because inverting the flag is only a
+# falsifiable mutation in one direction. `enforced: false` is a COMMITTED,
+# reviewable state that full mode deliberately does not diff against live
+# config, so post-flip the inverted (false) spec is legitimately GREEN.
+# Asserting a red there would be a lie in the opposite direction. Post-flip the
+# mutation that must red is a CONTENT one — a required context live protection
+# does not carry — which is the same class of finding (spec disagrees with the
+# world) reached through the field that still moves.
+FULLMUT="$TMP/enforced-inverted.json"
+jq '.enforced |= not' "$SPEC" > "$FULLMUT"
+if [ "$(jq -c . "$FULLMUT")" = "$(jq -c . "$SPEC")" ]; then
+  bad "the section-11 mutation is byte-identical to the committed spec — it would assert pass AND fail on one file"
+else
+  ok "the section-11 mutation is DERIVED (\`.enforced |= not\`) and differs from the committed spec in both eras"
+fi
+
 if bash "$VERIFY" >/dev/null 2>&1; then
-  ok "full mode is green while enforced=false (the pre-flip state is committed, not swallowed)"
+  ok "full mode is green on the COMMITTED spec (enforced=$(jq -r .enforced "$SPEC")) — hgw2-s7's slice gate passes"
 else
   bad "full mode reds on the committed spec — hgw2-s7's slice gate cannot pass"
 fi
-if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then
-  bad "full mode PASSED with enforced=true against an unprotected main — it cannot fail"
+
+if jq -e '.enforced == false' "$SPEC" >/dev/null; then
+  if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then
+    bad "full mode PASSED with enforced=true against an unprotected main — it cannot fail"
+  else
+    ok "…and RED with enforced=true while main is unprotected (mutation-proven able to fail)"
+  fi
 else
-  ok "…and RED with enforced=true while main is unprotected (mutation-proven able to fail)"
+  # Post-flip. The flag inversion is green BY DESIGN (see above), so the
+  # falsifying mutation is a context live protection does not publish.
+  CONTENTMUT="$TMP/phantom-context.json"
+  jq '.protection.required_status_checks.checks += [{"context":"No workflow emits me","app_id":15368}]' \
+    "$SPEC" > "$CONTENTMUT"
+  if bash "$VERIFY" --spec "$CONTENTMUT" >/dev/null 2>&1; then
+    bad "full mode PASSED with a required context live protection does not carry — it cannot fail"
+  else
+    ok "…and RED on a spec context live protection does not carry (mutation-proven able to fail post-flip)"
+  fi
+  if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then
+    ok "…and the INVERTED flag (enforced=false) is green by design — a committed, reviewable state, never a swallowed one"
+  else
+    bad "full mode reds on enforced=false, which is a committed state the guard is documented to accept"
+  fi
+fi
+
+# ═══ 12. the superset floor ══════════════════════════════════════════════════
+
+section "12. the cardinality floor refuses a SWAP that a count floor waves through"
+
+FLOOR="$REPO_ROOT/scripts/required-checks-floor.sh"
+
+# HERMETIC ON PURPOSE: the harness drives the floor through `--reference`
+# fixtures. CI checks out at depth 1 and `git show origin/main:…` is not
+# guaranteed to resolve there, and a harness that needs a remote ref is a
+# harness CI eventually skips. The DEFAULT reference — the one that matters in
+# anger — is asserted separately, below, by reading the script.
+cat > "$TMP/floor-ref.json" <<'JSON'
+{ "protection": { "required_status_checks": { "strict": false, "checks": [
+  { "context": "Elixir gate", "app_id": 15368 },
+  { "context": "PR references an active task", "app_id": 15368 }
+] } } }
+JSON
+
+floor() { # candidate [extra args…] -> prints output, returns the floor's rc
+  local cand="$1"; shift
+  bash "$FLOOR" --reference "$TMP/floor-ref.json" "$@" "$cand" 2>&1
+}
+
+# (a) THE PASS CASE. Identical set, identical app_ids.
+cp "$TMP/floor-ref.json" "$TMP/floor-same.json"
+FOUT="$(floor "$TMP/floor-same.json")" && FRC=0 || FRC=$?
+if [ "$FRC" -eq 0 ] && grep -q "FLOOR OK" <<<"$FOUT"; then
+  ok "the floor PASSES a candidate identical to the reference (exit 0)"
+else
+  bad "the floor did not pass an identical candidate (exit $FRC): $(head -2 <<<"$FOUT")"
+fi
+
+# (b) THE REFUSE CASE, and it is the specimen a count floor cannot see: two
+#     contexts in, two out, and the only blocking gate has been replaced by a
+#     continue-on-error one.
+cat > "$TMP/floor-swap.json" <<'JSON'
+{ "protection": { "required_status_checks": { "strict": false, "checks": [
+  { "context": "PR references an active task", "app_id": 15368 },
+  { "context": "Boundary gate (advisory)", "app_id": 15368 }
+] } } }
+JSON
+FOUT="$(floor "$TMP/floor-swap.json")" && FRC=0 || FRC=$?
+if [ "$FRC" -eq 1 ] && grep -q "LOST  Elixir gate" <<<"$FOUT"; then
+  ok "the floor REFUSES a same-COUNT swap and names the lost gate (exit 1) — a \`>= 2\` floor passes this specimen"
+else
+  bad "the floor did not refuse the swap specimen (exit $FRC): $(head -3 <<<"$FOUT")"
+fi
+# The count really is equal, so the assertion above is about the SET and not
+# secretly about the length. Stated as an assertion so it cannot rot.
+if [ "$(jq '.protection.required_status_checks.checks | length' "$TMP/floor-swap.json")" \
+   = "$(jq '.protection.required_status_checks.checks | length' "$TMP/floor-ref.json")" ]; then
+  ok "…and the swap specimen has the SAME cardinality as the reference (so a count floor is proven insufficient, not merely asserted)"
+else
+  bad "the swap specimen changed the count — it no longer proves what it claims"
+fi
+
+# (c) app_id weakening is a loss too: `null` means "any app with checks:write".
+jq '.protection.required_status_checks.checks[0].app_id = null' "$TMP/floor-ref.json" > "$TMP/floor-nullapp.json"
+FOUT="$(floor "$TMP/floor-nullapp.json")" && FRC=0 || FRC=$?
+if [ "$FRC" -eq 1 ]; then
+  ok "the floor REFUSES an app_id weakened to null (the name survives; the pin does not)"
+else
+  bad "the floor accepted app_id:null (exit $FRC)"
+fi
+
+# (d) growth is LOUD and non-zero-unless-acknowledged (D69).
+jq '.protection.required_status_checks.checks += [{"context":"Doc budgets + anchors","app_id":15368}]' \
+  "$TMP/floor-ref.json" > "$TMP/floor-grow.json"
+FOUT="$(floor "$TMP/floor-grow.json")" && FRC=0 || FRC=$?
+if [ "$FRC" -eq 2 ] && grep -q "ADDED  Doc budgets + anchors" <<<"$FOUT"; then
+  ok "the floor exits 2 on GROWTH and names the added context (a promoted check is a decision, not a detail)"
+else
+  bad "growth did not exit 2 with the added name (exit $FRC): $(head -3 <<<"$FOUT")"
+fi
+FOUT="$(floor "$TMP/floor-grow.json" --acknowledge-growth)" && FRC=0 || FRC=$?
+if [ "$FRC" -eq 0 ]; then
+  ok "…and --acknowledge-growth is the ONLY way past it"
+else
+  bad "--acknowledge-growth did not clear the growth exit (exit $FRC)"
+fi
+
+# (e) an unreadable reference FAILS. This is the clause that keeps the floor
+#     from degrading into "nothing to compare against, so pass".
+FOUT="$(floor "$TMP/floor-same.json" --reference "$TMP/no-such-reference.json")" && FRC=0 || FRC=$?
+if [ "$FRC" -ne 0 ]; then
+  ok "an unreadable reference FAILS (never a vacuous pass)"
+else
+  bad "an unreadable reference passed"
+fi
+
+# (f) the DEFAULT reference is git, not the worktree — the whole reason the
+#     floor is not vacuous on the PR that rewrites the spec.
+if grep -q 'git -C "\$REPO_ROOT" show "\$REF_REV:\$SPEC_PATH"' "$FLOOR" \
+   && grep -q 'REF_REV="origin/main"' "$FLOOR"; then
+  ok "the floor's DEFAULT reference is \`git show origin/main:.github/required-checks.json\`, never the worktree copy the PR rewrites"
+else
+  bad "the floor no longer defaults to reading its reference out of git — it would compare the candidate to itself"
+fi
+
+# (g) and the floor lives OUTSIDE the generator and OUTSIDE verify, deliberately.
+#     Inside the generator it would run against the harness fixture shape that
+#     section 3 builds and refuse it; inside verify it has no second reference,
+#     because verify treats the committed spec AS truth.
+if ! grep -q "required-checks-floor" "$GEN" && ! grep -q "required-checks-floor" "$VERIFY"; then
+  ok "the floor is called by neither the generator nor verify (it needs a second reference; those two have none)"
+else
+  bad "the floor has been wired into the generator or verify — see the header for why that cannot work"
+fi
+
+# ═══ 13. the prose ratchet ═══════════════════════════════════════════════════
+
+section "13. no in-repo prose teaches \`gh pr merge --admin\` any more"
+
+# THE POINT: `--admin` is not forbidden, and this is not a spelling rule. Under
+# `enforce_admins: true` the flag simply does nothing — the server decides — so
+# prose that TEACHES it as the merge protocol sends every agent in the fleet at
+# a verb that now refuses. The replacement is an artifact, and the ratchet's job
+# is to keep the pointer pointing: scripts/bp-merge.sh.
+#
+# SCOPE, and every exemption is a measured one rather than a convenience:
+#   *.md only                      — prose is the thing that teaches
+#   .github/workflows/elixir.yml   — DESCRIPTIVE of the deadlock refusal
+#                                    ("even `gh pr merge --admin` is refused"),
+#                                    which the flip makes MORE true. Not prose,
+#                                    and not scanned: this rule is `*.md`.
+#   scripts/bp-merge.test.sh:114+  — the existing ratchet's own implementation.
+#                                    Same reason, same non-.md scope.
+#   scripts/bp-vercel-quick-setup.sh — `--admin-token`, an unrelated flag.
+#   tooling/grip/ledger/**         — DATED RECORDS of what was measured on a
+#                                    given day. Rewriting a record to match
+#                                    today's policy is falsifying it.
+#   .claude/workflows/*charter.md  — the D-entries are the measurements this
+#                                    epic is made of; D17 and D40 exist
+#                                    precisely to say what `--admin` did.
+#
+# ONE scan, driven twice. The canary run below appends an extra path to the
+# SAME function rather than re-typing the grep — a mutation proof against a
+# second copy of the pattern proves nothing about the first.
+prose_admin_hits() { # [extra path…]
+  {
+    ( cd "$REPO_ROOT" && git ls-files -- '*.md' )
+    printf '%s\n' "$@"
+  } \
+    | grep -v '^$' \
+    | grep -v '^tooling/grip/ledger/' \
+    | grep -v '^\.claude/workflows/.*charter\.md$' \
+    | ( cd "$REPO_ROOT" && tr '\n' '\0' | xargs -0 grep -nE 'gh pr merge[^`]*--admin' 2>/dev/null ) || true
+}
+
+PROSE_HITS="$(prose_admin_hits)"
+if [ -z "$PROSE_HITS" ]; then
+  ok "no non-exempt *.md teaches \`gh pr merge … --admin\` — the pointer is scripts/bp-merge.sh"
+else
+  bad "prose still teaches the abolished verb:"
+  printf '%s\n' "$PROSE_HITS" | sed 's/^/       /' >&2
+fi
+
+# MUTATION PROOF: the ratchet above is a grep, and a grep that matches nothing
+# is indistinguishable from a grep that is broken. So plant the folklore in a
+# file the scan actually covers and watch it fire.
+RATCHET_CANARY="$TMP/ratchet-canary.md"
+printf 'poll checks + `gh pr merge --squash --admin` once the gate passes\n' > "$RATCHET_CANARY"
+CANARY_HITS="$(prose_admin_hits "$RATCHET_CANARY")"
+if grep -q 'ratchet-canary' <<<"$CANARY_HITS"; then
+  ok "…and the ratchet FIRES on a planted \`gh pr merge --squash --admin\` (mutation-proven able to fail)"
+else
+  bad "the ratchet did not fire on the planted canary — it is a grep that can only pass"
 fi
 
 # ═══ live stage ══════════════════════════════════════════════════════════════

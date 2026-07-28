@@ -16,6 +16,28 @@
 # BEFORE THE FLIP (enforced:false) it still runs the deadlock detector against a
 # real PR head, so it is never a vacuous pass. AFTER hgw2-s7 flips enforced to
 # true, an unreadable protection API is a hard red here.
+#
+# WHY `BREAKGLASS_TOKEN` AND NOT `github.token` (honest-gates D85)
+#
+# `GET /repos/:o/:r/branches/:b/protection` requires ADMIN. `administration` is
+# not one of the scopes a workflow `permissions:` block can grant to
+# `github.token` — the key does not exist — so the runner's token returns 403 on
+# that endpoint no matter what is listed above. And
+# `required-checks-verify.sh` hard-fails on a protection read it cannot make,
+# deliberately: an unreadable input is a failure and never a skip. Put together,
+# the flip would have made this job PERMANENTLY red for a reason that has
+# nothing to do with drift — the exact "red that means nothing" this epic
+# exists to abolish, installed by the epic itself.
+#
+# THE TRADEOFF IS REAL AND IS WRITTEN DOWN RATHER THAN HIDDEN. `BREAKGLASS_TOKEN`
+# is currently a broad user token (`repo`, `workflow`): far more than the
+# `administration: read` this job needs, in a PUBLIC repository. Secrets are not
+# exposed to fork PRs, but any workflow change merged to main can read it. The
+# fix is a fine-grained PAT scoped to this repo with Administration: Read-only
+# and nothing else, which can only be minted in the web UI — filed as the human
+# gate `hg-breakglass-token-fine-grained`. The `|| github.token` fallback keeps
+# the job runnable if the secret is ever removed; it will then red on the
+# protection read, which is the honest outcome and not a silent skip.
 
 name: required-checks-drift
 
@@ -62,12 +84,12 @@ jobs:
 
       - name: Prove the toolchain by mutation (required-checks.test.sh)
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
         run: bash scripts/required-checks.test.sh
 
       - name: Three-way drift check (spec ↔ live protection ↔ rendered names)
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
         run: |
           set -euo pipefail
           rc=0

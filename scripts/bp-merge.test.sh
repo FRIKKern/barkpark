@@ -109,6 +109,88 @@ advice_contains "18 RERUN advice names a re-run command"       RERUN       'gh r
 advice_contains "19 WAIT advice names a watch command"         WAIT        'gh pr checks'
 advice_contains "20 UNRECOGNISED advice refuses LOUDLY"        UNRECOGNISED 'refuses to guess'
 advice_contains "21 CLIENT_BLOCK advice says the API was never reached" CLIENT_BLOCK 'never called'
+# D79. CLIENT_BLOCK is the DOMINANT arm the moment protection lands — gh refuses
+# locally on `mergeStateStatus: BLOCKED` and never calls the merge API — and it
+# used to offer a JSON dump instead of a resolving command. A rollup lists every
+# check on the head, advisory ones included, and cannot tell you which of them
+# the BRANCH requires; only the set difference against the committed spec can.
+advice_contains "21b CLIENT_BLOCK advice names the RESOLVING command, like every other arm (D79)" \
+                                                             CLIENT_BLOCK 'required-checks-verify.sh --deadlock'
+
+# ── the counter-line: bp-merge's own refusal must not re-teach the dead verb ──
+# D78. gh quotes its own suggestion to override the branch policy whenever
+# viewerCanAdminister is true, which is every agent in this fleet. The verbatim
+# quote stays — it is the wrapper's whole promise — so the correction has to sit
+# beneath it, or the evidence artifact this epic produces teaches the abolished
+# verb in gh's voice.
+CB_FIXTURE='X Pull request FRIKKern/barkpark#6414 is not mergeable: the base branch policy prohibits the merge.
+Try running: gh pr merge --squash --admin  # add the --admin flag to override and merge now'
+out="$(counter_line "$CB_FIXTURE")"
+if printf '%s' "$out" | grep -q 'DEAD'; then
+  pass=$((pass + 1)); echo "  ok   21c refuse() prints a counter-line when gh suggests the admin override (D78)"
+else
+  fail=$((fail + 1)); echo "  FAIL no counter-line for a gh message carrying the admin-override hint" >&2
+fi
+if printf '%s' "$out" | grep -q "merge verb is this script"; then
+  pass=$((pass + 1)); echo "  ok   21d …and it POINTS somewhere (the artifact), rather than only saying no"
+else
+  fail=$((fail + 1)); echo "  FAIL the counter-line does not point at the replacement verb" >&2
+fi
+# A message that never mentioned an override gets no lecture — a wrapper that
+# argues with things gh did not say is noise, and noise is how a real refusal
+# gets skimmed past.
+if [ -z "$(counter_line 'GraphQL: Required status check "Elixir gate" is in progress.')" ]; then
+  pass=$((pass + 1)); echo "  ok   21e …and stays SILENT on a message that never suggested an override"
+else
+  fail=$((fail + 1)); echo "  FAIL the counter-line fires on a message that mentioned no override" >&2
+fi
+# And it must be reachable from refuse(): a counter-line nothing calls is a
+# comment. Asserted structurally, because refuse() exits and cannot be driven
+# from this harness.
+if grep -q 'counter_line "\$msg"' "$ROOT/scripts/bp-merge.sh"; then
+  pass=$((pass + 1)); echo "  ok   21f refuse() actually calls counter_line (not a dead helper)"
+else
+  fail=$((fail + 1)); echo "  FAIL counter_line is defined but refuse() never calls it" >&2
+fi
+# The verbatim quote is NOT filtered. If refuse() ever starts editing gh's
+# message, the wrapper is lying about what GitHub said.
+if grep -q "gh said, verbatim" "$ROOT/scripts/bp-merge.sh" \
+   && ! grep -qE 'msg.*\|.*(sed .*s/--admin|grep -v)' "$ROOT/scripts/bp-merge.sh"; then
+  pass=$((pass + 1)); echo "  ok   21g gh's message is still quoted VERBATIM — countered beneath, never edited"
+else
+  fail=$((fail + 1)); echo "  FAIL refuse() filters gh's message instead of countering it" >&2
+fi
+
+# ── the merge that LANDED and still exited non-zero ──────────────────────────
+# Measured on this script's own first live merge (PR #6924, mergedAt
+# 2026-07-28T22:54:25Z): `gh pr merge --squash --delete-branch` merged
+# server-side and then exited 1 because `--delete-branch` tries to check the
+# base branch out locally, and `main` is permanently checked out by the primary
+# worktree in this fleet. The classifier answered UNRECOGNISED — the honest
+# answer for an unmeasured string, and still a FALSE STALL that would fire on
+# every successful merge here. The table is deliberately NOT extended with this
+# string: whether a merge landed is a question for the API, not for a grep.
+check "28 gh's local post-merge failure is UNRECOGNISED, not a silent green" UNRECOGNISED \
+  "failed to run git: fatal: 'main' is already checked out at '/Volumes/SATECHI/github/barkpark'"
+if grep -q 'merged_despite_error "\$out"' "$ROOT/scripts/bp-merge.sh"; then
+  pass=$((pass + 1)); echo "  ok   29 merge_loop asks the API whether the PR MERGED before classifying any string"
+else
+  fail=$((fail + 1)); echo "  FAIL merge_loop classifies the message without first reading the PR state" >&2
+fi
+# And the state check must run BEFORE classify_refusal, or the false stall
+# survives: the string would be classified and refuse() would exit 1 first.
+if awk '/merged_despite_error "\$out"/ {seen=1} /state="\$\(classify_refusal/ {print (seen ? "OK" : "LATE"); exit}' \
+     "$ROOT/scripts/bp-merge.sh" | grep -q OK; then
+  pass=$((pass + 1)); echo "  ok   30 …and it does so BEFORE classify_refusal, or the refusal would exit first"
+else
+  fail=$((fail + 1)); echo "  FAIL the state read happens after classification — the false stall survives" >&2
+fi
+if grep -q 'pr_state() {' "$ROOT/scripts/bp-merge.sh" \
+   && grep -q "\[ \"\$(pr_state)\" = \"MERGED\" \]" "$ROOT/scripts/bp-merge.sh"; then
+  pass=$((pass + 1)); echo "  ok   31 the landed-check reads STATE from the API, never a message shape"
+else
+  fail=$((fail + 1)); echo "  FAIL the landed-check is not a state read" >&2
+fi
 
 # ── the two flags this repo's merge protocol must stop using ─────────────────
 # Comments may DISCUSS them; no executable line may emit them. `--admin` bypasses

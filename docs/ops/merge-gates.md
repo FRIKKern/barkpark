@@ -323,9 +323,12 @@ gh api -X PUT repos/:owner/:repo/branches/main/protection \
 JSON
 # `strict: false` — do not require the branch to be up to date with main; that
 # is a serialization tax, not a correctness gate.
-# `enforce_admins: true` — every merge in this repo is `gh pr merge --squash
-# --admin`, so protection with `enforce_admins: false` would be bypassed by
-# 100% of merges: a gate that cannot block.
+# `enforce_admins: true` — the admin bypass is refused server-side, so it is no
+# longer a merge protocol. THE MERGE VERB IS `scripts/bp-merge.sh`: argument-
+# free, run from the PR branch's worktree, deadlock pre-flight first, then a
+# plain `gh pr merge --squash --delete-branch` once the required set is green.
+# `enforce_admins: false` would have been bypassed by 100% of the fleet's
+# merges — a gate that cannot block.
 # Verify by round-tripping the read back: the context must match byte for byte
 # and app_id must be 15368, never null.
 gh api repos/:owner/:repo/branches/main/protection/required_status_checks \
