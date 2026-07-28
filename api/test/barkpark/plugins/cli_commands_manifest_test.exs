@@ -589,7 +589,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     @auth_none ~w(auth.register auth.login auth.verify-email auth.request-reset auth.reset)
     @auth_read ~w(auth.me auth.logout auth.mfa-enroll auth.mfa-verify)
 
-    test "all 9 auth verbs are CORE under the `auth` noun, route-matched, write-free" do
+    test "all 9 auth verbs are CORE under the `auth` noun, route-matched, side-effect honest" do
       manifest = Capabilities.manifest("admin", project: false)
       cmds = manifest["commands"]
 
@@ -599,10 +599,17 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       for c <- auth_cmds do
         assert c["source"] == "core"
         assert c["noun"] == "auth"
-        refute c["writes"]
         {method, path} = Map.fetch!(@auth_routes, c["id"])
         assert c["http"]["method"] == method
         assert c["http"]["path_template"] == path
+
+        # PDS-D302 REVERSED the original "write-free" claim here. `writes` means
+        # "has side effects", and internal/cli/mcp_bridge.go turns it straight
+        # into ReadOnlyHint — so advertising auth.register / auth.mfa-enroll as
+        # read-only told an MCP client they were safe to call unprompted. Only
+        # the GET is genuinely read-only.
+        assert c["writes"] == (method != "GET"),
+               "#{c["id"]} (#{method}) advertises writes == #{inspect(c["writes"])}"
       end
 
       # tier split: 5 public "none", 4 session-gated "read".

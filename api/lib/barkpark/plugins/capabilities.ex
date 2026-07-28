@@ -705,6 +705,7 @@ defmodule Barkpark.Plugins.Capabilities do
             "Return only these content fields (projection): a comma list. System fields (_id, _type, …) always included."
           )
         ],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -738,6 +739,7 @@ defmodule Barkpark.Plugins.Capabilities do
           )
         ],
         paginated: true,
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -750,6 +752,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/data/backlinks/:dataset/:id",
         "read",
         args: [arg("id", true, "string", "Document id to find referrers of.")],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -767,6 +770,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "read",
         args: [arg("id", true, "string", "Document id to find related documents for.")],
         flags: [flag("limit", "int", "Max related entries to return (default 10, max 50).")],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -783,6 +787,7 @@ defmodule Barkpark.Plugins.Capabilities do
         flags: [
           flag("type", "string", "Comma list of document types to count (default paper,task).")
         ],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -798,6 +803,7 @@ defmodule Barkpark.Plugins.Capabilities do
         flags: [
           flag("type", "string", "Comma list of document types to include (default paper,task).")
         ],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -814,6 +820,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("doc_id", true, "string", "Document id.")
         ],
         flags: [flag("limit", "int", "Max revisions to return.")],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -826,6 +833,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/data/revision/:dataset/:rev_id",
         "read",
         args: [arg("rev_id", true, "string", "Revision id (from doc history).")],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -853,6 +861,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/data/analytics/:dataset",
         "read",
+        writes: false,
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -864,6 +873,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/data/counts/:dataset",
         "read",
+        writes: false,
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -902,6 +912,7 @@ defmodule Barkpark.Plugins.Capabilities do
           )
         ],
         paginated: true,
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1087,6 +1098,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/schemas/:dataset",
         "admin",
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1099,6 +1111,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/schemas/:dataset/:name",
         "admin",
         args: [arg("name", true, "string", "Schema name.")],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1141,6 +1154,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("offset", "int", "Assets to skip.", default: 0)
         ],
         paginated: true,
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1166,6 +1180,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/media/:dataset/:id",
         "none",
         args: [arg("id", true, "string", "Asset id.")],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1191,6 +1206,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/media/:dataset/:id/relations",
         "none",
         args: [arg("id", true, "string", "Asset id.")],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1243,6 +1259,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("sort", "string", "Sort order (default created-desc)."),
           flag("facets", "string", "Comma-separated facet dimensions to compute.")
         ],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1258,6 +1275,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("q", false, "string", "Partial query to filter suggestions (optional).")
         ],
         flags: [flag("limit", "int", "Max suggestions per bucket (default 8, max 20).")],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1290,6 +1308,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/media/:dataset/collections",
         "none",
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1302,6 +1321,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/media/:dataset/collections/:id/assets",
         "none",
         args: [arg("id", true, "string", "Collection id.")],
+        writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
@@ -1401,6 +1421,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("perspective", "string", "published (default) | drafts | raw.")
         ],
         paginated: true,
+        writes: false,
         default_output: "table",
         # Supports the brief/full projection (R3): agents get token-thrifty hit
         # cards by default, humans get the full envelope. Emitted only under
@@ -1416,6 +1437,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/api/workspaces",
         "read",
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -1457,6 +1479,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/api/workspaces/:workspace_slug/projects",
         "read",
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -1467,6 +1490,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/api/workspaces/:workspace_slug/projects/:project_slug/datasets",
         "read",
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -1499,6 +1523,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/webhooks/:dataset",
         "admin",
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -1524,6 +1549,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/webhooks/:dataset/:id",
         "admin",
         args: [arg("id", true, "string", "Webhook id.")],
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -1566,6 +1592,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/webhooks/:dataset/:id/deliveries",
         "admin",
         args: [arg("id", true, "string", "Webhook id.")],
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -1627,6 +1654,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/plugins",
         "admin",
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -1653,6 +1681,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/secrets",
         "admin",
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -1664,6 +1693,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/secrets/:name",
         "admin",
         args: [arg("name", true, "string", "Secret name.")],
+        writes: false,
         default_output: "json"
       ),
       core_cmd(
@@ -1711,6 +1741,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/w/:workspace_slug/p/:project_slug/v1/secrets",
         "scoped_admin",
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -1722,6 +1753,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/w/:workspace_slug/p/:project_slug/v1/secrets/:name",
         "scoped_admin",
         args: [arg("name", true, "string", "Secret name.")],
+        writes: false,
         default_output: "json"
       ),
       core_cmd(
@@ -1759,6 +1791,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/shares",
         "admin",
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -1820,6 +1853,7 @@ defmodule Barkpark.Plugins.Capabilities do
             "published (default) | drafts (live extract over the drafts corpus)."
           )
         ],
+        writes: false,
         default_output: "json"
       ),
       # Expectation reverse view (lvw-t8, living-values §8/§9): the tasks a
@@ -1835,6 +1869,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "read",
         args: [arg("id", true, "string", "Document id the tasks cite (typically a paper slug).")],
         flags: [flag("dataset", "string", "Dataset to scope to (default production).")],
+        writes: false,
         default_output: "json"
       ),
       core_cmd(
@@ -1846,6 +1881,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/graph/orphans",
         "read",
         flags: [flag("dataset", "string", "Dataset to scope to (default production).")],
+        writes: false,
         default_output: "json"
       ),
       core_cmd(
@@ -1857,14 +1893,20 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/graph/dangling",
         "read",
         flags: [flag("dataset", "string", "Dataset to scope to (default production).")],
+        writes: false,
         default_output: "json"
       ),
       # ── Core user auth (login/sessions/MFA/email flows) ──────────────────
       # Pre-tenant, global (no scoped_prefix). The 5 public verbs are tier
       # "none" so an anon caller can discover login; the 5 session-gated verbs
       # are tier "read" (hidden from anon, shown to any authenticated caller).
-      # writes:false for all — these are auth exchanges, not content mutations
-      # (the manifest `writes` flag drives bp's content --dry-run/confirm path).
+      # `writes: true` for all of them (PDS-D302): `writes` means "has side
+      # effects", not "mutates a document" — these exchanges mint sessions,
+      # rotate passwords and disable MFA. They used to omit the flag and so
+      # rode the `false` default, which `internal/cli/mcp_bridge.go` turns into
+      # `ReadOnlyHint: true` — an MCP client was told `auth.mfa-disable` was a
+      # safe read-only call. bp's content --dry-run/confirm path keys off the
+      # content mutation verbs, not off this bit.
       # Paths mirror the `scope "/v1/auth"` blocks in router.ex (public entry +
       # session-gated).
       core_cmd(
@@ -1879,6 +1921,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("email", true, "string", "Account email address."),
           arg("password", true, "string", "Account password.")
         ],
+        writes: true,
         default_output: "json"
       ),
       core_cmd(
@@ -1897,6 +1940,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("totp_code", "string", "Six-digit TOTP code (when MFA is enrolled)."),
           flag("recovery_code", "string", "One-time MFA recovery code (TOTP fallback).")
         ],
+        writes: true,
         default_output: "json"
       ),
       core_cmd(
@@ -1908,6 +1952,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/auth/verify-email",
         "none",
         args: [arg("token", true, "string", "Email verification token.")],
+        writes: true,
         default_output: "json"
       ),
       core_cmd(
@@ -1919,6 +1964,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/auth/request-reset",
         "none",
         args: [arg("email", true, "string", "Account email address.")],
+        writes: true,
         default_output: "json"
       ),
       core_cmd(
@@ -1933,6 +1979,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("token", true, "string", "Password-reset token."),
           arg("password", true, "string", "New password.")
         ],
+        writes: true,
         default_output: "json"
       ),
       core_cmd(
@@ -1943,6 +1990,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/auth/me",
         "read",
+        writes: false,
         default_output: "json"
       ),
       core_cmd(
@@ -1953,6 +2001,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "DELETE",
         "/v1/auth/logout",
         "read",
+        writes: true,
         default_output: "json"
       ),
       core_cmd(
@@ -1967,6 +2016,7 @@ defmodule Barkpark.Plugins.Capabilities do
         # account password in the body, not just a session token. Without it the
         # endpoint 422s "password required".
         args: [arg("password", true, "string", "Account password (re-auth).")],
+        writes: true,
         default_output: "json"
       ),
       core_cmd(
@@ -1982,6 +2032,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("code", true, "string", "Six-digit TOTP code."),
           arg("password", true, "string", "Account password (re-auth).")
         ],
+        writes: true,
         default_output: "json"
       ),
       core_cmd(
@@ -1993,6 +2044,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/auth/mfa/disable",
         "read",
         args: [arg("password", true, "string", "Account password (re-auth).")],
+        writes: true,
         default_output: "json"
       ),
       # ── Airdrop grants — the `access` noun (grantor surface) ──────────────
@@ -2054,6 +2106,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/access",
         "read",
         flags: [flag("workspace_id", "string", "Workspace whose grants to list (required).")],
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -2065,6 +2118,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/access/:id",
         "read",
         args: [arg("id", true, "string", "Grant id.")],
+        writes: false,
         default_output: "json"
       ),
       core_cmd(
@@ -2099,6 +2153,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/access/mine",
         "read",
+        writes: false,
         default_output: "table"
       ),
       # ── Profile-driven Epic / Legendary cycle ledger ───────────────────
@@ -2117,6 +2172,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("epic_id", true, "string", "Epic id."),
           arg("wave_id", true, "string", "Wave id.")
         ],
+        writes: false,
         default_output: "json"
       ),
       core_cmd(
@@ -2387,9 +2443,10 @@ defmodule Barkpark.Plugins.Capabilities do
       # from anon/lower-tier callers exactly like the other admin nouns. The
       # SSE route — `GET /v1/chat/sessions/:id/events` — is a builtin
       # streaming carve-out with no manifest verb (like `listen`); it is named
-      # in the `chat` noun summary. `writes: false` throughout: these are chat
-      # transport calls, not content mutations, so bp does not run the content
-      # --dry-run/confirm path (same treatment as the auth.* exchanges).
+      # in the `chat` noun summary. `writes: true` on every non-GET verb here
+      # (PDS-D302): sending a message, interrupting a run or approving a tool
+      # call all have side effects, so the manifest must not advertise them as
+      # read-only to the MCP bridge — same treatment as the auth.* exchanges.
       #
       # D36 CLOSED (charter D16 is the demanded confirmation). `chat` is an
       # ORTHOGONAL capability, not a rank: `tier_for_token/1` above appends a
@@ -2426,6 +2483,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("model", "string", "Provider-scoped model choice (allowlisted)."),
           flag("effort", "string", "Provider-scoped effort choice (allowlisted).")
         ],
+        writes: true,
         default_output: "json"
       ),
       core_cmd(
@@ -2439,6 +2497,7 @@ defmodule Barkpark.Plugins.Capabilities do
         flags: [
           flag("archived", "string", "Filter by archived state (query ?archived=<value>).")
         ],
+        writes: false,
         default_output: "table"
       ),
       core_cmd(
@@ -2457,6 +2516,7 @@ defmodule Barkpark.Plugins.Capabilities do
             "Return only message rows with seq > <since> (the turn-boundary tail refetch)."
           )
         ],
+        writes: false,
         default_output: "json"
       ),
       core_cmd(
@@ -2475,6 +2535,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("effort_choice", "string", "Effort choice (allowlisted)."),
           flag("title", "string", "Session title (≤256 UTF-8 bytes).")
         ],
+        writes: true,
         default_output: "minimal"
       ),
       core_cmd(
@@ -2489,6 +2550,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("id", true, "string", "Chat session id."),
           arg("content", true, "string", "Message content (≤64 KiB).")
         ],
+        writes: true,
         default_output: "minimal"
       ),
       core_cmd(
@@ -2500,6 +2562,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/chat/sessions/:id/interrupt",
         "admin",
         args: [arg("id", true, "string", "Chat session id.")],
+        writes: true,
         default_output: "minimal"
       ),
       core_cmd(
@@ -2520,6 +2583,7 @@ defmodule Barkpark.Plugins.Capabilities do
           ),
           arg("decision", true, "string", "allow | deny (never a caller-supplied updatedInput).")
         ],
+        writes: true,
         default_output: "minimal"
       ),
       core_cmd(
@@ -2531,6 +2595,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/chat/sessions/:id/archive",
         "admin",
         args: [arg("id", true, "string", "Chat session id.")],
+        writes: true,
         default_output: "minimal"
       ),
       core_cmd(
@@ -2542,6 +2607,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/chat/sessions/:id/unarchive",
         "admin",
         args: [arg("id", true, "string", "Chat session id.")],
+        writes: true,
         default_output: "minimal"
       )
     ]
@@ -2558,7 +2624,12 @@ defmodule Barkpark.Plugins.Capabilities do
       "auth_tier" => auth_tier,
       "args" => Keyword.get(opts, :args, []),
       "flags" => Keyword.get(opts, :flags, []),
-      "writes" => Keyword.get(opts, :writes, false),
+      # REQUIRED, never defaulted (PDS-D302): a `writes` that fails open is how
+      # 16 mutators shipped advertised as read-only. `core_commands/0` is a
+      # runtime function, so this raises on the first /v1/capabilities request,
+      # not at boot — the manifest contract test is the real guard, and every
+      # call site must state the bit out loud.
+      "writes" => Keyword.fetch!(opts, :writes),
       "batch" => Keyword.get(opts, :batch, false),
       "paginated" => Keyword.get(opts, :paginated, false),
       "dry_run" => Keyword.get(opts, :dry_run, false),

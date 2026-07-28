@@ -17,13 +17,13 @@ A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Docum
 Base URL: http://<host>:4000
 ```
 
-Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (all permissions, `Default`). CORS: schema `cors_origins` + configured defaults + Barkpark Cloud origins.
+Private endpoints need `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (all perms, `Default`). CORS: schema `cors_origins` + configured defaults + Barkpark Cloud origins.
 
-**Tenancy.** Path workspace/project are authoritative and must match the token: unknown workspace → `404`, non-member → `403`. Binding/write gates: `docs/auth.md`.
+**Tenancy.** Path workspace/project are authoritative and must match the token: unknown → `404`, non-member → `403`. Binding/write gates: `docs/auth.md`.
 
 Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any token · **[admin]** = admin.
 
-**Discovery.** OpenAPI 3.1 descriptor of `/v1`: `GET /openapi.json` (public, manifest-generated).
+**Discovery.** OpenAPI 3.1 of `/v1`: `GET /openapi.json` (public, manifest-generated).
 
 ## 3. Document Envelope
 
@@ -38,17 +38,7 @@ Every response wraps its payload under `result`, plus four outer metadata keys:
 
 `result` is `{count, offset, limit, perspective, documents:[...]}` for queries (§4), the document envelope object for single docs (§5).
 
-**Document envelope keys** (inside `result` for a single doc; each `result.documents[]` element for queries):
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `_id` | string | Full id; `drafts.` prefix when draft |
-| `_type` | string | Type (schema name) |
-| `_rev` | string | 32-char hex, changes on every write |
-| `_draft` | boolean | `true` if `_id` starts with `drafts.` |
-| `_publishedId` | string | Id with `drafts.` prefix stripped |
-| `_createdAt` | string | ISO 8601 UTC, `Z` suffix |
-| `_updatedAt` | string | ISO 8601 UTC, `Z` suffix |
+**Document envelope keys** (inside `result` for a single doc; each `result.documents[]` element for queries): `_id` full id, `drafts.` prefix when draft · `_type` schema name · `_rev` 32-char hex, changes on every write · `_draft` bool, `_id` starts with `drafts.` · `_publishedId` id with `drafts.` stripped · `_createdAt`/`_updatedAt` ISO 8601 UTC, `Z` suffix (all strings but `_draft`).
 
 Other keys = stored content plus `title`; user fields can't shadow reserved keys (dropped on write).
 
@@ -61,16 +51,16 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | Param | Default | Notes |
 |-------|---------|-------|
 | `perspective` | `published` | `published\|drafts\|raw`; tokenless pinned `published` |
-| `limit` | `100` | Integer, min 1, max 1000 |
-| `offset` | `0` | Integer |
-| `fields` | — | CSV content-field projection (`title,slug`); system fields always kept |
+| `limit` | `100` | Int, min 1, max 1000 |
+| `offset` | `0` | Int |
+| `fields` | — | CSV content-field projection (`title,slug`); system fields kept |
 | `order` | `_updatedAt:desc` | `<field>:asc\|desc`, comma-join secondaries |
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
-| `filter[<field>][<op>]` | — | Ops `op` ∈ `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
+| `filter[<field>][<op>]` | — | Ops: `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs). Depth 1. |
 
-**Response:** `result` is `{perspective, documents:[envelopes], count, limit, offset}` (`count` = page rows); outer keys per §3.
+**Response:** `result` = `{perspective, documents:[envelopes], count, limit, offset}` (`count` = page rows); outer keys per §3.
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
@@ -88,15 +78,17 @@ Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag
 
 Tags — `GET /v1/data/tags/:dataset` (`?type=`, default `paper,task`): per-tag per-type published counts → `{result:{tags:[{tag,counts,total}],count}}`; `/tags/:dataset/:tag`: docs ranked by that tag's strength (legacy flat last) → `result.documents:[{doc_id,type,title,strength,rationale,main_tag_match}]`. Anon 404.
 
+Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts, one aggregate → `{ok,dataset,perspective:"published",counts:{<type>:N}}` (frozen, not `result`-wrapped). Anon 404. Published-only: absent/`published` → `200`; any other `?perspective` → **`400 malformed`**, never a silently-published body.
+
 ### 5c. History [token]
 
 Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{…content}}`; `POST revision/:dataset/:id/restore` restores as a draft.
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-Apply a batch of mutations atomically (any failure rolls back the batch). Body: `{ "mutations": [ … ] }`.
+A batch of mutations, applied atomically (any failure rolls back the batch). Body: `{ "mutations": [ … ] }`.
 
-**Write gate.** Requires `write` permission (read-only token → `403`, even on its own workspace); tenancy checked first (§2).
+**Write gate.** Needs `write` permission (read-only token → `403`, even on its own workspace); tenancy first (§2).
 
 ### Mutation kinds
 
@@ -115,7 +107,7 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
 - **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist. Requires `type` (else `400 malformed`); honors `ifRevisionID`.
 
-**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add non-blocking `warnings: [{code,severity,message}]` (e.g. `label_norm`); paper-ingest 200 carries the same key.
+**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add non-blocking `warnings:[{code,severity,message}]` (e.g. `label_norm`); paper-ingest 200 carries it too.
 
 Failures use the §9 error envelope.
 
@@ -123,19 +115,19 @@ Failures use the §9 error envelope.
 
 SSE stream of document mutations, scoped to the resolved workspace + project.
 
-**Resuming:** `Last-Event-ID: <int>` header (or `?lastEventId=<int>` for browsers); replays scope events with greater `id`, oldest first, then live.
+**Resuming:** `Last-Event-ID: <int>` header (`?lastEventId=<int>` for browsers); replays scope events with greater `id`, oldest first, then live.
 
 **First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
 
 **Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data` fields: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (rev *before*, `null` on `create`), `result` (envelope), `syncTags` (outer format). **Keepalive:** `: keepalive` every 30 s idle.
 
-**Shed frame:** a stalled consumer gets ONE final `event: overloaded` / `data: {"type":"overloaded","reason":"slow_consumer"}`, then the stream closes — reconnect with `Last-Event-ID`. (The chat stream never sheds.)
+**Shed frame:** a stalled consumer gets ONE `event: overloaded` / `data: {"type":"overloaded","reason":"slow_consumer"}`, then the stream closes — reconnect with `Last-Event-ID`. (Chat never sheds.)
 
-**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a compact live workflow summary (unreplayable, NO `id:`).
+**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a live workflow summary (unreplayable, NO `id:`).
 
 ## 8. Schema endpoints [admin]
 
-Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the global `admin` permission; scoped `P` forms gate on workspace role (`owner`/`admin`) instead. Below, `P` = `/w/:workspace_slug/p/:project_slug`. A schema object is `{name,title,icon,visibility,fields:[...]}`.
+Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the global `admin` permission; scoped `P` forms gate on workspace role (`owner`/`admin`). Below, `P` = `/w/:workspace_slug/p/:project_slug`; a schema object is `{name,title,icon,visibility,fields:[...]}`.
 
 - `GET P/v1/schemas/:dataset` → `{"_schemaVersion": 1, "schemas": [ <schema>, ... ]}`
 - `GET P/v1/schemas/:dataset/:name` → `{"_schemaVersion": 1, "schema": <schema>}`
@@ -144,7 +136,7 @@ Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the gl
 
 ## 8a. Tickets plugin — `/v1/tickets`
 
-A **`bptk_` key IS an identity**: an operator mints one per outsider, who files/reads tickets with only that key. Present only when the plugin is on. `status` is **server-derived**: `open` = operator's move, `answered` = submitter's; a submitter reply auto-reopens, an operator close → `closed`.
+A **`bptk_` key IS an identity**: minted per outsider, who files/reads tickets with only that key. Plugin-gated. `status` is **server-derived**: `open` = operator's move, `answered` = submitter's; a submitter reply auto-reopens, an operator close → `closed`.
 
 | Persona (auth) | Routes (`/v1` prefix) |
 |---|---|
@@ -152,7 +144,7 @@ A **`bptk_` key IS an identity**: an operator mints one per outsider, who files/
 | Operator (bearer) | `GET /tickets/inbox[/:id[/attachments/:asset_id]]` (open first) · `POST /tickets/:id/answer` `{body,close?}` · `POST /tickets/:id/close` |
 | Admin (`/v1/plugins/tickets/keys`) | `POST` mint · `GET` ls · `POST /:id/{rotate,pause,unpause}` · `DELETE /:id` revoke |
 
-**Auth.** A `bptk_` key is refused by every non-ticket route (tier `"none"` in `/v1/capabilities`). **Paused** → `403` `key paused` (reversible); **revoked** → `401` (same as no token); **rotate** = new secret, same identity row.
+**Auth.** A `bptk_` key is refused by every non-ticket route (tier `"none"` in `/v1/capabilities`). **Paused** → `403` `key paused` (reversible); **revoked** → `401` (as no token); **rotate** = new secret, same identity row.
 
 **Attachments** (submitter-only): MIME from magic bytes (client header ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign → `404`. **Write limits** per key (reads exempt): create 10/hr, message 60/hr, attachment 30/hr; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** + `quickstart` curls.
 
@@ -162,11 +154,11 @@ Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_T
 
 **`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col,dir}]}` — a pure row permutation of the rect (formulas move verbatim, undo = the inverse permutation). Refusals: `sort_merge_overlap`/`sort_frozen_overlap` (rect below the frozen band)/`invalid_sort_keys`.
 
-**Filtering** is per-viewer view-state in Studio + the `/sheets` reader (sorting is an edit mutation). Deliberately NO filter wire endpoint; adding one is a design regression.
+**Filtering** is per-viewer view-state in Studio + the `/sheets` reader (sorting is an edit mutation). Deliberately NO filter wire endpoint; adding one is a regression.
 
 ## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
 
-Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless legacy aliases. Full contract: [`cycle-fleet.md`](contracts/cycle-fleet.md).
+Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless legacy aliases. Contract: [`cycle-fleet.md`](contracts/cycle-fleet.md).
 
 ## 9. Error Codes
 
@@ -184,4 +176,4 @@ Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE
 
 ## 11. Rate Limiting
 
-Per token (or IP), read/write buckets per dataset: **300r/60w** per min (config `:rate_limits` or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over → `429` + `Retry-After` (§9); ticket keys per-key (§8a).
+Per token (or IP), read/write buckets per dataset: **300r/60w**/min (config `:rate_limits` or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over → `429` + `Retry-After` (§9); ticket keys per-key (§8a).
