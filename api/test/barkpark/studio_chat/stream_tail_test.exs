@@ -9,7 +9,14 @@ defmodule Barkpark.StudioChat.StreamTailTest do
   The renderer is injected, so the corpus asserts on the raw stable PREFIX
   (`& &1`) instead of on HTML: the boundary law is the thing under test.
   """
-  use ExUnit.Case, async: true
+  # async: FALSE deliberately. The "display cap" describe block swaps
+  # :max_streaming_display_bytes through Application.put_env/3, which writes ONE
+  # value for the WHOLE NODE — under async: true that swap is in force for every
+  # other async test running at that instant (AsyncGlobalSeamGuardTest catches
+  # exactly this, and did). The cap is read via StreamTail.max_streaming_display_bytes/0
+  # off Application env with no injection seam, so serialising this pure-unit module
+  # is the honest fix rather than widening the guard.
+  use ExUnit.Case, async: false
 
   alias Barkpark.StudioChat.StreamTail
 
