@@ -10,6 +10,12 @@
 // obvious candidate (its `counts` already ride every Tasks-tab load), but the
 // map is assembled in the app shell, not here — so wiring it is a shell
 // change, not a TabBar one. Until then this comment is the whole truth.
+//
+// A badge is a COUNT PLUS ITS STANDING (`TabBadge`), never a bare number: a
+// count the app has stopped being able to confirm paints as a muted,
+// outlined chip and says so to a screen reader, instead of wearing the same
+// alarm-red as one that just landed. The shell owns the judgement (it owns the
+// feed); this component owns the two paints.
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { useTheme } from './theme'
@@ -23,6 +29,24 @@ export const TABS: readonly { key: TabKey; label: string }[] = [
   { key: 'papers', label: 'Papers' },
 ]
 
+/** One tab's needs-you badge: the number, and whether the shell can still
+ * vouch for it. `confirmed: false` is not "zero" and not "error" — it is the
+ * last-known count, painted as last-known. */
+export interface TabBadge {
+  count: number
+  /** Defaults to true: a feed that says nothing about freshness is treated as
+   * confirmed, which is only safe because the one fed badge always says. */
+  confirmed?: boolean
+}
+
+/** The badge's screen-reader line — pure, so the unconfirmed wording is pinned
+ * by a test rather than by a screenshot. */
+export function badgeLabel(tabLabel: string, count: number, confirmed: boolean): string {
+  return confirmed
+    ? `${tabLabel}: ${count} needs you`
+    : `${tabLabel}: ${count} needs you, last known count — not confirmed since the app lost contact`
+}
+
 export function TabBar({
   active,
   onSelect,
@@ -30,16 +54,18 @@ export function TabBar({
 }: {
   active: TabKey
   onSelect: (tab: TabKey) => void
-  /** needs-you counts per tab, assembled by the app shell. Only `chat` is fed
+  /** needs-you badges per tab, assembled by the app shell. Only `chat` is fed
    * today (blocked sessions from /v1/chat/rollup); see the file header. */
-  badges?: Partial<Record<TabKey, number>>
+  badges?: Partial<Record<TabKey, TabBadge>>
 }) {
   const theme = useTheme()
   return (
     <View style={[styles.bar, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
       {TABS.map((tab) => {
         const isActive = tab.key === active
-        const badge = badges?.[tab.key] ?? 0
+        const badge = badges?.[tab.key]
+        const count = badge?.count ?? 0
+        const confirmed = badge?.confirmed !== false
         return (
           <Pressable
             key={tab.key}
@@ -56,9 +82,22 @@ export function TabBar({
             >
               {tab.label}
             </Text>
-            {badge > 0 && (
-              <View style={[styles.badge, { backgroundColor: theme.danger }]}>
-                <Text style={styles.badgeText}>{badge > 99 ? '99+' : String(badge)}</Text>
+            {count > 0 && (
+              <View
+                accessibilityLabel={badgeLabel(tab.label, count, confirmed)}
+                style={[
+                  styles.badge,
+                  confirmed
+                    ? { backgroundColor: theme.danger }
+                    : // Unconfirmed: the soft/outlined warning chip the papers
+                      // list and the reader already use for cached content, so
+                      // "this is last-known" reads the same everywhere.
+                      { backgroundColor: theme.warnSoft, borderColor: theme.warn, borderWidth: 1 },
+                ]}
+              >
+                <Text style={[styles.badgeText, { color: confirmed ? '#ffffff' : theme.textMuted }]}>
+                  {count > 99 ? '99+' : String(count)}
+                </Text>
               </View>
             )}
           </Pressable>
@@ -81,5 +120,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
-  badgeText: { ...scale.micro, color: '#ffffff', fontWeight: '700' },
+  badgeText: { ...scale.micro, fontWeight: '700' },
 })
