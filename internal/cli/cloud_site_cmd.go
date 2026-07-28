@@ -245,16 +245,46 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	if wantDeploy {
 		emit = out.progressf
 	}
-	emit("✓ site %s created — %s build, kind %s", hzCell(site.Name), hzCell(siteOr(site.Framework, framework)), hzCell(siteOr(site.Kind, kind)))
-	emit("  dataset: %s", siteDatasetLabel(site, ws, proj, ds))
-	if req.DocType != "" {
-		emit("  content: %s docs", hzCell(req.DocType))
+	renderSiteCreated(emit, site, req, wantDeploy)
+	if wantDeploy {
+		return chainSiteDeploy(out, cfg, ref, site)
 	}
-	if req.Template != "" {
-		emit("  starter: %s", hzCell(req.Template))
+	return exitOK
+}
+
+// renderSiteCreated writes the `create` receipt from the site row the CONTROL
+// PLANE returned — the persisted record, never the request. It is a pure render
+// (no network, no config) so the success-claim registry can probe it with a
+// backing and a contradicting response; `emit` is out.outf on a plain create and
+// out.progressf inside the create --deploy one-motion.
+//
+// The request is still passed, for exactly one job: telling APART "the server
+// echoed what you asked for" from "the server said nothing about it". Where the
+// two diverge the line says which one it is printing, because a create that
+// echoes your own flag back at you is not evidence the control plane bound it.
+func renderSiteCreated(emit func(string, ...any), site cloudclient.SpawnSite, req cloudclient.SpawnSiteCreate, wantDeploy bool) {
+	ref := spawnSiteRef(site)
+	emit("✓ site %s created — %s build, kind %s",
+		hzCell(siteOr(site.Name, req.Name)),
+		hzCell(siteOr(site.Framework, req.Framework)),
+		hzCell(siteOr(site.Kind, req.Kind)))
+	emit("  dataset: %s", siteDatasetClaim(site, req))
+	// The bound content type. The record's doc_type is the only thing that says the
+	// control plane STORED the binding; echoing req.DocType back would claim a
+	// binding nothing confirmed — and neither read says the dataset actually serves
+	// that type, so the line does not pretend to (D-honest: the first deploy's
+	// content fetch is what proves that).
+	switch {
+	case strings.TrimSpace(site.DocType) != "":
+		emit("  content: %s (bound on the site row; whether the dataset serves that type is proven by the first deploy, not here)", hzCell(site.DocType))
+	case strings.TrimSpace(req.DocType) != "":
+		emit("  content: %s requested — the control plane echoed no doc type back, so the binding is UNCONFIRMED", hzCell(req.DocType))
 	}
-	if req.Theme != "" {
-		emit("  theme:   %s", hzCell(req.Theme))
+	if t := siteOr(site.Template, req.Template); strings.TrimSpace(t) != "" {
+		emit("  starter: %s", hzCell(t))
+	}
+	if t := siteOr(site.Theme, req.Theme); strings.TrimSpace(t) != "" {
+		emit("  theme:   %s", hzCell(t))
 	}
 	// A plain create can only promise the URL goes live after the first deploy; the
 	// one-motion is ABOUT to deploy, so it skips the caveat and lets the deploy stream
@@ -267,9 +297,9 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	// Next.js, the rest ride the same node-slot engine on the roadmap. A static site
 	// keeps the Astro-is-flagship note. Both are measured — neither over-promises a
 	// build that may not land yet.
-	effFramework := siteOr(site.Framework, framework)
+	effFramework := siteOr(site.Framework, req.Framework)
 	switch {
-	case siteIsNode(siteOr(site.Kind, kind), site.RuntimeTarget):
+	case siteIsNode(siteOr(site.Kind, req.Kind), site.RuntimeTarget):
 		emit("  runtime: %s — a long-running node SSR process on its own slot port, health-gated behind Caddy", hzCell(siteOr(site.RuntimeTarget, cloudclient.RuntimeTargetNode)))
 		if effFramework != "nextjs" {
 			emit("  note:    nextjs is the flagship container framework; %q rides the same node-slot engine on the roadmap and may not build yet", effFramework)
@@ -277,11 +307,22 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	case effFramework != "astro":
 		emit("  note:    astro is the flagship static framework; %q rides the same engine on the roadmap and may not build yet", effFramework)
 	}
-	if wantDeploy {
-		return chainSiteDeploy(out, cfg, ref, site)
+	if !wantDeploy {
+		emit("  deploy it with `bp cloud site deploy %s`", ref)
 	}
-	emit("  deploy it with `bp cloud site deploy %s`", ref)
-	return exitOK
+}
+
+// siteDatasetClaim is the create receipt's dataset line. siteDatasetLabel prefers
+// the server's values and silently falls back to what the user typed, which makes
+// a control plane that echoed NOTHING look like one that confirmed the binding.
+// Here the fallback is labelled: a fully-echoed triple prints bare, a partially or
+// wholly un-echoed one says it is the request.
+func siteDatasetClaim(s cloudclient.SpawnSite, req cloudclient.SpawnSiteCreate) string {
+	label := siteDatasetLabel(s, req.Workspace, req.Project, req.Dataset)
+	if strings.TrimSpace(s.Workspace) != "" && strings.TrimSpace(s.Project) != "" && strings.TrimSpace(s.Dataset) != "" {
+		return label
+	}
+	return label + " (as requested — the control plane did not echo the binding back)"
 }
 
 // chainSiteDeploy is the create --deploy one-motion tail: it enqueues the first
@@ -401,6 +442,21 @@ func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.
 	if out.emitStructured(map[string]any{"deployment": siteDeploymentMap(d)}) {
 		return siteDeployExit(d)
 	}
+	return renderSiteDeployVerdict(out, ref, d)
+}
+
+// renderSiteDeployVerdict is the human verdict on a deployment the stream stopped
+// on — the extracted, network-free render the success-claim registry probes. Its
+// ONLY input is the deployment record the control plane returned, and the exit
+// code it returns is siteDeployExit's contract (a deploy that never went live
+// never exits 0).
+//
+// THE LIMIT IT SPEAKS. "live" is the control plane's record of its own SWITCH,
+// and the CLI never fetches the URL — so the receipt names the deployment it read
+// and says the URL is reported, not fetched, in the same breath as the checkmark.
+// That is the `bp cloud deploy` idiom (an unperformable read-back is stated, not
+// hidden) applied to the spawner: this render claims the RECORD, not the page.
+func renderSiteDeployVerdict(out *writer, ref string, d cloudclient.SiteDeployment) int {
 	switch {
 	case strings.EqualFold(d.Status, "failed"):
 		stage, reason := siteFailure(d)
@@ -418,10 +474,12 @@ func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.
 		return exitGeneric
 	case strings.EqualFold(d.Status, "live"):
 		prov := siteTriggerNarration(d.Trigger)
-		if u := siteOr(d.URL, ""); u != "" {
+		if u := strings.TrimSpace(d.URL); u != "" {
 			out.outf("✓ site live — %s%s", u, prov)
+			out.outf("  deployment %s reports live after SWITCH; the CLI did not fetch that URL, so this is the control plane's record, not a proof the page serves — confirm with `curl -sI %s`", hzCell(d.ID), u)
 		} else {
 			out.outf("✓ site live%s", prov)
+			out.outf("  deployment %s reports live after SWITCH and carries no URL — the CLI has nothing to point you at; read one with `bp cloud site open %s`", hzCell(d.ID), ref)
 		}
 		return exitOK
 	default:
@@ -538,6 +596,16 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 		out.renderRaw(res.Raw)
 		return exitOK
 	}
+	renderSiteRolledBack(out, ref, res)
+	return exitOK
+}
+
+// renderSiteRolledBack writes the rollback receipt from the envelope the control
+// plane returned after the flip — the A1 case: the server measured the serving
+// slot AFTER the swap and relays it, so the deployment id in the sentence IS the
+// post-condition read. Extracted (network-free) so the success-claim registry can
+// probe it with a backing and a contradicting envelope.
+func renderSiteRolledBack(out *writer, ref string, res cloudclient.SiteRollbackResult) {
 	if dep := strings.TrimSpace(res.DeploymentID); dep != "" {
 		out.outf("✓ site rolled back — %s is now serving deployment %s.", ref, sanitizeCell(dep))
 	} else {
@@ -550,7 +618,6 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 	if u := strings.TrimSpace(res.URL); u != "" {
 		out.outf("  url: %s", sanitizeCell(u))
 	}
-	return exitOK
 }
 
 // siteRollbackMechanismLine is the one-line explanation of HOW the rollback flipped,
@@ -630,12 +697,38 @@ func runCloudSiteDelete(out *writer, g globals, args []string) int {
 		out.renderRaw(res.Raw)
 		return exitOK
 	}
+	renderSiteDeleted(out, ref, res)
+	return exitOK
+}
+
+// renderSiteDeleted writes the delete receipt from the DELETE envelope — the
+// extracted, network-free render the success-claim registry probes.
+//
+// WHAT IT STOPPED CLAIMING. The old line was "✓ site deleted — <slug> is torn
+// down on its box and deregistered." The deregistration half is backed: the
+// envelope is written after Registry.delete_site and carries the deleted row's
+// slug. The TEARDOWN half was backed by nothing readable here — the control plane
+// runs the box teardown first and refuses to deregister when it fails (so a
+// success envelope does mean a teardown that did not report an error), but the
+// box's own teardown report is unconditional (ssw8-teardown-truth), and this
+// envelope carries no measured box state at all: no route, no slot, no tree. So
+// the receipt claims the record and names the unread half in the same breath.
+//
+// An envelope that is not the success shape (ok:false, or a status that is not
+// "deleted") gets no checkmark: an HTTP 200 is not the post-condition.
+func renderSiteDeleted(out *writer, ref string, res cloudclient.SiteDeleteResult) {
 	slug := strings.TrimSpace(res.Slug)
 	if slug == "" {
 		slug = ref
 	}
-	out.outf("✓ site deleted — %s is torn down on its box and deregistered.", sanitizeCell(slug))
-	return exitOK
+	status := strings.ToLower(strings.TrimSpace(res.Status))
+	if !res.OK || status != "deleted" {
+		out.outf("site delete UNCONFIRMED — the control plane answered ok=%t status=%q for %s, which is not its deleted receipt; re-read it with `bp cloud site status %s`.",
+			res.OK, sanitizeCell(res.Status), sanitizeCell(slug), ref)
+		return
+	}
+	out.outf("✓ site deregistered — %s is deleted from the control plane (status: %s).", sanitizeCell(slug), sanitizeCell(res.Status))
+	out.outf("  the box teardown ran first (the control plane refuses to deregister a site whose teardown errored), but this envelope carries no measured box state — nothing here read the route, the slots or the tree, so the teardown itself is UNVERIFIED by this receipt.")
 }
 
 // [--doc-type <t>]` — PATCH the between-deploys-safe fields. Infrastructural
@@ -682,6 +775,16 @@ func runCloudSiteSettings(out *writer, g globals, args []string) int {
 	if out.emitStructured(map[string]any{"site": spawnSiteMap(site)}) {
 		return exitOK
 	}
+	renderSiteSettingsUpdated(out, ref, site)
+	return exitOK
+}
+
+// renderSiteSettingsUpdated writes the settings receipt from the PATCHed row the
+// control plane returned — a persisted-record echo (class A2), which backs a claim
+// ABOUT THE RECORD, which is exactly what this sentence claims. Extracted and
+// network-free so the success-claim registry can probe it: a server that stored
+// something other than what you sent prints different values here.
+func renderSiteSettingsUpdated(out *writer, ref string, site cloudclient.SpawnSite) {
 	out.outf("✓ %s settings updated", hzCell(site.Name))
 	if site.Theme != "" {
 		out.outf("  theme:   %s", hzCell(site.Theme))
@@ -694,8 +797,7 @@ func runCloudSiteSettings(out *writer, g globals, args []string) int {
 	if site.DocType != "" {
 		out.outf("  content: %s", hzCell(site.DocType))
 	}
-	out.outf("  (applies on the next deploy — run `bp cloud site deploy %s`)", ref)
-	return exitOK
+	out.outf("  (the values above are the row the control plane stored; they take effect on the next deploy — run `bp cloud site deploy %s`)", ref)
 }
 
 func runCloudSiteStatus(out *writer, g globals, args []string) int {
