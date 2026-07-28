@@ -151,14 +151,17 @@ the shared lock → backup → `caddy validate` → reload → revert — delibe
 `instance-deploy.sh`'s whole-file global `sed`, which was RUN-proven to corrupt a
 second site sharing a port literal) → **RETIRE** (keep the current slot + **1
 warm previous** slot running for `<1 s` rollback, stop the rest, keep the newest
-`N` release dirs on disk). Two slots per site (`a`/`b`), blue/green: build+boot
+`N` release dirs on disk, never the builds slot `a`, slot `b` or `.previous`
+still point at — those three skip the prune *on top of* the newest-`N` window, so
+the honest bound is `N+3`, not `N`: at `RETAIN=5` with 10 releases and all three
+protected builds outside the window, **8** dirs remain). Two slots per site (`a`/`b`), blue/green: build+boot
 the idle slot, health-gate it, THEN flip — a slot that won't boot or fails its
 probe NEVER takes the Caddy upstream. `--rollback`: a warm previous slot = a pure
 Caddy port-flip back (`<1 s`, no reboot/re-gate); a cold older release reboots the
 idle slot onto it + gates + flips. The slot unit is
 `deploy/systemd/barkpark-site@.service` (§below). Offline gate (fake
 `systemctl`/`caddy`/`npm`, no real systemd/network): `bash
-deploy/site-deploy-node.sh --self-test` — 50 checks: the six-stage protocol,
+deploy/site-deploy-node.sh --self-test` — 108 checks: the six-stage protocol,
 boot-in-place HEALTH with the marker-value gate, the marker-anchored port flip,
 retire protecting both live slots, and the warm-rollback flip.
 
@@ -223,7 +226,7 @@ writable). Both acquire in the same order — own lock (fd 9) → Caddyfile lock
 deploy never waits on the instance deploy's multi-minute run.
 
 Offline gate (no npm/caddy/systemd): `bash deploy/site-deploy.sh --self-test` —
-77 checks: the symlink flip, forward/back rollback and retire-N over fixture
+128 checks: the symlink flip, forward/back rollback and retire-N over fixture
 release dirs, the marker reader, then the real script driven end-to-end against a
 fake npm (the six-stage protocol, a lying build failing HEALTH with exit 14 and
 being purged, the retry rebuilding, a BUILD failure carrying its 401 to stdout).
