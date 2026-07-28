@@ -1054,3 +1054,41 @@ a new concept the four-verb core does not need is designed wrong. Elaboration ye
   zombie after absorbing its criteria 5+6 into the epic; `pdf-bl-console-key-custody` criterion 0
   STAMPED from D94 and left open at 1/3; the three wound-tasks re-parented under the epic with
   criteria. Wave Paper: `claude-ready-servers-wave-2026-07-28`.
+- **2026-07-28 · CLAUDE-READY SERVERS WAVE 1 round-1 REVIEW (grade A−).** All 4 round-1 slices
+  built green and adversarially re-verified; TWO small review fixes, both on `-r` branches; the
+  live fires (P1/P2/P3) remain LEAD/OWNER executions by design — nothing in this round touched
+  live infra beyond free read-only probes. `pdf-w1-p1-refire-instrument`: final branch
+  `loop-epic/the-money-safe-live-fire-instrument-one--0-r` — review closed the builder's two
+  named blind spots with FREE live smokes (`hcloud zone rrset list -o json` is a BARE ARRAY with
+  `records:[{value}]`, the leg-5 parser's exact middle case, proven end-to-end against the live
+  zone with a known IP → `guerrilla` hit; the loose census-time DNS-context grep is now one
+  anchored `dns_ctx_listed()` shared with 0i, proven to match `main` and reject the `mai`
+  prefix); gate re-run green. `pdf-w1-honest-evidence`: final branch
+  `loop-epic/headless-orders-stamp-evidence-they-actu-1-r` — verdict ladder independently
+  re-derived (every route to PASS requires a parsed receipt with `is_error` literally false or
+  a fresh post-claim artifact; every ambiguous state lands MISS→release); one fix: the usage
+  header's `{{PROMPT}}` custom-adapter example documented a substitution that never existed
+  (the contract is `$FLEET_PROMPT`); 32/32 fixture gate green. `pdf-w1-dns-census-leg`: branch
+  `loop-epic/bp-cloud-support-remove-deletes-the-a-re-2` UNCHANGED — HIGH-FLIP-RISK judgment
+  independently re-derived: only the ZONE derives from the row URL, the record match is purely
+  by VALUE on both sweep and census, and every degradation (wrong zone, fleet-token-sees-no-
+  zones, failed delete) lands as census residue, never a silent clean; gate green, gofmt clean.
+  `pdf-w1-tokenid-loud-seam`: branch `loop-epic/an-empty-minted-token-id-stops-being-sil-3`
+  UNCHANGED — plumbing audit re-verified (three `r.tokenID` sites, guarded assignment at :652,
+  custody fields unset on the fatal path); gate green. LEDGER: one omission repaired — the
+  dns-census slice's criterion 2 (fifth census leg) was implemented + tested but never stamped;
+  review-stamped with evidence at the standing claim epoch. The tokenid builder's un-fileable
+  backlog task (`pdf-w1-tokenid-orphan-reconcile`: orphan-token reconcile + supportParseMint
+  nested-`id` leniency) was filed by review (the main's `/v1/data/mutate` was flapping 500s —
+  retried). Cross-slice: coherent — the refire's rung-4 `bp` build picks up the DNS sweep when
+  slice 3 merges, and slice 4's loud seam turns the D102 silent-nil into a terminal RED the
+  refire classifies correctly. MERGE ORDER for the lead: tokenid-loud-seam FIRST, then
+  dns-census-leg, then the refire `-r`, then honest-evidence `-r` (any order works — files are
+  disjoint — but the seam and sweep must be in the tree before P1 fires so the instrument tests
+  the fixed chain); close each slice's merge-gated criterion on merge. THEN the lead FIRES
+  `scripts/pdf-p1-refire.sh` (unset HCLOUD_TOKEN; hcloud contexts carry both credentials), and
+  only after P1's color is recorded dispatches round-2 `pdf-w1-bake-seed-reset` (PDF-D103
+  ordering is law). Flip-risk note: a genuinely independent second reviewer before merge is
+  warranted on the honest-evidence verdict predicate and the refire teardown-credential
+  judgment, per the E2 protocol. Wave Paper closed as the debrief:
+  `claude-ready-servers-wave-2026-07-28`.
