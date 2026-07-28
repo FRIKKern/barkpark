@@ -816,6 +816,34 @@ test("MENTION-IMMUNITY does not demote a real invocation", () => {
   assert.equal(deriveLevel(`diff <(git show origin/main:a.md) a.md`), "L2");
 });
 
+test("MENTION-IMMUNITY: a QUOTED destination is still a real invocation, not a mention", () => {
+  // REVIEW ADDITION (wave 11). Reading these through the quote mask demoted
+  // three live shapes — measured against origin/main 072978af0, `ssh
+  // "root@host" uptime` went L1→L6 and `git show 'origin/main:…'` went L2→L3.
+  // Quoting a HOST or a REF is quoting an argument, not naming a command
+  // inside prose, and a false DEMOTION is as much a defect as a false
+  // promotion: it makes an honest L1 claim unstampable.
+  //
+  // The rule is head-keyed: a segment headed by the command ITSELF reads its
+  // raw bytes; every other head still reads the mask. `headToken` unwraps
+  // PREFIX_WRAPPERS, so the `timeout` form is covered by the same line.
+  assert.equal(deriveLevel(`ssh "root@89.167.28.206" uptime`), "L1");
+  assert.equal(deriveLevel(`ssh 'root@89.167.28.206' systemctl is-active barkpark`), "L1");
+  assert.equal(deriveLevel(`timeout 30 ssh "root@h" uptime`), "L1");
+  assert.equal(deriveLevel(`git show "origin/main:api/mix.exs" | wc -l`), "L2");
+  assert.equal(deriveLevel(`git show 'origin/main:api/mix.exs'`), "L2");
+  assert.equal(deriveLevel(`gh api "repos/o/r/pulls" --jq .`), "L2");
+
+  // …and the mask still governs every other head, so the mention stays demoted.
+  assert.equal(deriveLevel(`echo "ssh root@89.167.28.206 uptime"`), "L6");
+  assert.equal(deriveLevel(`echo "git show origin/main:api/mix.exs"`), "L6");
+
+  // KNOWN RESIDUAL, pinned so it is visible rather than silent: an UNQUOTED
+  // mention under a NON-reader head still promotes. Nothing in 673 committed
+  // rows has this shape; owned by tgw11-bl-level-unquoted-mention-nonreader.
+  assert.equal(deriveLevel(`echo ssh root@89.167.28.206`), "L1");
+});
+
 test("MENTION-IMMUNITY: the ceiling holds — admitFact rejects a false L1 on a quoting grep", () => {
   const admitted = admitFact({
     subject: "docs/ops/PROD_OPS.md",

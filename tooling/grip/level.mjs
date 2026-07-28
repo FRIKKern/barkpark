@@ -480,9 +480,19 @@ function segmentLevel(text, maskText = text) {
   // reads origin. The corpus contains exactly that shape, and demoting it
   // would break the standing zero-false-demotion bar.
   const mentionOnly = READER_HEADS.has(head) && !/[<>$]\(/.test(masked);
+  // …and a segment HEADED BY the command itself is never a mention of it: its
+  // own quoted arguments belong to it. `ssh "root@host" uptime` and
+  // `git show 'origin/main:api/mix.exs'` quote a DESTINATION, they do not name
+  // a command inside prose — and reading those through the mask demoted a live
+  // production read L1→L6 and an origin read L2→L3, the exact false-demotion
+  // direction this change is barred from moving. `headToken` already unwraps
+  // PREFIX_WRAPPERS, so `timeout 30 ssh "root@h" …` is covered too. Masking
+  // still governs every OTHER head, which is what keeps `echo "ssh root@host"`
+  // at L6.
+  const probe = (name) => (head === name ? command : masked);
 
   // L1 — a running system was touched.
-  if (!mentionOnly && SSH_READ.test(masked)) return "L1";
+  if (!mentionOnly && SSH_READ.test(probe("ssh"))) return "L1";
   if (head === "curl" || head === "wget") {
     // The URL is read from the ORIGINAL segment, quotes and all: `curl 'https://…'`
     // is a real remote target. The head gate is what keeps a MENTIONED url —
@@ -492,7 +502,7 @@ function segmentLevel(text, maskText = text) {
   if (!head) return null;
 
   // L2 — origin/main, or another remote read through a remote-API client.
-  if (!mentionOnly && (GIT_SHOW_REMOTE.test(masked) || GH_API.test(masked))) return "L2";
+  if (!mentionOnly && (GIT_SHOW_REMOTE.test(probe("git")) || GH_API.test(probe("gh")))) return "L2";
   if (REMOTE_API_HEADS.has(head)) return hasOnlyLoopbackTargets(command) ? "L3" : "L2";
 
   // L4 — the read's TARGET is a known generated artifact. Checked before the
