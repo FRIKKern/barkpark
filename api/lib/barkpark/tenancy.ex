@@ -1363,6 +1363,10 @@ defmodule Barkpark.Tenancy do
 
   # E3 doc-keyed sweep: mirrors `WorkspaceBundle.copy_where(_, :e3_doc, …)`
   # verbatim (the `(doc_id, dataset)` EXISTS semi-join) + the sibling-guard.
+  # Reachability: both interpolands are closed — `table` comes from
+  # `Catalog.e3_doc_keyed/0` (a pinned literal map) via `qi/1`, `ws_lit` from
+  # `Catalog.uuid_literal!/1`, which raises on anything that is not a UUID.
+  # sobelow_skip ["SQL.Query"]
   defp delete_e3_doc_keyed(table, ws_lit) do
     Repo.query!(
       "DELETE FROM #{qi(table)} t " <>
@@ -1376,6 +1380,10 @@ defmodule Barkpark.Tenancy do
 
   # E3 dataset-keyed sweep: mirrors `WorkspaceBundle.copy_where(_, :e3_dataset, …)`.
   # An empty slug set yields `ANY(ARRAY[]::text[])`, which matches nothing.
+  # Reachability: `table` is a pinned `Catalog.e3_dataset_keyed/0` literal via
+  # `qi/1`; `slugs` is rendered by `Catalog.text_array_literal/1`, which
+  # single-quotes and doubles every embedded quote.
+  # sobelow_skip ["SQL.Query"]
   defp delete_e3_dataset_keyed(table, slugs) do
     Repo.query!(
       "DELETE FROM #{qi(table)} t WHERE t.dataset = ANY(#{Catalog.text_array_literal(slugs)})",
@@ -1385,6 +1393,10 @@ defmodule Barkpark.Tenancy do
 
   # allowlist sweep: mirrors `WorkspaceBundle.copy_where(_, :allowlist, …)` —
   # the `scope`-column tables prefixed per `Catalog.allowlist/0`.
+  # Reachability: DEAD as of Wave 5 — `Catalog.allowlist/0` is `%{}`, so the
+  # only call site's `for` comprehension never iterates; if it is ever revived,
+  # the interpolands are a pinned table name and a `text_array_literal/1` array.
+  # sobelow_skip ["SQL.Query"]
   defp delete_allowlist_scoped(table, prefix, slugs) do
     scopes = Enum.map(slugs, &(prefix <> &1))
 
