@@ -109,6 +109,13 @@ var knownStableKeys = map[string]bool{
 	"skeleton": true, "reason": true,
 }
 
+// skeletonLabels is skeleton_label/1's whole vocabulary (charter D67) — the
+// server can emit no eighth kind, and a client has a shape for no eighth kind.
+var skeletonLabels = map[string]bool{
+	"diagram": true, "chart": true, "stats": true, "table": true,
+	"callout": true, "code": true, "block": true,
+}
+
 func loadStableFrames(t *testing.T) stableFrameFixture {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", stableFramesFixture))
@@ -275,8 +282,14 @@ func TestChatStableFramesRender(t *testing.T) {
 
 				if d.Skeleton != nil {
 					skeletons++
-					if d.Skeleton.Kind == "" || d.Skeleton.Prose == "" {
-						t.Fatalf("frame %d: skeleton must carry both kind and prose", i)
+					// `kind` must be one of the server's seven labels
+					// (skeleton_label/1, charter D67) — an eighth would render a
+					// word no surface has a shape for. `prose` is deliberately
+					// NOT required non-empty: it is the prose ABOVE the forming
+					// component, and it is legitimately "" whenever the
+					// component starts exactly at `to`.
+					if !skeletonLabels[d.Skeleton.Kind] {
+						t.Fatalf("frame %d: skeleton kind %q outside the server's seven labels", i, d.Skeleton.Kind)
 					}
 				}
 

@@ -111,7 +111,15 @@ export type StableSkeletonKind =
 
 export interface StableSkeleton {
   kind: StableSkeletonKind
-  /** A short human line for the placeholder — never rendered as markdown. */
+  /** The PROSE ABOVE the forming component — the source bytes between `to` and
+   * the component's first triggering line, verbatim. It is `StreamTail`'s
+   * `classify/1` third element (charter D62/D67), and the client renders it as
+   * live text ABOVE the placeholder box so a paragraph that happens to sit
+   * under a forming table keeps streaming instead of vanishing behind it.
+   *
+   * NOT a caption, NOT the component's own body, and legitimately the EMPTY
+   * STRING whenever the component starts exactly at `to` — a consumer must
+   * handle '' and must never require it non-empty. */
   prose: string
 }
 

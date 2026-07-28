@@ -8,6 +8,7 @@
     "why_to": "REQUIRED: a client cannot advance a byte cursor from {from, blocks} alone -- block text is not source bytes (53 source vs 42 derived over four segments in the run proof), so a PERFECT stream gets rejected at frame 2 without it.",
     "why_turn": "REQUIRED: `from` alone FALSE-ACCEPTS across a turn boundary, and the client's own `gen` cannot fence it (gen advances on system/init, not on the event: message replay that CAUSES the gap). Sequence turn_boundary_gap_false_accepted_by_from_only is the run proof.",
     "why_skeleton_is_server_side": "The classifier is part of the one converter, so every surface draws the same placeholder for the same unsettled tail.",
+    "what_skeleton_prose_is": "skeleton.prose is the PROSE ABOVE the forming component -- the bytes between `to` and the component's first triggering line -- NOT a caption and NOT the component's own body. It is the StreamTail.classify/1 third element verbatim (Barkpark.StudioChat.StreamTail, charter D62/D67): the client renders it as live text ABOVE the placeholder box so a paragraph that happens to sit under a forming table keeps streaming. It is legitimately the EMPTY STRING whenever the component starts exactly at `to`, and a consumer must accept that -- never require it non-empty.",
     "why_stable_end_is_its_own_event": "The capped state is reachable with ZERO stable frames ever emitted (run-proven at a 4 KiB cap: one unbroken block yields capped with 0 segments), so there is no stable frame to carry a terminal field."
   },
   "offsets": {
@@ -110,9 +111,9 @@
     {
       "name": "open_fence_skeleton",
       "title": "A segment carrying an open-fence skeleton",
-      "why": "Frame 0 settles the lead paragraph while an unterminated ``` fence is still streaming past `to`. The server classifies the remainder (skeleton.kind=code) because the classifier lives in the one converter (D59); the client draws a code-shaped placeholder, never a raw half-fence. Frame 1 settles the closed fence and the skeleton goes null.",
+      "why": "Frame 0 settles the lead paragraph while an unterminated ``` fence is still streaming past `to`. The server classifies the remainder (skeleton.kind=code) because the classifier lives in the one converter (D59); the client draws a code-shaped placeholder, never a raw half-fence. skeleton.prose is the line ABOVE the fence -- the bytes from `to` up to the fence's first line -- so that prose keeps streaming as live text while only the fence is hidden behind the placeholder (see contract.what_skeleton_prose_is). Frame 1 settles both the held-back paragraph and the closed fence, and the skeleton goes null.",
       "sources": {
-        "1": "Here is the converter entry point:\n\n```go\nfunc Render(doc Doc) string { return doc.Text }\n```\n\n"
+        "1": "Here is the converter entry point:\n\nIt looks like this:\n```go\nfunc Render(doc Doc) string { return doc.Text }\n```\n\n"
       },
       "skeleton_at_frame": 0,
       "frames": [
@@ -135,7 +136,7 @@
             ],
             "skeleton": {
               "kind": "code",
-              "prose": "func Render(doc Doc) string {"
+              "prose": "It looks like this:\n"
             }
           }
         },
@@ -144,8 +145,17 @@
           "data": {
             "turn": 1,
             "from": 36,
-            "to": 95,
+            "to": 115,
             "blocks": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "It looks like this:"
+                  }
+                ]
+              },
               {
                 "type": "code",
                 "value": "func Render(doc Doc) string { return doc.Text }"
@@ -158,7 +168,7 @@
           "event": "stable_end",
           "data": {
             "turn": 1,
-            "from": 95,
+            "from": 115,
             "reason": "settled"
           }
         }
@@ -166,7 +176,7 @@
       "expected": {
         "outcome": "settled",
         "accepted_stable_frames": 2,
-        "committed_bytes": 95,
+        "committed_bytes": 115,
         "final_turn": 1,
         "gap": null
       }
