@@ -9614,6 +9614,189 @@ test("stw9: siteDetailHtml — the rail reads doc_type back, and a site without 
   assert.doesNotMatch(without, /Content type<\/span><span class="v">post/);
 });
 
+// ── ssw8 (charter D82): THE CONTENT BINDING + THE UNBACKED-CLAIM INVARIANT ───
+//
+// site_json/2 serializes eleven binding fields; the console rendered one. These
+// pin the model AND the law that made the slice worth cutting: A SITE SURFACE
+// MUST RENDER NO CLAIM NO PAYLOAD FIELD BACKS. The invariant test below is
+// MUTATION-PROVEN — each arm was verified to go red against a renderer that
+// invents a value (see the commit message for the pasted reds).
+
+// Scoped readers: pull ONE rail row's value / the binding pill's label+title out
+// of the detail markup. Scoped on purpose — a whole-document scan for
+// "default" would trip on the theme select's real "Template default" option
+// label, which is a control's name, not a claim about this site.
+const railValueOf = (html, key) => {
+  const m = html.match(new RegExp(">" + key + "</span><span class=\"v\">([^<]*)<"));
+  return m && m[1];
+};
+const bindingPillOf = (html) => {
+  const m = html.match(/<span class="status-pill status-pill--(\w+)" title="([^"]*)"><span class="status-pill-dot"[^>]*><\/span><span class="status-pill-label">([^<]*)</);
+  return m && { role: m[1], title: m[2], label: m[3] };
+};
+
+test("ssw8 siteBindingModel: every state is derived from a payload field, and content_bound is read as a TOKEN promise", () => {
+  const M = (over) => hooks.siteBindingModel(over);
+  // Bound: the triple agrees with itself and a read token exists. The label
+  // says READ TOKEN — content_bound is `not is_nil(read_token_encrypted)`, so
+  // "this site has content" is a claim no field backs.
+  const bound = M({
+    workspace: "acme", bootstrap_workspace: "acme",
+    project: "site", bootstrap_project: "site",
+    dataset: "production", bootstrap_dataset: "production",
+    content_bound: true,
+  });
+  assert.equal(bound.path, "acme/site/production");
+  assert.equal(bound.pathState, "ok");
+  assert.equal(bound.role, "ok");
+  assert.equal(bound.label, "Read token stored");
+  assert.ok(!/has content|is bound\b/i.test(bound.label + " " + bound.title), "never promises content");
+  // A triple with NO read token is a real defect the payload states outright.
+  const noToken = M({ workspace: "a", project: "b", dataset: "c", content_bound: false });
+  assert.equal(noToken.role, "danger");
+  assert.equal(noToken.label, "No read token");
+  // content_bound ABSENT (an older control plane) is UNKNOWN, never false.
+  const oldCp = M({ workspace: "a", project: "b", dataset: "c" });
+  assert.equal(oldCp.token, "unknown");
+  assert.equal(oldCp.label, "Read token unknown");
+  assert.equal(oldCp.role, "neutral", "unknown is neutral — not a green, not a red");
+  // The two vocabularies of the SAME column disagreeing: both render, neither wins.
+  const clash = M({
+    workspace: "acme", bootstrap_workspace: "acme",
+    project: "site", bootstrap_project: "site",
+    dataset: "production", bootstrap_dataset: "producton",
+    content_bound: true,
+  });
+  assert.equal(clash.pathState, "mismatch");
+  assert.equal(clash.role, "danger");
+  assert.equal(clash.label, "Binding mismatch");
+  assert.ok(clash.path.includes("production") && clash.path.includes("producton"),
+    "a self-contradictory payload shows BOTH spellings — the renderer breaks no ties");
+  // A HALF-written triple is incomplete, not "ok with an em dash".
+  const partial = M({ workspace: "acme", dataset: "production", content_bound: true });
+  assert.equal(partial.pathState, "partial");
+  assert.equal(partial.role, "danger");
+  assert.equal(partial.label, "Binding incomplete");
+  // Nothing at all: unknown, and the LIST chip stays silent (a repo-deploy site
+  // has no binding to report — the detail rail still spells it out).
+  const nothing = M({});
+  assert.equal(nothing.path, "—");
+  assert.equal(nothing.label, "Binding unknown");
+  assert.equal(nothing.silent, true);
+  assert.equal(hooks.siteBindingChip({}), "");
+});
+
+test("ssw8 INVARIANT: no site surface renders a binding claim no payload field backs", () => {
+  // The vocabulary a renderer could plausibly INVENT. Every one of these is a
+  // REAL default somewhere in this product (`production` is the documented
+  // default dataset, `post` the default doc type, `default` the default
+  // workspace/project) — which is exactly what makes them the tempting lie on a
+  // surface whose payload does not carry them.
+  const INVENTABLE = /\b(production|default|post|entry|paper|bound)\b/i;
+  const SENT = { ws: "zzws", pr: "zzpr", ds: "zzds", ty: "zzty" };
+  const full = () => ({
+    id: "s1", slug: "s1", framework: "astro", inserted_at: "2026-07-01T10:00:00Z",
+    workspace: SENT.ws, bootstrap_workspace: SENT.ws,
+    project: SENT.pr, bootstrap_project: SENT.pr,
+    dataset: SENT.ds, bootstrap_dataset: SENT.ds,
+    doc_type: SENT.ty, content_bound: true,
+  });
+  const surfaces = (s) => [hooks.siteDetailHtml(s, null, [], "", []), hooks.siteRow(s, null)];
+
+  // ARM 1 — ABLATION. Delete one binding CONCEPT at a time (both spellings of
+  // it). Its sentinel must vanish from every site surface: a value that
+  // survives its own field's deletion is, by definition, unbacked.
+  const CONCEPTS = {
+    workspace: ["workspace", "bootstrap_workspace"],
+    project: ["project", "bootstrap_project"],
+    dataset: ["dataset", "bootstrap_dataset"],
+    "content type": ["doc_type"],
+  };
+  for (const [concept, fields] of Object.entries(CONCEPTS)) {
+    const s = full();
+    const values = fields.map((f) => String(s[f]));
+    fields.forEach((f) => { delete s[f]; });
+    for (const html of surfaces(s)) {
+      for (const v of values) {
+        assert.ok(!html.includes(v),
+          concept + " was removed from the payload but " + v + " still renders");
+      }
+    }
+  }
+
+  // ARM 2 — THE EMPTY PAYLOAD. A site carrying NO binding field at all: the rail
+  // reads honest placeholders and the binding rows contain nothing from the
+  // plausible-default vocabulary.
+  const bare = { id: "s1", framework: "astro", inserted_at: "2026-07-01T10:00:00Z" };
+  const bareRail = hooks.siteDetailHtml(bare, null, [], "", []);
+  assert.equal(railValueOf(bareRail, "Content dataset"), "—");
+  assert.equal(railValueOf(bareRail, "Content type"), "—");
+  const barePill = bindingPillOf(bareRail);
+  assert.equal(barePill.label, "Binding unknown");
+  assert.equal(barePill.role, "neutral");
+  for (const claim of [
+    railValueOf(bareRail, "Content dataset"),
+    railValueOf(bareRail, "Content type"),
+    barePill.label, barePill.title,
+  ]) {
+    assert.ok(!INVENTABLE.test(claim),
+      "an unbacked binding surface invented a value: " + JSON.stringify(claim));
+  }
+  // …and the list chip says nothing rather than inventing a state to show.
+  assert.equal(hooks.siteBindingChip(bare), "");
+  assert.ok(!hooks.siteRow(bare, null).includes("status-pill"), "no chip on an unbound row");
+
+  // ARM 3 — SELF-CONTRADICTION IS REPORTED, NOT RESOLVED. Both spellings of the
+  // dataset reach the surface; picking one would be a claim the payload denies.
+  const clash = Object.assign(full(), { bootstrap_dataset: "zzOTHER" });
+  const clashRail = hooks.siteDetailHtml(clash, null, [], "", []);
+  const clashValue = railValueOf(clashRail, "Content dataset");
+  assert.ok(clashValue.includes(SENT.ds) && clashValue.includes("zzOTHER"),
+    "both spellings render: " + clashValue);
+  assert.equal(bindingPillOf(clashRail).label, "Binding mismatch");
+  assert.ok(hooks.siteRow(clash, null).includes("status-pill--danger"),
+    "the row chip carries the contradiction too — the list is where a stranger looks first");
+
+  // ARM 4 — EVERY RENDERED BINDING VALUE TRACES TO A PAYLOAD VALUE. On the fully
+  // populated site the rail's binding rows are EXACTLY the sentinels, so nothing
+  // in them came from anywhere but the response.
+  const rail = hooks.siteDetailHtml(full(), null, [], "", []);
+  assert.equal(railValueOf(rail, "Content dataset"), SENT.ws + "/" + SENT.pr + "/" + SENT.ds);
+  assert.equal(railValueOf(rail, "Content type"), SENT.ty);
+  const pill = bindingPillOf(rail);
+  assert.equal(pill.label, "Read token stored");
+  assert.equal(pill.role, "ok");
+  // The token promise is stated as a token, never upgraded into a content claim.
+  assert.ok(!/has content|site is bound|content bound/i.test(pill.label + " " + pill.title),
+    "content_bound renders as 'a read token exists', never as 'this site has content'");
+});
+
+test("ssw8 siteRow: the FIRST row a stranger sees — real fields, a binding chip only when the payload has one", () => {
+  const s = {
+    id: "site-1", name: "acme-docs", slug: "acme-docs", framework: "astro",
+    domains: ["docs.acme.com"], github_repo: "acme/docs", github_branch: "main",
+    github_webhook_configured: true,
+    workspace: "acme", bootstrap_workspace: "acme",
+    project: "site", bootstrap_project: "site",
+    dataset: "production", bootstrap_dataset: "production",
+    content_bound: true,
+  };
+  const html = hooks.siteRow(s, { id: "bp-1", name: "Production", url: "https://acme.barkpark.cloud" });
+  assert.ok(html.includes('class="site-row" data-id="site-1"'), "the row is the drill-in target");
+  assert.ok(html.includes(">docs.acme.com<"), "the primary domain names the row");
+  assert.ok(html.includes("astro"), "the framework renders");
+  assert.ok(html.includes("acme/docs") && html.includes("@main"), "the linked repo renders");
+  assert.ok(html.includes("Auto-deploy"), "the auto-deploy chip renders");
+  assert.ok(html.includes("status-pill--ok") && html.includes(">Read token stored<"),
+    "a content-bound row carries the binding chip");
+  assert.ok(html.includes("acme/site/production"), "the chip's tooltip names the dataset it reads");
+  // A repo-deploy site with no binding at all: no chip, no invented state.
+  const plain = hooks.siteRow(
+    { id: "site-2", slug: "acme-app", framework: "nextjs", github_webhook_configured: false }, null);
+  assert.ok(!plain.includes("status-pill"), "an unbound row shows no binding chip");
+  assert.ok(plain.includes("not linked") && plain.includes("Manual"), "and still reads honestly otherwise");
+});
+
 test("gr-p3: siteStatusChip — Deploying while in flight, Live only when the pointer names a live row, else nothing", () => {
   const site = { current_deployment_id: "d1" };
   const live = [{ id: "d1", status: "live" }];
