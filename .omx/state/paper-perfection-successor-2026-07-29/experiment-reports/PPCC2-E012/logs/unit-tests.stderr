@@ -1,0 +1,10 @@
+test_hostile_shapes_quarantine_with_rollback (test_migration_gate.MigrationGateTest) ... ok
+test_migration_is_idempotent_and_preserves_authored_blocks (test_migration_gate.MigrationGateTest) ... ok
+test_safe_href_remains_reader_visible (test_migration_gate.MigrationGateTest) ... ok
+test_semantic_headings_and_width (test_migration_gate.MigrationGateTest) ... ok
+test_strict_json_rejects_duplicate_and_nonfinite (test_migration_gate.MigrationGateTest) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.711s
+
+OK
