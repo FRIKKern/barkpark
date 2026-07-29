@@ -35,6 +35,23 @@
 # The reverse ordering leaves a SILENT OPEN, which is the failure this epic
 # exists to make impossible. False positives are recoverable; silence is not.
 #
+# TWO SCOPES, ONE RECORDER (honest-gates wave 5, S4)
+#
+#   narrow (default)  DELETE …/branches/<b>/protection/enforce_admins
+#                     Required checks still apply to everyone; admins may
+#                     bypass them, and an admin `git push` to main also lands
+#                     ("remote: Bypassed rule violations", D39).
+#   total  (--total)  DELETE …/branches/<b>/protection
+#                     The whole protection object goes. This is the hammer
+#                     `required-checks-apply.sh --disable` used to swing with no
+#                     record at all; it now delegates HERE, so the total form is
+#                     recorded on exactly the same path as the narrow one.
+#
+# The record carries `- scope: narrow|total`, and --close reads it back: a total
+# glass is closed by PUTting the FULL committed spec, never by POSTing
+# enforce_admins alone. A partial restore followed by a close record saying
+# "closed" is a new lie, and this script refuses to write one.
+#
 # --close INVERTS THAT ORDERING, ON PURPOSE
 #
 # Restoring protection is the safe direction, so --close POSTs first, verifies
@@ -45,7 +62,7 @@
 # in its write order; symmetry there would invert the safety.
 #
 # USAGE
-#   scripts/breakglass.sh --open  --reason "…" --task <task-id> [--dry-run]
+#   scripts/breakglass.sh --open  --reason "…" --task <task-id> [--total] [--dry-run]
 #   scripts/breakglass.sh --close --reason "…" --task <task-id> [--record BG-…]
 #   scripts/breakglass.sh --status
 #
@@ -69,6 +86,7 @@ RECORD_ID=""
 REPO_OVERRIDE=""
 BRANCH_OVERRIDE=""
 DRY_RUN=0
+SCOPE="narrow"
 
 # The exact command line, requoted, so the record carries what was actually run.
 CMDLINE="scripts/breakglass.sh"
@@ -219,7 +237,16 @@ do_open() {
   standing="$(open_glasses)"
   [ -z "$standing" ] || fail "the log already carries an OPEN break-glass: $(printf '%s' "$standing" | tr '\n' ' ')— close it first (scripts/breakglass.sh --close --reason … --task …)"
 
-  say "── break-glass: opening admin bypass on $repo/$branch ──"
+  local endpoint what
+  case "$SCOPE" in
+    narrow) endpoint="repos/$repo/branches/$branch/protection/enforce_admins"
+            what="admin bypass" ;;
+    total)  endpoint="repos/$repo/branches/$branch/protection"
+            what="ALL protection (total hammer)" ;;
+    *) fail "unknown scope '$SCOPE'" ;;
+  esac
+
+  say "── break-glass: opening $what on $repo/$branch ──"
   say "[1/5] preflight: --reason and --task present (no API call has been made yet)"
 
   local actor login actor_id
@@ -241,8 +268,8 @@ do_open() {
   local id; id="$(new_record_id)"
 
   if [ "$DRY_RUN" -eq 1 ]; then
-    say "[4/5] WOULD write record $id to $LOG and read it back — and would ABORT here if it did not"
-    say "[5/5] WOULD then DELETE repos/$repo/branches/$branch/protection/enforce_admins"
+    say "[4/5] WOULD write record $id (scope $SCOPE) to $LOG and read it back — and would ABORT here if it did not"
+    say "[5/5] WOULD then DELETE $endpoint"
     say
     say "DRY RUN — nothing written, nothing deleted. The record is written and acknowledged BEFORE the delete, always."
     return 0
@@ -255,14 +282,15 @@ do_open() {
     "task=$TASK" \
     "repo=$repo" \
     "branch=$branch" \
+    "scope=$SCOPE" \
     "command=$CMDLINE" \
     "pre-state=enforce_admins.enabled=$pre (read $pre_ts)" \
     "reason=$REASON" \
     || fail "the record could not be written and acknowledged — NOT touching protection. An unrecorded break-glass does not open."
 
-  say "[5/5] DELETE repos/$repo/branches/$branch/protection/enforce_admins"
+  say "[5/5] DELETE $endpoint"
   local rc=0
-  gh api -X DELETE "repos/$repo/branches/$branch/protection/enforce_admins" >/dev/null 2>&1 || rc=$?
+  gh api -X DELETE "$endpoint" >/dev/null 2>&1 || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf -- '- outcome: DELETE FAILED (rc %s) — this record may be a false positive; verify with scripts/breakglass-watch.sh\n' "$rc" >> "$LOG"
     fail "the DELETE failed (rc $rc). The record STANDS — a false-positive record is the safe residue, and the watch will red until it is closed."
@@ -273,7 +301,7 @@ do_open() {
   printf -- '- outcome: opened (post-state enforce_admins.enabled=%s)\n' "$post" >> "$LOG"
 
   say
-  say "OPEN — $repo/$branch admin bypass is DOWN. Record: $id"
+  say "OPEN — $repo/$branch $what is DOWN (scope $SCOPE). Record: $id"
   say "  * commit and push $LOG NOW; the watch reads the committed log offline."
   say "  * close it the moment the merge lands: scripts/breakglass.sh --close --reason … --task $TASK"
   return 0
@@ -301,13 +329,30 @@ do_close() {
     target="$standing"
   fi
 
-  say "── break-glass: closing $target on $repo/$branch ──"
+  # The RECORD decides how much has to come back, not the flags on this
+  # invocation. A total glass closed with the narrow POST would restore
+  # enforce_admins onto a branch with no required checks, no review rule and no
+  # force-push block — and then write a close record saying it was closed. That
+  # record would be a new lie, so the scope is read back off disk.
+  local scope
+  scope="$(record_field "$target" scope)"
+  [ -n "$scope" ] || scope="narrow"   # records written before scopes existed
+  case "$scope" in
+    narrow|total) : ;;
+    *) fail "record $target carries scope '$scope', which is neither narrow nor total — refusing to guess how much protection to restore" ;;
+  esac
+
+  say "── break-glass: closing $target (scope $scope) on $repo/$branch ──"
   local actor login actor_id
   actor="$(read_actor)" || fail "the actor is unreadable"
   login="${actor%%	*}"; actor_id="${actor##*	}"
 
   if [ "$DRY_RUN" -eq 1 ]; then
-    say "WOULD POST repos/$repo/branches/$branch/protection/enforce_admins, verify the read-back, THEN write the close record for $target"
+    if [ "$scope" = "total" ]; then
+      say "WOULD PUT the FULL committed spec ($SPEC) to repos/$repo/branches/$branch/protection, verify the read-back, THEN write the close record for $target"
+    else
+      say "WOULD POST repos/$repo/branches/$branch/protection/enforce_admins, verify the read-back, THEN write the close record for $target"
+    fi
     say "DRY RUN — nothing restored, nothing written."
     return 0
   fi
@@ -315,8 +360,20 @@ do_close() {
   # Restore FIRST: see the header. A crash after this and before the record
   # leaves the log over-reporting (says open, is shut) — the safe direction.
   local rc=0
-  gh api -X POST "repos/$repo/branches/$branch/protection/enforce_admins" >/dev/null 2>&1 || rc=$?
-  [ "$rc" -eq 0 ] || fail "the POST failed (rc $rc) — protection is still down and $target is still open. Retry, or restore by hand."
+  if [ "$scope" = "total" ]; then
+    # One payload builder in this repo, and it lives in required-checks-apply.sh
+    # (D41: every field, including the falses, or the PUT does not converge).
+    # Borrowed, never re-implemented — two builders drift and one of them ships.
+    local payload
+    payload="$(bash "$REPO_ROOT/scripts/required-checks-apply.sh" --payload --spec "$SPEC" 2>&1)" \
+      || fail "cannot build the full protection payload from $SPEC: $payload"
+    say "restoring the FULL protection object from $SPEC (scope total)"
+    printf '%s' "$payload" | gh api -X PUT "repos/$repo/branches/$branch/protection" --input - >/dev/null 2>&1 || rc=$?
+    [ "$rc" -eq 0 ] || fail "the full-restore PUT failed (rc $rc) — protection is still down and $target is still open. Retry, or restore by hand."
+  else
+    gh api -X POST "repos/$repo/branches/$branch/protection/enforce_admins" >/dev/null 2>&1 || rc=$?
+    [ "$rc" -eq 0 ] || fail "the POST failed (rc $rc) — protection is still down and $target is still open. Retry, or restore by hand."
+  fi
 
   local post
   post="$(read_prestate "$repo" "$branch")" || fail "restored, but the read-back is unreadable — verify by hand before writing a close record"
@@ -331,6 +388,7 @@ do_close() {
     "task=$TASK" \
     "repo=$repo" \
     "branch=$branch" \
+    "scope=$scope" \
     "command=$CMDLINE" \
     "post-state=enforce_admins.enabled=$post (read $ts)" \
     "reason=$REASON" \
@@ -351,7 +409,7 @@ do_status() {
     say "LOG: OPEN break-glass record(s):"
     printf '%s\n' "$standing" | while IFS= read -r id; do
       [ -n "$id" ] || continue
-      say "  $id  task=$(record_field "$id" task)  actor=$(record_field "$id" actor)"
+      say "  $id  scope=$(record_field "$id" scope || true)  task=$(record_field "$id" task)  actor=$(record_field "$id" actor)"
       say "     reason: $(record_field "$id" reason)"
     done
   else
@@ -379,6 +437,8 @@ main() {
       --reason) REASON="${2:-}"; shift 2 ;;
       --task)   TASK="${2:-}";   shift 2 ;;
       --record) RECORD_ID="${2:-}"; shift 2 ;;
+      --total)  SCOPE="total";  shift ;;
+      --narrow) SCOPE="narrow"; shift ;;
       --log)    LOG="${2:-}";    shift 2 ;;
       --spec)   SPEC="${2:-}";   shift 2 ;;
       --repo)   REPO_OVERRIDE="${2:-}";   shift 2 ;;

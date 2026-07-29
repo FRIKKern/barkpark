@@ -36,34 +36,44 @@
 # This fleet has merged three PRs inside 78 seconds; strict would convert
 # parallel merges into a serial rebase-and-rerun train.
 #
-# TWO BREAK-GLASSES, AND `--disable` IS THE BIGGER ONE
+# THE BREAK-GLASS IS NOT HERE. IT IS scripts/breakglass.sh (wave 5, S4)
 #
-# `--disable` removes ALL protection from the branch. That is the total hammer:
-# it restores admin merge AND direct `git push` (D39), and re-arming is just
-# `--confirm` again, because the PUT is a full replace. Use it when the fleet is
-# genuinely stuck.
+# `--disable` removes ALL protection from the branch — the total hammer: admin
+# merge AND direct `git push` come back, and re-arming is just `--confirm`
+# again, because the PUT is a full replace. It used to gate on nothing but
+# `--confirm`, write NO record, and echo an attribution line into the operator's
+# own terminal. That is a silent open, which is the failure this epic exists to
+# abolish, so `--disable` now DELEGATES to `scripts/breakglass.sh --open
+# --total`: same refusals, same write-record-and-acknowledge-BEFORE-the-DELETE
+# ordering, same append-only log, and the record carries `scope: total` so
+# `--close` restores the FULL object rather than enforce_admins alone.
 #
-# The NARROW form charter D17 specifies is admin-bypass only, and it is two
-# commands rather than a flag on purpose — each one attributable in the shell
-# history of whoever ran it:
-#     gh api -X DELETE repos/<o>/<r>/branches/main/protection/enforce_admins
-#     gh api -X POST   repos/<o>/<r>/branches/main/protection/enforce_admins
-# Down, the required checks still apply to everyone; only admins may bypass
-# them. Either way required-checks-verify.sh goes RED while the glass is broken
-# (it asserts enforce_admins.enabled == true), so a break-glass left open is a
-# CI failure and not a quiet drift.
+#     scripts/breakglass.sh --open  --reason "…" --task <id>            # narrow
+#     scripts/breakglass.sh --open  --reason "…" --task <id> --total    # total
+#     scripts/breakglass.sh --close --reason "…" --task <id>            # back
+#
+# There is no unrecorded recipe in this header any more. The two raw `gh api`
+# lines that used to live here taught the exact path the epic is closing; the
+# narrow form is `breakglass.sh --open`, which is one command, attributable, and
+# refuses to touch the API before the record is on disk.
+#
+# Either scope reds `required-checks-verify.sh` while the glass is open (it
+# asserts enforce_admins.enabled == true) and reds `breakglass-watch.sh` every
+# 30 minutes, so a break-glass left open is a CI failure and not a quiet drift.
 #
 # SAFETY
 #   * refuses unless the spec says enforced:true (so the tooling slice cannot
 #     protect anything by accident)
 #   * refuses without --confirm
+#   * `--disable` additionally refuses without --reason AND --task, because it
+#     is a break-glass and a break-glass with no why is a shrug
 #   * always verifies the read-back afterwards, and reds if it disagrees
 #
 # USAGE
 #   scripts/required-checks-apply.sh --payload            # print, touch nothing
 #   scripts/required-checks-apply.sh --confirm            # apply + verify
 #   scripts/required-checks-apply.sh --confirm --branch <throwaway>
-#   scripts/required-checks-apply.sh --disable --confirm  # break-glass, loud
+#   scripts/required-checks-apply.sh --disable --confirm --reason "…" --task <id>
 
 set -euo pipefail
 
@@ -74,6 +84,9 @@ CONFIRM=0
 PAYLOAD_ONLY=0
 DISABLE=0
 BRANCH_OVERRIDE=""
+REASON=""
+TASK=""
+LOG_OVERRIDE=""
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -105,7 +118,12 @@ main() {
       --confirm) CONFIRM=1; shift ;;
       --payload) PAYLOAD_ONLY=1; shift ;;
       --disable) DISABLE=1; shift ;;
-      -h|--help) sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      --reason) REASON="${2:-}"; shift 2 ;;
+      --task) TASK="${2:-}"; shift 2 ;;
+      --log) LOG_OVERRIDE="${2:-}"; shift 2 ;;
+      # By SHAPE, not a line range: a range silently truncates the moment anyone
+      # adds a line to the header above it.
+      -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
       *) fail "unknown argument: $1" ;;
     esac
   done
@@ -118,15 +136,34 @@ main() {
   branch="${BRANCH_OVERRIDE:-$(jq -r '.branch' "$SPEC")}"
 
   if [ "$DISABLE" -eq 1 ]; then
-    # BREAK-GLASS. One command, attributable, never a silent flag: it prints who
-    # ran it and leaves the committed spec untouched, so the guard goes RED
-    # (enforced:true + branch unprotected) until protection is restored.
+    # BREAK-GLASS, TOTAL SCOPE — and it does not happen here. This used to DELETE
+    # the protection object directly after echoing the actor's login at the
+    # operator's own terminal, with a fallback that printed the literal string
+    # "unknown" when the read failed: no record, and an UNATTRIBUTABLE actor let
+    # through, which is not a break-glass at all.
+    #
+    # Every clause of that is now breakglass.sh's:
+    # it refuses without --reason and --task before any API call, hard-fails on
+    # an unreadable actor (read_actor), writes the record and READS IT BACK OFF
+    # DISK before the DELETE, and stamps `scope: total` so --close restores the
+    # whole object instead of enforce_admins alone.
     [ "$CONFIRM" -eq 1 ] || fail "--disable needs --confirm; disabling protection is never implicit"
-    echo "BREAK-GLASS: removing protection from $repo/$branch as $(gh api user --jq .login 2>/dev/null || echo UNKNOWN) at $(date -u +%FT%TZ)"
-    gh api -X DELETE "repos/$repo/branches/$branch/protection" >/dev/null \
-      || fail "could not remove protection"
-    echo "protection removed. The committed spec still says enforced=$(jq -r .enforced "$SPEC"), so the CI guard is now RED until it is restored — that is the point."
-    return 0
+    [ -n "$REASON" ] || fail "--disable needs --reason; the total hammer records, and a record with no stated reason is a shrug"
+    [ -n "$TASK" ]   || fail "--disable needs --task; the record must point at the work that justified it"
+
+    echo "BREAK-GLASS (total) — delegating to scripts/breakglass.sh, which records BEFORE it deletes."
+    # Built as an ARRAY. `${LOG_OVERRIDE:+--log "$LOG_OVERRIDE"}` has to stay
+    # unquoted to vanish when empty, which also means it WORD-SPLITS when set —
+    # so a log or branch path containing a space would have reached breakglass.sh
+    # as two arguments and been refused, at the worst possible moment.
+    # `if`, not `[ … ] && …`: under `set -e` an AND-list whose FIRST command is
+    # false makes the whole list the failing pipeline, and the script would exit
+    # 1 — silently doing nothing — in the ordinary case where no override is set.
+    local -a glass_args=(--open --total --spec "$SPEC")
+    if [ -n "$LOG_OVERRIDE" ]; then    glass_args+=(--log "$LOG_OVERRIDE"); fi
+    if [ -n "$BRANCH_OVERRIDE" ]; then glass_args+=(--branch "$branch"); fi
+    glass_args+=(--reason "$REASON" --task "$TASK")
+    exec bash "$REPO_ROOT/scripts/breakglass.sh" "${glass_args[@]}"
   fi
 
   local payload

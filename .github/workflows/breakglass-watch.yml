@@ -45,6 +45,9 @@ on:
       - "scripts/breakglass.sh"
       - "scripts/breakglass-watch.sh"
       - "scripts/breakglass.test.sh"
+      # --disable delegates into breakglass.sh, so a change here can break the
+      # recorded path without touching a single breakglass* file.
+      - "scripts/required-checks-apply.sh"
       - ".github/workflows/breakglass-watch.yml"
       - "docs/ops/break-glass-log.md"
 
@@ -58,13 +61,27 @@ permissions:
   #
   # The consequence, stated rather than papered over: GITHUB_TOKEN cannot read
   # branch protection at all (that read needs repo-admin scope, which a
-  # repo-scoped run token never carries). Without the BREAKGLASS_TOKEN secret
-  # the live-protection authority returns UNKNOWN on every scheduled run — a
-  # ::warning, never a green tick claiming the glass is shut — and the check
-  # rests entirely on authority 1, the committed log, which needs no token and
-  # is the authority that catches the recorded case. Provision BREAKGLASS_TOKEN
-  # (a PAT with repo admin read) to arm the second authority; until then the
-  # UNRECORDED-open case is caught only by a human reading the warning.
+  # repo-scoped run token never carries) — it 403s "Resource not accessible by
+  # integration". Until wave 5 that 403 collapsed into UNKNOWN and the run
+  # concluded SUCCESS, so a watch with no live authority reported green. It no
+  # longer does: a 401/403 is a CONFIGURATION fault, exits 3, and FAILS this
+  # run.
+  #
+  # BREAKGLASS_TOKEN WAS PROVISIONED 2026-07-28T22:33:20Z by the flip slice
+  # (hgw2-s7), so the second authority is ARMED and this workflow is not
+  # expected to red. Read the two halves together before concluding anything
+  # from a green tick here: if the secret is ever removed, rotated or revoked,
+  # the `|| github.token` fallback keeps the job RUNNABLE and it then reds every
+  # 30 minutes on the protection read. That red is the honest state of a watch
+  # that cannot read what it watches — it is not a false alarm to silence, and
+  # the fix is to restore the secret, never to soften this classification.
+  #
+  # The token is a broad user PAT (`repo`, `workflow`) in a PUBLIC repository:
+  # far more authority than the `administration: read` this job needs. Fork PRs
+  # cannot read it, but any workflow change merged to main can. The correct
+  # credential is a fine-grained PAT scoped to this repo with Administration:
+  # Read-only, mintable only in the web UI — an OPEN human gate, not a closed
+  # one.
 
 concurrency:
   group: breakglass-watch-${{ github.ref }}
@@ -97,7 +114,11 @@ jobs:
           case "$rc" in
             0) exit 0 ;;
             1) echo "::error::BREAK-GLASS OPEN on main. This run fails, and it will keep failing every 30 minutes until it is closed."; exit 1 ;;
-            2) echo "::warning::protection could not be read — UNKNOWN, not green. See docs/ops/break-glass-log.md for why an unreadable API is not a red here."; exit 0 ;;
+            2) echo "::warning::protection could not be read after retries — UNKNOWN, not green. A 5xx or a timeout clears on its own; see docs/ops/break-glass-log.md for why a transport blip is not a red here."; exit 0 ;;
+            # 401/403 is NOT a blip. The credential cannot read the endpoint and
+            # will not start being able to; a watch with no live authority must
+            # fail the RUN rather than warn into an empty room.
+            3) echo "::error::CONFIGURATION FAULT — this run's credential cannot read branch protection (401/403). Provision or rotate BREAKGLASS_TOKEN. The live authority is dead until then and this run fails every 30 minutes."; exit 1 ;;
             *) echo "::error::breakglass-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
 
@@ -112,5 +133,7 @@ jobs:
         run: |
           bash -n scripts/breakglass.sh
           bash -n scripts/breakglass-watch.sh
+          # --disable delegates here, so its syntax is this harness's problem too.
+          bash -n scripts/required-checks-apply.sh
       - name: Mutation proofs (breakglass.test.sh)
         run: bash scripts/breakglass.test.sh

@@ -20,9 +20,34 @@ git add docs/ops/break-glass-log.md && git commit -m "chore: break-glass closed"
 `--dry-run` prints the ordered trace and touches nothing. `--status` prints the
 open records and the live state, and exits 2 when a glass is open.
 
-This lowers **only** `enforce_admins`: required checks still apply to everyone,
-admins may bypass them. It is not `required-checks-apply.sh --disable`, which
-removes protection entirely and also restores direct `git push` to main.
+### What the narrow glass actually restores — read this before you push
+
+That command lowers **only** `enforce_admins`. Required status checks still
+apply to everyone; **admins bypass them**, and that includes `git push`. This
+was measured (honest-gates D39): with `enforce_admins: false`, an admin push
+straight to `main` **succeeds**, and git prints
+
+```
+remote: Bypassed rule violations for refs/heads/main:
+```
+
+So the `git push` in the runbook above lands *because the glass is open*, not in
+spite of it. Do not reach for the total hammer just to push the record.
+
+The bigger scope is `--total`, which removes the protection object entirely —
+no required checks, no review rule, no force-push block for anyone:
+
+```bash
+scripts/breakglass.sh --open --total --reason "…" --task …
+# equivalently, and it now delegates to exactly the line above:
+scripts/required-checks-apply.sh --disable --confirm --reason "…" --task …
+```
+
+`--close` reads the record's `scope` back off disk and restores accordingly: a
+`narrow` record is closed by POSTing `enforce_admins`, a `total` record by
+PUTting the **full** committed spec (`.github/required-checks.json`). Closing a
+total glass with the narrow POST would leave main with no required checks at all
+while the log said "closed" — a new lie, so the script refuses to guess.
 
 ## Why the record is written before the delete
 
@@ -66,10 +91,25 @@ just a check run: job-level `continue-on-error` renders a red check while
 laundering the run to success, and the run conclusion is what notifications and
 `gh run list` read.
 
+## The claim, bounded
+
+**Bounded claim.** Every way *this repository* can lower `main`'s admin gate —
+`breakglass.sh` in either scope, `required-checks-apply.sh --disable`, or a raw
+`gh api` by hand — is either **refused** before it touches the API or
+**observed** afterwards, and no open glass survives more than one watch interval
+without a **FAILING** workflow run.
+
+It is bounded, not absolute, and the boundaries are the six residuals below.
+The claim covers this repository's tooling and this repository's watch. It does
+not cover a human with admin rights and a browser: GitHub's settings UI can turn
+protection off with no record, and nothing repo-side can see that until the next
+watch interval reads the live object.
+
 ## The residual, in numbers
 
-Five gaps, stated rather than papered over (three named at build, two added by
-the wave-4 review — an incomplete residual list is itself a residual):
+Six gaps, stated rather than papered over (three named at build, two added by
+the wave-4 review, one by wave 5 — an incomplete residual list is itself a
+residual):
 
 - **A 30-minute observation window.** A glass opened at 14:01 can go unseen
   until 14:31, and GitHub queues scheduled runs under load — treat it as
@@ -90,22 +130,36 @@ the wave-4 review — an incomplete residual list is itself a residual):
   enforce it. It deliberately does not commit for you: a tool that commits
   mid-incident is one surprise too many, and it could not push to a protected
   main anyway until the glass is down.
-- **The live-protection authority is UNARMED until `BREAKGLASS_TOKEN` exists.**
-  Reading branch protection needs repo-admin scope, which `GITHUB_TOKEN` never
-  carries and no workflow `permissions:` key can grant (`administration` is not
-  an accepted scope — writing it makes the whole workflow file invalid, so the
-  scream would never run; `scripts/breakglass.test.sh` 6.8b pins that). Until
-  the secret is provisioned, every scheduled run reports **UNKNOWN** for the
-  live read — a `::warning`, never a green claiming the glass is shut — and the
-  check rests on the committed log alone. That covers every glass opened
-  THROUGH the script; a glass opened by hand is caught by a human reading the
-  warning, or by the next `required-checks-verify.sh --ci` run.
+- **The live-protection authority is UNARMED until `BREAKGLASS_TOKEN` exists —
+  and it now says so out loud.** Reading branch protection needs repo-admin
+  scope, which `GITHUB_TOKEN` never carries and no workflow `permissions:` key
+  can grant (`administration` is not an accepted scope — writing it makes the
+  whole workflow file invalid, so the scream would never run;
+  `scripts/breakglass.test.sh` 6.8b pins that). That read 403s with *"Resource
+  not accessible by integration"*. Until wave 5 it collapsed into **UNKNOWN**,
+  the workflow mapped UNKNOWN to exit 0, and the run concluded **SUCCESS** — a
+  watch with no live authority reporting green. A 401/403 is now a
+  **configuration fault**: not retried, exit 3, and the workflow **fails the
+  run**. So until the secret is provisioned this workflow reds every 30 minutes.
+  That is the honest state of a watch that cannot read what it watches; it is
+  not a false alarm to silence. A 5xx, a timeout, or a **403 rate limit** keeps
+  the old treatment — three attempts, then a `::warning`; a rate limit clears on
+  its own and reding main every 30 minutes for one would be the fatigue this
+  epic refuses.
+- **A red run only screams if it REACHES a human.**
+  There are **zero webhooks on this repository** and no notification
+  integration, so a failing scheduled run is visible in the Actions tab and in
+  `gh run list` and nowhere else. Nobody is
+  paged at 03:00. Routing scheduled-gate failures somewhere a human actually
+  looks is already filed as bp task `pt-w1-scheduled-gate-alerting` — prior art,
+  not re-filed here. Until it lands, treat the Actions tab as the alerting
+  channel and check it after any break-glass.
 
-An unreadable protection API after three attempts is reported as **UNKNOWN** and
-warns rather than reds. That is a deliberate fourth gap: a GitHub blip that reds
-main every 30 minutes trains the fleet to dismiss the check, which is the
-disease. The committed-log authority runs offline and covers the case that
-matters.
+An unreadable protection API after three attempts — a 5xx or a timeout, *not* a
+401/403 — is reported as **UNKNOWN** and warns rather than reds. That is
+deliberate: a GitHub blip that reds main every 30 minutes trains the fleet to
+dismiss the check, which is the disease. The committed-log authority runs
+offline and covers the case that matters.
 
 ## Records
 

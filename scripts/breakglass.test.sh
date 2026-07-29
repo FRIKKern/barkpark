@@ -53,11 +53,34 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -X) method="$2"; shift 2 ;;
     api) shift ;;
+    --input) shift 2 ;;
+    --jq) shift 2 ;;
     *) url="$1"; shift ;;
   esac
 done
 
 case "$method/$url" in
+  PUT/*branches/*/protection)
+    # The full-replace restore. Body is read (and kept) so a case can assert
+    # WHAT was PUT, not merely that a PUT happened.
+    cat > "$STUB/put-body.json"
+    cp "$BG_LOG" "$STUB/log-at-put.txt" 2>/dev/null || echo "(no log)" > "$STUB/log-at-put.txt"
+    rc="$(cat "$STUB/put.rc" 2>/dev/null || echo 0)"
+    if [ "$rc" = "0" ]; then
+      rm -f "$STUB/protection.err"
+      echo '{"enforce_admins":{"enabled":true}}' > "$STUB/protection.json"
+    fi
+    exit "$rc" ;;
+  DELETE/*branches/*/protection)
+    # THE TOTAL HAMMER. Same ordering probe as the narrow path below: snapshot
+    # the log exactly as it stands at the instant the API call is issued.
+    cp "$BG_LOG" "$STUB/log-at-delete.txt" 2>/dev/null || echo "(no log)" > "$STUB/log-at-delete.txt"
+    rc="$(cat "$STUB/delete.rc" 2>/dev/null || echo 0)"
+    if [ "$rc" = "0" ]; then
+      rm -f "$STUB/protection.json"
+      echo '{"message":"Branch not protected"}' > "$STUB/protection.err"
+    fi
+    exit "$rc" ;;
   DELETE/*enforce_admins)
     # THE ORDERING PROBE: snapshot the log exactly as it stands when the DELETE
     # is issued. If the record is not in this snapshot, it was not written first.
@@ -351,10 +374,50 @@ if printf '%s' "$spec_only" | jq -e '[.exclusions[] | select(.context | startswi
 else bad "6.10 the exclusion ledger does not carry both names"; fi
 
 # ═══ 7. the runbook states the residual ══════════════════════════════════════
-section "7. the residual is stated in numbers"
+section "7. the residual is stated in numbers, bounded rather than absolute"
 grep -q "30-minute observation window" "$DOC" && ok "7.1 the 30-minute window is stated" || bad "7.1 no 30-minute window"
 grep -q "Actions outage silences it" "$DOC" && ok "7.2 the Actions-outage silence is stated" || bad "7.2 no Actions-outage line"
 grep -q "60 days" "$DOC" && ok "7.3 the 60-day scheduled-workflow auto-disable is stated" || bad "7.3 no 60-day line"
+grep -q "COMMITTED AND PUSHED" "$DOC" \
+  && ok "7.4 the append-to-push window is stated (the record is only an authority once pushed)" \
+  || bad "7.4 no append-to-push window"
+grep -q "pt-w1-scheduled-gate-alerting" "$DOC" \
+  && ok "7.5 the fifth residual — a red run only screams if it REACHES a human, and this repo has zero webhooks — names its prior-art task rather than re-filing it" \
+  || bad "7.5 the alerting residual does not reference pt-w1-scheduled-gate-alerting"
+if grep -q "zero webhooks on this repository" "$DOC"; then
+  ok "7.6 …and states the mechanism (zero webhooks), not just the task id"
+else bad "7.6 the alerting residual does not state the zero-webhook mechanism"; fi
+# BOUNDED, not absolute: the claim must be scoped to what was actually measured.
+if grep -q "Bounded claim" "$DOC" && grep -q "more than one watch interval" "$DOC"; then
+  ok "7.7 the shippable claim is stated in bounded, checkable form (every lowering of main's admin gate is refused or observed; no open glass survives more than one watch interval without a FAILING run)"
+else bad "7.7 the runbook does not state a bounded claim"; fi
+# D39: the narrow glass DOES restore direct push for an admin. The doc used to
+# imply only --disable did. That sentence is what a human reads at 03:00.
+if grep -q "Bypassed rule violations" "$DOC"; then
+  ok "7.8 the push contradiction is fixed per D39 — the doc quotes the measured 'remote: Bypassed rule violations' rather than implying only --disable restores push"
+else bad "7.8 the runbook still does not say that an admin push lands with the NARROW glass open (D39)"; fi
+if grep -q "breakglass.sh --open --total" "$DOC"; then
+  ok "7.9 the runbook teaches the recorded total form, not a raw gh api line"
+else bad "7.9 the runbook does not point --disable's users at breakglass.sh --open --total"; fi
+
+# ═══ 7b. the flip's own tooling stops teaching the unrecorded path ════════════
+section "7b. required-checks-apply.sh no longer documents or performs a silent open"
+APPLY="$REPO_ROOT/scripts/required-checks-apply.sh"
+if ! grep -qE 'gh api -X (DELETE|POST) +repos/<' "$APPLY"; then
+  ok "7b.1 the raw two-line unrecorded recipe is GONE from the header"
+else bad "7b.1 the header still teaches a raw gh api break-glass: $(grep -nE 'gh api -X (DELETE|POST) +repos/<' "$APPLY")"; fi
+if grep -q 'scripts/breakglass.sh --open' "$APPLY"; then
+  ok "7b.2 …and the header points at scripts/breakglass.sh --open instead"
+else bad "7b.2 the header does not point at breakglass.sh"; fi
+if ! grep -q 'echo UNKNOWN' "$APPLY"; then
+  ok "7b.3 the 'gh api user … || echo UNKNOWN' fallback is gone — an unattributable break-glass is not a break-glass"
+else bad "7b.3 required-checks-apply.sh still falls back to UNKNOWN: $(grep -n 'echo UNKNOWN' "$APPLY")"; fi
+if ! grep -qF 'gh api -X DELETE "repos/$repo/branches/$branch/protection"' "$APPLY"; then
+  ok "7b.4 --disable no longer issues its own DELETE anywhere in the script"
+else bad "7b.4 required-checks-apply.sh still deletes protection itself"; fi
+if grep -q 'exec bash "$REPO_ROOT/scripts/breakglass.sh"' "$APPLY"; then
+  ok "7b.5 …it delegates to the one recorder (exec breakglass.sh --open --total)"
+else bad "7b.5 --disable does not delegate to breakglass.sh"; fi
 
 # ═══ 8. mutation proofs ══════════════════════════════════════════════════════
 # A guard that cannot be shown to be load-bearing is decoration. Each mutant
@@ -393,6 +456,167 @@ out="$(bash "$MUT" --spec "$SPEC" --log "$BG_LOG" --protection-file "$TMP/nope.j
 if [ "$rc" -ne 1 ]; then
   ok "8.4 disarm the committed-log authority ⇒ an open glass goes UNSEEN when the API is unreadable (exit $rc, not 1). The offline authority is load-bearing."
 else bad "8.4 the mutant still red; 5.5 proves nothing"; fi
+
+# ═══ 9. the TOTAL hammer records, on the same path as the narrow one ═════════
+# `required-checks-apply.sh --disable` used to gate on nothing but --confirm,
+# write no record, and DELETE the whole protection object. Every claim below is
+# behaviour: the ordering row snapshots the log INSIDE the stub at the instant
+# of the DELETE, exactly as 2.2 does for the narrow path.
+section "9. required-checks-apply.sh --disable is a RECORDED break-glass"
+
+apply() { bash "$APPLY" --spec "$SPEC" --log "$BG_LOG" "$@"; }
+
+world d1
+out="$(apply --disable --confirm --task hgw5-s4 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q -- "--disable needs --reason" <<<"$out"; then
+  ok "9.1 --disable without --reason refuses (exit $rc): $(head -1 <<<"$out")"
+else bad "9.1 --disable without --reason should refuse; exit $rc: $out"; fi
+[ "$(ncalls)" -eq 0 ] && ok "9.2 …and made ZERO API calls" || bad "9.2 saw calls: $(calls)"
+
+world d2
+out="$(apply --disable --confirm --reason "the fleet is stuck" 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q -- "--disable needs --task" <<<"$out"; then
+  ok "9.3 --disable without --task refuses (exit $rc): $(head -1 <<<"$out")"
+else bad "9.3 --disable without --task should refuse; exit $rc: $out"; fi
+[ "$(ncalls)" -eq 0 ] && ok "9.4 …and made ZERO API calls" || bad "9.4 saw calls: $(calls)"
+
+world d3
+out="$(apply --disable --confirm --reason "the fleet is stuck" --task hgw5-s4 2>&1)"; rc=$?
+id="$(grep -o 'BG-[0-9TZ]*-[0-9a-f]*' "$BG_LOG" | head -1)"
+if [ "$rc" -eq 0 ] && [ -n "$id" ]; then
+  ok "9.5 --disable --confirm --reason --task opens the TOTAL glass and wrote record $id"
+else bad "9.5 --disable failed (exit $rc): $out"; fi
+if [ -f "$STUB/log-at-delete.txt" ] && grep -q "$id" "$STUB/log-at-delete.txt"; then
+  ok "9.6 the log ALREADY contained $id at the instant the total DELETE was issued (snapshot taken inside the stub, not read from source)"
+else bad "9.6 the record was not on disk when the total DELETE fired"; fi
+if grep -qE 'DELETE .*branches/main/protection( |$)' <<<"$(calls)" \
+   && ! grep -q "enforce_admins" <<<"$(calls)"; then
+  ok "9.7 the WHOLE protection object is the endpoint deleted, not enforce_admins"
+else bad "9.7 wrong endpoint for the total hammer: $(calls)"; fi
+grep -q -- "- scope: total" "$BG_LOG" \
+  && ok "9.8 the record carries 'scope: total' — --close reads it back to decide how much to restore" \
+  || bad "9.8 the record has no scope: total"
+grep -q -- "- actor: pelle (id 4242)" "$BG_LOG" \
+  && ok "9.9 …and an attributable actor, read through breakglass.sh's read_actor" \
+  || bad "9.9 the record has no actor"
+
+world d4
+rm -f "$STUB/user.json"     # gh api user now 401s
+out="$(apply --disable --confirm --reason "x" --task t 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && ! grep -q "DELETE" <<<"$(calls)"; then
+  ok "9.10 an UNREADABLE actor refuses and never DELETEs (exit $rc) — the old code printed 'UNKNOWN' and deleted anyway"
+else bad "9.10 an unattributable --disable still deleted: rc=$rc calls=$(calls)"; fi
+
+# ═══ 9b. the total glass is closed by restoring the FULL object ══════════════
+section "9b. a total glass closes with a full-spec PUT, never a narrow POST"
+
+world d5
+apply --disable --confirm --reason "stuck" --task t >/dev/null 2>&1
+id="$(grep -o 'BG-[0-9TZ]*-[0-9a-f]*' "$BG_LOG" | head -1)"
+: > "$STUB/calls.log"
+out="$(glass --close --reason "unstuck" --task t 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && grep -q -- "- closes: $id" "$BG_LOG"; then
+  ok "9b.1 --close closed the total record $id"
+else bad "9b.1 close of a total glass failed (exit $rc): $out"; fi
+if grep -q "PUT" <<<"$(calls)" && ! grep -q "POST" <<<"$(calls)"; then
+  ok "9b.2 it PUT the whole protection object and issued NO enforce_admins POST — a partial restore followed by a close record would be a new lie"
+else bad "9b.2 the total close did not full-restore: $(calls)"; fi
+if [ -f "$STUB/put-body.json" ] \
+   && jq -e '.required_status_checks.checks[0].context == "Elixir gate"' "$STUB/put-body.json" >/dev/null 2>&1; then
+  ok "9b.3 the PUT body is the COMMITTED SPEC (required contexts included), not a hand-built fragment"
+else bad "9b.3 the PUT body did not carry the spec's required checks: $(cat "$STUB/put-body.json" 2>/dev/null)"; fi
+if [ "$(grep -c -- "- scope: total" "$BG_LOG")" -eq 2 ]; then
+  ok "9b.4 BOTH blocks carry scope: total — the open record and the close record that answers it"
+else bad "9b.4 the close record lost the scope: $(grep -c -- "- scope: total" "$BG_LOG") occurrence(s)"; fi
+if [ -f "$STUB/log-at-put.txt" ] && ! grep -q -- "- closes: $id" "$STUB/log-at-put.txt"; then
+  ok "9b.5 the close record was written AFTER the restore — the deliberate ordering inversion survives the total path too"
+else bad "9b.5 the total close wrote its record before restoring"; fi
+
+world d6
+apply --disable --confirm --reason "stuck" --task t >/dev/null 2>&1
+: > "$STUB/calls.log"
+# Disarm the scope read-back: the close then believes every glass is narrow.
+sed 's@^  scope="$(record_field "$target" scope)"@  scope=""@' "$GLASS" > "$MUT"
+out="$(bash "$MUT" --spec "$SPEC" --log "$BG_LOG" --close --reason "x" --task t 2>&1)"; rc=$?
+if grep -q "POST" <<<"$(calls)" && ! grep -q "PUT" <<<"$(calls)"; then
+  ok "9b.6 disarm the scope read-back ⇒ a TOTAL glass is 'closed' with the narrow POST, leaving a branch with no required checks and a close record saying it is shut. The scope field is load-bearing."
+else bad "9b.6 the mutant did not take the narrow path; 9b.2 proves nothing: rc=$rc calls=$(calls)"; fi
+
+world d7
+# Disarm the delegation itself: --disable goes back to deleting protection by
+# hand. The record is what disappears — which is the whole point of the routing.
+# The delegation is ONE line — `exec bash … "${glass_args[@]}"` — so the mutant
+# is a single substitution. (It used to be a multi-line exec and this was an awk
+# skip-range; a range that never finds its terminator silently eats the rest of
+# the file and the mutant then "passes" for the wrong reason.)
+sed 's@^    exec bash "\$REPO_ROOT/scripts/breakglass.sh" .*@    gh api -X DELETE "repos/$repo/branches/$branch/protection" >/dev/null 2>\&1; return 0@' \
+  "$APPLY" > "$MUT"
+grep -q 'gh api -X DELETE "repos/\$repo' "$MUT" \
+  || bad "9b.7 SETUP: the delegation mutant did not apply — the exec line's shape changed and this proof is vacuous"
+out="$(bash "$MUT" --spec "$SPEC" --log "$BG_LOG" --disable --confirm --reason x --task t 2>&1)"; rc=$?
+if grep -q "DELETE" <<<"$(calls)" && ! grep -q "BG-" "$BG_LOG"; then
+  ok "9b.7 disarm the delegation ⇒ the total DELETE fires with NO record on disk — exactly the silent open that shipped on main. The routing is load-bearing."
+else bad "9b.7 the mutant did not open silently (rc $rc); 9.6 proves nothing: calls=$(calls)"; fi
+
+# ═══ 10. a revoked token REDS ════════════════════════════════════════════════
+# Measured on main: a 403 'Resource not accessible by integration' returned
+# UNKNOWN (rc 2), the workflow mapped rc 2 to exit 0, and the run concluded
+# SUCCESS — a watch with no live authority reporting green.
+section "10. 401/403 is a CONFIGURATION fault, not a transport blip"
+
+world t1
+printf 'gh: HTTP 401: Bad credentials (https://api.github.com/repos/x/branches/main/protection)\n' > "$STUB/protection.err"
+rm -f "$STUB/protection.json"
+out="$(bash "$WATCH" --spec "$SPEC" --log "$BG_LOG" --attempts 3 2>&1)"; rc=$?
+if [ "$rc" -eq 3 ] && grep -q "CONFIGURATION FAULT" <<<"$out"; then
+  ok "10.1 a revoked/garbage token (401 Bad credentials) exits 3, not 2 — the verdict the workflow reds on"
+else bad "10.1 expected exit 3 from a 401; got $rc: $out"; fi
+if [ "$(ncalls)" -eq 1 ]; then
+  ok "10.2 …and it was NOT retried (1 call, not 3): a permanent fault does not clear by waiting 20 seconds"
+else bad "10.2 the 401 was retried $(ncalls) times"; fi
+
+world t2
+printf 'gh: HTTP 403: Resource not accessible by integration\n' > "$STUB/protection.err"
+rm -f "$STUB/protection.json"
+out="$(bash "$WATCH" --spec "$SPEC" --log "$BG_LOG" --attempts 3 2>&1)"; rc=$?
+[ "$rc" -eq 3 ] \
+  && ok "10.3 the EXACT body the live scheduled run got (403 'Resource not accessible by integration', run 30395930365) now exits 3" \
+  || bad "10.3 expected exit 3 from the measured 403; got $rc: $out"
+
+world t3
+printf 'gh: HTTP 502 bad gateway\n' > "$STUB/protection.err"
+rm -f "$STUB/protection.json"
+out="$(bash "$WATCH" --spec "$SPEC" --log "$BG_LOG" --attempts 3 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ "$(ncalls)" -eq 3 ]; then
+  ok "10.4 a 5xx still retries 3 times and stays UNKNOWN (exit 2) — the split did not swallow the transport case it was carved out of"
+else bad "10.4 expected exit 2 after 3 attempts for a 502; rc=$rc calls=$(ncalls)"; fi
+
+world t3b
+# GitHub answers 403 for RATE LIMITING too, and that one clears on its own.
+# Classifying it as permanent would red main every 30 minutes on a busy
+# afternoon — the fatigue this epic refuses. It must stay in the retry lane.
+printf 'gh: HTTP 403: API rate limit exceeded for user ID 4242.\n' > "$STUB/protection.err"
+rm -f "$STUB/protection.json"
+out="$(bash "$WATCH" --spec "$SPEC" --log "$BG_LOG" --attempts 3 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ "$(ncalls)" -eq 3 ]; then
+  ok "10.4b a 403 RATE LIMIT is NOT a configuration fault — 3 attempts then UNKNOWN (exit 2), because it clears on its own"
+else bad "10.4b a rate-limit 403 was misclassified as permanent; rc=$rc calls=$(ncalls): $out"; fi
+
+world t4
+printf 'gh: HTTP 401: Bad credentials\n' > "$STUB/protection.err"
+rm -f "$STUB/protection.json"
+sed 's@^is_config_fault() { # body@is_config_fault() { return 1; } # disarmed\nis_config_fault_orig() {@' "$WATCH" > "$MUT"
+out="$(bash "$MUT" --spec "$SPEC" --log "$BG_LOG" --attempts 3 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && grep -q "::warning" <<<"$out"; then
+  ok "10.5 disarm the fault classifier ⇒ the SAME 401 collapses back to UNKNOWN (exit 2) with only a ::warning, which the workflow maps to exit 0 and a SUCCESSFUL run. That is main's behaviour today, and the classifier is what removes it."
+else bad "10.5 the mutant did not reproduce today's blind state (rc $rc): $out"; fi
+
+if grep -q '3) echo "::error::CONFIGURATION FAULT' "$WF"; then
+  ok "10.6 the workflow maps exit 3 to ::error + exit 1 — the RUN fails, and the run conclusion is what notifications read"
+else bad "10.6 breakglass-watch.yml does not red on exit 3"; fi
+if awk '/rc" in$/{p=1} p && /^ *2\)/ && /exit 0/{found=1} END{exit !found}' "$WF"; then
+  ok "10.7 …while a transport UNKNOWN (2) still exits 0, so a GitHub blip does not train the fleet to dismiss the check"
+else bad "10.7 the rc=2 branch no longer exits 0"; fi
 
 echo
 echo "── tally ──"
