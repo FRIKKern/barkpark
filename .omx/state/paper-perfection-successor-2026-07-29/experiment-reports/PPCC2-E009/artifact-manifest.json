@@ -1,0 +1,43 @@
+{
+  "assignment_id": "PPCC2-E009",
+  "durable_files": [
+    {
+      "bytes": 61,
+      "path": ".gitignore",
+      "sha256": "e666e41dd7c7abbe4804e5799fdb646bc8b37d8daae7586319690d0e7a292f4d"
+    },
+    {
+      "bytes": 737,
+      "path": "README.md",
+      "sha256": "cf6c7ee8d2015c2083ed60cdb632e90d0dc4558aeb2a4646f9b0ff1af69725a1"
+    },
+    {
+      "bytes": 42418,
+      "path": "attack_legacy.py",
+      "sha256": "dc05edd62bdb68372f32bd3b12ce2c5e634e5fcbbe378b46b7b9f4813f67ef6b"
+    },
+    {
+      "bytes": 1539,
+      "path": "render_e004.exs",
+      "sha256": "60a613c6dafbec490f4f304172c1121d1ba59bba7027839c90f5382ef0f4574b"
+    },
+    {
+      "bytes": 1623347,
+      "path": "attack-evidence.json",
+      "sha256": "f3424a1e9d0b784521db3887dc0af2c20f788df1d94d5337d9b40a4384b51887"
+    },
+    {
+      "bytes": 604947,
+      "path": "attack-trace.ndjson",
+      "sha256": "e7eb03472f5db4d79b2e2cf7a5fb1e8a0ce72c3f8746fe6407d0c9337d6dedd0"
+    },
+    {
+      "bytes": 30409,
+      "path": "report.json",
+      "sha256": "9b3c87232d6577ec668a124a96298fb4fd03524ee49f41e0beb724dd4623d14d"
+    }
+  ],
+  "generated_large_artifacts_committed": false,
+  "generated_large_artifacts_policy": "Assignment-local renders, binaries, and raw logs are reproducible and ignored; hashes/excerpts/results are embedded in attack-evidence.json and report.json.",
+  "schema_version": "ppcc2-e009-artifact-manifest/v1"
+}
