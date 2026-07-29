@@ -117,14 +117,29 @@ is exactly that string), runs `if: always()`, and fails when any upstream job
 lands outside its allow-set. That is the one name branch protection is meant to
 require — `Test (Elixir 1.18.1 / OTP 27.0)` is a job underneath it.
 
-`main` has **no branch protection or rulesets** configured (verified
-2026-06-21, re-checked 2026-07-01, via the GitHub branches/rulesets APIs), so none of these gates
-mechanically blocks a merge — PR #123 merged with the advisory `format` check
-red. They are the team's merge discipline, enforced by review rather than by
-GitHub. The checks that *should* be green before merge are `mix-prod-compile`,
-`mix-test`, and `validation-perf`; `format` is advisory; `plugin-node`
-matters only when the PR touches `api/priv/plugins/**`. If these are meant to
-be enforced, add a branch-protection rule requiring those status checks.
+**`main` IS protected — as of 2026-07-28.** The long-standing "no branch
+protection" reading (verified 2026-06-21, re-checked 2026-07-01) is **dead**;
+do not plan from it. Re-derived 2026-07-29:
+
+```
+$ gh api repos/FRIKKern/barkpark/branches/main/protection \
+    -q '{contexts:.required_status_checks.contexts,strict:.required_status_checks.strict,enforce_admins:.enforce_admins.enabled}'
+{"contexts":["Elixir gate","PR references an active task"],"enforce_admins":true,"strict":false}
+$ gh api repos/FRIKKern/barkpark/rulesets -q 'length'   # 0
+```
+
+**Rulesets are still `[]` — that reading is TRUE and the wrong place to look.**
+Protection on this repo lives in the *branch protection* API, not rulesets;
+anyone who checks only `/rulesets` gets an accurate empty list and the wrong
+conclusion. `.github/required-checks.json` on `origin/main` now carries
+`"enforced": true` (it is applied state, no longer a proposal).
+
+Exactly **two** contexts are required, and everything else on a PR is advisory:
+`mix-prod-compile`, `validation-perf` and `format` do not block (PR #123 merged
+with `format` red), and `plugin-node` matters only when the PR touches
+`api/priv/plugins/**`. `strict: false` means a PR is not forced to be
+up-to-date with `main` before merge. To make another check binding, add its
+context to `.github/required-checks.json` and apply — never hand-PUT.
 
 ## Security gates (Sobelow + mix_audit)
 
@@ -159,22 +174,31 @@ Elixir security gates, path-triggered on `api/**`:
    text gated the flip on the baseline's `file:line` entries reaching **0**, and
    quoted **137** entries. Both numbers are corrected below.
 
-   **Live count (re-derived at edit time, 2026-07-28, on `main`):**
+   **Live count — RE-DERIVE, never quote.** The count is drained by every
+   annotation wave, so any number written here is stale on arrival. Run:
 
    ```
    $ grep -c '^[A-Za-z]' api/.sobelow-skips
-   108
    $ grep '^[A-Za-z]' api/.sobelow-skips | sed 's/:.*//' | sort | uniq -c | sort -rn
-     68 Traversal.FileModule   12 DOS.StringToAtom   9 SQL.Query   6 Config.CSRF
-      3 XSS.Raw   2 SQL.Stream   2 CI.System   1 XSS.SendResp   1 XSS.ContentType
-      1 Traversal.SendFile   1 RCE.CodeModule   1 Config.HTTPS   1 Config.Headers
    ```
+
+   Last derivation, 2026-07-29 on `origin/main` @ `606fefd15`: **89 rows** —
+   54 `Traversal.FileModule`, 11 `DOS.StringToAtom`, 6 `SQL.Query`,
+   6 `Config.CSRF`, 3 `XSS.Raw`, 2 `SQL.Stream`, and one each of
+   `XSS.SendResp`, `XSS.ContentType`, `Traversal.SendFile`, `RCE.CodeModule`,
+   `Config.HTTPS`, `Config.Headers`, `CI.System`. (It read 108 on 2026-07-28.)
+   Wave 24 slice S3 then deleted **32 dead rows** — entries that were no longer
+   the thing suppressing any finding, proven by running Sobelow with the
+   baseline emptied — taking it to **57**. Which is why the paragraph above
+   says derive, not quote.
 
    **Amended precondition — the floor is 10, not 0.** The flip is gated on the
    baseline holding **ONLY entries that provably cannot carry an inline
-   `# sobelow_skip` annotation**, enumerated by type and count. On sobelow
-   0.14.1 that floor is exactly **10 of 108** (98 are annotatable), in two
-   mechanical classes:
+   `# sobelow_skip` annotation**, enumerated by type and count. The floor is a
+   property of sobelow 0.14.1's architecture, not of the baseline's size: it is
+   **10** today (so 79 of the 89 rows above are annotatable), in two mechanical
+   classes. Derive the denominator with the command above rather than quoting
+   this paragraph's:
 
    | Class | Count | Entries | Why no annotation can ever reach it |
    |---|---|---|---|
@@ -186,26 +210,52 @@ Elixir security gates, path-triggered on `api/**`:
    the flip when the baseline contains nothing but those 10; do not re-evaluate
    on "reaches 0", which cannot happen.
 
-   **Topology: no security.yml check can be required today (S4 + SR-1).** The
-   amendment records this so the implicit "…and then it blocks" promise stops
-   being made:
+   **The floor is 10 only while the findings still exist.** It is a count of
+   *unannotatable* findings, not of *unfixable* ones — fixing the underlying
+   code removes a row from the floor. Wave 24 slice S2 does exactly that to the
+   single `Config.Headers` finding in `router.ex`, taking the floor **10 → 9**.
+   Re-derive the floor from the table above after any such fix; do not treat 10
+   as a constant.
 
-   - `main` has **no branch protection** — `gh api repos/FRIKKern/barkpark/branches/main/protection`
-     → `404 "Branch not protected"` — and **no rulesets** (`gh api …/rulesets` → `[]`).
-   - `.github/required-checks.json` carries **`"enforced": false`**; its
-     `protection` block is a *proposal*, not applied state.
+   **Topology: no `security.yml` check can be required — and live protection
+   does NOT change that.** The conclusion is unchanged; the argument that used
+   to carry it was wrong and has been replaced. It rested on "`main` has no
+   branch protection" and "`required-checks.json` carries `enforced: false`" —
+   **both of those are FALSE as of 2026-07-28**: protection is live with
+   `enforce_admins: true` and two required contexts, and the tracked file
+   carries `"enforced": true` (see *Pre-merge gates* above for the re-derivation).
+   Note the trap: `gh api …/rulesets` → `[]` is still a TRUE reading, and it is
+   the reading that produces the WRONG conclusion, because this repo's
+   protection is not a ruleset.
+
+   The conclusion survives on **S4 alone**, which is about workflow topology and
+   nothing to do with whether the branch is protected:
+
+   - `security.yml` is **workflow-level paths-filtered** on `api/**`
+     (`.github/workflows/security.yml`, `on.pull_request.paths`).
    - `scripts/required-checks-generate.sh` **stage S4 excludes every check
-     defined in a paths-filtered workflow** ("an ABSENT check is a permanent
-     *expected*"). `security.yml` is paths-filtered on `api/**`, so *every* job
-     in it is S4-excluded regardless of blocking-ness. Proof that this is not
-     just the advisory flag: the **`mix-audit` job carries no
-     `continue-on-error` and is still excluded**, with reason `S4
-     PATHS-FILTERED` — while `sobelow` is excluded under `S2 ADVISORY`.
+     defined in a paths-filtered workflow** — "an ABSENT check is a permanent
+     *expected*", i.e. a required context that never reports deadlocks the
+     branch. The `pf` flag is computed **once per FILE** by the parser and
+     stamped onto every job row it emits, so *every* job in `security.yml` is
+     S4-excluded regardless of blocking-ness.
+   - Proof that this is topology and not the advisory flag: the **`mix-audit`
+     job carries no `continue-on-error` and is still excluded**, with reason
+     `S4 PATHS-FILTERED` — while `sobelow` is excluded under `S2 ADVISORY`.
 
    So flipping `continue-on-error: true` → `false` on `sobelow` would make the
-   *job* red but would still not gate any merge. Making Sobelow actually block
-   requires branch protection (or a ruleset) plus a non-paths-filtered required
-   context — a separate change from the baseline drain.
+   *job* red but would still not gate any merge — the branch being protected
+   does not make the check requireable, because the generator never offers it.
+   Making Sobelow actually block requires **moving it out of a paths-filtered
+   workflow** (or aggregating it behind a non-paths-filtered context) *first*;
+   that is a separate change from the baseline drain, and any plan that treats
+   live protection as sufficient is wrong.
+
+   **Sobelow's greenness therefore is not a branch-protection concern — it is
+   still a real one.** A permanently-red regression gate cannot report a
+   regression: while it is red for residue, a genuinely new insecure pattern is
+   indistinguishable from an old one. That is the reason to drain it, and the
+   only honest one.
 
    **Provenance: D75 is a dangling citation.** "D75" has no defining charter
    entry. It is cited at `bp-felix-pristine-charter.md:904` and `:2165` and at
@@ -271,8 +321,10 @@ run them, cannot run them locally, and cannot fix them in a PR.
 
 ### Making `pr-task-gate` binding (required-by-name)
 
-The gate ships **advisory** — a red check does not yet block a merge, because
-`main` has no branch protection. It becomes binding only when added to the
+**This gate is now BINDING** — `PR references an active task` is one of the two
+required contexts live on `main` (2026-07-28; see *Pre-merge gates*). The
+bootstrap below is kept as the account of how a context becomes required, not
+as pending work. A check becomes binding only when added to the
 required-status-checks list **by name**. Required-by-name is load-bearing (D3):
 a workflow that silently never runs on a conflicting PR must read as
 "not satisfied", not as an absent/passing check.

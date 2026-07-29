@@ -1,8 +1,24 @@
 # Re-derivation: branch protection on main (cloud-console-hardening wave 7 verify)
 
-Measured 2026-07-28 against live GitHub and `origin/main` @ f38c01920.
+> **SUPERSEDED 2026-07-29 — the `NO_PROTECTION` reading below is DEAD.**
+> Protection was applied to `main` later on 2026-07-28. Re-derived
+> 2026-07-29 on `origin/main` @ `606fefd15`:
+>
+> ```sh
+> gh api repos/FRIKKern/barkpark/branches/main/protection \
+>   -q '{contexts:.required_status_checks.contexts,strict:.required_status_checks.strict,enforce_admins:.enforce_admins.enabled}'
+> # {"contexts":["Elixir gate","PR references an active task"],"enforce_admins":true,"strict":false}
+> gh api repos/FRIKKern/barkpark/rulesets -q 'length'   # 0 — still empty, and still the WRONG place to look
+> git show origin/main:.github/required-checks.json | grep '"enforced"'   # "enforced": true
+> ```
+>
+> The *conclusion* about CSSOM parity survives and does not depend on
+> protection state: a check defined in a workflow-level paths-filtered
+> workflow is excluded by `required-checks-generate.sh` stage S4 and can
+> never be required. Canonical: `docs/ops/merge-gates.md` §Security gates.
+> Everything below is retained as the 2026-07-28 measurement it was.
 
-## Is main protected? NO.
+## Is main protected? NO. (as measured 2026-07-28 — SUPERSEDED, see above)
 
 ```sh
 gh api repos/FRIKKern/barkpark/branches/main/protection || echo NO_PROTECTION
