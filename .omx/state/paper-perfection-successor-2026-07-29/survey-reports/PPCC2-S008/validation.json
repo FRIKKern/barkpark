@@ -1,0 +1,277 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report-validation/v1",
+  "assignment_id": "PPCC2-S008",
+  "valid": true,
+  "checks": [
+    {
+      "name": "bound-snapshot-sha",
+      "status": "PASS",
+      "evidence": "d19697904bb0ddfb96f6a3dc91d9d6a1f68d14d618bb216fa891e99d4fe56249"
+    },
+    {
+      "name": "source-snapshot-sha",
+      "status": "PASS",
+      "evidence": "6c936bb45abe9c236463b587e1ac8951e48abaff5fab725a39c5f0ff8b6e123d"
+    },
+    {
+      "name": "bound-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S008",
+        "status": "cyclefleet_bound",
+        "unit_count": 10
+      }
+    },
+    {
+      "name": "immutable-wave-binding",
+      "status": "PASS",
+      "evidence": {
+        "status": "cyclefleet_bound",
+        "wave_id": "paper-perfection-successor-wave-2026-07-29",
+        "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+        "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+        "source_snapshot_sha256": "6c936bb45abe9c236463b587e1ac8951e48abaff5fab725a39c5f0ff8b6e123d"
+      }
+    },
+    {
+      "name": "report-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S008",
+        "worker": "worker-2"
+      }
+    },
+    {
+      "name": "ordered-checked-unit-ids",
+      "status": "PASS",
+      "evidence": [
+        "paper:claude-ready-servers-product-strategy",
+        "paper:claude-ready-servers-wave-2026-07-28",
+        "paper:cli-reliability-wave-2026-07-23",
+        "paper:cloud-console-epic-wish",
+        "paper:cloud-console-hardening-dashboard",
+        "paper:cloud-console-hardening-wave-2-2026-07-21",
+        "paper:cloud-console-hardening-wave-2026-07-21",
+        "paper:cloud-console-hardening-wave-3-2026-07-21",
+        "paper:cloud-console-hardening-wave-4-2026-07-21",
+        "paper:cloud-console-hardening-wave-5-2026-07-21"
+      ]
+    },
+    {
+      "name": "one-verdict-per-unit",
+      "status": "PASS",
+      "evidence": 10
+    },
+    {
+      "name": "verdict-metadata-pinned",
+      "status": "PASS",
+      "evidence": "all document ids and immutable revisions match"
+    },
+    {
+      "name": "allowed-verdicts-and-counts",
+      "status": "PASS",
+      "evidence": {
+        "repair": 6,
+        "keep": 3,
+        "superseded": 1
+      }
+    },
+    {
+      "name": "editorial-dimensions-complete",
+      "status": "PASS",
+      "evidence": [
+        "compression_and_restraint",
+        "duplicate_disposition",
+        "evidence_and_truth",
+        "human_voice_and_precision",
+        "opening_and_criteria",
+        "outline_and_hierarchy",
+        "purpose_and_larger_goal",
+        "rationale"
+      ]
+    },
+    {
+      "name": "specific-existing-evidence-refs",
+      "status": "PASS",
+      "evidence": [
+        {
+          "document_id": "claude-ready-servers-product-strategy",
+          "ref": "blocks[11]",
+          "exists": true
+        },
+        {
+          "document_id": "claude-ready-servers-product-strategy",
+          "ref": "blocks[37]",
+          "exists": true
+        },
+        {
+          "document_id": "claude-ready-servers-wave-2026-07-28",
+          "ref": "blocks[4]",
+          "exists": true
+        },
+        {
+          "document_id": "claude-ready-servers-wave-2026-07-28",
+          "ref": "blocks[72]",
+          "exists": true
+        },
+        {
+          "document_id": "cli-reliability-wave-2026-07-23",
+          "ref": "blocks[36]",
+          "exists": true
+        },
+        {
+          "document_id": "cli-reliability-wave-2026-07-23",
+          "ref": "blocks[13]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-epic-wish",
+          "ref": "blocks[19]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-epic-wish",
+          "ref": "blocks[16]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-dashboard",
+          "ref": "blocks[14]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-dashboard",
+          "ref": "blocks[3]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-wave-2-2026-07-21",
+          "ref": "blocks[95]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-wave-2-2026-07-21",
+          "ref": "blocks[2]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-wave-2026-07-21",
+          "ref": "blocks[125]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-wave-2026-07-21",
+          "ref": "blocks[73]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-wave-3-2026-07-21",
+          "ref": "blocks[172]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-wave-3-2026-07-21",
+          "ref": "blocks[174]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-wave-4-2026-07-21",
+          "ref": "blocks[17]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-wave-4-2026-07-21",
+          "ref": "blocks[97]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-wave-5-2026-07-21",
+          "ref": "blocks[7]",
+          "exists": true
+        },
+        {
+          "document_id": "cloud-console-hardening-wave-5-2026-07-21",
+          "ref": "blocks[2]",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "five-reader-risks",
+      "status": "PASS",
+      "evidence": [
+        "CLI/API",
+        "Studio",
+        "TUI80",
+        "email",
+        "public"
+      ]
+    },
+    {
+      "name": "read-only-mutation-attestation",
+      "status": "PASS",
+      "evidence": {
+        "production_papers_mutated": false,
+        "cyclefleet_mutated": false,
+        "read_operations_only": [
+          "bp doc get paper <document_id> --perspective raw --json"
+        ],
+        "bp_cycle_assign_called": false,
+        "bp_cycle_result_called": false
+      }
+    },
+    {
+      "name": "unvisited-scope-empty",
+      "status": "PASS",
+      "evidence": []
+    },
+    {
+      "name": "readbacks-exact-and-hashed",
+      "status": "PASS",
+      "evidence": "all 10 raw ids/revisions and SHA-256 receipts match"
+    },
+    {
+      "name": "native-block-representation",
+      "status": "PASS",
+      "evidence": {
+        "native_block_total": 835
+      }
+    },
+    {
+      "name": "purpose-based-duplicate-analysis",
+      "status": "PASS",
+      "evidence": [
+        {
+          "candidate_set": [
+            "cloud-console-hardening-wave-4-2026-07-21",
+            "cloud-console-hardening-wave-5-2026-07-21"
+          ],
+          "basis": "Same D41 boundary-payment purpose; wave 4 stops before survey/build and wave 5 explicitly identifies itself as the fresh replacement after wave 4 died at Digest.",
+          "disposition": "Wave 5 is current outcome authority; archive wave 4 as failed planning provenance."
+        },
+        {
+          "candidate_set": [
+            "cloud-console-hardening-wave-2026-07-21",
+            "cloud-console-hardening-wave-2-2026-07-21",
+            "cloud-console-hardening-wave-3-2026-07-21",
+            "cloud-console-hardening-wave-5-2026-07-21"
+          ],
+          "basis": "Shared epic chronology and repeated phase/ledger scaffolding, but distinct measured defects and decisions.",
+          "disposition": "Create a compact series chronology/status index; retain pinned full audits as evidence sources."
+        },
+        {
+          "candidate_set": [
+            "claude-ready-servers-product-strategy",
+            "claude-ready-servers-wave-2026-07-28"
+          ],
+          "basis": "Same program but different authority: outside-in sequencing decision versus proof-before-build execution.",
+          "disposition": "Cross-link through the capstone; do not merge the research and execution records."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  }
+}

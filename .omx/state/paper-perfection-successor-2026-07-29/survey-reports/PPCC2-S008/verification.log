@@ -1,0 +1,25 @@
+PPCC2-S008 verification
+bound_snapshot_sha256:
+d19697904bb0ddfb96f6a3dc91d9d6a1f68d14d618bb216fa891e99d4fe56249  /Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/survey-cycle/bound-assignments/PPCC2-S008.json
+source_snapshot_sha256:
+6c936bb45abe9c236463b587e1ac8951e48abaff5fab725a39c5f0ff8b6e123d  /Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/survey-authority/assignments/PPCC2-S008.json
+json_lint:
+PASS
+python_compile:
+PASS
+tabnanny:
+PASS
+focused_validator:
+{
+  "valid": true,
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  }
+}
+readback_exact_count:
+{
+  "count": 10,
+  "all_pinned_revisions_read": true,
+  "block_total": 835
+}

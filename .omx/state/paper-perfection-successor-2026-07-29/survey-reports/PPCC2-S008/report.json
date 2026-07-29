@@ -1,0 +1,492 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S008",
+  "assignment_snapshot_sha256": "d19697904bb0ddfb96f6a3dc91d9d6a1f68d14d618bb216fa891e99d4fe56249",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 3,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "6c936bb45abe9c236463b587e1ac8951e48abaff5fab725a39c5f0ff8b6e123d"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All ten pinned revisions were read across 835 native blocks. Keep 3, repair 6, supersede 1. The best transferable pattern is adversarial, mutation-proven evidence with explicit residuals; the main editorial failure is enormous living-wave chronology that buries terminal truth. Cloud-console wave 4 is specifically superseded because it stops at Strategize and wave 5 explicitly replaces the spend-limited failed wave.",
+  "verdict_counts": {
+    "repair": 6,
+    "keep": 3,
+    "superseded": 1
+  },
+  "checked_unit_ids": [
+    "paper:claude-ready-servers-product-strategy",
+    "paper:claude-ready-servers-wave-2026-07-28",
+    "paper:cli-reliability-wave-2026-07-23",
+    "paper:cloud-console-epic-wish",
+    "paper:cloud-console-hardening-dashboard",
+    "paper:cloud-console-hardening-wave-2-2026-07-21",
+    "paper:cloud-console-hardening-wave-2026-07-21",
+    "paper:cloud-console-hardening-wave-3-2026-07-21",
+    "paper:cloud-console-hardening-wave-4-2026-07-21",
+    "paper:cloud-console-hardening-wave-5-2026-07-21"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 10,
+    "native_top_level_blocks_read": 835,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:claude-ready-servers-product-strategy blocks[11]",
+      "evidence": "Evidence-gated productization trigger combines sealed fleet capability with willingness-to-pay.",
+      "lesson": "Make sequencing reversible and measurable."
+    },
+    {
+      "block_ref": "paper:cli-reliability-wave-2026-07-23 blocks[36]",
+      "evidence": "Review tests real GitHub Actions bash -e semantics and catches a dead-on-arrival tripwire.",
+      "lesson": "Validate the execution environment, not only local logic."
+    },
+    {
+      "block_ref": "paper:cloud-console-hardening-wave-2-2026-07-21 blocks[95]",
+      "evidence": "Union gates catch a defect invisible to four independently green slices.",
+      "lesson": "Integration is a separate proof obligation."
+    },
+    {
+      "block_ref": "paper:cloud-console-hardening-wave-5-2026-07-21 blocks[7]",
+      "evidence": "A permanent mutation proof replaces a decaying absolute floor.",
+      "lesson": "Make critical checks reproducibly non-vacuous."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:cloud-console-hardening-wave-2-2026-07-21 blocks[2]",
+      "evidence": "Front door still says SURVEYING after an A- debrief.",
+      "reader_impact": "Historical state is mistaken for current truth."
+    },
+    {
+      "block_ref": "paper:cloud-console-hardening-wave-3-2026-07-21 blocks[174]",
+      "evidence": "A 3,444-character multi-slice verdict hides six independent outcomes.",
+      "reader_impact": "Narrow readers lose the decision thread."
+    },
+    {
+      "block_ref": "paper:cloud-console-hardening-wave-4-2026-07-21 blocks[97]",
+      "evidence": "The attempted wave ends at Strategize with survey still next.",
+      "reader_impact": "It cannot serve as terminal authority."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "cloud-console-hardening-wave-4-2026-07-21",
+        "cloud-console-hardening-wave-5-2026-07-21"
+      ],
+      "basis": "Same D41 boundary-payment purpose; wave 4 stops before survey/build and wave 5 explicitly identifies itself as the fresh replacement after wave 4 died at Digest.",
+      "disposition": "Wave 5 is current outcome authority; archive wave 4 as failed planning provenance."
+    },
+    {
+      "candidate_set": [
+        "cloud-console-hardening-wave-2026-07-21",
+        "cloud-console-hardening-wave-2-2026-07-21",
+        "cloud-console-hardening-wave-3-2026-07-21",
+        "cloud-console-hardening-wave-5-2026-07-21"
+      ],
+      "basis": "Shared epic chronology and repeated phase/ledger scaffolding, but distinct measured defects and decisions.",
+      "disposition": "Create a compact series chronology/status index; retain pinned full audits as evidence sources."
+    },
+    {
+      "candidate_set": [
+        "claude-ready-servers-product-strategy",
+        "claude-ready-servers-wave-2026-07-28"
+      ],
+      "basis": "Same program but different authority: outside-in sequencing decision versus proof-before-build execution.",
+      "disposition": "Cross-link through the capstone; do not merge the research and execution records."
+    }
+  ],
+  "reader_risks": [
+    "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+    "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+    "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+    "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+    "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:claude-ready-servers-product-strategy",
+      "document_id": "claude-ready-servers-product-strategy",
+      "document_rev": "6b6c12592f9eb0a144c9fc66952e2f71",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Outside-in decision framework for whether Barkpark should perfect its internal fleet or sell Claude-ready servers first, including rivals, costs, credential posture, and a productization trigger.",
+      "opening_and_criteria": "blocks[3] states the requested sequencing verdict and blocks[5] gives it immediately; blocks[11] converts it into a falsifiable trigger: two fleet criteria sealed plus willingness-to-pay at the $29-plus-support ladder.",
+      "outline_and_hierarchy": "67 blocks: recommendation → wedge → options → market evidence → legal/cost/demand findings → internal constraints → change map → risks → coverage. The path is coherent, but market research and internal roadmap detail compete with the decision.",
+      "human_voice_and_precision": "Direct about uncertainty and corrects live-page misconceptions. The legal reading is explicitly labeled inference, which is excellent; currency and vendor claims are inherently time-sensitive.",
+      "compression_and_restraint": "About 26k extracted characters. Dense vendor, charter, and change-path tables are useful receipts, but a one-page decision card should precede them.",
+      "evidence_and_truth": "blocks[11] makes the decision measurable; blocks[37] says no primary source blesses the BYO rental model and separates inference from permission.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[11]",
+          "evidence": "TRIGGER := durability + unattended mixed-agent seal AND pilot willingness-to-pay at the $29-plus-support ladder.",
+          "lesson": "Turn “internal first” into an evidence-gated transition rather than indefinite dogfooding."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[37]",
+          "evidence": "The rent-a-box BYO-login legal reading is explicitly an inference and no primary source blesses it.",
+          "reader_impact": "The product recommendation depends on a legal interpretation that can change and must not read as durable authorization."
+        }
+      ],
+      "duplicate_disposition": "Distinct product-strategy lane; the named capstone reconciles it with utilization, credential, GUI, and pipeline lanes. Keep this as source research, but route the final first-bet decision through the capstone.",
+      "reader_risks": [
+        "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+        "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+        "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+        "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+      ],
+      "rationale": "Repair: preserve the measurable trigger and honest legal caveat, add source dates/freshness badges, and move vendor/charter receipts behind a short current decision surface."
+    },
+    {
+      "unit_id": "paper:claude-ready-servers-wave-2026-07-28",
+      "document_id": "claude-ready-servers-wave-2026-07-28",
+      "document_rev": "456822e61b26d0f86a225b53c1abdbf2",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 1 proof-before-build record for honest fleet evidence, a money-safe live-fire instrument, token custody loudness, DNS census, and the first spend-aware support-box journey.",
+      "opening_and_criteria": "blocks[4] is an excellent corrected front door: complete/reviewed A-, four round-one slices green, but P1/P2/P3 live fires and round two still unrun. The wish’s visible success remains explicitly open.",
+      "outline_and_hierarchy": "128 blocks preserve the full living-wave arc from biography and premise-smoke through 16-lane survey, 12 verifiers, D97–D106, five slices, and review. The current truth is present but surrounded by extensive operational history.",
+      "human_voice_and_precision": "Unusually candid about access inversions, stale memory, anonymous exposure, and money-touching owner gates. Acronym and task-id density assumes expert context.",
+      "compression_and_restraint": "Roughly 48k extracted characters; blocks[72] is an 1,873-character verifier dispatch list and blocks[127] a 1,079-character lead runbook. Separate current owner actions from archival derivation.",
+      "evidence_and_truth": "blocks[4] distinguishes built instruments from unexecuted live proof; blocks[125] repeats that the headline green refire, Claude turn, and teardown were deliberately not run.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "COMPLETE: REVIEWED, grade A−; four slices built, while P1/P2/P3 live fires are explicitly unrun and owner-gated.",
+          "lesson": "Put “instrument built” and “real-world proof still owed” in the same terminal status block."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[72]",
+          "evidence": "Twelve verification assignments and their mechanics occupy a single 1,873-character block.",
+          "reader_impact": "The operational dispatch receipt overwhelms TUI/email readers and competes with the live-fire obligations."
+        }
+      ],
+      "duplicate_disposition": "Distinct execution wave, not a duplicate of the product-strategy paper. Its current authority should be limited to what round one built; later live-fire receipts should supersede its future-tense runbook.",
+      "reader_risks": [
+        "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+        "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+        "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+        "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+      ],
+      "rationale": "Repair: keep the honest proof boundary, add a short owner-action rail for P1/P2/P3, and collapse survey/verify dispatch detail into appendices."
+    },
+    {
+      "unit_id": "paper:cli-reliability-wave-2026-07-23",
+      "document_id": "cli-reliability-wave-2026-07-23",
+      "document_rev": "e3fcaf1b770a3a7c57a1c2fea19f80f8",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "A focused two-slice reliability wave fixing doctor.sh false-green staleness semantics and adding an advisory tokenless Scaffy catalog-drift tripwire.",
+      "opening_and_criteria": "blocks[1] names both bugs and the non-Elixir fence. blocks[15] updates the front door to reviewed/debriefed, 2/2 green, A-, with post-merge D10 obligations still open.",
+      "outline_and_hierarchy": "40 blocks form a compact wave: premise smoke, two-slice direction, survey/verify, D1–D11, plan, debrief, and next-wave obligations.",
+      "human_voice_and_precision": "Precise about merge-base semantics, advisory versus required gates, and a reviewer-caught bash-errexit defect. It corrects stale premises rather than forcing the original story.",
+      "compression_and_restraint": "Still dense—blocks[13] is a 3,498-character survey plan—but the terminal status and 40-block scale keep the main story retrievable.",
+      "evidence_and_truth": "blocks[35] re-derives the high-flip-risk matrix; blocks[36] records the actual `bash -e` defect and its fixed capture idiom.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[36]",
+          "evidence": "The workflow’s local simulation missed bash -e; review fixed `out=$(cmd); code=$?` to `code=0; out=$(cmd) || code=$?` and re-proved both red and green paths.",
+          "lesson": "Test CI shell semantics, not only script logic under a friendlier local shell."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[13]",
+          "evidence": "A 3,498-character survey assignment list sits on the primary reading path.",
+          "reader_impact": "The durable decision and two shipped results are much smaller than the discovery narration."
+        }
+      ],
+      "duplicate_disposition": "Distinct CLI-reliability authority; no cloud-console or Claude-ready paper owns the same doctor/autoseed boundary.",
+      "reader_risks": [
+        "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+        "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+        "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+        "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+      ],
+      "rationale": "Keep: focused purpose, corrected terminal status, concrete mutation proof, and honest post-merge obligations outweigh the removable survey-plan density."
+    },
+    {
+      "unit_id": "paper:cloud-console-epic-wish",
+      "document_id": "cloud-console-epic-wish",
+      "document_rev": "256efaded2fc2394ebde93874b13a875",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Superseding mission brief for a production operator console with truthful overview, quotas, webhooks, access, studios, APIs, datasets, activity, settings, and CLI reciprocity.",
+      "opening_and_criteria": "blocks[1] states the emotional goal—control and everything working. blocks[19] later supplies the real acceptance boundary: live backends only, truthful toggles, quotas/states, security, audit, and no decorative UI.",
+      "outline_and_hierarchy": "22 blocks are compact: bar → reference surface → overview/meters → webhooks → remaining tabs → non-negotiables → scale. Prioritization inside the very large feature set is limited beyond webhooks.",
+      "human_voice_and_precision": "Bold and memorable, with a strong “meters without truth are lies” rule. Several architecture choices are delegated to a future architect rather than bounded here.",
+      "compression_and_restraint": "Concise for its scope, but blocks[16] packs six product domains into one 613-character list and the document asks for many waves without a staged success ladder.",
+      "evidence_and_truth": "blocks[10] refuses fake metering; blocks[19] defines backend/test/state/security obligations for every surface.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[19]",
+          "evidence": "A panel ships only with its live backend wired and tested; toggles round-trip real state and errors honestly.",
+          "lesson": "State a non-negotiable truth contract that prevents decorative console work."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[16]",
+          "evidence": "Members, Studios, API, Datasets, Activity, and Plan/Settings are each compressed into one undifferentiated backlog list.",
+          "reader_impact": "The epic has breadth but no reader-visible sequencing or minimum coherent release boundary."
+        }
+      ],
+      "duplicate_disposition": "This is the mission authority, not a build/debrief duplicate of the hardening waves. Link a current charter/roadmap showing which wish slices are authoritative and which are absorbed.",
+      "reader_risks": [
+        "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+        "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+        "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+        "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+      ],
+      "rationale": "Repair: keep the mission and truth contract, add staged release criteria and an explicit current-authority link so “very big epic” becomes executable rather than merely expansive."
+    },
+    {
+      "unit_id": "paper:cloud-console-hardening-dashboard",
+      "document_id": "cloud-console-hardening-dashboard",
+      "document_rev": "492288d631c019882e59a8dcff5a0a95",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "A live query-backed dashboard over the cloud-console-hardening epic, demonstrating PortableDoc papers as system views rather than hand-maintained status documents.",
+      "opening_and_criteria": "blocks[2] says every number and row resolves from task substrate at render time. blocks[14] explains the row/aggregate resolver and mutation-event rerender contract.",
+      "outline_and_hierarchy": "15 compact blocks: live counts, momentum chart, status/priority heatmap, kanban, claimable list, and an implementation note.",
+      "human_voice_and_precision": "Clear, restrained, and specific about zero authored rows. The implementation note names resolver functions and fail-closed tenancy.",
+      "compression_and_restraint": "Only about 1.3k extracted characters; no meaningful prose bloat. Its dependency on a live resolver is the principal cross-reader limitation.",
+      "evidence_and_truth": "blocks[3] declares authored rows: 0; blocks[14] names query objects, TaskResolver, aggregation, and event-driven rerendering.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[14]",
+          "evidence": "Blocks carry queries, resolve through rows_for_query/agg_for_query with fail-closed tenancy, and rerender on task mutations.",
+          "lesson": "Explain the mechanism that makes a live dashboard trustworthy instead of asking readers to trust freshness labels."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[3]",
+          "evidence": "The dashboard intentionally has authored rows: 0.",
+          "reader_impact": "Static email/public/CLI exports without resolver support may render little or no evidence unless they provide a dated fallback snapshot."
+        }
+      ],
+      "duplicate_disposition": "Distinct live-view artifact; the hardening wave papers are historical build records, not substitutes. The dashboard should link them as evidence sources rather than copy their counts.",
+      "reader_risks": [
+        "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+        "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+        "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+        "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+      ],
+      "rationale": "Keep: exemplary compact live-system view; add or document a fallback snapshot for readers that cannot execute query-backed blocks."
+    },
+    {
+      "unit_id": "paper:cloud-console-hardening-wave-2-2026-07-21",
+      "document_id": "cloud-console-hardening-wave-2-2026-07-21",
+      "document_rev": "173d6ad783eb2dae65fc57b6b3e51da5",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 2 merge-train record for SSE-ticket security, HEAD side-effect fencing, a real revoke click oracle, and honest gate/ledger classification.",
+      "opening_and_criteria": "blocks[2] still says SURVEYING, while blocks[91] closes round one at four green, reviewed, merge-ready slices and blocks[103] grades A-.",
+      "outline_and_hierarchy": "108 blocks and roughly 119k decoded characters carry a full strategize/survey/verify/decide/review history. The debrief is strong but buried beneath repeated state corrections.",
+      "human_voice_and_precision": "Excellent at refuting its own incorrect gate and roster premises, and at naming a cross-slice defect. Very high internal vocabulary and branch detail reduce portability.",
+      "compression_and_restraint": "The 2,747-character state-refutation list at blocks[75] and 2,946-character slice ledger at blocks[93] are appendix-sized.",
+      "evidence_and_truth": "blocks[95] explains a defect invisible to every per-slice gate but exposed by integrating all four; blocks[97] records the modeled fix.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[95]",
+          "evidence": "All four slices were green alone; only the integrated gate exposed the missing SSE-ticket fixture and false toast.",
+          "lesson": "Run a union gate over interacting slices before merge; per-slice green cannot certify composition."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The front door remains STATUS: SURVEYING although the paper later closes round one at A-.",
+          "reader_impact": "Search, email, and API summaries can report historical state as current truth."
+        }
+      ],
+      "duplicate_disposition": "Distinct wave-2 security/integration authority. It overlaps wave 1 as predecessor history and wave 3 as follow-on, not as same-purpose duplication.",
+      "reader_risks": [
+        "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+        "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+        "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+        "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+      ],
+      "rationale": "Repair: promote the review outcome to the opening, split refutations and per-slice receipts, and retain the integrated-defect lesson as the main durable artifact."
+    },
+    {
+      "unit_id": "paper:cloud-console-hardening-wave-2026-07-21",
+      "document_id": "cloud-console-hardening-wave-2026-07-21",
+      "document_rev": "16a3141be0bb985742e2b016254bba82",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Founding cloud-console hardening wave: re-verify inherited backlog truth and fix concrete console lies in refetch, peer IP, gates, emissions, and ledger closing.",
+      "opening_and_criteria": "blocks[1] clearly names the founding role. blocks[125] later corrects stale building status and falsifies the wave’s own Law 3; blocks[127] closes six green round-one slices at A-.",
+      "outline_and_hierarchy": "147 blocks preserve extensive premise correction, survey, verification, decisions, six-slice review, ledger audit, and next-wave sequencing. Corrections are accurate but the reader must traverse a very large living record.",
+      "human_voice_and_precision": "Strongest when it admits its own law was false and repairs a branch-SHA citation. Deep task/line/branch density makes the human story difficult outside the epic.",
+      "compression_and_restraint": "Several blocks exceed 2–3k characters; blocks[73] is a 3,309-character not-found inventory. A terminal summary plus archival evidence sections are necessary.",
+      "evidence_and_truth": "blocks[96] gives live-production proof that 98% of session IP rows were false; blocks[125] explicitly downgrades Law 3 from invariant to tendency.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[125]",
+          "evidence": "Review falsifies the wave’s own “staleness is always safe-direction” law and preserves the earlier claim only as historical record.",
+          "lesson": "Correct the governing law in the same artifact instead of hiding a premise failure."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[73]",
+          "evidence": "A 3,309-character NOT FOUND inventory mixes many separate risks and decisions-in-waiting.",
+          "reader_impact": "The terminal six-slice result and remaining live hazards are hard to retrieve in narrow readers."
+        }
+      ],
+      "duplicate_disposition": "Founding historical authority. Later waves supersede current state, but not its measured peer-IP and law-correction evidence; preserve as history with a series index.",
+      "reader_risks": [
+        "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+        "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+        "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+        "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+      ],
+      "rationale": "Repair: retain the unique founding measurements and self-correction, add a dated outcome/authority rail, and move exhaustive discovery into an evidence appendix."
+    },
+    {
+      "unit_id": "paper:cloud-console-hardening-wave-3-2026-07-21",
+      "document_id": "cloud-console-hardening-wave-3-2026-07-21",
+      "document_rev": "bc89039eb1bcc908b5be80ce33148094",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 3 composition and boundary-payment record: land the stranded train, close three enforcement doors, add reapers/UX honesty, and prove the integrated six-slice state.",
+      "opening_and_criteria": "The living-wave opening and measured ground truth establish the stranded-train problem; blocks[169]–blocks[178] finally give a complete six-slice debrief and A- grade.",
+      "outline_and_hierarchy": "186 blocks and 56 headings are the largest unit here. The composite proof and self-critique are excellent, but decision retrieval is expensive.",
+      "human_voice_and_precision": "Adversarial and self-correcting: it records refuted criteria, line-citation drift, counts-versus-sets limitations, and residual claim theft.",
+      "compression_and_restraint": "blocks[174] is a 3,444-character multi-slice verdict; the largest document block exceeds 5k. This needs an executive path plus frozen receipt appendix.",
+      "evidence_and_truth": "blocks[172] reports the integrated gate counts; blocks[179] explains why three stale citations and open residual harms hold the wave below A.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[172]",
+          "evidence": "The integrated merge ran 2,199 cloud tests, 1,325 targeted API tests, 87 smoke scenarios, 661 JS tests, CSS checks, task-gate tests, and formatting.",
+          "lesson": "Report composite proof with exact delta-aware counts, not “all tests passed.”"
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[174]",
+          "evidence": "A 3,444-character per-slice verdict list combines six branches, reviewer fixes, mutations, and residual risks.",
+          "reader_impact": "The document’s strongest evidence is not independently scannable or safely excerptable."
+        }
+      ],
+      "duplicate_disposition": "Distinct wave-3 composition authority; later boundary waves consume its findings. Retain exact proof but expose the series through a compact chronology.",
+      "reader_risks": [
+        "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+        "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+        "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+        "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+      ],
+      "rationale": "Repair: preserve the unusually strong composite proof and self-critique, but split the six verdicts and promote current residuals ahead of the 186-block diary."
+    },
+    {
+      "unit_id": "paper:cloud-console-hardening-wave-4-2026-07-21",
+      "document_id": "cloud-console-hardening-wave-4-2026-07-21",
+      "document_rev": "2d528beec3a9c961848c3ea86f53fdf3",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Attempted wave 4 strategy for turning documented coverage boundaries into mutation-proven machine-checked censuses.",
+      "opening_and_criteria": "blocks[1] declares a living wave, but blocks[97] ends at STRATEGIZE COMPLETE / survey next. No Digest, Decide, build, or Review outcome exists in this revision.",
+      "outline_and_hierarchy": "98 blocks are largely direction, debate, and 20 survey prompts. The artifact stops before any evidence-gated plan or terminal result.",
+      "human_voice_and_precision": "The mutation-proof doctrine is strong and specific, but the document reads as dispatch material rather than completed reader authority.",
+      "compression_and_restraint": "A large 98-block setup for a wave that never reaches Digest. Most question/assignment blocks should not remain a primary outcome paper.",
+      "evidence_and_truth": "blocks[17] gives a useful non-vacuity rule; blocks[97] truthfully exposes the incomplete phase boundary. Wave 5 blocks[1]–blocks[2] states it was a fresh wave after wave 4 died at Digest.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[17]",
+          "evidence": "Every machine check must be mutation-proven able to fail; a check nobody has seen fail is not trustworthy.",
+          "lesson": "Require red/green evidence before promoting a boundary check."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[97]",
+          "evidence": "STRATEGIZE: COMPLETE; NEXT: survey fleet flies.",
+          "reader_impact": "The paper has no surveyed decision, build result, or debrief and cannot serve as terminal wave authority."
+        }
+      ],
+      "duplicate_disposition": "Superseded by cloud-console-hardening-wave-5-2026-07-21, which explicitly says it is the fresh wave after wave 4 died at Digest and records the built D41 payment. Preserve wave 4 only as planning/audit history.",
+      "reader_risks": [
+        "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+        "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+        "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+        "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+      ],
+      "rationale": "Superseded: route current readers to wave 5; retain only the mutation-proof doctrine and failed-wave provenance in an archived chronology."
+    },
+    {
+      "unit_id": "paper:cloud-console-hardening-wave-5-2026-07-21",
+      "document_id": "cloud-console-hardening-wave-5-2026-07-21",
+      "document_rev": "a0843df4fb4e21c74ea75fb549c32d05",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Review-time debrief of the successful replacement wave that machine-checked five documented-but-unenforced D41 boundaries.",
+      "opening_and_criteria": "blocks[2] immediately discloses that the living Paper was not created until Review and this is a reconstructed debrief. blocks[5] states five slices shipped green and mutation-proven.",
+      "outline_and_hierarchy": "24 blocks: provenance note → direction → five slice receipts → coherence → ledger → grade → next wave. It is the most concise cloud-console wave artifact in this set.",
+      "human_voice_and_precision": "Honest about broken living-story process, per-slice limits, full-suite OOM, and merge-gated criteria. Technical language remains dense but bounded.",
+      "compression_and_restraint": "Good overall. blocks[15] is 1,115 characters and blocks[23] 991, but each has a clear single role.",
+      "evidence_and_truth": "blocks[7] records a permanent reproducible CSSOM proof; blocks[21] grades A- while naming the reconstruction and residual limits.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "The CSSOM floor became an exact committed sidecar and a permanent proof demonstrates why a >= floor would false-green.",
+          "lesson": "Turn one-time mutation evidence into a durable reproducible proof when the boundary is important."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The Paper was never created during Strategize/Digest/Decide and had to be reconstructed at Review.",
+          "reader_impact": "Readers lose a contemporaneous decision trail and must trust reconstruction for phase history."
+        }
+      ],
+      "duplicate_disposition": "This is the successor/current outcome for failed wave 4. Keep wave 5 as authority; archive wave 4’s planning record and cross-link the replacement explicitly.",
+      "reader_risks": [
+        "Studio: show a dated terminal-status/authority rail before long living-wave chronology; keep evidence blocks collapsible but named.",
+        "TUI80: summarize multi-kilobyte survey lists and wide tables before the full receipt so wrapping does not bury decisions.",
+        "email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "public: freshness-label market prices, legal inferences, branch/host details, live task counts, and security topology.",
+        "CLI/API: preserve exact ids, revisions, commands, exit codes, and whether a claim is planned, tested, merged, or live."
+      ],
+      "rationale": "Keep: concise, provenance-honest, mutation-proven, and terminal. Its process failure is clearly disclosed rather than hidden."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "read_operations_only": [
+      "bp doc get paper <document_id> --perspective raw --json"
+    ],
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}
