@@ -1,0 +1,3214 @@
+{
+  "_createdAt": "2026-07-13T14:42:13.900042Z",
+  "_draft": false,
+  "_id": "context-compression-benchmark",
+  "_publishedId": "context-compression-benchmark",
+  "_rev": "92fc8945a2e24e2787abf75c01551a41",
+  "_type": "paper",
+  "_updatedAt": "2026-07-13T14:42:13.900042Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "text": "Benchmark framework · evolving tournament",
+      "type": "eyebrow"
+    },
+    {
+      "id": "block-1",
+      "level": 1,
+      "text": "The context-compression benchmark — an evolving strategy tournament",
+      "type": "heading"
+    },
+    {
+      "id": "block-2",
+      "items": [
+        "strategy matrix",
+        "sensitivity-tagged tasks",
+        "review → rank → vs",
+        "self-evolving generations"
+      ],
+      "type": "byline"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Thesis: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "more relevant context in fewer tokens"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". We deliver each task's context by many strategies — pure text, pure image at several densities, hybrid (code exact + metadata optically packed), with and without extra relevance data — score them on real tasks, and let agents rank the arms and evolve the next generation. The output is a "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "policy: content-sensitivity → best strategy"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ", because code and prose want opposite answers."
+        }
+      ],
+      "id": "block-3",
+      "title": "The goal is a routing policy, not a single winner",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "The strategy space (generation 1 arms)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "An "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "arm"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " is one point in modality × density × enrichment (later: packing × ensemble). "
+        },
+        {
+          "type": "code",
+          "value": "enrichment=full"
+        },
+        {
+          "type": "text",
+          "value": " adds relevance metadata — reach, edges, intention — that a bare file lacks."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "header": [
+        "Arm",
+        "Modality",
+        "Density",
+        "Enrichment",
+        "Applies to"
+      ],
+      "id": "block-6",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "T-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "text"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "T-full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "text"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "enrichable"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I100-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "image"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I60-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "image"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "60"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I45-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "image"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "45"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I33-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "image"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "33"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I45-full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "image"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "45"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "enrichable"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "H45-full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "hybrid"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "45"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "enrichable"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "H33-full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "hybrid"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "33"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "enrichable"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "block-7",
+      "level": 2,
+      "text": "Metric of record",
+      "type": "heading"
+    },
+    {
+      "id": "block-8",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Quality-per-1k-tokens. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "correct answers ÷ (input tokens / 1000). Rewards packing more usable context into fewer tokens."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Cheap-and-wrong is a trap, not a win. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "An arm that is cheap but silently wrong on verbatim content is disqualified for that sensitivity — the ranking agent is told this explicitly."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Token cost is exact. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "images ("
+          },
+          {
+            "type": "code",
+            "value": "⌈w·h/750⌉"
+          },
+          {
+            "type": "text",
+            "value": "), text ("
+          },
+          {
+            "type": "code",
+            "value": "chars/4"
+          },
+          {
+            "type": "text",
+            "value": "). Time proxied by tokens; per-agent wall-clock isn't cleanly measurable here."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-9",
+      "level": 2,
+      "text": "Tasks & sensitivity classes",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Each task is tagged by what kind of reading it demands. Sensitivity, not task identity, is what the routing policy keys on."
+        }
+      ],
+      "id": "block-10",
+      "type": "paragraph"
+    },
+    {
+      "header": [
+        "Task",
+        "Sensitivity",
+        "Enrichable?"
+      ],
+      "id": "block-11",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "t1_extract"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "verbatim-lo"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "no"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "t3_hash"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "verbatim-hi"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "no"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "t2_logcount"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "aggregate"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "no"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "t4_summarize"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "gist"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "no"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "c1_reach"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "multi-hop-reasoning"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "yes"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "c2_intention"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "gist"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "yes"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "c3_blast"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "multi-hop-reasoning"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "yes"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "block-12",
+      "level": 2,
+      "text": "Generation-1 token ledger (live)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Cost per cell as "
+        },
+        {
+          "type": "code",
+          "value": "tokens/multiplier"
+        },
+        {
+          "type": "text",
+          "value": " (multiplier = bare-payload text tokens ÷ this arm's tokens; >1 means cheaper than bare text). Blank = arm not applicable to that task."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "header": [
+        "Task",
+        "T-bare",
+        "T-full",
+        "I100-bare",
+        "I60-bare",
+        "I45-bare",
+        "I33-bare",
+        "I45-full",
+        "H45-full",
+        "H33-full"
+      ],
+      "id": "block-14",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "t1_extract"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "41/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "117/0.3×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "42/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "24/1.7×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "13/3.1×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "t3_hash"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "68/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "69/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "25/2.7×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "14/4.9×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "8/8.5×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "t2_logcount"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "73/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "67/1.1×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "24/3.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "14/5.2×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "8/9.1×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "t4_summarize"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "113/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "118/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "42/2.7×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "24/4.7×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "13/8.7×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "c1_reach"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "107/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "142/0.8×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "193/0.6×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "69/1.6×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "39/2.7×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "21/5.1×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "50/2.1×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "117/0.9×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "112/1.0×"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "c2_intention"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "35/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "78/0.5×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "60/0.6×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "22/1.6×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "12/2.9×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "7/5.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "35/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "49/0.7×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "43/0.8×"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "c3_blast"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "28/1.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "46/0.6×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "37/0.8×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "13/2.1×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "8/3.5×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "4/7.0×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "15/1.9×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "35/0.8×"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "32/0.9×"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "On code tasks the enriched-optical arm carries "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "more"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " data at "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "fewer"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " tokens than bare text: "
+        },
+        {
+          "type": "code",
+          "value": "c1_reach"
+        },
+        {
+          "type": "text",
+          "value": " is 107 tok bare-text vs "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "50"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " for I45-full (2.1×) — the relevance metadata that costs +33% as text ("
+        },
+        {
+          "type": "code",
+          "value": "T-full"
+        },
+        {
+          "type": "text",
+          "value": " 142) costs "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "less"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " than bare once optically packed. Whether the model can still "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "use"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " it is what the quality run decides. Hybrid keeps code exact but pays a safety premium."
+        }
+      ],
+      "id": "block-15",
+      "title": "The thesis, already visible in cost",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "block-16",
+      "level": 2,
+      "text": "The generational loop",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "One "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "generation"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " = one pass, then the registry mutates:"
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-18",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Solve. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "one solver per (task × arm); reads text / image / both (hybrid); answers only from the context."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Score. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "objective (exact / numeric / set-match) against a hidden key — proofs; the gist tasks by a judge."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Review. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "one review agent per strategy: strengths, failure modes, which sensitivities to trust it for."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Rank. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "a ranking agent builds the leaderboard, the per-sensitivity routing policy, and interesting "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "head-to-head \"vs\""
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " matchups that each isolate one variable (enrichment, density, hybrid-vs-pure-image)."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Evolve. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "a meta-analyst proposes new arms + new tasks and retires dominated ones. Next generation runs the mutated registry."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Levers queued for later generations: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "a true 5×8 bitmap font (reach pxpipe's ~4.6× that antialiased Menlo can't), 3-way voting (does redundancy buy back verbatim accuracy?), confidence-gated re-read (solver flags illegible fields → re-serve those as text), and isolating "
+        },
+        {
+          "type": "code",
+          "value": "edges-only"
+        },
+        {
+          "type": "text",
+          "value": " vs "
+        },
+        {
+          "type": "code",
+          "value": "summary-only"
+        },
+        {
+          "type": "text",
+          "value": " enrichment."
+        }
+      ],
+      "id": "block-19",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-20",
+      "level": 2,
+      "text": "Pre-registered expectation (the policy we expect to converge on)",
+      "type": "heading"
+    },
+    {
+      "header": [
+        "Sensitivity",
+        "Expected best arm",
+        "Why"
+      ],
+      "id": "block-21",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "gist / aggregate"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "I33 / I45"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "survives deep compression; cheapest"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "verbatim-hi (hash, key)"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "T-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "optical confabulates high-entropy strings"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "verbatim-lo (email)"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "I45 / T-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "borderline; density decides"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "code / multi-hop"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "H45-full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "code exact + relevance packed = ceiling raised, cost controlled"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "block-22",
+      "level": 2,
+      "text": "Persistence & tendencies",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Every generation appends to a "
+        },
+        {
+          "type": "code",
+          "value": "results.jsonl"
+        },
+        {
+          "type": "text",
+          "value": " leaderboard and regenerates a results paper, so tendencies accumulate over a long run. Each such paper is itself render-audited (TUI + Email) — the substrate must be perfect on every surface, since these are the "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "file-documents"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " agents will consume."
+        }
+      ],
+      "id": "block-23",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "47"
+        },
+        {
+          "type": "text",
+          "value": " cells materialized ("
+        },
+        {
+          "type": "text",
+          "value": "7 tasks × applicable arms"
+        },
+        {
+          "type": "text",
+          "value": "), token ledger computed, workflow drafted ("
+        },
+        {
+          "type": "code",
+          "value": "gen.wf.js"
+        },
+        {
+          "type": "text",
+          "value": "). A launch runs "
+        },
+        {
+          "type": "text",
+          "value": "47 solvers + per-arm reviews + ranking + evolve"
+        },
+        {
+          "type": "text",
+          "value": ", and returns the leaderboard, the routing policy, the vs matchups, and the generation-2 proposal."
+        }
+      ],
+      "id": "block-24",
+      "title": "Status — ready to run generation 1",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "block-25",
+      "type": "divider"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Companions: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "thesis + fidelity results in "
+        },
+        {
+          "type": "code",
+          "value": "optical-compression-text-as-image-tokens"
+        },
+        {
+          "type": "text",
+          "value": "; the first chore-task protocol in "
+        },
+        {
+          "type": "code",
+          "value": "optical-compression-experiment-protocol"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "block-26",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "text": "Benchmark framework · evolving tournament",
+        "type": "eyebrow"
+      },
+      {
+        "id": "block-1",
+        "level": 1,
+        "text": "The context-compression benchmark — an evolving strategy tournament",
+        "type": "heading"
+      },
+      {
+        "id": "block-2",
+        "items": [
+          "strategy matrix",
+          "sensitivity-tagged tasks",
+          "review → rank → vs",
+          "self-evolving generations"
+        ],
+        "type": "byline"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Thesis: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "more relevant context in fewer tokens"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". We deliver each task's context by many strategies — pure text, pure image at several densities, hybrid (code exact + metadata optically packed), with and without extra relevance data — score them on real tasks, and let agents rank the arms and evolve the next generation. The output is a "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "policy: content-sensitivity → best strategy"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ", because code and prose want opposite answers."
+          }
+        ],
+        "id": "block-3",
+        "title": "The goal is a routing policy, not a single winner",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "The strategy space (generation 1 arms)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "An "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "arm"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " is one point in modality × density × enrichment (later: packing × ensemble). "
+          },
+          {
+            "type": "code",
+            "value": "enrichment=full"
+          },
+          {
+            "type": "text",
+            "value": " adds relevance metadata — reach, edges, intention — that a bare file lacks."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "header": [
+          "Arm",
+          "Modality",
+          "Density",
+          "Enrichment",
+          "Applies to"
+        ],
+        "id": "block-6",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "T-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "text"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "all"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "T-full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "text"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "enrichable"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I100-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "image"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "all"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I60-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "image"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "60"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "all"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I45-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "image"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "45"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "all"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I33-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "image"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "33"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "all"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I45-full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "image"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "45"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "enrichable"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "H45-full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "hybrid"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "45"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "enrichable"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "H33-full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "hybrid"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "33"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "enrichable"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "block-7",
+        "level": 2,
+        "text": "Metric of record",
+        "type": "heading"
+      },
+      {
+        "id": "block-8",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Quality-per-1k-tokens. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "correct answers ÷ (input tokens / 1000). Rewards packing more usable context into fewer tokens."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Cheap-and-wrong is a trap, not a win. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "An arm that is cheap but silently wrong on verbatim content is disqualified for that sensitivity — the ranking agent is told this explicitly."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Token cost is exact. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "images ("
+            },
+            {
+              "type": "code",
+              "value": "⌈w·h/750⌉"
+            },
+            {
+              "type": "text",
+              "value": "), text ("
+            },
+            {
+              "type": "code",
+              "value": "chars/4"
+            },
+            {
+              "type": "text",
+              "value": "). Time proxied by tokens; per-agent wall-clock isn't cleanly measurable here."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-9",
+        "level": 2,
+        "text": "Tasks & sensitivity classes",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Each task is tagged by what kind of reading it demands. Sensitivity, not task identity, is what the routing policy keys on."
+          }
+        ],
+        "id": "block-10",
+        "type": "paragraph"
+      },
+      {
+        "header": [
+          "Task",
+          "Sensitivity",
+          "Enrichable?"
+        ],
+        "id": "block-11",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "t1_extract"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "verbatim-lo"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "no"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "t3_hash"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "verbatim-hi"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "no"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "t2_logcount"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "aggregate"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "no"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "t4_summarize"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "gist"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "no"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "c1_reach"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "multi-hop-reasoning"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "yes"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "c2_intention"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "gist"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "yes"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "c3_blast"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "multi-hop-reasoning"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "yes"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "block-12",
+        "level": 2,
+        "text": "Generation-1 token ledger (live)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Cost per cell as "
+          },
+          {
+            "type": "code",
+            "value": "tokens/multiplier"
+          },
+          {
+            "type": "text",
+            "value": " (multiplier = bare-payload text tokens ÷ this arm's tokens; >1 means cheaper than bare text). Blank = arm not applicable to that task."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "header": [
+          "Task",
+          "T-bare",
+          "T-full",
+          "I100-bare",
+          "I60-bare",
+          "I45-bare",
+          "I33-bare",
+          "I45-full",
+          "H45-full",
+          "H33-full"
+        ],
+        "id": "block-14",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "t1_extract"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "41/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "117/0.3×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "42/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "24/1.7×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "13/3.1×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "t3_hash"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "68/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "69/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "25/2.7×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "14/4.9×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "8/8.5×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "t2_logcount"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "73/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "67/1.1×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "24/3.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "14/5.2×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "8/9.1×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "t4_summarize"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "113/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "118/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "42/2.7×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "24/4.7×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "13/8.7×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "—"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "c1_reach"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "107/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "142/0.8×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "193/0.6×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "69/1.6×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "39/2.7×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "21/5.1×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "50/2.1×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "117/0.9×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "112/1.0×"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "c2_intention"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "35/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "78/0.5×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "60/0.6×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "22/1.6×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "12/2.9×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "7/5.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "35/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "49/0.7×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "43/0.8×"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "c3_blast"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "28/1.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "46/0.6×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "37/0.8×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "13/2.1×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "8/3.5×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "4/7.0×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "15/1.9×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "35/0.8×"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "32/0.9×"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "On code tasks the enriched-optical arm carries "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "more"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " data at "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "fewer"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " tokens than bare text: "
+          },
+          {
+            "type": "code",
+            "value": "c1_reach"
+          },
+          {
+            "type": "text",
+            "value": " is 107 tok bare-text vs "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "50"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " for I45-full (2.1×) — the relevance metadata that costs +33% as text ("
+          },
+          {
+            "type": "code",
+            "value": "T-full"
+          },
+          {
+            "type": "text",
+            "value": " 142) costs "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "less"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " than bare once optically packed. Whether the model can still "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "use"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " it is what the quality run decides. Hybrid keeps code exact but pays a safety premium."
+          }
+        ],
+        "id": "block-15",
+        "title": "The thesis, already visible in cost",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "id": "block-16",
+        "level": 2,
+        "text": "The generational loop",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "One "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "generation"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " = one pass, then the registry mutates:"
+          }
+        ],
+        "id": "block-17",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-18",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Solve. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "one solver per (task × arm); reads text / image / both (hybrid); answers only from the context."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Score. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "objective (exact / numeric / set-match) against a hidden key — proofs; the gist tasks by a judge."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Review. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "one review agent per strategy: strengths, failure modes, which sensitivities to trust it for."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Rank. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "a ranking agent builds the leaderboard, the per-sensitivity routing policy, and interesting "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "head-to-head \"vs\""
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " matchups that each isolate one variable (enrichment, density, hybrid-vs-pure-image)."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Evolve. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "a meta-analyst proposes new arms + new tasks and retires dominated ones. Next generation runs the mutated registry."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Levers queued for later generations: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "a true 5×8 bitmap font (reach pxpipe's ~4.6× that antialiased Menlo can't), 3-way voting (does redundancy buy back verbatim accuracy?), confidence-gated re-read (solver flags illegible fields → re-serve those as text), and isolating "
+          },
+          {
+            "type": "code",
+            "value": "edges-only"
+          },
+          {
+            "type": "text",
+            "value": " vs "
+          },
+          {
+            "type": "code",
+            "value": "summary-only"
+          },
+          {
+            "type": "text",
+            "value": " enrichment."
+          }
+        ],
+        "id": "block-19",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-20",
+        "level": 2,
+        "text": "Pre-registered expectation (the policy we expect to converge on)",
+        "type": "heading"
+      },
+      {
+        "header": [
+          "Sensitivity",
+          "Expected best arm",
+          "Why"
+        ],
+        "id": "block-21",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "gist / aggregate"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "I33 / I45"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "survives deep compression; cheapest"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "verbatim-hi (hash, key)"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "T-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "optical confabulates high-entropy strings"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "verbatim-lo (email)"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "I45 / T-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "borderline; density decides"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "code / multi-hop"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "H45-full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "code exact + relevance packed = ceiling raised, cost controlled"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "block-22",
+        "level": 2,
+        "text": "Persistence & tendencies",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Every generation appends to a "
+          },
+          {
+            "type": "code",
+            "value": "results.jsonl"
+          },
+          {
+            "type": "text",
+            "value": " leaderboard and regenerates a results paper, so tendencies accumulate over a long run. Each such paper is itself render-audited (TUI + Email) — the substrate must be perfect on every surface, since these are the "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "file-documents"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " agents will consume."
+          }
+        ],
+        "id": "block-23",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "47"
+          },
+          {
+            "type": "text",
+            "value": " cells materialized ("
+          },
+          {
+            "type": "text",
+            "value": "7 tasks × applicable arms"
+          },
+          {
+            "type": "text",
+            "value": "), token ledger computed, workflow drafted ("
+          },
+          {
+            "type": "code",
+            "value": "gen.wf.js"
+          },
+          {
+            "type": "text",
+            "value": "). A launch runs "
+          },
+          {
+            "type": "text",
+            "value": "47 solvers + per-arm reviews + ranking + evolve"
+          },
+          {
+            "type": "text",
+            "value": ", and returns the leaderboard, the routing policy, the vs matchups, and the generation-2 proposal."
+          }
+        ],
+        "id": "block-24",
+        "title": "Status — ready to run generation 1",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "id": "block-25",
+        "type": "divider"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Companions: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "thesis + fidelity results in "
+          },
+          {
+            "type": "code",
+            "value": "optical-compression-text-as-image-tokens"
+          },
+          {
+            "type": "text",
+            "value": "; the first chore-task protocol in "
+          },
+          {
+            "type": "code",
+            "value": "optical-compression-experiment-protocol"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "id": "block-26",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">Benchmark framework · evolving tournament</p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">The context-compression benchmark — an evolving strategy tournament</h1><p style=\"border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px\">strategy matrix · sensitivity-tagged tasks · review → rank → vs · self-evolving generations</p><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">The goal is a routing policy, not a single winner</div><span>Thesis: <span style=\"font-weight:bold\">more relevant context in fewer tokens</span>. We deliver each task&#39;s context by many strategies — pure text, pure image at several densities, hybrid (code exact + metadata optically packed), with and without extra relevance data — score them on real tasks, and let agents rank the arms and evolve the next generation. The output is a <span style=\"font-weight:bold\">policy: content-sensitivity → best strategy</span>, because code and prose want opposite answers.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The strategy space (generation 1 arms)</h2><p>An <span style=\"font-weight:bold\">arm</span> is one point in modality × density × enrichment (later: packing × ensemble). <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">enrichment=full</code> adds relevance metadata — reach, edges, intention — that a bare file lacks.</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Arm</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Modality</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Density</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Enrichment</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Applies to</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">T-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>text</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>all</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">T-full</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>text</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>full</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>enrichable</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I100-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>image</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>all</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I60-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>image</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>60</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>all</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I45-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>image</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>45</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>all</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I33-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>image</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>33</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>all</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I45-full</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>image</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>45</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>full</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>enrichable</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">H45-full</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>hybrid</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>45</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>full</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>enrichable</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">H33-full</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>hybrid</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>33</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>full</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>enrichable</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Metric of record</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Quality-per-1k-tokens. </span>correct answers ÷ (input tokens / 1000). Rewards packing more usable context into fewer tokens.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Cheap-and-wrong is a trap, not a win. </span>An arm that is cheap but silently wrong on verbatim content is disqualified for that sensitivity — the ranking agent is told this explicitly.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Token cost is exact. </span>images (<code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">⌈w·h/750⌉</code>), text (<code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">chars/4</code>). Time proxied by tokens; per-agent wall-clock isn&#39;t cleanly measurable here.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Tasks &amp; sensitivity classes</h2><p>Each task is tagged by what kind of reading it demands. Sensitivity, not task identity, is what the routing policy keys on.</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Task</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Sensitivity</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Enrichable?</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">t1_extract</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>verbatim-lo</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>no</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">t3_hash</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>verbatim-hi</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>no</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">t2_logcount</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>aggregate</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>no</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">t4_summarize</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>gist</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>no</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">c1_reach</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>multi-hop-reasoning</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>yes</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">c2_intention</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>gist</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>yes</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">c3_blast</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>multi-hop-reasoning</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>yes</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Generation-1 token ledger (live)</h2><p>Cost per cell as <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">tokens/multiplier</code> (multiplier = bare-payload text tokens ÷ this arm&#39;s tokens; &gt;1 means cheaper than bare text). Blank = arm not applicable to that task.</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Task</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>T-bare</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>T-full</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>I100-bare</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>I60-bare</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>I45-bare</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>I33-bare</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>I45-full</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>H45-full</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>H33-full</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">t1_extract</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>41/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>117/0.3×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>42/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>24/1.7×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>13/3.1×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">t3_hash</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>68/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>69/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>25/2.7×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>14/4.9×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>8/8.5×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">t2_logcount</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>73/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>67/1.1×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>24/3.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>14/5.2×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>8/9.1×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">t4_summarize</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>113/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>118/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>42/2.7×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>24/4.7×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>13/8.7×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">c1_reach</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>107/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>142/0.8×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>193/0.6×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>69/1.6×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>39/2.7×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>21/5.1×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>50/2.1×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>117/0.9×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>112/1.0×</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">c2_intention</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>35/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>78/0.5×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>60/0.6×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>22/1.6×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>12/2.9×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>7/5.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>35/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>49/0.7×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>43/0.8×</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">c3_blast</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>28/1.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>46/0.6×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>37/0.8×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>13/2.1×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>8/3.5×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>4/7.0×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>15/1.9×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>35/0.8×</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>32/0.9×</span></td></tr></tbody></table><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">The thesis, already visible in cost</div><span>On code tasks the enriched-optical arm carries <span style=\"font-weight:bold\">more</span> data at <span style=\"font-weight:bold\">fewer</span> tokens than bare text: <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">c1_reach</code> is 107 tok bare-text vs <span style=\"font-weight:bold\">50</span> for I45-full (2.1×) — the relevance metadata that costs +33% as text (<code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">T-full</code> 142) costs <span style=\"font-weight:bold\">less</span> than bare once optically packed. Whether the model can still <span style=\"font-weight:bold\">use</span> it is what the quality run decides. Hybrid keeps code exact but pays a safety premium.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The generational loop</h2><p>One <span style=\"font-weight:bold\">generation</span> = one pass, then the registry mutates:</p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Solve. </span>one solver per (task × arm); reads text / image / both (hybrid); answers only from the context.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Score. </span>objective (exact / numeric / set-match) against a hidden key — proofs; the gist tasks by a judge.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Review. </span>one review agent per strategy: strengths, failure modes, which sensitivities to trust it for.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Rank. </span>a ranking agent builds the leaderboard, the per-sensitivity routing policy, and interesting <span style=\"font-weight:bold\">head-to-head &quot;vs&quot;</span> matchups that each isolate one variable (enrichment, density, hybrid-vs-pure-image).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Evolve. </span>a meta-analyst proposes new arms + new tasks and retires dominated ones. Next generation runs the mutated registry.</span></div></div><p><span style=\"font-weight:bold\">Levers queued for later generations: </span>a true 5×8 bitmap font (reach pxpipe&#39;s ~4.6× that antialiased Menlo can&#39;t), 3-way voting (does redundancy buy back verbatim accuracy?), confidence-gated re-read (solver flags illegible fields → re-serve those as text), and isolating <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">edges-only</code> vs <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">summary-only</code> enrichment.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Pre-registered expectation (the policy we expect to converge on)</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Sensitivity</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Expected best arm</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Why</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>gist / aggregate</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I33 / I45</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>survives deep compression; cheapest</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>verbatim-hi (hash, key)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">T-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>optical confabulates high-entropy strings</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>verbatim-lo (email)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I45 / T-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>borderline; density decides</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>code / multi-hop</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">H45-full</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>code exact + relevance packed = ceiling raised, cost controlled</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Persistence &amp; tendencies</h2><p>Every generation appends to a <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">results.jsonl</code> leaderboard and regenerates a results paper, so tendencies accumulate over a long run. Each such paper is itself render-audited (TUI + Email) — the substrate must be perfect on every surface, since these are the <span style=\"font-weight:bold\">file-documents</span> agents will consume.</p><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">Status — ready to run generation 1</div><span>47 cells materialized (7 tasks × applicable arms), token ledger computed, workflow drafted (<code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">gen.wf.js</code>). A launch runs 47 solvers + per-arm reviews + ranking + evolve, and returns the leaderboard, the routing policy, the vs matchups, and the generation-2 proposal.</span></div><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><p><span style=\"font-weight:bold\">Companions: </span>thesis + fidelity results in <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">optical-compression-text-as-image-tokens</code>; the first chore-task protocol in <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">optical-compression-experiment-protocol</code>.</p>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\">Benchmark framework · evolving tournament</p><h1>The context-compression benchmark — an evolving strategy tournament</h1><p class=\"bp-role-byline\">strategy matrix · sensitivity-tagged tasks · review → rank → vs · self-evolving generations</p><div class=\"bp-callout bp-callout--info\"><strong>The goal is a routing policy, not a single winner</strong> <span>Thesis: <span style=\"font-weight:bold\">more relevant context in fewer tokens</span>. We deliver each task&#39;s context by many strategies — pure text, pure image at several densities, hybrid (code exact + metadata optically packed), with and without extra relevance data — score them on real tasks, and let agents rank the arms and evolve the next generation. The output is a <span style=\"font-weight:bold\">policy: content-sensitivity → best strategy</span>, because code and prose want opposite answers.</span></div><h2>The strategy space (generation 1 arms)</h2><p>An <span style=\"font-weight:bold\">arm</span> is one point in modality × density × enrichment (later: packing × ensemble). <code>enrichment=full</code> adds relevance metadata — reach, edges, intention — that a bare file lacks.</p><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Arm</span></th><th class=\"bp-table__th\"><span>Modality</span></th><th class=\"bp-table__th\"><span>Density</span></th><th class=\"bp-table__th\"><span>Enrichment</span></th><th class=\"bp-table__th\"><span>Applies to</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><code>T-bare</code></td><td class=\"bp-table__td\"><span>text</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>bare</span></td><td class=\"bp-table__td\"><span>all</span></td></tr><tr><td class=\"bp-table__td\"><code>T-full</code></td><td class=\"bp-table__td\"><span>text</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>full</span></td><td class=\"bp-table__td\"><span>enrichable</span></td></tr><tr><td class=\"bp-table__td\"><code>I100-bare</code></td><td class=\"bp-table__td\"><span>image</span></td><td class=\"bp-table__td\"><span>100</span></td><td class=\"bp-table__td\"><span>bare</span></td><td class=\"bp-table__td\"><span>all</span></td></tr><tr><td class=\"bp-table__td\"><code>I60-bare</code></td><td class=\"bp-table__td\"><span>image</span></td><td class=\"bp-table__td\"><span>60</span></td><td class=\"bp-table__td\"><span>bare</span></td><td class=\"bp-table__td\"><span>all</span></td></tr><tr><td class=\"bp-table__td\"><code>I45-bare</code></td><td class=\"bp-table__td\"><span>image</span></td><td class=\"bp-table__td\"><span>45</span></td><td class=\"bp-table__td\"><span>bare</span></td><td class=\"bp-table__td\"><span>all</span></td></tr><tr><td class=\"bp-table__td\"><code>I33-bare</code></td><td class=\"bp-table__td\"><span>image</span></td><td class=\"bp-table__td\"><span>33</span></td><td class=\"bp-table__td\"><span>bare</span></td><td class=\"bp-table__td\"><span>all</span></td></tr><tr><td class=\"bp-table__td\"><code>I45-full</code></td><td class=\"bp-table__td\"><span>image</span></td><td class=\"bp-table__td\"><span>45</span></td><td class=\"bp-table__td\"><span>full</span></td><td class=\"bp-table__td\"><span>enrichable</span></td></tr><tr><td class=\"bp-table__td\"><code>H45-full</code></td><td class=\"bp-table__td\"><span>hybrid</span></td><td class=\"bp-table__td\"><span>45</span></td><td class=\"bp-table__td\"><span>full</span></td><td class=\"bp-table__td\"><span>enrichable</span></td></tr><tr><td class=\"bp-table__td\"><code>H33-full</code></td><td class=\"bp-table__td\"><span>hybrid</span></td><td class=\"bp-table__td\"><span>33</span></td><td class=\"bp-table__td\"><span>full</span></td><td class=\"bp-table__td\"><span>enrichable</span></td></tr></tbody></table><h2>Metric of record</h2><ul><li><span><span style=\"font-weight:bold\">Quality-per-1k-tokens. </span>correct answers ÷ (input tokens / 1000). Rewards packing more usable context into fewer tokens.</span></li><li><span><span style=\"font-weight:bold\">Cheap-and-wrong is a trap, not a win. </span>An arm that is cheap but silently wrong on verbatim content is disqualified for that sensitivity — the ranking agent is told this explicitly.</span></li><li><span><span style=\"font-weight:bold\">Token cost is exact. </span>images (<code>⌈w·h/750⌉</code>), text (<code>chars/4</code>). Time proxied by tokens; per-agent wall-clock isn&#39;t cleanly measurable here.</span></li></ul><h2>Tasks &amp; sensitivity classes</h2><p>Each task is tagged by what kind of reading it demands. Sensitivity, not task identity, is what the routing policy keys on.</p><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Task</span></th><th class=\"bp-table__th\"><span>Sensitivity</span></th><th class=\"bp-table__th\"><span>Enrichable?</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><code>t1_extract</code></td><td class=\"bp-table__td\"><span>verbatim-lo</span></td><td class=\"bp-table__td\"><span>no</span></td></tr><tr><td class=\"bp-table__td\"><code>t3_hash</code></td><td class=\"bp-table__td\"><span>verbatim-hi</span></td><td class=\"bp-table__td\"><span>no</span></td></tr><tr><td class=\"bp-table__td\"><code>t2_logcount</code></td><td class=\"bp-table__td\"><span>aggregate</span></td><td class=\"bp-table__td\"><span>no</span></td></tr><tr><td class=\"bp-table__td\"><code>t4_summarize</code></td><td class=\"bp-table__td\"><span>gist</span></td><td class=\"bp-table__td\"><span>no</span></td></tr><tr><td class=\"bp-table__td\"><code>c1_reach</code></td><td class=\"bp-table__td\"><span>multi-hop-reasoning</span></td><td class=\"bp-table__td\"><span>yes</span></td></tr><tr><td class=\"bp-table__td\"><code>c2_intention</code></td><td class=\"bp-table__td\"><span>gist</span></td><td class=\"bp-table__td\"><span>yes</span></td></tr><tr><td class=\"bp-table__td\"><code>c3_blast</code></td><td class=\"bp-table__td\"><span>multi-hop-reasoning</span></td><td class=\"bp-table__td\"><span>yes</span></td></tr></tbody></table><h2>Generation-1 token ledger (live)</h2><p>Cost per cell as <code>tokens/multiplier</code> (multiplier = bare-payload text tokens ÷ this arm&#39;s tokens; &gt;1 means cheaper than bare text). Blank = arm not applicable to that task.</p><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Task</span></th><th class=\"bp-table__th\"><span>T-bare</span></th><th class=\"bp-table__th\"><span>T-full</span></th><th class=\"bp-table__th\"><span>I100-bare</span></th><th class=\"bp-table__th\"><span>I60-bare</span></th><th class=\"bp-table__th\"><span>I45-bare</span></th><th class=\"bp-table__th\"><span>I33-bare</span></th><th class=\"bp-table__th\"><span>I45-full</span></th><th class=\"bp-table__th\"><span>H45-full</span></th><th class=\"bp-table__th\"><span>H33-full</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><code>t1_extract</code></td><td class=\"bp-table__td\"><span>41/1.0×</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>117/0.3×</span></td><td class=\"bp-table__td\"><span>42/1.0×</span></td><td class=\"bp-table__td\"><span>24/1.7×</span></td><td class=\"bp-table__td\"><span>13/3.1×</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>—</span></td></tr><tr><td class=\"bp-table__td\"><code>t3_hash</code></td><td class=\"bp-table__td\"><span>68/1.0×</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>69/1.0×</span></td><td class=\"bp-table__td\"><span>25/2.7×</span></td><td class=\"bp-table__td\"><span>14/4.9×</span></td><td class=\"bp-table__td\"><span>8/8.5×</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>—</span></td></tr><tr><td class=\"bp-table__td\"><code>t2_logcount</code></td><td class=\"bp-table__td\"><span>73/1.0×</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>67/1.1×</span></td><td class=\"bp-table__td\"><span>24/3.0×</span></td><td class=\"bp-table__td\"><span>14/5.2×</span></td><td class=\"bp-table__td\"><span>8/9.1×</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>—</span></td></tr><tr><td class=\"bp-table__td\"><code>t4_summarize</code></td><td class=\"bp-table__td\"><span>113/1.0×</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>118/1.0×</span></td><td class=\"bp-table__td\"><span>42/2.7×</span></td><td class=\"bp-table__td\"><span>24/4.7×</span></td><td class=\"bp-table__td\"><span>13/8.7×</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>—</span></td><td class=\"bp-table__td\"><span>—</span></td></tr><tr><td class=\"bp-table__td\"><code>c1_reach</code></td><td class=\"bp-table__td\"><span>107/1.0×</span></td><td class=\"bp-table__td\"><span>142/0.8×</span></td><td class=\"bp-table__td\"><span>193/0.6×</span></td><td class=\"bp-table__td\"><span>69/1.6×</span></td><td class=\"bp-table__td\"><span>39/2.7×</span></td><td class=\"bp-table__td\"><span>21/5.1×</span></td><td class=\"bp-table__td\"><span>50/2.1×</span></td><td class=\"bp-table__td\"><span>117/0.9×</span></td><td class=\"bp-table__td\"><span>112/1.0×</span></td></tr><tr><td class=\"bp-table__td\"><code>c2_intention</code></td><td class=\"bp-table__td\"><span>35/1.0×</span></td><td class=\"bp-table__td\"><span>78/0.5×</span></td><td class=\"bp-table__td\"><span>60/0.6×</span></td><td class=\"bp-table__td\"><span>22/1.6×</span></td><td class=\"bp-table__td\"><span>12/2.9×</span></td><td class=\"bp-table__td\"><span>7/5.0×</span></td><td class=\"bp-table__td\"><span>35/1.0×</span></td><td class=\"bp-table__td\"><span>49/0.7×</span></td><td class=\"bp-table__td\"><span>43/0.8×</span></td></tr><tr><td class=\"bp-table__td\"><code>c3_blast</code></td><td class=\"bp-table__td\"><span>28/1.0×</span></td><td class=\"bp-table__td\"><span>46/0.6×</span></td><td class=\"bp-table__td\"><span>37/0.8×</span></td><td class=\"bp-table__td\"><span>13/2.1×</span></td><td class=\"bp-table__td\"><span>8/3.5×</span></td><td class=\"bp-table__td\"><span>4/7.0×</span></td><td class=\"bp-table__td\"><span>15/1.9×</span></td><td class=\"bp-table__td\"><span>35/0.8×</span></td><td class=\"bp-table__td\"><span>32/0.9×</span></td></tr></tbody></table><div class=\"bp-callout bp-callout--success\"><strong>The thesis, already visible in cost</strong> <span>On code tasks the enriched-optical arm carries <span style=\"font-weight:bold\">more</span> data at <span style=\"font-weight:bold\">fewer</span> tokens than bare text: <code>c1_reach</code> is 107 tok bare-text vs <span style=\"font-weight:bold\">50</span> for I45-full (2.1×) — the relevance metadata that costs +33% as text (<code>T-full</code> 142) costs <span style=\"font-weight:bold\">less</span> than bare once optically packed. Whether the model can still <span style=\"font-weight:bold\">use</span> it is what the quality run decides. Hybrid keeps code exact but pays a safety premium.</span></div><h2>The generational loop</h2><p>One <span style=\"font-weight:bold\">generation</span> = one pass, then the registry mutates:</p><ul><li><span><span style=\"font-weight:bold\">Solve. </span>one solver per (task × arm); reads text / image / both (hybrid); answers only from the context.</span></li><li><span><span style=\"font-weight:bold\">Score. </span>objective (exact / numeric / set-match) against a hidden key — proofs; the gist tasks by a judge.</span></li><li><span><span style=\"font-weight:bold\">Review. </span>one review agent per strategy: strengths, failure modes, which sensitivities to trust it for.</span></li><li><span><span style=\"font-weight:bold\">Rank. </span>a ranking agent builds the leaderboard, the per-sensitivity routing policy, and interesting <span style=\"font-weight:bold\">head-to-head &quot;vs&quot;</span> matchups that each isolate one variable (enrichment, density, hybrid-vs-pure-image).</span></li><li><span><span style=\"font-weight:bold\">Evolve. </span>a meta-analyst proposes new arms + new tasks and retires dominated ones. Next generation runs the mutated registry.</span></li></ul><p><span style=\"font-weight:bold\">Levers queued for later generations: </span>a true 5×8 bitmap font (reach pxpipe&#39;s ~4.6× that antialiased Menlo can&#39;t), 3-way voting (does redundancy buy back verbatim accuracy?), confidence-gated re-read (solver flags illegible fields → re-serve those as text), and isolating <code>edges-only</code> vs <code>summary-only</code> enrichment.</p><h2>Pre-registered expectation (the policy we expect to converge on)</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Sensitivity</span></th><th class=\"bp-table__th\"><span>Expected best arm</span></th><th class=\"bp-table__th\"><span>Why</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>gist / aggregate</span></td><td class=\"bp-table__td\"><code>I33 / I45</code></td><td class=\"bp-table__td\"><span>survives deep compression; cheapest</span></td></tr><tr><td class=\"bp-table__td\"><span>verbatim-hi (hash, key)</span></td><td class=\"bp-table__td\"><code>T-bare</code></td><td class=\"bp-table__td\"><span>optical confabulates high-entropy strings</span></td></tr><tr><td class=\"bp-table__td\"><span>verbatim-lo (email)</span></td><td class=\"bp-table__td\"><code>I45 / T-bare</code></td><td class=\"bp-table__td\"><span>borderline; density decides</span></td></tr><tr><td class=\"bp-table__td\"><span>code / multi-hop</span></td><td class=\"bp-table__td\"><code>H45-full</code></td><td class=\"bp-table__td\"><span>code exact + relevance packed = ceiling raised, cost controlled</span></td></tr></tbody></table><h2>Persistence &amp; tendencies</h2><p>Every generation appends to a <code>results.jsonl</code> leaderboard and regenerates a results paper, so tendencies accumulate over a long run. Each such paper is itself render-audited (TUI + Email) — the substrate must be perfect on every surface, since these are the <span style=\"font-weight:bold\">file-documents</span> agents will consume.</p><div class=\"bp-callout bp-callout--success\"><strong>Status — ready to run generation 1</strong> <span>47 cells materialized (7 tasks × applicable arms), token ledger computed, workflow drafted (<code>gen.wf.js</code>). A launch runs 47 solvers + per-arm reviews + ranking + evolve, and returns the leaderboard, the routing policy, the vs matchups, and the generation-2 proposal.</span></div><div style=\"position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)\"><span style=\"position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem\">§</span></div><p><span style=\"font-weight:bold\">Companions: </span>thesis + fidelity results in <code>optical-compression-text-as-image-tokens</code>; the first chore-task protocol in <code>optical-compression-experiment-protocol</code>.</p>",
+  "body_html_sv": 3,
+  "description": "An evolving benchmark that compares context-delivery strategies (pure text, pure image at several densities, hybrid code-exact-plus-optical-metadata, with and without relevance enrichment) on sensitivity-tagged tasks; agents review and rank each strategy and propose the next generation. Metric of record: quality-per-token. Output: a routing policy mapping content-sensitivity to the best strategy.",
+  "main_tag": "optical-compression",
+  "preview": {
+    "description": "An evolving benchmark that compares context-delivery strategies (pure text, pure image at several densities,…",
+    "extensions": {
+      "tags": [
+        "optical-compression",
+        "token-efficiency",
+        "context-management",
+        "research-note"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/context-compression-benchmark"
+  },
+  "rev": 1,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "the family of strategies under test",
+      "strength": 90,
+      "tag": "optical-compression"
+    },
+    {
+      "rationale": "quality-per-token is the metric of record",
+      "strength": 80,
+      "tag": "token-efficiency"
+    },
+    {
+      "rationale": "delivering more relevant context per token to agents",
+      "strength": 65,
+      "tag": "context-management"
+    },
+    {
+      "rationale": "benchmark framework + pre-registered expectation",
+      "strength": 25,
+      "tag": "research-note"
+    }
+  ],
+  "title": "The context-compression benchmark — an evolving strategy tournament"
+}

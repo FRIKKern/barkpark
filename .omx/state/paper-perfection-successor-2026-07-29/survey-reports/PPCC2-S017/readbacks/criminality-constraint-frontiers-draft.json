@@ -1,0 +1,2610 @@
+{
+  "_createdAt": "2026-07-21T15:40:23.895651Z",
+  "_draft": false,
+  "_id": "criminality-constraint-frontiers-draft",
+  "_publishedId": "criminality-constraint-frontiers-draft",
+  "_rev": "aff12235cd69f94c0336d6f69d30e843",
+  "_type": "paper",
+  "_updatedAt": "2026-07-28T16:32:31.211851Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "text": "Barkpark Papers · essay",
+      "type": "eyebrow"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Criminality comes from anywhere."
+        }
+      ],
+      "id": "block-1",
+      "level": 1,
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Crime is not a defect of certain people in certain places. It is what any population does when the legitimate frontier for meeting a need drifts out of reach while an illegitimate point sits nearby — and whether people come back is decided by a sanction curve with two cliffs."
+        }
+      ],
+      "id": "block-3",
+      "type": "ingress"
+    },
+    {
+      "id": "block-4",
+      "items": [
+        "Constraint frontiers",
+        "Gated ladders",
+        "The punishment sweet spot"
+      ],
+      "type": "byline"
+    },
+    {
+      "id": "block-6",
+      "items": [
+        {
+          "denom": "76.6%",
+          "label": "reoffending — Norway vs the U.S. (fig. 7)",
+          "value": "20%"
+        },
+        {
+          "label": "job callbacks lost to a record alone¹",
+          "value": "−50%"
+        },
+        {
+          "label": "positive drug tests under HOPE²",
+          "value": "−72%"
+        },
+        {
+          "label": "less reoffending, caused by humane prisons³",
+          "value": "29pp"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "id": "block-8",
+      "type": "divider"
+    },
+    {
+      "id": "block-11",
+      "text": "01 · The frontier walk",
+      "type": "eyebrow"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Every method is a point; the points form a frontier"
+        }
+      ],
+      "id": "block-12",
+      "level": 2,
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Start with a deliberately mundane experiment: hold one goal fixed — growing a plant at home — and walk its constraints. Each tab below is one position in the money × effort space; watch what squeezing does."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-14",
+      "tabs": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "No constraints."
+                },
+                {
+                  "type": "text",
+                  "value": " The textbook method: proper equipment, proper stages, proper schedule. Every failure mode is deleted by some purchased component; effort and money are both spent freely. This is the point everyone imagines is "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "italic"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "the"
+                },
+                {
+                  "type": "text",
+                  "value": " method. It's just the least constrained one."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "label": "№1 · Baseline"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "The improvised version."
+                },
+                {
+                  "type": "text",
+                  "value": " Scavenged containers, window light, household substitutes. Capital is replaced by cleverness — and by "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "italic"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "accepted failure modes"
+                },
+                {
+                  "type": "text",
+                  "value": " the equipment would have deleted. The method survives; the reliability is what got sold."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "label": "№2 · Money ↓"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "The capitalized version."
+                },
+                {
+                  "type": "text",
+                  "value": " Automation and better inputs delete failure modes one by one. Effort is roughly the integral of failure-mode correction over time — which is why money and effort keep converging on the same purchases."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "label": "№3 · Effort ↓"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "type": "bold"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "The regime change."
+                },
+                {
+                  "type": "text",
+                  "value": " Squeeze effort hard enough and the smooth trade-off breaks: no tuned middle version exists any more. You either buy a machine that does everything, or plant outdoors and accept a lottery. A hard constraint produces a "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "italic"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "qualitatively different"
+                },
+                {
+                  "type": "text",
+                  "value": " solution — not a smaller version of the old one."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "label": "№4 · The extreme"
+        }
+      ],
+      "type": "tabs"
+    },
+    {
+      "id": "block-15",
+      "items": [
+        {
+          "label": "LESSON 1",
+          "lead": "Methods form a Pareto frontier.",
+          "text": "For any budget of money, effort, skill and risk there is a nearby viable point."
+        },
+        {
+          "label": "LESSON 2",
+          "lead": "The frontier is dense and improvisable.",
+          "text": "Delete a point and its neighbours regenerate — suppression fights geometry."
+        },
+        {
+          "label": "LESSON 3",
+          "lead": "Extremes produce regime changes.",
+          "text": "Push a constraint hard enough and you get a different solution, not a gradient."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "id": "block-18",
+      "text": "02 · The inversion",
+      "type": "eyebrow"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Where crime comes from"
+        }
+      ],
+      "id": "block-19",
+      "level": 2,
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Now invert the picture. People have needs — income, status, security, belonging. Legitimate methods for meeting those needs also form a frontier, and that frontier is not equally reachable."
+        }
+      ],
+      "id": "block-20",
+      "type": "paragraph"
+    },
+    {
+      "cite": "Robert K. Merton, “Social Structure and Anomie”, 1938",
+      "content": [
+        {
+          "type": "text",
+          "value": "It is only when a system of cultural values extols, virtually above all else, certain common symbols of success for the population at large while its social structure rigorously restricts or completely eliminates access to approved modes of acquiring these symbols for a considerable part of the same population that antisocial behavior ensues on a considerable scale."
+        }
+      ],
+      "id": "block-21",
+      "type": "blockquote"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Crime emerges wherever a legitimate method for meeting a need is out of reach while an illegitimate point is within reach. Everyone, everywhere, has some reachable illicit point — so no geography or class is immune. What varies is which point is reachable."
+        }
+      ],
+      "id": "block-22",
+      "type": "pullquote"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Which point is reachable is set by three axes — and each axis is a different kind of gate:"
+        }
+      ],
+      "id": "block-23",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Fixes the reachable region of the legitimate frontier. Where legal income routes are blocked or slow, the relative price of the nearest illicit point drops. Becker's expected-utility layer prices the choice."
+        }
+      ],
+      "id": "block-24",
+      "title": "Economics — what is affordable",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Criminal methods are learned socially (Sutherland); illegitimate opportunity is also unevenly distributed (Cloward & Ohlin). You cannot traffic weapons without a trafficking network, however strained you are."
+        }
+      ],
+      "id": "block-25",
+      "title": "Culture — what is visible",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Self-control, risk tolerance, violence tolerance (Gottfredson & Hirschi). Heavier rungs cost variance — exposure to prison and death — not money. Personality decides whether that currency is payable."
+        }
+      ],
+      "id": "block-26",
+      "title": "Personality — what variance is payable",
+      "tone": "danger",
+      "type": "callout"
+    },
+    {
+      "id": "block-29",
+      "text": "03 · The ladder",
+      "type": "eyebrow"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Gated markets, not a slippery slope"
+        }
+      ],
+      "id": "block-30",
+      "level": 2,
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The severity ladder — cultivation, dealing, organized distribution, trafficking and enforcement — looks like a slope but behaves like the corners of the constraint space: every transition is a regime change with a different binding constraint, and every gate filters people out."
+        }
+      ],
+      "id": "block-31",
+      "type": "paragraph"
+    },
+    {
+      "caption": "Figure 1 — Each rung is a separate market with its own admission ticket; the gate label is the currency that admission costs.",
+      "id": "block-32",
+      "source": "flowchart LR\n  A[\"1 · Home\ncultivation\"]\n  B[\"2 · Small-scale\ndealing\"]\n  C[\"3 · Organized\ndistribution\"]\n  D[\"4 · Trafficking +\nenforcement\"]\n  A -->|\"social\nexposure\"| B\n  B -->|\"network\nmembership\"| C\n  C -->|\"violence\ncapability\"| D\n",
+      "type": "diagram"
+    },
+    {
+      "blocks": [
+        {
+          "cells": [
+            [
+              0,
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              1,
+              1,
+              0
+            ],
+            [
+              2,
+              2,
+              3,
+              1
+            ],
+            [
+              3,
+              2,
+              3,
+              3
+            ]
+          ],
+          "colLabels": [
+            "capital",
+            "skill",
+            "network",
+            "violence"
+          ],
+          "id": "block-33-0",
+          "max": 3,
+          "rowLabels": [
+            "cultivation",
+            "dealing",
+            "distribution",
+            "trafficking"
+          ],
+          "type": "heatmap",
+          "values": true
+        },
+        {
+          "content": [
+            {
+              "marks": [
+                {
+                  "type": "italic"
+                }
+              ],
+              "type": "text",
+              "value": "Figure 2 — The ladder as a constraint matrix (0 = none, 3 = decisive). Capital and skill grow gently; the network and violence columns jump — those are the gates, and they are the two currencies most participants never hold."
+            }
+          ],
+          "id": "block-33-1",
+          "type": "paragraph"
+        }
+      ],
+      "id": "block-33",
+      "layout": {
+        "mode": "grid",
+        "tracks": 2
+      },
+      "type": "section"
+    },
+    {
+      "id": "block-36",
+      "text": "04 · The trap",
+      "type": "eyebrow"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "When leaving crime costs more than staying"
+        }
+      ],
+      "id": "block-37",
+      "level": 2,
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Here is the part the ladder alone misses: for someone deep enough in, the incentives to stay in crime are stronger than anyone's incentives to leave. That is not a metaphor — it is a measurable structure with three interlocking mechanisms."
+        }
+      ],
+      "id": "block-38",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-39",
+      "items": [
+        {
+          "label": "MECHANISM 1",
+          "lead": "Punishment past a point brands rather than deters.",
+          "text": "The label, not just the act, produces the next offence: the record halves job callbacks¹; formally processing a first juvenile offence increases reoffending vs diversion⁴; first arrests trigger secondary sanctioning — arrests beget arrests through the system's own memory."
+        },
+        {
+          "label": "MECHANISM 2",
+          "lead": "The more a person has lost, the less any threat bites.",
+          "text": "Deterrence runs on stakes. Strip job, housing, family and standing, and the state has spent its leverage; sanctions felt as unfair on the poorly bonded produce defiant pride, not compliance⁵ — and under three-strikes maximums the marginal price of violence hits zero⁶."
+        },
+        {
+          "label": "MECHANISM 3",
+          "lead": "Exclusion cuts the one lifeline that ends criminal careers.",
+          "text": "Half a century of the Glueck cohort says desistance rides on belonging: marriage, work, service⁷. Stigmatizing shame hands the rejected to the one community still selling status — the subculture⁸."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "id": "block-40",
+      "max": 100,
+      "mode": "share",
+      "rows": [
+        {
+          "label": "White — no record",
+          "value": 34
+        },
+        {
+          "label": "White — criminal record",
+          "value": 17
+        },
+        {
+          "label": "Black — no record",
+          "value": 14
+        },
+        {
+          "label": "Black — criminal record",
+          "value": 5
+        }
+      ],
+      "title": "Figure 3 — Callback rate, matched entry-level applicants (Pager 2003)¹",
+      "type": "gauge-list"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "italic"
+            }
+          ],
+          "type": "text",
+          "value": "Same résumés, same demeanor — the record alone halves consideration, and a white applicant with a record out-polls a Black applicant without one."
+        }
+      ],
+      "id": "block-41",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Punishment past the sweet spot does not just fail to deter — it manufactures the very persistence it claims to fight: it deletes stakes, closes exits, and hands the excluded to the one community still offering membership."
+        }
+      ],
+      "id": "block-42",
+      "type": "pullquote"
+    },
+    {
+      "id": "block-45",
+      "text": "05 · The opposite cliff",
+      "type": "eyebrow"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "No punishment, and the leeches inherit the earth"
+        }
+      ],
+      "id": "block-46",
+      "level": 2,
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "If over-punishment traps individuals, under-punishment dissolves the commons — one of the most replicated results in experimental economics⁹. In repeated public-goods games, cooperation without a sanctioning option decays toward zero: most people are "
+        },
+        {
+          "marks": [
+            {
+              "type": "italic"
+            }
+          ],
+          "type": "text",
+          "value": "conditional"
+        },
+        {
+          "type": "text",
+          "value": " cooperators, so every unpunished free rider licenses the next defection. When most people leech, everyone leeches."
+        }
+      ],
+      "id": "block-47",
+      "type": "paragraph"
+    },
+    {
+      "annotations": {
+        "points": [
+          {
+            "index": 9,
+            "label": "norm collapse",
+            "series": 1
+          },
+          {
+            "index": 9,
+            "label": "near-full cooperation",
+            "series": 0
+          }
+        ]
+      },
+      "axes": {
+        "max": 20,
+        "min": 0,
+        "xLabels": [
+          "r1",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "r10"
+        ]
+      },
+      "caption": "Figure 4 — The two regimes of the public-goods game (stylized from Fehr & Gächter 2000⁹). Same people, same stakes; the only difference is whether peers can sanction. Remarkably, people PAY their own money to punish leeches who never harmed them — the appetite for punishment is the evolved immune system of cooperation.",
+      "id": "block-48",
+      "kind": "line",
+      "series": [
+        {
+          "label": "peers can sanction free riders",
+          "points": [
+            11,
+            13.5,
+            14.8,
+            15.7,
+            16.4,
+            17,
+            17.5,
+            17.9,
+            18.3,
+            18.6
+          ]
+        },
+        {
+          "label": "no sanctioning possible",
+          "points": [
+            10.5,
+            8.9,
+            7.7,
+            6.6,
+            5.8,
+            5,
+            4.2,
+            3.4,
+            2.6,
+            1.6
+          ]
+        }
+      ],
+      "type": "chart"
+    },
+    {
+      "id": "block-51",
+      "text": "06 · The sweet spot",
+      "type": "eyebrow"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Between the two cliffs"
+        }
+      ],
+      "id": "block-52",
+      "level": 2,
+      "type": "heading"
+    },
+    {
+      "annotations": {
+        "points": [
+          {
+            "index": 5,
+            "label": "the sweet spot"
+          }
+        ],
+        "regions": [
+          {
+            "from": 0,
+            "label": "NORM COLLAPSE",
+            "to": 3,
+            "tone": "warn"
+          },
+          {
+            "from": 7,
+            "label": "BRANDING TRAP",
+            "to": 10,
+            "tone": "danger"
+          }
+        ]
+      },
+      "axes": {
+        "max": 100,
+        "min": 0,
+        "xLabels": [
+          "no consequences",
+          "",
+          "",
+          "",
+          "",
+          "sweet spot",
+          "",
+          "",
+          "",
+          "",
+          "max severity + exclusion"
+        ]
+      },
+      "caption": "Figure 5 — The sanction curve is a U, not a line.",
+      "id": "block-53",
+      "kind": "line",
+      "series": [
+        {
+          "label": "crime and persistence in crime",
+          "points": [
+            86,
+            64,
+            44,
+            30,
+            23,
+            21,
+            24,
+            33,
+            47,
+            63,
+            80
+          ]
+        }
+      ],
+      "type": "chart"
+    },
+    {
+      "blocks": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "No rules → confusion about right and wrong → exploitation of the confusion without mercy → imitation of the exploiters. The cascade is fast, and it is not hypothetical: it is the no-sanction arm of figure 4."
+            }
+          ],
+          "id": "block-54-0",
+          "title": "The left cliff — norm collapse",
+          "tone": "warning",
+          "type": "callout"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Stigma, defiance, nothing left to lose. Punishment past the mark deletes stakes, closes exits, severs belonging — and manufactures exactly the persistence it claims to fight. It is the record bar of figure 3."
+            }
+          ],
+          "id": "block-54-1",
+          "title": "The right cliff — the branding trap",
+          "tone": "danger",
+          "type": "callout"
+        }
+      ],
+      "id": "block-54",
+      "layout": {
+        "mode": "grid",
+        "tracks": 2
+      },
+      "title": "",
+      "type": "section"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The empirical literature is unusually consistent about what the valley looks like — four findings, each with its own instrument:"
+        }
+      ],
+      "id": "block-55",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "Certainty beats severity."
+        },
+        {
+          "type": "text",
+          "value": " Five decades of deterrence research reach one headline conclusion: the "
+        },
+        {
+          "marks": [
+            {
+              "type": "italic"
+            }
+          ],
+          "type": "text",
+          "value": "certainty"
+        },
+        {
+          "type": "text",
+          "value": " of apprehension deters; "
+        },
+        {
+          "marks": [
+            {
+              "type": "italic"
+            }
+          ],
+          "type": "text",
+          "value": "severity"
+        },
+        {
+          "type": "text",
+          "value": " at the margin does not¹⁰. Lengthy sentences and mandatory minimums cannot be justified on deterrence grounds. The offender's brain asks “will I get caught?”, not “what is the statutory maximum?”"
+        }
+      ],
+      "id": "block-56",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-57",
+      "max": 100,
+      "mode": "share",
+      "rows": [
+        {
+          "label": "Positive drug tests — HOPE",
+          "value": 13
+        },
+        {
+          "label": "Positive drug tests — standard",
+          "value": 46
+        },
+        {
+          "label": "New arrest — HOPE",
+          "value": 21
+        },
+        {
+          "label": "New arrest — standard",
+          "value": 47
+        },
+        {
+          "label": "Probation revoked — HOPE",
+          "value": 7
+        },
+        {
+          "label": "Probation revoked — standard",
+          "value": 15
+        }
+      ],
+      "title": "Figure 6 — HOPE vs probation-as-usual, Hawaii randomized trial (%)²",
+      "type": "gauge-list"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "Swift-certain-mild works in the field."
+        },
+        {
+          "type": "text",
+          "value": " HOPE flipped the usual regime: every violation drew an immediate, guaranteed sanction of a few "
+        },
+        {
+          "marks": [
+            {
+              "type": "italic"
+            }
+          ],
+          "type": "text",
+          "value": "days"
+        },
+        {
+          "type": "text",
+          "value": " — and every outcome improved while total punishment administered went "
+        },
+        {
+          "marks": [
+            {
+              "type": "italic"
+            }
+          ],
+          "type": "text",
+          "value": "down"
+        },
+        {
+          "type": "text",
+          "value": ". Milder punishment, delivered reliably, out-deterred harsher punishment delivered as a lottery."
+        }
+      ],
+      "id": "block-58",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-59",
+      "max": 100,
+      "mode": "share",
+      "rows": [
+        {
+          "label": "Norway — within 2 years",
+          "value": 20
+        },
+        {
+          "label": "Norway — within 5 years",
+          "value": 25
+        },
+        {
+          "label": "United States — within 3 years",
+          "value": 68
+        },
+        {
+          "label": "United States — within 5 years",
+          "value": 76.6
+        }
+      ],
+      "title": "Figure 7 — Share of released prisoners who reoffend (%)",
+      "type": "gauge-list"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "Reintegration is not softness; it is the mechanism."
+        },
+        {
+          "type": "text",
+          "value": " Because Norwegian criminal cases are as-good-as-randomly assigned to judges of differing strictness, the judge-lottery design measures what prison itself "
+        },
+        {
+          "marks": [
+            {
+              "type": "italic"
+            }
+          ],
+          "type": "text",
+          "value": "causes"
+        },
+        {
+          "type": "text",
+          "value": ": in a system built around education, training and open prisons, incarceration "
+        },
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "reduced"
+        },
+        {
+          "type": "text",
+          "value": " five-year reoffending by 29 percentage points and pushed unemployed offenders into work³. Prison, done reintegratively, rehabilitates — “nothing works” is false. The disintegrative version is what manufactures recidivists."
+        }
+      ],
+      "id": "block-60",
+      "type": "paragraph"
+    },
+    {
+      "cite": "John Braithwaite, Crime, Shame and Reintegration, 1989⁸",
+      "content": [
+        {
+          "type": "text",
+          "value": "The best place to see reintegrative shaming at work is the loving family… Family life teaches us that shaming and punishment are possible while maintaining bonds of respect."
+        }
+      ],
+      "id": "block-61",
+      "type": "blockquote"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "And the sanction must feel fair."
+        },
+        {
+          "type": "text",
+          "value": " Sanctions experienced as unfair and stigmatizing, landing on the poorly bonded, produce more crime, not less⁵. Procedural justice — being heard, respected, rules applied evenly — is a crime-reduction technology. Braithwaite's formula compresses the whole valley into one sentence: "
+        },
+        {
+          "marks": [
+            {
+              "type": "italic"
+            }
+          ],
+          "type": "text",
+          "value": "condemn the act, never the person, and follow every degradation ceremony with a ceremony that decertifies the deviance."
+        }
+      ],
+      "id": "block-62",
+      "type": "paragraph"
+    },
+    {
+      "children": [
+        {
+          "content": [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "Fehr & Gächter series"
+            },
+            {
+              "type": "text",
+              "value": " (fig. 4) is stylized from the published round means, not digitized data. "
+            },
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "HOPE"
+            },
+            {
+              "type": "text",
+              "value": " (fig. 6): later multi-site replications were weaker than the original trial — the swift-certain-fair family still outperforms, but effect sizes vary with implementation fidelity. "
+            },
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "Norway vs U.S."
+            },
+            {
+              "type": "text",
+              "value": " (fig. 7): reconviction vs rearrest — different measures; read as regimes, not a controlled comparison; the honest comparison is each system against its own history (Norway's own 2-year rate fell from the 60–70% range to ~20% after its 1990s reforms). Gauge digits round to whole percent; the exact U.S. 5-year figure is 76.6%."
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "id": "block-63",
+      "summary": "Method notes & honest caveats — read before citing",
+      "type": "expandable"
+    },
+    {
+      "id": "block-66",
+      "text": "07 · Design rules",
+      "type": "eyebrow"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Move the frontiers, shape the curve"
+        }
+      ],
+      "id": "block-67",
+      "level": 2,
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Put the two halves together and the policy geometry falls out. The first half showed method frontiers are dense and regenerating — suppressing points fights geometry itself. The second half showed the sanction curve is a U. Together they yield seven design rules:"
+        }
+      ],
+      "id": "block-68",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-69",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Every krone moved from sentence-length to detection probability buys deterrence; the reverse buys prison beds and branded people."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Spend on certainty, not severity"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "HOPE's days-not-months regime is the template: consequences close enough to the act to teach, small enough to leave stakes standing."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Keep sanctions swift, mild and utterly predictable"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Proportionality is not sentimentality — a price gradient is what stops a burglar from becoming a killer of witnesses. Never price the maximum into the middle of the ladder."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Preserve marginal deterrence"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Reintegrative shame condemns the act and keeps membership; stigma hands the person to the subculture. Expunge stale records; audit every collateral consequence that closes the labour-market door figure 3 measured."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Punish inside the circle, not out of it"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Desistance rides on work, family and belonging. Prison time that ends without a job, a home and a network is a subscription renewal, not a sentence served."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Build exits at every gate"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Jobs, training and credit put legal points within more budgets; regulated legalization moves whole frontier segments out of criminal space entirely."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Raise the legitimate frontier; relocate what you can off the illicit map"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The left cliff is real: unpunished free-riding cascades. The valley is not the absence of consequences — it is consequences engineered to be cheap, certain, fair and survivable."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Never confuse the valley with zero"
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A person deep in criminality is not beyond incentives — they are responding perfectly to the incentives we built. The system that branded them, stripped their stakes and severed their belonging is getting exactly the behaviour it pays for."
+        }
+      ],
+      "id": "block-70",
+      "type": "pullquote"
+    },
+    {
+      "id": "block-73",
+      "text": "08 · Sources",
+      "type": "eyebrow"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "What this draft stands on"
+        }
+      ],
+      "id": "block-74",
+      "level": 2,
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Numbered marks in the text (¹ ² ³ …) resolve below. Full-text links where the publisher allows."
+        }
+      ],
+      "id": "block-75",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-76",
+      "notes": [
+        {
+          "id": "1",
+          "text": "Pager (2003), “The Mark of a Criminal Record”, American Journal of Sociology 108(5): matched-pair audit, Milwaukee. jstor.org/stable/10.1086/374403"
+        },
+        {
+          "id": "2",
+          "text": "Hawken & Kleiman (2009), “Managing Drug Involved Probationers with Swift and Certain Sanctions: Evaluating Hawaii's HOPE”, NIJ."
+        },
+        {
+          "id": "3",
+          "text": "Bhuller, Dahl, Løken & Mogstad (2020), “Incarceration, Recidivism, and Employment”, Journal of Political Economy 128(4). nber.org/papers/w22648"
+        },
+        {
+          "id": "4",
+          "text": "Petrosino et al. (2010/2014), Campbell systematic reviews: formal juvenile processing vs diversion."
+        },
+        {
+          "id": "5",
+          "text": "Sherman (1993), “Defiance, Deterrence, and Irrelevance: A Theory of the Criminal Sanction”, Journal of Research in Crime and Delinquency 30(4)."
+        },
+        {
+          "id": "6",
+          "text": "Iyengar (2008), “I'd Rather Be Hanged for a Sheep than a Lamb: The Unintended Consequences of 'Three-Strikes' Laws”, NBER w13784."
+        },
+        {
+          "id": "7",
+          "text": "Sampson & Laub (1993–2003), the Glueck cohort follow-up: marriage, work and military service as desistance turning points."
+        },
+        {
+          "id": "8",
+          "text": "Braithwaite (1989), Crime, Shame and Reintegration, Cambridge University Press."
+        },
+        {
+          "id": "9",
+          "text": "Fehr & Gächter (2000), “Cooperation and Punishment in Public Goods Experiments”, American Economic Review 90(4)."
+        },
+        {
+          "id": "10",
+          "text": "Nagin (2013), “Deterrence in the Twenty-First Century”, Crime and Justice 42. Plus Merton (1938); Becker (1968); Cloward & Ohlin (1960); Sutherland's differential association; Gottfredson & Hirschi (1990)."
+        }
+      ],
+      "type": "footnote"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The full-component-deck revision: tabs (frontier walk), toned cards (three axes), constraint heatmap (fig. 2), notes grids (lessons + trap mechanisms), section grid (the two cliffs), annotated charts (figs. 4–5), cited blockquotes (Merton, Braithwaite), expandable method caveats, steps (design rules), real footnotes. Open: comparative sidebar (same need, two economies); length decision for an op-ed cut."
+        }
+      ],
+      "id": "block-78",
+      "title": "Draft status — rev 8",
+      "tone": "info",
+      "type": "callout"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "text": "Barkpark Papers · essay",
+        "type": "eyebrow"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Criminality comes from anywhere."
+          }
+        ],
+        "id": "block-1",
+        "level": 1,
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Crime is not a defect of certain people in certain places. It is what any population does when the legitimate frontier for meeting a need drifts out of reach while an illegitimate point sits nearby — and whether people come back is decided by a sanction curve with two cliffs."
+          }
+        ],
+        "id": "block-3",
+        "type": "ingress"
+      },
+      {
+        "id": "block-4",
+        "items": [
+          "Constraint frontiers",
+          "Gated ladders",
+          "The punishment sweet spot"
+        ],
+        "type": "byline"
+      },
+      {
+        "id": "block-6",
+        "items": [
+          {
+            "denom": "76.6%",
+            "label": "reoffending — Norway vs the U.S. (fig. 7)",
+            "value": "20%"
+          },
+          {
+            "label": "job callbacks lost to a record alone¹",
+            "value": "−50%"
+          },
+          {
+            "label": "positive drug tests under HOPE²",
+            "value": "−72%"
+          },
+          {
+            "label": "less reoffending, caused by humane prisons³",
+            "value": "29pp"
+          }
+        ],
+        "type": "stats"
+      },
+      {
+        "id": "block-8",
+        "type": "divider"
+      },
+      {
+        "id": "block-11",
+        "text": "01 · The frontier walk",
+        "type": "eyebrow"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Every method is a point; the points form a frontier"
+          }
+        ],
+        "id": "block-12",
+        "level": 2,
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Start with a deliberately mundane experiment: hold one goal fixed — growing a plant at home — and walk its constraints. Each tab below is one position in the money × effort space; watch what squeezing does."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-14",
+        "tabs": [
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "marks": [
+                      {
+                        "type": "bold"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "No constraints."
+                  },
+                  {
+                    "type": "text",
+                    "value": " The textbook method: proper equipment, proper stages, proper schedule. Every failure mode is deleted by some purchased component; effort and money are both spent freely. This is the point everyone imagines is "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "italic"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "the"
+                  },
+                  {
+                    "type": "text",
+                    "value": " method. It's just the least constrained one."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "label": "№1 · Baseline"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "marks": [
+                      {
+                        "type": "bold"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "The improvised version."
+                  },
+                  {
+                    "type": "text",
+                    "value": " Scavenged containers, window light, household substitutes. Capital is replaced by cleverness — and by "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "italic"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "accepted failure modes"
+                  },
+                  {
+                    "type": "text",
+                    "value": " the equipment would have deleted. The method survives; the reliability is what got sold."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "label": "№2 · Money ↓"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "marks": [
+                      {
+                        "type": "bold"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "The capitalized version."
+                  },
+                  {
+                    "type": "text",
+                    "value": " Automation and better inputs delete failure modes one by one. Effort is roughly the integral of failure-mode correction over time — which is why money and effort keep converging on the same purchases."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "label": "№3 · Effort ↓"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "marks": [
+                      {
+                        "type": "bold"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "The regime change."
+                  },
+                  {
+                    "type": "text",
+                    "value": " Squeeze effort hard enough and the smooth trade-off breaks: no tuned middle version exists any more. You either buy a machine that does everything, or plant outdoors and accept a lottery. A hard constraint produces a "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "italic"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "qualitatively different"
+                  },
+                  {
+                    "type": "text",
+                    "value": " solution — not a smaller version of the old one."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "label": "№4 · The extreme"
+          }
+        ],
+        "type": "tabs"
+      },
+      {
+        "id": "block-15",
+        "items": [
+          {
+            "label": "LESSON 1",
+            "lead": "Methods form a Pareto frontier.",
+            "text": "For any budget of money, effort, skill and risk there is a nearby viable point."
+          },
+          {
+            "label": "LESSON 2",
+            "lead": "The frontier is dense and improvisable.",
+            "text": "Delete a point and its neighbours regenerate — suppression fights geometry."
+          },
+          {
+            "label": "LESSON 3",
+            "lead": "Extremes produce regime changes.",
+            "text": "Push a constraint hard enough and you get a different solution, not a gradient."
+          }
+        ],
+        "type": "notes"
+      },
+      {
+        "id": "block-18",
+        "text": "02 · The inversion",
+        "type": "eyebrow"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Where crime comes from"
+          }
+        ],
+        "id": "block-19",
+        "level": 2,
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Now invert the picture. People have needs — income, status, security, belonging. Legitimate methods for meeting those needs also form a frontier, and that frontier is not equally reachable."
+          }
+        ],
+        "id": "block-20",
+        "type": "paragraph"
+      },
+      {
+        "cite": "Robert K. Merton, “Social Structure and Anomie”, 1938",
+        "content": [
+          {
+            "type": "text",
+            "value": "It is only when a system of cultural values extols, virtually above all else, certain common symbols of success for the population at large while its social structure rigorously restricts or completely eliminates access to approved modes of acquiring these symbols for a considerable part of the same population that antisocial behavior ensues on a considerable scale."
+          }
+        ],
+        "id": "block-21",
+        "type": "blockquote"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Crime emerges wherever a legitimate method for meeting a need is out of reach while an illegitimate point is within reach. Everyone, everywhere, has some reachable illicit point — so no geography or class is immune. What varies is which point is reachable."
+          }
+        ],
+        "id": "block-22",
+        "type": "pullquote"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Which point is reachable is set by three axes — and each axis is a different kind of gate:"
+          }
+        ],
+        "id": "block-23",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Fixes the reachable region of the legitimate frontier. Where legal income routes are blocked or slow, the relative price of the nearest illicit point drops. Becker's expected-utility layer prices the choice."
+          }
+        ],
+        "id": "block-24",
+        "title": "Economics — what is affordable",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Criminal methods are learned socially (Sutherland); illegitimate opportunity is also unevenly distributed (Cloward & Ohlin). You cannot traffic weapons without a trafficking network, however strained you are."
+          }
+        ],
+        "id": "block-25",
+        "title": "Culture — what is visible",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Self-control, risk tolerance, violence tolerance (Gottfredson & Hirschi). Heavier rungs cost variance — exposure to prison and death — not money. Personality decides whether that currency is payable."
+          }
+        ],
+        "id": "block-26",
+        "title": "Personality — what variance is payable",
+        "tone": "danger",
+        "type": "callout"
+      },
+      {
+        "id": "block-29",
+        "text": "03 · The ladder",
+        "type": "eyebrow"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Gated markets, not a slippery slope"
+          }
+        ],
+        "id": "block-30",
+        "level": 2,
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The severity ladder — cultivation, dealing, organized distribution, trafficking and enforcement — looks like a slope but behaves like the corners of the constraint space: every transition is a regime change with a different binding constraint, and every gate filters people out."
+          }
+        ],
+        "id": "block-31",
+        "type": "paragraph"
+      },
+      {
+        "caption": "Figure 1 — Each rung is a separate market with its own admission ticket; the gate label is the currency that admission costs.",
+        "id": "block-32",
+        "source": "flowchart LR\n  A[\"1 · Home\ncultivation\"]\n  B[\"2 · Small-scale\ndealing\"]\n  C[\"3 · Organized\ndistribution\"]\n  D[\"4 · Trafficking +\nenforcement\"]\n  A -->|\"social\nexposure\"| B\n  B -->|\"network\nmembership\"| C\n  C -->|\"violence\ncapability\"| D\n",
+        "type": "diagram"
+      },
+      {
+        "blocks": [
+          {
+            "cells": [
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                1,
+                1,
+                1,
+                0
+              ],
+              [
+                2,
+                2,
+                3,
+                1
+              ],
+              [
+                3,
+                2,
+                3,
+                3
+              ]
+            ],
+            "colLabels": [
+              "capital",
+              "skill",
+              "network",
+              "violence"
+            ],
+            "id": "block-33-0",
+            "max": 3,
+            "rowLabels": [
+              "cultivation",
+              "dealing",
+              "distribution",
+              "trafficking"
+            ],
+            "type": "heatmap",
+            "values": true
+          },
+          {
+            "content": [
+              {
+                "marks": [
+                  {
+                    "type": "italic"
+                  }
+                ],
+                "type": "text",
+                "value": "Figure 2 — The ladder as a constraint matrix (0 = none, 3 = decisive). Capital and skill grow gently; the network and violence columns jump — those are the gates, and they are the two currencies most participants never hold."
+              }
+            ],
+            "id": "block-33-1",
+            "type": "paragraph"
+          }
+        ],
+        "id": "block-33",
+        "layout": {
+          "mode": "grid",
+          "tracks": 2
+        },
+        "type": "section"
+      },
+      {
+        "id": "block-36",
+        "text": "04 · The trap",
+        "type": "eyebrow"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "When leaving crime costs more than staying"
+          }
+        ],
+        "id": "block-37",
+        "level": 2,
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Here is the part the ladder alone misses: for someone deep enough in, the incentives to stay in crime are stronger than anyone's incentives to leave. That is not a metaphor — it is a measurable structure with three interlocking mechanisms."
+          }
+        ],
+        "id": "block-38",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-39",
+        "items": [
+          {
+            "label": "MECHANISM 1",
+            "lead": "Punishment past a point brands rather than deters.",
+            "text": "The label, not just the act, produces the next offence: the record halves job callbacks¹; formally processing a first juvenile offence increases reoffending vs diversion⁴; first arrests trigger secondary sanctioning — arrests beget arrests through the system's own memory."
+          },
+          {
+            "label": "MECHANISM 2",
+            "lead": "The more a person has lost, the less any threat bites.",
+            "text": "Deterrence runs on stakes. Strip job, housing, family and standing, and the state has spent its leverage; sanctions felt as unfair on the poorly bonded produce defiant pride, not compliance⁵ — and under three-strikes maximums the marginal price of violence hits zero⁶."
+          },
+          {
+            "label": "MECHANISM 3",
+            "lead": "Exclusion cuts the one lifeline that ends criminal careers.",
+            "text": "Half a century of the Glueck cohort says desistance rides on belonging: marriage, work, service⁷. Stigmatizing shame hands the rejected to the one community still selling status — the subculture⁸."
+          }
+        ],
+        "type": "notes"
+      },
+      {
+        "id": "block-40",
+        "max": 100,
+        "mode": "share",
+        "rows": [
+          {
+            "label": "White — no record",
+            "value": 34
+          },
+          {
+            "label": "White — criminal record",
+            "value": 17
+          },
+          {
+            "label": "Black — no record",
+            "value": 14
+          },
+          {
+            "label": "Black — criminal record",
+            "value": 5
+          }
+        ],
+        "title": "Figure 3 — Callback rate, matched entry-level applicants (Pager 2003)¹",
+        "type": "gauge-list"
+      },
+      {
+        "content": [
+          {
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ],
+            "type": "text",
+            "value": "Same résumés, same demeanor — the record alone halves consideration, and a white applicant with a record out-polls a Black applicant without one."
+          }
+        ],
+        "id": "block-41",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Punishment past the sweet spot does not just fail to deter — it manufactures the very persistence it claims to fight: it deletes stakes, closes exits, and hands the excluded to the one community still offering membership."
+          }
+        ],
+        "id": "block-42",
+        "type": "pullquote"
+      },
+      {
+        "id": "block-45",
+        "text": "05 · The opposite cliff",
+        "type": "eyebrow"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "No punishment, and the leeches inherit the earth"
+          }
+        ],
+        "id": "block-46",
+        "level": 2,
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "If over-punishment traps individuals, under-punishment dissolves the commons — one of the most replicated results in experimental economics⁹. In repeated public-goods games, cooperation without a sanctioning option decays toward zero: most people are "
+          },
+          {
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ],
+            "type": "text",
+            "value": "conditional"
+          },
+          {
+            "type": "text",
+            "value": " cooperators, so every unpunished free rider licenses the next defection. When most people leech, everyone leeches."
+          }
+        ],
+        "id": "block-47",
+        "type": "paragraph"
+      },
+      {
+        "annotations": {
+          "points": [
+            {
+              "index": 9,
+              "label": "norm collapse",
+              "series": 1
+            },
+            {
+              "index": 9,
+              "label": "near-full cooperation",
+              "series": 0
+            }
+          ]
+        },
+        "axes": {
+          "max": 20,
+          "min": 0,
+          "xLabels": [
+            "r1",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "r10"
+          ]
+        },
+        "caption": "Figure 4 — The two regimes of the public-goods game (stylized from Fehr & Gächter 2000⁹). Same people, same stakes; the only difference is whether peers can sanction. Remarkably, people PAY their own money to punish leeches who never harmed them — the appetite for punishment is the evolved immune system of cooperation.",
+        "id": "block-48",
+        "kind": "line",
+        "series": [
+          {
+            "label": "peers can sanction free riders",
+            "points": [
+              11,
+              13.5,
+              14.8,
+              15.7,
+              16.4,
+              17,
+              17.5,
+              17.9,
+              18.3,
+              18.6
+            ]
+          },
+          {
+            "label": "no sanctioning possible",
+            "points": [
+              10.5,
+              8.9,
+              7.7,
+              6.6,
+              5.8,
+              5,
+              4.2,
+              3.4,
+              2.6,
+              1.6
+            ]
+          }
+        ],
+        "type": "chart"
+      },
+      {
+        "id": "block-51",
+        "text": "06 · The sweet spot",
+        "type": "eyebrow"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Between the two cliffs"
+          }
+        ],
+        "id": "block-52",
+        "level": 2,
+        "type": "heading"
+      },
+      {
+        "annotations": {
+          "points": [
+            {
+              "index": 5,
+              "label": "the sweet spot"
+            }
+          ],
+          "regions": [
+            {
+              "from": 0,
+              "label": "NORM COLLAPSE",
+              "to": 3,
+              "tone": "warn"
+            },
+            {
+              "from": 7,
+              "label": "BRANDING TRAP",
+              "to": 10,
+              "tone": "danger"
+            }
+          ]
+        },
+        "axes": {
+          "max": 100,
+          "min": 0,
+          "xLabels": [
+            "no consequences",
+            "",
+            "",
+            "",
+            "",
+            "sweet spot",
+            "",
+            "",
+            "",
+            "",
+            "max severity + exclusion"
+          ]
+        },
+        "caption": "Figure 5 — The sanction curve is a U, not a line.",
+        "id": "block-53",
+        "kind": "line",
+        "series": [
+          {
+            "label": "crime and persistence in crime",
+            "points": [
+              86,
+              64,
+              44,
+              30,
+              23,
+              21,
+              24,
+              33,
+              47,
+              63,
+              80
+            ]
+          }
+        ],
+        "type": "chart"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "No rules → confusion about right and wrong → exploitation of the confusion without mercy → imitation of the exploiters. The cascade is fast, and it is not hypothetical: it is the no-sanction arm of figure 4."
+              }
+            ],
+            "id": "block-54-0",
+            "title": "The left cliff — norm collapse",
+            "tone": "warning",
+            "type": "callout"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Stigma, defiance, nothing left to lose. Punishment past the mark deletes stakes, closes exits, severs belonging — and manufactures exactly the persistence it claims to fight. It is the record bar of figure 3."
+              }
+            ],
+            "id": "block-54-1",
+            "title": "The right cliff — the branding trap",
+            "tone": "danger",
+            "type": "callout"
+          }
+        ],
+        "id": "block-54",
+        "layout": {
+          "mode": "grid",
+          "tracks": 2
+        },
+        "title": "",
+        "type": "section"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The empirical literature is unusually consistent about what the valley looks like — four findings, each with its own instrument:"
+          }
+        ],
+        "id": "block-55",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Certainty beats severity."
+          },
+          {
+            "type": "text",
+            "value": " Five decades of deterrence research reach one headline conclusion: the "
+          },
+          {
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ],
+            "type": "text",
+            "value": "certainty"
+          },
+          {
+            "type": "text",
+            "value": " of apprehension deters; "
+          },
+          {
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ],
+            "type": "text",
+            "value": "severity"
+          },
+          {
+            "type": "text",
+            "value": " at the margin does not¹⁰. Lengthy sentences and mandatory minimums cannot be justified on deterrence grounds. The offender's brain asks “will I get caught?”, not “what is the statutory maximum?”"
+          }
+        ],
+        "id": "block-56",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-57",
+        "max": 100,
+        "mode": "share",
+        "rows": [
+          {
+            "label": "Positive drug tests — HOPE",
+            "value": 13
+          },
+          {
+            "label": "Positive drug tests — standard",
+            "value": 46
+          },
+          {
+            "label": "New arrest — HOPE",
+            "value": 21
+          },
+          {
+            "label": "New arrest — standard",
+            "value": 47
+          },
+          {
+            "label": "Probation revoked — HOPE",
+            "value": 7
+          },
+          {
+            "label": "Probation revoked — standard",
+            "value": 15
+          }
+        ],
+        "title": "Figure 6 — HOPE vs probation-as-usual, Hawaii randomized trial (%)²",
+        "type": "gauge-list"
+      },
+      {
+        "content": [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Swift-certain-mild works in the field."
+          },
+          {
+            "type": "text",
+            "value": " HOPE flipped the usual regime: every violation drew an immediate, guaranteed sanction of a few "
+          },
+          {
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ],
+            "type": "text",
+            "value": "days"
+          },
+          {
+            "type": "text",
+            "value": " — and every outcome improved while total punishment administered went "
+          },
+          {
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ],
+            "type": "text",
+            "value": "down"
+          },
+          {
+            "type": "text",
+            "value": ". Milder punishment, delivered reliably, out-deterred harsher punishment delivered as a lottery."
+          }
+        ],
+        "id": "block-58",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-59",
+        "max": 100,
+        "mode": "share",
+        "rows": [
+          {
+            "label": "Norway — within 2 years",
+            "value": 20
+          },
+          {
+            "label": "Norway — within 5 years",
+            "value": 25
+          },
+          {
+            "label": "United States — within 3 years",
+            "value": 68
+          },
+          {
+            "label": "United States — within 5 years",
+            "value": 76.6
+          }
+        ],
+        "title": "Figure 7 — Share of released prisoners who reoffend (%)",
+        "type": "gauge-list"
+      },
+      {
+        "content": [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Reintegration is not softness; it is the mechanism."
+          },
+          {
+            "type": "text",
+            "value": " Because Norwegian criminal cases are as-good-as-randomly assigned to judges of differing strictness, the judge-lottery design measures what prison itself "
+          },
+          {
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ],
+            "type": "text",
+            "value": "causes"
+          },
+          {
+            "type": "text",
+            "value": ": in a system built around education, training and open prisons, incarceration "
+          },
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "reduced"
+          },
+          {
+            "type": "text",
+            "value": " five-year reoffending by 29 percentage points and pushed unemployed offenders into work³. Prison, done reintegratively, rehabilitates — “nothing works” is false. The disintegrative version is what manufactures recidivists."
+          }
+        ],
+        "id": "block-60",
+        "type": "paragraph"
+      },
+      {
+        "cite": "John Braithwaite, Crime, Shame and Reintegration, 1989⁸",
+        "content": [
+          {
+            "type": "text",
+            "value": "The best place to see reintegrative shaming at work is the loving family… Family life teaches us that shaming and punishment are possible while maintaining bonds of respect."
+          }
+        ],
+        "id": "block-61",
+        "type": "blockquote"
+      },
+      {
+        "content": [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "And the sanction must feel fair."
+          },
+          {
+            "type": "text",
+            "value": " Sanctions experienced as unfair and stigmatizing, landing on the poorly bonded, produce more crime, not less⁵. Procedural justice — being heard, respected, rules applied evenly — is a crime-reduction technology. Braithwaite's formula compresses the whole valley into one sentence: "
+          },
+          {
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ],
+            "type": "text",
+            "value": "condemn the act, never the person, and follow every degradation ceremony with a ceremony that decertifies the deviance."
+          }
+        ],
+        "id": "block-62",
+        "type": "paragraph"
+      },
+      {
+        "children": [
+          {
+            "content": [
+              {
+                "marks": [
+                  {
+                    "type": "bold"
+                  }
+                ],
+                "type": "text",
+                "value": "Fehr & Gächter series"
+              },
+              {
+                "type": "text",
+                "value": " (fig. 4) is stylized from the published round means, not digitized data. "
+              },
+              {
+                "marks": [
+                  {
+                    "type": "bold"
+                  }
+                ],
+                "type": "text",
+                "value": "HOPE"
+              },
+              {
+                "type": "text",
+                "value": " (fig. 6): later multi-site replications were weaker than the original trial — the swift-certain-fair family still outperforms, but effect sizes vary with implementation fidelity. "
+              },
+              {
+                "marks": [
+                  {
+                    "type": "bold"
+                  }
+                ],
+                "type": "text",
+                "value": "Norway vs U.S."
+              },
+              {
+                "type": "text",
+                "value": " (fig. 7): reconviction vs rearrest — different measures; read as regimes, not a controlled comparison; the honest comparison is each system against its own history (Norway's own 2-year rate fell from the 60–70% range to ~20% after its 1990s reforms). Gauge digits round to whole percent; the exact U.S. 5-year figure is 76.6%."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "id": "block-63",
+        "summary": "Method notes & honest caveats — read before citing",
+        "type": "expandable"
+      },
+      {
+        "id": "block-66",
+        "text": "07 · Design rules",
+        "type": "eyebrow"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Move the frontiers, shape the curve"
+          }
+        ],
+        "id": "block-67",
+        "level": 2,
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Put the two halves together and the policy geometry falls out. The first half showed method frontiers are dense and regenerating — suppressing points fights geometry itself. The second half showed the sanction curve is a U. Together they yield seven design rules:"
+          }
+        ],
+        "id": "block-68",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-69",
+        "steps": [
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Every krone moved from sentence-length to detection probability buys deterrence; the reverse buys prison beds and branded people."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Spend on certainty, not severity"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "HOPE's days-not-months regime is the template: consequences close enough to the act to teach, small enough to leave stakes standing."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Keep sanctions swift, mild and utterly predictable"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Proportionality is not sentimentality — a price gradient is what stops a burglar from becoming a killer of witnesses. Never price the maximum into the middle of the ladder."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Preserve marginal deterrence"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Reintegrative shame condemns the act and keeps membership; stigma hands the person to the subculture. Expunge stale records; audit every collateral consequence that closes the labour-market door figure 3 measured."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Punish inside the circle, not out of it"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Desistance rides on work, family and belonging. Prison time that ends without a job, a home and a network is a subscription renewal, not a sentence served."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Build exits at every gate"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Jobs, training and credit put legal points within more budgets; regulated legalization moves whole frontier segments out of criminal space entirely."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Raise the legitimate frontier; relocate what you can off the illicit map"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "The left cliff is real: unpunished free-riding cascades. The valley is not the absence of consequences — it is consequences engineered to be cheap, certain, fair and survivable."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Never confuse the valley with zero"
+          }
+        ],
+        "type": "steps"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "A person deep in criminality is not beyond incentives — they are responding perfectly to the incentives we built. The system that branded them, stripped their stakes and severed their belonging is getting exactly the behaviour it pays for."
+          }
+        ],
+        "id": "block-70",
+        "type": "pullquote"
+      },
+      {
+        "id": "block-73",
+        "text": "08 · Sources",
+        "type": "eyebrow"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "What this draft stands on"
+          }
+        ],
+        "id": "block-74",
+        "level": 2,
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Numbered marks in the text (¹ ² ³ …) resolve below. Full-text links where the publisher allows."
+          }
+        ],
+        "id": "block-75",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-76",
+        "notes": [
+          {
+            "id": "1",
+            "text": "Pager (2003), “The Mark of a Criminal Record”, American Journal of Sociology 108(5): matched-pair audit, Milwaukee. jstor.org/stable/10.1086/374403"
+          },
+          {
+            "id": "2",
+            "text": "Hawken & Kleiman (2009), “Managing Drug Involved Probationers with Swift and Certain Sanctions: Evaluating Hawaii's HOPE”, NIJ."
+          },
+          {
+            "id": "3",
+            "text": "Bhuller, Dahl, Løken & Mogstad (2020), “Incarceration, Recidivism, and Employment”, Journal of Political Economy 128(4). nber.org/papers/w22648"
+          },
+          {
+            "id": "4",
+            "text": "Petrosino et al. (2010/2014), Campbell systematic reviews: formal juvenile processing vs diversion."
+          },
+          {
+            "id": "5",
+            "text": "Sherman (1993), “Defiance, Deterrence, and Irrelevance: A Theory of the Criminal Sanction”, Journal of Research in Crime and Delinquency 30(4)."
+          },
+          {
+            "id": "6",
+            "text": "Iyengar (2008), “I'd Rather Be Hanged for a Sheep than a Lamb: The Unintended Consequences of 'Three-Strikes' Laws”, NBER w13784."
+          },
+          {
+            "id": "7",
+            "text": "Sampson & Laub (1993–2003), the Glueck cohort follow-up: marriage, work and military service as desistance turning points."
+          },
+          {
+            "id": "8",
+            "text": "Braithwaite (1989), Crime, Shame and Reintegration, Cambridge University Press."
+          },
+          {
+            "id": "9",
+            "text": "Fehr & Gächter (2000), “Cooperation and Punishment in Public Goods Experiments”, American Economic Review 90(4)."
+          },
+          {
+            "id": "10",
+            "text": "Nagin (2013), “Deterrence in the Twenty-First Century”, Crime and Justice 42. Plus Merton (1938); Becker (1968); Cloward & Ohlin (1960); Sutherland's differential association; Gottfredson & Hirschi (1990)."
+          }
+        ],
+        "type": "footnote"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The full-component-deck revision: tabs (frontier walk), toned cards (three axes), constraint heatmap (fig. 2), notes grids (lessons + trap mechanisms), section grid (the two cliffs), annotated charts (figs. 4–5), cited blockquotes (Merton, Braithwaite), expandable method caveats, steps (design rules), real footnotes. Open: comparative sidebar (same need, two economies); length decision for an op-ed cut."
+          }
+        ],
+        "id": "block-78",
+        "title": "Draft status — rev 8",
+        "tone": "info",
+        "type": "callout"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">Barkpark Papers · essay</p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Criminality comes from anywhere.</h1><p style=\"margin:0 0 10px;line-height:1.55;font-size:18px\">Crime is not a defect of certain people in certain places. It is what any population does when the legitimate frontier for meeting a need drifts out of reach while an illegitimate point sits nearby — and whether people come back is decided by a sanction curve with two cliffs.</p><p style=\"border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px\">Constraint frontiers · Gated ladders · The punishment sweet spot</p><div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">20%</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">reoffending — Norway vs the U.S. (fig. 7)</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">−50%</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">job callbacks lost to a record alone¹</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">−72%</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">positive drug tests under HOPE²</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">29pp</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">less reoffending, caused by humane prisons³</div></div></div><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">01 · The frontier walk</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Every method is a point; the points form a frontier</h2><p>Start with a deliberately mundane experiment: hold one goal fixed — growing a plant at home — and walk its constraints. Each tab below is one position in the money × effort space; watch what squeezing does.</p><div class=\"bp-tabs\"><div class=\"bp-tabs__section\"><p class=\"bp-tabs__label\">№1 · Baseline</p><p><span style=\"font-weight:bold\">No constraints.</span> The textbook method: proper equipment, proper stages, proper schedule. Every failure mode is deleted by some purchased component; effort and money are both spent freely. This is the point everyone imagines is <span style=\"font-style:italic\">the</span> method. It&#39;s just the least constrained one.</p></div><div class=\"bp-tabs__section\"><p class=\"bp-tabs__label\">№2 · Money ↓</p><p><span style=\"font-weight:bold\">The improvised version.</span> Scavenged containers, window light, household substitutes. Capital is replaced by cleverness — and by <span style=\"font-style:italic\">accepted failure modes</span> the equipment would have deleted. The method survives; the reliability is what got sold.</p></div><div class=\"bp-tabs__section\"><p class=\"bp-tabs__label\">№3 · Effort ↓</p><p><span style=\"font-weight:bold\">The capitalized version.</span> Automation and better inputs delete failure modes one by one. Effort is roughly the integral of failure-mode correction over time — which is why money and effort keep converging on the same purchases.</p></div><div class=\"bp-tabs__section\"><p class=\"bp-tabs__label\">№4 · The extreme</p><p><span style=\"font-weight:bold\">The regime change.</span> Squeeze effort hard enough and the smooth trade-off breaks: no tuned middle version exists any more. You either buy a machine that does everything, or plant outdoors and accept a lottery. A hard constraint produces a <span style=\"font-style:italic\">qualitatively different</span> solution — not a smaller version of the old one.</p></div></div><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;border-collapse:collapse;margin:12px 0\"><tr><td style=\"width:132px;vertical-align:top;padding:6px 12px 6px 0\"><span style=\"display:inline-block;background:#e4eae9;color:#1e5347;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;line-height:1.3;padding:3px 8px;border-radius:6px\">LESSON 1</span></td><td style=\"vertical-align:top;padding:6px 0;font-size:14px;line-height:1.55;color:#15211d\"><b>Methods form a Pareto frontier.</b> For any budget of money, effort, skill and risk there is a nearby viable point.</td></tr><tr><td style=\"width:132px;vertical-align:top;padding:6px 12px 6px 0\"><span style=\"display:inline-block;background:#e4eae9;color:#1e5347;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;line-height:1.3;padding:3px 8px;border-radius:6px\">LESSON 2</span></td><td style=\"vertical-align:top;padding:6px 0;font-size:14px;line-height:1.55;color:#15211d\"><b>The frontier is dense and improvisable.</b> Delete a point and its neighbours regenerate — suppression fights geometry.</td></tr><tr><td style=\"width:132px;vertical-align:top;padding:6px 12px 6px 0\"><span style=\"display:inline-block;background:#e4eae9;color:#1e5347;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;line-height:1.3;padding:3px 8px;border-radius:6px\">LESSON 3</span></td><td style=\"vertical-align:top;padding:6px 0;font-size:14px;line-height:1.55;color:#15211d\"><b>Extremes produce regime changes.</b> Push a constraint hard enough and you get a different solution, not a gradient.</td></tr></table><p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">02 · The inversion</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Where crime comes from</h2><p>Now invert the picture. People have needs — income, status, security, belonging. Legitimate methods for meeting those needs also form a frontier, and that frontier is not equally reachable.</p><blockquote style=\"margin:0 0 16px;padding:2px 0 2px 16px;border-left:3px solid #dde7e2;color:#55635e;font-style:italic;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif\">It is only when a system of cultural values extols, virtually above all else, certain common symbols of success for the population at large while its social structure rigorously restricts or completely eliminates access to approved modes of acquiring these symbols for a considerable part of the same population that antisocial behavior ensues on a considerable scale.<cite style=\"display:block;margin-top:6px;font-style:normal;font-size:14px;color:#55635e\">— Robert K. Merton, “Social Structure and Anomie”, 1938</cite></blockquote><p style=\"margin:22px 0;padding:2px 0 2px 16px;border-left:3px solid #1e5347;color:#15211d;font-size:19px;font-style:italic\">Crime emerges wherever a legitimate method for meeting a need is out of reach while an illegitimate point is within reach. Everyone, everywhere, has some reachable illicit point — so no geography or class is immune. What varies is which point is reachable.</p><p>Which point is reachable is set by three axes — and each axis is a different kind of gate:</p><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">Economics — what is affordable</div><span>Fixes the reachable region of the legitimate frontier. Where legal income routes are blocked or slow, the relative price of the nearest illicit point drops. Becker&#39;s expected-utility layer prices the choice.</span></div><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#8a6420;font-weight:600;margin:0 0 6px\">Culture — what is visible</div><span>Criminal methods are learned socially (Sutherland); illegitimate opportunity is also unevenly distributed (Cloward &amp; Ohlin). You cannot traffic weapons without a trafficking network, however strained you are.</span></div><div style=\"border-left:3px solid #a63a2e;background:#f7e9e6;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#a63a2e;font-weight:600;margin:0 0 6px\">Personality — what variance is payable</div><span>Self-control, risk tolerance, violence tolerance (Gottfredson &amp; Hirschi). Heavier rungs cost variance — exposure to prison and death — not money. Personality decides whether that currency is payable.</span></div><p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">03 · The ladder</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Gated markets, not a slippery slope</h2><p>The severity ladder — cultivation, dealing, organized distribution, trafficking and enforcement — looks like a slope but behaves like the corners of the constraint space: every transition is a regime change with a different binding constraint, and every gate filters people out.</p><figure style=\"margin:16px 0\"><pre style=\"background:#f3f4f6;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:0.9em;overflow:auto;white-space:pre-wrap\">flowchart LR\n  A[&quot;1 · Home\ncultivation&quot;]\n  B[&quot;2 · Small-scale\ndealing&quot;]\n  C[&quot;3 · Organized\ndistribution&quot;]\n  D[&quot;4 · Trafficking +\nenforcement&quot;]\n  A --&gt;|&quot;social\nexposure&quot;| B\n  B --&gt;|&quot;network\nmembership&quot;| C\n  C --&gt;|&quot;violence\ncapability&quot;| D\n</pre><div style=\"color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px\">Figure 1 — Each rung is a separate market with its own admission ticket; the gate label is the currency that admission costs.</div></figure><div style=\"display:flex;flex-direction:column\"><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><div style=\"display:inline-block;background:#ffffff;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><table cellspacing=\"3\" cellpadding=\"0\" style=\"border-collapse:separate\"><tr><td></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;padding:2px 3px;text-align:center\">capital</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;padding:2px 3px;text-align:center\">skill</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;padding:2px 3px;text-align:center\">network</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;padding:2px 3px;text-align:center\">violence</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;padding:2px 8px 2px 0;text-align:right\">cultivation</td><td style=\"width:22px;height:18px;border-radius:3px;background:#eaf1ee\" title=\"0\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#eaf1ee\" title=\"0\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#eaf1ee\" title=\"0\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#eaf1ee\" title=\"0\"></td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;padding:2px 8px 2px 0;text-align:right\">dealing</td><td style=\"width:22px;height:18px;border-radius:3px;background:#a6bcb6\" title=\"1\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#a6bcb6\" title=\"1\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#a6bcb6\" title=\"1\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#eaf1ee\" title=\"0\"></td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;padding:2px 8px 2px 0;text-align:right\">distribution</td><td style=\"width:22px;height:18px;border-radius:3px;background:#62887f\" title=\"2\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#62887f\" title=\"2\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#1e5347\" title=\"3\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#a6bcb6\" title=\"1\"></td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;padding:2px 8px 2px 0;text-align:right\">trafficking</td><td style=\"width:22px;height:18px;border-radius:3px;background:#1e5347\" title=\"3\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#62887f\" title=\"2\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#1e5347\" title=\"3\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#1e5347\" title=\"3\"></td></tr></table></div><p><span style=\"font-style:italic\">Figure 2 — The ladder as a constraint matrix (0 = none, 3 = decisive). Capital and skill grow gently; the network and violence columns jump — those are the gates, and they are the two currencies most participants never hold.</span></p><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"></div><p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">04 · The trap</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">When leaving crime costs more than staying</h2><p>Here is the part the ladder alone misses: for someone deep enough in, the incentives to stay in crime are stronger than anyone&#39;s incentives to leave. That is not a metaphor — it is a measurable structure with three interlocking mechanisms.</p><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;border-collapse:collapse;margin:12px 0\"><tr><td style=\"width:132px;vertical-align:top;padding:6px 12px 6px 0\"><span style=\"display:inline-block;background:#e4eae9;color:#1e5347;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;line-height:1.3;padding:3px 8px;border-radius:6px\">MECHANISM 1</span></td><td style=\"vertical-align:top;padding:6px 0;font-size:14px;line-height:1.55;color:#15211d\"><b>Punishment past a point brands rather than deters.</b> The label, not just the act, produces the next offence: the record halves job callbacks¹; formally processing a first juvenile offence increases reoffending vs diversion⁴; first arrests trigger secondary sanctioning — arrests beget arrests through the system&#39;s own memory.</td></tr><tr><td style=\"width:132px;vertical-align:top;padding:6px 12px 6px 0\"><span style=\"display:inline-block;background:#e4eae9;color:#1e5347;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;line-height:1.3;padding:3px 8px;border-radius:6px\">MECHANISM 2</span></td><td style=\"vertical-align:top;padding:6px 0;font-size:14px;line-height:1.55;color:#15211d\"><b>The more a person has lost, the less any threat bites.</b> Deterrence runs on stakes. Strip job, housing, family and standing, and the state has spent its leverage; sanctions felt as unfair on the poorly bonded produce defiant pride, not compliance⁵ — and under three-strikes maximums the marginal price of violence hits zero⁶.</td></tr><tr><td style=\"width:132px;vertical-align:top;padding:6px 12px 6px 0\"><span style=\"display:inline-block;background:#e4eae9;color:#1e5347;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;line-height:1.3;padding:3px 8px;border-radius:6px\">MECHANISM 3</span></td><td style=\"vertical-align:top;padding:6px 0;font-size:14px;line-height:1.55;color:#15211d\"><b>Exclusion cuts the one lifeline that ends criminal careers.</b> Half a century of the Glueck cohort says desistance rides on belonging: marriage, work, service⁷. Stigmatizing shame hands the rejected to the one community still selling status — the subculture⁸.</td></tr></table><div style=\"background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><div style=\"font-weight:700;color:#15211d;margin-bottom:8px\">Figure 3 — Callback rate, matched entry-level applicants (Pager 2003)¹</div><table role=\"presentation\" style=\"border-collapse:collapse;width:100%\"><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">White — no record</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:34%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">34%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">White — criminal record</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:17%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">17%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">Black — no record</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:14.0%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">14%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">Black — criminal record</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:5%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">5%</td></tr></table></div><p><span style=\"font-style:italic\">Same résumés, same demeanor — the record alone halves consideration, and a white applicant with a record out-polls a Black applicant without one.</span></p><p style=\"margin:22px 0;padding:2px 0 2px 16px;border-left:3px solid #1e5347;color:#15211d;font-size:19px;font-style:italic\">Punishment past the sweet spot does not just fail to deter — it manufactures the very persistence it claims to fight: it deletes stakes, closes exits, and hands the excluded to the one community still offering membership.</p><p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">05 · The opposite cliff</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">No punishment, and the leeches inherit the earth</h2><p>If over-punishment traps individuals, under-punishment dissolves the commons — one of the most replicated results in experimental economics⁹. In repeated public-goods games, cooperation without a sanctioning option decays toward zero: most people are <span style=\"font-style:italic\">conditional</span> cooperators, so every unpunished free rider licenses the next defection. When most people leech, everyone leeches.</p><div style=\"background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><div style=\"font-size:13px;font-weight:600;color:#15211d;margin-bottom:6px\">Figure 4 — The two regimes of the public-goods game (stylized from Fehr &amp; Gächter 2000⁹). Same people, same stakes; the only difference is whether peers can sanction. Remarkably, people PAY their own money to punish leeches who never harmed them — the appetite for punishment is the evolved immune system of cooperation.</div><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#55635e;margin:2px 0\"><span style=\"display:inline-block;width:12px;height:3px;border-radius:2px;background:#1e5347;margin-right:8px;vertical-align:middle\"></span>peers can sanction free riders · 11 → 18.6 · now 18.6</div><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#55635e;margin:2px 0\"><span style=\"display:inline-block;width:12px;height:3px;border-radius:2px;background:#1e5347;margin-right:8px;vertical-align:middle\"></span>no sanctioning possible · 1.6 → 10.5 · now 1.6</div><div style=\"font-size:11px;color:#55635e;margin-top:6px;font-style:italic\">Open the paper to see the live chart.</div></div><p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">06 · The sweet spot</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Between the two cliffs</h2><div style=\"background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><div style=\"font-size:13px;font-weight:600;color:#15211d;margin-bottom:6px\">Figure 5 — The sanction curve is a U, not a line.</div><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#55635e;margin:2px 0\"><span style=\"display:inline-block;width:12px;height:3px;border-radius:2px;background:#1e5347;margin-right:8px;vertical-align:middle\"></span>crime and persistence in crime · 21 → 86 · now 80</div><div style=\"font-size:11px;color:#55635e;margin-top:6px;font-style:italic\">Open the paper to see the live chart.</div></div><div style=\"display:flex;flex-direction:column\"><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><span style=\"font-weight:bold\"></span><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#8a6420;font-weight:600;margin:0 0 6px\">The left cliff — norm collapse</div><span>No rules → confusion about right and wrong → exploitation of the confusion without mercy → imitation of the exploiters. The cascade is fast, and it is not hypothetical: it is the no-sanction arm of figure 4.</span></div><div style=\"border-left:3px solid #a63a2e;background:#f7e9e6;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#a63a2e;font-weight:600;margin:0 0 6px\">The right cliff — the branding trap</div><span>Stigma, defiance, nothing left to lose. Punishment past the mark deletes stakes, closes exits, severs belonging — and manufactures exactly the persistence it claims to fight. It is the record bar of figure 3.</span></div><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"></div><p>The empirical literature is unusually consistent about what the valley looks like — four findings, each with its own instrument:</p><p><span style=\"font-weight:bold\">Certainty beats severity.</span> Five decades of deterrence research reach one headline conclusion: the <span style=\"font-style:italic\">certainty</span> of apprehension deters; <span style=\"font-style:italic\">severity</span> at the margin does not¹⁰. Lengthy sentences and mandatory minimums cannot be justified on deterrence grounds. The offender&#39;s brain asks “will I get caught?”, not “what is the statutory maximum?”</p><div style=\"background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><div style=\"font-weight:700;color:#15211d;margin-bottom:8px\">Figure 6 — HOPE vs probation-as-usual, Hawaii randomized trial (%)²</div><table role=\"presentation\" style=\"border-collapse:collapse;width:100%\"><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">Positive drug tests — HOPE</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:13%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">13%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">Positive drug tests — standard</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:46%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">46%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">New arrest — HOPE</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:21%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">21%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">New arrest — standard</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:47%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">47%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">Probation revoked — HOPE</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:7.0%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">7%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">Probation revoked — standard</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:15%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">15%</td></tr></table></div><p><span style=\"font-weight:bold\">Swift-certain-mild works in the field.</span> HOPE flipped the usual regime: every violation drew an immediate, guaranteed sanction of a few <span style=\"font-style:italic\">days</span> — and every outcome improved while total punishment administered went <span style=\"font-style:italic\">down</span>. Milder punishment, delivered reliably, out-deterred harsher punishment delivered as a lottery.</p><div style=\"background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><div style=\"font-weight:700;color:#15211d;margin-bottom:8px\">Figure 7 — Share of released prisoners who reoffend (%)</div><table role=\"presentation\" style=\"border-collapse:collapse;width:100%\"><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">Norway — within 2 years</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:20%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">20%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">Norway — within 5 years</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:25%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">25%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">United States — within 3 years</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:68%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">68%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">United States — within 5 years</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:76.6%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">77%</td></tr></table></div><p><span style=\"font-weight:bold\">Reintegration is not softness; it is the mechanism.</span> Because Norwegian criminal cases are as-good-as-randomly assigned to judges of differing strictness, the judge-lottery design measures what prison itself <span style=\"font-style:italic\">causes</span>: in a system built around education, training and open prisons, incarceration <span style=\"font-weight:bold\">reduced</span> five-year reoffending by 29 percentage points and pushed unemployed offenders into work³. Prison, done reintegratively, rehabilitates — “nothing works” is false. The disintegrative version is what manufactures recidivists.</p><blockquote style=\"margin:0 0 16px;padding:2px 0 2px 16px;border-left:3px solid #dde7e2;color:#55635e;font-style:italic;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif\">The best place to see reintegrative shaming at work is the loving family… Family life teaches us that shaming and punishment are possible while maintaining bonds of respect.<cite style=\"display:block;margin-top:6px;font-style:normal;font-size:14px;color:#55635e\">— John Braithwaite, Crime, Shame and Reintegration, 1989⁸</cite></blockquote><p><span style=\"font-weight:bold\">And the sanction must feel fair.</span> Sanctions experienced as unfair and stigmatizing, landing on the poorly bonded, produce more crime, not less⁵. Procedural justice — being heard, respected, rules applied evenly — is a crime-reduction technology. Braithwaite&#39;s formula compresses the whole valley into one sentence: <span style=\"font-style:italic\">condemn the act, never the person, and follow every degradation ceremony with a ceremony that decertifies the deviance.</span></p><details open class=\"bp-expandable\"><summary>Method notes &amp; honest caveats — read before citing</summary><div class=\"bp-expandable__body\"><p><span style=\"font-weight:bold\">Fehr &amp; Gächter series</span> (fig. 4) is stylized from the published round means, not digitized data. <span style=\"font-weight:bold\">HOPE</span> (fig. 6): later multi-site replications were weaker than the original trial — the swift-certain-fair family still outperforms, but effect sizes vary with implementation fidelity. <span style=\"font-weight:bold\">Norway vs U.S.</span> (fig. 7): reconviction vs rearrest — different measures; read as regimes, not a controlled comparison; the honest comparison is each system against its own history (Norway&#39;s own 2-year rate fell from the 60–70% range to ~20% after its 1990s reforms). Gauge digits round to whole percent; the exact U.S. 5-year figure is 76.6%.</p></div></details><p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">07 · Design rules</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Move the frontiers, shape the curve</h2><p>Put the two halves together and the policy geometry falls out. The first half showed method frontiers are dense and regenerating — suppressing points fights geometry itself. The second half showed the sanction curve is a U. Together they yield seven design rules:</p><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Spend on certainty, not severity</div><div class=\"bp-steps__body\"><p>Every krone moved from sentence-length to detection probability buys deterrence; the reverse buys prison beds and branded people.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Keep sanctions swift, mild and utterly predictable</div><div class=\"bp-steps__body\"><p>HOPE&#39;s days-not-months regime is the template: consequences close enough to the act to teach, small enough to leave stakes standing.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Preserve marginal deterrence</div><div class=\"bp-steps__body\"><p>Proportionality is not sentimentality — a price gradient is what stops a burglar from becoming a killer of witnesses. Never price the maximum into the middle of the ladder.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Punish inside the circle, not out of it</div><div class=\"bp-steps__body\"><p>Reintegrative shame condemns the act and keeps membership; stigma hands the person to the subculture. Expunge stale records; audit every collateral consequence that closes the labour-market door figure 3 measured.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Build exits at every gate</div><div class=\"bp-steps__body\"><p>Desistance rides on work, family and belonging. Prison time that ends without a job, a home and a network is a subscription renewal, not a sentence served.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Raise the legitimate frontier; relocate what you can off the illicit map</div><div class=\"bp-steps__body\"><p>Jobs, training and credit put legal points within more budgets; regulated legalization moves whole frontier segments out of criminal space entirely.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Never confuse the valley with zero</div><div class=\"bp-steps__body\"><p>The left cliff is real: unpunished free-riding cascades. The valley is not the absence of consequences — it is consequences engineered to be cheap, certain, fair and survivable.</p></div></li></ol><p style=\"margin:22px 0;padding:2px 0 2px 16px;border-left:3px solid #1e5347;color:#15211d;font-size:19px;font-style:italic\">A person deep in criminality is not beyond incentives — they are responding perfectly to the incentives we built. The system that branded them, stripped their stakes and severed their belonging is getting exactly the behaviour it pays for.</p><p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">08 · Sources</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What this draft stands on</h2><p>Numbered marks in the text (¹ ² ³ …) resolve below. Full-text links where the publisher allows.</p><ol class=\"bp-footnote\"><li id=\"fn-1\" class=\"bp-footnote__note\">Pager (2003), “The Mark of a Criminal Record”, American Journal of Sociology 108(5): matched-pair audit, Milwaukee. jstor.org/stable/10.1086/374403</li><li id=\"fn-2\" class=\"bp-footnote__note\">Hawken &amp; Kleiman (2009), “Managing Drug Involved Probationers with Swift and Certain Sanctions: Evaluating Hawaii&#39;s HOPE”, NIJ.</li><li id=\"fn-3\" class=\"bp-footnote__note\">Bhuller, Dahl, Løken &amp; Mogstad (2020), “Incarceration, Recidivism, and Employment”, Journal of Political Economy 128(4). nber.org/papers/w22648</li><li id=\"fn-4\" class=\"bp-footnote__note\">Petrosino et al. (2010/2014), Campbell systematic reviews: formal juvenile processing vs diversion.</li><li id=\"fn-5\" class=\"bp-footnote__note\">Sherman (1993), “Defiance, Deterrence, and Irrelevance: A Theory of the Criminal Sanction”, Journal of Research in Crime and Delinquency 30(4).</li><li id=\"fn-6\" class=\"bp-footnote__note\">Iyengar (2008), “I&#39;d Rather Be Hanged for a Sheep than a Lamb: The Unintended Consequences of &#39;Three-Strikes&#39; Laws”, NBER w13784.</li><li id=\"fn-7\" class=\"bp-footnote__note\">Sampson &amp; Laub (1993–2003), the Glueck cohort follow-up: marriage, work and military service as desistance turning points.</li><li id=\"fn-8\" class=\"bp-footnote__note\">Braithwaite (1989), Crime, Shame and Reintegration, Cambridge University Press.</li><li id=\"fn-9\" class=\"bp-footnote__note\">Fehr &amp; Gächter (2000), “Cooperation and Punishment in Public Goods Experiments”, American Economic Review 90(4).</li><li id=\"fn-10\" class=\"bp-footnote__note\">Nagin (2013), “Deterrence in the Twenty-First Century”, Crime and Justice 42. Plus Merton (1938); Becker (1968); Cloward &amp; Ohlin (1960); Sutherland&#39;s differential association; Gottfredson &amp; Hirschi (1990).</li></ol><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">Draft status — rev 8</div><span>The full-component-deck revision: tabs (frontier walk), toned cards (three axes), constraint heatmap (fig. 2), notes grids (lessons + trap mechanisms), section grid (the two cliffs), annotated charts (figs. 4–5), cited blockquotes (Merton, Braithwaite), expandable method caveats, steps (design rules), real footnotes. Open: comparative sidebar (same need, two economies); length decision for an op-ed cut.</span></div>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\">Barkpark Papers · essay</p><h1>Criminality comes from anywhere.</h1><p class=\"bp-role-ingress\">Crime is not a defect of certain people in certain places. It is what any population does when the legitimate frontier for meeting a need drifts out of reach while an illegitimate point sits nearby — and whether people come back is decided by a sanction curve with two cliffs.</p><p class=\"bp-role-byline\">Constraint frontiers · Gated ladders · The punishment sweet spot</p><div class=\"bp-stats\"><div class=\"bp-stat\"><div class=\"bp-stat__v\">20%<span class=\"bp-stat__denom\">/76.6%</span></div><div class=\"bp-stat__l\">reoffending — Norway vs the U.S. (fig. 7)</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">−50%</div><div class=\"bp-stat__l\">job callbacks lost to a record alone¹</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">−72%</div><div class=\"bp-stat__l\">positive drug tests under HOPE²</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">29pp</div><div class=\"bp-stat__l\">less reoffending, caused by humane prisons³</div></div></div><div style=\"position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)\"><span style=\"position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem\">§</span></div><p class=\"bp-role-eyebrow\">01 · The frontier walk</p><h2>Every method is a point; the points form a frontier</h2><p>Start with a deliberately mundane experiment: hold one goal fixed — growing a plant at home — and walk its constraints. Each tab below is one position in the money × effort space; watch what squeezing does.</p><div class=\"bp-tabs\"><div class=\"bp-tabs__strip\" role=\"tablist\"><button type=\"button\" class=\"bp-tabs__tab bp-tabs__tab--active\" role=\"tab\" aria-selected=\"true\" data-tab-index=\"0\">№1 · Baseline</button><button type=\"button\" class=\"bp-tabs__tab\" role=\"tab\" aria-selected=\"false\" data-tab-index=\"1\">№2 · Money ↓</button><button type=\"button\" class=\"bp-tabs__tab\" role=\"tab\" aria-selected=\"false\" data-tab-index=\"2\">№3 · Effort ↓</button><button type=\"button\" class=\"bp-tabs__tab\" role=\"tab\" aria-selected=\"false\" data-tab-index=\"3\">№4 · The extreme</button></div><div class=\"bp-tabs__panels\"><div class=\"bp-tabs__panel\" data-tab-index=\"0\"><p><span style=\"font-weight:bold\">No constraints.</span> The textbook method: proper equipment, proper stages, proper schedule. Every failure mode is deleted by some purchased component; effort and money are both spent freely. This is the point everyone imagines is <span style=\"font-style:italic\">the</span> method. It&#39;s just the least constrained one.</p></div><div class=\"bp-tabs__panel\" data-tab-index=\"1\"><p><span style=\"font-weight:bold\">The improvised version.</span> Scavenged containers, window light, household substitutes. Capital is replaced by cleverness — and by <span style=\"font-style:italic\">accepted failure modes</span> the equipment would have deleted. The method survives; the reliability is what got sold.</p></div><div class=\"bp-tabs__panel\" data-tab-index=\"2\"><p><span style=\"font-weight:bold\">The capitalized version.</span> Automation and better inputs delete failure modes one by one. Effort is roughly the integral of failure-mode correction over time — which is why money and effort keep converging on the same purchases.</p></div><div class=\"bp-tabs__panel\" data-tab-index=\"3\"><p><span style=\"font-weight:bold\">The regime change.</span> Squeeze effort hard enough and the smooth trade-off breaks: no tuned middle version exists any more. You either buy a machine that does everything, or plant outdoors and accept a lottery. A hard constraint produces a <span style=\"font-style:italic\">qualitatively different</span> solution — not a smaller version of the old one.</p></div></div></div><div class=\"bp-notes\"><div class=\"bp-note\"><span class=\"bp-note__k\">LESSON 1</span><div class=\"bp-note__d\"><b>Methods form a Pareto frontier.</b> For any budget of money, effort, skill and risk there is a nearby viable point.</div></div><div class=\"bp-note\"><span class=\"bp-note__k\">LESSON 2</span><div class=\"bp-note__d\"><b>The frontier is dense and improvisable.</b> Delete a point and its neighbours regenerate — suppression fights geometry.</div></div><div class=\"bp-note\"><span class=\"bp-note__k\">LESSON 3</span><div class=\"bp-note__d\"><b>Extremes produce regime changes.</b> Push a constraint hard enough and you get a different solution, not a gradient.</div></div></div><p class=\"bp-role-eyebrow\">02 · The inversion</p><h2>Where crime comes from</h2><p>Now invert the picture. People have needs — income, status, security, belonging. Legitimate methods for meeting those needs also form a frontier, and that frontier is not equally reachable.</p><blockquote class=\"bp-blockquote\"><p>It is only when a system of cultural values extols, virtually above all else, certain common symbols of success for the population at large while its social structure rigorously restricts or completely eliminates access to approved modes of acquiring these symbols for a considerable part of the same population that antisocial behavior ensues on a considerable scale.</p><cite class=\"bp-blockquote__cite\">Robert K. Merton, “Social Structure and Anomie”, 1938</cite></blockquote><p class=\"bp-role-pullquote\" style=\"font-style:italic\">Crime emerges wherever a legitimate method for meeting a need is out of reach while an illegitimate point is within reach. Everyone, everywhere, has some reachable illicit point — so no geography or class is immune. What varies is which point is reachable.</p><p>Which point is reachable is set by three axes — and each axis is a different kind of gate:</p><div class=\"bp-callout bp-callout--info\"><strong>Economics — what is affordable</strong> <span>Fixes the reachable region of the legitimate frontier. Where legal income routes are blocked or slow, the relative price of the nearest illicit point drops. Becker&#39;s expected-utility layer prices the choice.</span></div><div class=\"bp-callout bp-callout--warning\"><strong>Culture — what is visible</strong> <span>Criminal methods are learned socially (Sutherland); illegitimate opportunity is also unevenly distributed (Cloward &amp; Ohlin). You cannot traffic weapons without a trafficking network, however strained you are.</span></div><div class=\"bp-callout bp-callout--danger\"><strong>Personality — what variance is payable</strong> <span>Self-control, risk tolerance, violence tolerance (Gottfredson &amp; Hirschi). Heavier rungs cost variance — exposure to prison and death — not money. Personality decides whether that currency is payable.</span></div><p class=\"bp-role-eyebrow\">03 · The ladder</p><h2>Gated markets, not a slippery slope</h2><p>The severity ladder — cultivation, dealing, organized distribution, trafficking and enforcement — looks like a slope but behaves like the corners of the constraint space: every transition is a regime change with a different binding constraint, and every gate filters people out.</p><figure style=\"margin:1.6rem 0;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px\"><pre class=\"mermaid\">flowchart LR\n  A[\"1 · Home\ncultivation\"]\n  B[\"2 · Small-scale\ndealing\"]\n  C[\"3 · Organized\ndistribution\"]\n  D[\"4 · Trafficking +\nenforcement\"]\n  A --&gt;|\"social\nexposure\"| B\n  B --&gt;|\"network\nmembership\"| C\n  C --&gt;|\"violence\ncapability\"| D\n</pre><figcaption style=\"margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif\">Figure 1 — Each rung is a separate market with its own admission ticket; the gate label is the currency that admission costs.</figcaption></figure><div style=\"display:flex;flex-direction:column\"><hr class=\"bp-hr\"><div class=\"bp-section__grid\" style=\"--bp-tracks:2;--bp-grid-gap:var(--bp-space-md,1.6rem)\"><div class=\"bp-section__cell\"><div class=\"bp-heat bp-heat--mtx\"><div class=\"bp-heat__grid\" style=\"grid-template-columns:auto repeat(4,minmax(28px,auto))\"><span class=\"bp-heat__rl\"></span><span class=\"bp-heat__cl\">capital</span><span class=\"bp-heat__cl\">skill</span><span class=\"bp-heat__cl\">network</span><span class=\"bp-heat__cl\">violence</span><span class=\"bp-heat__rl\">cultivation</span><i class=\"bp-heat__c bp-heat__c--z bp-heat__c--v\" title=\"0\">0</i><i class=\"bp-heat__c bp-heat__c--z bp-heat__c--v\" title=\"0\">0</i><i class=\"bp-heat__c bp-heat__c--z bp-heat__c--v\" title=\"0\">0</i><i class=\"bp-heat__c bp-heat__c--z bp-heat__c--v\" title=\"0\">0</i><span class=\"bp-heat__rl\">dealing</span><i class=\"bp-heat__c bp-heat__c--b0 bp-heat__c--v\" title=\"1\">1</i><i class=\"bp-heat__c bp-heat__c--b0 bp-heat__c--v\" title=\"1\">1</i><i class=\"bp-heat__c bp-heat__c--b0 bp-heat__c--v\" title=\"1\">1</i><i class=\"bp-heat__c bp-heat__c--z bp-heat__c--v\" title=\"0\">0</i><span class=\"bp-heat__rl\">distribution</span><i class=\"bp-heat__c bp-heat__c--b1 bp-heat__c--v\" title=\"2\">2</i><i class=\"bp-heat__c bp-heat__c--b1 bp-heat__c--v\" title=\"2\">2</i><i class=\"bp-heat__c bp-heat__c--b2 bp-heat__c--v\" title=\"3\">3</i><i class=\"bp-heat__c bp-heat__c--b0 bp-heat__c--v\" title=\"1\">1</i><span class=\"bp-heat__rl\">trafficking</span><i class=\"bp-heat__c bp-heat__c--b2 bp-heat__c--v\" title=\"3\">3</i><i class=\"bp-heat__c bp-heat__c--b1 bp-heat__c--v\" title=\"2\">2</i><i class=\"bp-heat__c bp-heat__c--b2 bp-heat__c--v\" title=\"3\">3</i><i class=\"bp-heat__c bp-heat__c--b2 bp-heat__c--v\" title=\"3\">3</i></div><div class=\"bp-heat__legend\">less <i class=\"bp-heat__c bp-heat__c--b0\"></i><i class=\"bp-heat__c bp-heat__c--b1\"></i><i class=\"bp-heat__c bp-heat__c--b2\"></i><i class=\"bp-heat__c bp-heat__c--b3\"></i> more</div></div></div><div class=\"bp-section__cell\"><p><span style=\"font-style:italic\">Figure 2 — The ladder as a constraint matrix (0 = none, 3 = decisive). Capital and skill grow gently; the network and violence columns jump — those are the gates, and they are the two currencies most participants never hold.</span></p></div></div><hr class=\"bp-hr\"></div><p class=\"bp-role-eyebrow\">04 · The trap</p><h2>When leaving crime costs more than staying</h2><p>Here is the part the ladder alone misses: for someone deep enough in, the incentives to stay in crime are stronger than anyone&#39;s incentives to leave. That is not a metaphor — it is a measurable structure with three interlocking mechanisms.</p><div class=\"bp-notes\"><div class=\"bp-note\"><span class=\"bp-note__k\">MECHANISM 1</span><div class=\"bp-note__d\"><b>Punishment past a point brands rather than deters.</b> The label, not just the act, produces the next offence: the record halves job callbacks¹; formally processing a first juvenile offence increases reoffending vs diversion⁴; first arrests trigger secondary sanctioning — arrests beget arrests through the system&#39;s own memory.</div></div><div class=\"bp-note\"><span class=\"bp-note__k\">MECHANISM 2</span><div class=\"bp-note__d\"><b>The more a person has lost, the less any threat bites.</b> Deterrence runs on stakes. Strip job, housing, family and standing, and the state has spent its leverage; sanctions felt as unfair on the poorly bonded produce defiant pride, not compliance⁵ — and under three-strikes maximums the marginal price of violence hits zero⁶.</div></div><div class=\"bp-note\"><span class=\"bp-note__k\">MECHANISM 3</span><div class=\"bp-note__d\"><b>Exclusion cuts the one lifeline that ends criminal careers.</b> Half a century of the Glueck cohort says desistance rides on belonging: marriage, work, service⁷. Stigmatizing shame hands the rejected to the one community still selling status — the subculture⁸.</div></div></div><div class=\"bp-gauge\"><div class=\"bp-gauge__t\">Figure 3 — Callback rate, matched entry-level applicants (Pager 2003)¹</div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">White — no record</span><span class=\"bp-gauge__bar\"><i style=\"width:34%\"></i></span><span class=\"bp-gauge__d\">34%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">White — criminal record</span><span class=\"bp-gauge__bar\"><i style=\"width:17%\"></i></span><span class=\"bp-gauge__d\">17%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">Black — no record</span><span class=\"bp-gauge__bar\"><i style=\"width:14.0%\"></i></span><span class=\"bp-gauge__d\">14%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">Black — criminal record</span><span class=\"bp-gauge__bar\"><i style=\"width:5%\"></i></span><span class=\"bp-gauge__d\">5%</span></div></div><p><span style=\"font-style:italic\">Same résumés, same demeanor — the record alone halves consideration, and a white applicant with a record out-polls a Black applicant without one.</span></p><p class=\"bp-role-pullquote\" style=\"font-style:italic\">Punishment past the sweet spot does not just fail to deter — it manufactures the very persistence it claims to fight: it deletes stakes, closes exits, and hands the excluded to the one community still offering membership.</p><p class=\"bp-role-eyebrow\">05 · The opposite cliff</p><h2>No punishment, and the leeches inherit the earth</h2><p>If over-punishment traps individuals, under-punishment dissolves the commons — one of the most replicated results in experimental economics⁹. In repeated public-goods games, cooperation without a sanctioning option decays toward zero: most people are <span style=\"font-style:italic\">conditional</span> cooperators, so every unpunished free rider licenses the next defection. When most people leech, everyone leeches.</p><div class=\"bp-chart\"><div class=\"bp-chart__t\">Figure 4 — The two regimes of the public-goods game (stylized from Fehr &amp; Gächter 2000⁹). Same people, same stakes; the only difference is whether peers can sanction. Remarkably, people PAY their own money to punish leeches who never harmed them — the appetite for punishment is the evolved immune system of cooperation.</div><svg viewBox=\"0 0 640 190\" preserveAspectRatio=\"none\" role=\"img\"><line class=\"bp-chart__grid\" x1=\"46\" y1=\"8\" x2=\"630\" y2=\"8\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"12\" text-anchor=\"end\">20</text><line class=\"bp-chart__grid\" x1=\"46\" y1=\"58.7\" x2=\"630\" y2=\"58.7\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"62.7\" text-anchor=\"end\">13.3</text><line class=\"bp-chart__grid\" x1=\"46\" y1=\"109.3\" x2=\"630\" y2=\"109.3\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"113.3\" text-anchor=\"end\">6.7</text><line class=\"bp-chart__grid\" x1=\"46\" y1=\"160\" x2=\"630\" y2=\"160\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"164\" text-anchor=\"end\">0</text><line class=\"bp-chart__axis\" x1=\"46\" y1=\"160\" x2=\"630\" y2=\"160\"/><polyline class=\"bp-chart__s bp-chart__s0\" points=\"46,76.4 110.9,57.4 175.8,47.5 240.7,40.7 305.6,35.4 370.4,30.8 435.3,27 500.2,24.0 565.1,20.9 630,18.6\"/><polyline class=\"bp-chart__s bp-chart__s1\" points=\"46,80.2 110.9,92.4 175.8,101.5 240.7,109.8 305.6,115.9 370.4,122 435.3,128.1 500.2,134.2 565.1,140.2 630,147.8\"/><circle class=\"bp-chart__pt\" cx=\"630\" cy=\"147.8\" r=\"3.5\"/><text class=\"bp-chart__ann\" x=\"630\" y=\"139.8\" text-anchor=\"middle\">norm collapse</text><circle class=\"bp-chart__pt\" cx=\"630\" cy=\"18.6\" r=\"3.5\"/><text class=\"bp-chart__ann\" x=\"630\" y=\"34.6\" text-anchor=\"middle\">near-full cooperation</text><text class=\"bp-chart__tick\" x=\"46\" y=\"176\" text-anchor=\"start\">r1</text><text class=\"bp-chart__tick\" x=\"630\" y=\"176\" text-anchor=\"end\">r10</text></svg><div class=\"bp-chart__legend\"><span class=\"bp-chart__key\"><i class=\"bp-chart__swatch bp-chart__s0\"></i>peers can sanction free riders</span><span class=\"bp-chart__key\"><i class=\"bp-chart__swatch bp-chart__s1\"></i>no sanctioning possible</span></div></div><p class=\"bp-role-eyebrow\">06 · The sweet spot</p><h2>Between the two cliffs</h2><div class=\"bp-chart\"><div class=\"bp-chart__t\">Figure 5 — The sanction curve is a U, not a line.</div><svg viewBox=\"0 0 640 190\" preserveAspectRatio=\"none\" role=\"img\"><line class=\"bp-chart__grid\" x1=\"46\" y1=\"8\" x2=\"630\" y2=\"8\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"12\" text-anchor=\"end\">100</text><line class=\"bp-chart__grid\" x1=\"46\" y1=\"58.7\" x2=\"630\" y2=\"58.7\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"62.7\" text-anchor=\"end\">66.7</text><line class=\"bp-chart__grid\" x1=\"46\" y1=\"109.3\" x2=\"630\" y2=\"109.3\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"113.3\" text-anchor=\"end\">33.3</text><line class=\"bp-chart__grid\" x1=\"46\" y1=\"160\" x2=\"630\" y2=\"160\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"164\" text-anchor=\"end\">0</text><line class=\"bp-chart__axis\" x1=\"46\" y1=\"160\" x2=\"630\" y2=\"160\"/><rect class=\"bp-chart__region bp-chart__region--warn\" x=\"46\" y=\"8\" width=\"175.2\" height=\"152\"/><text class=\"bp-chart__ann\" x=\"133.6\" y=\"19\" text-anchor=\"middle\">NORM COLLAPSE</text><rect class=\"bp-chart__region bp-chart__region--danger\" x=\"454.8\" y=\"8\" width=\"175.2\" height=\"152\"/><text class=\"bp-chart__ann\" x=\"542.4\" y=\"19\" text-anchor=\"middle\">BRANDING TRAP</text><polyline class=\"bp-chart__s bp-chart__s0\" points=\"46,29.3 104.4,62.7 162.8,93.1 221.2,114.4 279.6,125.0 338,128.1 396.4,123.5 454.8,109.8 513.2,88.6 571.6,64.2 630,38.4\"/><circle class=\"bp-chart__pt\" cx=\"338\" cy=\"128.1\" r=\"3.5\"/><text class=\"bp-chart__ann\" x=\"338\" y=\"120.1\" text-anchor=\"middle\">the sweet spot</text><text class=\"bp-chart__tick\" x=\"46\" y=\"176\" text-anchor=\"start\">no consequences</text><text class=\"bp-chart__tick\" x=\"630\" y=\"176\" text-anchor=\"end\">max severity + exclusion</text></svg><div class=\"bp-chart__legend\"><span class=\"bp-chart__key\"><i class=\"bp-chart__swatch bp-chart__s0\"></i>crime and persistence in crime</span></div></div><div style=\"display:flex;flex-direction:column\"><hr class=\"bp-hr\"><div class=\"bp-section__title\" style=\"font-weight:bold\"></div><div class=\"bp-section__grid\" style=\"--bp-tracks:2;--bp-grid-gap:var(--bp-space-md,1.6rem)\"><div class=\"bp-section__cell\"><div class=\"bp-callout bp-callout--warning\"><strong>The left cliff — norm collapse</strong> <span>No rules → confusion about right and wrong → exploitation of the confusion without mercy → imitation of the exploiters. The cascade is fast, and it is not hypothetical: it is the no-sanction arm of figure 4.</span></div></div><div class=\"bp-section__cell\"><div class=\"bp-callout bp-callout--danger\"><strong>The right cliff — the branding trap</strong> <span>Stigma, defiance, nothing left to lose. Punishment past the mark deletes stakes, closes exits, severs belonging — and manufactures exactly the persistence it claims to fight. It is the record bar of figure 3.</span></div></div></div><hr class=\"bp-hr\"></div><p>The empirical literature is unusually consistent about what the valley looks like — four findings, each with its own instrument:</p><p><span style=\"font-weight:bold\">Certainty beats severity.</span> Five decades of deterrence research reach one headline conclusion: the <span style=\"font-style:italic\">certainty</span> of apprehension deters; <span style=\"font-style:italic\">severity</span> at the margin does not¹⁰. Lengthy sentences and mandatory minimums cannot be justified on deterrence grounds. The offender&#39;s brain asks “will I get caught?”, not “what is the statutory maximum?”</p><div class=\"bp-gauge\"><div class=\"bp-gauge__t\">Figure 6 — HOPE vs probation-as-usual, Hawaii randomized trial (%)²</div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">Positive drug tests — HOPE</span><span class=\"bp-gauge__bar\"><i style=\"width:13%\"></i></span><span class=\"bp-gauge__d\">13%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">Positive drug tests — standard</span><span class=\"bp-gauge__bar\"><i style=\"width:46%\"></i></span><span class=\"bp-gauge__d\">46%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">New arrest — HOPE</span><span class=\"bp-gauge__bar\"><i style=\"width:21%\"></i></span><span class=\"bp-gauge__d\">21%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">New arrest — standard</span><span class=\"bp-gauge__bar\"><i style=\"width:47%\"></i></span><span class=\"bp-gauge__d\">47%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">Probation revoked — HOPE</span><span class=\"bp-gauge__bar\"><i style=\"width:7.0%\"></i></span><span class=\"bp-gauge__d\">7%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">Probation revoked — standard</span><span class=\"bp-gauge__bar\"><i style=\"width:15%\"></i></span><span class=\"bp-gauge__d\">15%</span></div></div><p><span style=\"font-weight:bold\">Swift-certain-mild works in the field.</span> HOPE flipped the usual regime: every violation drew an immediate, guaranteed sanction of a few <span style=\"font-style:italic\">days</span> — and every outcome improved while total punishment administered went <span style=\"font-style:italic\">down</span>. Milder punishment, delivered reliably, out-deterred harsher punishment delivered as a lottery.</p><div class=\"bp-gauge\"><div class=\"bp-gauge__t\">Figure 7 — Share of released prisoners who reoffend (%)</div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">Norway — within 2 years</span><span class=\"bp-gauge__bar\"><i style=\"width:20%\"></i></span><span class=\"bp-gauge__d\">20%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">Norway — within 5 years</span><span class=\"bp-gauge__bar\"><i style=\"width:25%\"></i></span><span class=\"bp-gauge__d\">25%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">United States — within 3 years</span><span class=\"bp-gauge__bar\"><i style=\"width:68%\"></i></span><span class=\"bp-gauge__d\">68%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">United States — within 5 years</span><span class=\"bp-gauge__bar\"><i style=\"width:76.6%\"></i></span><span class=\"bp-gauge__d\">77%</span></div></div><p><span style=\"font-weight:bold\">Reintegration is not softness; it is the mechanism.</span> Because Norwegian criminal cases are as-good-as-randomly assigned to judges of differing strictness, the judge-lottery design measures what prison itself <span style=\"font-style:italic\">causes</span>: in a system built around education, training and open prisons, incarceration <span style=\"font-weight:bold\">reduced</span> five-year reoffending by 29 percentage points and pushed unemployed offenders into work³. Prison, done reintegratively, rehabilitates — “nothing works” is false. The disintegrative version is what manufactures recidivists.</p><blockquote class=\"bp-blockquote\"><p>The best place to see reintegrative shaming at work is the loving family… Family life teaches us that shaming and punishment are possible while maintaining bonds of respect.</p><cite class=\"bp-blockquote__cite\">John Braithwaite, Crime, Shame and Reintegration, 1989⁸</cite></blockquote><p><span style=\"font-weight:bold\">And the sanction must feel fair.</span> Sanctions experienced as unfair and stigmatizing, landing on the poorly bonded, produce more crime, not less⁵. Procedural justice — being heard, respected, rules applied evenly — is a crime-reduction technology. Braithwaite&#39;s formula compresses the whole valley into one sentence: <span style=\"font-style:italic\">condemn the act, never the person, and follow every degradation ceremony with a ceremony that decertifies the deviance.</span></p><details class=\"bp-expandable\"><summary>Method notes &amp; honest caveats — read before citing</summary><div class=\"bp-expandable__body\"><p><span style=\"font-weight:bold\">Fehr &amp; Gächter series</span> (fig. 4) is stylized from the published round means, not digitized data. <span style=\"font-weight:bold\">HOPE</span> (fig. 6): later multi-site replications were weaker than the original trial — the swift-certain-fair family still outperforms, but effect sizes vary with implementation fidelity. <span style=\"font-weight:bold\">Norway vs U.S.</span> (fig. 7): reconviction vs rearrest — different measures; read as regimes, not a controlled comparison; the honest comparison is each system against its own history (Norway&#39;s own 2-year rate fell from the 60–70% range to ~20% after its 1990s reforms). Gauge digits round to whole percent; the exact U.S. 5-year figure is 76.6%.</p></div></details><p class=\"bp-role-eyebrow\">07 · Design rules</p><h2>Move the frontiers, shape the curve</h2><p>Put the two halves together and the policy geometry falls out. The first half showed method frontiers are dense and regenerating — suppressing points fights geometry itself. The second half showed the sanction curve is a U. Together they yield seven design rules:</p><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Spend on certainty, not severity</div><div class=\"bp-steps__body\"><p>Every krone moved from sentence-length to detection probability buys deterrence; the reverse buys prison beds and branded people.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Keep sanctions swift, mild and utterly predictable</div><div class=\"bp-steps__body\"><p>HOPE&#39;s days-not-months regime is the template: consequences close enough to the act to teach, small enough to leave stakes standing.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Preserve marginal deterrence</div><div class=\"bp-steps__body\"><p>Proportionality is not sentimentality — a price gradient is what stops a burglar from becoming a killer of witnesses. Never price the maximum into the middle of the ladder.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Punish inside the circle, not out of it</div><div class=\"bp-steps__body\"><p>Reintegrative shame condemns the act and keeps membership; stigma hands the person to the subculture. Expunge stale records; audit every collateral consequence that closes the labour-market door figure 3 measured.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Build exits at every gate</div><div class=\"bp-steps__body\"><p>Desistance rides on work, family and belonging. Prison time that ends without a job, a home and a network is a subscription renewal, not a sentence served.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Raise the legitimate frontier; relocate what you can off the illicit map</div><div class=\"bp-steps__body\"><p>Jobs, training and credit put legal points within more budgets; regulated legalization moves whole frontier segments out of criminal space entirely.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Never confuse the valley with zero</div><div class=\"bp-steps__body\"><p>The left cliff is real: unpunished free-riding cascades. The valley is not the absence of consequences — it is consequences engineered to be cheap, certain, fair and survivable.</p></div></li></ol><p class=\"bp-role-pullquote\" style=\"font-style:italic\">A person deep in criminality is not beyond incentives — they are responding perfectly to the incentives we built. The system that branded them, stripped their stakes and severed their belonging is getting exactly the behaviour it pays for.</p><p class=\"bp-role-eyebrow\">08 · Sources</p><h2>What this draft stands on</h2><p>Numbered marks in the text (¹ ² ³ …) resolve below. Full-text links where the publisher allows.</p><ol class=\"bp-footnote\"><li id=\"fn-1\" class=\"bp-footnote__note\">Pager (2003), “The Mark of a Criminal Record”, American Journal of Sociology 108(5): matched-pair audit, Milwaukee. jstor.org/stable/10.1086/374403</li><li id=\"fn-2\" class=\"bp-footnote__note\">Hawken &amp; Kleiman (2009), “Managing Drug Involved Probationers with Swift and Certain Sanctions: Evaluating Hawaii&#39;s HOPE”, NIJ.</li><li id=\"fn-3\" class=\"bp-footnote__note\">Bhuller, Dahl, Løken &amp; Mogstad (2020), “Incarceration, Recidivism, and Employment”, Journal of Political Economy 128(4). nber.org/papers/w22648</li><li id=\"fn-4\" class=\"bp-footnote__note\">Petrosino et al. (2010/2014), Campbell systematic reviews: formal juvenile processing vs diversion.</li><li id=\"fn-5\" class=\"bp-footnote__note\">Sherman (1993), “Defiance, Deterrence, and Irrelevance: A Theory of the Criminal Sanction”, Journal of Research in Crime and Delinquency 30(4).</li><li id=\"fn-6\" class=\"bp-footnote__note\">Iyengar (2008), “I&#39;d Rather Be Hanged for a Sheep than a Lamb: The Unintended Consequences of &#39;Three-Strikes&#39; Laws”, NBER w13784.</li><li id=\"fn-7\" class=\"bp-footnote__note\">Sampson &amp; Laub (1993–2003), the Glueck cohort follow-up: marriage, work and military service as desistance turning points.</li><li id=\"fn-8\" class=\"bp-footnote__note\">Braithwaite (1989), Crime, Shame and Reintegration, Cambridge University Press.</li><li id=\"fn-9\" class=\"bp-footnote__note\">Fehr &amp; Gächter (2000), “Cooperation and Punishment in Public Goods Experiments”, American Economic Review 90(4).</li><li id=\"fn-10\" class=\"bp-footnote__note\">Nagin (2013), “Deterrence in the Twenty-First Century”, Crime and Justice 42. Plus Merton (1938); Becker (1968); Cloward &amp; Ohlin (1960); Sutherland&#39;s differential association; Gottfredson &amp; Hirschi (1990).</li></ol><div class=\"bp-callout bp-callout--info\"><strong>Draft status — rev 8</strong> <span>The full-component-deck revision: tabs (frontier walk), toned cards (three axes), constraint heatmap (fig. 2), notes grids (lessons + trap mechanisms), section grid (the two cliffs), annotated charts (figs. 4–5), cited blockquotes (Merton, Braithwaite), expandable method caveats, steps (design rules), real footnotes. Open: comparative sidebar (same need, two economies); length decision for an op-ed cut.</span></div>",
+  "body_html_sv": "c18f53335d0cddd150ef2c1749afc3f83072e9160a011cac63d103bd03fdd308",
+  "description": "DRAFT rev 8, the beauty pass. Crime emerges wherever the legitimate frontier for meeting a need is out of reach while an illegitimate point is within reach; economics, culture and personality pick the reachable point; the severity ladder is gated markets, not a slope; and the sanction curve is a U with two cliffs - norm collapse when free-riding goes unpunished and the branding trap when punishment outruns the sweet spot - with the evidenced valley: certain-swift-mild-fair sanctions plus reintegration. Now composed with tabs, toned cards, a constraint heatmap, notes grids, a section grid, annotated charts, cited blockquotes, expandable caveats, steps and real footnotes. Eight figures, fourteen sources.",
+  "main_tag": "article-draft",
+  "preview": {
+    "description": "DRAFT rev 8, the beauty pass. Crime emerges wherever the legitimate frontier for meeting a need is out of…",
+    "extensions": {
+      "tags": [
+        "article-draft",
+        "criminology",
+        "constraint-frontiers",
+        "portabledoc"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/criminality-constraint-frontiers-draft"
+  },
+  "rev": 12,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "Working outward-facing essay, rev 8: the beauty pass — mechanical spacing, proximity-true kickers, horizontal ladder.",
+      "strength": 90,
+      "tag": "article-draft"
+    },
+    {
+      "rationale": "Strain, opportunity, labeling, defiance, deterrence, desistance, reintegrative shaming.",
+      "strength": 88,
+      "tag": "criminology"
+    },
+    {
+      "rationale": "The frontier lens: dense regenerating method frontiers + the U-shaped sanction curve.",
+      "strength": 80,
+      "tag": "constraint-frontiers"
+    },
+    {
+      "rationale": "Showcase-grade composition: tabs, cards, heatmap, notes, section grid, annotations, footnotes in one article.",
+      "strength": 55,
+      "tag": "portabledoc"
+    }
+  ],
+  "title": "Criminality Comes From Anywhere: Constraint Frontiers, Gated Ladders, and the Punishment Sweet Spot"
+}

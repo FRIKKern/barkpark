@@ -1,0 +1,506 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S017",
+  "assignment_snapshot_sha256": "5dec9d93266dfb705fca8e3cf0c94f1e0c34ffd10b24939ca0dbe26012f1019c",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 6,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "dfc67e28c6ff8fec03e19e6c9895092e01ac0dc0fa4403bb231bc5ed69968786"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All ten pinned revisions were read across 556 native top-level blocks. Keep 4 and repair 6. The best pattern is evidence that changes the plan—fleet-scale reversals, mutation-capable security gates, and byte/token discipline. The main reader risk is temporal: strong pre-ratification lane and crown Papers now coexist with a later CLOSED Wave-1 outcome, while the benchmark framework still says Gen 1 is ready despite a results Paper.",
+  "verdict_counts": {
+    "repair": 6,
+    "keep": 4
+  },
+  "checked_unit_ids": [
+    "paper:context-compression-benchmark",
+    "paper:context-compression-benchmark-gen1",
+    "paper:criminality-constraint-frontiers-draft",
+    "paper:ctx-compression-capstone",
+    "paper:ctx-compression-handle-doctrine",
+    "paper:ctx-compression-headroom-lessons",
+    "paper:ctx-compression-spend-census",
+    "paper:ctx-compression-taskboard-flagship",
+    "paper:ctx-compression-view-tiers-seam",
+    "paper:ctx-compression-wave-2026-07-24"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 10,
+    "native_top_level_blocks_read": 556,
+    "legacy_html_documents_read": 0,
+    "legacy_html_chars_read": 0,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:ctx-compression-spend-census blocks[7]",
+      "evidence": "Fleet evidence reverses the pilot priority and the charter order changes.",
+      "lesson": "Let better evidence change the plan."
+    },
+    {
+      "block_ref": "paper:ctx-compression-view-tiers-seam blocks[17]",
+      "evidence": "Every fail-closed check must be proven capable of detecting a planted breach.",
+      "lesson": "Mutation-test security greens."
+    },
+    {
+      "block_ref": "paper:ctx-compression-capstone blocks[73]",
+      "evidence": "A stale citation is corrected and the conclusion is re-derived on corrected grounds.",
+      "lesson": "Repair premises openly."
+    },
+    {
+      "block_ref": "paper:ctx-compression-wave-2026-07-24 blocks[50]",
+      "evidence": "The brief manifest proves completeness, collision safety, and a byte-identical full escape hatch.",
+      "lesson": "Compression cannot trade away invocation truth."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:context-compression-benchmark blocks[24]",
+      "evidence": "Framework says Gen 1 is ready while a completed Gen-1 result exists.",
+      "reader_impact": "Pre-run policy can be mistaken for current authority."
+    },
+    {
+      "block_ref": "paper:ctx-compression-capstone blocks[93]",
+      "evidence": "Crown says the epic is considering even though Wave 1 records ratification and execution.",
+      "reader_impact": "Program status is temporally inconsistent."
+    },
+    {
+      "block_ref": "paper:ctx-compression-handle-doctrine blocks[49]",
+      "evidence": "Workspace, MCP token, WriteScope, and historical-read security remain unresolved.",
+      "reader_impact": "A crisp handle slogan can appear more complete than its security contract."
+    },
+    {
+      "block_ref": "paper:ctx-compression-wave-2026-07-24 blocks[59]",
+      "evidence": "Token and live gates are pending and one security slice has no local test execution.",
+      "reader_impact": "Byte/PR progress can be overstated as token/live proof."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "context-compression-benchmark",
+        "context-compression-benchmark-gen1"
+      ],
+      "basis": "Same evolving benchmark but distinct authority layers: protocol/registry versus one generation’s measured results.",
+      "disposition": "Keep separate; make framework status point to latest generation and preserve preregistration versus observed policy."
+    },
+    {
+      "candidate_set": [
+        "ctx-compression-capstone",
+        "ctx-compression-headroom-lessons",
+        "ctx-compression-spend-census",
+        "ctx-compression-handle-doctrine",
+        "ctx-compression-view-tiers-seam",
+        "ctx-compression-taskboard-flagship"
+      ],
+      "basis": "Crown plus five independently researched depth lanes. The capstone deliberately resolves their collisions and indexes their evidence.",
+      "disposition": "Use capstone as current doctrine/index; retain lanes as source authority and add ratification/outcome links rather than merging 388 blocks of evidence."
+    },
+    {
+      "candidate_set": [
+        "ctx-compression-capstone",
+        "ctx-compression-wave-2026-07-24"
+      ],
+      "basis": "Program plan and first execution outcome share doctrine but have different temporal roles. Wave 1 supersedes only the crown’s pre-ratification status, not its multi-wave rationale.",
+      "disposition": "Keep both; repair crown status and make Wave 1 the authority for shipped/deferred Wave-1 facts."
+    },
+    {
+      "candidate_set": [
+        "ctx-compression-handle-doctrine",
+        "ctx-compression-taskboard-flagship",
+        "ctx-compression-view-tiers-seam"
+      ],
+      "basis": "Three lanes overlap on rev carriage, caching, and view profiles; the capstone explicitly records the collision and rules brief v3 plus board profile.",
+      "disposition": "Preserve specialized authorities, link to crown ruling, and remove competing pre-ratification status language from projections."
+    }
+  ],
+  "reader_risks": [
+    "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+    "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+    "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+    "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+    "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:context-compression-benchmark",
+      "document_id": "context-compression-benchmark",
+      "document_rev": "92fc8945a2e24e2787abf75c01551a41",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Framework for an evolving modality/density/enrichment tournament whose output is a sensitivity-specific context-routing policy.",
+      "opening_and_criteria": "blocks[0]-[8] define the thesis and disqualify cheap-but-wrong arms. blocks[24] still says Generation 1 is ready to run even though the companion Gen-1 results Paper now exists.",
+      "outline_and_hierarchy": "27 blocks cleanly cover arms, metric, tasks, ledger, loop, preregistration, and persistence. The framework is compact, but current-generation state is stale.",
+      "human_voice_and_precision": "Clear experimental voice distinguishes a routing policy from a universal winner. Pre-registered expectations are appropriately framed, yet should be reconciled with the surprising completed result.",
+      "compression_and_restraint": "Replace the ready-to-run card with a generational index and label the expectation table as preregistered, not current policy.",
+      "evidence_and_truth": "blocks[8] makes correctness a hard gate before quality-per-token; blocks[24] proves materialization but is now a stale status surface.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "Cheap-and-wrong arms are explicitly disqualified before efficiency ranking.",
+          "lesson": "Make fidelity a gate, not a term cheap errors can average away."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[24]",
+          "evidence": "The terminal card still says Generation 1 is ready to run, while the pinned Gen-1 results Paper reports completion.",
+          "lesson": "Readers may treat pre-run expectations as current routing authority."
+        }
+      ],
+      "duplicate_disposition": "Same benchmark program as context-compression-benchmark-gen1, but framework and generation result are distinct. Link the framework to the latest generation and preserve results separately.",
+      "reader_risks": [
+        "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+        "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+        "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+        "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+      ],
+      "rationale": "Repair: sound framework, but stale generation status and unreconciled pre-registration compete with completed results."
+    },
+    {
+      "unit_id": "paper:context-compression-benchmark-gen1",
+      "document_id": "context-compression-benchmark-gen1",
+      "document_rev": "db13f9233c92ef8f427d12b414e4d8f1",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Generation-1 result authority for 72 agents, 47 cells, nine strategies, and a provisional sensitivity-routing policy.",
+      "opening_and_criteria": "blocks[0]-[7] immediately present scale, winner, leaderboard, and policy. The headline names both the 45% win and the lower-density fidelity cliff.",
+      "outline_and_hierarchy": "20 blocks are proportionate: headline, ranking, surprises, head-to-heads, honest scope, and Gen-2 proposal.",
+      "human_voice_and_precision": "Concrete and surprised rather than promotional. It openly reports silent confident corruption and provisional arms.",
+      "compression_and_restraint": "Keep; a public projection should remove the live-credential example and retain only a synthetic exact-string result.",
+      "evidence_and_truth": "blocks[9] reports non-monotonic accuracy and uncalibrated confidence; blocks[13] limits the result to small contexts and small n for hybrid/enrichment.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[13]",
+          "evidence": "The paper explicitly says small contexts may move the fidelity floor and that hybrid/enrichment have only n=3.",
+          "lesson": "Place scope limits beside a surprising winner."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[9]",
+          "evidence": "Sub-45% arms silently returned wrong hashes, counts, and a corrupted credential while self-rating clear.",
+          "lesson": "Self-reported legibility cannot gate exact-string routing, and credential-shaped examples are unsafe on public surfaces."
+        }
+      ],
+      "duplicate_disposition": "Current result companion to the benchmark framework, not a replacement for its protocol. Future generation results should form an indexed series.",
+      "reader_risks": [
+        "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+        "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+        "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+        "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+      ],
+      "rationale": "Keep: concise current results, exact sample disclosure, and strong honest-scope section make this a reliable generation authority."
+    },
+    {
+      "unit_id": "paper:criminality-constraint-frontiers-draft",
+      "document_id": "criminality-constraint-frontiers-draft",
+      "document_rev": "aff12235cd69f94c0336d6f69d30e843",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Public-facing essay arguing that reachable constraint frontiers shape crime and that sanctions have both norm-collapse and branding cliffs.",
+      "opening_and_criteria": "blocks[0]-[4] give a strong thesis and memorable quantitative hooks. blocks[58] still labels the piece DRAFT rev 8 and leaves a comparative sidebar and length decision open.",
+      "outline_and_hierarchy": "59 blocks move through frontier, inversion, gated ladder, trap, opposite cliff, sweet spot, design rules, and sources. Rich visuals improve scanability but the evidence-to-claim path is long.",
+      "human_voice_and_precision": "Human, forceful, and memorable. Some causal language is stronger than the mixed observational/experimental sources warrant, although the caveat section corrects key comparison limits.",
+      "compression_and_restraint": "Create a shorter publication cut and keep the full cited essay as the evidence edition; make figure caveats visible at the point of reuse.",
+      "evidence_and_truth": "blocks[48] clearly distinguishes stylized data, replication variance, and non-equivalent Norway/U.S. measures; blocks[57] supplies fourteen numbered sources.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[48]",
+          "evidence": "Method notes disclose stylized chart data, weaker replications, and reconviction-versus-rearrest mismatch.",
+          "lesson": "Put comparability limits next to vivid causal charts."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[58]",
+          "evidence": "The ending still says Draft rev 8 and leaves a comparative sidebar and op-ed length decision open.",
+          "lesson": "Public readers cannot tell whether this is publication authority or a beauty-pass draft."
+        }
+      ],
+      "duplicate_disposition": "Distinct subject from the context-compression program; no same-purpose duplicate in this assignment.",
+      "reader_risks": [
+        "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+        "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+        "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+        "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+      ],
+      "rationale": "Repair: strong structured essay and unusually honest notes, but draft state and open publication decisions prevent terminal authority."
+    },
+    {
+      "unit_id": "paper:ctx-compression-capstone",
+      "document_id": "ctx-compression-capstone",
+      "document_rev": "aa9506bd1d165273e9648140d5d44bd3",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Crown synthesis binding five investigation lanes into the Barkpark-native context-compression doctrine and ranked multi-wave program.",
+      "opening_and_criteria": "blocks[0]-[5] clearly name crown status and the governing principle. blocks[93] still presents the epic as considering and user ratification as future, while the later Wave-1 Paper says all twelve calls were ratified and work began.",
+      "outline_and_hierarchy": "94 blocks synthesize external evidence, internal census, doctrine, flagship, collisions, files, waves, risks, and decisions. It is authoritative but too long to be its own current status page.",
+      "human_voice_and_precision": "Confident yet self-correcting: cross-lane contradictions are recorded rather than erased. Dense internal anchors raise the barrier for non-builders.",
+      "compression_and_restraint": "Prepend a current-program card linking ratification and Wave 1; retain the crown as doctrine and archival reasoning.",
+      "evidence_and_truth": "blocks[73] corrects a stale pilot citation without discarding the surviving conclusion; blocks[69]-[75] resolve lane collisions explicitly.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[73]",
+          "evidence": "The crown replaces a stale 14.6% pilot figure with the 68.1% fleet result and re-derives the park conclusion on corrected grounds.",
+          "lesson": "Correct the premise openly and test whether the conclusion still follows."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[93]",
+          "evidence": "The final status says the epic seed is merely considering and opening is still the user’s call.",
+          "lesson": "A later pinned Wave-1 Paper records ratification and execution, so the crown’s most visible program state is stale."
+        }
+      ],
+      "duplicate_disposition": "Canonical synthesis of five lane papers, not a replacement for their evidence appendices. Keep lane depth and make this the doctrine/index, with forward links to wave outcomes.",
+      "reader_risks": [
+        "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+        "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+        "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+        "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+      ],
+      "rationale": "Repair: preserve as crown doctrine, but update pre-ratification status and add a compact progress index over the 94-block synthesis."
+    },
+    {
+      "unit_id": "paper:ctx-compression-handle-doctrine",
+      "document_id": "ctx-compression-handle-doctrine",
+      "document_rev": "876141f25e33c7762ea615af5cd7b537",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Retrieval-half lane defining handle = doc id + rev, CMS-backed infinite validity, bp park, MCP carriage, and ETag implications.",
+      "opening_and_criteria": "blocks[0]-[6] state the doctrine and scope crisply. blocks[47]-[55] still present seven calls for ratification and an incomplete security/tenancy handoff even though the crown and Wave 1 later ratify program choices.",
+      "outline_and_hierarchy": "56 blocks cover laws, rev convergence, invalidation, park, MCP, ETag, slices, corrections, mechanics, risks, and coverage. It is builder-grade but not a compact current contract.",
+      "human_voice_and_precision": "Technically precise and commendably willing to overturn premises. The many options and anchors read as prep rather than a frozen doctrine.",
+      "compression_and_restraint": "Add a ratified-decisions appendix/current card; keep unresolved tenancy questions explicitly open and separate from settled handle laws.",
+      "evidence_and_truth": "blocks[34] lists five premises that fell; blocks[49] identifies unresolved workspace, MCP-token, WriteScope, and historical-read security questions.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[34]",
+          "evidence": "The lane corrects CAS, ETag, resource_link, issue-count, and fleet-spend premises after fresh evidence.",
+          "lesson": "Publish premise reversals as first-class evidence."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[49]",
+          "evidence": "Cross-workspace cashing, MCP token context, WriteScope, and member-open parked revisions remain unresolved.",
+          "lesson": "A reader could mistake a charter-grade handle slogan for a complete security contract."
+        }
+      ],
+      "duplicate_disposition": "One of five depth lanes summarized by the capstone. Retain as retrieval authority; link capstone ratifications and later implementation waves rather than merging.",
+      "reader_risks": [
+        "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+        "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+        "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+        "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+      ],
+      "rationale": "Repair: strong doctrine and corrections, but stale pre-ratification calls plus unresolved tenancy boundaries need a current contract layer."
+    },
+    {
+      "unit_id": "paper:ctx-compression-headroom-lessons",
+      "document_id": "ctx-compression-headroom-lessons",
+      "document_rev": "a658c2c6a9590baff73eab408e04723a",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "External-evidence lane converting Headroom code, issue census, self-audit, and benchmark evidence into native-only verdicts and five charter laws.",
+      "opening_and_criteria": "blocks[0]-[5] identify ownership, corpus, and metrics. The opening says this lane builds no code and supplies evidence, preventing design advice from being mistaken for shipped behavior.",
+      "outline_and_hierarchy": "60 blocks are long but systematic: architecture verdict, laws, cage, issue taxonomy, savings calibration, corrections, current system, risks, and coverage.",
+      "human_voice_and_precision": "Forensic and skeptical. It separates reject, adopt-natively, and test-first, and names moving-upstream uncertainty.",
+      "compression_and_restraint": "Keep as evidence appendix; use the capstone for ordinary readers and this paper for audit/research readers.",
+      "evidence_and_truth": "blocks[17] turns failure taxonomy into per-emitter laws; blocks[40] corrects prior-paper TTL, hash, issue-count, and whale claims.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[17]",
+          "evidence": "Five laws translate recurring failures into per-emitter proof obligations rather than importing a proxy.",
+          "lesson": "Mine external failure for native constraints, not dependency enthusiasm."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[53]",
+          "evidence": "Citations are pinned to a fast-moving 2026-07-23 clone and one cache-priced benchmark may never have run.",
+          "lesson": "External-state claims age quickly and must stay revision/date scoped."
+        }
+      ],
+      "duplicate_disposition": "Depth lane feeding the capstone; no merge needed. Cross-link corrections to any older Headroom study that repeats superseded facts.",
+      "reader_risks": [
+        "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+        "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+        "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+        "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+      ],
+      "rationale": "Keep: explicit evidence ownership, source dating, corrections, and bounded native-only verdict make the long appendix trustworthy."
+    },
+    {
+      "unit_id": "paper:ctx-compression-spend-census",
+      "document_id": "ctx-compression-spend-census",
+      "document_rev": "3940b779767f9d6aaf07e6672b471331",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Internal measurement lane ranking context-compression work using fleet spend, field usage, harness overlap, and pre-registered duels.",
+      "opening_and_criteria": "blocks[0]-[3] lead with the scope and the two scale reversals. The thesis distinguishes measurements from explicitly demoted pilot claims.",
+      "outline_and_hierarchy": "59 blocks follow census, first-party spend, fields, serialization, meter, harness, external benchmark, ranked wins, duel, risks, and coverage.",
+      "human_voice_and_precision": "Excellent empirical voice: it admits when a larger sample reverses the easy story and refuses to convert bytes to tokens without count_tokens.",
+      "compression_and_restraint": "Keep the full audit; a compact dashboard can project the canonical rankings and pending experiments.",
+      "evidence_and_truth": "blocks[7]-[8] overturn both pilot direction and whale distribution; blocks[24] prevents unmeasured token claims.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "Fleet evidence reverses the input-side priority, so the charter reorders output work first.",
+          "lesson": "Let scale corrections change the plan, not merely the footnote."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[24]",
+          "evidence": "All serialization gains are bytes only because no count_tokens-capable key was reachable.",
+          "lesson": "Calling byte savings token savings would violate the declared meter contract."
+        }
+      ],
+      "duplicate_disposition": "Measurement authority feeding the capstone and later waves. Keep separate from doctrinal lanes and link rankings to implementation outcomes.",
+      "reader_risks": [
+        "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+        "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+        "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+        "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+      ],
+      "rationale": "Keep: rerunnable censuses, explicit demotions, and unit discipline make this the strongest measurement authority in the set."
+    },
+    {
+      "unit_id": "paper:ctx-compression-taskboard-flagship",
+      "document_id": "ctx-compression-taskboard-flagship",
+      "document_rev": "ace7021a9cfe9799edc3e38958e4052b",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Worked flagship for a two-level task board using compact board truth, full focused detail, rev cache, event addresses, and explicit staleness.",
+      "opening_and_criteria": "blocks[0]-[5] explain the 9.14 MB paint, 32% corpus visibility, and intended split. It remains a design lane rather than a shipped outcome.",
+      "outline_and_hierarchy": "64 blocks comprehensively specify card fields, cache/invalidation, ETag, failure honesty, measurements, architecture, files, risks, and coverage.",
+      "human_voice_and_precision": "Precise, operational, and unusually attentive to stale-data honesty. Internal contract lore and open decisions make it hard for a product reader.",
+      "compression_and_restraint": "Prepend ratified design state and implementation status; move consumer census and file map behind builder-only sections.",
+      "evidence_and_truth": "blocks[33]-[34] ground the design in live sizes and reveal that the current board silently shows only 32% of tasks.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[34]",
+          "evidence": "Live measurement shows 3,118 tasks but a 1,000-task clamp; un-truncation, not bytes alone, is the primary UX win.",
+          "lesson": "Tie compression work to restored truth, not only smaller payloads."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[53]",
+          "evidence": "The proposal explicitly dismantles frozen D12/D13/D28 contracts and says they must be amended, not silently contradicted.",
+          "lesson": "Until ratification/status is surfaced, builders may implement against conflicting frozen law."
+        }
+      ],
+      "duplicate_disposition": "Flagship worked example summarized by the capstone. Keep its detailed card/invalidation authority separate and link later taskboard build receipts.",
+      "reader_risks": [
+        "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+        "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+        "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+        "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+      ],
+      "rationale": "Repair: measured and builder-ready, but design-only state, open rulings, and frozen-contract conflicts require a current ratification/build card."
+    },
+    {
+      "unit_id": "paper:ctx-compression-view-tiers-seam",
+      "document_id": "ctx-compression-view-tiers-seam",
+      "document_rev": "0d1dafe21a10db854bdad2ca612bbeb4",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Presentation/security lane defining tier grammar, fieldful/blobful boundary, and fail-closed obligations for new readers and emitters.",
+      "opening_and_criteria": "blocks[0]-[5] explicitly say nothing was built and this is a wave-start plan. Later crown and Wave 1 resolve several calls, but this Paper remains pre-ratification.",
+      "outline_and_hierarchy": "55 blocks cover grammar, proof patterns, emitter census, nil inversion, task-embed gap, export law, rev convergence, anchors, risks, and coverage.",
+      "human_voice_and_precision": "Security voice is careful: latent issues are called latent, dead paths are proven dead, and every new green must be mutation-capable.",
+      "compression_and_restraint": "Keep the audit, but add ratification and build-status overlays for the nil flip, query seal, rev/profile ruling, and historical-read policy.",
+      "evidence_and_truth": "blocks[17] states a mutation-proven per-slice obligation; blocks[25] identifies the unsealed task-embed chain and its current latent severity.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[17]",
+          "evidence": "Every new view/handle/emitter must prove its fail-closed check can fail by planting a violating case.",
+          "lesson": "A green that cannot detect the intended breach is not evidence."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[47]",
+          "evidence": "The risk section names dirty in-flight files and requires re-survey at build time; several anchors and calls are snapshot-bound.",
+          "lesson": "A builder may treat dated prep anchors as current code truth unless the paper links forward to implementation evidence."
+        }
+      ],
+      "duplicate_disposition": "Security/presentation depth lane feeding the capstone; retain rather than merge. Forward-link the Wave-1 seal and nil-polarity receipts.",
+      "reader_risks": [
+        "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+        "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+        "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+        "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+      ],
+      "rationale": "Repair: excellent fail-closed design, but snapshot-bound prep status must be reconciled with later ratification and Wave-1 execution."
+    },
+    {
+      "unit_id": "paper:ctx-compression-wave-2026-07-24",
+      "document_id": "ctx-compression-wave-2026-07-24",
+      "document_rev": "7cf14df5b436656bc0bb350b58224b4a",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-1 execution authority for the born-brief capabilities manifest plus query-envelope and nil-polarity security seals.",
+      "opening_and_criteria": "blocks[0]-[3] lead with CLOSED, reviewed date, A- grade, exact objective, and ratified program context. The debrief preserves both shipped and deliberately sequenced work.",
+      "outline_and_hierarchy": "62 blocks include wish, direction, survey/decisions, slice receipts, stalled/deferred, audit, grade, and next wave. It is long but terminal truth is front-loaded.",
+      "human_voice_and_precision": "Concrete and honest: it distinguishes bytes from tokens, local gates from CI, and designed deferral from stalled work.",
+      "compression_and_restraint": "Keep. An email projection can use the front card and blocks[50]-[61] without carrying the full strategy history.",
+      "evidence_and_truth": "blocks[50]-[53] record four PR-specific receipts and exact proof boundaries; blocks[55]-[59] explain deferred slices and why the grade stops at A-.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[50]",
+          "evidence": "The manifest slice proves invoke completeness across 142 commands, hostile collision safety, full byte identity, and fixture self-consistency.",
+          "lesson": "A compressed contract must remain complete and offer a byte-identical escape hatch."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[59]",
+          "evidence": "Token count and live smoke did not run, and one security slice had no local test execution; the headline remains directional in tokens.",
+          "lesson": "Readers must not translate a 3.62x byte win into token or live proof before the sequenced gates run."
+        }
+      ],
+      "duplicate_disposition": "Implementation successor to the capstone and lane plans, but it covers only Wave 1. Keep as outcome authority and link backward for doctrine.",
+      "reader_risks": [
+        "Studio: lead with a dated authority/status card and collapse lane appendices, tables, and file maps behind named evidence sections.",
+        "TUI80: summarize wide matrices, charts, code anchors, and long judgment-call lists before preserving exact detail in the Paper.",
+        "email: extract thesis, current status, strongest number, residual risk, and next decision; link the durable Paper rather than inlining the investigation.",
+        "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "CLI/API: preserve ids, revisions, byte/token units, sample sizes, confidence limits, and the distinction among proposed, measured, ratified, built, merged, and live-proven states."
+      ],
+      "rationale": "Keep: current CLOSED front matter, concrete PR evidence, deliberate deferrals, and bounded A- grading make this a trustworthy wave record."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}

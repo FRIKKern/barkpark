@@ -1,0 +1,284 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report-validation/v1",
+  "assignment_id": "PPCC2-S017",
+  "valid": true,
+  "checks": [
+    {
+      "name": "bound-snapshot-sha",
+      "status": "PASS",
+      "evidence": "5dec9d93266dfb705fca8e3cf0c94f1e0c34ffd10b24939ca0dbe26012f1019c"
+    },
+    {
+      "name": "source-snapshot-sha",
+      "status": "PASS",
+      "evidence": "dfc67e28c6ff8fec03e19e6c9895092e01ac0dc0fa4403bb231bc5ed69968786"
+    },
+    {
+      "name": "bound-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S017",
+        "status": "cyclefleet_bound",
+        "unit_count": 10
+      }
+    },
+    {
+      "name": "immutable-wave-binding",
+      "status": "PASS",
+      "evidence": {
+        "status": "cyclefleet_bound",
+        "wave_id": "paper-perfection-successor-wave-2026-07-29",
+        "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+        "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+        "source_snapshot_sha256": "dfc67e28c6ff8fec03e19e6c9895092e01ac0dc0fa4403bb231bc5ed69968786"
+      }
+    },
+    {
+      "name": "report-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S017",
+        "worker": "worker-2"
+      }
+    },
+    {
+      "name": "ordered-checked-unit-ids",
+      "status": "PASS",
+      "evidence": [
+        "paper:context-compression-benchmark",
+        "paper:context-compression-benchmark-gen1",
+        "paper:criminality-constraint-frontiers-draft",
+        "paper:ctx-compression-capstone",
+        "paper:ctx-compression-handle-doctrine",
+        "paper:ctx-compression-headroom-lessons",
+        "paper:ctx-compression-spend-census",
+        "paper:ctx-compression-taskboard-flagship",
+        "paper:ctx-compression-view-tiers-seam",
+        "paper:ctx-compression-wave-2026-07-24"
+      ]
+    },
+    {
+      "name": "one-verdict-per-unit",
+      "status": "PASS",
+      "evidence": 10
+    },
+    {
+      "name": "verdict-metadata-pinned",
+      "status": "PASS",
+      "evidence": "all document ids and immutable revisions match"
+    },
+    {
+      "name": "allowed-verdicts-and-counts",
+      "status": "PASS",
+      "evidence": {
+        "repair": 6,
+        "keep": 4
+      }
+    },
+    {
+      "name": "editorial-dimensions-complete",
+      "status": "PASS",
+      "evidence": [
+        "compression_and_restraint",
+        "duplicate_disposition",
+        "evidence_and_truth",
+        "human_voice_and_precision",
+        "opening_and_criteria",
+        "outline_and_hierarchy",
+        "purpose_and_larger_goal",
+        "rationale"
+      ]
+    },
+    {
+      "name": "specific-existing-evidence-refs",
+      "status": "PASS",
+      "evidence": [
+        {
+          "document_id": "context-compression-benchmark",
+          "ref": "blocks[8]",
+          "exists": true
+        },
+        {
+          "document_id": "context-compression-benchmark",
+          "ref": "blocks[24]",
+          "exists": true
+        },
+        {
+          "document_id": "context-compression-benchmark-gen1",
+          "ref": "blocks[13]",
+          "exists": true
+        },
+        {
+          "document_id": "context-compression-benchmark-gen1",
+          "ref": "blocks[9]",
+          "exists": true
+        },
+        {
+          "document_id": "criminality-constraint-frontiers-draft",
+          "ref": "blocks[48]",
+          "exists": true
+        },
+        {
+          "document_id": "criminality-constraint-frontiers-draft",
+          "ref": "blocks[58]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-capstone",
+          "ref": "blocks[73]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-capstone",
+          "ref": "blocks[93]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-handle-doctrine",
+          "ref": "blocks[34]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-handle-doctrine",
+          "ref": "blocks[49]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-headroom-lessons",
+          "ref": "blocks[17]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-headroom-lessons",
+          "ref": "blocks[53]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-spend-census",
+          "ref": "blocks[7]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-spend-census",
+          "ref": "blocks[24]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-taskboard-flagship",
+          "ref": "blocks[34]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-taskboard-flagship",
+          "ref": "blocks[53]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-view-tiers-seam",
+          "ref": "blocks[17]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-view-tiers-seam",
+          "ref": "blocks[47]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-wave-2026-07-24",
+          "ref": "blocks[50]",
+          "exists": true
+        },
+        {
+          "document_id": "ctx-compression-wave-2026-07-24",
+          "ref": "blocks[59]",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "five-reader-risks",
+      "status": "PASS",
+      "evidence": [
+        "CLI/API",
+        "Studio",
+        "TUI80",
+        "email",
+        "public"
+      ]
+    },
+    {
+      "name": "read-only-mutation-attestation",
+      "status": "PASS",
+      "evidence": {
+        "production_papers_mutated": false,
+        "cyclefleet_mutated": false,
+        "bp_cycle_assign_called": false,
+        "bp_cycle_result_called": false
+      }
+    },
+    {
+      "name": "unvisited-scope-empty",
+      "status": "PASS",
+      "evidence": []
+    },
+    {
+      "name": "readbacks-exact-and-hashed",
+      "status": "PASS",
+      "evidence": "all 10 raw ids/revisions and SHA-256 receipts match"
+    },
+    {
+      "name": "native-and-legacy-representation",
+      "status": "PASS",
+      "evidence": {
+        "native_block_total": 556
+      }
+    },
+    {
+      "name": "purpose-based-duplicate-analysis",
+      "status": "PASS",
+      "evidence": [
+        {
+          "candidate_set": [
+            "context-compression-benchmark",
+            "context-compression-benchmark-gen1"
+          ],
+          "basis": "Same evolving benchmark but distinct authority layers: protocol/registry versus one generation’s measured results.",
+          "disposition": "Keep separate; make framework status point to latest generation and preserve preregistration versus observed policy."
+        },
+        {
+          "candidate_set": [
+            "ctx-compression-capstone",
+            "ctx-compression-headroom-lessons",
+            "ctx-compression-spend-census",
+            "ctx-compression-handle-doctrine",
+            "ctx-compression-view-tiers-seam",
+            "ctx-compression-taskboard-flagship"
+          ],
+          "basis": "Crown plus five independently researched depth lanes. The capstone deliberately resolves their collisions and indexes their evidence.",
+          "disposition": "Use capstone as current doctrine/index; retain lanes as source authority and add ratification/outcome links rather than merging 388 blocks of evidence."
+        },
+        {
+          "candidate_set": [
+            "ctx-compression-capstone",
+            "ctx-compression-wave-2026-07-24"
+          ],
+          "basis": "Program plan and first execution outcome share doctrine but have different temporal roles. Wave 1 supersedes only the crown’s pre-ratification status, not its multi-wave rationale.",
+          "disposition": "Keep both; repair crown status and make Wave 1 the authority for shipped/deferred Wave-1 facts."
+        },
+        {
+          "candidate_set": [
+            "ctx-compression-handle-doctrine",
+            "ctx-compression-taskboard-flagship",
+            "ctx-compression-view-tiers-seam"
+          ],
+          "basis": "Three lanes overlap on rev carriage, caching, and view profiles; the capstone explicitly records the collision and rules brief v3 plus board profile.",
+          "disposition": "Preserve specialized authorities, link to crown ruling, and remove competing pre-ratification status language from projections."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  }
+}

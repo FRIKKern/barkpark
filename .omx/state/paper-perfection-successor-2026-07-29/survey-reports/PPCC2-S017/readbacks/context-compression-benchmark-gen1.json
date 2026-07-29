@@ -1,0 +1,2080 @@
+{
+  "_createdAt": "2026-07-13T15:30:57.601099Z",
+  "_draft": false,
+  "_id": "context-compression-benchmark-gen1",
+  "_publishedId": "context-compression-benchmark-gen1",
+  "_rev": "db13f9233c92ef8f427d12b414e4d8f1",
+  "_type": "paper",
+  "_updatedAt": "2026-07-13T15:30:57.601099Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "text": "Generation 1 · results & routing policy",
+      "type": "eyebrow"
+    },
+    {
+      "id": "block-1",
+      "level": 1,
+      "text": "Context-compression benchmark — Generation 1 results",
+      "type": "heading"
+    },
+    {
+      "id": "block-2",
+      "items": [
+        "72 agents",
+        "47 cells",
+        "9 strategies",
+        "the winner surprised us"
+      ],
+      "type": "byline"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "I45-bare"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (image downscaled to 45%) was "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "both the most accurate and the cheapest"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " — 7/7 across every sensitivity class, including the exact 40-char hash and the live credential, at "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "3.4× fewer tokens than bare text"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". On these (small) contexts, moderate optical compression is lossless "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "and"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " a token win. But the floor is sharp: 33% silently corrupts, and 60% is a trap."
+        }
+      ],
+      "id": "block-3",
+      "title": "Headline: 45% image won outright",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Leaderboard (by quality-per-1k-tokens)",
+      "type": "heading"
+    },
+    {
+      "header": [
+        "Arm",
+        "Accuracy",
+        "Tokens",
+        "Quality/1k",
+        "n"
+      ],
+      "id": "block-5",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "I45-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100%"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "135"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "51.9"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "7"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I33-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "43%"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "74"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "40.5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "7"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I45-full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100%"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "30.0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I60-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "57%"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "237"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "16.9"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "7"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "H33-full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100%"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "187"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "16.0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "T-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100%"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "465"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "15.1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "7"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "H45-full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100%"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "201"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "14.9"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "T-full"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100%"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "266"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "11.3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I100-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100%"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "661"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "10.6"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "7"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "block-6",
+      "level": 2,
+      "text": "Routing policy — best arm per sensitivity",
+      "type": "heading"
+    },
+    {
+      "header": [
+        "Sensitivity",
+        "Best arm",
+        "Key caveat"
+      ],
+      "id": "block-7",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "verbatim-lo"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "I45-bare"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reproduced the full postgres credential string character-exact at just 24 tokens, cheapest correct arm (T-bare/I100 also exact but 2-5x costlier). Har…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "verbatim-hi"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "I45-bare"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reproduced the 40-char SHA exactly AND self-rated 'clear' at 14 tokens — more compressed yet more confident than I100-bare (correct but 'partial'). Sh…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "aggregate"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "I45-bare"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Correct count (5) at 14 tokens and reliable everywhere else. I33-bare is also correct at 8 tokens but untrustworthy on adjacent cells. Surprising mid-…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "gist"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "I45-bare"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Correct on both gist cells (t4, c2) at the lowest cost (24 and 12 tokens). Weak axis is FORM: output drifts verbose (t4) and drops to 'partial' legibi…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "multi-hop-reasoning"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "I45-bare"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Both hops exact (c1 api,session at 39 tok; c3 auth at 8 tok) — cheapest reliable arm; all full arms are also 3/3 but cost 2-3x per hop. Reasoning tole…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "code-locate"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "I45-bare"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "UNTESTED — no code-locate cell exists in this grid, so this is extrapolation from I45-bare's dominance on adjacent exact-recall and reasoning classes.…"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "block-8",
+      "level": 2,
+      "text": "The surprises",
+      "type": "heading"
+    },
+    {
+      "id": "block-9",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Compression is non-monotonic. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "I60-bare (60%) scored 4/7 while I45-bare (45%) scored 7/7 — less compression, worse answers. A leaner arm beat a richer one."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Failures are silent and confident. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "I60 and I33 returned wrong hashes, an off-by-one count, and a corrupted credential — all self-reported 'clear'. Self-report is uncalibrated; never trust a sub-45% 'clear'."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "45% is a hard fidelity floor for exact strings. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "At 33% a live credential lost 4+ characters with no flag. Above 45%, reasoning even tolerates compression well."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Hybrid was dead weight — here. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "H45-full doubled tokens over I45-full for zero accuracy gain, because no task actually stressed exact code reading. Its value is unproven, not disproven — Gen 2 adds code-fidelity cells to test it."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-10",
+      "level": 2,
+      "text": "Interesting head-to-heads",
+      "type": "heading"
+    },
+    {
+      "header": [
+        "Matchup",
+        "Winner",
+        "Takeaway"
+      ],
+      "id": "block-11",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "I45-bare vs I100-bare (compression sweet spot: 45% v"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "I45-bare"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Compressing the image to 45% preserved perfect accuracy across every sensitivity while cutting tokens ~5x — and on the hash cell the compressed arm rated 'clear' where fu…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "T-bare vs I45-full (does enrichment+compression beat"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "I45-full"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "On the cells both arms ran, compressed-image context matched bare text answer-for-answer at ~40% lower cost — enrichment+compression pays off, though bare text still cove…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "I45-full vs H45-full (pure compressed image vs hybri"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "I45-full"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The hybrid code-safety overlay doubled token cost and bought zero accuracy on this slice — the pure 45% image already carried enough signal, so the H-overlay is dead weig…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "I45-bare vs I33-bare (how far can density be pushed "
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "I45-bare"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "45% is the fidelity floor: dropping to 33% roughly halves cost but silently corrupts a live credential (no flag), can't read the hash, drops the gist concept, and mis-hop…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "T-full vs H45-full (is optically packing the metadat"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "H45-full"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Optically packing full context (H45) beat plain full text by ~25% tokens at identical accuracy — a real if modest win, but both are dominated by I45-full at 100 tok, so p…"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "block-12",
+      "level": 2,
+      "text": "Honest scope",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "These contexts are "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "small"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (a few lines). At that size 45% glyphs stay legible; our earlier dedicated fidelity test showed verbatim collapse at higher densities on larger pages. So the finding is scoped: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "the fidelity floor moves with content size and density"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". The real target — large file-documents — needs a size axis, which Gen 2+ should add. Hybrid and enrichment ran only n=3 on easy cells; treat those rows as provisional."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-14",
+      "level": 2,
+      "text": "Generation 2 — the loop's own proposal",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The meta-analyst proposed these, each aimed at an open question:"
+        }
+      ],
+      "id": "block-15",
+      "type": "paragraph"
+    },
+    {
+      "header": [
+        "New arm",
+        "Probes"
+      ],
+      "id": "block-16",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "I33-vote3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Whether majority-voting over cheap reads recovers the exact-recall (t1 credential, verbatim-hi hash) that single I33-bare silently corrupts. Distinguishes STOCHASTIC loss (voting f…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I40-bare"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Locates the exact verbatim fidelity cliff between known-broken 33% and known-good 45%. If 40% reproduces the hash/credential char-exact, the floor drops and every exact cell saves …"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I45-edges"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Isolates whether the reachability EDGES alone drive I45-full's multi-hop wins. Paired with I45-summary this splits the edges-only vs summary-only lever: if edges-only matches full …"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I45-summary"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Isolates whether summary alone drives gist wins AND whether canonical-summary enrichment repairs I45-bare's known FORM weakness (verbose/partial-legible gist output). If it fixes f…"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "Ipack-bitmap5x8"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Whether structured bitmap packing beats naive density-downscaling at EQUAL tokens for verbatim exact-recall. If bitmap5x8 reproduces the hash/indented-code that 33%-downscaled I33 …"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "I33-cgre"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Whether adaptive escalation pays only on hard cells: cheap (~2x74) on easy lookups, one 45% re-read on contested exact strings. Deliberately gates on cross-sample disagreement, NOT…"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Retire (dominated): "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "code",
+          "value": "I60-bare, I100-bare, T-full, H33-full"
+        },
+        {
+          "type": "text",
+          "value": ". "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "New tasks: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "t-code-symbol [code-locate], t-code-indent [code-locate/verbatim], t-agg-distractor [aggregate], t-gist-canonical [gist], t-hop-deep [multi-hop-reasoning], t-verbatim-confusable [verbatim-hi], t-secret-leak [verbatim-lo/safety]"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-18",
+      "type": "divider"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Framework: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "code",
+          "value": "context-compression-benchmark"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "thesis: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "code",
+          "value": "optical-compression-text-as-image-tokens"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "block-19",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "text": "Generation 1 · results & routing policy",
+        "type": "eyebrow"
+      },
+      {
+        "id": "block-1",
+        "level": 1,
+        "text": "Context-compression benchmark — Generation 1 results",
+        "type": "heading"
+      },
+      {
+        "id": "block-2",
+        "items": [
+          "72 agents",
+          "47 cells",
+          "9 strategies",
+          "the winner surprised us"
+        ],
+        "type": "byline"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "I45-bare"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " (image downscaled to 45%) was "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "both the most accurate and the cheapest"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — 7/7 across every sensitivity class, including the exact 40-char hash and the live credential, at "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "3.4× fewer tokens than bare text"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". On these (small) contexts, moderate optical compression is lossless "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "and"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " a token win. But the floor is sharp: 33% silently corrupts, and 60% is a trap."
+          }
+        ],
+        "id": "block-3",
+        "title": "Headline: 45% image won outright",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "Leaderboard (by quality-per-1k-tokens)",
+        "type": "heading"
+      },
+      {
+        "header": [
+          "Arm",
+          "Accuracy",
+          "Tokens",
+          "Quality/1k",
+          "n"
+        ],
+        "id": "block-5",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "I45-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100%"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "135"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "51.9"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "7"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I33-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "43%"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "74"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "40.5"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "7"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I45-full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100%"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "30.0"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "3"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I60-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "57%"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "237"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "16.9"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "7"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "H33-full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100%"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "187"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "16.0"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "3"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "T-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100%"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "465"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "15.1"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "7"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "H45-full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100%"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "201"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "14.9"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "3"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "T-full"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100%"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "266"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "11.3"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "3"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I100-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100%"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "661"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "10.6"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "7"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "block-6",
+        "level": 2,
+        "text": "Routing policy — best arm per sensitivity",
+        "type": "heading"
+      },
+      {
+        "header": [
+          "Sensitivity",
+          "Best arm",
+          "Key caveat"
+        ],
+        "id": "block-7",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "verbatim-lo"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "I45-bare"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Reproduced the full postgres credential string character-exact at just 24 tokens, cheapest correct arm (T-bare/I100 also exact but 2-5x costlier). Har…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "verbatim-hi"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "I45-bare"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Reproduced the 40-char SHA exactly AND self-rated 'clear' at 14 tokens — more compressed yet more confident than I100-bare (correct but 'partial'). Sh…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "aggregate"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "I45-bare"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Correct count (5) at 14 tokens and reliable everywhere else. I33-bare is also correct at 8 tokens but untrustworthy on adjacent cells. Surprising mid-…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "gist"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "I45-bare"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Correct on both gist cells (t4, c2) at the lowest cost (24 and 12 tokens). Weak axis is FORM: output drifts verbose (t4) and drops to 'partial' legibi…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "multi-hop-reasoning"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "I45-bare"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Both hops exact (c1 api,session at 39 tok; c3 auth at 8 tok) — cheapest reliable arm; all full arms are also 3/3 but cost 2-3x per hop. Reasoning tole…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "code-locate"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "I45-bare"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "UNTESTED — no code-locate cell exists in this grid, so this is extrapolation from I45-bare's dominance on adjacent exact-recall and reasoning classes.…"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "block-8",
+        "level": 2,
+        "text": "The surprises",
+        "type": "heading"
+      },
+      {
+        "id": "block-9",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Compression is non-monotonic. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "I60-bare (60%) scored 4/7 while I45-bare (45%) scored 7/7 — less compression, worse answers. A leaner arm beat a richer one."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Failures are silent and confident. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "I60 and I33 returned wrong hashes, an off-by-one count, and a corrupted credential — all self-reported 'clear'. Self-report is uncalibrated; never trust a sub-45% 'clear'."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "45% is a hard fidelity floor for exact strings. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "At 33% a live credential lost 4+ characters with no flag. Above 45%, reasoning even tolerates compression well."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Hybrid was dead weight — here. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "H45-full doubled tokens over I45-full for zero accuracy gain, because no task actually stressed exact code reading. Its value is unproven, not disproven — Gen 2 adds code-fidelity cells to test it."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-10",
+        "level": 2,
+        "text": "Interesting head-to-heads",
+        "type": "heading"
+      },
+      {
+        "header": [
+          "Matchup",
+          "Winner",
+          "Takeaway"
+        ],
+        "id": "block-11",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "I45-bare vs I100-bare (compression sweet spot: 45% v"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "I45-bare"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Compressing the image to 45% preserved perfect accuracy across every sensitivity while cutting tokens ~5x — and on the hash cell the compressed arm rated 'clear' where fu…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "T-bare vs I45-full (does enrichment+compression beat"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "I45-full"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "On the cells both arms ran, compressed-image context matched bare text answer-for-answer at ~40% lower cost — enrichment+compression pays off, though bare text still cove…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "I45-full vs H45-full (pure compressed image vs hybri"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "I45-full"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "The hybrid code-safety overlay doubled token cost and bought zero accuracy on this slice — the pure 45% image already carried enough signal, so the H-overlay is dead weig…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "I45-bare vs I33-bare (how far can density be pushed "
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "I45-bare"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "45% is the fidelity floor: dropping to 33% roughly halves cost but silently corrupts a live credential (no flag), can't read the hash, drops the gist concept, and mis-hop…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "T-full vs H45-full (is optically packing the metadat"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "H45-full"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Optically packing full context (H45) beat plain full text by ~25% tokens at identical accuracy — a real if modest win, but both are dominated by I45-full at 100 tok, so p…"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "block-12",
+        "level": 2,
+        "text": "Honest scope",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "These contexts are "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "small"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " (a few lines). At that size 45% glyphs stay legible; our earlier dedicated fidelity test showed verbatim collapse at higher densities on larger pages. So the finding is scoped: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "the fidelity floor moves with content size and density"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". The real target — large file-documents — needs a size axis, which Gen 2+ should add. Hybrid and enrichment ran only n=3 on easy cells; treat those rows as provisional."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-14",
+        "level": 2,
+        "text": "Generation 2 — the loop's own proposal",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The meta-analyst proposed these, each aimed at an open question:"
+          }
+        ],
+        "id": "block-15",
+        "type": "paragraph"
+      },
+      {
+        "header": [
+          "New arm",
+          "Probes"
+        ],
+        "id": "block-16",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "I33-vote3"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Whether majority-voting over cheap reads recovers the exact-recall (t1 credential, verbatim-hi hash) that single I33-bare silently corrupts. Distinguishes STOCHASTIC loss (voting f…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I40-bare"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Locates the exact verbatim fidelity cliff between known-broken 33% and known-good 45%. If 40% reproduces the hash/credential char-exact, the floor drops and every exact cell saves …"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I45-edges"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Isolates whether the reachability EDGES alone drive I45-full's multi-hop wins. Paired with I45-summary this splits the edges-only vs summary-only lever: if edges-only matches full …"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I45-summary"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Isolates whether summary alone drives gist wins AND whether canonical-summary enrichment repairs I45-bare's known FORM weakness (verbose/partial-legible gist output). If it fixes f…"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "Ipack-bitmap5x8"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Whether structured bitmap packing beats naive density-downscaling at EQUAL tokens for verbatim exact-recall. If bitmap5x8 reproduces the hash/indented-code that 33%-downscaled I33 …"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "I33-cgre"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Whether adaptive escalation pays only on hard cells: cheap (~2x74) on easy lookups, one 45% re-read on contested exact strings. Deliberately gates on cross-sample disagreement, NOT…"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Retire (dominated): "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "code",
+            "value": "I60-bare, I100-bare, T-full, H33-full"
+          },
+          {
+            "type": "text",
+            "value": ". "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "New tasks: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "t-code-symbol [code-locate], t-code-indent [code-locate/verbatim], t-agg-distractor [aggregate], t-gist-canonical [gist], t-hop-deep [multi-hop-reasoning], t-verbatim-confusable [verbatim-hi], t-secret-leak [verbatim-lo/safety]"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "id": "block-17",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-18",
+        "type": "divider"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Framework: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "code",
+            "value": "context-compression-benchmark"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "thesis: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "code",
+            "value": "optical-compression-text-as-image-tokens"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "id": "block-19",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">Generation 1 · results &amp; routing policy</p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Context-compression benchmark — Generation 1 results</h1><p style=\"border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px\">72 agents · 47 cells · 9 strategies · the winner surprised us</p><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">Headline: 45% image won outright</div><span><span style=\"font-weight:bold\">I45-bare</span> (image downscaled to 45%) was <span style=\"font-weight:bold\">both the most accurate and the cheapest</span> — 7/7 across every sensitivity class, including the exact 40-char hash and the live credential, at <span style=\"font-weight:bold\">3.4× fewer tokens than bare text</span>. On these (small) contexts, moderate optical compression is lossless <span style=\"font-weight:bold\">and</span> a token win. But the floor is sharp: 33% silently corrupts, and 60% is a trap.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Leaderboard (by quality-per-1k-tokens)</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Arm</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Accuracy</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Tokens</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Quality/1k</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>n</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I45-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100%</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>135</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">51.9</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>7</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I33-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>43%</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>74</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>40.5</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>7</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I45-full</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100%</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>30.0</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>3</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I60-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>57%</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>237</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>16.9</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>7</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">H33-full</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100%</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>187</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>16.0</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>3</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">T-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100%</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>465</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>15.1</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>7</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">H45-full</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100%</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>201</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>14.9</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>3</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">T-full</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100%</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>266</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>11.3</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>3</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I100-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100%</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>661</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>10.6</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>7</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Routing policy — best arm per sensitivity</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Sensitivity</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Best arm</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Key caveat</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">verbatim-lo</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">I45-bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Reproduced the full postgres credential string character-exact at just 24 tokens, cheapest correct arm (T-bare/I100 also exact but 2-5x costlier). Har…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">verbatim-hi</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">I45-bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Reproduced the 40-char SHA exactly AND self-rated &#39;clear&#39; at 14 tokens — more compressed yet more confident than I100-bare (correct but &#39;partial&#39;). Sh…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">aggregate</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">I45-bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Correct count (5) at 14 tokens and reliable everywhere else. I33-bare is also correct at 8 tokens but untrustworthy on adjacent cells. Surprising mid-…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">gist</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">I45-bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Correct on both gist cells (t4, c2) at the lowest cost (24 and 12 tokens). Weak axis is FORM: output drifts verbose (t4) and drops to &#39;partial&#39; legibi…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">multi-hop-reasoning</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">I45-bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Both hops exact (c1 api,session at 39 tok; c3 auth at 8 tok) — cheapest reliable arm; all full arms are also 3/3 but cost 2-3x per hop. Reasoning tole…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">code-locate</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">I45-bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>UNTESTED — no code-locate cell exists in this grid, so this is extrapolation from I45-bare&#39;s dominance on adjacent exact-recall and reasoning classes.…</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The surprises</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Compression is non-monotonic. </span>I60-bare (60%) scored 4/7 while I45-bare (45%) scored 7/7 — less compression, worse answers. A leaner arm beat a richer one.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Failures are silent and confident. </span>I60 and I33 returned wrong hashes, an off-by-one count, and a corrupted credential — all self-reported &#39;clear&#39;. Self-report is uncalibrated; never trust a sub-45% &#39;clear&#39;.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">45% is a hard fidelity floor for exact strings. </span>At 33% a live credential lost 4+ characters with no flag. Above 45%, reasoning even tolerates compression well.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Hybrid was dead weight — here. </span>H45-full doubled tokens over I45-full for zero accuracy gain, because no task actually stressed exact code reading. Its value is unproven, not disproven — Gen 2 adds code-fidelity cells to test it.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Interesting head-to-heads</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Matchup</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Winner</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Takeaway</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>I45-bare vs I100-bare (compression sweet spot: 45% v</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">I45-bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Compressing the image to 45% preserved perfect accuracy across every sensitivity while cutting tokens ~5x — and on the hash cell the compressed arm rated &#39;clear&#39; where fu…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>T-bare vs I45-full (does enrichment+compression beat</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">I45-full</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>On the cells both arms ran, compressed-image context matched bare text answer-for-answer at ~40% lower cost — enrichment+compression pays off, though bare text still cove…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>I45-full vs H45-full (pure compressed image vs hybri</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">I45-full</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>The hybrid code-safety overlay doubled token cost and bought zero accuracy on this slice — the pure 45% image already carried enough signal, so the H-overlay is dead weig…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>I45-bare vs I33-bare (how far can density be pushed </span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">I45-bare</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>45% is the fidelity floor: dropping to 33% roughly halves cost but silently corrupts a live credential (no flag), can&#39;t read the hash, drops the gist concept, and mis-hop…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>T-full vs H45-full (is optically packing the metadat</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">H45-full</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Optically packing full context (H45) beat plain full text by ~25% tokens at identical accuracy — a real if modest win, but both are dominated by I45-full at 100 tok, so p…</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Honest scope</h2><p>These contexts are <span style=\"font-weight:bold\">small</span> (a few lines). At that size 45% glyphs stay legible; our earlier dedicated fidelity test showed verbatim collapse at higher densities on larger pages. So the finding is scoped: <span style=\"font-weight:bold\">the fidelity floor moves with content size and density</span>. The real target — large file-documents — needs a size axis, which Gen 2+ should add. Hybrid and enrichment ran only n=3 on easy cells; treat those rows as provisional.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Generation 2 — the loop&#39;s own proposal</h2><p>The meta-analyst proposed these, each aimed at an open question:</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>New arm</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Probes</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I33-vote3</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Whether majority-voting over cheap reads recovers the exact-recall (t1 credential, verbatim-hi hash) that single I33-bare silently corrupts. Distinguishes STOCHASTIC loss (voting f…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I40-bare</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Locates the exact verbatim fidelity cliff between known-broken 33% and known-good 45%. If 40% reproduces the hash/credential char-exact, the floor drops and every exact cell saves …</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I45-edges</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Isolates whether the reachability EDGES alone drive I45-full&#39;s multi-hop wins. Paired with I45-summary this splits the edges-only vs summary-only lever: if edges-only matches full …</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I45-summary</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Isolates whether summary alone drives gist wins AND whether canonical-summary enrichment repairs I45-bare&#39;s known FORM weakness (verbose/partial-legible gist output). If it fixes f…</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Ipack-bitmap5x8</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Whether structured bitmap packing beats naive density-downscaling at EQUAL tokens for verbatim exact-recall. If bitmap5x8 reproduces the hash/indented-code that 33%-downscaled I33 …</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I33-cgre</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Whether adaptive escalation pays only on hard cells: cheap (~2x74) on easy lookups, one 45% re-read on contested exact strings. Deliberately gates on cross-sample disagreement, NOT…</span></td></tr></tbody></table><p><span style=\"font-weight:bold\">Retire (dominated): </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">I60-bare, I100-bare, T-full, H33-full</code>. <span style=\"font-weight:bold\">New tasks: </span>t-code-symbol [code-locate], t-code-indent [code-locate/verbatim], t-agg-distractor [aggregate], t-gist-canonical [gist], t-hop-deep [multi-hop-reasoning], t-verbatim-confusable [verbatim-hi], t-secret-leak [verbatim-lo/safety].</p><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><p><span style=\"font-weight:bold\">Framework: </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">context-compression-benchmark</code> · <span style=\"font-weight:bold\">thesis: </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">optical-compression-text-as-image-tokens</code>.</p>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\">Generation 1 · results &amp; routing policy</p><h1>Context-compression benchmark — Generation 1 results</h1><p class=\"bp-role-byline\">72 agents · 47 cells · 9 strategies · the winner surprised us</p><div class=\"bp-callout bp-callout--success\"><strong>Headline: 45% image won outright</strong> <span><span style=\"font-weight:bold\">I45-bare</span> (image downscaled to 45%) was <span style=\"font-weight:bold\">both the most accurate and the cheapest</span> — 7/7 across every sensitivity class, including the exact 40-char hash and the live credential, at <span style=\"font-weight:bold\">3.4× fewer tokens than bare text</span>. On these (small) contexts, moderate optical compression is lossless <span style=\"font-weight:bold\">and</span> a token win. But the floor is sharp: 33% silently corrupts, and 60% is a trap.</span></div><h2>Leaderboard (by quality-per-1k-tokens)</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Arm</span></th><th class=\"bp-table__th\"><span>Accuracy</span></th><th class=\"bp-table__th\"><span>Tokens</span></th><th class=\"bp-table__th\"><span>Quality/1k</span></th><th class=\"bp-table__th\"><span>n</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><code>I45-bare</code></td><td class=\"bp-table__td\"><span>100%</span></td><td class=\"bp-table__td\"><span>135</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">51.9</span></td><td class=\"bp-table__td\"><span>7</span></td></tr><tr><td class=\"bp-table__td\"><code>I33-bare</code></td><td class=\"bp-table__td\"><span>43%</span></td><td class=\"bp-table__td\"><span>74</span></td><td class=\"bp-table__td\"><span>40.5</span></td><td class=\"bp-table__td\"><span>7</span></td></tr><tr><td class=\"bp-table__td\"><code>I45-full</code></td><td class=\"bp-table__td\"><span>100%</span></td><td class=\"bp-table__td\"><span>100</span></td><td class=\"bp-table__td\"><span>30.0</span></td><td class=\"bp-table__td\"><span>3</span></td></tr><tr><td class=\"bp-table__td\"><code>I60-bare</code></td><td class=\"bp-table__td\"><span>57%</span></td><td class=\"bp-table__td\"><span>237</span></td><td class=\"bp-table__td\"><span>16.9</span></td><td class=\"bp-table__td\"><span>7</span></td></tr><tr><td class=\"bp-table__td\"><code>H33-full</code></td><td class=\"bp-table__td\"><span>100%</span></td><td class=\"bp-table__td\"><span>187</span></td><td class=\"bp-table__td\"><span>16.0</span></td><td class=\"bp-table__td\"><span>3</span></td></tr><tr><td class=\"bp-table__td\"><code>T-bare</code></td><td class=\"bp-table__td\"><span>100%</span></td><td class=\"bp-table__td\"><span>465</span></td><td class=\"bp-table__td\"><span>15.1</span></td><td class=\"bp-table__td\"><span>7</span></td></tr><tr><td class=\"bp-table__td\"><code>H45-full</code></td><td class=\"bp-table__td\"><span>100%</span></td><td class=\"bp-table__td\"><span>201</span></td><td class=\"bp-table__td\"><span>14.9</span></td><td class=\"bp-table__td\"><span>3</span></td></tr><tr><td class=\"bp-table__td\"><code>T-full</code></td><td class=\"bp-table__td\"><span>100%</span></td><td class=\"bp-table__td\"><span>266</span></td><td class=\"bp-table__td\"><span>11.3</span></td><td class=\"bp-table__td\"><span>3</span></td></tr><tr><td class=\"bp-table__td\"><code>I100-bare</code></td><td class=\"bp-table__td\"><span>100%</span></td><td class=\"bp-table__td\"><span>661</span></td><td class=\"bp-table__td\"><span>10.6</span></td><td class=\"bp-table__td\"><span>7</span></td></tr></tbody></table><h2>Routing policy — best arm per sensitivity</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Sensitivity</span></th><th class=\"bp-table__th\"><span>Best arm</span></th><th class=\"bp-table__th\"><span>Key caveat</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><code>verbatim-lo</code></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">I45-bare</span></td><td class=\"bp-table__td\"><span>Reproduced the full postgres credential string character-exact at just 24 tokens, cheapest correct arm (T-bare/I100 also exact but 2-5x costlier). Har…</span></td></tr><tr><td class=\"bp-table__td\"><code>verbatim-hi</code></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">I45-bare</span></td><td class=\"bp-table__td\"><span>Reproduced the 40-char SHA exactly AND self-rated &#39;clear&#39; at 14 tokens — more compressed yet more confident than I100-bare (correct but &#39;partial&#39;). Sh…</span></td></tr><tr><td class=\"bp-table__td\"><code>aggregate</code></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">I45-bare</span></td><td class=\"bp-table__td\"><span>Correct count (5) at 14 tokens and reliable everywhere else. I33-bare is also correct at 8 tokens but untrustworthy on adjacent cells. Surprising mid-…</span></td></tr><tr><td class=\"bp-table__td\"><code>gist</code></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">I45-bare</span></td><td class=\"bp-table__td\"><span>Correct on both gist cells (t4, c2) at the lowest cost (24 and 12 tokens). Weak axis is FORM: output drifts verbose (t4) and drops to &#39;partial&#39; legibi…</span></td></tr><tr><td class=\"bp-table__td\"><code>multi-hop-reasoning</code></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">I45-bare</span></td><td class=\"bp-table__td\"><span>Both hops exact (c1 api,session at 39 tok; c3 auth at 8 tok) — cheapest reliable arm; all full arms are also 3/3 but cost 2-3x per hop. Reasoning tole…</span></td></tr><tr><td class=\"bp-table__td\"><code>code-locate</code></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">I45-bare</span></td><td class=\"bp-table__td\"><span>UNTESTED — no code-locate cell exists in this grid, so this is extrapolation from I45-bare&#39;s dominance on adjacent exact-recall and reasoning classes.…</span></td></tr></tbody></table><h2>The surprises</h2><ul><li><span><span style=\"font-weight:bold\">Compression is non-monotonic. </span>I60-bare (60%) scored 4/7 while I45-bare (45%) scored 7/7 — less compression, worse answers. A leaner arm beat a richer one.</span></li><li><span><span style=\"font-weight:bold\">Failures are silent and confident. </span>I60 and I33 returned wrong hashes, an off-by-one count, and a corrupted credential — all self-reported &#39;clear&#39;. Self-report is uncalibrated; never trust a sub-45% &#39;clear&#39;.</span></li><li><span><span style=\"font-weight:bold\">45% is a hard fidelity floor for exact strings. </span>At 33% a live credential lost 4+ characters with no flag. Above 45%, reasoning even tolerates compression well.</span></li><li><span><span style=\"font-weight:bold\">Hybrid was dead weight — here. </span>H45-full doubled tokens over I45-full for zero accuracy gain, because no task actually stressed exact code reading. Its value is unproven, not disproven — Gen 2 adds code-fidelity cells to test it.</span></li></ul><h2>Interesting head-to-heads</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Matchup</span></th><th class=\"bp-table__th\"><span>Winner</span></th><th class=\"bp-table__th\"><span>Takeaway</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>I45-bare vs I100-bare (compression sweet spot: 45% v</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">I45-bare</span></td><td class=\"bp-table__td\"><span>Compressing the image to 45% preserved perfect accuracy across every sensitivity while cutting tokens ~5x — and on the hash cell the compressed arm rated &#39;clear&#39; where fu…</span></td></tr><tr><td class=\"bp-table__td\"><span>T-bare vs I45-full (does enrichment+compression beat</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">I45-full</span></td><td class=\"bp-table__td\"><span>On the cells both arms ran, compressed-image context matched bare text answer-for-answer at ~40% lower cost — enrichment+compression pays off, though bare text still cove…</span></td></tr><tr><td class=\"bp-table__td\"><span>I45-full vs H45-full (pure compressed image vs hybri</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">I45-full</span></td><td class=\"bp-table__td\"><span>The hybrid code-safety overlay doubled token cost and bought zero accuracy on this slice — the pure 45% image already carried enough signal, so the H-overlay is dead weig…</span></td></tr><tr><td class=\"bp-table__td\"><span>I45-bare vs I33-bare (how far can density be pushed </span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">I45-bare</span></td><td class=\"bp-table__td\"><span>45% is the fidelity floor: dropping to 33% roughly halves cost but silently corrupts a live credential (no flag), can&#39;t read the hash, drops the gist concept, and mis-hop…</span></td></tr><tr><td class=\"bp-table__td\"><span>T-full vs H45-full (is optically packing the metadat</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">H45-full</span></td><td class=\"bp-table__td\"><span>Optically packing full context (H45) beat plain full text by ~25% tokens at identical accuracy — a real if modest win, but both are dominated by I45-full at 100 tok, so p…</span></td></tr></tbody></table><h2>Honest scope</h2><p>These contexts are <span style=\"font-weight:bold\">small</span> (a few lines). At that size 45% glyphs stay legible; our earlier dedicated fidelity test showed verbatim collapse at higher densities on larger pages. So the finding is scoped: <span style=\"font-weight:bold\">the fidelity floor moves with content size and density</span>. The real target — large file-documents — needs a size axis, which Gen 2+ should add. Hybrid and enrichment ran only n=3 on easy cells; treat those rows as provisional.</p><h2>Generation 2 — the loop&#39;s own proposal</h2><p>The meta-analyst proposed these, each aimed at an open question:</p><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>New arm</span></th><th class=\"bp-table__th\"><span>Probes</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><code>I33-vote3</code></td><td class=\"bp-table__td\"><span>Whether majority-voting over cheap reads recovers the exact-recall (t1 credential, verbatim-hi hash) that single I33-bare silently corrupts. Distinguishes STOCHASTIC loss (voting f…</span></td></tr><tr><td class=\"bp-table__td\"><code>I40-bare</code></td><td class=\"bp-table__td\"><span>Locates the exact verbatim fidelity cliff between known-broken 33% and known-good 45%. If 40% reproduces the hash/credential char-exact, the floor drops and every exact cell saves …</span></td></tr><tr><td class=\"bp-table__td\"><code>I45-edges</code></td><td class=\"bp-table__td\"><span>Isolates whether the reachability EDGES alone drive I45-full&#39;s multi-hop wins. Paired with I45-summary this splits the edges-only vs summary-only lever: if edges-only matches full …</span></td></tr><tr><td class=\"bp-table__td\"><code>I45-summary</code></td><td class=\"bp-table__td\"><span>Isolates whether summary alone drives gist wins AND whether canonical-summary enrichment repairs I45-bare&#39;s known FORM weakness (verbose/partial-legible gist output). If it fixes f…</span></td></tr><tr><td class=\"bp-table__td\"><code>Ipack-bitmap5x8</code></td><td class=\"bp-table__td\"><span>Whether structured bitmap packing beats naive density-downscaling at EQUAL tokens for verbatim exact-recall. If bitmap5x8 reproduces the hash/indented-code that 33%-downscaled I33 …</span></td></tr><tr><td class=\"bp-table__td\"><code>I33-cgre</code></td><td class=\"bp-table__td\"><span>Whether adaptive escalation pays only on hard cells: cheap (~2x74) on easy lookups, one 45% re-read on contested exact strings. Deliberately gates on cross-sample disagreement, NOT…</span></td></tr></tbody></table><p><span style=\"font-weight:bold\">Retire (dominated): </span><code>I60-bare, I100-bare, T-full, H33-full</code>. <span style=\"font-weight:bold\">New tasks: </span>t-code-symbol [code-locate], t-code-indent [code-locate/verbatim], t-agg-distractor [aggregate], t-gist-canonical [gist], t-hop-deep [multi-hop-reasoning], t-verbatim-confusable [verbatim-hi], t-secret-leak [verbatim-lo/safety].</p><div style=\"position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)\"><span style=\"position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem\">§</span></div><p><span style=\"font-weight:bold\">Framework: </span><code>context-compression-benchmark</code> · <span style=\"font-weight:bold\">thesis: </span><code>optical-compression-text-as-image-tokens</code>.</p>",
+  "body_html_sv": 3,
+  "description": "Generation-1 results of the evolving context-compression benchmark: 72 agents over 47 task x strategy cells. Image at 45% density won outright — most accurate and cheapest (3.4x fewer tokens than text) — with a hard fidelity floor at 45%, silent confident failures below it, and hybrid/enrichment provisional; plus the meta-analyst's Generation-2 proposal.",
+  "main_tag": "optical-compression",
+  "preview": {
+    "description": "Generation-1 results of the evolving context-compression benchmark: 72 agents over 47 task x strategy cells.…",
+    "extensions": {
+      "tags": [
+        "optical-compression",
+        "token-efficiency",
+        "fidelity-risk",
+        "research-note"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/context-compression-benchmark-gen1"
+  },
+  "rev": 1,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "the strategies benchmarked",
+      "strength": 90,
+      "tag": "optical-compression"
+    },
+    {
+      "rationale": "quality-per-token leaderboard",
+      "strength": 80,
+      "tag": "token-efficiency"
+    },
+    {
+      "rationale": "silent confident failures below 45%",
+      "strength": 60,
+      "tag": "fidelity-risk"
+    },
+    {
+      "rationale": "generation-1 results + gen-2 proposal",
+      "strength": 25,
+      "tag": "research-note"
+    }
+  ],
+  "title": "Context-compression benchmark — Generation 1 results"
+}

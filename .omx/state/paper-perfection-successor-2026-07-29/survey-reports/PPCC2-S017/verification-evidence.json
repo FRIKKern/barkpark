@@ -1,0 +1,16 @@
+{
+  "schema_version": "paper-perfection-successor-survey-verification-evidence/v1",
+  "assignment_id": "PPCC2-S017",
+  "valid": true,
+  "validation_summary": {"pass": 17, "fail": 0},
+  "report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+  "bound_snapshot_sha256": "5dec9d93266dfb705fca8e3cf0c94f1e0c34ffd10b24939ca0dbe26012f1019c",
+  "source_snapshot_sha256": "dfc67e28c6ff8fec03e19e6c9895092e01ac0dc0fa4403bb231bc5ed69968786",
+  "readback_count": 10,
+  "all_pinned_revisions_read": true,
+  "native_top_level_block_count": 556,
+  "legacy_html_document_count": 0,
+  "legacy_html_chars": 0,
+  "gates": {"json_lint":"PASS","python_compile":"PASS","tabnanny":"PASS","focused_validator":"17 PASS / 0 FAIL"},
+  "mutation_attestation": {"production_papers_mutated":false,"cyclefleet_mutated":false}
+}

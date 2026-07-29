@@ -1,0 +1,898 @@
+{
+  "_createdAt": "2026-07-24T00:11:58.118231Z",
+  "_draft": false,
+  "_id": "ctx-compression-wave-2026-07-24",
+  "_publishedId": "ctx-compression-wave-2026-07-24",
+  "_rev": "7cf14df5b436656bc0bb350b58224b4a",
+  "_type": "paper",
+  "_updatedAt": "2026-07-27T08:48:46.124212Z",
+  "blocks": [
+    {
+      "id": "w1-001",
+      "text": "context-compression epic · WAVE 1 · opened 2026-07-24 · status: CLOSED — reviewed 2026-07-24, grade A-, debrief below",
+      "type": "eyebrow"
+    },
+    {
+      "id": "w1-002",
+      "level": 1,
+      "text": "The manifest goes brief — killing the 95.7 KB session-start tax",
+      "type": "h1"
+    },
+    {
+      "id": "w1-003",
+      "text": "Every agent session opens with bp capabilities -o json: 95,666 bytes of full-depth manifest landing where the meter amplifies bytes 5-6x. It is the last un-briefed first-party payload and the spend census's top-ranked prize. This wave makes the agent-facing manifest born brief — 17.5-24.3 KB, invoke-complete, deterministic — verified by count_tokens on the ready fixtures and one live before/after session. Riding along: the two seals the user ratified as NOW (query.ex's unsealed task-embed chain, the nil-polarity inversion), because the doctrine orders seal before tiers and this is the first tier wave of the epic.",
+      "type": "ingress"
+    },
+    {
+      "id": "w1-004",
+      "text": "Wave 1 of the ctx-compression epic · epic task task-495cc9a9af43472c · charter: .claude/workflows/bp-ctx-compression-charter.md (founded at Decide, pushed 4b46ccbe6) · ground truth: /papers/ctx-compression-capstone + five lane papers · all 12 capstone judgment calls RATIFIED 2026-07-24",
+      "type": "byline"
+    },
+    {
+      "id": "w1-010",
+      "level": 2,
+      "text": "The wish (verbatim)",
+      "type": "h2"
+    },
+    {
+      "id": "w1-011",
+      "text": "Alright, 1 then 2 — user's verbatim approval of: ratify the context-compression epic (task-495cc9a9af43472c) and charter it via bp-epic-cycle with wave 1 first. Wave 1 is the capstone's top-ranked win: the manifest brief view — the last un-briefed first-party payload, 95,666 B → 17.5-24.3 KB (3.9-5.5x), paid on every session; verification = count_tokens on the fixtures + one live before/after session. All 12 capstone judgment calls are RATIFIED on the recommended column (recorded in the epic task's notes): audit-wrap duel RUNS inside the cage spec pre-registered; brief-v3 squeak accepted; board profile ruling stands; bp park = plugin + 2 MB ceiling + mandatory summary; nil-polarity flip + fence; seal query.ex NOW; axi-b7 write echoes ?view=brief opt-in; ?views=1 stays opt-in; schema evolution on rev-pinned reads FAILS CLOSED; census thresholds forbidden until measured; duel budget ~$30-80; board clamp raise-then-fold (the raise already landed as stopgap PR #6033 / task-8ad8d5cfe98c70aa — coordinate, don't duplicate it). Ground truth papers: /papers/ctx-compression-capstone (crown), -headroom-lessons, -spend-census, -handle-doctrine, -view-tiers-seam, -taskboard-flagship. Doctrine: compress presentation, never truth; native-only; count_tokens before token claims; seal before tiers.",
+      "type": "callout"
+    },
+    {
+      "id": "w1-020",
+      "level": 2,
+      "text": "Direction — born-brief session start, rendered where the truth already lives",
+      "type": "h2"
+    },
+    {
+      "id": "w1-021",
+      "text": "The finished experience: an agent opens a session, runs bp capabilities -o json (or gets it piped), and receives a brief manifest — roughly 17.5-24.3 KB instead of 95.7 KB — that is INVOKE-COMPLETE: every noun, every verb, every arg (name/required/type), every flag (name/type), every summary an agent needs to compose ANY bp command correctly on the first try, with zero follow-up calls. What vanishes is exactly the plumbing only the CLI itself consumes: http method/path templates, mutation_op, set_key, scoped_prefix, default_output, dry_run/batch bookkeeping. bp capabilities --full remains byte-identical to today's output — the escape hatch is one flag, named in the brief itself. Humans see no change: the -o table tree was already brief.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-022",
+      "text": "The load-bearing structural insight from reading the real code: the wire is NOT where this payload is paid. internal/manifest/fetch.go always fetches (and ETag-caches) the FULL manifest because the CLI's entire command tree is a pure function of it — that fetch never enters agent context. The 95,666 B enters context as STDOUT: runCapabilities (internal/cli/builtins.go:44) re-marshals the strict-decoded Manifest struct and prints it. So the diet belongs at the point of print: a deterministic brief projection in Go, over truth the client provably holds in full. This is not a proxy guessing — it is the system's own first-party CLI projecting its own strict-decoded contract, which is exactly what 'compress presentation, never truth' permits.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-023",
+      "text": "Tentative key choices (Decide finalizes after two explore rounds): (1) render client-side in runCapabilities under exactly the AXI option-B semantics — brief when machineOut() AND NOT --full; explicit -o table unchanged; (2) the brief SHAPE is decided by measurement, not taste: caps_brief.json (24,266 B) vs caps_brief.tsv (17,543 B) go through count_tokens — bytes are not tokens and the meter standard bans tiktoken/chars-4 — with the pre-committed rule that tokens win, ties break toward JSON (parseability); (3) the projection spec ships as a named keep-list artifact so a later server-side ?view=brief (for SDK/curl consumers, if a future census ever ranks them) adopts it verbatim — nothing foreclosed; (4) the slice carries the full AXI protective-pattern kit in the same PR: byte tripwire pair (realistic + hostile), exact-key-set pin, opt-out-byte-identical proof for --full, determinism check (byte-identical consecutive calls — already true today, must stay true); (5) invoke-completeness is an acceptance TEST, not a hope: for every command in the manifest, the brief alone must carry what composing that command requires.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-024",
+      "text": "Companion slices, small and ratified NOW: (a) seal Tasks.Query.to_render_map (query.ex:740-753) by copying board.ex's field_readable? gate verbatim, with the redact-then-assert-omitted proof — the doctrine orders seal before tiers, and this is tier wave one; (b) flip the nil-polarity inversion (envelope.ex:222 field_readable? nil => true) and fence it so the next hand-rolled emitter cannot pass nil believing it fails closed. Candidate micro-slice if survey confirms it is as cheap as the census claims: a did-you-mean hint for bp task show / bp task list — 2,428 + 329 typed occurrences, 1.19 MB of pure error waste with no defenders. Verification for the flagship: 12 count_tokens calls on the fixtures (epic task #1 per the capstone) plus one live before/after agent session on the ledger measuring total_cost_usd, num_turns, and --full escape-hatch rate.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-025",
+      "text": "Brief-but-complete beats smaller-but-lossy: a card missing one needed field costs more than the cut saved.",
+      "type": "pullquote"
+    },
+    {
+      "id": "w1-026",
+      "text": "Explicitly OUT of this wave: the board tier and rev-everywhere (later waves per the ratified order), the serialization duel proper (wave 2, duel-gated, $30-80 budget), bp park and MCP (wave 3+, after exercise), the ETag-view cache-key fold and Vary emission (needed only when a server-side view ships — this direction avoids triggering that RFC 9110 fix now), and anything touching taskboard fetch (stopgap PR #6033 / task-8ad8d5cfe98c70aa is in flight there — coordinate, don't duplicate).",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-030",
+      "level": 2,
+      "text": "Direction debate — three candidates, one winner",
+      "type": "h2"
+    },
+    {
+      "id": "w1-031",
+      "text": "Candidate A — server-side ?view=brief on GET /v1/capabilities, under the views grammar. The doctrine-pure reading ('the brief card is a server render'): Elixir hand-tunes a brief manifest, every consumer (CLI, MCP, SDK, curl) inherits it, the tier grammar stays uniform. It loses on engineering economics that only appear once you read the consumption path: the CLI must fetch the FULL manifest regardless (the command tree is built from it), so a server brief saves zero wire and zero context on its own — it only changes what gets PRINTED, which a client projection does identically. And it drags in real scope: the ETag must fold the view param (the capstone flags today's precedent as a latent RFC 9110 violation that MUST be fixed by whoever ships a server view), Vary must be emitted, a second wire shape needs Go strict-decode modeling plus the frozen manifest.schema.json additive dance, across two languages. All of that to produce byte-identical stdout. The views grammar also structurally cannot describe the capabilities builtin — it is the bootstrap (chicken-and-egg: you need the manifest to learn what views exist), a carve-out today and a carve-out under A.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-032",
+      "text": "Candidate B (WINNER) — client-side deterministic brief projection at the point of print. One language, zero wire-contract risk (released binaries strict-decode the manifest; stdout shape is not a wire contract and carries no DisallowUnknownFields blast radius), works offline against the on-disk ETag cache, and the render is a pure function of strict-decoded truth — when the server adds a command tomorrow, the brief includes it with zero code change, preserving the manifest package's 'hardcodes NO noun' law. The count_tokens-validated keep-list is the durable artifact; it ports verbatim to a server view the day a measured non-CLI consumer exists.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-033",
+      "text": "Candidate C — shrink the manifest itself (trim summaries/flag docs for everyone). Rejected fastest: the summaries ARE the product for the human tree and the MCP tool derivation, the root shape is frozen under strict decode, and it compresses truth to fix a presentation problem — a direct doctrine violation.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-034",
+      "text": "Sharpest attacks on the winner, and how the wave absorbs them: (1) DOCTRINE DRIFT — every other brief is server-declared; this forks the grammar. Absorbed: capabilities is already outside the grammar (a builtin the views descriptor cannot reach), the projection is first-party and guess-free, and the keep-list is written to be server-portable — the fork is a deferral, not a divergence. (2) COMPLETENESS RISK — the census's own law says a brief missing one field costs more than it saves (agents already handle-climb 12,368 task gets vs 1,421 readies). Absorbed: invoke-completeness is the acceptance test, and the live before/after session measures the --full escape rate directly; if agents climb, the brief fattens before it ships. (3) BYTES ARE NOT TOKENS — TSV wins bytes (17.5 vs 24.3 KB) but JSON punctuation vs TSV structure may invert on the tokenizer, and 'count_tokens before token claims' is ratified doctrine. Absorbed: the shape choice is explicitly deferred to the count_tokens run — task #1 of the wave, pre-committed decision rule. (4) HIDDEN CONSUMERS — a script somewhere parses bp capabilities -o json and breaks on brief-when-piped. Absorbed: survey question manifest-consumers censuses every parser in the repo before Decide; the AXI piped-default precedent survived the same worry with option-B semantics.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-040",
+      "level": 2,
+      "text": "Survey plan — 16 scouts, cast wide",
+      "type": "h2"
+    },
+    {
+      "id": "w1-041",
+      "text": "Each question below goes to one Sonnet surveyor. The stress-test assumptions above map 1:1 onto scouts; the Digest phase distills their reports into the verify plan and appends it here before the verifiers fly.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-042",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "manifest-consumers — who parses bp capabilities output or GET /v1/capabilities across the repo (scripts, tooling, docs, JS SDK, MCP bridge, openapi gen, Studio)? Breakage census for brief-when-piped."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "fixtures-location — where are caps.json / caps_brief.json / caps_brief.tsv and the projection spec that produced them; do the byte counts reproduce live?"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "count-tokens-harness — what exists for count_tokens metering (meter standard, METER formula, key reachability); where does the 12-call script live?"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "views-grammar-reach — can the views grammar structurally reach the capabilities builtin; map the builtin dispatch, g.full, machineOut, and the exact hook point for a client render."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "manifest-byte-anatomy — byte breakdown of the live 95,666 B manifest by field class; which cuts reach ~24 KB while staying invoke-complete?"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "seal-query-ex — confirm query.ex:740-753 unsealed on origin/main; map board.ex gate + TaskResolver wiring + the redact-then-assert-omitted precedent to copy."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "nil-polarity — confirm envelope.ex:222 polarity on origin/main; caller census; what flip + fence concretely entails and what fence precedents exist."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "cache-and-etag — CLI manifest Cache/CacheKey semantics under a client render; confirm the client path triggers zero server ETag/Vary work."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "axi-precedent-kit — file:line inventory of the AXI protective patterns to copy (tripwire pair, exact-key-set pin, opt-out-byte-identical, amendment discipline)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "session-start-reality — how sessions actually consume the manifest (CLAUDE.md instructions, onramp/prime, MCP tools/list serialization); calls per session."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "quick-fix-did-you-mean — where unknown-verb errors render; cost of a did-you-mean hint for task show/list; prior suggestion art in the CLI."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "stopgap-coordination — state of task-8ad8d5cfe98c70aa / PR #6033; files touched; any overlap with wave 1 files."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "tsv-render-art — existing tabular/TSV emitters to reuse; how TSV brief handles nested args/flags; determinism properties."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "live-before-after-method — how AXI measured its 12-92x diets; what one live before/after session needs (harness, total_cost_usd, turn counts)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "strict-decode-blast — the precise boundary between contract-safe CLI output changes and forbidden manifest wire changes; who gates manifest.schema.json."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "epic-hygiene — how prior epics filed waves/slices on the ledger (AXI as template); charter file conventions; what the founding charter must unfreeze or cite."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "w1-050",
+      "level": 2,
+      "text": "In flight",
+      "type": "h2"
+    },
+    {
+      "id": "w1-051",
+      "text": "STATUS: surveying. 16 surveyors dispatched against the questions above. Next: Digest appends the survey digest + verify plan here BEFORE the verifiers fly; Decide appends the decisions + wave plan BEFORE the builders fly; Review closes this Paper as the wave debrief. Epic task task-495cc9a9af43472c carries wave_status + wave_paper pointers back here.",
+      "type": "callout"
+    },
+    {
+      "id": "w1-100",
+      "level": 2,
+      "text": "Survey digest — 16 reports in (Digest phase, 2026-07-24)",
+      "type": "h2"
+    },
+    {
+      "id": "w1-101",
+      "text": "The direction's structural premise is CONFIRMED in code on origin/main, at every anchor: internal/manifest/fetch.go always fetches the FULL manifest (hardcoded ?views=1 opt-in, ETag-cached, no view selector) and that fetch never reaches context; the 95.7 KB enters as stdout at runCapabilities (internal/cli/builtins.go:44, out.renderJSON(m)); piped output already defaults to JSON (output.go); the capabilities builtin is dispatched outside the manifest tree (cli.go:127) and the AXI views grammar structurally cannot reach it (resolveView requires a manifest.Command; capabilities has none — carve-out is by design, per axi-s2's frozen 3-command descriptor). Zero in-repo parsers depend on the full stdout shape: MCP bridge/resources consume the in-process struct, server-side pins guard the WIRE (untouched), the one jq shape-dependency (tooling/mobile-smoke/smoke.sh) hits the raw HTTP endpoint, JS SDK and Studio are non-consumers. Cache/ETag machinery needs zero changes — the latent RFC 9110 gap lives in QueryController.list_etag (/v1/data), a different controller, correctly deferred (hd-s3). There is currently NO test pinning runCapabilities' stdout at all — the wish's protective kit is this path's FIRST-EVER coverage, not extra safety.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-102",
+      "text": "Both ratified-NOW companion seals are shovel-ready with exact anchors. Seal query.ex: to_render_map (query.ex:741) reads content fields with zero Envelope gating (the file's only field_readable? call, :320, serves the separate aggregate path); gate-to-copy is Board.field_visibility_gate/1 (board.ex:190-202); two consumers (papers.ex:1074 resolve_tasks_in_blocks, shared/paper.ex:377 task_previews) both fix with one change; the redact-then-assert-omitted recipe exists twice (board_test.exs:40-124, board_live_test.exs:1550/1636) and query_rows_test.exs has zero visibility coverage today — this is the FOURTH sealing of the same leak class. Nil-polarity: envelope.ex:222 (nil ⇒ true) AND the catch-all :244 both fail open, opposite of render/3's own nil handling; zero HTTP/WS-reachable callers pass literal nil (from_conn never returns nil); exactly ONE test asserts the old behavior (envelope_test.exs:254-257); no Credo exists in the repo, so the fence is regression test + doctrine comment + CI grep, not a Credo rule; a sibling landmine (listen_controller.ex:393-395, nil ⇒ full unredacted document) needs a ruling in the same PR. Did-you-mean is TWO distinct fixes: threading the ALREADY-COMPUTED Levenshtein hint into the JSON error envelope (fixes list→ls, 329 hits — machinery exists, usageErrf hardcodes hint=\"\") and an explicit alias intercept for show→get (2,428 hits — Levenshtein can never catch it; precedent: task tui at cli.go:152, server ls at cli.go:411). ~20-30 LOC combined, own small task to keep blast radii disjoint.",
+      "type": "paragraph"
+    },
+    {
+      "content": "THE CONTRADICTION THAT GATES DECIDE: the ratified byte target may be unachievable under the ratified keep-list. A surveyor rebuilt the brief projection exactly per the keep-list (noun/verb/summary/writes/auth_tier + args{name,required,type} + flags{name,type}) as ordinary nested JSON against the live 142-command manifest: 46,595 B = 2.06x — NOT the ratified 24,266 B = 3.9x. Tuple encoding: 39,435 B (2.43x). Packed-string args/flags: 36,714 B (2.61x). Only by ALSO dropping the nouns catalog (4,384 B) and violating the keep-list did 27,178 B (3.53x) appear. The six census fixtures that produced 24,266/17,543 B are GONE (ephemeral scratchpad of a dead session) and the encoding that produced them was never recorded in any paper. Verify assignment 1 rebuilds this ground truth for real; Decide must then either revise the target ratio or extend the keep-list with explicit encoding rules (packed args/flags, nouns-catalog drop) before the spec is written as the named, server-portable keep-list.",
+      "id": "w1-103",
+      "type": "callout"
+    },
+    {
+      "id": "w1-104",
+      "text": "Other premise corrections. (1) Stopgap PR #6033 is MERGED (2026-07-24T00:19Z, commit 83c41e66c on origin/main), not in flight — zero file overlap with wave-1 targets (GetConditional signature preserved); its ledger task task-8ad8d5cfe98c70aa is STALE-OPEN and Decide should close it. (2) 'count_tokens on the fixtures' cannot run as a pre-build gate: fixtures don't exist; the real order is build projection → regenerate fixtures → count. (3) No count_tokens-capable API key is reachable anywhere in this environment (env, keychain, bp secret, 1Password); OAuth tokens 401 against the Messages API family — a HUMAN must provision a console key, and the pre-registered fallback is bytes-with-conversion-pending, never a fabricated token number. (4) The '12-92x' phrase matches no measured number; the AXI band is 12x-81.5x, all static wc -c probes — the one live before/after session is a NEW method leg, n=1, and must be pre-registered as directional-smoke-only (5-6x early-byte cache amplification means the session needs enough turns to clear ~2x the $0.55 spawn floor). (5) 'Paid on every session' is doctrine, not measurement: bp capabilities is absent from the census's top-8 bp-verb byte table and its call frequency was never counted; framing softens to 'amplified per call' unless measured. (6) The byte-anatomy scare that 3 commands emit views 'without ?views=1' is almost certainly the CLI's own hardcoded opt-in (fetch.go:40) — verifier will prove the raw endpoint honors the contract. (7) Live manifest has drifted +249 B (95,915 B, 142 commands) since the census — tripwires must pin live-measured baselines, not the literal 95,666.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-110",
+      "level": 2,
+      "text": "Coverage map — what was checked, found, and NOT found",
+      "type": "h2"
+    },
+    {
+      "id": "w1-111",
+      "text": "CHECKED AND FOUND: every consumer class of the manifest (Go in-process, server wire pins, shell/doc greps, blast-radius config); the two dispatch pipelines and the exact brief hook point (builtins.go:53); the full byte anatomy of the live manifest by field class (args 18.8K / flags 17.2K / summaries 13.8K / http 10.3K…); the AXI precedent kit with file:line for all five reusable patterns (exact-key-set pin tasks_controller_test.exs:2071, byte tripwire pair :2431-2549, opt-in gate capabilities.ex:281-321, same-PR amendment rule, Go clamp mcp_brief_view_test.go); METER.md + meter.py as the dollar meter-of-record; both seal targets end-to-end with test recipes; the did-you-mean machinery (nearestVerb live-verified in table mode, dropped in JSON mode); epic-cycle filing conventions (parent_id linkage, wave_paper field, labels:[] on slices, charter skeleton, the charter_path-defaults-to-CLOUD-charter bug).",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-112",
+      "text": "CHECKED AND NOT FOUND (absences that are decisions-in-waiting): no literal @brief_keys symbol anywhere (it's a paraphrase — the real pattern is a numbered cut-list comment + key-set pin test); no caps_brief.json/.tsv/ready_cards fixtures anywhere on the machine; no count_tokens script anywhere in the repo (METER.md names the endpoint, nothing calls it); no ANTHROPIC_API_KEY in any store; no TSV writer for nested structures (table.go is lossy-human, sheets/csv.ex is flat-grid RFC-4180 — a nested-manifest TSV sub-grammar is UNDESIGNED, with Flag.Default's arbitrary-JSON as the sharpest edge); no test pinning capabilities stdout; no Credo tooling; no Vary header anywhere except CORS; no ctx-compression charter file (confirmed absent, charter_exists=false correct); no 'agent-report' surface; no 92x anywhere; no JS SDK / Studio / deploy consumption of the manifest. UNREACHED CORNERS: internal/manifest/manifest_test.go's exact assertions (may pin command counts); cli-release.yml's unconditional-test backstop for the go-tests.yml path-filter gap (docs/cli/fixtures/** does NOT trigger go tests); docs/contracts/dispatch-areas.md files-grammar; tasks_controller/params.ex:187 caller origin end-to-end; hit_envelope.ex:108 guard; whether resolve_tasks_in_blocks batches rows_for_query per paper (N+1 schema-resolution risk for the seal); shell history for the lost fixture-generation script.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-120",
+      "level": 2,
+      "text": "Verify plan — 7 assignments in flight",
+      "type": "h2"
+    },
+    {
+      "id": "w1-121",
+      "text": "V1 brief-encoding-ground-truth (OPUS, runs code): rebuild the brief projection from the live manifest across all candidate encodings (nested JSON / tuples / packed args-flags / TSV denormalized / TSV packed, each with and without the nouns catalog), wc -c every variant, and recommend the encoding+keep-list amendment that reaches an honest ratio while staying invoke-complete and server-portable. This closes the ratified-target contradiction. V2 go-baseline-and-views-optin (sonnet, runs gates): CC=clang go build ./... && go vet && go test ./internal/cli/... ./internal/manifest/... green on origin/main; confirm no capabilities stdout test exists; curl the raw /v1/capabilities WITHOUT ?views=1 to prove the opt-in contract holds (expect 0 views keys) and with it (expect 3). V3 nil-polarity-flip-probe (OPUS, worktree probe): flip envelope.ex:222+:244 to false, run targeted mix test on envelope_test.exs + board_test.exs, prove exactly one pre-existing assertion breaks; trace params.ex:187 and hit_envelope.ex:108; enumerate listen_controller.ex:393's test-seam usages for the remove-vs-fence ruling.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-122",
+      "text": "V4 seal-query-feasibility (OPUS, worktree probe): prove query_rows_test.exs + board_test.exs green baseline; establish whether rows_for_query is called per-block per paper (N+1 schema-resolution risk) and whether the dataset is threadable into field_visibility_gate at the rows_for_query level; probe the gate edit. V5 did-you-mean-probe (sonnet, worktree probe): implement the show→get alias + thread the existing hint into the JSON envelope, measure real LOC, go test ./internal/cli/..., demonstrate the built binary's behavior both arms. V6 metering-preflight (sonnet, runs commands): meter.py --self-test; claude CLI flag support for -p/--output-format json/--max-budget-usd; prove count_tokens 401s without x-api-key (closing the census's own inference gap); confirm bp secret get is a workable script read-path for a future key. V7 hygiene-gates-and-ledger (sonnet, runs gates): bash scripts/docs-anchors-check.sh green + does it force a card edit on builtins.go changes; cli-release.yml unconditional-test backstop; dispatch-areas.md files-grammar for Decide's collision labels; reconfirm stopgap task staleness so Decide closes it. Decide must also: pass EXPLICIT charter_path (.claude/workflows/bp-ctx-compression-charter.md — the default silently targets the cloud charter), pick a slice prefix (ctxb-s<N> suggested), drop the epic-candidate label on chartering, and file the fixtures' durable home (tooling/scaffy-duels/fixtures/ suggested, committed like results/).",
+      "type": "paragraph"
+    },
+    {
+      "content": "STATUS: verifying. 7 verifiers in flight (3 Opus, 4 Sonnet; 3 in throwaway worktrees). Next: Decide folds verifier proof into decisions + the wave plan, files slice tasks under task-495cc9a9af43472c, and appends here BEFORE builders fly. The single decision Decide cannot skip: the brief encoding rule vs the ratified 3.9-5.5x target (see the contradiction callout above).",
+      "id": "w1-123",
+      "type": "callout"
+    },
+    {
+      "id": "w1-201",
+      "level": 2,
+      "text": "Verification results (the deep round — what proof forced)",
+      "type": "h2"
+    },
+    {
+      "id": "w1-202",
+      "text": "Seven verifiers ran against origin/main 83c41e66c with executed proofs. The headline: THE RATIFIED BYTE TARGET FAILED RECONSTRUCTION. brief-encoding-ground-truth projected the exact ratified keep-list over the live manifest (95,915 B, 142 commands) in 10 encoding variants: nested JSON bottoms at 42,025 B (2.28x) — the ratified 24,266 B/3.9x is unreachable as JSON objects — and the ratified 17,543 B/5.5x TSV is only reachable by dropping summaries, which breaks invoke-completeness ('tsv/cmd NO-sum bytes=9245 ratio=10.37x; with-sum bytes=21348 ratio=4.49x'). The source fixtures are gone and unrecorded. Encoding is the entire ballgame: identical fields span 2.07x-4.47x. Measured menu, all invoke-complete: nested-JSON 42 KB/2.28x · array-of-tuples 26.5 KB/3.62x · TSV/cmd 21.5 KB/4.47x. TSV's collision-freedom is data-dependent, not structural (0 collisions today, but a re-added Flag.default breaks it silently); JSON-family is immune by construction.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-203",
+      "text": "go-baseline-and-views-optin: Go gate fully green on origin/main ('ok internal/cli 20.675s'); NO test pins runCapabilities stdout (the protective kit is this path's first-ever coverage); docs/cli/fixtures/full-manifest.json is stale at 40 vs live 142 commands but regen is proven safe (no consumer asserts a count); the 'views without ?views=1' scare is REFUTED — authenticated raw server without the param returns 142 commands with ZERO views, with it exactly 3 (search.query, task.ready, task.prime); the always-present views were fetch.go:40's own hardcoded opt-in.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-204",
+      "text": "nil-polarity-flip-probe + seal-query-feasibility: both Elixir slices are shovel-ready with exact anchors — but NO Elixir toolchain exists on this machine (which mix -> not found; toolchain lives on prod via /root/.asdf), so blast radius is settled by exhaustive static caller-trace, not a green run: all 6 production callers of field_readable? pass non-nil structs; exactly ONE test assertion (envelope_test.exs:256) breaks on the flip; the :244 catch-all has zero coverage today. A sibling fail-open lives at listen_controller.ex:395 (nil -> unredacted document; one test usage at :152). The seal's load-bearing constraint is dataset threading: the Studio preview path NEVER stamps dataset into the block query ('shared/paper.ex:377 calls rows_for_query(query, scope)' raw), so the gate must take an explicit opts[:dataset] or it seals against the wrong schema. rows_for_query has exactly two production callers; no per-doc N+1 (gate hoists above the map, board.ex:190 pattern); nil schema degrades to allow-all without raising.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-205",
+      "text": "did-you-mean-probe: GO — built and live-verified end to end: 'task show' stdout byte-identical to 'task get' (diff empty, note stderr-only), 'task list' resolves via ls alias exit 0, 'task raedy -o json' now carries error.hint 'barkpark task ready', table mode byte-unaffected; ~25-30 functional LOC via a sibling usageErrHintf (widening usageErrf would touch 63 no-op sites). metering-preflight: meter.py self-test passes non-vacuously; the claude CLI has all four spawn flags; count_tokens is live and key-gated (401 'x-api-key header is required') — but NO API key is provisioned anywhere reachable (bp secret ls: only ingest_token). hygiene-gates: docs-anchors-check PASSES (12 warnings, none in scope); anchor gate is name-existence only (editing runCapabilities' body forces no card edit); go-tests.yml omits docs/cli/fixtures/** (real gap, fix rides s1); cli-release.yml only fires on tags. CORRECTION: task-8ad8d5cfe98c70aa is ALREADY CLOSED (done, 2026-07-24T00:21Z, evidence cites merge 83c41e66c) — the digest's stale-open premise was a timing race; no close action exists.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-206",
+      "level": 2,
+      "text": "Decisions (final — mirrored from the charter, .claude/workflows/bp-ctx-compression-charter.md)",
+      "type": "h2"
+    },
+    {
+      "id": "w1-207",
+      "text": "(1) Client-side projection at print — the wire always fetches full; stdout at builtins.go:44 is where bytes enter context; a server view saves zero and drags ETag/Vary scope. (2) Ratified targets REVISED — they failed reconstruction; honest menu recorded. (3) Encoding = array-of-tuples JSON + legend, nouns catalog dropped (~26.5 KB/3.62x): only JSON-family near the ratified band, structurally collision-free where TSV is data-dependently safe. (4) Targets are ratios, never fixed bytes (manifest grows; tripwire: brief <= 32% of full). (5) Tokens still win, POST-build: no fixtures pre-exist and no key is reachable — bytes ship labeled bytes-with-conversion-pending; >10% token win by another invoke-complete encoding flips by amendment, ties break JSON. (6) BRIEF-KEEP-LIST v1 pins fields AND encoding, server-portable for a later ?view=brief. (7) --full byte-identical, table untouched, brief only on machineOut && !full. (8) Protective kit in the same PR — first-ever coverage of this stdout.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-208",
+      "text": "(9) Fixtures to tooling/scaffy-duels/fixtures/; docs/cli/fixtures regenerated to 142 commands; docs/cli/fixtures/** added to go-tests.yml. (10) Seal query.ex NOW with EXPLICIT dataset threading (opts[:dataset]; preview passes socket.assigns.dataset) — query-map derivation would silently seal the wrong schema; per-field independent gating; counts stay ungated. (11) Nil flip fails closed at :222 AND the :244 catch-all; the listen_controller.ex:395 sibling is REMOVED in the same slice (explicit scope expansion, one-test blast radius); fence = tests + doc rewrite + scripts/nil-polarity-check.sh grep gate (Credo does not exist here). (12) Did-you-mean is its own small slice (probe-proven recipe). (13) Live session is n=1 DIRECTIONAL SMOKE, pre-registered (fixed prompt, model pin, envelope-only metering, >2x the $0.55 floor, --full escape rate as a named metric); 'paid on every session' softens to amplified-per-call; '12-92x' corrects to the measured 12-81.5x. (14) task-8ad8d5cfe98c70aa already closed — no action. (15) charter_path always explicit (the workflow default silently targets the cloud charter). (16) Prefix ctx-; epic-candidate label drops on chartering. (17) Census thresholds forbidden until measured; duel $30-80 in wave 2; board clamp raise landed, fold is future work.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-209",
+      "level": 2,
+      "text": "Wave plan — 6 slices, 4 building now, 2 sequenced behind s1",
+      "type": "h2"
+    },
+    {
+      "id": "w1-210",
+      "text": "ROUND 1 (dependency-free, building this run): ctx-s1-brief-manifest [go-cli, fable, large] — born-brief bp capabilities per BRIEF-KEEP-LIST v1 + full protective kit + fixture regen + go-tests.yml paths; gate: CC=clang go build ./... && go vet ./internal/cli/... ./internal/manifest/... && CC=clang go test ./internal/cli/... ./internal/manifest/... · ctx-s2-seal-query-rows [elixir, opus, medium] — dataset-threaded visibility gate in to_render_map, both callers updated, board_test recipe copied; HIGH-FLIP-RISK: dataset threading (independent second review warranted before merge); gate: cd api && mix test query_rows_test board_test (elixir.yml CI binding where no local toolchain) · ctx-s3-nil-polarity [elixir, opus, small] — :222 + :244 flip, listen_controller seam removal, grep fence; HIGH-FLIP-RISK: dead-path claim (static-only today); gate: mix test envelope_test listen_controller_test + nil-polarity-check.sh + docs-anchors-check.sh · ctx-s4-did-you-mean [go-cli, opus, small] — show->get/list->ls aliases + usageErrHintf hint threading + fixture-based tests; gate: the Go gate.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-211",
+      "text": "ROUND 2 (AFTER ctx-s1-brief-manifest MERGES — the lead dispatches these manually; they do not build this run): ctx-s5-count-tokens [tooling, opus, small] — count_tokens calibration over the committed fixtures, 12 calls x 2 pinned models when a key lands, bytes-with-conversion-pending fallback, pre-registered confirm-or-flip rule; gate: count_tokens_calibrate.py --self-check + meter.py --self-test · ctx-s6-live-smoke [tooling, opus, medium] — pre-registered n=1 directional before/after session, brief-default vs --full-forced, envelope-metered, --full escape rate as first-class metric; gate: meter.py --self-test. BACKLOG FILED (published children of the epic): ctx-b1-paired-duel (wave 2, $30-80), ctx-b2-server-view-brief (+RFC 9110 ETag/Vary fix), ctx-b3-bp-park (plugin + 2 MB + mandatory summary), ctx-b4-mcp-tools-all-sizing, ctx-b5-provision-count-tokens-key (HUMAN, p1 — unblocks every token claim), ctx-b6-memoized-visibility-gate.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-212",
+      "text": "STATUS: building. 4 round-1 builders fly now (s1 fable, s2/s3/s4 opus); s5+s6 dispatch after s1 merges. Charter founded and pushed (4b46ccbe6). Review must: re-derive s2's dataset-threading and s3's dead-path judgments independently (both flagged HIGH-FLIP-RISK), confirm s1's --full byte-identity and invoke-completeness tests actually enumerate all 142 commands, and close merge-gated criteria on merge.",
+      "type": "callout"
+    },
+    {
+      "id": "w1-d00",
+      "text": "DEBRIEF — wave closed (Review, 2026-07-24)",
+      "type": "h2"
+    },
+    {
+      "id": "w1-d01",
+      "text": "All four round-1 slices built, reviewed by the wave reviewer (full diffs vs origin/main, gates re-run, cross-slice integration merge tested green), pushed, and opened as PRs. The reviewer made ZERO code fixes — every slice survived adversarial review as built. Grade: A-. The lead merges; merge-gated criteria on each task are the lead's to close on merge.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-d02",
+      "text": "Shipped",
+      "type": "h3"
+    },
+    {
+      "id": "w1-d03",
+      "text": "ctx-s1-brief-manifest — branch loop-epic/born-brief-bp-capabilities-machine-outpu-0, PR #6052. Born-brief bp capabilities: BRIEF-KEEP-LIST v1 array-of-tuples, 95,915 B -> 26,502 B (3.62x / 27.6%, under the 32% ratio tripwire). Protective kit is real, not vacuous: invoke-completeness enumerates all 142 commands field-by-field, the legend pin is exact, the hostile synthetic proves structural collision-freedom, --full is byte-identical. Reviewer additionally proved the committed caps-brief fixture is byte-identical to briefManifest(caps-full) — the frozen duel pair is self-consistent. Verdict: exemplary; merge first (s5/s6 sequence behind it).",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-d04",
+      "text": "ctx-s3-nil-polarity — branch loop-epic/nil-caller-fails-closed-envelope-ex-fiel-2, PR #6053. envelope.ex nil clause + :244 catch-all flipped fail-CLOSED; the listen_controller fail-open nil seam REMOVED; nil-polarity-check.sh fence (selftest REDs on all three planted fail-open shapes) wired into doc-gates.yml. HIGH-FLIP-RISK dead-path claim independently RE-DERIVED by the reviewer: all 6 production callers thread a non-nil principal, and ScopeHelpers.from_assigns always Keyword.puts :caller_context via from_conn -> anonymous(), so the SSE path can never hand nil to redacted_result. Runnable gates green locally; elixir.yml on the PR is the binding mix proof (no local toolchain, charter-designated). Comment-sweep follow-up: task-3afeb5994c839c27.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-d05",
+      "text": "ctx-s4-did-you-mean — branch loop-epic/bp-task-show-list-resolve-via-aliases-an-3, PR #6054. task show->get / task list->ls aliases (stderr-only note, stdout byte-identical to the canonical verb — proven with separate-stream capture) + error.hint did-you-mean in JSON envelopes via the usageErrHintf sibling (the ~60 no-op usageErrf sites stay byte-identical). Reviewer verified the clean merge with s1's 142-command fixture regen and the combined suite green. Small, probe-proven, exactly decision 12.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-d06",
+      "text": "ctx-s2-seal-query-rows — branch loop-epic/tasks-query-to-render-map-sealed-schema--1, PR #6055 — CI-GATED, second-review-owed. rows_for_query/3 sealed with the explicit dataset cascade; papers.ex passes its stamped dataset, Studio preview passes socket.assigns.dataset. The HIGH-FLIP-RISK dataset-threading judgment was re-derived by the reviewer (the adjacent agg_for_query fetcher already threads socket.assigns.dataset — strong local precedent), and the gate composes correctly with s3's flip (anonymous(), never nil). The mix gate could NOT run anywhere this wave (no Elixir toolchain); criteria 2/4/5 stay honestly open pending elixir.yml green on the PR. Per the flip-risk protocol a genuinely independent second reviewer is warranted before merge — that dispatch is the lead's manual step.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-d07",
+      "text": "Stalled / deferred",
+      "type": "h3"
+    },
+    {
+      "id": "w1-d08",
+      "text": "Nothing stalled. ctx-s5-count-tokens and ctx-s6-live-smoke did not build BY DESIGN (sequenced round 2, both depend on s1 being on main). Both tasks sit open and unclaimed on the ledger with full briefs. The token leg of s5 additionally waits on ctx-b5 (human provisions an Anthropic API key via bp secret set); its bytes-labeled-bytes fallback runs without one.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-d09",
+      "text": "Ledger audit",
+      "type": "h3"
+    },
+    {
+      "id": "w1-d10",
+      "text": "Clean — zero fixes needed. All four built slices: claimed by their builders, criteria stamped mid-claim with concrete evidence (probe lines, test names, file:line), lifecycle honestly in_progress with merge-gated criteria left open for the lead. s2's unrunnable mix criteria are unmet with empty evidence — honest, not padded. s5/s6 open and unclaimed. The backlog (ctx-b1..b6 + task-3afeb5994c839c27) matches the charter roster exactly; no out-of-wave task was touched. Nit, not a lie: s4's final claim pulse still reads 'committing on <branch>' where s1/s3 wrote a proper final now-line.",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-d11",
+      "text": "Grade: A- (earned, not asserted)",
+      "type": "h3"
+    },
+    {
+      "id": "w1-d12",
+      "text": "Strong: the capstone's top-ranked win landed at exactly the revised measured target (3.62x, like-for-like encoding, ratio-not-bytes law respected); the protective kits are genuinely protective (selftest-tripwired fence, hostile synthetic, first-ever coverage of two previously dark paths); both HIGH-FLIP-RISK judgments were re-derived independently and held; all branches pushed with PRs open — no stranded work. Short of A/A+: the wave's headline claim is still in BYTES — count_tokens (s5) and the live smoke (s6) are exactly the two slices that could not run this round, so 'compresses the session-start tax' remains directionally proven, not token-proven; s2 ships without ANY test execution anywhere (CI will be first contact); and the third inline copy of the anonymous visibility gate (query.ex, after board.ex + board_live.ex) is charter-sanctioned but real duplication debt (ctx-b6 is the consolidation point).",
+      "type": "paragraph"
+    },
+    {
+      "id": "w1-d13",
+      "text": "Next wave",
+      "type": "h3"
+    },
+    {
+      "id": "w1-d14",
+      "text": "(1) Lead merges round 1: #6052 first, then #6053/#6054 in any order, #6055 only after elixir.yml green AND the independent second review of the dataset threading; close each task's merge-gated criteria on merge. (2) Dispatch ctx-s5-count-tokens once s1 is on main; bytes fallback works keyless, ctx-b5 unblocks tokens. (3) Dispatch ctx-s6-live-smoke after s1 merges — pre-register BEFORE any run; report the --full escape rate. (4) The token verdict either confirms tuples or files the >10% amendment naming the winner. Then wave 2 proper: the pre-registered paired duel (ctx-b1, $30-80), census thresholds measured-first.",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "w1-001",
+        "text": "context-compression epic · WAVE 1 · opened 2026-07-24 · status: CLOSED — reviewed 2026-07-24, grade A-, debrief below",
+        "type": "eyebrow"
+      },
+      {
+        "id": "w1-002",
+        "level": 1,
+        "text": "The manifest goes brief — killing the 95.7 KB session-start tax",
+        "type": "h1"
+      },
+      {
+        "id": "w1-003",
+        "text": "Every agent session opens with bp capabilities -o json: 95,666 bytes of full-depth manifest landing where the meter amplifies bytes 5-6x. It is the last un-briefed first-party payload and the spend census's top-ranked prize. This wave makes the agent-facing manifest born brief — 17.5-24.3 KB, invoke-complete, deterministic — verified by count_tokens on the ready fixtures and one live before/after session. Riding along: the two seals the user ratified as NOW (query.ex's unsealed task-embed chain, the nil-polarity inversion), because the doctrine orders seal before tiers and this is the first tier wave of the epic.",
+        "type": "ingress"
+      },
+      {
+        "id": "w1-004",
+        "text": "Wave 1 of the ctx-compression epic · epic task task-495cc9a9af43472c · charter: .claude/workflows/bp-ctx-compression-charter.md (founded at Decide, pushed 4b46ccbe6) · ground truth: /papers/ctx-compression-capstone + five lane papers · all 12 capstone judgment calls RATIFIED 2026-07-24",
+        "type": "byline"
+      },
+      {
+        "id": "w1-010",
+        "level": 2,
+        "text": "The wish (verbatim)",
+        "type": "h2"
+      },
+      {
+        "id": "w1-011",
+        "text": "Alright, 1 then 2 — user's verbatim approval of: ratify the context-compression epic (task-495cc9a9af43472c) and charter it via bp-epic-cycle with wave 1 first. Wave 1 is the capstone's top-ranked win: the manifest brief view — the last un-briefed first-party payload, 95,666 B → 17.5-24.3 KB (3.9-5.5x), paid on every session; verification = count_tokens on the fixtures + one live before/after session. All 12 capstone judgment calls are RATIFIED on the recommended column (recorded in the epic task's notes): audit-wrap duel RUNS inside the cage spec pre-registered; brief-v3 squeak accepted; board profile ruling stands; bp park = plugin + 2 MB ceiling + mandatory summary; nil-polarity flip + fence; seal query.ex NOW; axi-b7 write echoes ?view=brief opt-in; ?views=1 stays opt-in; schema evolution on rev-pinned reads FAILS CLOSED; census thresholds forbidden until measured; duel budget ~$30-80; board clamp raise-then-fold (the raise already landed as stopgap PR #6033 / task-8ad8d5cfe98c70aa — coordinate, don't duplicate it). Ground truth papers: /papers/ctx-compression-capstone (crown), -headroom-lessons, -spend-census, -handle-doctrine, -view-tiers-seam, -taskboard-flagship. Doctrine: compress presentation, never truth; native-only; count_tokens before token claims; seal before tiers.",
+        "type": "callout"
+      },
+      {
+        "id": "w1-020",
+        "level": 2,
+        "text": "Direction — born-brief session start, rendered where the truth already lives",
+        "type": "h2"
+      },
+      {
+        "id": "w1-021",
+        "text": "The finished experience: an agent opens a session, runs bp capabilities -o json (or gets it piped), and receives a brief manifest — roughly 17.5-24.3 KB instead of 95.7 KB — that is INVOKE-COMPLETE: every noun, every verb, every arg (name/required/type), every flag (name/type), every summary an agent needs to compose ANY bp command correctly on the first try, with zero follow-up calls. What vanishes is exactly the plumbing only the CLI itself consumes: http method/path templates, mutation_op, set_key, scoped_prefix, default_output, dry_run/batch bookkeeping. bp capabilities --full remains byte-identical to today's output — the escape hatch is one flag, named in the brief itself. Humans see no change: the -o table tree was already brief.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-022",
+        "text": "The load-bearing structural insight from reading the real code: the wire is NOT where this payload is paid. internal/manifest/fetch.go always fetches (and ETag-caches) the FULL manifest because the CLI's entire command tree is a pure function of it — that fetch never enters agent context. The 95,666 B enters context as STDOUT: runCapabilities (internal/cli/builtins.go:44) re-marshals the strict-decoded Manifest struct and prints it. So the diet belongs at the point of print: a deterministic brief projection in Go, over truth the client provably holds in full. This is not a proxy guessing — it is the system's own first-party CLI projecting its own strict-decoded contract, which is exactly what 'compress presentation, never truth' permits.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-023",
+        "text": "Tentative key choices (Decide finalizes after two explore rounds): (1) render client-side in runCapabilities under exactly the AXI option-B semantics — brief when machineOut() AND NOT --full; explicit -o table unchanged; (2) the brief SHAPE is decided by measurement, not taste: caps_brief.json (24,266 B) vs caps_brief.tsv (17,543 B) go through count_tokens — bytes are not tokens and the meter standard bans tiktoken/chars-4 — with the pre-committed rule that tokens win, ties break toward JSON (parseability); (3) the projection spec ships as a named keep-list artifact so a later server-side ?view=brief (for SDK/curl consumers, if a future census ever ranks them) adopts it verbatim — nothing foreclosed; (4) the slice carries the full AXI protective-pattern kit in the same PR: byte tripwire pair (realistic + hostile), exact-key-set pin, opt-out-byte-identical proof for --full, determinism check (byte-identical consecutive calls — already true today, must stay true); (5) invoke-completeness is an acceptance TEST, not a hope: for every command in the manifest, the brief alone must carry what composing that command requires.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-024",
+        "text": "Companion slices, small and ratified NOW: (a) seal Tasks.Query.to_render_map (query.ex:740-753) by copying board.ex's field_readable? gate verbatim, with the redact-then-assert-omitted proof — the doctrine orders seal before tiers, and this is tier wave one; (b) flip the nil-polarity inversion (envelope.ex:222 field_readable? nil => true) and fence it so the next hand-rolled emitter cannot pass nil believing it fails closed. Candidate micro-slice if survey confirms it is as cheap as the census claims: a did-you-mean hint for bp task show / bp task list — 2,428 + 329 typed occurrences, 1.19 MB of pure error waste with no defenders. Verification for the flagship: 12 count_tokens calls on the fixtures (epic task #1 per the capstone) plus one live before/after agent session on the ledger measuring total_cost_usd, num_turns, and --full escape-hatch rate.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-025",
+        "text": "Brief-but-complete beats smaller-but-lossy: a card missing one needed field costs more than the cut saved.",
+        "type": "pullquote"
+      },
+      {
+        "id": "w1-026",
+        "text": "Explicitly OUT of this wave: the board tier and rev-everywhere (later waves per the ratified order), the serialization duel proper (wave 2, duel-gated, $30-80 budget), bp park and MCP (wave 3+, after exercise), the ETag-view cache-key fold and Vary emission (needed only when a server-side view ships — this direction avoids triggering that RFC 9110 fix now), and anything touching taskboard fetch (stopgap PR #6033 / task-8ad8d5cfe98c70aa is in flight there — coordinate, don't duplicate).",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-030",
+        "level": 2,
+        "text": "Direction debate — three candidates, one winner",
+        "type": "h2"
+      },
+      {
+        "id": "w1-031",
+        "text": "Candidate A — server-side ?view=brief on GET /v1/capabilities, under the views grammar. The doctrine-pure reading ('the brief card is a server render'): Elixir hand-tunes a brief manifest, every consumer (CLI, MCP, SDK, curl) inherits it, the tier grammar stays uniform. It loses on engineering economics that only appear once you read the consumption path: the CLI must fetch the FULL manifest regardless (the command tree is built from it), so a server brief saves zero wire and zero context on its own — it only changes what gets PRINTED, which a client projection does identically. And it drags in real scope: the ETag must fold the view param (the capstone flags today's precedent as a latent RFC 9110 violation that MUST be fixed by whoever ships a server view), Vary must be emitted, a second wire shape needs Go strict-decode modeling plus the frozen manifest.schema.json additive dance, across two languages. All of that to produce byte-identical stdout. The views grammar also structurally cannot describe the capabilities builtin — it is the bootstrap (chicken-and-egg: you need the manifest to learn what views exist), a carve-out today and a carve-out under A.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-032",
+        "text": "Candidate B (WINNER) — client-side deterministic brief projection at the point of print. One language, zero wire-contract risk (released binaries strict-decode the manifest; stdout shape is not a wire contract and carries no DisallowUnknownFields blast radius), works offline against the on-disk ETag cache, and the render is a pure function of strict-decoded truth — when the server adds a command tomorrow, the brief includes it with zero code change, preserving the manifest package's 'hardcodes NO noun' law. The count_tokens-validated keep-list is the durable artifact; it ports verbatim to a server view the day a measured non-CLI consumer exists.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-033",
+        "text": "Candidate C — shrink the manifest itself (trim summaries/flag docs for everyone). Rejected fastest: the summaries ARE the product for the human tree and the MCP tool derivation, the root shape is frozen under strict decode, and it compresses truth to fix a presentation problem — a direct doctrine violation.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-034",
+        "text": "Sharpest attacks on the winner, and how the wave absorbs them: (1) DOCTRINE DRIFT — every other brief is server-declared; this forks the grammar. Absorbed: capabilities is already outside the grammar (a builtin the views descriptor cannot reach), the projection is first-party and guess-free, and the keep-list is written to be server-portable — the fork is a deferral, not a divergence. (2) COMPLETENESS RISK — the census's own law says a brief missing one field costs more than it saves (agents already handle-climb 12,368 task gets vs 1,421 readies). Absorbed: invoke-completeness is the acceptance test, and the live before/after session measures the --full escape rate directly; if agents climb, the brief fattens before it ships. (3) BYTES ARE NOT TOKENS — TSV wins bytes (17.5 vs 24.3 KB) but JSON punctuation vs TSV structure may invert on the tokenizer, and 'count_tokens before token claims' is ratified doctrine. Absorbed: the shape choice is explicitly deferred to the count_tokens run — task #1 of the wave, pre-committed decision rule. (4) HIDDEN CONSUMERS — a script somewhere parses bp capabilities -o json and breaks on brief-when-piped. Absorbed: survey question manifest-consumers censuses every parser in the repo before Decide; the AXI piped-default precedent survived the same worry with option-B semantics.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-040",
+        "level": 2,
+        "text": "Survey plan — 16 scouts, cast wide",
+        "type": "h2"
+      },
+      {
+        "id": "w1-041",
+        "text": "Each question below goes to one Sonnet surveyor. The stress-test assumptions above map 1:1 onto scouts; the Digest phase distills their reports into the verify plan and appends it here before the verifiers fly.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-042",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "manifest-consumers — who parses bp capabilities output or GET /v1/capabilities across the repo (scripts, tooling, docs, JS SDK, MCP bridge, openapi gen, Studio)? Breakage census for brief-when-piped."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fixtures-location — where are caps.json / caps_brief.json / caps_brief.tsv and the projection spec that produced them; do the byte counts reproduce live?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "count-tokens-harness — what exists for count_tokens metering (meter standard, METER formula, key reachability); where does the 12-call script live?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "views-grammar-reach — can the views grammar structurally reach the capabilities builtin; map the builtin dispatch, g.full, machineOut, and the exact hook point for a client render."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "manifest-byte-anatomy — byte breakdown of the live 95,666 B manifest by field class; which cuts reach ~24 KB while staying invoke-complete?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "seal-query-ex — confirm query.ex:740-753 unsealed on origin/main; map board.ex gate + TaskResolver wiring + the redact-then-assert-omitted precedent to copy."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "nil-polarity — confirm envelope.ex:222 polarity on origin/main; caller census; what flip + fence concretely entails and what fence precedents exist."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "cache-and-etag — CLI manifest Cache/CacheKey semantics under a client render; confirm the client path triggers zero server ETag/Vary work."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "axi-precedent-kit — file:line inventory of the AXI protective patterns to copy (tripwire pair, exact-key-set pin, opt-out-byte-identical, amendment discipline)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "session-start-reality — how sessions actually consume the manifest (CLAUDE.md instructions, onramp/prime, MCP tools/list serialization); calls per session."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "quick-fix-did-you-mean — where unknown-verb errors render; cost of a did-you-mean hint for task show/list; prior suggestion art in the CLI."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "stopgap-coordination — state of task-8ad8d5cfe98c70aa / PR #6033; files touched; any overlap with wave 1 files."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tsv-render-art — existing tabular/TSV emitters to reuse; how TSV brief handles nested args/flags; determinism properties."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "live-before-after-method — how AXI measured its 12-92x diets; what one live before/after session needs (harness, total_cost_usd, turn counts)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "strict-decode-blast — the precise boundary between contract-safe CLI output changes and forbidden manifest wire changes; who gates manifest.schema.json."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "epic-hygiene — how prior epics filed waves/slices on the ledger (AXI as template); charter file conventions; what the founding charter must unfreeze or cite."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "w1-050",
+        "level": 2,
+        "text": "In flight",
+        "type": "h2"
+      },
+      {
+        "id": "w1-051",
+        "text": "STATUS: surveying. 16 surveyors dispatched against the questions above. Next: Digest appends the survey digest + verify plan here BEFORE the verifiers fly; Decide appends the decisions + wave plan BEFORE the builders fly; Review closes this Paper as the wave debrief. Epic task task-495cc9a9af43472c carries wave_status + wave_paper pointers back here.",
+        "type": "callout"
+      },
+      {
+        "id": "w1-100",
+        "level": 2,
+        "text": "Survey digest — 16 reports in (Digest phase, 2026-07-24)",
+        "type": "h2"
+      },
+      {
+        "id": "w1-101",
+        "text": "The direction's structural premise is CONFIRMED in code on origin/main, at every anchor: internal/manifest/fetch.go always fetches the FULL manifest (hardcoded ?views=1 opt-in, ETag-cached, no view selector) and that fetch never reaches context; the 95.7 KB enters as stdout at runCapabilities (internal/cli/builtins.go:44, out.renderJSON(m)); piped output already defaults to JSON (output.go); the capabilities builtin is dispatched outside the manifest tree (cli.go:127) and the AXI views grammar structurally cannot reach it (resolveView requires a manifest.Command; capabilities has none — carve-out is by design, per axi-s2's frozen 3-command descriptor). Zero in-repo parsers depend on the full stdout shape: MCP bridge/resources consume the in-process struct, server-side pins guard the WIRE (untouched), the one jq shape-dependency (tooling/mobile-smoke/smoke.sh) hits the raw HTTP endpoint, JS SDK and Studio are non-consumers. Cache/ETag machinery needs zero changes — the latent RFC 9110 gap lives in QueryController.list_etag (/v1/data), a different controller, correctly deferred (hd-s3). There is currently NO test pinning runCapabilities' stdout at all — the wish's protective kit is this path's FIRST-EVER coverage, not extra safety.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-102",
+        "text": "Both ratified-NOW companion seals are shovel-ready with exact anchors. Seal query.ex: to_render_map (query.ex:741) reads content fields with zero Envelope gating (the file's only field_readable? call, :320, serves the separate aggregate path); gate-to-copy is Board.field_visibility_gate/1 (board.ex:190-202); two consumers (papers.ex:1074 resolve_tasks_in_blocks, shared/paper.ex:377 task_previews) both fix with one change; the redact-then-assert-omitted recipe exists twice (board_test.exs:40-124, board_live_test.exs:1550/1636) and query_rows_test.exs has zero visibility coverage today — this is the FOURTH sealing of the same leak class. Nil-polarity: envelope.ex:222 (nil ⇒ true) AND the catch-all :244 both fail open, opposite of render/3's own nil handling; zero HTTP/WS-reachable callers pass literal nil (from_conn never returns nil); exactly ONE test asserts the old behavior (envelope_test.exs:254-257); no Credo exists in the repo, so the fence is regression test + doctrine comment + CI grep, not a Credo rule; a sibling landmine (listen_controller.ex:393-395, nil ⇒ full unredacted document) needs a ruling in the same PR. Did-you-mean is TWO distinct fixes: threading the ALREADY-COMPUTED Levenshtein hint into the JSON error envelope (fixes list→ls, 329 hits — machinery exists, usageErrf hardcodes hint=\"\") and an explicit alias intercept for show→get (2,428 hits — Levenshtein can never catch it; precedent: task tui at cli.go:152, server ls at cli.go:411). ~20-30 LOC combined, own small task to keep blast radii disjoint.",
+        "type": "paragraph"
+      },
+      {
+        "content": "THE CONTRADICTION THAT GATES DECIDE: the ratified byte target may be unachievable under the ratified keep-list. A surveyor rebuilt the brief projection exactly per the keep-list (noun/verb/summary/writes/auth_tier + args{name,required,type} + flags{name,type}) as ordinary nested JSON against the live 142-command manifest: 46,595 B = 2.06x — NOT the ratified 24,266 B = 3.9x. Tuple encoding: 39,435 B (2.43x). Packed-string args/flags: 36,714 B (2.61x). Only by ALSO dropping the nouns catalog (4,384 B) and violating the keep-list did 27,178 B (3.53x) appear. The six census fixtures that produced 24,266/17,543 B are GONE (ephemeral scratchpad of a dead session) and the encoding that produced them was never recorded in any paper. Verify assignment 1 rebuilds this ground truth for real; Decide must then either revise the target ratio or extend the keep-list with explicit encoding rules (packed args/flags, nouns-catalog drop) before the spec is written as the named, server-portable keep-list.",
+        "id": "w1-103",
+        "type": "callout"
+      },
+      {
+        "id": "w1-104",
+        "text": "Other premise corrections. (1) Stopgap PR #6033 is MERGED (2026-07-24T00:19Z, commit 83c41e66c on origin/main), not in flight — zero file overlap with wave-1 targets (GetConditional signature preserved); its ledger task task-8ad8d5cfe98c70aa is STALE-OPEN and Decide should close it. (2) 'count_tokens on the fixtures' cannot run as a pre-build gate: fixtures don't exist; the real order is build projection → regenerate fixtures → count. (3) No count_tokens-capable API key is reachable anywhere in this environment (env, keychain, bp secret, 1Password); OAuth tokens 401 against the Messages API family — a HUMAN must provision a console key, and the pre-registered fallback is bytes-with-conversion-pending, never a fabricated token number. (4) The '12-92x' phrase matches no measured number; the AXI band is 12x-81.5x, all static wc -c probes — the one live before/after session is a NEW method leg, n=1, and must be pre-registered as directional-smoke-only (5-6x early-byte cache amplification means the session needs enough turns to clear ~2x the $0.55 spawn floor). (5) 'Paid on every session' is doctrine, not measurement: bp capabilities is absent from the census's top-8 bp-verb byte table and its call frequency was never counted; framing softens to 'amplified per call' unless measured. (6) The byte-anatomy scare that 3 commands emit views 'without ?views=1' is almost certainly the CLI's own hardcoded opt-in (fetch.go:40) — verifier will prove the raw endpoint honors the contract. (7) Live manifest has drifted +249 B (95,915 B, 142 commands) since the census — tripwires must pin live-measured baselines, not the literal 95,666.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-110",
+        "level": 2,
+        "text": "Coverage map — what was checked, found, and NOT found",
+        "type": "h2"
+      },
+      {
+        "id": "w1-111",
+        "text": "CHECKED AND FOUND: every consumer class of the manifest (Go in-process, server wire pins, shell/doc greps, blast-radius config); the two dispatch pipelines and the exact brief hook point (builtins.go:53); the full byte anatomy of the live manifest by field class (args 18.8K / flags 17.2K / summaries 13.8K / http 10.3K…); the AXI precedent kit with file:line for all five reusable patterns (exact-key-set pin tasks_controller_test.exs:2071, byte tripwire pair :2431-2549, opt-in gate capabilities.ex:281-321, same-PR amendment rule, Go clamp mcp_brief_view_test.go); METER.md + meter.py as the dollar meter-of-record; both seal targets end-to-end with test recipes; the did-you-mean machinery (nearestVerb live-verified in table mode, dropped in JSON mode); epic-cycle filing conventions (parent_id linkage, wave_paper field, labels:[] on slices, charter skeleton, the charter_path-defaults-to-CLOUD-charter bug).",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-112",
+        "text": "CHECKED AND NOT FOUND (absences that are decisions-in-waiting): no literal @brief_keys symbol anywhere (it's a paraphrase — the real pattern is a numbered cut-list comment + key-set pin test); no caps_brief.json/.tsv/ready_cards fixtures anywhere on the machine; no count_tokens script anywhere in the repo (METER.md names the endpoint, nothing calls it); no ANTHROPIC_API_KEY in any store; no TSV writer for nested structures (table.go is lossy-human, sheets/csv.ex is flat-grid RFC-4180 — a nested-manifest TSV sub-grammar is UNDESIGNED, with Flag.Default's arbitrary-JSON as the sharpest edge); no test pinning capabilities stdout; no Credo tooling; no Vary header anywhere except CORS; no ctx-compression charter file (confirmed absent, charter_exists=false correct); no 'agent-report' surface; no 92x anywhere; no JS SDK / Studio / deploy consumption of the manifest. UNREACHED CORNERS: internal/manifest/manifest_test.go's exact assertions (may pin command counts); cli-release.yml's unconditional-test backstop for the go-tests.yml path-filter gap (docs/cli/fixtures/** does NOT trigger go tests); docs/contracts/dispatch-areas.md files-grammar; tasks_controller/params.ex:187 caller origin end-to-end; hit_envelope.ex:108 guard; whether resolve_tasks_in_blocks batches rows_for_query per paper (N+1 schema-resolution risk for the seal); shell history for the lost fixture-generation script.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-120",
+        "level": 2,
+        "text": "Verify plan — 7 assignments in flight",
+        "type": "h2"
+      },
+      {
+        "id": "w1-121",
+        "text": "V1 brief-encoding-ground-truth (OPUS, runs code): rebuild the brief projection from the live manifest across all candidate encodings (nested JSON / tuples / packed args-flags / TSV denormalized / TSV packed, each with and without the nouns catalog), wc -c every variant, and recommend the encoding+keep-list amendment that reaches an honest ratio while staying invoke-complete and server-portable. This closes the ratified-target contradiction. V2 go-baseline-and-views-optin (sonnet, runs gates): CC=clang go build ./... && go vet && go test ./internal/cli/... ./internal/manifest/... green on origin/main; confirm no capabilities stdout test exists; curl the raw /v1/capabilities WITHOUT ?views=1 to prove the opt-in contract holds (expect 0 views keys) and with it (expect 3). V3 nil-polarity-flip-probe (OPUS, worktree probe): flip envelope.ex:222+:244 to false, run targeted mix test on envelope_test.exs + board_test.exs, prove exactly one pre-existing assertion breaks; trace params.ex:187 and hit_envelope.ex:108; enumerate listen_controller.ex:393's test-seam usages for the remove-vs-fence ruling.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-122",
+        "text": "V4 seal-query-feasibility (OPUS, worktree probe): prove query_rows_test.exs + board_test.exs green baseline; establish whether rows_for_query is called per-block per paper (N+1 schema-resolution risk) and whether the dataset is threadable into field_visibility_gate at the rows_for_query level; probe the gate edit. V5 did-you-mean-probe (sonnet, worktree probe): implement the show→get alias + thread the existing hint into the JSON envelope, measure real LOC, go test ./internal/cli/..., demonstrate the built binary's behavior both arms. V6 metering-preflight (sonnet, runs commands): meter.py --self-test; claude CLI flag support for -p/--output-format json/--max-budget-usd; prove count_tokens 401s without x-api-key (closing the census's own inference gap); confirm bp secret get is a workable script read-path for a future key. V7 hygiene-gates-and-ledger (sonnet, runs gates): bash scripts/docs-anchors-check.sh green + does it force a card edit on builtins.go changes; cli-release.yml unconditional-test backstop; dispatch-areas.md files-grammar for Decide's collision labels; reconfirm stopgap task staleness so Decide closes it. Decide must also: pass EXPLICIT charter_path (.claude/workflows/bp-ctx-compression-charter.md — the default silently targets the cloud charter), pick a slice prefix (ctxb-s<N> suggested), drop the epic-candidate label on chartering, and file the fixtures' durable home (tooling/scaffy-duels/fixtures/ suggested, committed like results/).",
+        "type": "paragraph"
+      },
+      {
+        "content": "STATUS: verifying. 7 verifiers in flight (3 Opus, 4 Sonnet; 3 in throwaway worktrees). Next: Decide folds verifier proof into decisions + the wave plan, files slice tasks under task-495cc9a9af43472c, and appends here BEFORE builders fly. The single decision Decide cannot skip: the brief encoding rule vs the ratified 3.9-5.5x target (see the contradiction callout above).",
+        "id": "w1-123",
+        "type": "callout"
+      },
+      {
+        "id": "w1-201",
+        "level": 2,
+        "text": "Verification results (the deep round — what proof forced)",
+        "type": "h2"
+      },
+      {
+        "id": "w1-202",
+        "text": "Seven verifiers ran against origin/main 83c41e66c with executed proofs. The headline: THE RATIFIED BYTE TARGET FAILED RECONSTRUCTION. brief-encoding-ground-truth projected the exact ratified keep-list over the live manifest (95,915 B, 142 commands) in 10 encoding variants: nested JSON bottoms at 42,025 B (2.28x) — the ratified 24,266 B/3.9x is unreachable as JSON objects — and the ratified 17,543 B/5.5x TSV is only reachable by dropping summaries, which breaks invoke-completeness ('tsv/cmd NO-sum bytes=9245 ratio=10.37x; with-sum bytes=21348 ratio=4.49x'). The source fixtures are gone and unrecorded. Encoding is the entire ballgame: identical fields span 2.07x-4.47x. Measured menu, all invoke-complete: nested-JSON 42 KB/2.28x · array-of-tuples 26.5 KB/3.62x · TSV/cmd 21.5 KB/4.47x. TSV's collision-freedom is data-dependent, not structural (0 collisions today, but a re-added Flag.default breaks it silently); JSON-family is immune by construction.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-203",
+        "text": "go-baseline-and-views-optin: Go gate fully green on origin/main ('ok internal/cli 20.675s'); NO test pins runCapabilities stdout (the protective kit is this path's first-ever coverage); docs/cli/fixtures/full-manifest.json is stale at 40 vs live 142 commands but regen is proven safe (no consumer asserts a count); the 'views without ?views=1' scare is REFUTED — authenticated raw server without the param returns 142 commands with ZERO views, with it exactly 3 (search.query, task.ready, task.prime); the always-present views were fetch.go:40's own hardcoded opt-in.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-204",
+        "text": "nil-polarity-flip-probe + seal-query-feasibility: both Elixir slices are shovel-ready with exact anchors — but NO Elixir toolchain exists on this machine (which mix -> not found; toolchain lives on prod via /root/.asdf), so blast radius is settled by exhaustive static caller-trace, not a green run: all 6 production callers of field_readable? pass non-nil structs; exactly ONE test assertion (envelope_test.exs:256) breaks on the flip; the :244 catch-all has zero coverage today. A sibling fail-open lives at listen_controller.ex:395 (nil -> unredacted document; one test usage at :152). The seal's load-bearing constraint is dataset threading: the Studio preview path NEVER stamps dataset into the block query ('shared/paper.ex:377 calls rows_for_query(query, scope)' raw), so the gate must take an explicit opts[:dataset] or it seals against the wrong schema. rows_for_query has exactly two production callers; no per-doc N+1 (gate hoists above the map, board.ex:190 pattern); nil schema degrades to allow-all without raising.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-205",
+        "text": "did-you-mean-probe: GO — built and live-verified end to end: 'task show' stdout byte-identical to 'task get' (diff empty, note stderr-only), 'task list' resolves via ls alias exit 0, 'task raedy -o json' now carries error.hint 'barkpark task ready', table mode byte-unaffected; ~25-30 functional LOC via a sibling usageErrHintf (widening usageErrf would touch 63 no-op sites). metering-preflight: meter.py self-test passes non-vacuously; the claude CLI has all four spawn flags; count_tokens is live and key-gated (401 'x-api-key header is required') — but NO API key is provisioned anywhere reachable (bp secret ls: only ingest_token). hygiene-gates: docs-anchors-check PASSES (12 warnings, none in scope); anchor gate is name-existence only (editing runCapabilities' body forces no card edit); go-tests.yml omits docs/cli/fixtures/** (real gap, fix rides s1); cli-release.yml only fires on tags. CORRECTION: task-8ad8d5cfe98c70aa is ALREADY CLOSED (done, 2026-07-24T00:21Z, evidence cites merge 83c41e66c) — the digest's stale-open premise was a timing race; no close action exists.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-206",
+        "level": 2,
+        "text": "Decisions (final — mirrored from the charter, .claude/workflows/bp-ctx-compression-charter.md)",
+        "type": "h2"
+      },
+      {
+        "id": "w1-207",
+        "text": "(1) Client-side projection at print — the wire always fetches full; stdout at builtins.go:44 is where bytes enter context; a server view saves zero and drags ETag/Vary scope. (2) Ratified targets REVISED — they failed reconstruction; honest menu recorded. (3) Encoding = array-of-tuples JSON + legend, nouns catalog dropped (~26.5 KB/3.62x): only JSON-family near the ratified band, structurally collision-free where TSV is data-dependently safe. (4) Targets are ratios, never fixed bytes (manifest grows; tripwire: brief <= 32% of full). (5) Tokens still win, POST-build: no fixtures pre-exist and no key is reachable — bytes ship labeled bytes-with-conversion-pending; >10% token win by another invoke-complete encoding flips by amendment, ties break JSON. (6) BRIEF-KEEP-LIST v1 pins fields AND encoding, server-portable for a later ?view=brief. (7) --full byte-identical, table untouched, brief only on machineOut && !full. (8) Protective kit in the same PR — first-ever coverage of this stdout.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-208",
+        "text": "(9) Fixtures to tooling/scaffy-duels/fixtures/; docs/cli/fixtures regenerated to 142 commands; docs/cli/fixtures/** added to go-tests.yml. (10) Seal query.ex NOW with EXPLICIT dataset threading (opts[:dataset]; preview passes socket.assigns.dataset) — query-map derivation would silently seal the wrong schema; per-field independent gating; counts stay ungated. (11) Nil flip fails closed at :222 AND the :244 catch-all; the listen_controller.ex:395 sibling is REMOVED in the same slice (explicit scope expansion, one-test blast radius); fence = tests + doc rewrite + scripts/nil-polarity-check.sh grep gate (Credo does not exist here). (12) Did-you-mean is its own small slice (probe-proven recipe). (13) Live session is n=1 DIRECTIONAL SMOKE, pre-registered (fixed prompt, model pin, envelope-only metering, >2x the $0.55 floor, --full escape rate as a named metric); 'paid on every session' softens to amplified-per-call; '12-92x' corrects to the measured 12-81.5x. (14) task-8ad8d5cfe98c70aa already closed — no action. (15) charter_path always explicit (the workflow default silently targets the cloud charter). (16) Prefix ctx-; epic-candidate label drops on chartering. (17) Census thresholds forbidden until measured; duel $30-80 in wave 2; board clamp raise landed, fold is future work.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-209",
+        "level": 2,
+        "text": "Wave plan — 6 slices, 4 building now, 2 sequenced behind s1",
+        "type": "h2"
+      },
+      {
+        "id": "w1-210",
+        "text": "ROUND 1 (dependency-free, building this run): ctx-s1-brief-manifest [go-cli, fable, large] — born-brief bp capabilities per BRIEF-KEEP-LIST v1 + full protective kit + fixture regen + go-tests.yml paths; gate: CC=clang go build ./... && go vet ./internal/cli/... ./internal/manifest/... && CC=clang go test ./internal/cli/... ./internal/manifest/... · ctx-s2-seal-query-rows [elixir, opus, medium] — dataset-threaded visibility gate in to_render_map, both callers updated, board_test recipe copied; HIGH-FLIP-RISK: dataset threading (independent second review warranted before merge); gate: cd api && mix test query_rows_test board_test (elixir.yml CI binding where no local toolchain) · ctx-s3-nil-polarity [elixir, opus, small] — :222 + :244 flip, listen_controller seam removal, grep fence; HIGH-FLIP-RISK: dead-path claim (static-only today); gate: mix test envelope_test listen_controller_test + nil-polarity-check.sh + docs-anchors-check.sh · ctx-s4-did-you-mean [go-cli, opus, small] — show->get/list->ls aliases + usageErrHintf hint threading + fixture-based tests; gate: the Go gate.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-211",
+        "text": "ROUND 2 (AFTER ctx-s1-brief-manifest MERGES — the lead dispatches these manually; they do not build this run): ctx-s5-count-tokens [tooling, opus, small] — count_tokens calibration over the committed fixtures, 12 calls x 2 pinned models when a key lands, bytes-with-conversion-pending fallback, pre-registered confirm-or-flip rule; gate: count_tokens_calibrate.py --self-check + meter.py --self-test · ctx-s6-live-smoke [tooling, opus, medium] — pre-registered n=1 directional before/after session, brief-default vs --full-forced, envelope-metered, --full escape rate as first-class metric; gate: meter.py --self-test. BACKLOG FILED (published children of the epic): ctx-b1-paired-duel (wave 2, $30-80), ctx-b2-server-view-brief (+RFC 9110 ETag/Vary fix), ctx-b3-bp-park (plugin + 2 MB + mandatory summary), ctx-b4-mcp-tools-all-sizing, ctx-b5-provision-count-tokens-key (HUMAN, p1 — unblocks every token claim), ctx-b6-memoized-visibility-gate.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-212",
+        "text": "STATUS: building. 4 round-1 builders fly now (s1 fable, s2/s3/s4 opus); s5+s6 dispatch after s1 merges. Charter founded and pushed (4b46ccbe6). Review must: re-derive s2's dataset-threading and s3's dead-path judgments independently (both flagged HIGH-FLIP-RISK), confirm s1's --full byte-identity and invoke-completeness tests actually enumerate all 142 commands, and close merge-gated criteria on merge.",
+        "type": "callout"
+      },
+      {
+        "id": "w1-d00",
+        "text": "DEBRIEF — wave closed (Review, 2026-07-24)",
+        "type": "h2"
+      },
+      {
+        "id": "w1-d01",
+        "text": "All four round-1 slices built, reviewed by the wave reviewer (full diffs vs origin/main, gates re-run, cross-slice integration merge tested green), pushed, and opened as PRs. The reviewer made ZERO code fixes — every slice survived adversarial review as built. Grade: A-. The lead merges; merge-gated criteria on each task are the lead's to close on merge.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-d02",
+        "text": "Shipped",
+        "type": "h3"
+      },
+      {
+        "id": "w1-d03",
+        "text": "ctx-s1-brief-manifest — branch loop-epic/born-brief-bp-capabilities-machine-outpu-0, PR #6052. Born-brief bp capabilities: BRIEF-KEEP-LIST v1 array-of-tuples, 95,915 B -> 26,502 B (3.62x / 27.6%, under the 32% ratio tripwire). Protective kit is real, not vacuous: invoke-completeness enumerates all 142 commands field-by-field, the legend pin is exact, the hostile synthetic proves structural collision-freedom, --full is byte-identical. Reviewer additionally proved the committed caps-brief fixture is byte-identical to briefManifest(caps-full) — the frozen duel pair is self-consistent. Verdict: exemplary; merge first (s5/s6 sequence behind it).",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-d04",
+        "text": "ctx-s3-nil-polarity — branch loop-epic/nil-caller-fails-closed-envelope-ex-fiel-2, PR #6053. envelope.ex nil clause + :244 catch-all flipped fail-CLOSED; the listen_controller fail-open nil seam REMOVED; nil-polarity-check.sh fence (selftest REDs on all three planted fail-open shapes) wired into doc-gates.yml. HIGH-FLIP-RISK dead-path claim independently RE-DERIVED by the reviewer: all 6 production callers thread a non-nil principal, and ScopeHelpers.from_assigns always Keyword.puts :caller_context via from_conn -> anonymous(), so the SSE path can never hand nil to redacted_result. Runnable gates green locally; elixir.yml on the PR is the binding mix proof (no local toolchain, charter-designated). Comment-sweep follow-up: task-3afeb5994c839c27.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-d05",
+        "text": "ctx-s4-did-you-mean — branch loop-epic/bp-task-show-list-resolve-via-aliases-an-3, PR #6054. task show->get / task list->ls aliases (stderr-only note, stdout byte-identical to the canonical verb — proven with separate-stream capture) + error.hint did-you-mean in JSON envelopes via the usageErrHintf sibling (the ~60 no-op usageErrf sites stay byte-identical). Reviewer verified the clean merge with s1's 142-command fixture regen and the combined suite green. Small, probe-proven, exactly decision 12.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-d06",
+        "text": "ctx-s2-seal-query-rows — branch loop-epic/tasks-query-to-render-map-sealed-schema--1, PR #6055 — CI-GATED, second-review-owed. rows_for_query/3 sealed with the explicit dataset cascade; papers.ex passes its stamped dataset, Studio preview passes socket.assigns.dataset. The HIGH-FLIP-RISK dataset-threading judgment was re-derived by the reviewer (the adjacent agg_for_query fetcher already threads socket.assigns.dataset — strong local precedent), and the gate composes correctly with s3's flip (anonymous(), never nil). The mix gate could NOT run anywhere this wave (no Elixir toolchain); criteria 2/4/5 stay honestly open pending elixir.yml green on the PR. Per the flip-risk protocol a genuinely independent second reviewer is warranted before merge — that dispatch is the lead's manual step.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-d07",
+        "text": "Stalled / deferred",
+        "type": "h3"
+      },
+      {
+        "id": "w1-d08",
+        "text": "Nothing stalled. ctx-s5-count-tokens and ctx-s6-live-smoke did not build BY DESIGN (sequenced round 2, both depend on s1 being on main). Both tasks sit open and unclaimed on the ledger with full briefs. The token leg of s5 additionally waits on ctx-b5 (human provisions an Anthropic API key via bp secret set); its bytes-labeled-bytes fallback runs without one.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-d09",
+        "text": "Ledger audit",
+        "type": "h3"
+      },
+      {
+        "id": "w1-d10",
+        "text": "Clean — zero fixes needed. All four built slices: claimed by their builders, criteria stamped mid-claim with concrete evidence (probe lines, test names, file:line), lifecycle honestly in_progress with merge-gated criteria left open for the lead. s2's unrunnable mix criteria are unmet with empty evidence — honest, not padded. s5/s6 open and unclaimed. The backlog (ctx-b1..b6 + task-3afeb5994c839c27) matches the charter roster exactly; no out-of-wave task was touched. Nit, not a lie: s4's final claim pulse still reads 'committing on <branch>' where s1/s3 wrote a proper final now-line.",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-d11",
+        "text": "Grade: A- (earned, not asserted)",
+        "type": "h3"
+      },
+      {
+        "id": "w1-d12",
+        "text": "Strong: the capstone's top-ranked win landed at exactly the revised measured target (3.62x, like-for-like encoding, ratio-not-bytes law respected); the protective kits are genuinely protective (selftest-tripwired fence, hostile synthetic, first-ever coverage of two previously dark paths); both HIGH-FLIP-RISK judgments were re-derived independently and held; all branches pushed with PRs open — no stranded work. Short of A/A+: the wave's headline claim is still in BYTES — count_tokens (s5) and the live smoke (s6) are exactly the two slices that could not run this round, so 'compresses the session-start tax' remains directionally proven, not token-proven; s2 ships without ANY test execution anywhere (CI will be first contact); and the third inline copy of the anonymous visibility gate (query.ex, after board.ex + board_live.ex) is charter-sanctioned but real duplication debt (ctx-b6 is the consolidation point).",
+        "type": "paragraph"
+      },
+      {
+        "id": "w1-d13",
+        "text": "Next wave",
+        "type": "h3"
+      },
+      {
+        "id": "w1-d14",
+        "text": "(1) Lead merges round 1: #6052 first, then #6053/#6054 in any order, #6055 only after elixir.yml green AND the independent second review of the dataset threading; close each task's merge-gated criteria on merge. (2) Dispatch ctx-s5-count-tokens once s1 is on main; bytes fallback works keyless, ctx-b5 unblocks tokens. (3) Dispatch ctx-s6-live-smoke after s1 merges — pre-register BEFORE any run; report the --full escape rate. (4) The token verdict either confirms tuples or files the >10% amendment naming the winner. Then wave 2 proper: the pre-registered paired duel (ctx-b1, $30-80), census thresholds measured-first.",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">context-compression epic · WAVE 1 · opened 2026-07-24 · status: CLOSED — reviewed 2026-07-24, grade A-, debrief below</p><div class=\"bp-unknown-block\">Unsupported block: h1</div><p style=\"margin:0 0 10px;line-height:1.55;font-size:18px\">Every agent session opens with bp capabilities -o json: 95,666 bytes of full-depth manifest landing where the meter amplifies bytes 5-6x. It is the last un-briefed first-party payload and the spend census&#39;s top-ranked prize. This wave makes the agent-facing manifest born brief — 17.5-24.3 KB, invoke-complete, deterministic — verified by count_tokens on the ready fixtures and one live before/after session. Riding along: the two seals the user ratified as NOW (query.ex&#39;s unsealed task-embed chain, the nil-polarity inversion), because the doctrine orders seal before tiers and this is the first tier wave of the epic.</p><p style=\"border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px\">Wave 1 of the ctx-compression epic · epic task task-495cc9a9af43472c · charter: .claude/workflows/bp-ctx-compression-charter.md (founded at Decide, pushed 4b46ccbe6) · ground truth: /papers/ctx-compression-capstone + five lane papers · all 12 capstone judgment calls RATIFIED 2026-07-24</p><div class=\"bp-unknown-block\">Unsupported block: h2</div><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span></span></div><div class=\"bp-unknown-block\">Unsupported block: h2</div><p>The finished experience: an agent opens a session, runs bp capabilities -o json (or gets it piped), and receives a brief manifest — roughly 17.5-24.3 KB instead of 95.7 KB — that is INVOKE-COMPLETE: every noun, every verb, every arg (name/required/type), every flag (name/type), every summary an agent needs to compose ANY bp command correctly on the first try, with zero follow-up calls. What vanishes is exactly the plumbing only the CLI itself consumes: http method/path templates, mutation_op, set_key, scoped_prefix, default_output, dry_run/batch bookkeeping. bp capabilities --full remains byte-identical to today&#39;s output — the escape hatch is one flag, named in the brief itself. Humans see no change: the -o table tree was already brief.</p><p>The load-bearing structural insight from reading the real code: the wire is NOT where this payload is paid. internal/manifest/fetch.go always fetches (and ETag-caches) the FULL manifest because the CLI&#39;s entire command tree is a pure function of it — that fetch never enters agent context. The 95,666 B enters context as STDOUT: runCapabilities (internal/cli/builtins.go:44) re-marshals the strict-decoded Manifest struct and prints it. So the diet belongs at the point of print: a deterministic brief projection in Go, over truth the client provably holds in full. This is not a proxy guessing — it is the system&#39;s own first-party CLI projecting its own strict-decoded contract, which is exactly what &#39;compress presentation, never truth&#39; permits.</p><p>Tentative key choices (Decide finalizes after two explore rounds): (1) render client-side in runCapabilities under exactly the AXI option-B semantics — brief when machineOut() AND NOT --full; explicit -o table unchanged; (2) the brief SHAPE is decided by measurement, not taste: caps_brief.json (24,266 B) vs caps_brief.tsv (17,543 B) go through count_tokens — bytes are not tokens and the meter standard bans tiktoken/chars-4 — with the pre-committed rule that tokens win, ties break toward JSON (parseability); (3) the projection spec ships as a named keep-list artifact so a later server-side ?view=brief (for SDK/curl consumers, if a future census ever ranks them) adopts it verbatim — nothing foreclosed; (4) the slice carries the full AXI protective-pattern kit in the same PR: byte tripwire pair (realistic + hostile), exact-key-set pin, opt-out-byte-identical proof for --full, determinism check (byte-identical consecutive calls — already true today, must stay true); (5) invoke-completeness is an acceptance TEST, not a hope: for every command in the manifest, the brief alone must carry what composing that command requires.</p><p>Companion slices, small and ratified NOW: (a) seal Tasks.Query.to_render_map (query.ex:740-753) by copying board.ex&#39;s field_readable? gate verbatim, with the redact-then-assert-omitted proof — the doctrine orders seal before tiers, and this is tier wave one; (b) flip the nil-polarity inversion (envelope.ex:222 field_readable? nil =&gt; true) and fence it so the next hand-rolled emitter cannot pass nil believing it fails closed. Candidate micro-slice if survey confirms it is as cheap as the census claims: a did-you-mean hint for bp task show / bp task list — 2,428 + 329 typed occurrences, 1.19 MB of pure error waste with no defenders. Verification for the flagship: 12 count_tokens calls on the fixtures (epic task #1 per the capstone) plus one live before/after agent session on the ledger measuring total_cost_usd, num_turns, and --full escape-hatch rate.</p><p style=\"margin:22px 0;padding:2px 0 2px 16px;border-left:3px solid #1e5347;color:#15211d;font-size:19px;font-style:italic\">Brief-but-complete beats smaller-but-lossy: a card missing one needed field costs more than the cut saved.</p><p>Explicitly OUT of this wave: the board tier and rev-everywhere (later waves per the ratified order), the serialization duel proper (wave 2, duel-gated, $30-80 budget), bp park and MCP (wave 3+, after exercise), the ETag-view cache-key fold and Vary emission (needed only when a server-side view ships — this direction avoids triggering that RFC 9110 fix now), and anything touching taskboard fetch (stopgap PR #6033 / task-8ad8d5cfe98c70aa is in flight there — coordinate, don&#39;t duplicate).</p><div class=\"bp-unknown-block\">Unsupported block: h2</div><p>Candidate A — server-side ?view=brief on GET /v1/capabilities, under the views grammar. The doctrine-pure reading (&#39;the brief card is a server render&#39;): Elixir hand-tunes a brief manifest, every consumer (CLI, MCP, SDK, curl) inherits it, the tier grammar stays uniform. It loses on engineering economics that only appear once you read the consumption path: the CLI must fetch the FULL manifest regardless (the command tree is built from it), so a server brief saves zero wire and zero context on its own — it only changes what gets PRINTED, which a client projection does identically. And it drags in real scope: the ETag must fold the view param (the capstone flags today&#39;s precedent as a latent RFC 9110 violation that MUST be fixed by whoever ships a server view), Vary must be emitted, a second wire shape needs Go strict-decode modeling plus the frozen manifest.schema.json additive dance, across two languages. All of that to produce byte-identical stdout. The views grammar also structurally cannot describe the capabilities builtin — it is the bootstrap (chicken-and-egg: you need the manifest to learn what views exist), a carve-out today and a carve-out under A.</p><p>Candidate B (WINNER) — client-side deterministic brief projection at the point of print. One language, zero wire-contract risk (released binaries strict-decode the manifest; stdout shape is not a wire contract and carries no DisallowUnknownFields blast radius), works offline against the on-disk ETag cache, and the render is a pure function of strict-decoded truth — when the server adds a command tomorrow, the brief includes it with zero code change, preserving the manifest package&#39;s &#39;hardcodes NO noun&#39; law. The count_tokens-validated keep-list is the durable artifact; it ports verbatim to a server view the day a measured non-CLI consumer exists.</p><p>Candidate C — shrink the manifest itself (trim summaries/flag docs for everyone). Rejected fastest: the summaries ARE the product for the human tree and the MCP tool derivation, the root shape is frozen under strict decode, and it compresses truth to fix a presentation problem — a direct doctrine violation.</p><p>Sharpest attacks on the winner, and how the wave absorbs them: (1) DOCTRINE DRIFT — every other brief is server-declared; this forks the grammar. Absorbed: capabilities is already outside the grammar (a builtin the views descriptor cannot reach), the projection is first-party and guess-free, and the keep-list is written to be server-portable — the fork is a deferral, not a divergence. (2) COMPLETENESS RISK — the census&#39;s own law says a brief missing one field costs more than it saves (agents already handle-climb 12,368 task gets vs 1,421 readies). Absorbed: invoke-completeness is the acceptance test, and the live before/after session measures the --full escape rate directly; if agents climb, the brief fattens before it ships. (3) BYTES ARE NOT TOKENS — TSV wins bytes (17.5 vs 24.3 KB) but JSON punctuation vs TSV structure may invert on the tokenizer, and &#39;count_tokens before token claims&#39; is ratified doctrine. Absorbed: the shape choice is explicitly deferred to the count_tokens run — task #1 of the wave, pre-committed decision rule. (4) HIDDEN CONSUMERS — a script somewhere parses bp capabilities -o json and breaks on brief-when-piped. Absorbed: survey question manifest-consumers censuses every parser in the repo before Decide; the AXI piped-default precedent survived the same worry with option-B semantics.</p><div class=\"bp-unknown-block\">Unsupported block: h2</div><p>Each question below goes to one Sonnet surveyor. The stress-test assumptions above map 1:1 onto scouts; the Digest phase distills their reports into the verify plan and appends it here before the verifiers fly.</p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>manifest-consumers — who parses bp capabilities output or GET /v1/capabilities across the repo (scripts, tooling, docs, JS SDK, MCP bridge, openapi gen, Studio)? Breakage census for brief-when-piped.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>fixtures-location — where are caps.json / caps_brief.json / caps_brief.tsv and the projection spec that produced them; do the byte counts reproduce live?</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>count-tokens-harness — what exists for count_tokens metering (meter standard, METER formula, key reachability); where does the 12-call script live?</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>views-grammar-reach — can the views grammar structurally reach the capabilities builtin; map the builtin dispatch, g.full, machineOut, and the exact hook point for a client render.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>manifest-byte-anatomy — byte breakdown of the live 95,666 B manifest by field class; which cuts reach ~24 KB while staying invoke-complete?</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>seal-query-ex — confirm query.ex:740-753 unsealed on origin/main; map board.ex gate + TaskResolver wiring + the redact-then-assert-omitted precedent to copy.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>nil-polarity — confirm envelope.ex:222 polarity on origin/main; caller census; what flip + fence concretely entails and what fence precedents exist.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>cache-and-etag — CLI manifest Cache/CacheKey semantics under a client render; confirm the client path triggers zero server ETag/Vary work.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>axi-precedent-kit — file:line inventory of the AXI protective patterns to copy (tripwire pair, exact-key-set pin, opt-out-byte-identical, amendment discipline).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>session-start-reality — how sessions actually consume the manifest (CLAUDE.md instructions, onramp/prime, MCP tools/list serialization); calls per session.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>quick-fix-did-you-mean — where unknown-verb errors render; cost of a did-you-mean hint for task show/list; prior suggestion art in the CLI.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>stopgap-coordination — state of task-8ad8d5cfe98c70aa / PR #6033; files touched; any overlap with wave 1 files.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>tsv-render-art — existing tabular/TSV emitters to reuse; how TSV brief handles nested args/flags; determinism properties.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>live-before-after-method — how AXI measured its 12-92x diets; what one live before/after session needs (harness, total_cost_usd, turn counts).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>strict-decode-blast — the precise boundary between contract-safe CLI output changes and forbidden manifest wire changes; who gates manifest.schema.json.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>epic-hygiene — how prior epics filed waves/slices on the ledger (AXI as template); charter file conventions; what the founding charter must unfreeze or cite.</span></div></div><div class=\"bp-unknown-block\">Unsupported block: h2</div><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span></span></div><div class=\"bp-unknown-block\">Unsupported block: h2</div><p>The direction&#39;s structural premise is CONFIRMED in code on origin/main, at every anchor: internal/manifest/fetch.go always fetches the FULL manifest (hardcoded ?views=1 opt-in, ETag-cached, no view selector) and that fetch never reaches context; the 95.7 KB enters as stdout at runCapabilities (internal/cli/builtins.go:44, out.renderJSON(m)); piped output already defaults to JSON (output.go); the capabilities builtin is dispatched outside the manifest tree (cli.go:127) and the AXI views grammar structurally cannot reach it (resolveView requires a manifest.Command; capabilities has none — carve-out is by design, per axi-s2&#39;s frozen 3-command descriptor). Zero in-repo parsers depend on the full stdout shape: MCP bridge/resources consume the in-process struct, server-side pins guard the WIRE (untouched), the one jq shape-dependency (tooling/mobile-smoke/smoke.sh) hits the raw HTTP endpoint, JS SDK and Studio are non-consumers. Cache/ETag machinery needs zero changes — the latent RFC 9110 gap lives in QueryController.list_etag (/v1/data), a different controller, correctly deferred (hd-s3). There is currently NO test pinning runCapabilities&#39; stdout at all — the wish&#39;s protective kit is this path&#39;s FIRST-EVER coverage, not extra safety.</p><p>Both ratified-NOW companion seals are shovel-ready with exact anchors. Seal query.ex: to_render_map (query.ex:741) reads content fields with zero Envelope gating (the file&#39;s only field_readable? call, :320, serves the separate aggregate path); gate-to-copy is Board.field_visibility_gate/1 (board.ex:190-202); two consumers (papers.ex:1074 resolve_tasks_in_blocks, shared/paper.ex:377 task_previews) both fix with one change; the redact-then-assert-omitted recipe exists twice (board_test.exs:40-124, board_live_test.exs:1550/1636) and query_rows_test.exs has zero visibility coverage today — this is the FOURTH sealing of the same leak class. Nil-polarity: envelope.ex:222 (nil ⇒ true) AND the catch-all :244 both fail open, opposite of render/3&#39;s own nil handling; zero HTTP/WS-reachable callers pass literal nil (from_conn never returns nil); exactly ONE test asserts the old behavior (envelope_test.exs:254-257); no Credo exists in the repo, so the fence is regression test + doctrine comment + CI grep, not a Credo rule; a sibling landmine (listen_controller.ex:393-395, nil ⇒ full unredacted document) needs a ruling in the same PR. Did-you-mean is TWO distinct fixes: threading the ALREADY-COMPUTED Levenshtein hint into the JSON error envelope (fixes list→ls, 329 hits — machinery exists, usageErrf hardcodes hint=&quot;&quot;) and an explicit alias intercept for show→get (2,428 hits — Levenshtein can never catch it; precedent: task tui at cli.go:152, server ls at cli.go:411). ~20-30 LOC combined, own small task to keep blast radii disjoint.</p><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span>THE CONTRADICTION THAT GATES DECIDE: the ratified byte target may be unachievable under the ratified keep-list. A surveyor rebuilt the brief projection exactly per the keep-list (noun/verb/summary/writes/auth_tier + args{name,required,type} + flags{name,type}) as ordinary nested JSON against the live 142-command manifest: 46,595 B = 2.06x — NOT the ratified 24,266 B = 3.9x. Tuple encoding: 39,435 B (2.43x). Packed-string args/flags: 36,714 B (2.61x). Only by ALSO dropping the nouns catalog (4,384 B) and violating the keep-list did 27,178 B (3.53x) appear. The six census fixtures that produced 24,266/17,543 B are GONE (ephemeral scratchpad of a dead session) and the encoding that produced them was never recorded in any paper. Verify assignment 1 rebuilds this ground truth for real; Decide must then either revise the target ratio or extend the keep-list with explicit encoding rules (packed args/flags, nouns-catalog drop) before the spec is written as the named, server-portable keep-list.</span></div><p>Other premise corrections. (1) Stopgap PR #6033 is MERGED (2026-07-24T00:19Z, commit 83c41e66c on origin/main), not in flight — zero file overlap with wave-1 targets (GetConditional signature preserved); its ledger task task-8ad8d5cfe98c70aa is STALE-OPEN and Decide should close it. (2) &#39;count_tokens on the fixtures&#39; cannot run as a pre-build gate: fixtures don&#39;t exist; the real order is build projection → regenerate fixtures → count. (3) No count_tokens-capable API key is reachable anywhere in this environment (env, keychain, bp secret, 1Password); OAuth tokens 401 against the Messages API family — a HUMAN must provision a console key, and the pre-registered fallback is bytes-with-conversion-pending, never a fabricated token number. (4) The &#39;12-92x&#39; phrase matches no measured number; the AXI band is 12x-81.5x, all static wc -c probes — the one live before/after session is a NEW method leg, n=1, and must be pre-registered as directional-smoke-only (5-6x early-byte cache amplification means the session needs enough turns to clear ~2x the $0.55 spawn floor). (5) &#39;Paid on every session&#39; is doctrine, not measurement: bp capabilities is absent from the census&#39;s top-8 bp-verb byte table and its call frequency was never counted; framing softens to &#39;amplified per call&#39; unless measured. (6) The byte-anatomy scare that 3 commands emit views &#39;without ?views=1&#39; is almost certainly the CLI&#39;s own hardcoded opt-in (fetch.go:40) — verifier will prove the raw endpoint honors the contract. (7) Live manifest has drifted +249 B (95,915 B, 142 commands) since the census — tripwires must pin live-measured baselines, not the literal 95,666.</p><div class=\"bp-unknown-block\">Unsupported block: h2</div><p>CHECKED AND FOUND: every consumer class of the manifest (Go in-process, server wire pins, shell/doc greps, blast-radius config); the two dispatch pipelines and the exact brief hook point (builtins.go:53); the full byte anatomy of the live manifest by field class (args 18.8K / flags 17.2K / summaries 13.8K / http 10.3K…); the AXI precedent kit with file:line for all five reusable patterns (exact-key-set pin tasks_controller_test.exs:2071, byte tripwire pair :2431-2549, opt-in gate capabilities.ex:281-321, same-PR amendment rule, Go clamp mcp_brief_view_test.go); METER.md + meter.py as the dollar meter-of-record; both seal targets end-to-end with test recipes; the did-you-mean machinery (nearestVerb live-verified in table mode, dropped in JSON mode); epic-cycle filing conventions (parent_id linkage, wave_paper field, labels:[] on slices, charter skeleton, the charter_path-defaults-to-CLOUD-charter bug).</p><p>CHECKED AND NOT FOUND (absences that are decisions-in-waiting): no literal @brief_keys symbol anywhere (it&#39;s a paraphrase — the real pattern is a numbered cut-list comment + key-set pin test); no caps_brief.json/.tsv/ready_cards fixtures anywhere on the machine; no count_tokens script anywhere in the repo (METER.md names the endpoint, nothing calls it); no ANTHROPIC_API_KEY in any store; no TSV writer for nested structures (table.go is lossy-human, sheets/csv.ex is flat-grid RFC-4180 — a nested-manifest TSV sub-grammar is UNDESIGNED, with Flag.Default&#39;s arbitrary-JSON as the sharpest edge); no test pinning capabilities stdout; no Credo tooling; no Vary header anywhere except CORS; no ctx-compression charter file (confirmed absent, charter_exists=false correct); no &#39;agent-report&#39; surface; no 92x anywhere; no JS SDK / Studio / deploy consumption of the manifest. UNREACHED CORNERS: internal/manifest/manifest_test.go&#39;s exact assertions (may pin command counts); cli-release.yml&#39;s unconditional-test backstop for the go-tests.yml path-filter gap (docs/cli/fixtures/** does NOT trigger go tests); docs/contracts/dispatch-areas.md files-grammar; tasks_controller/params.ex:187 caller origin end-to-end; hit_envelope.ex:108 guard; whether resolve_tasks_in_blocks batches rows_for_query per paper (N+1 schema-resolution risk for the seal); shell history for the lost fixture-generation script.</p><div class=\"bp-unknown-block\">Unsupported block: h2</div><p>V1 brief-encoding-ground-truth (OPUS, runs code): rebuild the brief projection from the live manifest across all candidate encodings (nested JSON / tuples / packed args-flags / TSV denormalized / TSV packed, each with and without the nouns catalog), wc -c every variant, and recommend the encoding+keep-list amendment that reaches an honest ratio while staying invoke-complete and server-portable. This closes the ratified-target contradiction. V2 go-baseline-and-views-optin (sonnet, runs gates): CC=clang go build ./... &amp;&amp; go vet &amp;&amp; go test ./internal/cli/... ./internal/manifest/... green on origin/main; confirm no capabilities stdout test exists; curl the raw /v1/capabilities WITHOUT ?views=1 to prove the opt-in contract holds (expect 0 views keys) and with it (expect 3). V3 nil-polarity-flip-probe (OPUS, worktree probe): flip envelope.ex:222+:244 to false, run targeted mix test on envelope_test.exs + board_test.exs, prove exactly one pre-existing assertion breaks; trace params.ex:187 and hit_envelope.ex:108; enumerate listen_controller.ex:393&#39;s test-seam usages for the remove-vs-fence ruling.</p><p>V4 seal-query-feasibility (OPUS, worktree probe): prove query_rows_test.exs + board_test.exs green baseline; establish whether rows_for_query is called per-block per paper (N+1 schema-resolution risk) and whether the dataset is threadable into field_visibility_gate at the rows_for_query level; probe the gate edit. V5 did-you-mean-probe (sonnet, worktree probe): implement the show→get alias + thread the existing hint into the JSON envelope, measure real LOC, go test ./internal/cli/..., demonstrate the built binary&#39;s behavior both arms. V6 metering-preflight (sonnet, runs commands): meter.py --self-test; claude CLI flag support for -p/--output-format json/--max-budget-usd; prove count_tokens 401s without x-api-key (closing the census&#39;s own inference gap); confirm bp secret get is a workable script read-path for a future key. V7 hygiene-gates-and-ledger (sonnet, runs gates): bash scripts/docs-anchors-check.sh green + does it force a card edit on builtins.go changes; cli-release.yml unconditional-test backstop; dispatch-areas.md files-grammar for Decide&#39;s collision labels; reconfirm stopgap task staleness so Decide closes it. Decide must also: pass EXPLICIT charter_path (.claude/workflows/bp-ctx-compression-charter.md — the default silently targets the cloud charter), pick a slice prefix (ctxb-s&lt;N&gt; suggested), drop the epic-candidate label on chartering, and file the fixtures&#39; durable home (tooling/scaffy-duels/fixtures/ suggested, committed like results/).</p><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span>STATUS: verifying. 7 verifiers in flight (3 Opus, 4 Sonnet; 3 in throwaway worktrees). Next: Decide folds verifier proof into decisions + the wave plan, files slice tasks under task-495cc9a9af43472c, and appends here BEFORE builders fly. The single decision Decide cannot skip: the brief encoding rule vs the ratified 3.9-5.5x target (see the contradiction callout above).</span></div><div class=\"bp-unknown-block\">Unsupported block: h2</div><p>Seven verifiers ran against origin/main 83c41e66c with executed proofs. The headline: THE RATIFIED BYTE TARGET FAILED RECONSTRUCTION. brief-encoding-ground-truth projected the exact ratified keep-list over the live manifest (95,915 B, 142 commands) in 10 encoding variants: nested JSON bottoms at 42,025 B (2.28x) — the ratified 24,266 B/3.9x is unreachable as JSON objects — and the ratified 17,543 B/5.5x TSV is only reachable by dropping summaries, which breaks invoke-completeness (&#39;tsv/cmd NO-sum bytes=9245 ratio=10.37x; with-sum bytes=21348 ratio=4.49x&#39;). The source fixtures are gone and unrecorded. Encoding is the entire ballgame: identical fields span 2.07x-4.47x. Measured menu, all invoke-complete: nested-JSON 42 KB/2.28x · array-of-tuples 26.5 KB/3.62x · TSV/cmd 21.5 KB/4.47x. TSV&#39;s collision-freedom is data-dependent, not structural (0 collisions today, but a re-added Flag.default breaks it silently); JSON-family is immune by construction.</p><p>go-baseline-and-views-optin: Go gate fully green on origin/main (&#39;ok internal/cli 20.675s&#39;); NO test pins runCapabilities stdout (the protective kit is this path&#39;s first-ever coverage); docs/cli/fixtures/full-manifest.json is stale at 40 vs live 142 commands but regen is proven safe (no consumer asserts a count); the &#39;views without ?views=1&#39; scare is REFUTED — authenticated raw server without the param returns 142 commands with ZERO views, with it exactly 3 (search.query, task.ready, task.prime); the always-present views were fetch.go:40&#39;s own hardcoded opt-in.</p><p>nil-polarity-flip-probe + seal-query-feasibility: both Elixir slices are shovel-ready with exact anchors — but NO Elixir toolchain exists on this machine (which mix -&gt; not found; toolchain lives on prod via /root/.asdf), so blast radius is settled by exhaustive static caller-trace, not a green run: all 6 production callers of field_readable? pass non-nil structs; exactly ONE test assertion (envelope_test.exs:256) breaks on the flip; the :244 catch-all has zero coverage today. A sibling fail-open lives at listen_controller.ex:395 (nil -&gt; unredacted document; one test usage at :152). The seal&#39;s load-bearing constraint is dataset threading: the Studio preview path NEVER stamps dataset into the block query (&#39;shared/paper.ex:377 calls rows_for_query(query, scope)&#39; raw), so the gate must take an explicit opts[:dataset] or it seals against the wrong schema. rows_for_query has exactly two production callers; no per-doc N+1 (gate hoists above the map, board.ex:190 pattern); nil schema degrades to allow-all without raising.</p><p>did-you-mean-probe: GO — built and live-verified end to end: &#39;task show&#39; stdout byte-identical to &#39;task get&#39; (diff empty, note stderr-only), &#39;task list&#39; resolves via ls alias exit 0, &#39;task raedy -o json&#39; now carries error.hint &#39;barkpark task ready&#39;, table mode byte-unaffected; ~25-30 functional LOC via a sibling usageErrHintf (widening usageErrf would touch 63 no-op sites). metering-preflight: meter.py self-test passes non-vacuously; the claude CLI has all four spawn flags; count_tokens is live and key-gated (401 &#39;x-api-key header is required&#39;) — but NO API key is provisioned anywhere reachable (bp secret ls: only ingest_token). hygiene-gates: docs-anchors-check PASSES (12 warnings, none in scope); anchor gate is name-existence only (editing runCapabilities&#39; body forces no card edit); go-tests.yml omits docs/cli/fixtures/** (real gap, fix rides s1); cli-release.yml only fires on tags. CORRECTION: task-8ad8d5cfe98c70aa is ALREADY CLOSED (done, 2026-07-24T00:21Z, evidence cites merge 83c41e66c) — the digest&#39;s stale-open premise was a timing race; no close action exists.</p><div class=\"bp-unknown-block\">Unsupported block: h2</div><p>(1) Client-side projection at print — the wire always fetches full; stdout at builtins.go:44 is where bytes enter context; a server view saves zero and drags ETag/Vary scope. (2) Ratified targets REVISED — they failed reconstruction; honest menu recorded. (3) Encoding = array-of-tuples JSON + legend, nouns catalog dropped (~26.5 KB/3.62x): only JSON-family near the ratified band, structurally collision-free where TSV is data-dependently safe. (4) Targets are ratios, never fixed bytes (manifest grows; tripwire: brief &lt;= 32% of full). (5) Tokens still win, POST-build: no fixtures pre-exist and no key is reachable — bytes ship labeled bytes-with-conversion-pending; &gt;10% token win by another invoke-complete encoding flips by amendment, ties break JSON. (6) BRIEF-KEEP-LIST v1 pins fields AND encoding, server-portable for a later ?view=brief. (7) --full byte-identical, table untouched, brief only on machineOut &amp;&amp; !full. (8) Protective kit in the same PR — first-ever coverage of this stdout.</p><p>(9) Fixtures to tooling/scaffy-duels/fixtures/; docs/cli/fixtures regenerated to 142 commands; docs/cli/fixtures/** added to go-tests.yml. (10) Seal query.ex NOW with EXPLICIT dataset threading (opts[:dataset]; preview passes socket.assigns.dataset) — query-map derivation would silently seal the wrong schema; per-field independent gating; counts stay ungated. (11) Nil flip fails closed at :222 AND the :244 catch-all; the listen_controller.ex:395 sibling is REMOVED in the same slice (explicit scope expansion, one-test blast radius); fence = tests + doc rewrite + scripts/nil-polarity-check.sh grep gate (Credo does not exist here). (12) Did-you-mean is its own small slice (probe-proven recipe). (13) Live session is n=1 DIRECTIONAL SMOKE, pre-registered (fixed prompt, model pin, envelope-only metering, &gt;2x the $0.55 floor, --full escape rate as a named metric); &#39;paid on every session&#39; softens to amplified-per-call; &#39;12-92x&#39; corrects to the measured 12-81.5x. (14) task-8ad8d5cfe98c70aa already closed — no action. (15) charter_path always explicit (the workflow default silently targets the cloud charter). (16) Prefix ctx-; epic-candidate label drops on chartering. (17) Census thresholds forbidden until measured; duel $30-80 in wave 2; board clamp raise landed, fold is future work.</p><div class=\"bp-unknown-block\">Unsupported block: h2</div><p>ROUND 1 (dependency-free, building this run): ctx-s1-brief-manifest [go-cli, fable, large] — born-brief bp capabilities per BRIEF-KEEP-LIST v1 + full protective kit + fixture regen + go-tests.yml paths; gate: CC=clang go build ./... &amp;&amp; go vet ./internal/cli/... ./internal/manifest/... &amp;&amp; CC=clang go test ./internal/cli/... ./internal/manifest/... · ctx-s2-seal-query-rows [elixir, opus, medium] — dataset-threaded visibility gate in to_render_map, both callers updated, board_test recipe copied; HIGH-FLIP-RISK: dataset threading (independent second review warranted before merge); gate: cd api &amp;&amp; mix test query_rows_test board_test (elixir.yml CI binding where no local toolchain) · ctx-s3-nil-polarity [elixir, opus, small] — :222 + :244 flip, listen_controller seam removal, grep fence; HIGH-FLIP-RISK: dead-path claim (static-only today); gate: mix test envelope_test listen_controller_test + nil-polarity-check.sh + docs-anchors-check.sh · ctx-s4-did-you-mean [go-cli, opus, small] — show-&gt;get/list-&gt;ls aliases + usageErrHintf hint threading + fixture-based tests; gate: the Go gate.</p><p>ROUND 2 (AFTER ctx-s1-brief-manifest MERGES — the lead dispatches these manually; they do not build this run): ctx-s5-count-tokens [tooling, opus, small] — count_tokens calibration over the committed fixtures, 12 calls x 2 pinned models when a key lands, bytes-with-conversion-pending fallback, pre-registered confirm-or-flip rule; gate: count_tokens_calibrate.py --self-check + meter.py --self-test · ctx-s6-live-smoke [tooling, opus, medium] — pre-registered n=1 directional before/after session, brief-default vs --full-forced, envelope-metered, --full escape rate as first-class metric; gate: meter.py --self-test. BACKLOG FILED (published children of the epic): ctx-b1-paired-duel (wave 2, $30-80), ctx-b2-server-view-brief (+RFC 9110 ETag/Vary fix), ctx-b3-bp-park (plugin + 2 MB + mandatory summary), ctx-b4-mcp-tools-all-sizing, ctx-b5-provision-count-tokens-key (HUMAN, p1 — unblocks every token claim), ctx-b6-memoized-visibility-gate.</p><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span></span></div><div class=\"bp-unknown-block\">Unsupported block: h2</div><p>All four round-1 slices built, reviewed by the wave reviewer (full diffs vs origin/main, gates re-run, cross-slice integration merge tested green), pushed, and opened as PRs. The reviewer made ZERO code fixes — every slice survived adversarial review as built. Grade: A-. The lead merges; merge-gated criteria on each task are the lead&#39;s to close on merge.</p><div class=\"bp-unknown-block\">Unsupported block: h3</div><p>ctx-s1-brief-manifest — branch loop-epic/born-brief-bp-capabilities-machine-outpu-0, PR #6052. Born-brief bp capabilities: BRIEF-KEEP-LIST v1 array-of-tuples, 95,915 B -&gt; 26,502 B (3.62x / 27.6%, under the 32% ratio tripwire). Protective kit is real, not vacuous: invoke-completeness enumerates all 142 commands field-by-field, the legend pin is exact, the hostile synthetic proves structural collision-freedom, --full is byte-identical. Reviewer additionally proved the committed caps-brief fixture is byte-identical to briefManifest(caps-full) — the frozen duel pair is self-consistent. Verdict: exemplary; merge first (s5/s6 sequence behind it).</p><p>ctx-s3-nil-polarity — branch loop-epic/nil-caller-fails-closed-envelope-ex-fiel-2, PR #6053. envelope.ex nil clause + :244 catch-all flipped fail-CLOSED; the listen_controller fail-open nil seam REMOVED; nil-polarity-check.sh fence (selftest REDs on all three planted fail-open shapes) wired into doc-gates.yml. HIGH-FLIP-RISK dead-path claim independently RE-DERIVED by the reviewer: all 6 production callers thread a non-nil principal, and ScopeHelpers.from_assigns always Keyword.puts :caller_context via from_conn -&gt; anonymous(), so the SSE path can never hand nil to redacted_result. Runnable gates green locally; elixir.yml on the PR is the binding mix proof (no local toolchain, charter-designated). Comment-sweep follow-up: task-3afeb5994c839c27.</p><p>ctx-s4-did-you-mean — branch loop-epic/bp-task-show-list-resolve-via-aliases-an-3, PR #6054. task show-&gt;get / task list-&gt;ls aliases (stderr-only note, stdout byte-identical to the canonical verb — proven with separate-stream capture) + error.hint did-you-mean in JSON envelopes via the usageErrHintf sibling (the ~60 no-op usageErrf sites stay byte-identical). Reviewer verified the clean merge with s1&#39;s 142-command fixture regen and the combined suite green. Small, probe-proven, exactly decision 12.</p><p>ctx-s2-seal-query-rows — branch loop-epic/tasks-query-to-render-map-sealed-schema--1, PR #6055 — CI-GATED, second-review-owed. rows_for_query/3 sealed with the explicit dataset cascade; papers.ex passes its stamped dataset, Studio preview passes socket.assigns.dataset. The HIGH-FLIP-RISK dataset-threading judgment was re-derived by the reviewer (the adjacent agg_for_query fetcher already threads socket.assigns.dataset — strong local precedent), and the gate composes correctly with s3&#39;s flip (anonymous(), never nil). The mix gate could NOT run anywhere this wave (no Elixir toolchain); criteria 2/4/5 stay honestly open pending elixir.yml green on the PR. Per the flip-risk protocol a genuinely independent second reviewer is warranted before merge — that dispatch is the lead&#39;s manual step.</p><div class=\"bp-unknown-block\">Unsupported block: h3</div><p>Nothing stalled. ctx-s5-count-tokens and ctx-s6-live-smoke did not build BY DESIGN (sequenced round 2, both depend on s1 being on main). Both tasks sit open and unclaimed on the ledger with full briefs. The token leg of s5 additionally waits on ctx-b5 (human provisions an Anthropic API key via bp secret set); its bytes-labeled-bytes fallback runs without one.</p><div class=\"bp-unknown-block\">Unsupported block: h3</div><p>Clean — zero fixes needed. All four built slices: claimed by their builders, criteria stamped mid-claim with concrete evidence (probe lines, test names, file:line), lifecycle honestly in_progress with merge-gated criteria left open for the lead. s2&#39;s unrunnable mix criteria are unmet with empty evidence — honest, not padded. s5/s6 open and unclaimed. The backlog (ctx-b1..b6 + task-3afeb5994c839c27) matches the charter roster exactly; no out-of-wave task was touched. Nit, not a lie: s4&#39;s final claim pulse still reads &#39;committing on &lt;branch&gt;&#39; where s1/s3 wrote a proper final now-line.</p><div class=\"bp-unknown-block\">Unsupported block: h3</div><p>Strong: the capstone&#39;s top-ranked win landed at exactly the revised measured target (3.62x, like-for-like encoding, ratio-not-bytes law respected); the protective kits are genuinely protective (selftest-tripwired fence, hostile synthetic, first-ever coverage of two previously dark paths); both HIGH-FLIP-RISK judgments were re-derived independently and held; all branches pushed with PRs open — no stranded work. Short of A/A+: the wave&#39;s headline claim is still in BYTES — count_tokens (s5) and the live smoke (s6) are exactly the two slices that could not run this round, so &#39;compresses the session-start tax&#39; remains directionally proven, not token-proven; s2 ships without ANY test execution anywhere (CI will be first contact); and the third inline copy of the anonymous visibility gate (query.ex, after board.ex + board_live.ex) is charter-sanctioned but real duplication debt (ctx-b6 is the consolidation point).</p><div class=\"bp-unknown-block\">Unsupported block: h3</div><p>(1) Lead merges round 1: #6052 first, then #6053/#6054 in any order, #6055 only after elixir.yml green AND the independent second review of the dataset threading; close each task&#39;s merge-gated criteria on merge. (2) Dispatch ctx-s5-count-tokens once s1 is on main; bytes fallback works keyless, ctx-b5 unblocks tokens. (3) Dispatch ctx-s6-live-smoke after s1 merges — pre-register BEFORE any run; report the --full escape rate. (4) The token verdict either confirms tuples or files the &gt;10% amendment naming the winner. Then wave 2 proper: the pre-registered paired duel (ctx-b1, $30-80), census thresholds measured-first.</p>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\">context-compression epic · WAVE 1 · opened 2026-07-24 · status: CLOSED — reviewed 2026-07-24, grade A-, debrief below</p><h1>The manifest goes brief — killing the 95.7 KB session-start tax</h1><p class=\"bp-role-ingress\">Every agent session opens with bp capabilities -o json: 95,666 bytes of full-depth manifest landing where the meter amplifies bytes 5-6x. It is the last un-briefed first-party payload and the spend census&#39;s top-ranked prize. This wave makes the agent-facing manifest born brief — 17.5-24.3 KB, invoke-complete, deterministic — verified by count_tokens on the ready fixtures and one live before/after session. Riding along: the two seals the user ratified as NOW (query.ex&#39;s unsealed task-embed chain, the nil-polarity inversion), because the doctrine orders seal before tiers and this is the first tier wave of the epic.</p><p class=\"bp-role-byline\">Wave 1 of the ctx-compression epic · epic task task-495cc9a9af43472c · charter: .claude/workflows/bp-ctx-compression-charter.md (founded at Decide, pushed 4b46ccbe6) · ground truth: /papers/ctx-compression-capstone + five lane papers · all 12 capstone judgment calls RATIFIED 2026-07-24</p><h2>The wish (verbatim)</h2><div class=\"bp-callout bp-callout--info\"><span></span></div><h2>Direction — born-brief session start, rendered where the truth already lives</h2><p>The finished experience: an agent opens a session, runs bp capabilities -o json (or gets it piped), and receives a brief manifest — roughly 17.5-24.3 KB instead of 95.7 KB — that is INVOKE-COMPLETE: every noun, every verb, every arg (name/required/type), every flag (name/type), every summary an agent needs to compose ANY bp command correctly on the first try, with zero follow-up calls. What vanishes is exactly the plumbing only the CLI itself consumes: http method/path templates, mutation_op, set_key, scoped_prefix, default_output, dry_run/batch bookkeeping. bp capabilities --full remains byte-identical to today&#39;s output — the escape hatch is one flag, named in the brief itself. Humans see no change: the -o table tree was already brief.</p><p>The load-bearing structural insight from reading the real code: the wire is NOT where this payload is paid. internal/manifest/fetch.go always fetches (and ETag-caches) the FULL manifest because the CLI&#39;s entire command tree is a pure function of it — that fetch never enters agent context. The 95,666 B enters context as STDOUT: runCapabilities (internal/cli/builtins.go:44) re-marshals the strict-decoded Manifest struct and prints it. So the diet belongs at the point of print: a deterministic brief projection in Go, over truth the client provably holds in full. This is not a proxy guessing — it is the system&#39;s own first-party CLI projecting its own strict-decoded contract, which is exactly what &#39;compress presentation, never truth&#39; permits.</p><p>Tentative key choices (Decide finalizes after two explore rounds): (1) render client-side in runCapabilities under exactly the AXI option-B semantics — brief when machineOut() AND NOT --full; explicit -o table unchanged; (2) the brief SHAPE is decided by measurement, not taste: caps_brief.json (24,266 B) vs caps_brief.tsv (17,543 B) go through count_tokens — bytes are not tokens and the meter standard bans tiktoken/chars-4 — with the pre-committed rule that tokens win, ties break toward JSON (parseability); (3) the projection spec ships as a named keep-list artifact so a later server-side ?view=brief (for SDK/curl consumers, if a future census ever ranks them) adopts it verbatim — nothing foreclosed; (4) the slice carries the full AXI protective-pattern kit in the same PR: byte tripwire pair (realistic + hostile), exact-key-set pin, opt-out-byte-identical proof for --full, determinism check (byte-identical consecutive calls — already true today, must stay true); (5) invoke-completeness is an acceptance TEST, not a hope: for every command in the manifest, the brief alone must carry what composing that command requires.</p><p>Companion slices, small and ratified NOW: (a) seal Tasks.Query.to_render_map (query.ex:740-753) by copying board.ex&#39;s field_readable? gate verbatim, with the redact-then-assert-omitted proof — the doctrine orders seal before tiers, and this is tier wave one; (b) flip the nil-polarity inversion (envelope.ex:222 field_readable? nil =&gt; true) and fence it so the next hand-rolled emitter cannot pass nil believing it fails closed. Candidate micro-slice if survey confirms it is as cheap as the census claims: a did-you-mean hint for bp task show / bp task list — 2,428 + 329 typed occurrences, 1.19 MB of pure error waste with no defenders. Verification for the flagship: 12 count_tokens calls on the fixtures (epic task #1 per the capstone) plus one live before/after agent session on the ledger measuring total_cost_usd, num_turns, and --full escape-hatch rate.</p><p class=\"bp-role-pullquote\" style=\"font-style:italic\">Brief-but-complete beats smaller-but-lossy: a card missing one needed field costs more than the cut saved.</p><p>Explicitly OUT of this wave: the board tier and rev-everywhere (later waves per the ratified order), the serialization duel proper (wave 2, duel-gated, $30-80 budget), bp park and MCP (wave 3+, after exercise), the ETag-view cache-key fold and Vary emission (needed only when a server-side view ships — this direction avoids triggering that RFC 9110 fix now), and anything touching taskboard fetch (stopgap PR #6033 / task-8ad8d5cfe98c70aa is in flight there — coordinate, don&#39;t duplicate).</p><h2>Direction debate — three candidates, one winner</h2><p>Candidate A — server-side ?view=brief on GET /v1/capabilities, under the views grammar. The doctrine-pure reading (&#39;the brief card is a server render&#39;): Elixir hand-tunes a brief manifest, every consumer (CLI, MCP, SDK, curl) inherits it, the tier grammar stays uniform. It loses on engineering economics that only appear once you read the consumption path: the CLI must fetch the FULL manifest regardless (the command tree is built from it), so a server brief saves zero wire and zero context on its own — it only changes what gets PRINTED, which a client projection does identically. And it drags in real scope: the ETag must fold the view param (the capstone flags today&#39;s precedent as a latent RFC 9110 violation that MUST be fixed by whoever ships a server view), Vary must be emitted, a second wire shape needs Go strict-decode modeling plus the frozen manifest.schema.json additive dance, across two languages. All of that to produce byte-identical stdout. The views grammar also structurally cannot describe the capabilities builtin — it is the bootstrap (chicken-and-egg: you need the manifest to learn what views exist), a carve-out today and a carve-out under A.</p><p>Candidate B (WINNER) — client-side deterministic brief projection at the point of print. One language, zero wire-contract risk (released binaries strict-decode the manifest; stdout shape is not a wire contract and carries no DisallowUnknownFields blast radius), works offline against the on-disk ETag cache, and the render is a pure function of strict-decoded truth — when the server adds a command tomorrow, the brief includes it with zero code change, preserving the manifest package&#39;s &#39;hardcodes NO noun&#39; law. The count_tokens-validated keep-list is the durable artifact; it ports verbatim to a server view the day a measured non-CLI consumer exists.</p><p>Candidate C — shrink the manifest itself (trim summaries/flag docs for everyone). Rejected fastest: the summaries ARE the product for the human tree and the MCP tool derivation, the root shape is frozen under strict decode, and it compresses truth to fix a presentation problem — a direct doctrine violation.</p><p>Sharpest attacks on the winner, and how the wave absorbs them: (1) DOCTRINE DRIFT — every other brief is server-declared; this forks the grammar. Absorbed: capabilities is already outside the grammar (a builtin the views descriptor cannot reach), the projection is first-party and guess-free, and the keep-list is written to be server-portable — the fork is a deferral, not a divergence. (2) COMPLETENESS RISK — the census&#39;s own law says a brief missing one field costs more than it saves (agents already handle-climb 12,368 task gets vs 1,421 readies). Absorbed: invoke-completeness is the acceptance test, and the live before/after session measures the --full escape rate directly; if agents climb, the brief fattens before it ships. (3) BYTES ARE NOT TOKENS — TSV wins bytes (17.5 vs 24.3 KB) but JSON punctuation vs TSV structure may invert on the tokenizer, and &#39;count_tokens before token claims&#39; is ratified doctrine. Absorbed: the shape choice is explicitly deferred to the count_tokens run — task #1 of the wave, pre-committed decision rule. (4) HIDDEN CONSUMERS — a script somewhere parses bp capabilities -o json and breaks on brief-when-piped. Absorbed: survey question manifest-consumers censuses every parser in the repo before Decide; the AXI piped-default precedent survived the same worry with option-B semantics.</p><h2>Survey plan — 16 scouts, cast wide</h2><p>Each question below goes to one Sonnet surveyor. The stress-test assumptions above map 1:1 onto scouts; the Digest phase distills their reports into the verify plan and appends it here before the verifiers fly.</p><ul><li><span>manifest-consumers — who parses bp capabilities output or GET /v1/capabilities across the repo (scripts, tooling, docs, JS SDK, MCP bridge, openapi gen, Studio)? Breakage census for brief-when-piped.</span></li><li><span>fixtures-location — where are caps.json / caps_brief.json / caps_brief.tsv and the projection spec that produced them; do the byte counts reproduce live?</span></li><li><span>count-tokens-harness — what exists for count_tokens metering (meter standard, METER formula, key reachability); where does the 12-call script live?</span></li><li><span>views-grammar-reach — can the views grammar structurally reach the capabilities builtin; map the builtin dispatch, g.full, machineOut, and the exact hook point for a client render.</span></li><li><span>manifest-byte-anatomy — byte breakdown of the live 95,666 B manifest by field class; which cuts reach ~24 KB while staying invoke-complete?</span></li><li><span>seal-query-ex — confirm query.ex:740-753 unsealed on origin/main; map board.ex gate + TaskResolver wiring + the redact-then-assert-omitted precedent to copy.</span></li><li><span>nil-polarity — confirm envelope.ex:222 polarity on origin/main; caller census; what flip + fence concretely entails and what fence precedents exist.</span></li><li><span>cache-and-etag — CLI manifest Cache/CacheKey semantics under a client render; confirm the client path triggers zero server ETag/Vary work.</span></li><li><span>axi-precedent-kit — file:line inventory of the AXI protective patterns to copy (tripwire pair, exact-key-set pin, opt-out-byte-identical, amendment discipline).</span></li><li><span>session-start-reality — how sessions actually consume the manifest (CLAUDE.md instructions, onramp/prime, MCP tools/list serialization); calls per session.</span></li><li><span>quick-fix-did-you-mean — where unknown-verb errors render; cost of a did-you-mean hint for task show/list; prior suggestion art in the CLI.</span></li><li><span>stopgap-coordination — state of task-8ad8d5cfe98c70aa / PR #6033; files touched; any overlap with wave 1 files.</span></li><li><span>tsv-render-art — existing tabular/TSV emitters to reuse; how TSV brief handles nested args/flags; determinism properties.</span></li><li><span>live-before-after-method — how AXI measured its 12-92x diets; what one live before/after session needs (harness, total_cost_usd, turn counts).</span></li><li><span>strict-decode-blast — the precise boundary between contract-safe CLI output changes and forbidden manifest wire changes; who gates manifest.schema.json.</span></li><li><span>epic-hygiene — how prior epics filed waves/slices on the ledger (AXI as template); charter file conventions; what the founding charter must unfreeze or cite.</span></li></ul><h2>In flight</h2><div class=\"bp-callout bp-callout--info\"><span></span></div><h2>Survey digest — 16 reports in (Digest phase, 2026-07-24)</h2><p>The direction&#39;s structural premise is CONFIRMED in code on origin/main, at every anchor: internal/manifest/fetch.go always fetches the FULL manifest (hardcoded ?views=1 opt-in, ETag-cached, no view selector) and that fetch never reaches context; the 95.7 KB enters as stdout at runCapabilities (internal/cli/builtins.go:44, out.renderJSON(m)); piped output already defaults to JSON (output.go); the capabilities builtin is dispatched outside the manifest tree (cli.go:127) and the AXI views grammar structurally cannot reach it (resolveView requires a manifest.Command; capabilities has none — carve-out is by design, per axi-s2&#39;s frozen 3-command descriptor). Zero in-repo parsers depend on the full stdout shape: MCP bridge/resources consume the in-process struct, server-side pins guard the WIRE (untouched), the one jq shape-dependency (tooling/mobile-smoke/smoke.sh) hits the raw HTTP endpoint, JS SDK and Studio are non-consumers. Cache/ETag machinery needs zero changes — the latent RFC 9110 gap lives in QueryController.list_etag (/v1/data), a different controller, correctly deferred (hd-s3). There is currently NO test pinning runCapabilities&#39; stdout at all — the wish&#39;s protective kit is this path&#39;s FIRST-EVER coverage, not extra safety.</p><p>Both ratified-NOW companion seals are shovel-ready with exact anchors. Seal query.ex: to_render_map (query.ex:741) reads content fields with zero Envelope gating (the file&#39;s only field_readable? call, :320, serves the separate aggregate path); gate-to-copy is Board.field_visibility_gate/1 (board.ex:190-202); two consumers (papers.ex:1074 resolve_tasks_in_blocks, shared/paper.ex:377 task_previews) both fix with one change; the redact-then-assert-omitted recipe exists twice (board_test.exs:40-124, board_live_test.exs:1550/1636) and query_rows_test.exs has zero visibility coverage today — this is the FOURTH sealing of the same leak class. Nil-polarity: envelope.ex:222 (nil ⇒ true) AND the catch-all :244 both fail open, opposite of render/3&#39;s own nil handling; zero HTTP/WS-reachable callers pass literal nil (from_conn never returns nil); exactly ONE test asserts the old behavior (envelope_test.exs:254-257); no Credo exists in the repo, so the fence is regression test + doctrine comment + CI grep, not a Credo rule; a sibling landmine (listen_controller.ex:393-395, nil ⇒ full unredacted document) needs a ruling in the same PR. Did-you-mean is TWO distinct fixes: threading the ALREADY-COMPUTED Levenshtein hint into the JSON error envelope (fixes list→ls, 329 hits — machinery exists, usageErrf hardcodes hint=&quot;&quot;) and an explicit alias intercept for show→get (2,428 hits — Levenshtein can never catch it; precedent: task tui at cli.go:152, server ls at cli.go:411). ~20-30 LOC combined, own small task to keep blast radii disjoint.</p><div class=\"bp-callout bp-callout--info\"><span>THE CONTRADICTION THAT GATES DECIDE: the ratified byte target may be unachievable under the ratified keep-list. A surveyor rebuilt the brief projection exactly per the keep-list (noun/verb/summary/writes/auth_tier + args{name,required,type} + flags{name,type}) as ordinary nested JSON against the live 142-command manifest: 46,595 B = 2.06x — NOT the ratified 24,266 B = 3.9x. Tuple encoding: 39,435 B (2.43x). Packed-string args/flags: 36,714 B (2.61x). Only by ALSO dropping the nouns catalog (4,384 B) and violating the keep-list did 27,178 B (3.53x) appear. The six census fixtures that produced 24,266/17,543 B are GONE (ephemeral scratchpad of a dead session) and the encoding that produced them was never recorded in any paper. Verify assignment 1 rebuilds this ground truth for real; Decide must then either revise the target ratio or extend the keep-list with explicit encoding rules (packed args/flags, nouns-catalog drop) before the spec is written as the named, server-portable keep-list.</span></div><p>Other premise corrections. (1) Stopgap PR #6033 is MERGED (2026-07-24T00:19Z, commit 83c41e66c on origin/main), not in flight — zero file overlap with wave-1 targets (GetConditional signature preserved); its ledger task task-8ad8d5cfe98c70aa is STALE-OPEN and Decide should close it. (2) &#39;count_tokens on the fixtures&#39; cannot run as a pre-build gate: fixtures don&#39;t exist; the real order is build projection → regenerate fixtures → count. (3) No count_tokens-capable API key is reachable anywhere in this environment (env, keychain, bp secret, 1Password); OAuth tokens 401 against the Messages API family — a HUMAN must provision a console key, and the pre-registered fallback is bytes-with-conversion-pending, never a fabricated token number. (4) The &#39;12-92x&#39; phrase matches no measured number; the AXI band is 12x-81.5x, all static wc -c probes — the one live before/after session is a NEW method leg, n=1, and must be pre-registered as directional-smoke-only (5-6x early-byte cache amplification means the session needs enough turns to clear ~2x the $0.55 spawn floor). (5) &#39;Paid on every session&#39; is doctrine, not measurement: bp capabilities is absent from the census&#39;s top-8 bp-verb byte table and its call frequency was never counted; framing softens to &#39;amplified per call&#39; unless measured. (6) The byte-anatomy scare that 3 commands emit views &#39;without ?views=1&#39; is almost certainly the CLI&#39;s own hardcoded opt-in (fetch.go:40) — verifier will prove the raw endpoint honors the contract. (7) Live manifest has drifted +249 B (95,915 B, 142 commands) since the census — tripwires must pin live-measured baselines, not the literal 95,666.</p><h2>Coverage map — what was checked, found, and NOT found</h2><p>CHECKED AND FOUND: every consumer class of the manifest (Go in-process, server wire pins, shell/doc greps, blast-radius config); the two dispatch pipelines and the exact brief hook point (builtins.go:53); the full byte anatomy of the live manifest by field class (args 18.8K / flags 17.2K / summaries 13.8K / http 10.3K…); the AXI precedent kit with file:line for all five reusable patterns (exact-key-set pin tasks_controller_test.exs:2071, byte tripwire pair :2431-2549, opt-in gate capabilities.ex:281-321, same-PR amendment rule, Go clamp mcp_brief_view_test.go); METER.md + meter.py as the dollar meter-of-record; both seal targets end-to-end with test recipes; the did-you-mean machinery (nearestVerb live-verified in table mode, dropped in JSON mode); epic-cycle filing conventions (parent_id linkage, wave_paper field, labels:[] on slices, charter skeleton, the charter_path-defaults-to-CLOUD-charter bug).</p><p>CHECKED AND NOT FOUND (absences that are decisions-in-waiting): no literal @brief_keys symbol anywhere (it&#39;s a paraphrase — the real pattern is a numbered cut-list comment + key-set pin test); no caps_brief.json/.tsv/ready_cards fixtures anywhere on the machine; no count_tokens script anywhere in the repo (METER.md names the endpoint, nothing calls it); no ANTHROPIC_API_KEY in any store; no TSV writer for nested structures (table.go is lossy-human, sheets/csv.ex is flat-grid RFC-4180 — a nested-manifest TSV sub-grammar is UNDESIGNED, with Flag.Default&#39;s arbitrary-JSON as the sharpest edge); no test pinning capabilities stdout; no Credo tooling; no Vary header anywhere except CORS; no ctx-compression charter file (confirmed absent, charter_exists=false correct); no &#39;agent-report&#39; surface; no 92x anywhere; no JS SDK / Studio / deploy consumption of the manifest. UNREACHED CORNERS: internal/manifest/manifest_test.go&#39;s exact assertions (may pin command counts); cli-release.yml&#39;s unconditional-test backstop for the go-tests.yml path-filter gap (docs/cli/fixtures/** does NOT trigger go tests); docs/contracts/dispatch-areas.md files-grammar; tasks_controller/params.ex:187 caller origin end-to-end; hit_envelope.ex:108 guard; whether resolve_tasks_in_blocks batches rows_for_query per paper (N+1 schema-resolution risk for the seal); shell history for the lost fixture-generation script.</p><h2>Verify plan — 7 assignments in flight</h2><p>V1 brief-encoding-ground-truth (OPUS, runs code): rebuild the brief projection from the live manifest across all candidate encodings (nested JSON / tuples / packed args-flags / TSV denormalized / TSV packed, each with and without the nouns catalog), wc -c every variant, and recommend the encoding+keep-list amendment that reaches an honest ratio while staying invoke-complete and server-portable. This closes the ratified-target contradiction. V2 go-baseline-and-views-optin (sonnet, runs gates): CC=clang go build ./... &amp;&amp; go vet &amp;&amp; go test ./internal/cli/... ./internal/manifest/... green on origin/main; confirm no capabilities stdout test exists; curl the raw /v1/capabilities WITHOUT ?views=1 to prove the opt-in contract holds (expect 0 views keys) and with it (expect 3). V3 nil-polarity-flip-probe (OPUS, worktree probe): flip envelope.ex:222+:244 to false, run targeted mix test on envelope_test.exs + board_test.exs, prove exactly one pre-existing assertion breaks; trace params.ex:187 and hit_envelope.ex:108; enumerate listen_controller.ex:393&#39;s test-seam usages for the remove-vs-fence ruling.</p><p>V4 seal-query-feasibility (OPUS, worktree probe): prove query_rows_test.exs + board_test.exs green baseline; establish whether rows_for_query is called per-block per paper (N+1 schema-resolution risk) and whether the dataset is threadable into field_visibility_gate at the rows_for_query level; probe the gate edit. V5 did-you-mean-probe (sonnet, worktree probe): implement the show→get alias + thread the existing hint into the JSON envelope, measure real LOC, go test ./internal/cli/..., demonstrate the built binary&#39;s behavior both arms. V6 metering-preflight (sonnet, runs commands): meter.py --self-test; claude CLI flag support for -p/--output-format json/--max-budget-usd; prove count_tokens 401s without x-api-key (closing the census&#39;s own inference gap); confirm bp secret get is a workable script read-path for a future key. V7 hygiene-gates-and-ledger (sonnet, runs gates): bash scripts/docs-anchors-check.sh green + does it force a card edit on builtins.go changes; cli-release.yml unconditional-test backstop; dispatch-areas.md files-grammar for Decide&#39;s collision labels; reconfirm stopgap task staleness so Decide closes it. Decide must also: pass EXPLICIT charter_path (.claude/workflows/bp-ctx-compression-charter.md — the default silently targets the cloud charter), pick a slice prefix (ctxb-s&lt;N&gt; suggested), drop the epic-candidate label on chartering, and file the fixtures&#39; durable home (tooling/scaffy-duels/fixtures/ suggested, committed like results/).</p><div class=\"bp-callout bp-callout--info\"><span>STATUS: verifying. 7 verifiers in flight (3 Opus, 4 Sonnet; 3 in throwaway worktrees). Next: Decide folds verifier proof into decisions + the wave plan, files slice tasks under task-495cc9a9af43472c, and appends here BEFORE builders fly. The single decision Decide cannot skip: the brief encoding rule vs the ratified 3.9-5.5x target (see the contradiction callout above).</span></div><h2>Verification results (the deep round — what proof forced)</h2><p>Seven verifiers ran against origin/main 83c41e66c with executed proofs. The headline: THE RATIFIED BYTE TARGET FAILED RECONSTRUCTION. brief-encoding-ground-truth projected the exact ratified keep-list over the live manifest (95,915 B, 142 commands) in 10 encoding variants: nested JSON bottoms at 42,025 B (2.28x) — the ratified 24,266 B/3.9x is unreachable as JSON objects — and the ratified 17,543 B/5.5x TSV is only reachable by dropping summaries, which breaks invoke-completeness (&#39;tsv/cmd NO-sum bytes=9245 ratio=10.37x; with-sum bytes=21348 ratio=4.49x&#39;). The source fixtures are gone and unrecorded. Encoding is the entire ballgame: identical fields span 2.07x-4.47x. Measured menu, all invoke-complete: nested-JSON 42 KB/2.28x · array-of-tuples 26.5 KB/3.62x · TSV/cmd 21.5 KB/4.47x. TSV&#39;s collision-freedom is data-dependent, not structural (0 collisions today, but a re-added Flag.default breaks it silently); JSON-family is immune by construction.</p><p>go-baseline-and-views-optin: Go gate fully green on origin/main (&#39;ok internal/cli 20.675s&#39;); NO test pins runCapabilities stdout (the protective kit is this path&#39;s first-ever coverage); docs/cli/fixtures/full-manifest.json is stale at 40 vs live 142 commands but regen is proven safe (no consumer asserts a count); the &#39;views without ?views=1&#39; scare is REFUTED — authenticated raw server without the param returns 142 commands with ZERO views, with it exactly 3 (search.query, task.ready, task.prime); the always-present views were fetch.go:40&#39;s own hardcoded opt-in.</p><p>nil-polarity-flip-probe + seal-query-feasibility: both Elixir slices are shovel-ready with exact anchors — but NO Elixir toolchain exists on this machine (which mix -&gt; not found; toolchain lives on prod via /root/.asdf), so blast radius is settled by exhaustive static caller-trace, not a green run: all 6 production callers of field_readable? pass non-nil structs; exactly ONE test assertion (envelope_test.exs:256) breaks on the flip; the :244 catch-all has zero coverage today. A sibling fail-open lives at listen_controller.ex:395 (nil -&gt; unredacted document; one test usage at :152). The seal&#39;s load-bearing constraint is dataset threading: the Studio preview path NEVER stamps dataset into the block query (&#39;shared/paper.ex:377 calls rows_for_query(query, scope)&#39; raw), so the gate must take an explicit opts[:dataset] or it seals against the wrong schema. rows_for_query has exactly two production callers; no per-doc N+1 (gate hoists above the map, board.ex:190 pattern); nil schema degrades to allow-all without raising.</p><p>did-you-mean-probe: GO — built and live-verified end to end: &#39;task show&#39; stdout byte-identical to &#39;task get&#39; (diff empty, note stderr-only), &#39;task list&#39; resolves via ls alias exit 0, &#39;task raedy -o json&#39; now carries error.hint &#39;barkpark task ready&#39;, table mode byte-unaffected; ~25-30 functional LOC via a sibling usageErrHintf (widening usageErrf would touch 63 no-op sites). metering-preflight: meter.py self-test passes non-vacuously; the claude CLI has all four spawn flags; count_tokens is live and key-gated (401 &#39;x-api-key header is required&#39;) — but NO API key is provisioned anywhere reachable (bp secret ls: only ingest_token). hygiene-gates: docs-anchors-check PASSES (12 warnings, none in scope); anchor gate is name-existence only (editing runCapabilities&#39; body forces no card edit); go-tests.yml omits docs/cli/fixtures/** (real gap, fix rides s1); cli-release.yml only fires on tags. CORRECTION: task-8ad8d5cfe98c70aa is ALREADY CLOSED (done, 2026-07-24T00:21Z, evidence cites merge 83c41e66c) — the digest&#39;s stale-open premise was a timing race; no close action exists.</p><h2>Decisions (final — mirrored from the charter, .claude/workflows/bp-ctx-compression-charter.md)</h2><p>(1) Client-side projection at print — the wire always fetches full; stdout at builtins.go:44 is where bytes enter context; a server view saves zero and drags ETag/Vary scope. (2) Ratified targets REVISED — they failed reconstruction; honest menu recorded. (3) Encoding = array-of-tuples JSON + legend, nouns catalog dropped (~26.5 KB/3.62x): only JSON-family near the ratified band, structurally collision-free where TSV is data-dependently safe. (4) Targets are ratios, never fixed bytes (manifest grows; tripwire: brief &lt;= 32% of full). (5) Tokens still win, POST-build: no fixtures pre-exist and no key is reachable — bytes ship labeled bytes-with-conversion-pending; &gt;10% token win by another invoke-complete encoding flips by amendment, ties break JSON. (6) BRIEF-KEEP-LIST v1 pins fields AND encoding, server-portable for a later ?view=brief. (7) --full byte-identical, table untouched, brief only on machineOut &amp;&amp; !full. (8) Protective kit in the same PR — first-ever coverage of this stdout.</p><p>(9) Fixtures to tooling/scaffy-duels/fixtures/; docs/cli/fixtures regenerated to 142 commands; docs/cli/fixtures/** added to go-tests.yml. (10) Seal query.ex NOW with EXPLICIT dataset threading (opts[:dataset]; preview passes socket.assigns.dataset) — query-map derivation would silently seal the wrong schema; per-field independent gating; counts stay ungated. (11) Nil flip fails closed at :222 AND the :244 catch-all; the listen_controller.ex:395 sibling is REMOVED in the same slice (explicit scope expansion, one-test blast radius); fence = tests + doc rewrite + scripts/nil-polarity-check.sh grep gate (Credo does not exist here). (12) Did-you-mean is its own small slice (probe-proven recipe). (13) Live session is n=1 DIRECTIONAL SMOKE, pre-registered (fixed prompt, model pin, envelope-only metering, &gt;2x the $0.55 floor, --full escape rate as a named metric); &#39;paid on every session&#39; softens to amplified-per-call; &#39;12-92x&#39; corrects to the measured 12-81.5x. (14) task-8ad8d5cfe98c70aa already closed — no action. (15) charter_path always explicit (the workflow default silently targets the cloud charter). (16) Prefix ctx-; epic-candidate label drops on chartering. (17) Census thresholds forbidden until measured; duel $30-80 in wave 2; board clamp raise landed, fold is future work.</p><h2>Wave plan — 6 slices, 4 building now, 2 sequenced behind s1</h2><p>ROUND 1 (dependency-free, building this run): ctx-s1-brief-manifest [go-cli, fable, large] — born-brief bp capabilities per BRIEF-KEEP-LIST v1 + full protective kit + fixture regen + go-tests.yml paths; gate: CC=clang go build ./... &amp;&amp; go vet ./internal/cli/... ./internal/manifest/... &amp;&amp; CC=clang go test ./internal/cli/... ./internal/manifest/... · ctx-s2-seal-query-rows [elixir, opus, medium] — dataset-threaded visibility gate in to_render_map, both callers updated, board_test recipe copied; HIGH-FLIP-RISK: dataset threading (independent second review warranted before merge); gate: cd api &amp;&amp; mix test query_rows_test board_test (elixir.yml CI binding where no local toolchain) · ctx-s3-nil-polarity [elixir, opus, small] — :222 + :244 flip, listen_controller seam removal, grep fence; HIGH-FLIP-RISK: dead-path claim (static-only today); gate: mix test envelope_test listen_controller_test + nil-polarity-check.sh + docs-anchors-check.sh · ctx-s4-did-you-mean [go-cli, opus, small] — show-&gt;get/list-&gt;ls aliases + usageErrHintf hint threading + fixture-based tests; gate: the Go gate.</p><p>ROUND 2 (AFTER ctx-s1-brief-manifest MERGES — the lead dispatches these manually; they do not build this run): ctx-s5-count-tokens [tooling, opus, small] — count_tokens calibration over the committed fixtures, 12 calls x 2 pinned models when a key lands, bytes-with-conversion-pending fallback, pre-registered confirm-or-flip rule; gate: count_tokens_calibrate.py --self-check + meter.py --self-test · ctx-s6-live-smoke [tooling, opus, medium] — pre-registered n=1 directional before/after session, brief-default vs --full-forced, envelope-metered, --full escape rate as first-class metric; gate: meter.py --self-test. BACKLOG FILED (published children of the epic): ctx-b1-paired-duel (wave 2, $30-80), ctx-b2-server-view-brief (+RFC 9110 ETag/Vary fix), ctx-b3-bp-park (plugin + 2 MB + mandatory summary), ctx-b4-mcp-tools-all-sizing, ctx-b5-provision-count-tokens-key (HUMAN, p1 — unblocks every token claim), ctx-b6-memoized-visibility-gate.</p><div class=\"bp-callout bp-callout--info\"><span></span></div><h2>DEBRIEF — wave closed (Review, 2026-07-24)</h2><p>All four round-1 slices built, reviewed by the wave reviewer (full diffs vs origin/main, gates re-run, cross-slice integration merge tested green), pushed, and opened as PRs. The reviewer made ZERO code fixes — every slice survived adversarial review as built. Grade: A-. The lead merges; merge-gated criteria on each task are the lead&#39;s to close on merge.</p><h3>Shipped</h3><p>ctx-s1-brief-manifest — branch loop-epic/born-brief-bp-capabilities-machine-outpu-0, PR #6052. Born-brief bp capabilities: BRIEF-KEEP-LIST v1 array-of-tuples, 95,915 B -&gt; 26,502 B (3.62x / 27.6%, under the 32% ratio tripwire). Protective kit is real, not vacuous: invoke-completeness enumerates all 142 commands field-by-field, the legend pin is exact, the hostile synthetic proves structural collision-freedom, --full is byte-identical. Reviewer additionally proved the committed caps-brief fixture is byte-identical to briefManifest(caps-full) — the frozen duel pair is self-consistent. Verdict: exemplary; merge first (s5/s6 sequence behind it).</p><p>ctx-s3-nil-polarity — branch loop-epic/nil-caller-fails-closed-envelope-ex-fiel-2, PR #6053. envelope.ex nil clause + :244 catch-all flipped fail-CLOSED; the listen_controller fail-open nil seam REMOVED; nil-polarity-check.sh fence (selftest REDs on all three planted fail-open shapes) wired into doc-gates.yml. HIGH-FLIP-RISK dead-path claim independently RE-DERIVED by the reviewer: all 6 production callers thread a non-nil principal, and ScopeHelpers.from_assigns always Keyword.puts :caller_context via from_conn -&gt; anonymous(), so the SSE path can never hand nil to redacted_result. Runnable gates green locally; elixir.yml on the PR is the binding mix proof (no local toolchain, charter-designated). Comment-sweep follow-up: task-3afeb5994c839c27.</p><p>ctx-s4-did-you-mean — branch loop-epic/bp-task-show-list-resolve-via-aliases-an-3, PR #6054. task show-&gt;get / task list-&gt;ls aliases (stderr-only note, stdout byte-identical to the canonical verb — proven with separate-stream capture) + error.hint did-you-mean in JSON envelopes via the usageErrHintf sibling (the ~60 no-op usageErrf sites stay byte-identical). Reviewer verified the clean merge with s1&#39;s 142-command fixture regen and the combined suite green. Small, probe-proven, exactly decision 12.</p><p>ctx-s2-seal-query-rows — branch loop-epic/tasks-query-to-render-map-sealed-schema--1, PR #6055 — CI-GATED, second-review-owed. rows_for_query/3 sealed with the explicit dataset cascade; papers.ex passes its stamped dataset, Studio preview passes socket.assigns.dataset. The HIGH-FLIP-RISK dataset-threading judgment was re-derived by the reviewer (the adjacent agg_for_query fetcher already threads socket.assigns.dataset — strong local precedent), and the gate composes correctly with s3&#39;s flip (anonymous(), never nil). The mix gate could NOT run anywhere this wave (no Elixir toolchain); criteria 2/4/5 stay honestly open pending elixir.yml green on the PR. Per the flip-risk protocol a genuinely independent second reviewer is warranted before merge — that dispatch is the lead&#39;s manual step.</p><h3>Stalled / deferred</h3><p>Nothing stalled. ctx-s5-count-tokens and ctx-s6-live-smoke did not build BY DESIGN (sequenced round 2, both depend on s1 being on main). Both tasks sit open and unclaimed on the ledger with full briefs. The token leg of s5 additionally waits on ctx-b5 (human provisions an Anthropic API key via bp secret set); its bytes-labeled-bytes fallback runs without one.</p><h3>Ledger audit</h3><p>Clean — zero fixes needed. All four built slices: claimed by their builders, criteria stamped mid-claim with concrete evidence (probe lines, test names, file:line), lifecycle honestly in_progress with merge-gated criteria left open for the lead. s2&#39;s unrunnable mix criteria are unmet with empty evidence — honest, not padded. s5/s6 open and unclaimed. The backlog (ctx-b1..b6 + task-3afeb5994c839c27) matches the charter roster exactly; no out-of-wave task was touched. Nit, not a lie: s4&#39;s final claim pulse still reads &#39;committing on &lt;branch&gt;&#39; where s1/s3 wrote a proper final now-line.</p><h3>Grade: A- (earned, not asserted)</h3><p>Strong: the capstone&#39;s top-ranked win landed at exactly the revised measured target (3.62x, like-for-like encoding, ratio-not-bytes law respected); the protective kits are genuinely protective (selftest-tripwired fence, hostile synthetic, first-ever coverage of two previously dark paths); both HIGH-FLIP-RISK judgments were re-derived independently and held; all branches pushed with PRs open — no stranded work. Short of A/A+: the wave&#39;s headline claim is still in BYTES — count_tokens (s5) and the live smoke (s6) are exactly the two slices that could not run this round, so &#39;compresses the session-start tax&#39; remains directionally proven, not token-proven; s2 ships without ANY test execution anywhere (CI will be first contact); and the third inline copy of the anonymous visibility gate (query.ex, after board.ex + board_live.ex) is charter-sanctioned but real duplication debt (ctx-b6 is the consolidation point).</p><h3>Next wave</h3><p>(1) Lead merges round 1: #6052 first, then #6053/#6054 in any order, #6055 only after elixir.yml green AND the independent second review of the dataset threading; close each task&#39;s merge-gated criteria on merge. (2) Dispatch ctx-s5-count-tokens once s1 is on main; bytes fallback works keyless, ctx-b5 unblocks tokens. (3) Dispatch ctx-s6-live-smoke after s1 merges — pre-register BEFORE any run; report the --full escape rate. (4) The token verdict either confirms tuples or files the &gt;10% amendment naming the winner. Then wave 2 proper: the pre-registered paired duel (ctx-b1, $30-80), census thresholds measured-first.</p>",
+  "body_html_sv": "daa44d7cf3e98f5bce2e178dd7c8cd4dcf0c9d9d0adf2013f4205ac17dee8857",
+  "description": "Wave 1 strategy Paper for the ratified context-compression epic (task-495cc9a9af43472c): the manifest brief view — the last un-briefed first-party payload, 95,666 B paid at 5-6x amplification on every session — plus the two ratified-NOW seals (query.ex, nil-polarity). Direction, debate, and the 16-question survey plan.",
+  "main_tag": "context-management",
+  "preview": {
+    "description": "Wave 1 strategy Paper for the ratified context-compression epic (task-495cc9a9af43472c): the manifest brief…",
+    "extensions": {
+      "tags": [
+        "context-management",
+        "epic-cycle",
+        "cli",
+        "research-program"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/ctx-compression-wave-2026-07-24"
+  },
+  "rev": 1,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "wave 1 strategy of the context-compression epic",
+      "strength": 93,
+      "tag": "context-management"
+    },
+    {
+      "rationale": "the founding bp-epic-cycle wave paper for task-495cc9a9af43472c",
+      "strength": 74,
+      "tag": "epic-cycle"
+    },
+    {
+      "rationale": "the flagship slice lands in the bp CLI capabilities print path",
+      "strength": 61,
+      "tag": "cli"
+    },
+    {
+      "rationale": "carries the direction debate and 16-question survey plan",
+      "strength": 48,
+      "tag": "research-program"
+    }
+  ],
+  "title": "ctx-compression-wave-2026-07-24"
+}
