@@ -47,7 +47,12 @@ Build `planned` may exceed 15 and must equal the Scale profile's evaluated formu
 
 Build and Review preflight requires `--fleet-ledger-json PATH` pointing to the exact canonical `barkpark-epic-benchmark-v1` bytes emitted by `scripts/cycle/export_cyclefleet_b1.py`. The exporter resolves the canonical project-scoped `bp cycle show` authority before writing; a Paper is a reader projection, never the export source. The validator verifies canonical encoding, exact shape, component and ledger digests, replacement ancestry, redaction, every typed cost, the all-attempt summary, and the live Cycle scope fence. A complete-looking Paper is never sufficient by itself.
 
-Legendary scope requires `experiment.phase: legendary`, `protocol_version: 1`, the Task parent id in `experiment.epic_id`, and the Paper id in `experiment.wave_id`. The manifest contains exactly this reconciliation scope beneath `fleet_contract`:
+Legendary scope requires `experiment.phase: legendary`, `protocol_version: 1`,
+the immutable live Cycle authority epic id in `experiment.epic_id`, and the
+Paper id in `experiment.wave_id`. That epic id is normally the Task parent for
+a slice task, but it is the claimed Task id when a root campaign opened
+CycleFleet on itself. The manifest contains exactly this reconciliation scope
+beneath `fleet_contract`:
 
 ```json
 {"version":1,"paper_fleet_digest":"<canonical sha256 of the Paper fleet object>"}

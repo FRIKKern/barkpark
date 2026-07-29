@@ -1122,7 +1122,35 @@ def validate_fleet(paper: dict[str, Any], phase: str, require_debrief: bool) -> 
     return errors
 
 
+_EPIC_VALIDATE_LEDGER = EPIC.validate_ledger
+
+
+def validate_scope_fenced_ledger(
+    ledger: dict[str, Any],
+    paper: dict[str, Any],
+    task_parent_id: Any,
+    paper_id: str,
+) -> list[str]:
+    """Validate Legendary B1 scope against its live-bound Cycle fence.
+
+    The shared Epic validator normally binds a B1 to the task's parent epic.
+    A Legendary root campaign can instead open CycleFleet with the claimed
+    task itself as the immutable epic authority. The Legendary fence is later
+    reconciled field-for-field against that live authority, so use its epic id
+    for the shared structural check rather than inventing parent-goal scope.
+    """
+    manifest = ledger.get("manifest")
+    fence = manifest.get("cycle_scope_fence") if isinstance(manifest, dict) else None
+    expected_epic_id = (
+        fence.get("epic_id")
+        if isinstance(fence, dict) and EPIC.nonempty_string(fence.get("epic_id"))
+        else task_parent_id
+    )
+    return _EPIC_VALIDATE_LEDGER(ledger, paper, expected_epic_id, paper_id)
+
+
 EPIC.validate_fleet = validate_fleet
+EPIC.validate_ledger = validate_scope_fenced_ledger
 
 
 def validate(args: Any) -> list[str]:
