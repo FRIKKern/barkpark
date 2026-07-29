@@ -72,6 +72,20 @@ defmodule Barkpark.Sites.DeployRunner do
   Both derive their KEY→value decision from the SAME `resolved_build_vars/1`
   (the allow-list is never forked).
 
+  ## Prebuilt artifacts (charter D86/D87 — the build leaves the serving box)
+
+  A request carrying `artifact_b64` + `artifact_sha256` is INGESTED before
+  anything else runs: `Barkpark.Sites.PrebuiltArtifact` digest-verifies and
+  hardened-extracts it into `<run_state_dir>/<slug>.prebuilt`, and only then is
+  the site provisioned and the engine launched. A refused artifact costs
+  nothing (no provision, no unit) and returns `{:error, {:artifact_rejected,
+  code, message}}` — it NEVER degrades to a box build, because a box build
+  passes HEALTH on genuine markers while serving bytes the caller never asked
+  for. The staged dir reaches the engine as `PREBUILT_DIR` + `PREBUILT_SHA256`
+  on BOTH env sinks (`resolved_prebuilt_vars/1`), and both are persisted in the
+  run manifest so a re-attach after a BEAM restart still knows the run was
+  prebuilt.
+
   ## Fail-closed
 
   Always supervised (an idle GenServer is free), but every trigger is gated by
@@ -90,6 +104,7 @@ defmodule Barkpark.Sites.DeployRunner do
   require Logger
 
   alias Barkpark.Sites.DeployRequest
+  alias Barkpark.Sites.PrebuiltArtifact
   alias Barkpark.Sites.Provisioner
 
   @default_command {"bash", ["deploy/site-deploy.sh"]}
@@ -200,7 +215,9 @@ defmodule Barkpark.Sites.DeployRunner do
   `{:error, :already_running}`; a different slug proceeds. Never raises.
   """
   @spec trigger(DeployRequest.t()) ::
-          {:ok, :started} | {:error, :already_running | :disabled | :start_failed}
+          {:ok, :started}
+          | {:error, :already_running | :disabled | :start_failed}
+          | {:error, {:artifact_rejected, String.t(), String.t()}}
   def trigger(%DeployRequest{} = req), do: safe_call({:trigger, req}, {:error, :disabled})
 
   @doc """
@@ -405,6 +422,53 @@ defmodule Barkpark.Sites.DeployRunner do
   end
 
   defp start_run(state, %DeployRequest{} = req) do
+    # INGEST FIRST when the request carries prebuilt bytes (charter D86/D87): a
+    # refused artifact must cost nothing — no provision, no unit, no run — and
+    # must NEVER degrade to a box build, because a box build of the template
+    # would pass HEALTH on genuine markers while serving bytes the caller never
+    # asked for. The refusal is typed and reaches the caller as a 400.
+    case ingest_prebuilt(req) do
+      :ok -> provision_and_spawn(state, req)
+      {:error, code, message} -> {:reply, {:error, {:artifact_rejected, code, message}}, state}
+    end
+  end
+
+  # No artifact: unchanged box-build path.
+  defp ingest_prebuilt(%DeployRequest{artifact_b64: nil}), do: :ok
+
+  defp ingest_prebuilt(%DeployRequest{} = req) do
+    dir = prebuilt_dir(req.slug)
+
+    case PrebuiltArtifact.stage(req.artifact_b64, req.artifact_sha256, dir) do
+      {:ok, %{entries: entries, bytes: bytes}} ->
+        Logger.info(
+          "[site-deploy] staged prebuilt artifact for #{inspect(req.slug)} " <>
+            "(#{entries} entries, #{bytes} bytes, sha256 #{req.artifact_sha256})"
+        )
+
+        :ok
+
+      {:error, code, message} ->
+        Logger.warning(
+          "[site-deploy] prebuilt artifact REFUSED for #{inspect(req.slug)}: #{code} — #{message}"
+        )
+
+        {:error, code, message}
+    end
+  end
+
+  # Where a staged artifact lives: a deterministic per-slug path under the same
+  # run-state dir as the 0600 env file. Deterministic ON PURPOSE — it is how
+  # BOTH env sinks (child_env/1 and write_env_file/4) resolve PREBUILT_DIR from
+  # the request alone, with no third source of truth to drift.
+  defp prebuilt_dir(slug), do: Path.join(ensure_run_state_dir(), "#{slug}.prebuilt")
+
+  # The manifest is what a re-attach after a BEAM restart reads back, so a
+  # prebuilt run must be recognizable as one from disk alone.
+  defp prebuilt_manifest_dir(%DeployRequest{artifact_b64: nil}), do: nil
+  defp prebuilt_manifest_dir(%DeployRequest{} = req), do: prebuilt_dir(req.slug)
+
+  defp provision_and_spawn(state, %DeployRequest{} = req) do
     # PROVISION FIRST (charter D33/D34): a content-bound site has no repo to check
     # out, so its source must be materialized from the shipped template BEFORE the
     # build starts — otherwise the engine walks PLAN and dies at BUILD with `no
@@ -470,6 +534,8 @@ defmodule Barkpark.Sites.DeployRunner do
       status_file: status_file,
       log_file: log_file,
       build_env_file: env_file,
+      prebuilt_dir: prebuilt_manifest_dir(req),
+      prebuilt_sha256: req.artifact_sha256,
       started_at: DateTime.utc_now()
     }
 
@@ -875,6 +941,23 @@ defmodule Barkpark.Sites.DeployRunner do
     end
   end
 
+  # The PREBUILT pair, resolved ONCE for both sinks exactly like
+  # `resolved_build_vars/1` — because the failure mode of forking them is
+  # invisible: a prebuilt deploy that reaches the Port path (dev, macOS) but not
+  # the systemd EnvironmentFile works interactively and then silently degrades
+  # to a full on-box `npm ci && npm run build` under the real runner, i.e. the
+  # exact cost this whole wave exists to remove, with a GREEN deploy on top.
+  # An absent artifact yields NO lines at all, so the box-build path is byte-for-
+  # byte what it was.
+  defp resolved_prebuilt_vars(%DeployRequest{artifact_b64: nil}), do: []
+
+  defp resolved_prebuilt_vars(%DeployRequest{} = req) do
+    [
+      {"PREBUILT_DIR", prebuilt_dir(req.slug)},
+      {"PREBUILT_SHA256", req.artifact_sha256}
+    ]
+  end
+
   # The Port child's environment (fallback path). See the moduledoc: `false`
   # REMOVES, everything else is set explicitly, and PATH is untouched (inherited).
   defp child_env(%DeployRequest{} = req) do
@@ -894,7 +977,11 @@ defmodule Barkpark.Sites.DeployRunner do
       {~c"CONTENT_REV", charlist_or_false(req.content_rev)}
     ]
 
-    scrub ++ build ++ engine
+    prebuilt =
+      for {key, value} <- resolved_prebuilt_vars(req),
+          do: {to_charlist(key), charlist_or_false(value)}
+
+    scrub ++ build ++ engine ++ prebuilt
   end
 
   defp charlist_or_false(value) when is_binary(value) and value != "", do: to_charlist(value)
@@ -914,7 +1001,11 @@ defmodule Barkpark.Sites.DeployRunner do
       for {key, value} <- resolved_build_vars(req), is_binary(value), do: "#{key}=#{value}"
 
     engine_lines =
-      [{"SITE_SLUG", req.slug}, {"BUILD_ID", req.build_id}, {"CONTENT_REV", req.content_rev}]
+      [{"SITE_SLUG", req.slug}, {"BUILD_ID", req.build_id}, {"CONTENT_REV", req.content_rev}] ++
+        resolved_prebuilt_vars(req)
+
+    engine_lines =
+      engine_lines
       |> Enum.filter(fn {_k, v} -> is_binary(v) and v != "" end)
       |> Enum.map(fn {k, v} -> "#{k}=#{v}" end)
 
@@ -1285,6 +1376,8 @@ defmodule Barkpark.Sites.DeployRunner do
       "status_file" => m.status_file,
       "log_file" => m.log_file,
       "build_env_file" => m.build_env_file,
+      "prebuilt_dir" => Map.get(m, :prebuilt_dir),
+      "prebuilt_sha256" => Map.get(m, :prebuilt_sha256),
       "started_at" => DateTime.to_iso8601(m.started_at)
     }
   end
@@ -1301,6 +1394,8 @@ defmodule Barkpark.Sites.DeployRunner do
       status_file: j["status_file"],
       log_file: j["log_file"],
       build_env_file: j["build_env_file"],
+      prebuilt_dir: j["prebuilt_dir"],
+      prebuilt_sha256: j["prebuilt_sha256"],
       started_at: parse_dt(j["started_at"])
     }
   end
@@ -1366,6 +1461,11 @@ defmodule Barkpark.Sites.DeployRunner do
         _ = File.rm(manifest_path(dir, m.slug))
         _ = m.status_file && File.rm(m.status_file)
         _ = m.log_file && File.rm(m.log_file)
+        # The staged prebuilt tree is the BIGGEST thing a run leaves behind (up
+        # to the 64 MiB extraction cap, against a 3.8 GB box), so it is swept
+        # with the rest of the quartet rather than living forever after a
+        # one-shot slug.
+        _ = m.prebuilt_dir && File.rm_rf(m.prebuilt_dir)
         _ = unlink_env(m)
       end
     end

@@ -294,6 +294,102 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
 
   # ── single-flight ───────────────────────────────────────────────────────
 
+  # ── prebuilt artifacts (charter D86/D87) ────────────────────────────────
+
+  # A one-file `dist/` as a .tar.gz plus the digest of those exact bytes.
+  defp prebuilt_artifact do
+    tar = Path.join(System.tmp_dir!(), "bp-ctl-pb-#{System.unique_integer([:positive])}.tar.gz")
+    on_exit(fn -> File.rm(tar) end)
+
+    :ok =
+      :erl_tar.create(String.to_charlist(tar), [{~c"index.html", "<h1>pb</h1>"}], [:compressed])
+
+    raw = File.read!(tar)
+    {Base.encode64(raw), :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower)}
+  end
+
+  describe "POST — a prebuilt artifact" do
+    test "the 202 echoes prebuilt:true AND the verified digest", %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-ctl-run-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf(run_state) end)
+      {b64, sha} = prebuilt_artifact()
+
+      put_runner_cfg(enabled: true, run_state_dir: run_state, command: stub("exit 0"))
+
+      body =
+        conn
+        |> admin_conn()
+        |> post(
+          "/v1/admin/site-deploy",
+          body("pb-site", %{"artifact_b64" => b64, "artifact_sha256" => sha})
+        )
+        |> json_response(202)
+
+      assert body["ok"] == true
+      assert body["prebuilt"] == true
+      assert body["artifact_sha256"] == sha
+      assert body["status"]["slug"] == "pb-site"
+    end
+
+    test "a BOX BUILD omits both keys — an absent field, never a bare prebuilt:false", %{
+      conn: conn
+    } do
+      put_runner_cfg(enabled: true, command: stub("exit 0"))
+
+      body =
+        conn
+        |> admin_conn()
+        |> post("/v1/admin/site-deploy", body("box-built"))
+        |> json_response(202)
+
+      assert body["ok"] == true
+      refute Map.has_key?(body, "prebuilt")
+      refute Map.has_key?(body, "artifact_sha256")
+    end
+
+    test "400 invalid_artifact_digest — artifact_b64 alone is REFUSED, never silently dropped",
+         %{conn: conn} do
+      {b64, _sha} = prebuilt_artifact()
+      put_runner_cfg(enabled: true, command: stub("exit 0"))
+
+      assert %{"error" => %{"code" => "invalid_artifact_digest", "message" => message}} =
+               conn
+               |> admin_conn()
+               |> post("/v1/admin/site-deploy", body("half-pair", %{"artifact_b64" => b64}))
+               |> json_response(400)
+
+      assert message =~ "artifact_sha256 is required"
+    end
+
+    test "400 with the extractor's OWN typed code when the box refuses the bytes", %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-ctl-run-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf(run_state) end)
+      {b64, _sha} = prebuilt_artifact()
+
+      put_runner_cfg(enabled: true, run_state_dir: run_state, command: stub("exit 0"))
+
+      assert %{"error" => %{"code" => "E_DIGEST_MISMATCH", "message" => message}} =
+               conn
+               |> admin_conn()
+               |> post(
+                 "/v1/admin/site-deploy",
+                 body("bad-digest", %{
+                   "artifact_b64" => b64,
+                   "artifact_sha256" => String.duplicate("0", 64)
+                 })
+               )
+               |> json_response(400)
+
+      assert message =~ "sha256"
+      # The refusal did not start a run — the slug is still idle.
+      assert %{"state" => "idle"} =
+               conn
+               |> admin_conn()
+               |> get("/v1/admin/site-deploy", %{"slug" => "bad-digest"})
+               |> json_response(200)
+    end
+  end
+
   describe "POST — 409 single-flight is PER SLUG" do
     test "the same slug twice is 409; a different slug is 202", %{conn: conn} do
       put_runner_cfg(enabled: true, command: stub("sleep 0.6; exit 0"))

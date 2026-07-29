@@ -102,9 +102,25 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       |> maybe_put("content_rev", Keyword.get(opts, :content_rev))
       |> maybe_put("runtime_target", Keyword.get(opts, :runtime_target))
       |> maybe_put("env", Keyword.get(opts, :env))
+      |> maybe_put("artifact_b64", Keyword.get(opts, :artifact_b64))
+      |> maybe_put("artifact_sha256", Keyword.get(opts, :artifact_sha256))
 
     {:ok, request} = DeployRequest.new(params)
     request
+  end
+
+  # A minimal but REAL prebuilt bundle: a one-file `dist/` as a .tar.gz, plus
+  # the digest of the exact bytes. `:erl_tar` is fine for WRITING one (the ban
+  # is on handing an untrusted gzip stream to it for READING).
+  defp prebuilt_artifact(files \\ [{"index.html", "<h1>prebuilt</h1>"}]) do
+    tar = Path.join(System.tmp_dir!(), "bp-pb-#{System.unique_integer([:positive])}.tar.gz")
+    on_exit(fn -> File.rm(tar) end)
+
+    entries = for {name, data} <- files, do: {String.to_charlist(name), data}
+    :ok = :erl_tar.create(String.to_charlist(tar), entries, [:compressed])
+
+    raw = File.read!(tar)
+    {Base.encode64(raw), :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower)}
   end
 
   defp maybe_put(map, _key, nil), do: map
@@ -292,6 +308,126 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
       assert child["SITE_SLUG"] == "rb-env"
       refute Map.has_key?(child, "BUILD_ID")
+    end
+  end
+
+  # ── prebuilt artifacts (charter D86/D87 — the build leaves the box) ──────
+
+  describe "a prebuilt artifact" do
+    test "reaches the Port child as PREBUILT_DIR + PREBUILT_SHA256, and the dir HOLDS the bytes" do
+      dir = run_dir()
+      dump = Path.join(dir, "env.dump")
+      {b64, sha} = prebuilt_artifact()
+
+      put_cfg(enabled: true, run_state_dir: dir, command: stub("env > #{dump}; exit 0"))
+
+      request = req("pb-port", artifact_b64: b64, artifact_sha256: sha)
+      assert DeployRunner.trigger(request) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("pb-port")
+
+      child = dump |> File.read!() |> parse_env_dump()
+
+      assert child["PREBUILT_SHA256"] == sha
+      assert child["PREBUILT_DIR"] == Path.join(dir, "pb-port.prebuilt")
+
+      # Not just an env var pointing at nothing: the staged tree is really there.
+      assert File.read!(Path.join(child["PREBUILT_DIR"], "index.html")) =~ "prebuilt"
+    end
+
+    test "reaches the systemd EnvironmentFile too — THE LANDMINE (an interactive-only plumb silently rebuilds under systemd)" do
+      dir = run_dir()
+      argv_dump = Path.join(dir, "argv.dump")
+      {b64, sha} = prebuilt_artifact()
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(argv_dump), []},
+        is_active_cmd: {echo_script("active"), []},
+        command: stub("exit 0")
+      )
+
+      request = req("pb-unit", artifact_b64: b64, artifact_sha256: sha)
+      assert DeployRunner.trigger(request) == {:ok, :started}
+
+      env_contents = File.read!(Path.join(dir, "pb-unit.env"))
+      assert env_contents =~ "PREBUILT_DIR=#{Path.join(dir, "pb-unit.prebuilt")}"
+      assert env_contents =~ "PREBUILT_SHA256=#{sha}"
+
+      # …and the manifest survives the JSON round-trip, so a re-attach after a
+      # BEAM restart still knows this run was prebuilt.
+      manifest = dir |> Path.join("pb-unit.manifest.json") |> File.read!() |> Jason.decode!()
+      assert manifest["prebuilt_dir"] == Path.join(dir, "pb-unit.prebuilt")
+      assert manifest["prebuilt_sha256"] == sha
+    end
+
+    test "a BOX BUILD carries NEITHER var, on either sink" do
+      dir = run_dir()
+      dump = Path.join(dir, "env.dump")
+
+      put_cfg(enabled: true, run_state_dir: dir, command: stub("env > #{dump}; exit 0"))
+
+      assert DeployRunner.trigger(req("pb-none")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("pb-none")
+
+      child = dump |> File.read!() |> parse_env_dump()
+      refute Map.has_key?(child, "PREBUILT_DIR")
+      refute Map.has_key?(child, "PREBUILT_SHA256")
+    end
+
+    test "a REFUSED artifact starts NOTHING and never degrades to a box build" do
+      dir = run_dir()
+      ran = Path.join(dir, "engine.ran")
+      {_ok_b64, _ok_sha} = prebuilt_artifact()
+
+      # A symlink entry: refused, not sanitized (a staged symlink is SERVED).
+      tar = Path.join(System.tmp_dir!(), "bp-evil-#{System.unique_integer([:positive])}.tar.gz")
+      on_exit(fn -> File.rm(tar) end)
+      link = Path.join(System.tmp_dir!(), "bp-evil-link-#{System.unique_integer([:positive])}")
+      File.ln_s!("/etc/passwd", link)
+      on_exit(fn -> File.rm(link) end)
+
+      :ok =
+        :erl_tar.create(
+          String.to_charlist(tar),
+          [{~c"leak.txt", String.to_charlist(link)}],
+          [:compressed, :dereference_disabled]
+        )
+
+      raw = File.read!(tar)
+      b64 = Base.encode64(raw)
+      sha = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower)
+
+      put_cfg(enabled: true, run_state_dir: dir, command: stub("touch #{ran}; exit 0"))
+
+      request = req("pb-evil", artifact_b64: b64, artifact_sha256: sha)
+
+      assert {:error, {:artifact_rejected, "E_SYMLINK", message}} =
+               DeployRunner.trigger(request)
+
+      assert message =~ "symlink"
+
+      # Nothing ran, nothing staged, and the slug is still idle — a refusal is
+      # not a slot-holder either.
+      refute File.exists?(ran)
+      refute File.exists?(Path.join(dir, "pb-evil.prebuilt"))
+      assert %{state: :idle} = DeployRunner.status("pb-evil")
+    end
+
+    test "a digest mismatch is refused before anything is staged" do
+      dir = run_dir()
+      {b64, _sha} = prebuilt_artifact()
+
+      put_cfg(enabled: true, run_state_dir: dir, command: stub("exit 0"))
+
+      request =
+        req("pb-digest", artifact_b64: b64, artifact_sha256: String.duplicate("0", 64))
+
+      assert {:error, {:artifact_rejected, "E_DIGEST_MISMATCH", _}} =
+               DeployRunner.trigger(request)
+
+      refute File.exists?(Path.join(dir, "pb-digest.prebuilt"))
     end
   end
 
