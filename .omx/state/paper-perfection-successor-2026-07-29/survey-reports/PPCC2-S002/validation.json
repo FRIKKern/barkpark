@@ -1,0 +1,146 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report-validation/v1",
+  "assignment_id": "PPCC2-S002",
+  "valid": true,
+  "checks": [
+    {
+      "name": "assignment-sha",
+      "status": "PASS",
+      "evidence": "62c0e37569230c61a8a93bf2c2778f5e1f8a50bdca33c7f5803ff2e4b54d78ab"
+    },
+    {
+      "name": "assignment-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S002",
+        "unit_count": 10
+      }
+    },
+    {
+      "name": "report-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S002",
+        "phase": "survey",
+        "agent_type": "epic-surveyor"
+      }
+    },
+    {
+      "name": "ordered-checked-unit-ids",
+      "status": "PASS",
+      "evidence": [
+        "paper:barkpark-efficiency-ledger",
+        "paper:barkpark-estate",
+        "paper:barkpark-onboarding-painpoint-audit-2026-07-13",
+        "paper:barkpark-tasks-mobile-capstone",
+        "paper:barkpark-tasks-mobile-chat-third-client",
+        "paper:barkpark-tasks-mobile-identity-cascade",
+        "paper:barkpark-tasks-mobile-product-shapes",
+        "paper:barkpark-tasks-mobile-shell-and-cache",
+        "paper:barkpark-tasks-mobile-state-2026-07-23",
+        "paper:barkpark-tasks-mobile-status-2026-07-25"
+      ]
+    },
+    {
+      "name": "one-verdict-per-unit",
+      "status": "PASS",
+      "evidence": 10
+    },
+    {
+      "name": "verdict-metadata-pinned",
+      "status": "PASS",
+      "evidence": "document_id/document_rev match all 10 assignment units"
+    },
+    {
+      "name": "allowed-verdicts",
+      "status": "PASS",
+      "evidence": [
+        "keep",
+        "repair",
+        "repair",
+        "repair",
+        "keep",
+        "keep",
+        "superseded",
+        "superseded",
+        "superseded",
+        "keep"
+      ]
+    },
+    {
+      "name": "editorial-dimensions-complete",
+      "status": "PASS",
+      "evidence": [
+        "compression_and_restraint",
+        "duplicate_disposition",
+        "evidence_and_truth",
+        "human_voice_and_precision",
+        "opening_and_criteria",
+        "outline_and_hierarchy",
+        "purpose_and_larger_goal",
+        "rationale"
+      ]
+    },
+    {
+      "name": "specific-best-and-failure-evidence",
+      "status": "PASS",
+      "evidence": "nonempty block_ref/evidence for every unit"
+    },
+    {
+      "name": "five-reader-risks",
+      "status": "PASS",
+      "evidence": [
+        "CLI/API",
+        "Studio",
+        "TUI80",
+        "email",
+        "public"
+      ]
+    },
+    {
+      "name": "false-mutation-attestations",
+      "status": "PASS",
+      "evidence": {
+        "production_papers_mutated": false,
+        "cyclefleet_mutated": false,
+        "read_operations_only": [
+          "bp doc get paper <document_id> --perspective raw --json"
+        ]
+      }
+    },
+    {
+      "name": "unvisited-scope-empty",
+      "status": "PASS",
+      "evidence": []
+    },
+    {
+      "name": "readback-count",
+      "status": "PASS",
+      "evidence": {
+        "count": 10,
+        "all_pinned_revisions_read": true
+      }
+    },
+    {
+      "name": "readbacks-exact-and-hashed",
+      "status": "PASS",
+      "evidence": "all _id/_rev and SHA-256 receipts match"
+    },
+    {
+      "name": "immutable-cyclefleet-binding",
+      "status": "PASS",
+      "evidence": {
+        "status": "confirmed",
+        "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+        "cycle_assignment_id": "ef256c93-24d8-45cf-80f8-60a3e5a4ed04",
+        "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+        "receipt_path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/survey-cycle/assignment-receipts/PPCC2-S002.json",
+        "leader_confirmation_message_id": "add72096-69ec-4a7c-95d6-97e5ac643b46"
+      }
+    }
+  ],
+  "summary": {
+    "pass": 15,
+    "fail": 0
+  }
+}

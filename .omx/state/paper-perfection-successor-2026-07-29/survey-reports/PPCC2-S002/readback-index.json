@@ -1,0 +1,88 @@
+{
+  "schema_version": "paper-perfection-successor-readback-index/v1",
+  "assignment_id": "PPCC2-S002",
+  "reads": [
+    {
+      "document_id": "barkpark-efficiency-ledger",
+      "document_rev": "27ccebeaa8817028f19ffb4036841758",
+      "block_count": 32,
+      "readback_sha256": "856c673b4681550d055bb26e7aef64adacf98c58f0b1280cde84c6223c2a8356",
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:21:50Z"
+    },
+    {
+      "document_id": "barkpark-estate",
+      "document_rev": "09022412c78ebeb5c153ece215b34281",
+      "block_count": 36,
+      "readback_sha256": "3b77142365c0c2eec426124b25ae432da08cc54984c5f39050cad83c7740de64",
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:21:50Z"
+    },
+    {
+      "document_id": "barkpark-onboarding-painpoint-audit-2026-07-13",
+      "document_rev": "9e66a46c400a9b63a5db81340f3c3057",
+      "block_count": 72,
+      "readback_sha256": "444e915d6dec4f7e009a214d3678f6360c5660f16e1b8dfb9d8e58ada7ff1484",
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:21:51Z"
+    },
+    {
+      "document_id": "barkpark-tasks-mobile-capstone",
+      "document_rev": "1c7faad970614422b3620c044508f632",
+      "block_count": 104,
+      "readback_sha256": "a7f43e5fc690d4b8ee0dbf02e236297e7f4132f416b76bea9660ae71a49002f6",
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:21:52Z"
+    },
+    {
+      "document_id": "barkpark-tasks-mobile-chat-third-client",
+      "document_rev": "9e8e8419026ef12934afe053e0fc0677",
+      "block_count": 70,
+      "readback_sha256": "c3f49cc0beb0c478f78009057db3c729ae77e475245dc61eae77e2ef6125d537",
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:21:53Z"
+    },
+    {
+      "document_id": "barkpark-tasks-mobile-identity-cascade",
+      "document_rev": "b8da665b6f80b1554f000f89ec944e40",
+      "block_count": 54,
+      "readback_sha256": "4dbc5a28bda9b2db7b440d1706d09012c75b558cc7214d16e6139345b7f0dde5",
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:21:53Z"
+    },
+    {
+      "document_id": "barkpark-tasks-mobile-product-shapes",
+      "document_rev": "e711ef9123ad9ae85c7998c3690d7ed4",
+      "block_count": 58,
+      "readback_sha256": "bc91a40dcb28ef1ae747f56f4e7ef15baeaf9426b2a48cda902d85a9ced96e13",
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:21:54Z"
+    },
+    {
+      "document_id": "barkpark-tasks-mobile-shell-and-cache",
+      "document_rev": "f22076efc401d48a401c0d1e34fa37e6",
+      "block_count": 43,
+      "readback_sha256": "6bae1680f4898e3a52f5c16a60ec5bb8eb6816696843394e169c08554707fee5",
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:21:54Z"
+    },
+    {
+      "document_id": "barkpark-tasks-mobile-state-2026-07-23",
+      "document_rev": "550eec161b4892db6f55ba38925a0249",
+      "block_count": 22,
+      "readback_sha256": "a6a2013422bb6463a379bd7ab762937f139398281c5ae8c74f9e560ac448d4b8",
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:21:55Z"
+    },
+    {
+      "document_id": "barkpark-tasks-mobile-status-2026-07-25",
+      "document_rev": "f4ed68ce42affb58f002c2eb62c45f31",
+      "block_count": 57,
+      "readback_sha256": "75e4b4d384ad79c9390106301f63f84746d0296fea50e178a7d8bfaa637f2024",
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:21:56Z"
+    }
+  ],
+  "all_pinned_revisions_read": true,
+  "count": 10
+}

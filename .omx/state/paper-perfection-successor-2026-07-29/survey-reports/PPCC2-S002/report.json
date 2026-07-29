@@ -1,0 +1,622 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S002",
+  "assignment_snapshot_sha256": "62c0e37569230c61a8a93bf2c2778f5e1f8a50bdca33c7f5803ff2e4b54d78ab",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "phase": "survey",
+  "wave": 1,
+  "dispatch_slot": 2,
+  "worker": "worker-2",
+  "mutation_policy": "read_only",
+  "direct_answer": "All 10 exact pinned Paper revisions were read with zero revision drift. Preliminary disposition: 4 keep, 3 repair, 3 superseded. The transferable strengths are early measurable contracts, explicit evidence-versus-policy boundaries, and cross-lane rulings tied to concrete artifacts. The dominant failures are dense multi-kilobyte tables/lists, current-state language without durable receipts, and lane/status Papers continuing to look authoritative after a capstone or later dated status superseded their decision role.",
+  "verdict_counts": {
+    "keep": 4,
+    "repair": 3,
+    "superseded": 3
+  },
+  "checked_unit_ids": [
+    "paper:barkpark-efficiency-ledger",
+    "paper:barkpark-estate",
+    "paper:barkpark-onboarding-painpoint-audit-2026-07-13",
+    "paper:barkpark-tasks-mobile-capstone",
+    "paper:barkpark-tasks-mobile-chat-third-client",
+    "paper:barkpark-tasks-mobile-identity-cascade",
+    "paper:barkpark-tasks-mobile-product-shapes",
+    "paper:barkpark-tasks-mobile-shell-and-cache",
+    "paper:barkpark-tasks-mobile-state-2026-07-23",
+    "paper:barkpark-tasks-mobile-status-2026-07-25"
+  ],
+  "coverage_checks": [
+    {
+      "surface": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/survey-authority/assignments/PPCC2-S002.json",
+      "checked_for": "immutable ownership, pins, required result shape, mutation policy",
+      "result": "found"
+    },
+    {
+      "surface": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/survey-authority/SHA256SUMS",
+      "checked_for": "PPCC2-S002 assignment digest",
+      "result": "found"
+    },
+    {
+      "surface": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/survey-authority/validation.json",
+      "checked_for": "60-assignment/563-unit exact coverage, no overlap/omission, read-only attestation",
+      "result": "found"
+    },
+    {
+      "surface": "readbacks/*.json",
+      "checked_for": "all 10 raw Paper readbacks and exact _rev equality to assignment pins",
+      "result": "found"
+    },
+    {
+      "surface": "readback-index.json",
+      "checked_for": "10/10 pinned revision read receipts and SHA-256 values",
+      "result": "found"
+    },
+    {
+      "surface": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-current-corpus-2026-07-28/survey-reports/*/report.json",
+      "checked_for": "prior durable report schema and same-revision comparison",
+      "result": "found"
+    },
+    {
+      "surface": "CycleFleet binding confirmation",
+      "checked_for": "leader confirmation that immutable PPCC2-S002 assignment is appended to opened successor wave",
+      "result": "found",
+      "evidence": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/survey-cycle/assignment-receipts/PPCC2-S002.json"
+    }
+  ],
+  "best_pattern_evidence": [
+    {
+      "unit_id": "paper:barkpark-efficiency-ledger",
+      "block_ref": "blocks[15]",
+      "evidence": "A chain is only proven end-to-end on virgin ground.",
+      "lesson": "Convert a local failure into a reusable rule whose boundary can be tested again."
+    },
+    {
+      "unit_id": "paper:barkpark-estate",
+      "block_ref": "blocks[13]",
+      "evidence": "WHM concept → Barkpark primitive, with each row labeled existing, seam, or gap.",
+      "lesson": "Map incumbent concepts to current primitives and explicit gaps so strategy does not masquerade as implementation."
+    },
+    {
+      "unit_id": "paper:barkpark-onboarding-painpoint-audit-2026-07-13",
+      "block_ref": "blocks[24]",
+      "evidence": "BP-ONB-03: instance credentials without explicit team context produces an unactionable 404; recommended fix is --team / GetCredentialsForTeam.",
+      "lesson": "Tie each observed failure to user impact and a concrete remediation instead of listing pain without an exit path."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-capstone",
+      "block_ref": "blocks[72]",
+      "evidence": "The cascade is a navigation spine, not an authorization spine.",
+      "lesson": "Preserve rival evidence, declare the ruling, and express the result as a reusable product law."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-chat-third-client",
+      "block_ref": "blocks[27]",
+      "evidence": "Live events have no id and are unreplayable by design; recovery is refetch of settled truth.",
+      "lesson": "State replay and loss boundaries explicitly so clients do not invent a stronger delivery contract than the server provides."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-identity-cascade",
+      "block_ref": "blocks[22]-[23]",
+      "evidence": "Each credential path is compared by gate, yielded credential, and mobile verdict.",
+      "lesson": "Use an explicit alternatives matrix to prove a missing seam rather than asserting that “mobile auth is hard.”"
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-product-shapes",
+      "block_ref": "blocks[8]",
+      "evidence": "Ship v1 as a Reader-Communicator with teeth.",
+      "lesson": "State the user promise and scoped exception early enough that later technical evidence can be judged against it."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-shell-and-cache",
+      "block_ref": "blocks[24]",
+      "evidence": "One stream invalidates everything: /v1/data/listen/:dataset carries all document-type mutations.",
+      "lesson": "Derive cache behavior from the actual transport boundary instead of inventing per-screen invalidation."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-state-2026-07-23",
+      "block_ref": "blocks[15]",
+      "evidence": "The lease lapsed, the ledger reverted to open, and the gate refused every slice PR.",
+      "lesson": "Preserve a failed gate together with its remedy so later teams learn the mechanism rather than only seeing a green ending."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-status-2026-07-25",
+      "block_ref": "blocks[44]",
+      "evidence": "The binding real-Android verdict NEVER LANDED … the native fast-path was promoted by USER RULING.",
+      "lesson": "Separate measured evidence, its authority level, and the human decision so a later reader cannot infer a proof that never happened."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "unit_id": "paper:barkpark-efficiency-ledger",
+      "block_ref": "blocks[25]",
+      "evidence": "All 12 ready-to-build blocks are live … 32/32 meter-exact.",
+      "reader_impact": "This completion claim is time-sensitive and does not carry a dated receipt or release ids in the block; it can silently age into false current-state authority."
+    },
+    {
+      "unit_id": "paper:barkpark-estate",
+      "block_ref": "blocks[20]",
+      "evidence": "$ bp estate create client-a --domain cms.client-a.com --package studio-20",
+      "reader_impact": "Although blocks[19] disclaims the verbs, a polished terminal transcript can still be mistaken for a supported CLI contract in public, TUI, or API-oriented reading."
+    },
+    {
+      "unit_id": "paper:barkpark-onboarding-painpoint-audit-2026-07-13",
+      "block_ref": "blocks[19]",
+      "evidence": "The CLI existed but was not on the user PATH.",
+      "reader_impact": "This useful finding is buried inside a roughly 6,490-character timeline, obscuring prioritization and making TUI80/email consumption poor."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-capstone",
+      "block_ref": "blocks[72]",
+      "evidence": "Eleven cross-lane rulings are compressed into one 6,063-character table.",
+      "reader_impact": "The rigor becomes hard to scan in TUI/email and makes individual rulings difficult to link, review, or update independently."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-chat-third-client",
+      "block_ref": "blocks[24]",
+      "evidence": "Ten routes, request/response shapes, auth, and runtime semantics share one 2,253-character table.",
+      "reader_impact": "Narrow readers need a short route/decision cheat sheet even though the full table should remain as reference."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-identity-cascade",
+      "block_ref": "blocks[32]",
+      "evidence": "Eight independent findings—permissions, paper editing, PATs, attach/rotate, expiry, and more—occupy one long list.",
+      "reader_impact": "Independent decisions cannot be linked or updated cleanly, and TUI/email readers lose the acceptance boundary."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-product-shapes",
+      "block_ref": "blocks[29]",
+      "evidence": "The app token should be [read, write, chat] — WRONG — [read, chat] suffices.",
+      "reader_impact": "The later capstone/status record uses the ratified [read,write,chat] token, so this preliminary decision is materially stale and unsafe as current CLI/API guidance."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-shell-and-cache",
+      "block_ref": "blocks[12]",
+      "evidence": "WebView performance on long papers … is unprovable by reading.",
+      "reader_impact": "Later emulator scroll evidence failed and native reading was promoted by user ruling while the binding real-Android verdict remained open; the original WebView recommendation is no longer final authority."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-state-2026-07-23",
+      "block_ref": "blocks[17]",
+      "evidence": "Merge round 1 … post-merge proofs … dispatch round 2.",
+      "reader_impact": "All “right now” PR and gate statements became stale when the later 2026-07-25 status was published."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-status-2026-07-25",
+      "block_ref": "blocks[34]",
+      "evidence": "There are NO screenshots of the shipped native paper reader in this report.",
+      "reader_impact": "The report candidly exposes a public-reader evidence gap, but a key shipped claim remains visually under-proven and image fallbacks are already weak outside Studio."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate": [
+        "paper:barkpark-tasks-mobile-product-shapes",
+        "paper:barkpark-tasks-mobile-capstone"
+      ],
+      "disposition": "product-shapes is research substrate; capstone owns final cross-lane product rulings"
+    },
+    {
+      "candidate": [
+        "paper:barkpark-tasks-mobile-shell-and-cache",
+        "paper:barkpark-tasks-mobile-capstone"
+      ],
+      "disposition": "shell/cache retains transport evidence; capstone/charter owns the final reader decision"
+    },
+    {
+      "candidate": [
+        "paper:barkpark-tasks-mobile-state-2026-07-23",
+        "paper:barkpark-tasks-mobile-status-2026-07-25"
+      ],
+      "disposition": "same dated status role; 2026-07-25 supersedes 2026-07-23 for current status"
+    },
+    {
+      "candidate": [
+        "paper:barkpark-estate",
+        "paper:one-shot-onboarding"
+      ],
+      "disposition": "possible golden-path overlap named by Estate; compare authority before parallel maintenance, not a title-only merge"
+    }
+  ],
+  "reader_risks": {
+    "Studio": "Dense evidence tables benefit from native blocks and headings but need stable anchors/collapse rails.",
+    "TUI80": "Multi-kilobyte tables/lists, diagrams, and image evidence wrap or disappear; every Paper needs a concise text rail.",
+    "email": "Operational Papers should be summarized with durable links rather than fully inlined.",
+    "public": "Auth topology, infra/pricing, task/PR state, and live capability claims require freshness and redaction review.",
+    "CLI/API": "Exact ids/revisions must remain machine-readable; proposed endpoints/commands must never be presented as shipped contracts."
+  },
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:barkpark-efficiency-ledger",
+      "document_id": "barkpark-efficiency-ledger",
+      "document_rev": "27ccebeaa8817028f19ffb4036841758",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Measured cross-source synthesis of how Barkpark reduced development wall time without lowering gates: exact cost metering, the command-to-recipe knowledge ladder, drift tripwires, and a live Top-20 application.",
+      "opening_and_criteria": "blocks[2] opens with the measurable contract—“Every number on this page is measured”—and blocks[27] states the quality gate: a red left red stops the round. Formal acceptance criteria are distributed rather than collected in one block.",
+      "outline_and_hierarchy": "32 blocks, six headings: meter → knowledge ladder → drift triangle → live Top-20 application → ranked levers. The argument is compact and progressive.",
+      "human_voice_and_precision": "Clear and accountable, with named ratios, PRs, costs, and gates. Absolutist phrases such as “every number” and “all 3” remain trustworthy only while their receipts stay revision-linked.",
+      "compression_and_restraint": "32 blocks / 7,487 extracted characters; largest evidence table is blocks[24]. Density is good, with only modest narrow-reader friction.",
+      "evidence_and_truth": "blocks[15] turns an observed failure into a falsifiable rule, while blocks[27] ties speed to an unchanged test/golden/quality boundary.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[15]",
+          "evidence": "A chain is only proven end-to-end on virgin ground.",
+          "lesson": "Convert a local failure into a reusable rule whose boundary can be tested again."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[25]",
+          "evidence": "All 12 ready-to-build blocks are live … 32/32 meter-exact.",
+          "reader_impact": "This completion claim is time-sensitive and does not carry a dated receipt or release ids in the block; it can silently age into false current-state authority."
+        }
+      ],
+      "duplicate_disposition": "The named sources at blocks[31] (scaffy-loop-bench-status, scaffy-benchmark, scaffy-command-showcase) are supporting authorities, not title duplicates. Keep this Paper as synthesis and avoid parallel maintenance of their raw facts.",
+      "reader_risks": [
+        "Studio: preserve stable headings and collapse dense evidence tables/lists without hiding their labels.",
+        "TUI80: provide a short decision/status rail because wide tables, diagrams, images, and multi-kilobyte blocks wrap poorly.",
+        "email: send an executive extract plus a durable link; do not inline the full operational record.",
+        "public: date and freshness-label internal paths, auth topology, pricing, PR state, and live capability claims before broad publication.",
+        "CLI/API: preserve exact ids/revisions and distinguish proposed routes or target commands from shipped contracts."
+      ],
+      "rationale": "Keep: it is compact, distinct, evidence-led, and has a coherent terminal claim; repair only the live-status assertions with dated receipt links."
+    },
+    {
+      "unit_id": "paper:barkpark-estate",
+      "document_id": "barkpark-estate",
+      "document_rev": "09022412c78ebeb5c153ece215b34281",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Product thesis for an agent-native reseller tier: one Barkpark split into workspace-bounded client estates, custom domains, packages, quotas, and a deliberately small host-tenancy addition.",
+      "opening_and_criteria": "Scope and gaps are distributed across blocks[13]-[14], target UX is disclaimed at blocks[19], and the build slices appear at blocks[22]. There is no compact acceptance/exit gate.",
+      "outline_and_hierarchy": "36 blocks, nine headings: shape → domain flow → WHM mapping → premium case → target UX → build → economics → receipts. The spine is understandable but mixes current evidence with future product narrative.",
+      "human_voice_and_precision": "Concrete and persuasive; blocks[19] responsibly says the shown verbs are not built, but later command-shaped examples still read like product truth.",
+      "compression_and_restraint": "36 blocks / about 9,869 extracted characters; rich roadmap, diagram, terminal, and status blocks make Studio strong but TUI/email expensive.",
+      "evidence_and_truth": "blocks[13] separates existing primitives, seams, and gaps; blocks[28] names tenancy and infrastructure receipts. The product promise should inherit updates from its named specialist Papers.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[13]",
+          "evidence": "WHM concept → Barkpark primitive, with each row labeled existing, seam, or gap.",
+          "lesson": "Map incumbent concepts to current primitives and explicit gaps so strategy does not masquerade as implementation."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[20]",
+          "evidence": "$ bp estate create client-a --domain cms.client-a.com --package studio-20",
+          "reader_impact": "Although blocks[19] disclaims the verbs, a polished terminal transcript can still be mistaken for a supported CLI contract in public, TUI, or API-oriented reading."
+        }
+      ],
+      "duplicate_disposition": "Named specialists at blocks[31]-[35]—one-shot-onboarding, workspace-bundle-keystone, host-tenancy-caddy-probe, quota-suspend-seams, and perfect-plan-readiness-ledger—should own proofs. Estate should remain the product/decision summary and link to them.",
+      "reader_risks": [
+        "Studio: preserve stable headings and collapse dense evidence tables/lists without hiding their labels.",
+        "TUI80: provide a short decision/status rail because wide tables, diagrams, images, and multi-kilobyte blocks wrap poorly.",
+        "email: send an executive extract plus a durable link; do not inline the full operational record.",
+        "public: date and freshness-label internal paths, auth topology, pricing, PR state, and live capability claims before broad publication.",
+        "CLI/API: preserve exact ids/revisions and distinguish proposed routes or target commands from shipped contracts."
+      ],
+      "rationale": "Repair: retain the thesis, but promote shipped-versus-proposed labels, add explicit success criteria, and refresh claims from the named successor proofs."
+    },
+    {
+      "unit_id": "paper:barkpark-onboarding-painpoint-audit-2026-07-13",
+      "document_id": "barkpark-onboarding-painpoint-audit-2026-07-13",
+      "document_rev": "9e66a46c400a9b63a5db81340f3c3057",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Field audit of a real Windows, multi-team, Cloud-to-instance-to-MCP journey plus a second paper-publication journey, converting observed failures into remediation, regression, and backlog evidence.",
+      "opening_and_criteria": "The opening at blocks[2] is precise, but the production-quality acceptance criteria arrive only at blocks[56]-[57], after chronology, inventory, root causes, and recommendations.",
+      "outline_and_hierarchy": "72 blocks and 29 headings: summary/proof → environment/happy path → two actual journeys → 22-item inventory → root causes → recommendations → acceptance/regression/backlog → appendix.",
+      "human_voice_and_precision": "Specific, cautious, and security-aware. The main voice problem is scope accumulation: onboarding and authoring/publication are both worthy audits, but their combined chronology dilutes priority.",
+      "compression_and_restraint": "72 blocks / 37,324 extracted characters; blocks[19] and blocks[24] are roughly 6.5k-character evidence blocks. They are audit-rich but hostile to linear/narrow readers.",
+      "evidence_and_truth": "The audit preserves observed commands, user impact, root cause, fixes, acceptance criteria, and regression coverage. Its facts are valuable precisely because they are dated, not timeless product documentation.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[24]",
+          "evidence": "BP-ONB-03: instance credentials without explicit team context produces an unactionable 404; recommended fix is --team / GetCredentialsForTeam.",
+          "lesson": "Tie each observed failure to user impact and a concrete remediation instead of listing pain without an exit path."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[19]",
+          "evidence": "The CLI existed but was not on the user PATH.",
+          "reader_impact": "This useful finding is buried inside a roughly 6,490-character timeline, obscuring prioritization and making TUI80/email consumption poor."
+        }
+      ],
+      "duplicate_disposition": "No merge candidate inside PPCC2-S002. The Estate-linked one-shot-onboarding Paper may overlap the golden-path/acceptance-criteria role; compare authority before maintaining both, while preserving this audit’s Windows and publishing evidence.",
+      "reader_risks": [
+        "Studio: preserve stable headings and collapse dense evidence tables/lists without hiding their labels.",
+        "TUI80: provide a short decision/status rail because wide tables, diagrams, images, and multi-kilobyte blocks wrap poorly.",
+        "email: send an executive extract plus a durable link; do not inline the full operational record.",
+        "public: date and freshness-label internal paths, auth topology, pricing, PR state, and live capability claims before broad publication.",
+        "CLI/API: preserve exact ids/revisions and distinguish proposed routes or target commands from shipped contracts."
+      ],
+      "rationale": "Repair: keep the pinned field evidence, surface P0 findings and acceptance criteria near the start, and move the second publishing journey/full chronology behind summary rails."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-capstone",
+      "document_id": "barkpark-tasks-mobile-capstone",
+      "document_rev": "1c7faad970614422b3620c044508f632",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Crown synthesis for the mobile fourth client. It chooses a staged Operator’s Leash on Expo/React Native and adjudicates the five lane Papers into a founding-wave contract.",
+      "opening_and_criteria": "blocks[2] gives the wish and GO verdict up front; blocks[26]-[27] stage the cut; blocks[89]-[96] finally state the concrete founding-wave tasks and done condition.",
+      "outline_and_hierarchy": "104 blocks and 16 headings: findings → GO/product shapes → identity → shell/cache → chat → tasks/papers → consolidated permissions/transports → 11 rulings → files/risks → wave 1 → sources.",
+      "human_voice_and_precision": "Decisive but evidence-aware. blocks[73] explicitly distinguishes facts from recommendations and records where evidence killed an attractive premise.",
+      "compression_and_restraint": "104 blocks / about 58,483 extracted characters; blocks[72] is a 6,063-character rulings table and blocks[78] a 4,852-character change matrix. Strong hierarchy cannot fully offset those walls.",
+      "evidence_and_truth": "blocks[72] resolves cross-lane contradictions and blocks[96] states a user-observable done condition. This is the intended decision authority over the lane Papers.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[72]",
+          "evidence": "The cascade is a navigation spine, not an authorization spine.",
+          "lesson": "Preserve rival evidence, declare the ruling, and express the result as a reusable product law."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[72]",
+          "evidence": "Eleven cross-lane rulings are compressed into one 6,063-character table.",
+          "reader_impact": "The rigor becomes hard to scan in TUI/email and makes individual rulings difficult to link, review, or update independently."
+        }
+      ],
+      "duplicate_disposition": "Intentional umbrella over product-shapes, identity-cascade, shell-and-cache, chat-third-client, and tasks-papers-reading. Keep the capstone as decision authority; preserve lanes as evidence, not competing final rulings.",
+      "reader_risks": [
+        "Studio: preserve stable headings and collapse dense evidence tables/lists without hiding their labels.",
+        "TUI80: provide a short decision/status rail because wide tables, diagrams, images, and multi-kilobyte blocks wrap poorly.",
+        "email: send an executive extract plus a durable link; do not inline the full operational record.",
+        "public: date and freshness-label internal paths, auth topology, pricing, PR state, and live capability claims before broad publication.",
+        "CLI/API: preserve exact ids/revisions and distinguish proposed routes or target commands from shipped contracts."
+      ],
+      "rationale": "Repair: retain its crown authority and exact rulings, but split the adjudication/change matrices into linkable summaries with lane-level detail behind them."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-chat-third-client",
+      "document_id": "barkpark-tasks-mobile-chat-third-client",
+      "document_rev": "9e8e8419026ef12934afe053e0fc0677",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Definitive mobile chat contract map: current /v1/chat routes, SSE replay/live grammar, auth and registered-host failures, rendering boundary, and the one hard mobile credential seam.",
+      "opening_and_criteria": "blocks[2] gives the verdict and current boundary immediately; blocks[9]-[14] state five choices; blocks[22]-[28] provide routes/SSE; blocks[52]-[54] separate TODAY from EPIC-ADDS.",
+      "outline_and_hierarchy": "70 blocks with contract-first organization: choices → auth → endpoints/SSE → failure/render matrices → findings → current/future split → files/risks/coverage.",
+      "human_voice_and_precision": "Precise and falsifiable: blocks[6] says “No sync engine, no local write queue, no conflict resolution,” preventing generic mobile overdesign.",
+      "compression_and_restraint": "70 blocks / about 29,956 extracted characters; blocks[24] is a 2,253-character route table. Dense, but appropriate for a reference lane.",
+      "evidence_and_truth": "blocks[27] states replay ids, unreplayable live frames, cursor/reset behavior, heartbeats, and failure semantics rather than calling the stream merely “real-time.”",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[27]",
+          "evidence": "Live events have no id and are unreplayable by design; recovery is refetch of settled truth.",
+          "lesson": "State replay and loss boundaries explicitly so clients do not invent a stronger delivery contract than the server provides."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[24]",
+          "evidence": "Ten routes, request/response shapes, auth, and runtime semantics share one 2,253-character table.",
+          "reader_impact": "Narrow readers need a short route/decision cheat sheet even though the full table should remain as reference."
+        }
+      ],
+      "duplicate_disposition": "Companion, not duplicate, of identity-cascade and capstone. It uniquely owns chat routes, SSE grammar, host failures, and LiveView-only scope; the capstone owns only cross-lane rulings.",
+      "reader_risks": [
+        "Studio: preserve stable headings and collapse dense evidence tables/lists without hiding their labels.",
+        "TUI80: provide a short decision/status rail because wide tables, diagrams, images, and multi-kilobyte blocks wrap poorly.",
+        "email: send an executive extract plus a durable link; do not inline the full operational record.",
+        "public: date and freshness-label internal paths, auth topology, pricing, PR state, and live capability claims before broad publication.",
+        "CLI/API: preserve exact ids/revisions and distinguish proposed routes or target commands from shipped contracts."
+      ],
+      "rationale": "Keep: it is a distinct, evidence-dense API contract lane. Add a concise external route summary without replacing the pinned reference table."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-identity-cascade",
+      "document_id": "barkpark-tasks-mobile-identity-cascade",
+      "document_rev": "b8da665b6f80b1554f000f89ec944e40",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Identity/cascade authority for Cloud login → server → workspace → project → dataset, plus the missing per-user data-plane token exchange required for a phone client.",
+      "opening_and_criteria": "blocks[2] states the verdict; blocks[9]-[14] propose the exchange and cascade; blocks[37] separates shipped versus build; risks and user decisions are explicit at blocks[45]-[46].",
+      "outline_and_hierarchy": "54 blocks: hinge and rival designs → shipped login physics → level-by-level cascade → eight findings → scope/files → risks/coverage.",
+      "human_voice_and_precision": "Cleanly separates evidence, policy, and unknowns; blocks[11] says lifetime/revocation are policy choices rather than disguising them as schema work.",
+      "compression_and_restraint": "54 blocks / about 31,635 extracted characters; blocks[32] is a 2,967-character eight-finding list. The Paper is navigable but unusually dense per block.",
+      "evidence_and_truth": "blocks[22]-[23] compares every available credential path by gate, credential yielded, and mobile verdict; it makes the new seam’s necessity auditable.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[22]-[23]",
+          "evidence": "Each credential path is compared by gate, yielded credential, and mobile verdict.",
+          "lesson": "Use an explicit alternatives matrix to prove a missing seam rather than asserting that “mobile auth is hard.”"
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[32]",
+          "evidence": "Eight independent findings—permissions, paper editing, PATs, attach/rotate, expiry, and more—occupy one long list.",
+          "reader_impact": "Independent decisions cannot be linked or updated cleanly, and TUI/email readers lose the acceptance boundary."
+        }
+      ],
+      "duplicate_disposition": "Companion to chat and capstone, but uniquely owns device flow, token exchange, JIT member grant, and the full location cascade. Capstone is the intended cross-lane decision authority.",
+      "reader_risks": [
+        "Studio: preserve stable headings and collapse dense evidence tables/lists without hiding their labels.",
+        "TUI80: provide a short decision/status rail because wide tables, diagrams, images, and multi-kilobyte blocks wrap poorly.",
+        "email: send an executive extract plus a durable link; do not inline the full operational record.",
+        "public: date and freshness-label internal paths, auth topology, pricing, PR state, and live capability claims before broad publication.",
+        "CLI/API: preserve exact ids/revisions and distinguish proposed routes or target commands from shipped contracts."
+      ],
+      "rationale": "Keep: distinct identity/cascade authority with strong source discipline; split the eight findings and add one consolidated exchange acceptance checklist."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-product-shapes",
+      "document_id": "barkpark-tasks-mobile-product-shapes",
+      "document_rev": "e711ef9123ad9ae85c7998c3690d7ed4",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Preparation lane comparing Minimal, Maximal, and Sweet Spot product shapes and recommending a staged Operator’s Leash before the crown Paper ruled the cross-lane forks.",
+      "opening_and_criteria": "blocks[6]-[8] gives an early verdict, followed by detailed shapes, system anchors, risks, and coverage. The opening is criteria-first, but later evidence changed some choices.",
+      "outline_and_hierarchy": "58 blocks and 18 headings: verdict/cut line → three shapes → corrected premises → system anchors/permissions/sync/cascade → files/risks/coverage.",
+      "human_voice_and_precision": "Energetic and candid, with strong “premise / verdict / evidence” language. Its confidence becomes risky where preliminary lane choices later lose at capstone/status time.",
+      "compression_and_restraint": "58 blocks / about 32,028 extracted characters; eight evidence-heavy tables repeat some decision context and burden narrow readers.",
+      "evidence_and_truth": "blocks[29] is valuable because it records killed premises. It also demonstrates why a lane Paper must not remain final authority after cross-lane adjudication.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "Ship v1 as a Reader-Communicator with teeth.",
+          "lesson": "State the user promise and scoped exception early enough that later technical evidence can be judged against it."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[29]",
+          "evidence": "The app token should be [read, write, chat] — WRONG — [read, chat] suffices.",
+          "reader_impact": "The later capstone/status record uses the ratified [read,write,chat] token, so this preliminary decision is materially stale and unsafe as current CLI/API guidance."
+        }
+      ],
+      "duplicate_disposition": "Superseded for final rulings by barkpark-tasks-mobile-capstone. It also overlaps shell-and-cache on renderer/cache reasoning; retain both as evidence only where their questions differ.",
+      "reader_risks": [
+        "Studio: preserve stable headings and collapse dense evidence tables/lists without hiding their labels.",
+        "TUI80: provide a short decision/status rail because wide tables, diagrams, images, and multi-kilobyte blocks wrap poorly.",
+        "email: send an executive extract plus a durable link; do not inline the full operational record.",
+        "public: date and freshness-label internal paths, auth topology, pricing, PR state, and live capability claims before broad publication.",
+        "CLI/API: preserve exact ids/revisions and distinguish proposed routes or target commands from shipped contracts."
+      ],
+      "rationale": "Superseded: preserve its product-shape research and premise corrections, but route current decisions to the capstone/charter."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-shell-and-cache",
+      "document_id": "barkpark-tasks-mobile-shell-and-cache",
+      "document_rev": "f22076efc401d48a401c0d1e34fa37e6",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Preparation lane choosing Expo/React Native, native chat/tasks, a WebView Paper reader, and MMKV/SQLite instant-open caching, subject to a real-Android performance gate.",
+      "opening_and_criteria": "The verdict and explicit hardware gate appear at blocks[7]-[12], then architecture, cache, transport, risks, and coverage. This is a strong decision shape, but the central reader bet later changed.",
+      "outline_and_hierarchy": "43 blocks, eight headings: verdict → product to create → findings → current mechanics → files → risks → coverage.",
+      "human_voice_and_precision": "Rigorous and candid, especially about unprovable-by-reading performance and stale local checkouts. Dense all-caps/ledger phrasing is secondary to concrete mechanics.",
+      "compression_and_restraint": "43 blocks / about 47,337 decoded characters; blocks[24] alone is about 5,229 visible characters. It is the densest Paper in this subset.",
+      "evidence_and_truth": "blocks[24] correctly derives cache invalidation from the type-agnostic dataset stream and separates ephemeral chat deltas from settled-truth recovery.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[24]",
+          "evidence": "One stream invalidates everything: /v1/data/listen/:dataset carries all document-type mutations.",
+          "lesson": "Derive cache behavior from the actual transport boundary instead of inventing per-screen invalidation."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[12]",
+          "evidence": "WebView performance on long papers … is unprovable by reading.",
+          "reader_impact": "Later emulator scroll evidence failed and native reading was promoted by user ruling while the binding real-Android verdict remained open; the original WebView recommendation is no longer final authority."
+        }
+      ],
+      "duplicate_disposition": "Technical sibling to product-shapes and evidence source for the capstone. Preserve transport/cache proofs, but route the reader decision to the capstone/charter/status trail.",
+      "reader_risks": [
+        "Studio: preserve stable headings and collapse dense evidence tables/lists without hiding their labels.",
+        "TUI80: provide a short decision/status rail because wide tables, diagrams, images, and multi-kilobyte blocks wrap poorly.",
+        "email: send an executive extract plus a durable link; do not inline the full operational record.",
+        "public: date and freshness-label internal paths, auth topology, pricing, PR state, and live capability claims before broad publication.",
+        "CLI/API: preserve exact ids/revisions and distinguish proposed routes or target commands from shipped contracts."
+      ],
+      "rationale": "Superseded: retain its transport/cache evidence and rejected-alternative reasoning, but do not present the WebView ruling as current."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-state-2026-07-23",
+      "document_id": "barkpark-tasks-mobile-state-2026-07-23",
+      "document_rev": "550eec161b4892db6f55ba38925a0249",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "One-day operational snapshot of the mobile epic at the five-PR merge gate: what existed, what was in flight, and the next dispatch order.",
+      "opening_and_criteria": "blocks[2] states the snapshot purpose; blocks[5]-[7] gives the pipeline; blocks[13]-[17] records merge-gate state and future dispatch. Criteria are implicit and time-bound.",
+      "outline_and_hierarchy": "22 blocks, seven headings: pipeline → current artifacts → wave 1 → merge gate → dispatch → risks/human gates.",
+      "human_voice_and_precision": "Concise and honest about blockers, but “right now” and A−/PR-state vocabulary is deliberately ephemeral.",
+      "compression_and_restraint": "22 blocks / about 7,892 decoded characters. Compact overall; the main artifact table at blocks[9] still wraps poorly in TUI/email.",
+      "evidence_and_truth": "blocks[15] records a lease lapse, a truthful ledger gate refusal, the repair, and a prevention mechanism rather than hiding operational trouble.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[15]",
+          "evidence": "The lease lapsed, the ledger reverted to open, and the gate refused every slice PR.",
+          "lesson": "Preserve a failed gate together with its remedy so later teams learn the mechanism rather than only seeing a green ending."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[17]",
+          "evidence": "Merge round 1 … post-merge proofs … dispatch round 2.",
+          "reader_impact": "All “right now” PR and gate statements became stale when the later 2026-07-25 status was published."
+        }
+      ],
+      "duplicate_disposition": "Direct historical predecessor to barkpark-tasks-mobile-status-2026-07-25; both serve epic-status reporting, so the later report owns the current snapshot role.",
+      "reader_risks": [
+        "Studio: preserve stable headings and collapse dense evidence tables/lists without hiding their labels.",
+        "TUI80: provide a short decision/status rail because wide tables, diagrams, images, and multi-kilobyte blocks wrap poorly.",
+        "email: send an executive extract plus a durable link; do not inline the full operational record.",
+        "public: date and freshness-label internal paths, auth topology, pricing, PR state, and live capability claims before broad publication.",
+        "CLI/API: preserve exact ids/revisions and distinguish proposed routes or target commands from shipped contracts."
+      ],
+      "rationale": "Superseded: keep only as a dated process record and route current status readers to the 2026-07-25 report or later terminal evidence."
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-status-2026-07-25",
+      "document_id": "barkpark-tasks-mobile-status-2026-07-25",
+      "document_rev": "f4ed68ce42affb58f002c2eb62c45f31",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Evidence-led, date-bounded mid-flight status of the fourth client: real member flow, shipped waves, open hardware/evidence gates, active round, and path to v1.",
+      "opening_and_criteria": "Product shape appears at blocks[6]-[8], screenshot proof at blocks[10]-[35], shipped waves at blocks[36]-[45], and explicit remaining v1 gates at blocks[53]-[55].",
+      "outline_and_hierarchy": "57 blocks: what it is → 11-screen real flow → shipped waves → evidence discipline → in-flight round → remaining v1 gates.",
+      "human_voice_and_precision": "Notably honest and concrete. blocks[44] separates advisory emulator evidence, a user ruling, and the still-open binding hardware verdict.",
+      "compression_and_restraint": "57 blocks / about 17,634 decoded characters, including 11 images. Text is moderate, but image-heavy evidence does not survive TUI/email/CLI equally.",
+      "evidence_and_truth": "blocks[41] pins shipped revoke/chat/push work to commits and behavioral proofs; blocks[44] refuses to upgrade advisory evidence into a binding verdict.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[44]",
+          "evidence": "The binding real-Android verdict NEVER LANDED … the native fast-path was promoted by USER RULING.",
+          "lesson": "Separate measured evidence, its authority level, and the human decision so a later reader cannot infer a proof that never happened."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[34]",
+          "evidence": "There are NO screenshots of the shipped native paper reader in this report.",
+          "reader_impact": "The report candidly exposes a public-reader evidence gap, but a key shipped claim remains visually under-proven and image fallbacks are already weak outside Studio."
+        }
+      ],
+      "duplicate_disposition": "Supersedes the 2026-07-23 state Paper for status purposes. The capstone, charter, and wave Paper remain decision/ledger authorities; this remains a dated status snapshot.",
+      "reader_risks": [
+        "Studio: preserve stable headings and collapse dense evidence tables/lists without hiding their labels.",
+        "TUI80: provide a short decision/status rail because wide tables, diagrams, images, and multi-kilobyte blocks wrap poorly.",
+        "email: send an executive extract plus a durable link; do not inline the full operational record.",
+        "public: date and freshness-label internal paths, auth topology, pricing, PR state, and live capability claims before broad publication.",
+        "CLI/API: preserve exact ids/revisions and distinguish proposed routes or target commands from shipped contracts."
+      ],
+      "rationale": "Keep, date-bounded: it is the strongest status/audit artifact in the subset, provided it stays visibly stamped 2026-07-25 and links to later terminal evidence."
+    }
+  ],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "read_operations_only": [
+      "bp doc get paper <document_id> --perspective raw --json"
+    ]
+  },
+  "unvisited_scope": [],
+  "subagent_method": {
+    "spawned": 3,
+    "model": "gpt-5.6-terra",
+    "task_names": [
+      "ppcc2_assignment_probe",
+      "ppcc2_test_probe",
+      "ppcc2_binding_probe"
+    ],
+    "integrated_findings": [
+      "authority and report contract",
+      "validation and regression checks",
+      "CycleFleet binding gap",
+      "full-block editorial review of 3/3/4 Paper subsets"
+    ]
+  },
+  "cyclefleet_binding": {
+    "status": "confirmed",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "cycle_assignment_id": "ef256c93-24d8-45cf-80f8-60a3e5a4ed04",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "receipt_path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/survey-cycle/assignment-receipts/PPCC2-S002.json",
+    "leader_confirmation_message_id": "add72096-69ec-4a7c-95d6-97e5ac643b46"
+  }
+}
