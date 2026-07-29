@@ -242,7 +242,7 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
   end
 
   describe "pane_item/1" do
-    test "renders as a clickable div with label" do
+    test "renders as a real focusable button with label" do
       html =
         render_component(&StudioComponents.pane_item/1, %{
           phx_click: "select",
@@ -256,10 +256,17 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
       assert html =~ ~s(class="pane-item-label")
       assert html =~ "List documents"
       refute html =~ "selected"
-      assert html =~ ~s(<div)
+      # A desk row is an activatable control: it must be a <button>, not a
+      # <div phx-click> (which no keyboard can reach). This assertion used to
+      # read `html =~ "<div"` — the written-down convention that reproduced
+      # the defect in every component copied from pane_item/1.
+      assert html =~ ~s(<button type="button")
+      refute html =~ ~s(<div)
+      # Unselected rows carry no aria-current at all.
+      refute html =~ "aria-current"
     end
 
-    test "selected=true adds the selected class" do
+    test "selected=true adds the selected class and aria-current (never aria-selected)" do
       html =
         render_component(&StudioComponents.pane_item/1, %{
           phx_click: "select",
@@ -269,6 +276,10 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
         })
 
       assert html =~ ~s(class="pane-item selected")
+      # aria-selected is only meaningful inside a listbox/tab/grid container;
+      # a standalone nav row states its selection with aria-current.
+      assert html =~ ~s(aria-current="true")
+      refute html =~ "aria-selected"
     end
 
     test "icon slot renders in a leading .pane-item-icon span" do
@@ -381,6 +392,53 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
       assert html =~ ~s(phx-click="select")
       assert html =~ ~s(phx-value-pane="1")
       assert html =~ ~s(phx-value-id="p1")
+    end
+
+    test "the row body is a button whose accessible name comes from the title, not the doc id" do
+      html =
+        render_component(&StudioComponents.pane_doc_item/1, %{
+          phx_click: "select",
+          phx_value_pane: "1",
+          phx_value_id: "drafts.paper-7780f97",
+          title: "Hello World",
+          doc_id: "drafts.paper-7780f97",
+          status: "published",
+          is_draft: true,
+          badge: "In progress",
+          meta: "Updated 2h ago"
+        })
+
+      # The activatable control is a real <button>, so a keyboard can reach it.
+      assert html =~ ~s(<button type="button" class="bp-doc-row-body")
+      # title= is the accname fallback of LAST resort: without an explicit
+      # label, this button would announce the raw draft id. Composed, so the
+      # dot / badge / subtitle a sighted reader gets are spoken too.
+      assert html =~ ~s(aria-label="Hello World, draft, In progress, Updated 2h ago")
+      # and the raw id survives only as the sighted tooltip.
+      assert html =~ ~s(title="drafts.paper-7780f97")
+      # button content is phrasing content — the three inner divs are spans.
+      assert html =~ ~s(<span class="pane-doc-main">)
+      assert html =~ ~s(<span class="pane-doc-title">)
+      assert html =~ ~s(<span class="pane-doc-sub">)
+      # the OUTER row stays a div: it hosts the bulk-publish checkbox as a
+      # sibling, and a button may not contain a button.
+      assert html =~ ~s(<div id=) or html =~ ~s(<div class="pane-doc-item)
+    end
+
+    test "selected doc row states selection with aria-current, never aria-selected" do
+      html =
+        render_component(&StudioComponents.pane_doc_item/1, %{
+          phx_click: "select",
+          phx_value_pane: "1",
+          phx_value_id: "p1",
+          title: "Hello",
+          doc_id: "p1",
+          status: "published",
+          selected: true
+        })
+
+      assert html =~ ~s(aria-current="true")
+      refute html =~ "aria-selected"
     end
 
     test "is_draft=true overrides the status dot class to draft" do

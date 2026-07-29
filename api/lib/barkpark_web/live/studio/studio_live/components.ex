@@ -987,10 +987,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 title="Review scoped access grants"
                 data-test-id="access-open-type"
               ><.icon name="clock" size={14} /></button>
+              <%!-- Icon-only: without an explicit label its accessible name
+                    is the empty string, so AT announces a nameless button. --%>
               <button
                 class="pane-add-btn"
                 phx-click="new-document"
                 phx-value-type={pane.type_name}
+                title={"New #{pane.type_name}"}
+                aria-label={"New #{pane.type_name}"}
               ><.icon name="plus" size={14} /></button>
             <% end %>
           </:header_actions>
