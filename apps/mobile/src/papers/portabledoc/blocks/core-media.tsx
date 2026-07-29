@@ -3,11 +3,12 @@
 // asciicast (D46d/D47). MermaidIsland (a WebView island) is the one stateful
 // leaf, mounted as a component element the test walker treats as a leaf.
 //
-// Metro TDZ law (D49): this module imports HOISTED FUNCTION DECLARATIONS from
-// ../registry only (renderBlockNative, degradeCard) — never BLOCK_RENDERERS,
-// which is a const assembled from spreads and therefore undefined while the
-// family modules evaluate. `degradeCard` is called at THIS module's eval time,
-// which is precisely why it must be a function declaration over there.
+// Metro TDZ law (D49): this module imports `renderBlockNative` from ../registry
+// (a hoisted function declaration, and only ever CALLED at render time) and
+// never BLOCK_RENDERERS, which is a const assembled from spreads and therefore
+// undefined while the family modules evaluate. `degradeCard` is called at THIS
+// module's EVAL time — a strictly stronger requirement — so it is imported from
+// ../register, which is outside the registry↔families cycle entirely.
 import type { ReactNode } from 'react'
 import { Image, Linking, Pressable, ScrollView, Text, View } from 'react-native'
 
@@ -15,8 +16,8 @@ import type { Theme } from '../../../ui/theme'
 import { roles, scale } from '../../../ui/typography'
 import { MermaidIsland } from '../MermaidIsland'
 import { asList, num, openableUrl, str, isMap, type Block } from '../model'
-import { MONO, type BlockCtx, type Render } from '../register'
-import { degradeCard, renderBlockNative } from '../registry'
+import { degradeCard, MONO, type BlockCtx, type Render } from '../register'
+import { renderBlockNative } from '../registry'
 
 // The paper register frames code as a quoted passage (surface slab + accent
 // rule). In chat that reads as a pulled-out card; the transcript instead wants

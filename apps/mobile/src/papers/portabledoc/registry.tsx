@@ -28,7 +28,7 @@ import { tableRenderers } from './blocks/table'
 import { taskboardRenderers } from './blocks/taskboard'
 import { CHAT_RENDERERS } from './chat'
 import { isMap, str, type Block } from './model'
-import type { BlockCtx, Render } from './register'
+import { isDegradeCard, type BlockCtx, type Render } from './register'
 
 /* ── unknown-block degrade — honest, labeled, logged ONCE per type ──────────── */
 
@@ -87,32 +87,8 @@ export const BLOCK_RENDERERS: Record<string, Render> = {
 
 /* ── the degrade-only set (charter D47) ─────────────────────────────────────── */
 
-/** A renderer carrying the degrade-card marker. The property name is written
- * out LITERALLY inside the two functions below rather than hoisted into a
- * module const, because of the same Metro TDZ law as `renderBlockNative`: a
- * family module calls `degradeCard()` while ITS OWN module body evaluates,
- * which is before this module's body has run. A `function` declaration exists
- * at that moment; a `const` does not. */
-interface DegradeMarked {
-  readonly __bpDegradeCard?: true
-}
-
-/** Mark a renderer as a DEGRADE CARD — a labeled box that states its ceiling
- * instead of playing the content (video, asciicast; core-media.tsx carries the
- * doctrine). The mark is what `DEGRADE_ONLY` is derived FROM, so wrapping a new
- * card here is the whole registration: nothing else needs editing, and nothing
- * else can go stale. Read the DEGRADE_ONLY comment before adding a third — a
- * degrade card counts as UNrenderable at turn level, which is a deliberate
- * subtraction and not an oversight. */
-export function degradeCard<R extends Render>(render: R): R {
-  Object.defineProperty(render, '__bpDegradeCard', { value: true })
-  return render
-}
-
-/** Does this renderer carry the degrade-card marker? */
-export function isDegradeCard(render: Render | undefined): boolean {
-  return (render as (Render & DegradeMarked) | undefined)?.__bpDegradeCard === true
-}
+// `degradeCard` / `isDegradeCard` live in ./register (the cycle-free chrome
+// module) — see the note there. This module only DERIVES from the marker.
 
 /** The registered types whose renderer is a DEGRADE CARD rather than a render:
  * a labeled box that states its ceiling (`video`, `asciicast` — D46d). They ARE
