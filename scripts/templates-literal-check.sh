@@ -42,7 +42,14 @@
 # in DARK (2.57 / 2.09 / 2.37 / 2.42). Those are real and are NOT gated here —
 # they are spread across template files outside stw11-a11y-invariants's file
 # set, and each needs a judgment about whether the element is body text or a
-# de-emphasised affordance. Filed as stw11-backlog-dark-mode-zinc-mirror.
+# de-emphasised affordance.
+#
+# THE BACKLOG ROW FOR THAT WORK DOES NOT EXIST YET, and this header will not
+# claim otherwise. Its intended slug is stw11-backlog-dark-mode-zinc-mirror; it
+# was drafted in full but could not be filed — guerrilla's task/document CREATE
+# path was returning HTTP 500 or timing out all through this wave (reads and
+# patches served normally), and a post-condition read after every attempt came
+# back not_found. Whoever files it inherits the measurements above verbatim.
 #
 # ESCAPE HATCHES, both explicit:
 #   • a `templates-literal-allow: <reason>` comment on the flagged line
