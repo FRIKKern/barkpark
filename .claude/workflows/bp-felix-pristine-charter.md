@@ -2104,6 +2104,208 @@ Backlog filed: `task-felix-w22-bl-recorder-bounds` (P2), `task-felix-w22-bl-webh
 `task-felix-w22-bl-codex-completion-deadbranch` (P3).
 
 
+## Wave 24 Decisions (2026-07-29) — THE GATE GOES GREEN, AND EVERY WAIVER IN IT IS EARNED
+
+- **D147 — THE LEAD'S BRIEF IS WRONG AND THAT IS FINDING ONE: FIVE FILES, NOT FOUR.** The brief lists
+  workspace_bundle 10 + local.ex 7 + janitor 6 + router 1 = 24 and OMITS `media/blobstore/s3.ex`, which
+  carries 8. Re-derived FOUR times independently — digest, two verifiers, and Decide itself
+  (`mix sobelow --skip --format json` → `total 32`, five files, 34.2s wall, primary checkout whose `api/`
+  is byte-identical to origin/main `606fefd15`; host load NOT quiet, so treat the timing as an upper
+  bound). The omitted file is the largest unfenced block in the wave. **The correction was already on the
+  ledger, verbatim, since 2026-07-28**, inside the never-dispatched S5 task ("local.ex 7, s3.ex 8").
+  Nobody read it back. Three more corrections ride with it: main is `606fefd15`, not `0903f8132`; the
+  baseline is **89** rows, not 90 (line 1 is blank); the staleness residue is **31**, not 32.
+
+- **D148 — MOVE 1 IS A 15-ANNOTATION SLICE, NOT A P0. PROVEN BY EXECUTION, NOT BY READING.** A probe
+  driving `POST /api/workspaces/:slug/import` through the real `BarkparkWeb.Endpoint.call/2` returned
+  **403 for public-read, read AND read+write**, while an **ADMIN token passed the gate and died at 422
+  `invalid_bundle`** — the oracle that makes the 403s the admin gate rather than a missing route, a body
+  parse, or a workspace-not-found. Two further legs: ZERO writers of `media_files` outside `api/lib`
+  (repo-wide grep + a targeted `INSERT INTO`/`insert_all` scan over priv/plugins/tooling/cloud/js/web),
+  and no HTTP surface mints `"admin"` (four mint controllers, each with a server-authoritative allowlist
+  topping out at `write`). **BUT the waiver sentence must be TWO CLAUSES.** `import_member/3`
+  (workspace_bundle.ex:1013) still COPYs manifest-named tables and columns verbatim, bypassing
+  `MediaFile.changeset` entirely, so an admin bundle CAN plant `../../..` and six sinks hand that column
+  straight to `File.rm`/`send_file` — two of them (`share_link_controller.ex:140`,
+  `tickets_attachments_controller.ex:226`) appearing in NO prior enumeration. A waiver reading "never raw
+  client input" FULL STOP is FALSE, and the first reader who greps `import_member` correctly rejects all
+  fifteen. That sentence is load-bearing and must not be trimmed as verbosity.
+
+- **D149 — `felix-w23-bl-bundle-member-guard` IS MIS-PRICED AT P0 → REPRICED TO P3.** After D148 the only
+  input that reaches it is an admin bundle — an actor who already holds `File.rm` authority by other
+  means. Under hook (1) it names no reachable failure. It ships as scar-class defence-in-depth (hook 3)
+  or it does not ship. **A LATENT SEAM FOUND WHILE PROVING IT, and worth more than the P0 was:**
+  `Auth.authorize_pat_permissions/2` (auth.ex:577) allows `~w(read write admin)` when the caller's role is
+  `owner` or `admin`, and workspace creators ARE owners — the library would happily mint a globally-admin
+  token for a customer-created workspace owner. The ONLY thing holding it closed is that the sole HTTP
+  caller (`auth_controller.ex:238`) hardcodes `["read"]` / `role: "member"`, with no test pinning the
+  hardcode. One parameter from a privilege escalation. Filed, hook (4).
+
+- **D150 — MOVE 2 AS WRITTEN IS A NO-OP; THE FIX IS A CODE FIX, AND THE OBVIOUS FIX IS A TRAP.** The
+  fingerprint hashes the LINE NUMBER (`finding.ex:53-63`) and `--skip` matches on the hash alone
+  (`sobelow.ex:540` destructures `[_type, _filename_line_n, fingerprint]`). Commit `2a60d013f` (#6090)
+  already did the no-op once by accident: `:2539 → :2550` keeping hash `18ED697`, which brute-forces back
+  to line **2530** — a cosmetic bump that made a DEAD waiver look maintained. The honest fix is
+  `plug(:put_secure_browser_headers, %{"content-security-policy" => "default-src 'none'"})`, measured
+  **32 → 31, high_confidence 1 → 0, router findings []**. The NAIVE one-arg `plug(:put_secure_browser_headers)`
+  measures **32 → 32**: Config.Headers is merely replaced by a HIGH-confidence `Config.CSP` at :2611 with
+  ZERO Config.CSP baseline rows to absorb it (`Config.CSP.missing_csp_status/2` returns `{true, :high, plug}`
+  unconditionally). The two-arg map form is the established house pattern (router.ex :22/:121/:327/:375/:424).
+  The slice also deletes the contrary in-code ruling at router.ex:2604-2609, which cites `task-f76e9b7b` —
+  a task that **does not resolve** (`not_found`), a dangling citation of exactly the class D75 already caught.
+  Honest price, stated rather than oversold: `pipeline :error_test` is `compile_env`-gated to MIX_ENV=test,
+  so this prevents no production failure — it clears the wave's OWN named failure by DELETING a permanent
+  waiver instead of maintaining one, at a cost of three lines. Fallback if the fix is rejected (ship one,
+  never both): `Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:2609,364A37C`,
+  derived twice independently (Sobelow's own SARIF `primaryLocationLineHash`, and the phash2 formula, which
+  also reproduced CI's `18ED697` locally — so the fingerprint regime is toolchain-stable and the CI reconcile
+  round-trip is NOT the only source of a fingerprint).
+
+- **D151 — A `.sobelow-skips` ROW DELETION IS OUTSIDE D82's FENCE.** D82's OFF-list names
+  `tenancy/workspace_bundle` as a SOURCE path; `api/.sobelow-skips` is in neither the allow-list nor the
+  deny-list, and two merged PRs (#6616, #6412) already edited it. The fence's stated reason does not bind
+  either: PR #6551's nine-file list does **not** contain `api/.sobelow-skips` — zero conflict surface.
+
+- **D152 — THE DELETABLE SET IS 32, NOT 24, AND DELETING IT FLIPS THE STALENESS RATCHET GREEN.** Derived by
+  per-row EXECUTION, not classification: run A (no `--skip`) **167**, run B (baseline EMPTIED, annotations
+  honoured) **90**, run C (tracked baseline) **32**. A row is LIVE iff its exact `(type,file,line)` appears
+  in run B → **57 live + 32 dead = 89**. Deleting all 32: staleness **PASS exit 0**, the BLOCKING overlap
+  check **PASS exit 0** (deletion cannot red it — verified, not reasoned from its header),
+  `mix sobelow --skip` **unchanged at 32**. **Mutation-proven able to fail:** deleting one row classified
+  LIVE (`plugins/manifest.ex:90`) took the count to **33**. Deleting only the 23 non-fenced rows leaves the
+  ratchet **RED at 9**, so D151's ruling is on the flip's critical path. The 32 decompose as 17 superseded
+  by a named inline annotation, 5 media.ex rows closed by content against `1e0b43e67` (#6283, the
+  pluggable-blobstore extraction — media.ex retains no traversal-eligible `File` call at all), 7
+  workspace_bundle.ex + 2 archive.ex, and `router.ex:2550`.
+
+- **D153 — AMEND D82 BY NAME: A NARROW COMMENT-ONLY CARVE-OUT INTO `tenancy/workspace_bundle`. THIS
+  SUPERSEDES D143.** The digest's "there is no precedent for a comment-only cross-fence change" is
+  **REFUTED**: commit `c69cc0b1e` (PR #6412), merged 2026-07-28T00:48, changed `workspace_bundle.ex` by 20
+  lines **every one of which is a comment**, its own message reading verbatim *"Comment only — no
+  behaviour change."*, and it is already an ancestor of #6551's merge-base with **zero conflict**
+  (`git merge-base --is-ancestor c69cc0b1e 340204e5d` → yes). The counter-precedent is real and is quoted
+  alongside it, not hidden: #6616 explicitly refused the same crossing (*"Fence held: no
+  `tenancy/workspace_bundle/**` (D82 + PR #6551)"*). **RULING:** zero-semantic `# sobelow_skip` comment
+  lines in `api/lib/barkpark/tenancy/workspace_bundle**` are PERMITTED, conditioned on (i) the
+  annotation-binding ratchet landing FIRST, (ii) zero behaviour change, (iii) a rebase onto origin/main
+  immediately before push with the binding check re-run AFTER the rebase. D143 said green was not reachable
+  because 16 findings sat in files Felix may not touch; that premise is now amended, so the arithmetic
+  closes: **32 → 17 (s1) → 16 (s2) → 0 (s6)**. But note the honest sequencing consequence — s6 and s7 are
+  ROUND 2 and do NOT build this run, so **this run ships 32 → 17 and the instrument, not green.**
+
+- **D154 — OPTIONS (b) AND (c) ARE DEAD ON THE EVIDENCE.** (b) *sequence behind #6551 and publish the date*
+  has **no owner to publish one**: #6551 is OPEN but **unreviewed** (0 reviews, 0 review requests), **27
+  commits behind**, its **own Sobelow job FAILURE**, last commit 2026-07-28T15:12Z, an abandoned
+  half-finished `docs/api-v1.md` fix in its worktree, and its owning task `pds-bl-bounded-import-unpack`
+  carries an **EXPIRED claim** (`worker: null`). Landing it also **GROWS** the fenced set — +9 new `File.*`
+  calls in `archive.ex`. (c) *hand the 16 to PDS* has **no live recipient**: no `pds-w24` exists, all four
+  `pds-w23` rows carry expired claims and none mentions sobelow, and the only overlapping PDS rows are two
+  stale wave-11 P3 leftovers whose briefs describe a world that no longer exists. A Felix-owned P1 row
+  (`felix-w23-bl-fenced-sixteen`) already names the work.
+
+- **D155 — `# sobelow_skip` BINDS ON A `defp`, PROVEN BY MUTATION, FOR BOTH DETECTOR FAMILIES.** Annotating
+  `defp remove/1` took the scan 32 → 30; adding `defp owner_alive?/1` and `defp os_process_alive?/1` took it
+  to 28 — so **CI.System honours a `defp` too**, which had never been tested. All six janitor findings are
+  annotatable and the arithmetic does not change on privacy grounds. Mechanism: `parse.ex:96` collects
+  `{:defp,_,_}` into `def_funs` identically to `def`.
+
+- **D156 — THE MULTI-CLAUSE HAZARD IS LATENT, NOT LIVE — AND THE BINDING RATCHET IS THE WAVE'S DURABLE
+  DELIVERABLE.** Raised as possibly D137-class and **REFUTED**: with `.sobelow-skips` emptied so only inline
+  annotations suppress (90 findings), all six files holding a multi-clause-bound annotation contribute
+  **ZERO** findings. But one annotation waives exactly ONE clause — proven by splitting `Local.delete/1`,
+  which left clause 2 firing at local.ex:102 — and **10 of the 57** inline annotations sit on a multi-clause
+  def. D141's transfer trap was then **reproduced live**: displacing one annotation by one function moved the
+  total **17 → 18**, a bare +1 indistinguishable from "someone added a `File` call", while the waiver silently
+  transferred to a DIFFERENT unreviewed function. **Count-parity cannot see it.** The text-only binding
+  predicate (exact-regex + next-code-line-is-def + indent-equality) runs BEAM-free over all of `api/lib` in
+  **1.578s** with **ZERO violations today**, so it flips blocking on arrival — unlike the staleness ratchet it
+  has no residue to burn down. It lands as a `--binding` mode inside the existing overlap script (reusing its
+  verbatim `parse.ex:61` regex rather than forking a second copy) so it rides the existing blocking job with
+  **no workflow edit**.
+
+- **D157 — THE ANNOTATION COUNT IS 59 BINDING (57 inline + 2 attribute), NOT 73 AND NOT 39.**
+  `git grep -c sobelow_skip -- api/lib` = 73 includes **14 prose lines** of the form
+  `# @sobelow_skip — <justification>` that bind nothing. Spelling conformance is CLEAN (57/57 match Sobelow's
+  exact regex, so D141(d) has no live violations) and the seven indent-4 annotations sit inside NESTED
+  `defmodule`s, not inside function bodies, so D141(c) has no live violations either. Quote 57+2 with the
+  grep; never any of the three inherited numbers.
+
+- **D158 — THE STALENESS RATCHET UNDERCOUNTS BY ONE, STRUCTURALLY, AND security.yml's FLIP CONDITION IS
+  FALSE.** The ratchet SKIPS every `Config.*` row for want of a per-line anchor (8 skipped of 89), so it
+  reports 31 when **32** rows are dead — `router.ex:2550` is the invisible 32nd, dead AND with its live
+  successor at :2609 unwaived. And security.yml's flip-condition comment claims *"15 of the 31 are the
+  blobstore rows"*; `grep -c blobstore api/.sobelow-skips` = **0**. The blobstore contributes ZERO baseline
+  rows and ZERO staleness, so completing the blobstore migration moves the residue by **exactly zero** — the
+  gate's own operating instructions send the next reader to do the wrong work first. Corrected in the same PR
+  as the deletion. **This conflation is a house habit**: it appears in the workflow file, in the lead's brief,
+  and in the Strategize assignment briefs alike.
+
+- **D159 — THE WISH MISQUOTES THE BAR, AND THE CORPUS CANNOT RECEIVE DOCTRINE.** The charter's hook (3) is
+  *"closes a SCAR-CLASS risk — swept as a class"*, **not** "closes a real gap against the Phoenix Mastery
+  Corpus", and a **FOURTH** hook exists ("makes a NAMED future change provably cheaper") that the wish omits.
+  A slice justified solely on a Corpus gap does not clear the bar as written. Separately, the Corpus is a
+  complete **92-chapter / 13-part TITLE MAP with no chapter bodies**: "sobelow" appears **once**, as the last
+  word of ch 56's title, and `suppress|baseline|credo|dialyzer|static analy|linter|CI gate|regression gate`
+  return **ZERO** hits. So `felix-w23-bl-corpus-gate-integrity`'s criterion 2 ("covers waiver binding,
+  baseline monotonicity and advisory-mode-as-debt") is **structurally unsatisfiable in the artifact it names**.
+  And the doctrine is **already published three times** — `gates-tell-the-truth-wave-2026-07-20`,
+  `honest-gates-wave-2026-07-27`, and **felix's OWN wave 8 (2026-07-13)**, which already carried append-only
+  baseline decay (`sobelow.ex:512` `:append`), the inline-annotation migration, and a run-proven mutation
+  self-test, sixteen days before wave 24 claimed a doctrine gap. → **CLOSED BY CONTENT.** Only its criterion 3
+  (the `.github/workflows` ownership gap) survives, re-filed as an owner assignment under hook (4).
+
+- **D160 — D145 HOLDS: SETTLE `task-felix-w21-bl-janitor-ps-bound` BY SUPERSESSION, NOT BUILD.** `own`/`disown`
+  have **zero** production callers in `api/lib` (their own definitions plus four test references), so
+  `owner_alive?/1` always takes the `:enoent` branch and `os_process_alive?/1`'s unbounded `System.cmd(ps, …)`
+  is **unreachable in production**. Checked and NOT previously checked by anyone: **PR #6551 does not wire the
+  sidecar** — its janitor hunk is +8/−2 and is entirely the new `bp-ws-import-` scratch prefix — so lifting the
+  fence does not make the probe reachable. Bounding dead code fails the epic's own bar. Its correct successor is
+  `pds-w11-janitor-engine-handshake`, whose criterion 2 is literally the wiring that would make the probe live;
+  fold the bound in there rather than shipping it now.
+
+- **D161 — SR-1 IS DEAD; THE CONCLUSION SURVIVES ON ITS OWN FOOTING.** Branch protection on main is **LIVE**
+  (`enforce_admins: true`, required contexts `Elixir gate` + `PR references an active task`, `strict: false`,
+  rulesets `[]`). The wish's premise ("no branch protection — SR-1") is FALSE, and anyone re-deriving "rulesets
+  are empty" gets a TRUE reading and draws the WRONG conclusion. The CONCLUSION survives untouched:
+  `security.yml` is workflow-level paths-filtered on `api/**`, and `required-checks-generate.sh` stage S4
+  excludes **every** check defined in a paths-filtered workflow (the `pf` flag is computed once per FILE and
+  stamped on every job row), so no Sobelow check can be required as the file stands. Sobelow's greenness is NOT
+  on the branch-protection path; it matters because a blind security gate is a real hole. `docs/ops/merge-gates.md`
+  §9 still asserts the dead premise (and a stale `of 108` denominator) and is corrected this wave.
+
+- **D162 — WAVE 23 IS ITS OWN VICTIM: S1–S4 ALL MERGED AND ALL FOUR TASKS ARE STILL OPEN.** Verified
+  criterion-by-criterion against the merged diffs — #6616/#6617/#6618/#6619 (and #6620, the wave log) all MERGED
+  2026-07-28T11:40–11:41Z and all ancestors of origin/main; all three landed scripts PASS `--selftest` exit 0.
+  S1's binding was re-derived per-finding: 20 of 21 bound, the one "MISS" (`renditions.ex:107`) legitimately
+  still covered by a surviving baseline row, and deploy_runner's CI.System annotation **pre-existed** the commit —
+  so S1 did not over-waive. Two honesty deltas ride with the closes: **S2's TITLE overstates** (the selftest step
+  is blocking; the real staleness run carries `continue-on-error`), and **S3's criterion 2 has ROTTED** (its
+  "no branch protection" claim is now false — see D161). Closed by content with the fixing commits, not rebuilt.
+
+- **D163 — GUARDRAILS.** All builders **opus** (Fable UNAVAILABLE this wave — `no_fable: true` remaps every
+  fable-selecting dispatch site, builders included). Branch from **origin/main** into isolated worktrees;
+  `CC=/usr/bin/clang`; `.ex` PRs WAIT for the Elixir Test gate. **FILE OWNERSHIP IS EXCLUSIVE this wave:**
+  `api/.sobelow-skips` belongs to **s3 alone** (s1 and s2 are forbidden to touch it, and neither needs to);
+  `.github/workflows/security.yml` belongs to s3 (staleness flip) then s7 (sobelow-job flip) in that order, never
+  in parallel. Keep out of `cloud/**` and `deploy/**` — a Site Spawner wave holds that fence concurrently. Prefer
+  CI as arbiter for `api/**`; every number quoted must name the TREE it was taken in and the LOAD it was taken under.
+
+### Wave 24 roadmap (5 slices round 1 + 2 slices round 2 — green is reachable but NOT this run)
+
+| # | Slice | Task | Model | Round | Files |
+|---|---|---|---|---|---|
+| S1 | Blobstore 15 — two-clause proven waivers, 32→17. **HIGH-FLIP-RISK: admin-only reachability** | `felix-w24-s1-blobstore-fifteen` | opus | 1 | blobstore/local.ex, blobstore/s3.ex |
+| S2 | Router Config.Headers — FIX not re-anchor, floor 10→9 | `felix-w24-s2-router-csp-fix` | opus | 1 | barkpark_web/router.ex |
+| S3 | Prune 32 dead baseline rows + flip staleness BLOCKING + correct the gate's false comment | `felix-w24-s3-baseline-prune-and-flip` | opus | 1 | api/.sobelow-skips, security.yml |
+| S4 | Annotation-binding ratchet (`--binding` inside the existing blocking job) | `felix-w24-s4-annotation-binding-ratchet` | opus | 1 | scripts/sobelow-inline-overlap-check.sh |
+| S5 | merge-gates.md §9 — kill the dead SR-1 premise, keep the conclusion | `felix-w24-s5-merge-gates-dead-premise` | opus | 1 | docs/ops/merge-gates.md |
+| S6 | Fenced 16 under the D153 carve-out, 17→1. **HIGH-FLIP-RISK: fence amendment + displacement over #6551** | `felix-w24-s6-fenced-sixteen` | opus | 2 (after S4) | workspace_bundle.ex, janitor.ex |
+| S7 | Drop `continue-on-error` — or publish the exact remainder | `felix-w24-s7-continue-on-error-flip` | opus | 2 (after S1,S2,S3,S6) | security.yml |
+
+All five round-1 slices are file-disjoint and dispatch in parallel. S6 waits on S4 because the binding ratchet
+is what makes a displacement loud instead of silent, and S6 is precisely the case that springs the trap. S7
+waits on the arithmetic reaching zero — and if it has not, S7 publishes the remainder rather than faking green.
+
 ## Wave log
 
 ### Wave 2026-07-28 — Wave 23 BUILT + REVIEWED, grade A−. "The Blind Gate."
