@@ -1838,3 +1838,320 @@ quotable ruling; re-freezing after seeing results is the corruption the design f
 the same build from origin/main's instrument blob, checker against the frozen prediction, forced-container
 control as a SIBLING section, new artifact files only, Task trailer PR; lead closes criterion 11 on
 merge, then Review seals the epic root (in_progress 5/5). After S4: epic residue zero.
+
+---
+
+## Wave 17 — THE HAND-AUTHORING WAVE (owner report, 2026-07-29)
+
+> Wave 17 paper: **`studio-space-priority-desk-wave-2026-07-29`** (style=article).
+> Anchor: bp task **`task-f559f7c508527010`** (P0, 6 criteria, claimed `strategist`, **epoch 4**).
+> Amended 2026-07-29 (D216–D231).
+
+**The wish, verbatim (L1 — a human used the product):** *"As an interactive CMS it does not really work
+good yet — for example the Desk Structure shows buttons — but for example when creating a paper and
+selecting it, we see nothing. So right now AI has created everything — we need to be able to add things
+physically as well."*
+
+Sixteen waves of this epic optimised the geometry of a pane that already has a document in it. Not one
+asked whether a document could get there. The charter carries ZERO authoring commitments across D1–D215
+— that silence is the finding, and Wave 17 is new scope, not a re-litigation.
+
+- **D216 — The create-seam fix is EXACTLY TWO EDITS, both necessary, together sufficient; `handlers/fields.ex`
+  is NOT touched.** The direction's "three defects, any one sufficient" is refuted in both directions, by a
+  four-cell mutation matrix on the strict acceptance (canvas hook + "Add block" + no empty state):
+  **A+B → 2/2 pass** (`editor_view=:paper block_mode=true canvas=true addblock=true`); **A only → RED** at
+  ACCEPT-3 (pane opens, `block_mode=false`, no canvas); **B only → RED** at ACCEPT-1 (still "Select a
+  document to edit"); **neither → the owner's bug.**
+  **A** = `pane_builder.ex:422`, blocks branch: `Content.get_blocks_doc(slug, …)` → `Content.fetch_doc_with_draft(type_name, slug, …)`,
+  threading the REAL `is_draft`/`has_published` (they are hardcoded `false` today, so a draft paper would
+  otherwise open claiming to be published). **B** = `shared.ex:176`, `seed_new_doc_content/1`.
+  **RULING: fix the STORAGE side, keep the NAVIGATION.** Published-id navigation is *correct* — every
+  non-blocks type already depends on it, and `same_editor_doc?/2` (`shared.ex:1009`) normalises both sides
+  through `Content.published_id/1`, so fix A cannot break document identity, presence, secondary (D199),
+  refs or discard. Navigating to a `drafts.` id is the cheap lever and it is FORBIDDEN.
+
+- **D217 — THE FOURTH DEFECT DOES NOT EXIST. Its evidence was a harness artifact, and this correction is
+  the wave's most important finding.** The digest reported an unlocated defect on the `nav_path → editor_doc`
+  path because mutating `handlers/fields.ex` to navigate to the real draft id STILL rendered blank. Root
+  cause of that result: `zz_repro_new_doc_editor_test.exs` mounts the Studio **ROOT** (`nav_path == []`) and
+  fires `new-document` from there, so `nav_path` becomes a SINGLE segment with no type-list segment in front
+  of it; `walk_path/7` (`pane_builder.ex:252`) then finds no structure node for ANY id, draft or published,
+  fixed or unfixed. **Proof it is an artifact:** with the complete fix applied and the human journey 2/2
+  green, `zz_repro` still fails **2/2**. And no human can reach that state — both `phx-click="new-document"`
+  render sites (`components.ex:992` header action, `components.ex:1022` empty-list CTA) live INSIDE a
+  document-type list pane. **Ruling: the "fourth defect" is retired; a repro that drives a state the UI cannot
+  produce is an instrument, not a fact, and may not be cited by any slice.**
+
+- **D218 — The defect is BLOCKS-SHAPED, not paper-shaped and not type-general.** Measured by running the
+  desk `+` per type: `paper` and `session` (the exact `Content.blocks_type?/1` whitelist, `block_ops.ex:50`
+  `["paper","session"]`) go blank; `post` (`editor_doc="drafts.post-…"`, a real form, no empty state),
+  `sheet`, `task` and `ticket` all open fine, because every non-blocks branch resolves through
+  `fetch_doc_with_draft`. The surveyor who "ran it and saw `post` fail" ran the root-level harness of D217.
+  **Ruling: the fix and the guard gate on `blocks_type?/1` — two types, not one and not six.**
+
+- **D219 — The seed is `%{"blocks" => []}` and NOT a hand-rolled paragraph.** Two live worktrees carried
+  rival uncommitted prototypes. `[]` is the one that trips the writer's birth chokepoint
+  (`writer.ex:310 maybe_apply_paper_template/2` → `Papers.Template.maybe_seed/3`, which fires ONLY on an
+  explicit empty list), producing the locked `tpl-title` h1 + an empty `tpl-body` paragraph, `derive_title`,
+  and `style: "article"` — a formed starter document with `ingress`/`featured` ghost slots, not a void.
+  A hand-rolled one-paragraph seed BYPASSES the template (`blocks != []`) and measurably loses the title
+  block, the article style stamp AND every ghost slot. **Binding on the guard: assert the PERSISTED shape
+  (`tpl-title` locked/role:title + `tpl-body` paragraph), not merely that a pane appeared** — nothing joins
+  `shared.ex` to `writer.ex:310` but convention, and `bp-pd-layout-ledger-reconcile-charter.md` D13 already
+  records that chokepoint as untested end-to-end (open residue `pdd-t16-writer-path-test`). Asserting the
+  shape discharges that residue as a side effect.
+
+- **D220 — `pane_builder.ex:203` carries the IDENTICAL missing-draft-fallback and ships in the SAME slice.**
+  The reserved `["open", type, id]` segment (the backlinks-panel jump) calls `Content.get_blocks_doc/4` with
+  the same published-only resolution and the same hardcoded `is_draft: false, has_published: false`. A
+  backlink to any draft-only paper opens nothing, silently. Fix it beside :422 or the wave leaves a second
+  blank screen it already knew about.
+
+- **D221 — `session` is IN scope for the resolution fix, OUT of scope for the birth template, and its schema
+  icon is fixed this wave.** `blocks_type?/1` covers session, so A+B repair its resolution. But
+  `maybe_apply_paper_template(attrs, "paper")` matches papers ONLY (`writer.ex:345` is the catch-all), so a
+  session seeded `blocks: []` persists as an untemplated empty list → block mode with **zero canvas runs**:
+  a second, different blank. Extending the birth template to session is **named out of scope** and filed.
+  IN scope, because it is a one-field fix that also unblocks any session-covering guard:
+  `priv/plugins/bulldocs/schemas/session.json:4` ships `"icon": "🧵"`, which `BarkparkWeb.Icons` **raises**
+  on under `:test` (`icons.ex:260`) and silently mis-paints in prod (`:274` warn + "file" fallback).
+
+- **D222 — The never-blank contract is built at the `<:empty_state>` slot. NOT at `paper.ex:701`, and NEVER
+  inside `clear_paper_view/1`.** Three independent constraints converge:
+  (a) **`:701` is DEAD CODE on this path** — a `raise` planted in it never fired across **1483** studio
+  LiveView tests. Both and only two `view: :paper` producers return a bare `nil` editor on a lookup miss
+  rather than `%{view: :paper, doc: nil}`, and `Document.content` is `field :content, :map, default: %{}`
+  (`document.ex:21`), so the `when is_map(content)` head at `:639` always matches. Assigning a named state
+  at `:701` paints a screen no user can reach. This also settles the digest's second correction by mutation:
+  `%{}` IS a map, `Projection.read_blocks(%{})` → nil → the else-branch (`paper_block_mode: false`), so
+  defect 3 is a genuine never-blank violation but **not** what fires.
+  (b) **`clear_paper_view/1` is D199-radioactive.** D199 is live and non-vacuous: injecting the naive
+  unconditional secondary clear reds `studio_live_secondary_doc_test.exs:159` by name ("same-doc reload must
+  NOT wipe a live secondary pane"). It fires on same-doc Save/reload; a never-blank state routed through it
+  paints "cannot render" over a healthy document mid-autosave.
+  (c) **The reachable seam is `editor_doc == nil` → `editor.ex:476`, and `slot :empty_state` (`editor.ex:348`,
+  documented `:283-284`) is DECLARED AND NEVER FILLED** — `grep -rn '<:empty_state' api/lib api/test` exits 1.
+  The extension point for exactly this problem was built and left dead.
+  **Ruling:** fill `<:empty_state>` at the sole `studio_editor_shell` call site (`components.ex:1283`) from a
+  NEW assign computed where `editor == nil` but `nav_path` named a document. `clear_paper_view/1` and
+  `setup_paper_view/2` are not modified. Constraints: the markup must NOT carry class `editor-body`
+  (D180's `editor_body_tag/1` regex asserts it is `""` after a document close), must not resurrect
+  `editor_doc`, and `clear_paper_view/1` must keep calling `sidebar_assigns(nil)`.
+
+- **D223 — Structure-polish D19 binds the DESK TREE, not the editor pane.** That CUT ("do not retry in a
+  future wave") is a Go-client structural fact: old binaries drop unknown node types and collapse bare lists.
+  The Studio editor pane has no Go client. **D222 is not forbidden by D19** — say so explicitly, because a
+  builder will otherwise read the CUT as covering it.
+
+- **D224 — The desk becomes operable: `pane_item` → `<button type="button">`; `pane_doc_item`'s OUTER div
+  STAYS a div and only `.bp-doc-row-body` becomes a button.** The convention is written down and therefore
+  self-reproducing: `panes.ex` `pane_item/1`'s docstring says *"Renders a `<div class="pane-item">` (NOT a
+  `<button>` — matches the Studio convention)"*. **Delete that sentence in the same diff.** Measured blast
+  radius across the whole `live/studio` + `components` trees: **1740 tests, exactly ONE failure** —
+  `studio_components_pane_test.exs:259`, a bare `assert html =~ ~s(<div)` (attributed: the same trees are
+  1740/0 after revert). This replicates D55 at 40× scale and confirms its lesson — **no test anywhere in
+  `test/` ever clicks a desk row through the DOM**; selection is only ever driven as
+  `render_click(view, "select", %{"id" => …})`, which would pass identically if the row were a `<p>`. A
+  builder who hits red will not hit red, and green is also what a `tabindex`-on-div half-fix produces.
+  Binding sub-rulings, each measured or spec-derived:
+  1. The D55 byte-frozen regex is on **`pane-column`** (`studio_live_width_bucket_test.exs:101-102`), a
+     different component. It does NOT red. The `pane-item`/`pane-doc-item` class attributes are frozen
+     nowhere — and nothing guards them either.
+  2. The outer `.pane-doc-item` hosts the bulk-publish checkbox as a **sibling** of the row body; a
+     `<button>` cannot contain a `<button>`.
+  3. When `.bp-doc-row-body` becomes a button, its three inner `<div>`s become `<span>`s (button content is
+     phrasing content). Consequently **`.pane-doc-sub` needs an explicit `display: block`** — it declares
+     none, and as an inline box its vertical margins stop applying and `text-overflow: ellipsis` silently
+     dies. `.pane-doc-main` is safe (blockified as a flex item of `.bp-doc-row-body`); `.pane-doc-title`
+     already declares `display: flex`.
+  4. Use **`aria-current`, never `aria-selected`** — `studio_components_pane_test.exs:258` is
+     `refute html =~ "selected"` and reds on the latter.
+  5. The doc row's `aria-label` is composed **from the TITLE**. The row carries `title={@doc_id}`, and
+     `title=` is the accname fallback of last resort: converting to a button without an explicit label
+     UPGRADES the raw draft id into speech ("drafts.paper-7780f97accedfd66"). Keep `title=` as the sighted
+     tooltip; it is then correctly ignored for accname.
+  6. The `.pane-item` UA reset must be declared **before** its existing `border-left: 3px solid transparent`
+     or `border: 0` wipes the selected-row rail, and `width: 100%` is not optional (`.pane-body` is a plain
+     block container, so a button there shrink-to-fits). Target the bare class, not `button.pane-item`, so
+     the `a.pane-item.nav-plugin-entry` variant survives — the `.pane-section-header` reset
+     (`root.html.heex:1560-1567`) is the in-file precedent, as is `button.pane-column--collapsed` (`:1677-1682`).
+  7. The `+` button's accessible name is measured as the **empty string** (icon-only, no `aria-label`, no
+     `title`, while its siblings at `:976`/`:984` carry `title=`). Name it.
+  8. Ring spelling is settled: `outline: 2px solid var(--ring); outline-offset: -2px` (`:1504`, `:1681`,
+     `:1707`). No `:focus-visible` exists today for `.pane-item`, `.pane-doc-item`, `.bp-doc-row-body`,
+     `.pane-add-btn`, `.bp-doc-checkbox` or `.bp-desk-chip`.
+  9. **D79's focus-loss class is inherited and is a BROWSER question**: activating a control that re-renders
+     itself dropped `document.activeElement` to `<body>`. It cannot be answered by any ExUnit test — it goes
+     in the browser harness (D226), not in a mix test.
+
+- **D225 — Pending feedback is a SOCKET ASSIGN. `phx-disable-with` may never be the thing a guard asserts,
+  and may never go on an icon-only button.** The common premise is wrong in both directions:
+  `phx-disable-with` DOES fire for a plain non-form `phx-click` (`view.js:1668-1673` → `putRef` `:1434-1492`),
+  and the repo already ships five such uses. But (a) **LiveViewTest never runs the JS client** — probed: the
+  post-`render_click` server HTML is the pre-click button verbatim, no `disabled`, no text swap, no
+  `phx-click-loading` — so a guard on it proves a string is in markup, the exact vacuous green this wave
+  exists to end; and (b) on the icon-only `+` the client does `RESTORE := el.textContent` (empty), overwrites
+  `textContent` (destroying the SVG), and on undo restores `""` — **leaving the button permanently blank.**
+  A socket assign renders `disabled` + `aria-busy` + a label swap into server HTML and is fully observable
+  offline (probed: `disabled="" aria-busy="true"` after `render_click`). Supporting gaps: `aria-busy` appears
+  **zero** times in `api/lib`; `design/tokens.json` has no pending/busy/loading token; the only shipped
+  affordance is `.phx-click-loading { opacity: .6 }` (`root.html.heex:3752`), authored as a double-submit
+  guard, JS-applied, invisible to every ExUnit test — i.e. precisely the faint grey tint the owner read as a
+  dead control.
+
+- **D226 — CI: the OFFLINE LiveView guard is the required gate; the browser harness is the belt-and-braces
+  proof, and D81 does not forbid it.** `elixir.yml:23` carries a standing order that the workflow **must
+  never gain a workflow-level `on: … paths:` key**, so a guard inside `mix test` cannot be path-dodged; any
+  new browser workflow WILL be path-filtered and can silently never run on a PR that misses its paths.
+  The browser lane is nonetheless real and proven: `scripts/create-quickstart-smoke.sh` boots an ephemeral
+  Phoenix on a throwaway port + throwaway DB with a **self-minted** admin token (12 passed, 0 failed), and a
+  headless browser authenticated over plain `http://127.0.0.1` via `POST /v1/auth/login-tickets` →
+  `/login/ticket/<t>` reproduced the owner's bug on a **brand-new, freshly-migrated, empty database** in
+  **54s wall** — so the defect is not corpus-, instance- or guerrilla-specific.
+  **D81's "committed, NOT a CI gate" is scoped to the DEPLOYED-guerrilla instrument** (it `die()`s without
+  `ssh -i ~/.ssh/barkpark_indx`, a guerrilla admin token, an https host and a landed deploy). None of that
+  applies to an ephemeral local instance: `endpoint.ex:104-112` adds `secure: true` to the session cookie
+  only when `:session_secure` is set. **Ruling: D81 does not transfer; the harness may gate.**
+  **And it MUST authenticate and assert its identity.** In `MIX_ENV=dev` there is no anonymous path:
+  `plugs/optional_session_token.ex:47` falls through to `token_from_dev_config()`, verifying the seeded
+  `config/dev.exs:90` `:dev_browser_token` — a principal that cannot exist in production, on a measurably
+  reduced surface (`[phx-click="shares-open"]`: 0 anonymous vs 1 admin). A harness that "doesn't
+  authenticate" silently degrades to that principal and still reports green. Assert a discriminator.
+
+- **D227 — The journey guard CREATES ITS OWN DOCUMENT. D97 was this bug, diagnosed away as flake.** D97
+  recorded `drillToDocument`'s `waitForSelector('.bp-paper-surface')` timing out at 30s for three
+  independent verifiers, ruled it concurrent row churn, and pinned the instrument to a committed known-good
+  `--doc` slug. **Measured now:** a pre-existing draft-only paper renders `bp-paper-surface=false` on
+  origin/main and `true` after fix A. The drill clicked the first row; when that row was a draft-only paper
+  the selector could never appear. **There is no abandoned code fix in this epic — there is an abandoned
+  DIAGNOSIS, shipped as a workaround.** Ruling: the new guard never clicks "the first row" and never takes
+  the `--doc` escape hatch, or it inherits the exact blindness that hid this for five subsequent waves.
+
+- **D228 — The guard must ALSO open a PRE-EXISTING draft-only paper.** Only the blocks branch lacks the
+  draft fallback, so ANY never-published paper or session is unopenable — not just a fresh one. Two fossils
+  in production prove the human cost: `drafts.paper-b28358ff271b260e` (`_createdAt` 2026-07-09) and
+  `drafts.paper-3149ef706e777628` (2026-07-06), both `blocks: 0`, both `_updatedAt == _createdAt` — created,
+  found blank, abandoned. **The owner hit this twice, silently, three weeks before he reported it.** Both
+  rows are KEPT as evidence; the strategist's `drafts.paper-7780f97accedfd66` is kept for the same reason.
+  Free second guard, adopted: a fixed create seam means no new `blocks: 0 && _updatedAt == _createdAt` paper
+  draft ever appears — an assertable invariant over the live corpus.
+
+- **D229 — Do NOT route the `+` button through `BlockOps.upsert_blocks_doc/3`.** Probed seven ways: the
+  literal `+` shape (`blocks: []`, title "Untitled") returns `{:error, {:halted, "This paper has a title but
+  no content yet…"}}` and writes NO row; wall-compliant registered labels do not rescue it; **`bypass_wall:
+  true` does not rescue it either** — the hollow gate (`block_ops.ex:277`) sits BEFORE
+  `enforce_blocks_wall` (`:425`) and has no escape hatch at all. Behind it the wall then refuses on
+  `description` and on `unknown_tag`. Worse, `handlers/fields.ex` already flashes `{:halted, reason}` as
+  "Create cancelled: …", so this route converts *"I click + and see nothing"* into *"I click + and am told my
+  paper has no content, and nothing is created."* The hollow gate and the authoring wall are two sealed
+  epics' deliberate doctrine; the `+` button is not a publish. **Ruling: fix the READ side (D216); leave the
+  write path alone.**
+
+- **D230 — Named out of scope, so nobody discovers it in review.** (1) The publish-wall self-rescue: a fresh
+  "Untitled" paper cannot be published out of the draft state — four sequential refusals (`description` ≥20
+  chars → tag `tag` → `strength` 1-100 → `rationale` ≥20 chars → `unknown_tag`), plus a halt on "no content
+  yet". The acceptance bar for Wave 17 stops at **SAVE**, not at publish. (2) guerrilla's 6-20s TTFB (2
+  cores, load ~9.6) — the wave fixes what is wrong at ANY latency and refuses to chase it. (3) The
+  `bp doc publish` 500 on large payloads: probed as **load, not code** — the identical `limit=100` request
+  that failed later returned 200 on 3/3 retries, and `doc.publish` / `bulldocs.publish` are different
+  endpoints, so "bulldocs succeeds" is not a controlled comparison. Filed as an investigation with a
+  deterministic-repro bar, not as a confirmed defect. (4) Any open-ended aesthetic redesign.
+
+- **D231 — This amendment lands in THIS file, per D37.** The `-desk-` path named in every Wave 17 brief is
+  the 516-byte MOVED stub whose own text says *"Do not read or amend this file; do not cite it in a brief."*
+  Four verifiers re-confirmed it this wave. Wave 17's docs-only PR carries **this** charter.
+  **Methodological residue, recorded because it cost real time:** `bp search` was unreachable for six of
+  fifteen surveyors AND **exited 0 while failing** (`context deadline exceeded` on
+  `/v1/capabilities`) — so several "no prior art" findings are UNCHECKED, not absent. And the
+  `tooling/grip/ledger/` corpus now poisons repo-wide `grep '<<<<'` conflict probes: a prior row's own
+  documented `rerun` string contains the marker, so the MUST-RUN conflict probe returns 2 false positives.
+  **Use `git merge-tree --write-tree` exit status, never marker-grep.** (PR #6055 is `MERGEABLE`/`BLOCKED` —
+  a gate, not a conflict — and its only `shared/paper.ex` hunk is at `:374`, 265 lines from Wave 17's seam.)
+
+### Wave 17 plan — 6 slices, 3 in round 1
+
+| # | slice | round | task | files | model |
+|---|---|---|---|---|---|
+| S1 | create seam A+B+:203 + committed offline journey guard | 1 | `spd-w17-create-seam` | pane_builder.ex, shared.ex, new test | opus |
+| S2 | desk operability — focusable named controls + rings | 1 | `spd-w17-desk-operable` | panes.ex, root.html.heex, components.ex, 1 test line | fable* |
+| S3 | session schema icon (unblocks a session-covering guard) | 1 | `spd-w17-session-icon` | session.json | opus |
+| S4 | never-blank contract at `<:empty_state>` | 2 (after S1) | `spd-w17-never-blank` | pane_builder.ex, shared.ex, editor.ex, components.ex | fable* |
+| S5 | browser journey harness + CI workflow | 2 (after S1) | `spd-w17-browser-journey` | tooling/studio-journey/, scripts/, .github/workflows/ | opus |
+| S6 | honest pending feedback (socket assign + aria-busy) | 2 (after S2) | `spd-w17-pending-honest` | components.ex, handlers, root.html.heex | opus |
+
+\* fable-marked slices remap to Opus under the standing `no_fable` override (D19).
+
+**HIGH-FLIP-RISK, named for the reviewer:** S1's judgment *"`handlers/fields.ex` needs no edit; navigation
+stays published-keyed"* is the exact judgment the direction got wrong, in the opposite direction — it wants
+an INDEPENDENT re-derivation, not a re-read. S4's judgment *"`paper.ex:701` is dead code"* rests on a bounded
+negative (1483 tests + a static read of two producers), which is strong but not exhaustive; treat `:701` as
+"not the seam to build on", never as "safe to delete".
+
+**Fence:** `api/lib/barkpark_web/live/studio/**`, `api/lib/barkpark_web/components/studio_components/**`,
+`api/lib/barkpark_web/studio/pane_builder.ex`, `api/lib/barkpark_web/layouts/root.html.heex`,
+`api/test/barkpark_web/{live/studio,components}/**`, plus S5's new `tooling/studio-journey/`. Felix-pristine
+fences itself strictly OFF `api/lib/barkpark_web/live/studio` (its D82) and Site Spawner fences OUT `api/**`
+entirely (its D83) — so the overlap the lead warned about is smaller than feared. **One unadjudicated soft
+edge:** Felix's fence reads `api/test` unqualified. Wave 17 claims `api/test/barkpark_web/{live/studio,components}/**`
+by atomic bp claim; it is written down here rather than assumed.
+
+## Wave log — wave 17 (append at Review)
+
+### Wave 2026-07-29 — Wave 17 (THE HUMAN PATH), Review. Grade **A-**.
+
+**The wish.** The owner sat down with the product and it did not work: *"when creating a paper and
+selecting it, we see nothing… we need to be able to add things physically as well."* Rule one was
+REPRODUCE IT AS A HUMAN FIRST, and this wave is the first in the epic that did — in the verify phase,
+in a real authenticated browser on the deployed instance, before any diagnosis. The frames show the
+Papers desk gaining an `Untitled` draft row after a click on `+` while the content pane still reads
+*"Select a document to edit"*, twice (immediately and after 20s, so not a race); the control frames
+show an EXISTING published paper opening into a full canvas with `+ Add block` and `Auto-saved`. The
+machinery was present; only the never-published path was blank.
+
+**Round 1 landed — three slices, all reviewed, all pushed with PRs.**
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| `spd-w17-create-seam` | `…create-seam-a-new-paper-opens-in-0-r` | #7566 | THE owner's bug. `pane_builder.ex`'s blocks branch (and the reserved `["open", type, id]` segment) resolved published-only, so every never-published paper resolved to nothing; `seed_new_doc_content/1` now seeds an empty blocks LIST, which is what trips the paper template. Guard re-run by the reviewer against unmodified `origin/main`: **3 tests, 3 failures**, all on `refute html =~ "Select a document to edit"`. |
+| `spd-w17-desk-operable` | `…make-the-desk-operable-every-structure-a-1-r` | #7567 | The defect was a written-down convention in `pane_item/1`'s docstring; that sentence is deleted. Rows are real buttons with composed accessible names, `aria-current`, and focus rings; the icon-only `+` gains a name. |
+| `spd-w17-session-icon` | `…fix-the-session-schema-s-unrenderable-ic-2-r` | #7568 | Grew, in review, from one file into the class: `form_response.json` and scaffy `command.json` carried unmapped emoji too, and a new JSON-parsing scan over every `priv/plugins/*/schemas/*.json` found two MORE dead names (`shield`, `link`). Also delivers `spd-w17-sibling-schema-icons`. |
+
+**Reviewer fixes in place** (each mutation-proven, each in the class ExUnit structurally could not see):
+a brand-new paper was greeting its author with its own Slug field painted red — the inspector seeded
+from the raw `drafts.` id and failed its own format check (`sidebar_assigns/1` now normalises through
+`published_id`); the `div → button` conversion silently dropped the rows from body's `line-height: 1.6`
+to the UA button's `normal` (`line-height: inherit` restored); and one new assertion was an
+anywhere-match with an `or`, the same shape as the stale assertion the slice deletes.
+
+**Held at round 2 BY DESIGN** (the sequenced-rounds law, not a stall): `spd-w17-never-blank` and
+`spd-w17-browser-journey` after #7566, `spd-w17-pending-honest` after #7567. Dispatch in that order.
+
+**What this wave did NOT do, and it matters.** Nobody has looked at the FIXED screen in a browser.
+The reproduction is L1; the fix is proven offline. Anchor criteria 1–4 (`task-f559f7c508527010`) stay
+open with honest `--miss` notes, and the browser-journey slice is what closes them. The format leg of
+every gate exits 1 on this host on 88 untouched files — Elixir 1.19.5 installed against a pinned
+1.18.4 — verified differentially against main's own red Format job on the real 1.18.1 toolchain, which
+lists 94 files and none of this wave's, so no PR introduces one.
+
+**And CI caught a real one.** #7566's guard was green on the scoped studio suite three times and RED on
+all three arms in the full CI run — a process-global `BARKPARK_PAPER_CANVAS` leak from four sibling
+suites. Reproduced locally, fixed by pinning the flag, re-pushed. See D233; that is the wave's own
+lesson landing on the wave.
+
+**D232.** A schema's icon is a shipped product string, not source, and `priv/` was a fourth hole in a
+tripwire whose own moduledoc named three. Three schemas were wrong at once. The scan is the fix; the
+two edits were the symptom.
+
+**D233 — a scoped `mix test` is not the suite, and this wave proved it on itself.** The journey guard
+was green on `test/barkpark_web/live/studio` three separate times and went **RED on all three arms** in
+CI's full 12,971-test run, on exactly one line: `assert html =~ data-test-id="studio-paper-block-editor"`.
+Cause, reproduced locally rather than guessed: `BARKPARK_PAPER_CANVAS` is read from the
+**process-global** environment at render time, and four sibling suites deliberately set it to `"0"` to
+pin the legacy opt-out (`paper_editor_test_helpers.ex`, `studio_live_paper_canvas_test.exs`,
+`paper_canvas_test.exs`, `studio_live_paper_test.exs`). Running the guard with `BARKPARK_PAPER_CANVAS=0`
+reproduces CI byte for byte. Note what stayed GREEN under the hostile env: `refute html =~ "Select a
+document to edit"` — the owner's bug is fixed either way; a paper inheriting the OFF flag opens into the
+read-only View pane plus the toggle. **The defect was in the guard, not in the fix.** The guard now pins
+the flag ON (the mainline default per D7/D9) with the same `prev`/`put`/`on_exit` idiom the OFF suites
+use. Any future test whose assertion depends on `BARKPARK_PAPER_CANVAS` must pin it; inheriting it is
+an order-dependent green.
