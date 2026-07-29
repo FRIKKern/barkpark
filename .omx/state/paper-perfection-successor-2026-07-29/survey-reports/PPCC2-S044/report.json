@@ -1,0 +1,455 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S044",
+  "assignment_snapshot_sha256": "95b1dc78ace5da183f5e730bd89defcd9aa2da40eb6071ce121e30c661a6bc3f",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 15,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "358b55ab975291d521106d8a767f65af7d48f06b0e2b19fb5c4308e85669fe97"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read: 307 native blocks plus two legacy-HTML papers totaling 40,957 characters. Keep 4, repair 4, and mark 1 superseded. The self-update reconciliation paper is final ledger authority and supersedes Wave 6 for current status; the product close-out remains the human entry point. Search Wave 9 lacks its live seal, Shared Cells contains later-refuted claims, Shared Storm lacks implementation proof, and the Vercel gap analysis needs current-source refresh.",
+  "verdict_counts": {
+    "keep": 4,
+    "repair": 4,
+    "superseded": 1
+  },
+  "checked_unit_ids": [
+    "paper:search-template-wave-9-2026-07-26",
+    "paper:section-presets",
+    "paper:self-update-epic-wave-2026-07-11",
+    "paper:self-update-epic-wave-2026-07-11-reconcile",
+    "paper:self-update-from-nag-to-product",
+    "paper:session-handoff-design",
+    "paper:shared-cells",
+    "paper:shared-storm",
+    "paper:site-autodeploy-vercel-gap-analysis"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 307,
+    "legacy_html_documents_read": 2,
+    "legacy_html_semantic_units_read": 153,
+    "legacy_html_chars_read": 40957,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:search-template-wave-9-2026-07-26 body_html[117]",
+      "evidence": "Review repairs a cross-slice oracle that would have made a broken live site green."
+    },
+    {
+      "block_ref": "paper:self-update-epic-wave-2026-07-11-reconcile blocks[68]",
+      "evidence": "The final sweep proves 32/32 publish-collapse state after predecessor writes settle."
+    },
+    {
+      "block_ref": "paper:session-handoff-design blocks[7]",
+      "evidence": "Append-only events make crash recovery independent of close-time synthesis."
+    },
+    {
+      "block_ref": "paper:site-autodeploy-vercel-gap-analysis blocks[8]",
+      "evidence": "The competitive gap is reduced to three causal links rather than a feature catalog."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:search-template-wave-9-2026-07-26 body_html[109]",
+      "evidence": "All seven slices remain locally proven only; the live seal is absent.",
+      "lesson": "Do not call a demo perfect before deployment proof."
+    },
+    {
+      "block_ref": "paper:self-update-epic-wave-2026-07-11 blocks[86]",
+      "evidence": "Wave 6 itself says disposable-box live smoke is still required.",
+      "lesson": "Use the later reconcile for current authority."
+    },
+    {
+      "block_ref": "paper:shared-cells blocks[36]",
+      "evidence": "A linked proof replaces zero-downtime fiction with a measured write freeze.",
+      "lesson": "Repair contradicted doctrine in place."
+    },
+    {
+      "block_ref": "paper:shared-storm body_html[17]",
+      "evidence": "Anonymous-write abuse budgets are examples, not verified configured limits.",
+      "lesson": "Security budgets require implementation evidence."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "self-update-epic-wave-2026-07-11",
+        "self-update-epic-wave-2026-07-11-reconcile",
+        "self-update-from-nag-to-product"
+      ],
+      "basis": "They own distinct chronological/purpose layers: Wave-6 implementation, final ledger reconciliation, and human product close-out.",
+      "disposition": "Use reconcile as ledger authority, product paper as reader entry point, and mark Wave 6 superseded only for current status while preserving its receipts."
+    },
+    {
+      "candidate_set": [
+        "shared-cells",
+        "shared-storm"
+      ],
+      "basis": "The titles overlap on “shared,” but one is hosting-tenancy doctrine and the other a public anonymous-event plugin.",
+      "disposition": "Do not merge; add clearer subtitles/tags to prevent title-based duplicate classification."
+    },
+    {
+      "candidate_set": [
+        "section-presets",
+        "session-handoff-design"
+      ],
+      "basis": "Both contain reusable workflow structure, but one is an author palette and the other a durable session protocol.",
+      "disposition": "Keep separate and link only if session summaries adopt section presets."
+    }
+  ],
+  "reader_risks": [
+    "Studio: surface purpose, date, implementation status, and predecessor/successor links before long proof ledgers; collapse branch/task details.",
+    "TUI80: wrap or paginate tables, code assemblies, heatmaps, and branch ledgers; legacy HTML must not become unbroken terminal text.",
+    "email: send the decision, current status, one caveat, and a link; omit raw matrices, commands, and live-ledger detail.",
+    "public: remove internal hosts, credentials/env names, task/PR identifiers, operational addresses, and unsupported security or vendor-comparison claims.",
+    "CLI/API: preserve exact ids/revisions, endpoint and status vocabularies, gate totals, lifecycle distinctions, and planned-versus-shipped-versus-live-proven claims."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:search-template-wave-9-2026-07-26",
+      "document_id": "search-template-wave-9-2026-07-26",
+      "document_rev": "3024577a5608905f9f06da3bd1a5f7aa",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-9 strategy, investigation, build, and review record for turning the Next search demo into a browser-proven flagship.",
+      "opening_and_criteria": "The reviewed status and debrief are explicit: seven round-one slices green and pushed, with an A− grade and a reserved post-merge live seal.",
+      "outline_and_hierarchy": "Wish, browser ground truth, alternatives, survey, verification, decisions, wave plan, and debrief are complete, but the legacy-HTML ledger is extremely dense.",
+      "human_voice_and_precision": "The paper corrects its own early diagnoses and openly records a cross-slice false-green oracle and the absence of live proof.",
+      "compression_and_restraint": "Convert the current outcome and proof summary to native blocks, retain the full ledger as dated evidence, and add the post-merge live result before calling the demo perfect.",
+      "evidence_and_truth": "body_html[109]-[121] distinguishes locally green branches from live proof, names reviewer fixes, and keeps merge-gated criteria open. ",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[117]",
+          "evidence": "Review catches a journey oracle that would read green after the failure copy changed; it replaces text matching with a structural data-search-error marker and reruns the self-test.",
+          "lesson": "Cross-slice test oracles must bind to stable semantics, not copy."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[109]",
+          "evidence": "The grade explicitly says none of the seven slices is live-proven and the post-merge seal remains open.",
+          "lesson": "A local/stub/synthetic pass must not be reported as a deployed outcome."
+        }
+      ],
+      "duplicate_disposition": "Keep as the immutable W9 ledger, but repair current entry/status and native representation rather than merging with general search strategy papers.",
+      "reader_risks": [
+        "Studio: surface purpose, date, implementation status, and predecessor/successor links before long proof ledgers; collapse branch/task details.",
+        "TUI80: wrap or paginate tables, code assemblies, heatmaps, and branch ledgers; legacy HTML must not become unbroken terminal text.",
+        "email: send the decision, current status, one caveat, and a link; omit raw matrices, commands, and live-ledger detail.",
+        "public: remove internal hosts, credentials/env names, task/PR identifiers, operational addresses, and unsupported security or vendor-comparison claims.",
+        "CLI/API: preserve exact ids/revisions, endpoint and status vocabularies, gate totals, lifecycle distinctions, and planned-versus-shipped-versus-live-proven claims."
+      ],
+      "rationale": "Repair because the investigation is excellent but the paper remains legacy, branch-heavy, and explicitly short of live proof."
+    },
+    {
+      "unit_id": "paper:section-presets",
+      "document_id": "section-presets",
+      "document_rev": "9cdfa620e311d9abde720aa1c07d5150",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Compact author palette of four reusable PortableDoc assemblies: masthead, annotated figure, live dashboard, and honest runbook step.",
+      "opening_and_criteria": "The ingress names the author behavior being corrected and gives one action: copy JSON, replace placeholders, publish.",
+      "outline_and_hierarchy": "Four numbered recipes repeat a strong explanation-plus-code rhythm and link the dashboard to its normative query cookbook.",
+      "human_voice_and_precision": "The prose is practical and restrained, especially the rule that figure captions state the claim and source rather than repeat a title.",
+      "compression_and_restraint": "Keep; add schema/as-of metadata when block shapes change and replace manual copy-paste with Studio insert presets when the filed follow-up lands.",
+      "evidence_and_truth": "blocks[6]-[19] pair composition intent with complete JSON assemblies and explicit failure/rollback behavior.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[19]",
+          "evidence": "The runbook preset includes a check that can actually fail and requires the rollback path to be written before it is needed.",
+          "lesson": "Reusable authoring patterns should encode operational honesty, not only layout."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[20]",
+          "evidence": "The page remains the manual palette because Studio insert-palette versions are only a filed follow-up.",
+          "lesson": "Mark productized versus copy-paste workflow status so authors do not assume editor support exists."
+        }
+      ],
+      "duplicate_disposition": "Distinct from the query cookbook and showcase: this owns reusable section assemblies, not query semantics or component inventory.",
+      "reader_risks": [
+        "Studio: surface purpose, date, implementation status, and predecessor/successor links before long proof ledgers; collapse branch/task details.",
+        "TUI80: wrap or paginate tables, code assemblies, heatmaps, and branch ledgers; legacy HTML must not become unbroken terminal text.",
+        "email: send the decision, current status, one caveat, and a link; omit raw matrices, commands, and live-ledger detail.",
+        "public: remove internal hosts, credentials/env names, task/PR identifiers, operational addresses, and unsupported security or vendor-comparison claims.",
+        "CLI/API: preserve exact ids/revisions, endpoint and status vocabularies, gate totals, lifecycle distinctions, and planned-versus-shipped-versus-live-proven claims."
+      ],
+      "rationale": "Keep because it is concise, native, actionable, and purpose-specific."
+    },
+    {
+      "unit_id": "paper:self-update-epic-wave-2026-07-11",
+      "document_id": "self-update-epic-wave-2026-07-11",
+      "document_rev": "5f4c00fcca4b55aa88a62ac4b4c374df",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-6 execution ledger making rollback real across deploy script, instance API, control-plane relay, console, and CLI.",
+      "opening_and_criteria": "The debrief clearly states the honest scope: end-to-end offline rollback is shipped while disposable-box live smoke remains parked.",
+      "outline_and_hierarchy": "The full wave record is complete and evidence-rich, but the later reconciliation paper closes the epic and repairs the remaining ledger/story inconsistencies.",
+      "human_voice_and_precision": "It distinguishes a deliberate live-smoke exclusion from a stall and preserves residual non-transactional pin and wasm-skew caveats.",
+      "compression_and_restraint": "Preserve as immutable Wave-6 implementation evidence; route current self-update status through the reconciliation paper and product close-out.",
+      "evidence_and_truth": "blocks[76]-[86] record the shipped chain, exact cross-slice vocabulary, residuals, and the still-required live smoke.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[80]",
+          "evidence": "Review verifies byte-consistent refusal and success shapes across five surfaces and records non-transactional pin and wasm-skew residuals.",
+          "lesson": "Cross-surface features need a single verified vocabulary plus explicit residual failure modes."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[86]",
+          "evidence": "The next-step list says the disposable-box live smoke is the one gap between offline proof and fully proven rollback.",
+          "lesson": "Offline end-to-end evidence must remain distinct from live operational proof."
+        }
+      ],
+      "duplicate_disposition": "Superseded for current status by self-update-epic-wave-2026-07-11-reconcile; do not merge their immutable execution ledgers.",
+      "reader_risks": [
+        "Studio: surface purpose, date, implementation status, and predecessor/successor links before long proof ledgers; collapse branch/task details.",
+        "TUI80: wrap or paginate tables, code assemblies, heatmaps, and branch ledgers; legacy HTML must not become unbroken terminal text.",
+        "email: send the decision, current status, one caveat, and a link; omit raw matrices, commands, and live-ledger detail.",
+        "public: remove internal hosts, credentials/env names, task/PR identifiers, operational addresses, and unsupported security or vendor-comparison claims.",
+        "CLI/API: preserve exact ids/revisions, endpoint and status vocabularies, gate totals, lifecycle distinctions, and planned-versus-shipped-versus-live-proven claims."
+      ],
+      "rationale": "Superseded because the later reconcile closes the epic and owns the final ledger truth."
+    },
+    {
+      "unit_id": "paper:self-update-epic-wave-2026-07-11-reconcile",
+      "document_id": "self-update-epic-wave-2026-07-11-reconcile",
+      "document_rev": "13a11aa32be678b5c69755e50e64c72e",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Final bookkeeping-honesty wave closing self-update, repairing task evidence, publish-collapsing drafts, and parking human-gated deploy-with-Barkpark work.",
+      "opening_and_criteria": "The opening says this is reconciliation rather than construction and defines a zero-tolerance bar for evidence-free met flags.",
+      "outline_and_hierarchy": "The document moves from exhaustive survey through executable verification, decisions, six ledger slices, and a terminal review debrief.",
+      "human_voice_and_precision": "It is unusually candid about shifted criteria stamps, an unrenderable wave paper, and a RUNS-LAST dispatch error fixed by review.",
+      "compression_and_restraint": "Keep as final ledger authority; provide a short current-status entry point and collapse the very long forensic middle on constrained surfaces.",
+      "evidence_and_truth": "blocks[50], [62]-[72] provide rerun totals, final live-ledger state, reviewer repairs, sanctioned remainder list, and terminal scope.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[68]",
+          "evidence": "The reviewer waits for writers, completes the stalled RUNS-LAST publish-collapse, and proves 32/32 bare-id available with zero draft residue.",
+          "lesson": "Ordering-sensitive cleanup needs a final-state sweep, not a concurrent optimistic claim."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[70]",
+          "evidence": "Two builder-side ledger defects and a dispatch-ordering stall required reviewer repair, including the exact falsely-met merge-gate class the wave targeted.",
+          "lesson": "Reconciliation reports must preserve corrections to their own bookkeeping."
+        }
+      ],
+      "duplicate_disposition": "This is current self-update ledger authority; Wave 6 stays linked as implementation history and the product paper as human-facing summary.",
+      "reader_risks": [
+        "Studio: surface purpose, date, implementation status, and predecessor/successor links before long proof ledgers; collapse branch/task details.",
+        "TUI80: wrap or paginate tables, code assemblies, heatmaps, and branch ledgers; legacy HTML must not become unbroken terminal text.",
+        "email: send the decision, current status, one caveat, and a link; omit raw matrices, commands, and live-ledger detail.",
+        "public: remove internal hosts, credentials/env names, task/PR identifiers, operational addresses, and unsupported security or vendor-comparison claims.",
+        "CLI/API: preserve exact ids/revisions, endpoint and status vocabularies, gate totals, lifecycle distinctions, and planned-versus-shipped-versus-live-proven claims."
+      ],
+      "rationale": "Keep because it is terminal, adversarially verified, self-correcting, and explicit about remaining gates."
+    },
+    {
+      "unit_id": "paper:self-update-from-nag-to-product",
+      "document_id": "self-update-from-nag-to-product",
+      "document_rev": "834b97f06bf046bd44a617378f66c7a2",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Human-facing close-out explaining how a passive update banner became a canary-gated, kill-switchable, rollback-capable product across W1-W6.",
+      "opening_and_criteria": "The dated ingress states W1-W6 shipped and epic closed before telling the motivating user story.",
+      "outline_and_hierarchy": "A chronological wave narrative ends with honest remainders and a note that rev 3 replaced the legacy HTML with native article blocks.",
+      "human_voice_and_precision": "The opening quote keeps the product problem human while implementation sections remain exact about gates and surfaces.",
+      "compression_and_restraint": "Keep as the readable entry point; link the reconciliation ledger for proof and preserve optional future ideas as unfiled rather than implied commitments.",
+      "evidence_and_truth": "blocks[2], [25]-[30] clearly separate shipped product, blessed remainders, optional future work, and representation migration.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The first paragraph gives date, shipped range, closed lifecycle, and the four product capabilities in one sentence.",
+          "lesson": "A close-out paper should disclose status and scope before chronology."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[28]",
+          "evidence": "Growing cohorts and maintenance windows are deliberately unfiled future options with no owner.",
+          "lesson": "Unowned possibilities must not read like roadmap commitments."
+        }
+      ],
+      "duplicate_disposition": "Keep as human summary, separate from the reconcile proof ledger and Wave-6 execution record.",
+      "reader_risks": [
+        "Studio: surface purpose, date, implementation status, and predecessor/successor links before long proof ledgers; collapse branch/task details.",
+        "TUI80: wrap or paginate tables, code assemblies, heatmaps, and branch ledgers; legacy HTML must not become unbroken terminal text.",
+        "email: send the decision, current status, one caveat, and a link; omit raw matrices, commands, and live-ledger detail.",
+        "public: remove internal hosts, credentials/env names, task/PR identifiers, operational addresses, and unsupported security or vendor-comparison claims.",
+        "CLI/API: preserve exact ids/revisions, endpoint and status vocabularies, gate totals, lifecycle distinctions, and planned-versus-shipped-versus-live-proven claims."
+      ],
+      "rationale": "Keep because it is current, native, concise, and explicit about what closed versus what remains optional or gated."
+    },
+    {
+      "unit_id": "paper:session-handoff-design",
+      "document_id": "session-handoff-design",
+      "document_rev": "251a9a9573462ab7b7ead41f6dd6e5ad",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Approved design for a living, resumable session document with milestone events, checkpoint synthesis, scrubbed transcript media, and task backlinks.",
+      "opening_and_criteria": "The ingress makes crash safety the central requirement and explains why event trails exist before close-time synthesis.",
+      "outline_and_hierarchy": "Decisions, lifecycle, schema, API/CLI, skills, auto-log follow-up, failure handling, tests, and YAGNI exclusions form a complete design handoff.",
+      "human_voice_and_precision": "The design repeatedly chooses loud degradation over clever recovery and keeps the synthesis/event/transcript roles distinct.",
+      "compression_and_restraint": "Keep as the approved contract; add implementation status and security-test evidence when built, especially around transcript scrubbing and server-side auto-log.",
+      "evidence_and_truth": "blocks[4]-[10], [20]-[30] define the full lifecycle, data contract, portable skill surface, fallbacks, tests, and next-stage boundary.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "Synthesis is readable summary while append-only events remain ground truth between checkpoints, allowing crashed sessions to resume.",
+          "lesson": "Crash-safe handoff needs durable incremental state, not a close hook."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "V1 depends on agent discipline for logging, with server-side auto-log only filed as the next step.",
+          "lesson": "Approved design decisions should be labeled separately from shipped automation."
+        }
+      ],
+      "duplicate_disposition": "Distinct from task/session runtime docs: this is the canonical design contract and should link later implementation receipts rather than absorb them.",
+      "reader_risks": [
+        "Studio: surface purpose, date, implementation status, and predecessor/successor links before long proof ledgers; collapse branch/task details.",
+        "TUI80: wrap or paginate tables, code assemblies, heatmaps, and branch ledgers; legacy HTML must not become unbroken terminal text.",
+        "email: send the decision, current status, one caveat, and a link; omit raw matrices, commands, and live-ledger detail.",
+        "public: remove internal hosts, credentials/env names, task/PR identifiers, operational addresses, and unsupported security or vendor-comparison claims.",
+        "CLI/API: preserve exact ids/revisions, endpoint and status vocabularies, gate totals, lifecycle distinctions, and planned-versus-shipped-versus-live-proven claims."
+      ],
+      "rationale": "Keep because the approved design is coherent, test-shaped, and explicit about v1 versus v1.5."
+    },
+    {
+      "unit_id": "paper:shared-cells",
+      "document_id": "shared-cells",
+      "document_rev": "a015e5c728c35ccf37cf0b0aad68e18d",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Shared-hosting doctrine and build plan for bounded multi-tenant cells with transparent quotas, mobility, hardening, and graduation to dedicated infrastructure.",
+      "opening_and_criteria": "The opening makes the key architectural distinction—tenants author content, not code—then presents an honest ten-risk ledger.",
+      "outline_and_hierarchy": "Risk matrix, existing advantages, doctrine, build slices, receipts, and companion verdicts are coherent, but later verdict links overturn some body claims.",
+      "human_voice_and_precision": "The paper avoids utopian shared-hosting language and makes the hardened profile a non-negotiable launch precondition.",
+      "compression_and_restraint": "Fold the companion verdicts back into the main prose: replace zero-read-downtime and unconditional burst-absorption claims, distinguish target UX from shipped UI, and add as-of readiness.",
+      "evidence_and_truth": "blocks[9], [23]-[36] separate current substrate from planned slices and expose later proof/correction papers.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[28]",
+          "evidence": "The document refuses launch without console-off, operator-fenced admin surfaces, and RLS.",
+          "lesson": "Security preconditions belong in the launch gate, not backlog prose."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[36]",
+          "evidence": "The companion verdict says the earlier replication fiction was replaced by a measured roughly 60-second write-freeze window, contradicting the zero-read-downtime doctrine in blocks[17].",
+          "lesson": "When a linked proof overturns a central promise, update the main body rather than relying on a footer link."
+        }
+      ],
+      "duplicate_disposition": "Keep distinct as shared-tier doctrine, but repair it from the linked keystone/quota/cache/telemetry/migration verdicts.",
+      "reader_risks": [
+        "Studio: surface purpose, date, implementation status, and predecessor/successor links before long proof ledgers; collapse branch/task details.",
+        "TUI80: wrap or paginate tables, code assemblies, heatmaps, and branch ledgers; legacy HTML must not become unbroken terminal text.",
+        "email: send the decision, current status, one caveat, and a link; omit raw matrices, commands, and live-ledger detail.",
+        "public: remove internal hosts, credentials/env names, task/PR identifiers, operational addresses, and unsupported security or vendor-comparison claims.",
+        "CLI/API: preserve exact ids/revisions, endpoint and status vocabularies, gate totals, lifecycle distinctions, and planned-versus-shipped-versus-live-proven claims."
+      ],
+      "rationale": "Repair because its structure is strong but material later findings contradict central availability and cache claims."
+    },
+    {
+      "unit_id": "paper:shared-storm",
+      "document_id": "shared-storm",
+      "document_rev": "502bb8350f9afd21decaa56d95c10f38",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Small plugin proposal for anonymous, rate-limited shared lightning events and durable counters powering a GitHub Pages card.",
+      "opening_and_criteria": "The goal is vivid and the decision section explains why generic data routes and token semantics cannot safely support anonymous writes.",
+      "outline_and_hierarchy": "Architecture, client behavior, abuse posture, ops, and open questions fit in 23 semantic legacy-HTML units, but there is no execution status or falsifiable acceptance suite.",
+      "human_voice_and_precision": "The writing honestly bounds worst-case abuse and keeps local rendering independent of the network.",
+      "compression_and_restraint": "Convert to native blocks, mark proposal status, replace illustrative rate limits with configured policy, and add CORS, counter atomicity, cursor, TTL, and adversarial rate-limit proofs.",
+      "evidence_and_truth": "body_html[3]-[19] defines a minimal plugin seam, fail-closed channel configuration, offline grace, and bounded abuse model.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[3]",
+          "evidence": "The decision derives a purpose-built low-trust plugin from verified CORS/token constraints and keeps the plugin-off core untouched.",
+          "lesson": "New public-write surfaces need an explicit boundary and off-state."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[17]",
+          "evidence": "Rate limits and daily caps are illustrative examples, while durable anonymous counter inflation is accepted without an implementation/monitoring proof.",
+          "lesson": "Abuse budgets must be configured and tested, not left as e.g. values in a proposal."
+        }
+      ],
+      "duplicate_disposition": "Distinct proposal; do not merge with Shared Cells despite the name overlap because it owns a public-event plugin, not hosting tenancy.",
+      "reader_risks": [
+        "Studio: surface purpose, date, implementation status, and predecessor/successor links before long proof ledgers; collapse branch/task details.",
+        "TUI80: wrap or paginate tables, code assemblies, heatmaps, and branch ledgers; legacy HTML must not become unbroken terminal text.",
+        "email: send the decision, current status, one caveat, and a link; omit raw matrices, commands, and live-ledger detail.",
+        "public: remove internal hosts, credentials/env names, task/PR identifiers, operational addresses, and unsupported security or vendor-comparison claims.",
+        "CLI/API: preserve exact ids/revisions, endpoint and status vocabularies, gate totals, lifecycle distinctions, and planned-versus-shipped-versus-live-proven claims."
+      ],
+      "rationale": "Repair because the design is compact and sensible but legacy, unversioned, and missing execution/acceptance evidence."
+    },
+    {
+      "unit_id": "paper:site-autodeploy-vercel-gap-analysis",
+      "document_id": "site-autodeploy-vercel-gap-analysis",
+      "document_rev": "b6a3e4c6f12587f765a799e44e98e432",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Code-verified competitive gap analysis separating Vercel’s git loop from Barkpark’s content loop and sequencing the missing source-fetch, gate, and feedback links.",
+      "opening_and_criteria": "The ingress gives a useful two-loop frame and refuses to describe the open-circuit git path as polish debt.",
+      "outline_and_hierarchy": "Current-state table, competitive matrix, identity contrasts, three waves, anti-goals, and sequencing form a clear strategy document.",
+      "human_voice_and_precision": "It avoids cargo-cult parity by defending named boxes, price-before-charge, content-addressed builds, and honesty-as-UI.",
+      "compression_and_restraint": "Refresh against current source and current Vercel behavior, add completion markers, and move mutable competitive facts into a dated appendix before using it as present-state authority.",
+      "evidence_and_truth": "blocks[7]-[23] connect source evidence to three missing links, product identity, ranked waves, and explicit anti-goals.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "The gap compresses to source fetch, a credential/config gate, and deployment feedback; without all three the git loop is open circuit.",
+          "lesson": "Competitive plans should reduce feature lists to the load-bearing causal chain."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[25]",
+          "evidence": "The document is code-verified only as of 2026-07-18 while both local implementation and Vercel capabilities are fast-moving.",
+          "lesson": "Current-state competitive analysis needs an expiry or refresh protocol."
+        }
+      ],
+      "duplicate_disposition": "Keep as a dated strategic gap analysis, separate from later build wave records; repair current-status overlays rather than merge histories.",
+      "reader_risks": [
+        "Studio: surface purpose, date, implementation status, and predecessor/successor links before long proof ledgers; collapse branch/task details.",
+        "TUI80: wrap or paginate tables, code assemblies, heatmaps, and branch ledgers; legacy HTML must not become unbroken terminal text.",
+        "email: send the decision, current status, one caveat, and a link; omit raw matrices, commands, and live-ledger detail.",
+        "public: remove internal hosts, credentials/env names, task/PR identifiers, operational addresses, and unsupported security or vendor-comparison claims.",
+        "CLI/API: preserve exact ids/revisions, endpoint and status vocabularies, gate totals, lifecycle distinctions, and planned-versus-shipped-versus-live-proven claims."
+      ],
+      "rationale": "Repair because its strategic frame is strong but its “today” claims are time-sensitive and lack progress markers."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}
