@@ -2600,14 +2600,23 @@ defmodule BarkparkWeb.Router do
   # gracefully), so nothing user-facing raises — this is the only way to reach
   # the crash path. Compiled out unless :error_test_routes is set (config/test.exs).
   #
-  # Sobelow Config.Headers (justified, stays baselined — task-f76e9b7b): this
-  # pipeline is COMPILED OUT of dev and prod (the compile_env guard is only true
-  # under MIX_ENV=test). It exists solely to reach the raw crash path so the
-  # RenderErrors tests can assert ErrorHTML/ErrorJSON render — no real browser
-  # ever hits it, so missing put_secure_browser_headers exposes nothing.
+  # This pipeline used to carry a permanent Sobelow Config.Headers waiver on the
+  # grounds that it is compiled out of dev and prod. That reasoning was sound but
+  # the waiver was not free: a baselined finding is a line-anchored fingerprint
+  # that has to be re-anchored on every drift, and a permanently-red security
+  # gate cannot report a regression. Setting the headers costs three lines, so
+  # the waiver is deleted instead. The two-arg map form is the house pattern
+  # (see :browser, :shared_paper_browser) and is what Sobelow's syntactic
+  # Config.CSP check credits — the one-arg form would merely trade this finding
+  # for an uncredited Config.CSP one. Honest price: because the pipeline is
+  # compile_env-gated to MIX_ENV=test, this prevents no production failure.
   if Application.compile_env(:barkpark, :error_test_routes, false) do
     pipeline :error_test do
       plug(:accepts, ["json", "html"])
+
+      plug(:put_secure_browser_headers, %{
+        "content-security-policy" => "default-src 'none'"
+      })
     end
 
     scope "/__error_test__", BarkparkWeb do
