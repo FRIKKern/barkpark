@@ -1,0 +1,285 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report-validation/v1",
+  "assignment_id": "PPCC2-S005",
+  "valid": true,
+  "checks": [
+    {
+      "name": "bound-snapshot-sha",
+      "status": "PASS",
+      "evidence": "4d1c746e77a234705df2307d99bd8b509f08e3c9fd177ecd26bd4fcc14de3927"
+    },
+    {
+      "name": "source-snapshot-sha",
+      "status": "PASS",
+      "evidence": "31b934d6c8d22ab37045eb8b23571c93e9c59de80e190892bcc1cb1bb606b21b"
+    },
+    {
+      "name": "bound-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S005",
+        "status": "cyclefleet_bound",
+        "unit_count": 10
+      }
+    },
+    {
+      "name": "immutable-wave-binding",
+      "status": "PASS",
+      "evidence": {
+        "status": "cyclefleet_bound",
+        "wave_id": "paper-perfection-successor-wave-2026-07-29",
+        "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+        "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+        "source_snapshot_sha256": "31b934d6c8d22ab37045eb8b23571c93e9c59de80e190892bcc1cb1bb606b21b"
+      }
+    },
+    {
+      "name": "report-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S005",
+        "worker": "worker-2"
+      }
+    },
+    {
+      "name": "ordered-checked-unit-ids",
+      "status": "PASS",
+      "evidence": [
+        "paper:bp-scaffy-wave-2026-07-16",
+        "paper:bp-scaffy-wave-2026-07-23",
+        "paper:bp-scaffy-wave-2026-07-23-d58",
+        "paper:bp-scaffy-wave2-2026-07-16",
+        "paper:bp-scaffy-wave3-2026-07-16",
+        "paper:bp-scaffy-wave4-2026-07-16",
+        "paper:bp-scaffy-wave5-2026-07-17",
+        "paper:bp-scaffy-wave6-2026-07-17",
+        "paper:bp-scaffy-wave7-2026-07-17",
+        "paper:chat-herd-layer"
+      ]
+    },
+    {
+      "name": "one-verdict-per-unit",
+      "status": "PASS",
+      "evidence": 10
+    },
+    {
+      "name": "verdict-metadata-pinned",
+      "status": "PASS",
+      "evidence": "all document ids and immutable revisions match"
+    },
+    {
+      "name": "allowed-verdicts-and-counts",
+      "status": "PASS",
+      "evidence": {
+        "repair": 7,
+        "keep": 2,
+        "merge-candidate": 1
+      }
+    },
+    {
+      "name": "editorial-dimensions-complete",
+      "status": "PASS",
+      "evidence": [
+        "compression_and_restraint",
+        "duplicate_disposition",
+        "evidence_and_truth",
+        "human_voice_and_precision",
+        "opening_and_criteria",
+        "outline_and_hierarchy",
+        "purpose_and_larger_goal",
+        "rationale"
+      ]
+    },
+    {
+      "name": "specific-existing-evidence-refs",
+      "status": "PASS",
+      "evidence": [
+        {
+          "document_id": "bp-scaffy-wave-2026-07-16",
+          "ref": "body_html[94]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave-2026-07-16",
+          "ref": "body_html[73]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave-2026-07-23",
+          "ref": "blocks[26]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave-2026-07-23",
+          "ref": "blocks[2]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave-2026-07-23-d58",
+          "ref": "blocks[30]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave-2026-07-23-d58",
+          "ref": "blocks[34]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave2-2026-07-16",
+          "ref": "body_html[99]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave2-2026-07-16",
+          "ref": "body_html[97]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave3-2026-07-16",
+          "ref": "body_html[97]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave3-2026-07-16",
+          "ref": "body_html[91]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave4-2026-07-16",
+          "ref": "blocks[2]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave4-2026-07-16",
+          "ref": "blocks[71]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave5-2026-07-17",
+          "ref": "blocks[34]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave5-2026-07-17",
+          "ref": "blocks[2]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave6-2026-07-17",
+          "ref": "blocks[47]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave6-2026-07-17",
+          "ref": "blocks[55]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave7-2026-07-17",
+          "ref": "blocks[27]",
+          "exists": true
+        },
+        {
+          "document_id": "bp-scaffy-wave7-2026-07-17",
+          "ref": "blocks[18]",
+          "exists": true
+        },
+        {
+          "document_id": "chat-herd-layer",
+          "ref": "blocks[6]",
+          "exists": true
+        },
+        {
+          "document_id": "chat-herd-layer",
+          "ref": "blocks[29]",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "five-reader-risks",
+      "status": "PASS",
+      "evidence": [
+        "CLI/API",
+        "Studio",
+        "TUI80",
+        "email",
+        "public"
+      ]
+    },
+    {
+      "name": "read-only-mutation-attestation",
+      "status": "PASS",
+      "evidence": {
+        "production_papers_mutated": false,
+        "cyclefleet_mutated": false,
+        "read_operations_only": [
+          "bp doc get paper <document_id> --perspective raw --json"
+        ],
+        "bp_cycle_assign_called": false,
+        "bp_cycle_result_called": false
+      }
+    },
+    {
+      "name": "unvisited-scope-empty",
+      "status": "PASS",
+      "evidence": []
+    },
+    {
+      "name": "readbacks-exact-and-hashed",
+      "status": "PASS",
+      "evidence": "all 10 raw ids/revisions and SHA-256 receipts match"
+    },
+    {
+      "name": "legacy-html-accounted-not-empty",
+      "status": "PASS",
+      "evidence": {
+        "legacy_documents": [
+          "bp-scaffy-wave-2026-07-16",
+          "bp-scaffy-wave2-2026-07-16",
+          "bp-scaffy-wave3-2026-07-16"
+        ],
+        "native_block_total": 383
+      }
+    },
+    {
+      "name": "purpose-based-duplicate-analysis",
+      "status": "PASS",
+      "evidence": [
+        {
+          "candidate_set": [
+            "bp-scaffy-wave-2026-07-16",
+            "bp-scaffy-wave2-2026-07-16",
+            "bp-scaffy-wave3-2026-07-16",
+            "bp-scaffy-wave4-2026-07-16",
+            "bp-scaffy-wave5-2026-07-17",
+            "bp-scaffy-wave6-2026-07-17",
+            "bp-scaffy-wave7-2026-07-17"
+          ],
+          "basis": "Shared epic chronology and repeated phase/ledger scaffolding; each wave still owns different decision authority.",
+          "disposition": "Create a compact W1–W7 chronology/index; preserve pinned detailed audits and extract W7’s unique dogfood capsule."
+        },
+        {
+          "candidate_set": [
+            "bp-scaffy-wave-2026-07-23",
+            "bp-scaffy-wave-2026-07-23-d58"
+          ],
+          "basis": "Both center premise validation, but one validates workflow blocks across phases and the other records a distinct D58 refutation/pivot.",
+          "disposition": "Cross-link methodology; do not merge result authority."
+        },
+        {
+          "candidate_set": [
+            "chat-herd-layer",
+            "wsc session-card epic"
+          ],
+          "basis": "Shared chat state surface, explicitly described as substrate relationship rather than competing purpose.",
+          "disposition": "Keep design boundary; link implementation status instead of copying it."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  }
+}

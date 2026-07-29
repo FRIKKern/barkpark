@@ -1,0 +1,500 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S005",
+  "assignment_snapshot_sha256": "4d1c746e77a234705df2307d99bd8b509f08e3c9fd177ecd26bd4fcc14de3927",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 2,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "31b934d6c8d22ab37045eb8b23571c93e9c59de80e190892bcc1cb1bb606b21b"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally receipted.",
+  "direct_answer": "All ten pinned revisions were read. Keep 2, repair 7, and treat 1 as a purpose-based merge candidate. The corpus is unusually strong at honest run-proof debriefs and self-correction; its main editorial debt is stale opening state, repeated phase scaffolding, legacy HTML in W1–W3, and multi-kilobyte ledgers that bury terminal verdicts.",
+  "verdict_counts": {
+    "repair": 7,
+    "keep": 2,
+    "merge-candidate": 1
+  },
+  "checked_unit_ids": [
+    "paper:bp-scaffy-wave-2026-07-16",
+    "paper:bp-scaffy-wave-2026-07-23",
+    "paper:bp-scaffy-wave-2026-07-23-d58",
+    "paper:bp-scaffy-wave2-2026-07-16",
+    "paper:bp-scaffy-wave3-2026-07-16",
+    "paper:bp-scaffy-wave4-2026-07-16",
+    "paper:bp-scaffy-wave5-2026-07-17",
+    "paper:bp-scaffy-wave6-2026-07-17",
+    "paper:bp-scaffy-wave7-2026-07-17",
+    "paper:chat-herd-layer"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 10,
+    "native_top_level_blocks_read": 383,
+    "legacy_html_documents_read": [
+      "bp-scaffy-wave-2026-07-16",
+      "bp-scaffy-wave2-2026-07-16",
+      "bp-scaffy-wave3-2026-07-16"
+    ],
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:bp-scaffy-wave-2026-07-16 body_html[94]",
+      "evidence": "Outcome ledger records branches, verdicts, and a real review defect.",
+      "lesson": "Close with auditable receipts."
+    },
+    {
+      "block_ref": "paper:bp-scaffy-wave-2026-07-23 blocks[26]",
+      "evidence": "Premise-smoke catches its own upstream pagination misread before build.",
+      "lesson": "Treat self-correction as validation evidence."
+    },
+    {
+      "block_ref": "paper:bp-scaffy-wave6-2026-07-17 blocks[47]",
+      "evidence": "An irreproducible flattering benchmark number is explicitly dropped.",
+      "lesson": "Honesty beats narrative convenience."
+    },
+    {
+      "block_ref": "paper:chat-herd-layer blocks[6]",
+      "evidence": "Four stored states with stalled derived only in the view.",
+      "lesson": "Keep state models minimal and derived UX explicit."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:bp-scaffy-wave5-2026-07-17 blocks[2]",
+      "evidence": "IN FLIGHT remains at the front door after a Grade A round-one debrief.",
+      "reader_impact": "Stale summaries mislead readers."
+    },
+    {
+      "block_ref": "paper:bp-scaffy-wave7-2026-07-17 blocks[18]",
+      "evidence": "A 4,645-character reconciliation block carries several independent decisions.",
+      "reader_impact": "Narrow readers cannot retrieve the conclusion."
+    },
+    {
+      "block_ref": "paper:bp-scaffy-wave6-2026-07-17 blocks[55]",
+      "evidence": "A 2,752-character shipped paragraph mixes three artifacts and review findings.",
+      "reader_impact": "The terminal outcome is not scannable."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "bp-scaffy-wave-2026-07-16",
+        "bp-scaffy-wave2-2026-07-16",
+        "bp-scaffy-wave3-2026-07-16",
+        "bp-scaffy-wave4-2026-07-16",
+        "bp-scaffy-wave5-2026-07-17",
+        "bp-scaffy-wave6-2026-07-17",
+        "bp-scaffy-wave7-2026-07-17"
+      ],
+      "basis": "Shared epic chronology and repeated phase/ledger scaffolding; each wave still owns different decision authority.",
+      "disposition": "Create a compact W1–W7 chronology/index; preserve pinned detailed audits and extract W7’s unique dogfood capsule."
+    },
+    {
+      "candidate_set": [
+        "bp-scaffy-wave-2026-07-23",
+        "bp-scaffy-wave-2026-07-23-d58"
+      ],
+      "basis": "Both center premise validation, but one validates workflow blocks across phases and the other records a distinct D58 refutation/pivot.",
+      "disposition": "Cross-link methodology; do not merge result authority."
+    },
+    {
+      "candidate_set": [
+        "chat-herd-layer",
+        "wsc session-card epic"
+      ],
+      "basis": "Shared chat state surface, explicitly described as substrate relationship rather than competing purpose.",
+      "disposition": "Keep design boundary; link implementation status instead of copying it."
+    }
+  ],
+  "reader_risks": [
+    "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+    "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+    "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+    "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+    "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:bp-scaffy-wave-2026-07-16",
+      "document_id": "bp-scaffy-wave-2026-07-16",
+      "document_rev": "c8b40e0cb517a6920e1fa1ad4821cb7d",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "The founding Scaffy wave record: it turns a wish for commands-as-content into a seven-command corpus, grammar decisions, review outcomes, and a reusable wave plan.",
+      "opening_and_criteria": "body_html[2] states the wish and body_html[5] anchors ground truth, but the opening status remains a historical BUILDING-era front door while the real terminal verdict appears only at body_html[91]–body_html[103].",
+      "outline_and_hierarchy": "A long Strategize → Survey → Digest → Verify → Decide → Plan → Debrief chronology with 106 semantic HTML elements. The sequence is auditable, but the debrief should be promoted ahead of the phase diary.",
+      "human_voice_and_precision": "The voice is candid and specific: named tasks, exact gates, and a real defect are recorded without varnish. Operational shorthand is dense for readers outside the epic.",
+      "compression_and_restraint": "Legacy body_html contains about 31.5k visible characters; body_html[73] alone is a roughly 3.6k-character normative command. Preserve the receipt but add a compact outcome rail.",
+      "evidence_and_truth": "body_html[94] gives a task/branch/verdict review table and records the missing MARK defect; body_html[68] reports the clean-worktree gate contrast rather than repeating an assumption.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[94]",
+          "evidence": "The task/branch/verdict table distinguishes shipped work, review fixes, and exact merge branches.",
+          "lesson": "Close a build story with one auditable outcome ledger, including defects found."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[73]",
+          "evidence": "A 3,624-character normative command is carried inline on the main reading path.",
+          "lesson": "It overwhelms TUI/email readers and hides the decision it is meant to support."
+        }
+      ],
+      "duplicate_disposition": "Distinct as the corpus-origin record. It overlaps W2–W7 in phase boilerplate, not purpose; link a compact Scaffy chronology rather than merge away its founding evidence.",
+      "reader_risks": [
+        "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+        "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+        "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+        "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+      ],
+      "rationale": "Repair: retain the unique founding evidence, convert legacy HTML to native blocks, promote the A- debrief, and collapse command-sized proof behind a labeled summary."
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave-2026-07-23",
+      "document_id": "bp-scaffy-wave-2026-07-23",
+      "document_rev": "46ded8e9a6feb893dc8fbb0f6a05ffc6",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "A graduation-validation wave that tests whether premise-smoke and flip-risk guidance change plans before wasted build work, then ships three bounded fixes.",
+      "opening_and_criteria": "blocks[2] says IN FLIGHT even though blocks[39] later closes at Grade A. The success measure becomes crisp in blocks[26] and blocks[30]: one phantom caught by smoke, zero escaped to build.",
+      "outline_and_hierarchy": "48 blocks progress coherently from wish through premise challenge, survey, verification, decisions, build plan, and review. The opening status conflicts with the completed debrief.",
+      "human_voice_and_precision": "Exceptionally honest about a Strategize misread and ambiguous attribution. Precision is high, though repeated retelling of the same pagination correction creates fatigue.",
+      "compression_and_restraint": "The 3,463-character survey plan at blocks[16] and 2,439-character per-slice ledger at blocks[43] are valuable appendices, not ideal primary-path prose.",
+      "evidence_and_truth": "blocks[26] explicitly records premise_smoke PARTIAL/YES by phase, one caught failure, and zero escaped failures; blocks[41] independently re-derives the same terminal datum.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[26]",
+          "evidence": "Strategize misfired on pagination; Digest re-ran premise-smoke, caught it, and flipped the plan before build.",
+          "lesson": "Validation is strongest when it catches its own upstream reasoning error and records when it was contained."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The front-door callout still says IN FLIGHT: VERIFYING / BUILDING despite the later Grade A debrief.",
+          "lesson": "Readers and machine summaries can report stale state without reaching the end."
+        }
+      ],
+      "duplicate_disposition": "Distinct from the D58 premise-refutation wave: this paper validates the workflow block across phases; D58 tests a later candidate premise and pivot. Cross-link rather than merge.",
+      "reader_risks": [
+        "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+        "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+        "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+        "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+      ],
+      "rationale": "Repair: keep the rare self-correcting validation evidence, update the front door to terminal state, deduplicate the pagination narrative, and move fleet detail to appendices."
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave-2026-07-23-d58",
+      "document_id": "bp-scaffy-wave-2026-07-23-d58",
+      "document_rev": "7394c16f6d5dbbe5760c53f38bc2b0e2",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "A focused premise-refutation wave that tests D58 canonical-marker mechanics, kills a stale assumption, pivots to a verified alternative, and records a one-slice Grade A outcome.",
+      "opening_and_criteria": "The opening frames a falsifiable premise; blocks[27] announces WAVE COMPLETE, Grade A, 1/1, and blocks[30] states the premise/reseed proof.",
+      "outline_and_hierarchy": "44 blocks follow a disciplined challenge → verification → decision → one-slice build → independent review arc. The narrower scope makes the chronology easier to follow than most Scaffy waves.",
+      "human_voice_and_precision": "Direct, skeptical, and specific about what was refuted. It distinguishes evidence from interpretation and does not inflate a one-slice result.",
+      "compression_and_restraint": "Dense decision material remains, especially the multi-decision ledger around blocks[34], but the terminal result is visible and the document is materially tighter than the multi-round waves.",
+      "evidence_and_truth": "blocks[30] carries the exact premise/refutation and reseed proof; blocks[39] independently verifies the mutation path before the Grade A close.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[30]",
+          "evidence": "The paper records the original premise, the proof that killed it, and the explicit pivot rather than silently rewriting history.",
+          "lesson": "Preserve failed premises as first-class evidence when they materially improve the resulting plan."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[34]",
+          "evidence": "A dense D94–D98 decision ledger mixes policy, mechanics, and follow-up in one long list.",
+          "lesson": "Narrow readers must decode several authority layers before reaching the operative rule."
+        }
+      ],
+      "duplicate_disposition": "Not a duplicate of the general graduation wave: its authority is the D58 premise refutation and pivot. Link the validation methodology, but preserve this result separately.",
+      "reader_risks": [
+        "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+        "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+        "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+        "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+      ],
+      "rationale": "Keep: it has a distinct falsification result, a visible terminal status, independent proof, and disciplined scope; only minor compression is advisable."
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave2-2026-07-16",
+      "document_id": "bp-scaffy-wave2-2026-07-16",
+      "document_rev": "1c12245644cb00253ef6d182bc3f7a7a",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "The validator/formatter grammar-law wave: it turns the W1 corpus into executable rules, a typed AST, adversarial fixtures, and follow-up CLI/conformance work.",
+      "opening_and_criteria": "body_html[0]–body_html[1] now correct the status to CLOSED and explain the former VERIFYING label. The wish is clear, but success is split across two shipped slices and two structurally blocked slices.",
+      "outline_and_hierarchy": "106 semantic HTML elements track survey, six run-proofs, D20–D32, plan, and debrief. The terminal story is accurate but too far from the opening for scan-first readers.",
+      "human_voice_and_precision": "Excellent at naming contradictions and reporting parser/corpus divergence. Acronym and decision density assumes deep Scaffy context.",
+      "compression_and_restraint": "The legacy HTML narrative is about 30k visible characters; proof and debrief paragraphs exceed comfortable TUI/email size and should be summarized before expansion.",
+      "evidence_and_truth": "body_html[71]–body_html[76] report six concrete verifier outcomes; body_html[99] attributes the two stalls to same-round dependency dispatch rather than timing.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[99]",
+          "evidence": "CLI wiring and corpus conformance were never built because same-round dispatch violated their AFTER dependency.",
+          "lesson": "Name structural orchestration failure precisely instead of blaming workers or elapsed time."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[97]",
+          "evidence": "The core-package outcome is a roughly 1,100-character paragraph containing architecture, defects, fixes, tests, and merge guidance.",
+          "lesson": "Too many distinct judgments in one paragraph make the result hard to scan or quote safely."
+        }
+      ],
+      "duplicate_disposition": "Distinct grammar/validator authority between W1 corpus design and W3 execution engine. Phase boilerplate may be summarized in a series index; do not merge the decisions.",
+      "reader_risks": [
+        "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+        "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+        "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+        "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+      ],
+      "rationale": "Repair: preserve D20–D32 and the honest dispatch lesson, migrate legacy HTML to native blocks, and split the two shipped/two blocked outcome into a compact terminal ledger."
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave3-2026-07-16",
+      "document_id": "bp-scaffy-wave3-2026-07-16",
+      "document_rev": "966feaaa5f37c8bcdb4d0dc15630746f",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "The Scaffy engine wave: specify run/remove semantics, receipts, substitution, asserts, CLI wiring, live proof, and repo-aware validation on top of W2.",
+      "opening_and_criteria": "body_html[0] honestly says COMPLETE, grade B-, engine core landed and four slices blocked. That is an exemplary front door; the initial wish remains much broader than what shipped.",
+      "outline_and_hierarchy": "105 semantic HTML elements form a full research-to-review record. Terminal truth is clear, but the mass of proofs and D33–D43 mirrors competes with the central 1-of-5 outcome.",
+      "human_voice_and_precision": "The debrief is unusually candid: “A charter law that the dispatcher does not read is not yet a law.” Technical precision is strong, but it is written for insiders.",
+      "compression_and_restraint": "The engine-core result at body_html[91] is 1,264 characters and the full document exceeds 30k visible characters; add a short authority map and collapse derivation detail.",
+      "evidence_and_truth": "body_html[93] records zero code defects plus three extra probes; body_html[95] and body_html[97] separate construction quality from orchestration failure.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[97]",
+          "evidence": "The wave grades against the wish: 1 of 5 slices landed, so excellent engine-core construction still yields B-.",
+          "lesson": "Grade the outcome against the promised user-visible boundary, not merely the quality of the part that shipped."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[91]",
+          "evidence": "A 1,264-character shipped-slice paragraph compresses nearly every engine semantic, test, and merge instruction into one item.",
+          "lesson": "The main result becomes difficult to scan and risks losing constraints when excerpted."
+        }
+      ],
+      "duplicate_disposition": "Distinct engine authority. It overlaps W2/W4 only as chronological context; preserve the D33–D43 and orchestration-failure record while linking a compact series timeline.",
+      "reader_risks": [
+        "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+        "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+        "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+        "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+      ],
+      "rationale": "Repair: the truth model is excellent, but convert legacy HTML, add a concise shipped/blocked matrix, and demote the exhaustive semantic replay to a labeled evidence appendix."
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave4-2026-07-16",
+      "document_id": "bp-scaffy-wave4-2026-07-16",
+      "document_rev": "821a4c7becada1736be48c439b762eaf",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Commands-as-content distribution wave: schema/plugin support, file flags, remote pull/trust UX, seeding, and live proof through guerrilla.",
+      "opening_and_criteria": "blocks[2] immediately states WAVE CLOSED, 3 of 5 ready, and why rounds 2–3 stopped. It explicitly labels older in-flight beacons as historical.",
+      "outline_and_hierarchy": "76 blocks preserve a full wave audit, but the terminal callout makes the large chronology navigable. The five-slice/three-round plan and debrief align.",
+      "human_voice_and_precision": "Strong operational honesty and exact branch/gate guidance. Internal host and deployment vocabulary reduces portability to public readers.",
+      "compression_and_restraint": "The three shipped-slice paragraphs are dense—blocks[69] and blocks[71] exceed 1k characters—but the opening summary prevents them from obscuring status.",
+      "evidence_and_truth": "blocks[69] identifies a review-added render test; blocks[71] records a real `-o json` consent defect and the review branch containing the fix.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The first callout states the terminal outcome, explains 3/5, and marks older phase beacons as historical.",
+          "lesson": "Use a dated truth label at the front door when retaining a living wave chronology."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[71]",
+          "evidence": "The pull/trust review result combines contract, tests, live envelope proof, and a JSON-output defect in one 1,500-character paragraph.",
+          "lesson": "Readers cannot quickly separate shipped behavior, review fix, and residual risk."
+        }
+      ],
+      "duplicate_disposition": "Distinct remote distribution/trust authority. Later waves consume its results but do not replace its plugin, pull, consent, and provenance decisions.",
+      "reader_risks": [
+        "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+        "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+        "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+        "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+      ],
+      "rationale": "Keep: the terminal status is exemplary, evidence is concrete, and the paper owns a unique distribution boundary; optional paragraph splitting is editorial polish."
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave5-2026-07-17",
+      "document_id": "bp-scaffy-wave5-2026-07-17",
+      "document_rev": "60e898270f884c91c7c403cd141cabe8",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Catalog expansion and grammar-stress wave: mine real use cases, reject weak primitives, add ONEOF and several reversible commands, then reconcile and seed the catalog.",
+      "opening_and_criteria": "blocks[2] still says IN FLIGHT: DIGEST despite blocks[75]–blocks[79] closing round 1 at Grade A. The wish also promises served-at-14, which the debrief correctly says remains deferred.",
+      "outline_and_hierarchy": "81 blocks progress through premise corrections, evidence census, D54–D62, three-round plan, and round-one debrief. The stale opening and deferred endgame require careful full-document reading.",
+      "human_voice_and_precision": "The two premise corrections are forceful and evidence-led. The document avoids inventing FOREACH history, but dense catalog jargon narrows accessibility.",
+      "compression_and_restraint": "blocks[77] is a 1,500-character branch/verdict table and several survey/verify lists are larger; create a short round-one outcome plus remaining-work card.",
+      "evidence_and_truth": "blocks[34] proves the error-shape premise was already centralized; blocks[79] explicitly withholds A+ because serving/seeding is still open.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[34]",
+          "evidence": "Direct module reading overturns the assumed controller duplication and narrows add-error-shape to the real four-site change.",
+          "lesson": "Let primary-source inspection kill an attractive but false motivating story before design hardens around it."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The front-door callout remains IN FLIGHT: DIGEST while the paper later contains a Grade A round-one debrief.",
+          "lesson": "Status consumers can miss the terminal result, and “wave closes” can be mistaken for the still-deferred full wish."
+        }
+      ],
+      "duplicate_disposition": "Distinct catalog/grammar authority, but repeated survey and branch-ledger material overlaps the Scaffy wave series. Preserve decisions; summarize shared chronology in a series index.",
+      "reader_risks": [
+        "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+        "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+        "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+        "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+      ],
+      "rationale": "Repair: update the opening, distinguish round-one completion from the open served-at-14 endgame, and compress the 81-block ledger without losing premise corrections."
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave6-2026-07-17",
+      "document_id": "bp-scaffy-wave6-2026-07-17",
+      "document_rev": "e6a067fe4f4e10a744b7c5185efb842f",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Benchmark design wave: pre-register Scaffy-versus-agent duels, build a reproducible harness and miner, then run duels and author an evidence-led flagship verdict.",
+      "opening_and_criteria": "blocks[6] promises two papers and a verdict; blocks[54]–blocks[58] close only round 1, explicitly leaving duel execution and the flagship deferred.",
+      "outline_and_hierarchy": "64 blocks move from benchmark rationale through survey, corrections, calibration, D63–D73, plan, and round-one debrief. The scope boundary is honest but easy to miss after the aspirational opening.",
+      "human_voice_and_precision": "Excellent measurement skepticism: unsourced 56–80k and irreproducible 739 figures are killed. Benchmark terminology and long methodological paragraphs are heavy.",
+      "compression_and_restraint": "blocks[55] is roughly 2,752 characters and mixes three shipped artifacts plus review findings; it should be a small outcome table with linked receipts.",
+      "evidence_and_truth": "blocks[44] proves live cost, time, turns, tokens, and byte-clean reversal; blocks[47] kills the 739 claim with a reproducible miner.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[47]",
+          "evidence": "The miner reproduces supported counts and explicitly drops the 739 partner figure as irreproducible and structurally incompatible.",
+          "lesson": "A benchmark paper should delete flattering numbers that cannot be reconstructed, even when they motivated the wave."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[55]",
+          "evidence": "A 2,752-character “What shipped” paragraph combines preregistration, harness, miner, review fixes, tags, and branches.",
+          "lesson": "The most important round-one result is not independently scannable across Studio, TUI, or email."
+        }
+      ],
+      "duplicate_disposition": "Distinct benchmark-method authority. It should not be merged with the later duel results or flagship, but those papers should supersede its future-tense outcome claims once linked.",
+      "reader_risks": [
+        "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+        "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+        "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+        "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+      ],
+      "rationale": "Repair: preserve the honesty corrections and preregistration authority, label the document “round-one complete / duels pending,” and split the debrief into artifact-sized receipts."
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave7-2026-07-17",
+      "document_id": "bp-scaffy-wave7-2026-07-17",
+      "document_rev": "4c303ec163e9a3159bc2ba8f835cf5e2",
+      "verdict": "merge-candidate",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "A dogfood wave proving Scaffy can scaffold its own diff and filetree PortableDoc blocks, surface reconciliation needs, timing, parity, and later grow/paper work.",
+      "opening_and_criteria": "The wish asks for full rendered blocks and a self-demonstrating paper, while blocks[33]–blocks[37] close only round 1: starter stubs born, visible payoff deferred.",
+      "outline_and_hierarchy": "39 blocks are fewer than prior waves, but blocks[18], blocks[25], and blocks[27] carry very large reconciliations and run logs. The unique proof is buried inside familiar wave machinery.",
+      "human_voice_and_precision": "Precise and candid about the second classify refusal and the pre-seeded worktree. It clearly separates engine timing from asserts, but assumes deep D-number context.",
+      "compression_and_restraint": "blocks[18] is about 4,645 characters; blocks[27] is about 3,458. A compact W7 evidence capsule can preserve the unique dogfood proof far better than the full primary-path chronology.",
+      "evidence_and_truth": "blocks[17] proves dry-run and real apply; blocks[27] reports exact timings, the second-classify failure, mandatory classification, and parity repair.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[27]",
+          "evidence": "The live chain reports both fast engine-only timing and the exact same-tier classify failure, then proves the required one-word repair and parity gates.",
+          "lesson": "Dogfood claims should include the failure that reveals the real workflow, not only the happy-path scaffold timing."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[18]",
+          "evidence": "A 4,645-character reconciliation block combines three renderers, contract distinctions, chain reality, classification, and composition judgments.",
+          "lesson": "The unique conclusion is hard to retrieve and will wrap catastrophically in narrow readers."
+        }
+      ],
+      "duplicate_disposition": "Merge-candidate with a compact “Scaffy W1–W7 chronology” or dogfood evidence index: retain W7’s live chain/timing/failure capsule and link the full frozen audit as source. Do not title-merge with other waves.",
+      "reader_risks": [
+        "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+        "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+        "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+        "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+      ],
+      "rationale": "Merge-candidate: preserve the exact pinned audit, but move its transferable W7 proof into a compact series-level chronology because the visible product remained deferred and the primary path is dominated by repeated wave scaffolding."
+    },
+    {
+      "unit_id": "paper:chat-herd-layer",
+      "document_id": "chat-herd-layer",
+      "document_rev": "3f531a0ca367799f8794e312ce34b8cc",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Product/architecture design for herd-level agent attention: one four-state model, workspace rollup, fleet events, TUI herd view, MCP tools, notifications, and foreign-agent reporting.",
+      "opening_and_criteria": "blocks[1] gives a memorable thesis and blocks[6] defines the four-state contract. The paper does not declare a terminal design status or collected acceptance criteria; blocks[29] leaves open questions.",
+      "outline_and_hierarchy": "31 blocks are compact and well ordered: exclusions → state machine → six moves → dependency spine → relationship to wsc → build plan → risks → open questions.",
+      "human_voice_and_precision": "Strong human framing—attention rather than unread count—and precise state semantics. Several implementation claims are dated “verified against code” but need freshness boundaries.",
+      "compression_and_restraint": "Good restraint overall. The 1,227-character build plan at blocks[27] is dense but appropriately code-like; a one-screen success boundary would improve execution handoff.",
+      "evidence_and_truth": "blocks[6] is the authoritative state contract; blocks[28] ties each major risk to a mitigation and a live smoke gate rather than hand-waving reliability.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[6]",
+          "evidence": "Four states—blocked, working, idle, unknown—plus stalled as a view-side badge, with explicit rollup precedence.",
+          "lesson": "Keep the data model smaller than the UI vocabulary and make derived attention states explicit."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[29]",
+          "evidence": "The paper ends in open questions without a dated decision status or a single acceptance-criteria summary.",
+          "lesson": "Builders cannot tell which parts are authoritative design, unresolved choice, or already implemented elsewhere."
+        }
+      ],
+      "duplicate_disposition": "Distinct design authority relative to the wsc session-card epic: blocks[23] treats wsc as substrate rather than replacement. Keep that boundary and link current implementation status instead of duplicating it.",
+      "reader_risks": [
+        "Studio: put the terminal status and outcome before historical phase beacons; keep dense evidence collapsible but labeled.",
+        "TUI80: summarize wide tables and multi-kilobyte lists before the full ledger so wrapping does not bury the verdict.",
+        "email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "public: redact or freshness-label internal branches, paths, host assumptions, costs, and operational topology.",
+        "CLI/API: preserve exact command spellings, ids, revisions, exit codes, and the distinction between planned and shipped behavior."
+      ],
+      "rationale": "Repair: retain the excellent state model and dependency spine, add a dated status plus explicit success criteria, and resolve or assign the closing questions."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "read_operations_only": [
+      "bp doc get paper <document_id> --perspective raw --json"
+    ],
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}
