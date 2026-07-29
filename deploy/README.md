@@ -435,6 +435,57 @@ bp cloud site open     my-blog     # https://guerrilla.barkpark.cloud/sites/my-b
 bp cloud site rollback my-blog     # sub-second flip to the previous build
 ```
 
+### Shipping a build made somewhere else (`--prebuilt ./dist`)
+
+The default lane builds ON the serving box: `npm ci && npm run build` runs on the
+same two cores that answer the API. `--prebuilt` is the opt-in lane where that
+build happens anywhere else — your laptop, CI, a PDS box — and only the OUTPUT
+travels:
+
+```bash
+bp cloud site deploy my-blog --prebuilt ./dist
+```
+
+It is **two calls**, and the order is forced by build identity:
+
+1. **mint** — `POST /v1/sites/:id/deploy {"source":"prebuilt"}` creates the
+   deployment without starting a build and answers with the `build_id` (and the
+   `content_rev`, which only the box can compute). `bp` prints them as
+   `BARKPARK_BUILD_ID` / `BARKPARK_CONTENT_REV` / `BARKPARK_SITE_BASE` exports.
+2. **upload** — the packed `dist/` goes to the deployment-scoped artifact route
+   with a real `Content-Length` and the sha256 the client computed over exactly
+   those wire bytes. The box re-verifies that digest, extracts, and runs
+   STAGE → HEALTH → SWITCH → RETIRE with **BUILD reported `skipped`** — no npm
+   runs there.
+
+What it refuses, all before the upload: a directory that is empty, one with no
+root `index.html` (that is the project dir, not the output dir), and — after the
+mint — bytes whose `<meta name="bp-build-id">` is not the id this deployment
+minted, because HEALTH asserts that marker **by value** and such an upload is a
+guaranteed red one round trip later. Build with the printed exports and then ship
+to **that** deployment:
+
+```bash
+bp cloud site deploy my-blog --prebuilt ./dist --deployment <id>   # the refusal prints this line
+```
+
+`--deployment` is not a convenience — it is what makes the loop terminate. A
+prebuilt mint is deliberately **nonced** on the control plane (so two different
+`dist/` builds of the same content can never collide on one `build_id`), which
+means a plain re-run mints a *new* id and refuses again. The second run mints
+nothing, reads the named row, and uploads.
+
+What it packs: the directory's contents at the archive ROOT (no `dist/` prefix).
+The dotenv family, `.git` and `.DS_Store` are excluded; the ignore list is
+explicit precisely because the *default* project ignores (`dist`, `build`, `out`,
+`.next`, `.astro`) would delete this payload.
+
+What the digest certifies and what it does not: it closes tampering **in
+transit** — the box serves the bytes you packed. It says nothing about who built
+them or from what content. HEALTH is unchanged and still certifies integrity and
+identity only; provenance (`source=prebuilt`, the digest, the uploading
+principal) lives on the deployment record.
+
 ### The proof script
 
 `deploy/site-spawner-live-proof.sh` drives that whole journey against the live

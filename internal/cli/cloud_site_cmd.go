@@ -37,6 +37,9 @@ package cli
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -366,8 +369,8 @@ func siteInstanceNotLive(err error) bool {
 // runCloudSiteDeploy is `bp cloud site deploy <site>` (alias `build`) — enqueue a
 // build, then stream the six visible stages until the deploy lands or fails.
 func runCloudSiteDeploy(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site deploy <site> [--no-follow] [--force] [--via cloudflare --domain <host>]"
-	a, err := parseHzArgs(args, []string{"via", "domain"}, []string{"no-follow", "force"}, usage)
+	const usage = "bp cloud site deploy <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force] [--via cloudflare --domain <host>]"
+	a, err := parseHzArgs(args, []string{"via", "domain", "prebuilt", "deployment"}, []string{"no-follow", "force"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -387,6 +390,24 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 		return useError(out, "usage", "--domain needs --via cloudflare (usage: "+usage+")", exitUsage)
 	}
 
+	// --prebuilt <dir> is the lane where the build already happened somewhere
+	// else (charter D85): the bytes ship, the serving box runs no npm. It is a
+	// different two-call flow, so it branches before the one-call deploy — and
+	// the dir is validated here, with no network touched, so a mistyped path can
+	// never mint a deployment.
+	prebuilt := strings.TrimSpace(a.val("prebuilt"))
+	deploymentID := strings.TrimSpace(a.val("deployment"))
+	if prebuilt != "" {
+		if via != "" || domain != "" {
+			return useError(out, "usage", "--prebuilt does not take --via/--domain: bind the domain with a plain deploy (or `bp cloud site settings`) and ship the bytes separately (usage: "+usage+")", exitUsage)
+		}
+		if _, verr := validatePrebuiltDir(prebuilt); verr != nil {
+			return useError(out, "usage", verr.Error(), exitUsage)
+		}
+	} else if deploymentID != "" {
+		return useError(out, "usage", "--deployment only applies to --prebuilt: it names the already-minted deployment whose build id your bytes carry (usage: "+usage+")", exitUsage)
+	}
+
 	cfg, ok := siteCloudConfig(out, "deploy a site")
 	if !ok {
 		return exitAuth
@@ -395,11 +416,177 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 	if rerr != nil {
 		return openResolveFail(out, rerr)
 	}
+	if prebuilt != "" {
+		return runCloudSitePrebuiltDeploy(out, cfg, ref, id, prebuilt, deploymentID, a.bools["force"], !a.bools["no-follow"])
+	}
 	dep, derr := cfg.CloudClient().DeploySpawnSite(cloudCtx(), id, a.bools["force"], via, domain)
 	if derr != nil {
 		return cloudFail(out, "deploy site", derr)
 	}
 	return streamSiteDeploy(out, cfg, ref, id, dep, !a.bools["no-follow"])
+}
+
+// runCloudSitePrebuiltDeploy is `bp cloud site deploy <site> --prebuilt <dir>` —
+// the lane where the build ALREADY HAPPENED off the serving box (charter D85)
+// and only the output travels. It is two calls, and the order is forced:
+//
+//  1. MINT — POST /deploy {"source":"prebuilt"} creates the deployment row
+//     WITHOUT starting a build and answers with the build_id the bytes must
+//     carry (HEALTH asserts that marker by value) and the content_rev only the
+//     box can compute.
+//  2. UPLOAD — the packed tar.gz goes to the deployment-scoped artifact route
+//     with a real Content-Length and its sha256, and only then does the box
+//     stage, health-gate and switch.
+//
+// Between the two the CLI REFUSES bytes that do not carry the minted build_id.
+// That refusal is the honest one: such an upload is not a coin flip, it is a
+// deploy that will fail at HEALTH after burning the round trip.
+//
+// THE LOOP MUST TERMINATE, and that is why `--deployment` exists. A prebuilt
+// mint is deliberately NON-IDEMPOTENT on the control plane (it folds a nonce, so
+// two different `dist/` uploads for the same content can never collide on one
+// build_id), which means a plain re-run mints a DIFFERENT build id than the one
+// the user just built against and the refusal would repeat forever. So the
+// refusal names the deployment it minted, and the second run passes it back with
+// `--deployment <id>`: no new mint, the same build id, the upload lands.
+func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deploymentID string, force, follow bool) int {
+	dep, code := resolvePrebuiltDeployment(out, cfg, id, deploymentID, force)
+	if code != exitOK {
+		return code
+	}
+	buildID := strings.TrimSpace(dep.BuildID)
+	if buildID == "" {
+		return useError(out, "failed", "the control plane minted a prebuilt deployment with no build_id — nothing to stamp the bytes with, so the upload would fail at HEALTH; re-run without --prebuilt to build on the box, or upgrade the control plane", exitGeneric)
+	}
+
+	marker, merr := prebuiltBuildMarker(dir)
+	if merr != nil {
+		return useError(out, "failed", merr.Error(), exitGeneric)
+	}
+	if marker != buildID {
+		out.progressf("  export BARKPARK_BUILD_ID=%s", buildID)
+		if cr := strings.TrimSpace(dep.ContentRev); cr != "" {
+			out.progressf("  export BARKPARK_CONTENT_REV=%s", cr)
+		}
+		if u := strings.TrimSpace(dep.URL); u != "" {
+			out.progressf("  export BARKPARK_SITE_BASE=%s", u)
+		}
+		have := marker
+		if have == "" {
+			have = "(none)"
+		}
+		return useError(out, "failed", fmt.Sprintf(
+			"%s/index.html carries build id %s, not the %s this deployment minted — HEALTH asserts that marker by value, so these bytes would be rejected on the box. Re-run your build with the exports above, then ship it to THIS deployment:\n\n  bp cloud site deploy %s --prebuilt %s --deployment %s\n\n(a plain re-run would mint a new build id — a prebuilt mint is nonced on purpose — and refuse again.)",
+			dir, have, buildID, ref, dir, dep.ID), exitGeneric)
+	}
+
+	art, perr := packPrebuiltDir(dir)
+	if perr != nil {
+		return useError(out, "failed", perr.Error(), exitGeneric)
+	}
+	defer art.Cleanup()
+	out.progressf("→ packed %s — %d bytes on the wire, sha256 %s", dir, art.WireBytes, art.SHA256)
+
+	f, oerr := os.Open(art.Path)
+	if oerr != nil {
+		return useError(out, "failed", "read packed artifact: "+oerr.Error(), exitGeneric)
+	}
+	defer f.Close()
+	up, uerr := cfg.CloudClient().UploadDeploymentArtifact(cloudCtx(), id, dep.ID, f, art.WireBytes, art.SHA256)
+	if uerr != nil {
+		return cloudFail(out, "upload artifact", uerr)
+	}
+	if n := up.Bytes; n > 0 && n != art.WireBytes {
+		out.progressf("  control plane recorded %d bytes (client sent %d)", n, art.WireBytes)
+	}
+	out.progressf("→ uploaded — the box verifies the digest, then stages these bytes (BUILD is skipped: no npm runs there)")
+
+	return streamSiteDeploy(out, cfg, ref, id, dep, follow)
+}
+
+// resolvePrebuiltDeployment gets the deployment the bytes will be attached to:
+// the one named by `--deployment` (the resume half of the loop) or a freshly
+// minted one. A named deployment is FETCHED rather than trusted, because the
+// only two states that can accept an upload are "prebuilt" and "queued" — and a
+// stale id from a shell history is otherwise a 409 several seconds later, after
+// the pack.
+func resolvePrebuiltDeployment(out *writer, cfg *Config, id, deploymentID string, force bool) (cloudclient.SiteDeployment, int) {
+	if deploymentID == "" {
+		dep, derr := cfg.CloudClient().MintPrebuiltDeployment(cloudCtx(), id, force)
+		if derr != nil {
+			return dep, cloudFail(out, "mint prebuilt deployment", derr)
+		}
+		out.progressf("→ minted prebuilt deployment %s (build %s) — no build started on the box", sanitizeCell(dep.ID), sanitizeCell(dep.BuildID))
+		return dep, exitOK
+	}
+
+	dep, gerr := cfg.CloudClient().SpawnSiteDeployment(cloudCtx(), id, deploymentID)
+	if gerr != nil {
+		return dep, cloudFail(out, "read deployment "+deploymentID, gerr)
+	}
+	if src := strings.TrimSpace(dep.Source); src != "" && src != "prebuilt" {
+		return dep, useError(out, "failed", fmt.Sprintf("deployment %s is a %s deploy — it will never read an uploaded artifact; drop --deployment to mint a prebuilt one", deploymentID, src), exitGeneric)
+	}
+	if st := strings.TrimSpace(dep.Status); st != "" && st != "queued" {
+		return dep, useError(out, "failed", fmt.Sprintf("deployment %s is already %s — an artifact can only be attached while it is queued; drop --deployment to mint a fresh one and build against its build id", deploymentID, st), exitGeneric)
+	}
+	out.progressf("→ shipping to the already-minted deployment %s (build %s) — no new deployment, no build on the box", sanitizeCell(dep.ID), sanitizeCell(dep.BuildID))
+	return dep, exitOK
+}
+
+// prebuiltBuildMarker reads the `bp-build-id` meta marker out of a built
+// directory's root index.html — the same HTML-naive first-occurrence read the
+// box's HEALTH gate does, deliberately, so the CLI and the gate agree about what
+// a page claims. An unreadable index.html is an error; a page with no marker
+// returns "" so the caller can say "(none)" rather than guess.
+func prebuiltBuildMarker(dir string) (string, error) {
+	path := filepath.Join(dir, "index.html")
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	defer f.Close()
+	// The marker lives in <head>; a couple of MB is far past any real one and
+	// keeps a stray huge index.html from being slurped whole.
+	raw, err := io.ReadAll(io.LimitReader(f, 2<<20))
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	return metaMarkerValue(string(raw), "bp-build-id"), nil
+}
+
+// metaMarkerValue pulls `content="…"` out of the FIRST `<meta name="<name>">`
+// tag in the document. Single and double quotes are both accepted (frameworks
+// emit either); anything more structural than that belongs to a parser, and the
+// gate this mirrors does not use one.
+func metaMarkerValue(html, name string) string {
+	lower := strings.ToLower(html)
+	for _, q := range []string{`"`, `'`} {
+		needle := `name=` + q + strings.ToLower(name) + q
+		i := strings.Index(lower, needle)
+		if i < 0 {
+			continue
+		}
+		rest := html[i+len(needle):]
+		ci := strings.Index(strings.ToLower(rest), "content=")
+		if ci < 0 {
+			continue
+		}
+		rest = rest[ci+len("content="):]
+		if rest == "" {
+			continue
+		}
+		quote := rest[:1]
+		if quote != `"` && quote != `'` {
+			continue
+		}
+		end := strings.Index(rest[1:], quote)
+		if end < 0 {
+			continue
+		}
+		return strings.TrimSpace(rest[1 : 1+end])
+	}
+	return ""
 }
 
 // streamSiteDeploy renders the deploy as a stage-aware progress stream: each
@@ -744,8 +931,8 @@ func renderSiteDeleted(out *writer, ref string, res cloudclient.SiteDeleteResult
 // change is an honest usage error. The new values take effect on the NEXT
 // deploy — the receipt says so.
 func runCloudSiteSettings(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site settings <site> [--theme evergreen|ember|fjord|charple] [--doc-type <type>]"
-	a, err := parseHzArgs(args, []string{"theme", "doc-type"}, nil, usage)
+	const usage = "bp cloud site settings <site> [--theme evergreen|ember|fjord|charple] [--doc-type <type>] [--prebuilt-enabled true|false]"
+	a, err := parseHzArgs(args, []string{"theme", "doc-type", "prebuilt-enabled"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -761,9 +948,23 @@ func runCloudSiteSettings(out *writer, g globals, args []string) int {
 	if v := strings.TrimSpace(a.val("doc-type")); v != "" {
 		patch["doc_type"] = v
 	}
+	// The per-site opt-in for `--prebuilt` deploys. Without a flag here the
+	// control plane's `prebuilt_not_enabled` 422 would be unanswerable from bp:
+	// the lane exists and nothing in the CLI could turn it on.
+	if v := strings.TrimSpace(a.val("prebuilt-enabled")); v != "" {
+		switch strings.ToLower(v) {
+		case "true", "yes", "on", "1":
+			patch["prebuilt_enabled"] = true
+		case "false", "no", "off", "0":
+			patch["prebuilt_enabled"] = false
+		default:
+			return useError(out, "usage",
+				fmt.Sprintf("--prebuilt-enabled wants true or false, got %q (usage: %s)", v, usage), exitUsage)
+		}
+	}
 	if len(patch) == 0 {
 		return useError(out, "usage",
-			"nothing to change — pass --theme and/or --doc-type (usage: "+usage+")", exitUsage)
+			"nothing to change — pass --theme, --doc-type and/or --prebuilt-enabled (usage: "+usage+")", exitUsage)
 	}
 
 	cfg, ok := siteCloudConfig(out, "update a site's settings")
@@ -1169,12 +1370,12 @@ func printCloudSiteHelp(out *writer) {
 
 USAGE
   bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--deploy]
-  bp cloud site deploy    <site> [--no-follow] [--force]      (alias: build)
+  bp cloud site deploy    <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force]  (alias: build)
   bp cloud site rollback  <site>
   bp cloud site status    <site>
   bp cloud site open       <site> [--print-only]
   bp cloud site preflight [--dir <path>] [--skip-build]
-  bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>]
+  bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>] [--prebuilt-enabled true|false]
 
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
   builds and serves on that box). List yours with 'bp cloud status'.
@@ -1184,6 +1385,17 @@ USAGE
   SSR process on its own slot port, health-gated behind Caddy.
   --doc-type binds the content type the build reads (default 'post'); pass it
   when your dataset serves another type (e.g. 'paper').
+  --prebuilt <dir> ships a build you already made — the OUTPUT directory (./dist),
+  not the project. The serving box runs NO npm for that deploy: it verifies the
+  upload's sha256, stages those exact bytes, and BUILD reports skipped. It is two
+  calls: bp mints the deployment first and prints the BARKPARK_BUILD_ID /
+  BARKPARK_CONTENT_REV / BARKPARK_SITE_BASE your build must be stamped with, then
+  uploads. Bytes carrying a different build id are refused BEFORE the upload —
+  HEALTH asserts that marker by value — so build with those exports and then ship
+  to THAT deployment with --deployment <id>, which the refusal prints for you
+  (a prebuilt mint is nonced, so a plain re-run would mint a new id and refuse
+  again). Secrets (.env*) and .git are never packed. The site must opt in first:
+  bp cloud site settings <site> --prebuilt-enabled true
   --force re-runs a build even when content and config are unchanged — it folds a
   fresh nonce so a new release is minted instead of the cached deployment.
   --deploy on create is the one-motion: it chains straight into the deploy stream
