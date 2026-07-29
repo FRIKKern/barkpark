@@ -1,0 +1,75 @@
+CHECK 1 type/syntax: PYTHONPYCACHEPREFIX=/tmp/worker2-pycache python3 -m py_compile validate_report.py
+PASS py_compile
+CHECK 2 focused test suite: validate_report.py
+{"valid":true,"summary":{"pass":15,"fail":0}}
+PASS focused validator 15/15
+CHECK 3 lint: JSON parse + Python tabnanny
+CHECK 3 lint rerun: JSON parse + Python tabnanny
+PASS lint json_files=13 python_tabnanny=clean
+CHECK 4 end-to-end: actual bp read receipts + immutable CycleFleet binding
+PASS e2e 10/10 live bp readbacks at exact pins; receipt-bound wave revision 552a7065-368e-4e45-9eec-5113e60510a3
+CHECK 5 regressions/integrity: frozen authority + report mutation boundary
+assignments/PPCC2-S001.json: OK
+assignments/PPCC2-S002.json: OK
+assignments/PPCC2-S003.json: OK
+assignments/PPCC2-S004.json: OK
+assignments/PPCC2-S005.json: OK
+assignments/PPCC2-S006.json: OK
+assignments/PPCC2-S007.json: OK
+assignments/PPCC2-S008.json: OK
+assignments/PPCC2-S009.json: OK
+assignments/PPCC2-S010.json: OK
+assignments/PPCC2-S011.json: OK
+assignments/PPCC2-S012.json: OK
+assignments/PPCC2-S013.json: OK
+assignments/PPCC2-S014.json: OK
+assignments/PPCC2-S015.json: OK
+assignments/PPCC2-S016.json: OK
+assignments/PPCC2-S017.json: OK
+assignments/PPCC2-S018.json: OK
+assignments/PPCC2-S019.json: OK
+assignments/PPCC2-S020.json: OK
+assignments/PPCC2-S021.json: OK
+assignments/PPCC2-S022.json: OK
+assignments/PPCC2-S023.json: OK
+assignments/PPCC2-S024.json: OK
+assignments/PPCC2-S025.json: OK
+assignments/PPCC2-S026.json: OK
+assignments/PPCC2-S027.json: OK
+assignments/PPCC2-S028.json: OK
+assignments/PPCC2-S029.json: OK
+assignments/PPCC2-S030.json: OK
+assignments/PPCC2-S031.json: OK
+assignments/PPCC2-S032.json: OK
+assignments/PPCC2-S033.json: OK
+assignments/PPCC2-S034.json: OK
+assignments/PPCC2-S035.json: OK
+assignments/PPCC2-S036.json: OK
+assignments/PPCC2-S037.json: OK
+assignments/PPCC2-S038.json: OK
+assignments/PPCC2-S039.json: OK
+assignments/PPCC2-S040.json: OK
+assignments/PPCC2-S041.json: OK
+assignments/PPCC2-S042.json: OK
+assignments/PPCC2-S043.json: OK
+assignments/PPCC2-S044.json: OK
+assignments/PPCC2-S045.json: OK
+assignments/PPCC2-S046.json: OK
+assignments/PPCC2-S047.json: OK
+assignments/PPCC2-S048.json: OK
+assignments/PPCC2-S049.json: OK
+assignments/PPCC2-S050.json: OK
+assignments/PPCC2-S051.json: OK
+assignments/PPCC2-S052.json: OK
+assignments/PPCC2-S053.json: OK
+assignments/PPCC2-S054.json: OK
+assignments/PPCC2-S055.json: OK
+assignments/PPCC2-S056.json: OK
+assignments/PPCC2-S057.json: OK
+assignments/PPCC2-S058.json: OK
+assignments/PPCC2-S059.json: OK
+assignments/PPCC2-S060.json: OK
+dispatch-waves.json: OK
+survey-map.json: OK
+validation.json: OK
+PASS regression authority hashes, false mutation attestations, exact coverage/verdict census

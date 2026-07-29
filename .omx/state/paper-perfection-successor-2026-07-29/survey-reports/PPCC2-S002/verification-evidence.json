@@ -1,0 +1,43 @@
+{
+  "schema_version": "paper-perfection-successor-survey-verification-evidence/v1",
+  "assignment_id": "PPCC2-S002",
+  "checks": [
+    {
+      "name": "typecheck-equivalent",
+      "status": "PASS",
+      "command": "PYTHONPYCACHEPREFIX=/tmp/worker2-pycache python3 -m py_compile validate_report.py",
+      "output": "PASS py_compile"
+    },
+    {
+      "name": "focused-test-suite",
+      "status": "PASS",
+      "command": "python3 validate_report.py",
+      "output": "valid=true; pass=15; fail=0",
+      "artifact": "validation.json"
+    },
+    {
+      "name": "lint",
+      "status": "PASS",
+      "command": "jq empty on all 13 JSON files; python3 -m tabnanny validate_report.py",
+      "output": "json_files=13; python_tabnanny=clean"
+    },
+    {
+      "name": "end-to-end",
+      "status": "PASS",
+      "command": "bp doc get paper <id> --perspective raw --json for every assigned unit; validate readback hashes and CycleFleet receipt",
+      "output": "10/10 exact pinned revisions; immutable binding revision 552a7065-368e-4e45-9eec-5113e60510a3",
+      "artifacts": [
+        "fetch-log.ndjson",
+        "readback-index.json",
+        "validation.json"
+      ]
+    },
+    {
+      "name": "regression-integrity",
+      "status": "PASS",
+      "command": "cd survey-authority && shasum -a 256 -c SHA256SUMS; validate false mutation attestations and exact census",
+      "output": "63/63 authority entries OK; production_papers_mutated=false; cyclefleet_mutated=false; 10 checked units; verdicts 4 keep / 3 repair / 3 superseded"
+    }
+  ],
+  "gate_correction": "Initial lint wrapper used jq -e empty and a tee pipeline without pipefail; it stopped before a valid lint verdict. The corrected rerun used jq empty with set -o pipefail and passed. No partial result was accepted."
+}
