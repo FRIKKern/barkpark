@@ -173,7 +173,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   def seed_new_doc_content("task"), do: %{"kind" => "task", "lifecycle_status" => "open"}
-  def seed_new_doc_content(_type), do: %{}
+
+  # A blocks-doc is born with an EXPLICIT EMPTY block list — not `%{}`, and not a
+  # hand-rolled paragraph. The empty list is the signal
+  # `Papers.Template.maybe_seed/3` reads as "a new blank document" (via
+  # `Writer.maybe_apply_paper_template/2`), which is what produces the locked
+  # `tpl-title` heading, the empty `tpl-body` paragraph to type into, and
+  # `style: "article"`. `%{}` leaves `blocks` nil — the HTML-ingest path — so the
+  # human got a document with nothing to click and nowhere to type (spd-w17).
+  # Hand-rolling a paragraph here would bypass the template and lose all of it.
+  def seed_new_doc_content(type) do
+    if Content.blocks_type?(type), do: %{"blocks" => []}, else: %{}
+  end
 
   @doc false
   defdelegate paper_op(socket, op), to: Paper
