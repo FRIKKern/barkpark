@@ -1,0 +1,223 @@
+{
+  "_createdAt": "2026-07-09T22:13:09.550718Z",
+  "_draft": false,
+  "_id": "hyperquiz-realtime-protocol",
+  "_publishedId": "hyperquiz-realtime-protocol",
+  "_rev": "6b1b4a515ee0458c3d2b4988c7c2f520",
+  "_type": "paper",
+  "_updatedAt": "2026-07-18T01:03:46.846466Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Hyperquiz — Realtime Protocol",
+      "type": "heading"
+    },
+    {
+      "content": "Reconstructed 2026-07-10 from the Hyperquiz Founding Charter (.claude/workflows/bp-hyperquiz-charter.md) and the recovered engine branch hyperquiz-p1-recovered. The original localhost:4000 paper body was unreachable at reconstruction time, so this is rebuilt from those sources and the built code — not a byte-copy of the lost original. Canonical ledger: the hyperquiz-epic task tree on guerrilla.",
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "content": "The realtime layer is server-authoritative. The Room GenServer owns game state; clients send intent (a choice, a pointer position) and receive rendered frames. No client is trusted with scoring or timing.",
+      "id": "block-2",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-3",
+      "level": 2,
+      "text": "Channels & topics",
+      "type": "heading"
+    },
+    {
+      "id": "block-4",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Socket /quiz — anonymous, carrying a signed player token minted on join (reconnect identity survives a dropped socket, P6)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Channel quiz:room:<pin> — one per running game, joined by PIN."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "quiz:events:<pin> — authoritative state (phase changes, question pushes, tallies)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "quiz:cursors:<pin> — individual cursor frames (below the crossover threshold)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "quiz:heat:<pin> — the aggregate heatmap frame (above the threshold)."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "block-5",
+      "level": 2,
+      "text": "Cursor streaming",
+      "type": "heading"
+    },
+    {
+      "content": "Players stream continuous pointer/touch position at ~30Hz (quiz-cursors.js pointermove, throttled to 33ms) — NOT a tap-hold or drag-a-dot gesture (this corrects the original input-decision text; see the decisions paper). The server treats a cursor as opaque normalized coordinates.",
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "content": "The Room batches cursor frames at 15Hz into a compact binary codec (Quiz.CursorFrame) and fans them out on quiz:cursors:<pin>. Batching + binary encoding keeps the per-tick payload bounded even with hundreds of concurrent pointers.",
+      "id": "block-7",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-8",
+      "level": 2,
+      "text": "Heatmap frames",
+      "type": "heading"
+    },
+    {
+      "content": "Above the crossover threshold the Room stops fanning out individual cursors and instead emits a fixed 32x32 heatmap — a constant 2,048-byte payload on quiz:heat:<pin>, independent of the number of players. See the scaling paper.",
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-10",
+      "level": 2,
+      "text": "Live-edit round trip",
+      "type": "heading"
+    },
+    {
+      "content": "A Studio edit publishes the quiz content; Quiz.Bridge picks up the change and calls Room.apply_question on the running room, which pushes new state on quiz:events:<pin>. Every host and player screen re-renders with no reload, in under a second.",
+      "id": "block-11",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Hyperquiz — Realtime Protocol",
+        "type": "heading"
+      },
+      {
+        "content": "Reconstructed 2026-07-10 from the Hyperquiz Founding Charter (.claude/workflows/bp-hyperquiz-charter.md) and the recovered engine branch hyperquiz-p1-recovered. The original localhost:4000 paper body was unreachable at reconstruction time, so this is rebuilt from those sources and the built code — not a byte-copy of the lost original. Canonical ledger: the hyperquiz-epic task tree on guerrilla.",
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "content": "The realtime layer is server-authoritative. The Room GenServer owns game state; clients send intent (a choice, a pointer position) and receive rendered frames. No client is trusted with scoring or timing.",
+        "id": "block-2",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-3",
+        "level": 2,
+        "text": "Channels & topics",
+        "type": "heading"
+      },
+      {
+        "id": "block-4",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Socket /quiz — anonymous, carrying a signed player token minted on join (reconnect identity survives a dropped socket, P6)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Channel quiz:room:<pin> — one per running game, joined by PIN."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "quiz:events:<pin> — authoritative state (phase changes, question pushes, tallies)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "quiz:cursors:<pin> — individual cursor frames (below the crossover threshold)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "quiz:heat:<pin> — the aggregate heatmap frame (above the threshold)."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "block-5",
+        "level": 2,
+        "text": "Cursor streaming",
+        "type": "heading"
+      },
+      {
+        "content": "Players stream continuous pointer/touch position at ~30Hz (quiz-cursors.js pointermove, throttled to 33ms) — NOT a tap-hold or drag-a-dot gesture (this corrects the original input-decision text; see the decisions paper). The server treats a cursor as opaque normalized coordinates.",
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "content": "The Room batches cursor frames at 15Hz into a compact binary codec (Quiz.CursorFrame) and fans them out on quiz:cursors:<pin>. Batching + binary encoding keeps the per-tick payload bounded even with hundreds of concurrent pointers.",
+        "id": "block-7",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-8",
+        "level": 2,
+        "text": "Heatmap frames",
+        "type": "heading"
+      },
+      {
+        "content": "Above the crossover threshold the Room stops fanning out individual cursors and instead emits a fixed 32x32 heatmap — a constant 2,048-byte payload on quiz:heat:<pin>, independent of the number of players. See the scaling paper.",
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-10",
+        "level": 2,
+        "text": "Live-edit round trip",
+        "type": "heading"
+      },
+      {
+        "content": "A Studio edit publishes the quiz content; Quiz.Bridge picks up the change and calls Room.apply_question on the running room, which pushes new state on quiz:events:<pin>. Every host and player screen re-renders with no reload, in under a second.",
+        "id": "block-11",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Hyperquiz — Realtime Protocol</h1><p></p><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Channels &amp; topics</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Socket /quiz — anonymous, carrying a signed player token minted on join (reconnect identity survives a dropped socket, P6).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Channel quiz:room:&lt;pin&gt; — one per running game, joined by PIN.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>quiz:events:&lt;pin&gt; — authoritative state (phase changes, question pushes, tallies).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>quiz:cursors:&lt;pin&gt; — individual cursor frames (below the crossover threshold).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>quiz:heat:&lt;pin&gt; — the aggregate heatmap frame (above the threshold).</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Cursor streaming</h2><p></p><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Heatmap frames</h2><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Live-edit round trip</h2><p></p>"
+  },
+  "body_html": "<h1>Hyperquiz — Realtime Protocol</h1><p></p><p></p><h2>Channels &amp; topics</h2><ul><li><span>Socket /quiz — anonymous, carrying a signed player token minted on join (reconnect identity survives a dropped socket, P6).</span></li><li><span>Channel quiz:room:&lt;pin&gt; — one per running game, joined by PIN.</span></li><li><span>quiz:events:&lt;pin&gt; — authoritative state (phase changes, question pushes, tallies).</span></li><li><span>quiz:cursors:&lt;pin&gt; — individual cursor frames (below the crossover threshold).</span></li><li><span>quiz:heat:&lt;pin&gt; — the aggregate heatmap frame (above the threshold).</span></li></ul><h2>Cursor streaming</h2><p></p><p></p><h2>Heatmap frames</h2><p></p><h2>Live-edit round trip</h2><p></p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": null,
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/hyperquiz-realtime-protocol"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Hyperquiz — Realtime Protocol"
+}

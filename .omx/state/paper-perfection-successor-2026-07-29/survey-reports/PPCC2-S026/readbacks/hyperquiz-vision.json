@@ -1,0 +1,189 @@
+{
+  "_createdAt": "2026-07-09T22:13:09.354440Z",
+  "_draft": false,
+  "_id": "hyperquiz-vision",
+  "_publishedId": "hyperquiz-vision",
+  "_rev": "35b845cf0f7e34401b36b04ae336c499",
+  "_type": "paper",
+  "_updatedAt": "2026-07-18T01:03:48.286600Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Hyperquiz — Vision",
+      "type": "heading"
+    },
+    {
+      "content": "Reconstructed 2026-07-10 from the Hyperquiz Founding Charter (.claude/workflows/bp-hyperquiz-charter.md) and the recovered engine branch hyperquiz-p1-recovered. The original localhost:4000 paper body was unreachable at reconstruction time, so this is rebuilt from those sources and the built code — not a byte-copy of the lost original. Canonical ledger: the hyperquiz-epic task tree on guerrilla.",
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "content": "A live-quiz game running on Barkpark itself. A projector shows the spectacle, phones are the input, and Studio is the authoring desk — the host live-edits a question mid-game and every connected screen updates in under a second.",
+      "id": "block-2",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-3",
+      "level": 2,
+      "text": "The three surfaces",
+      "type": "heading"
+    },
+    {
+      "id": "block-4",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Projector / host — /quiz/host/:pin: the question, the choices, and a swarm of live cursors (or, at scale, a heatmap cloud). The spectacle screen."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Phone / player — /quiz/play/:pin: tap a choice, stream a cursor. Anonymous, zero-install, join by PIN."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Studio — the authoring desk: the host live-edits the running quiz and the change propagates to every screen in under a second."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "block-5",
+      "level": 2,
+      "text": "What makes it Barkpark-shaped",
+      "type": "heading"
+    },
+    {
+      "content": "Server-authoritative realtime (a Room GenServer per game, a binary cursor codec, an O(1) heatmap), honest states (loading / empty / error — no fake realtime), styled from the same theme tokens as the rest of Barkpark, and live on guerrilla where merged = deployed.",
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-7",
+      "level": 2,
+      "text": "Deliberately NOT an MMO",
+      "type": "heading"
+    },
+    {
+      "content": "Scoped away from WoW-scale authoritative simulation (that needs an in-memory game engine; Postgres can't carry game-tick writes). Strength-first: Phoenix presence + WebSocket fan-out + the Barkpark content model + Studio live-edit. The quiz is content; the crowd's cursors and picks render in real time.",
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-9",
+      "level": 2,
+      "text": "Status",
+      "type": "heading"
+    },
+    {
+      "content": "The engine already exists on local branch hyperquiz-p1-recovered — 28 commits, +2,952 lines across 35 files, 99 tests green when applied to current main (verified by an actual port attempt 2026-07-09). Priority: landing the stranded engine on main as a Barkpark.Plugin beats any new feature work.",
+      "id": "block-10",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Hyperquiz — Vision",
+        "type": "heading"
+      },
+      {
+        "content": "Reconstructed 2026-07-10 from the Hyperquiz Founding Charter (.claude/workflows/bp-hyperquiz-charter.md) and the recovered engine branch hyperquiz-p1-recovered. The original localhost:4000 paper body was unreachable at reconstruction time, so this is rebuilt from those sources and the built code — not a byte-copy of the lost original. Canonical ledger: the hyperquiz-epic task tree on guerrilla.",
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "content": "A live-quiz game running on Barkpark itself. A projector shows the spectacle, phones are the input, and Studio is the authoring desk — the host live-edits a question mid-game and every connected screen updates in under a second.",
+        "id": "block-2",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-3",
+        "level": 2,
+        "text": "The three surfaces",
+        "type": "heading"
+      },
+      {
+        "id": "block-4",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Projector / host — /quiz/host/:pin: the question, the choices, and a swarm of live cursors (or, at scale, a heatmap cloud). The spectacle screen."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Phone / player — /quiz/play/:pin: tap a choice, stream a cursor. Anonymous, zero-install, join by PIN."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Studio — the authoring desk: the host live-edits the running quiz and the change propagates to every screen in under a second."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "block-5",
+        "level": 2,
+        "text": "What makes it Barkpark-shaped",
+        "type": "heading"
+      },
+      {
+        "content": "Server-authoritative realtime (a Room GenServer per game, a binary cursor codec, an O(1) heatmap), honest states (loading / empty / error — no fake realtime), styled from the same theme tokens as the rest of Barkpark, and live on guerrilla where merged = deployed.",
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-7",
+        "level": 2,
+        "text": "Deliberately NOT an MMO",
+        "type": "heading"
+      },
+      {
+        "content": "Scoped away from WoW-scale authoritative simulation (that needs an in-memory game engine; Postgres can't carry game-tick writes). Strength-first: Phoenix presence + WebSocket fan-out + the Barkpark content model + Studio live-edit. The quiz is content; the crowd's cursors and picks render in real time.",
+        "id": "block-8",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-9",
+        "level": 2,
+        "text": "Status",
+        "type": "heading"
+      },
+      {
+        "content": "The engine already exists on local branch hyperquiz-p1-recovered — 28 commits, +2,952 lines across 35 files, 99 tests green when applied to current main (verified by an actual port attempt 2026-07-09). Priority: landing the stranded engine on main as a Barkpark.Plugin beats any new feature work.",
+        "id": "block-10",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Hyperquiz — Vision</h1><p></p><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The three surfaces</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Projector / host — /quiz/host/:pin: the question, the choices, and a swarm of live cursors (or, at scale, a heatmap cloud). The spectacle screen.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Phone / player — /quiz/play/:pin: tap a choice, stream a cursor. Anonymous, zero-install, join by PIN.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Studio — the authoring desk: the host live-edits the running quiz and the change propagates to every screen in under a second.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What makes it Barkpark-shaped</h2><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Deliberately NOT an MMO</h2><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Status</h2><p></p>"
+  },
+  "body_html": "<h1>Hyperquiz — Vision</h1><p></p><p></p><h2>The three surfaces</h2><ul><li><span>Projector / host — /quiz/host/:pin: the question, the choices, and a swarm of live cursors (or, at scale, a heatmap cloud). The spectacle screen.</span></li><li><span>Phone / player — /quiz/play/:pin: tap a choice, stream a cursor. Anonymous, zero-install, join by PIN.</span></li><li><span>Studio — the authoring desk: the host live-edits the running quiz and the change propagates to every screen in under a second.</span></li></ul><h2>What makes it Barkpark-shaped</h2><p></p><h2>Deliberately NOT an MMO</h2><p></p><h2>Status</h2><p></p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": null,
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/hyperquiz-vision"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Hyperquiz — Vision"
+}

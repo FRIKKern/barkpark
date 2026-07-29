@@ -1,0 +1,798 @@
+{
+  "_createdAt": "2026-07-16T14:54:22.924288Z",
+  "_draft": false,
+  "_id": "legendary-quality-remediation-wave-1-2026-07-16",
+  "_publishedId": "legendary-quality-remediation-wave-1-2026-07-16",
+  "_rev": "a073f8f81927290272ea038778e7ae87",
+  "_type": "paper",
+  "_updatedAt": "2026-07-16T14:54:22.924288Z",
+  "blocks": [
+    {
+      "id": "title",
+      "level": 1,
+      "text": "Three-lane REQUEST CHANGES dossier — Legendary remediation, 2026-07-16",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Authority and review work are complete; four bounded fixes are published and ready for implementation. Source fixes are not yet shipped."
+        }
+      ],
+      "id": "status",
+      "title": "REQUEST CHANGES · REMEDIATION WAVE PUBLISHED",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "id": "h-1",
+      "level": 2,
+      "text": "Executive status",
+      "type": "heading"
+    },
+    {
+      "id": "l-1",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Prime and immutable authority reconciliation are complete. The canonical legendary CycleFleet remains in Strategize with 1,872 frozen units, 0 assigned, and a 0/135 fleet ledger; no downstream phase credit has been fabricated."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Three independent gpt-5.6-sol high code-reviewer lanes reached terminal REQUEST CHANGES verdicts. Their findings are preserved append-only and now have a published remediation wave with four bounded child Tasks."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "This report is an evidence and shipping ledger. It does not claim the source fixes are complete: implementation, targeted tests, renewed review, merge, and push remain required."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h-2",
+      "level": 2,
+      "text": "Immutable authority snapshot",
+      "type": "heading"
+    },
+    {
+      "id": "l-2",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Frozen candidate: 002ea9faa64d060a8578a9b66ab3c5b1d5a5ae01; tree: 3586226ac79e794ecd6b3eecc17ecb593b8da41d."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "CycleFleet wave revision: 9eb08d95-7d87-4e84-a033-8e7e0811c749."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Frozen inventory: 258 Papers + 1,614 Tasks = 1,872 class-prefixed units."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Inventory digest: 61b21c1f2cf21c61f84bd9a936f1acd5fcdfa4fc42d37ff53cdb949a38e1bf6f."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Plan digest: 9997fc50db5f1b83f1f53e33bd45dd111b2b06402b07a78b0673d2048f299e45."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Reconciliation digest: 2d7a10bb018e654d8bad60343f0db376904af62edd698c10856006b4ae84e317."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h-3",
+      "level": 2,
+      "text": "Work completed",
+      "type": "heading"
+    },
+    {
+      "id": "l-3",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Opened and reconciled the durable legendary takeover root, wave Paper, exact inventory, immutable candidate identity, scale contract, and live CycleFleet projection."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Verified the opening ledger remains exact at 0 assigned / 135 required and that no Survey, Verify, Experiment, Build, or canonical Review assignment was counted early."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Ran three distinct high-effort review lanes: validator and phase semantics; failure modes and regression adequacy; Task/Paper/CycleFleet authority coherence."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Captured terminal raw review artifacts, checksums, and a durable context handoff under .omx/context."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Published remediation parent Task legendary-quality-takeover-remediation-2026-07-16."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Published four open remediation children with three evidence-bearing criteria each, label spines, priorities, Paper links, and explicit runnable gates."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h-4",
+      "level": 2,
+      "text": "Terminal review evidence",
+      "type": "heading"
+    },
+    {
+      "id": "l-4",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Validator/phase artifact sha256: 54984cbb0461e4306d3421e83740074315394d454ebb1ae460de159db7bfe062."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Failure-modes artifact sha256: 39f7d77b0f07a8fff1a531a78ae359acb81046183ff9da1c8d3eac96708b965a."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Authority/coherence artifact sha256: 1979fdbbeb20ce3b370c4e6e8634f28c5a3319fee11ce131d908bb085258e607."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "All three verdicts: REQUEST CHANGES. The prior failures remain append-only; this report does not rewrite them as success."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h-5",
+      "level": 2,
+      "text": "Ranked findings",
+      "type": "heading"
+    },
+    {
+      "id": "l-5",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "HIGH — Strategize validation compares copied capacity fields before the projection is sealed. Honest sealed=false/null opening state must pass, while post-seal drift must still fail closed."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "HIGH — Paper blocks can be current while cached body_html remains stale. Blocks mutation and rehydration need atomic authority or a digest-backed invalidation contract across scoped, public, and Studio readers."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "HIGH — The review runnable gate incorrectly depends on moving origin/main equality instead of validating the immutable candidate commit/tree directly."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "HIGH — The acceptance contract asks CycleFleet to carry git authority fields its live schema does not own. Task/Paper git identity and CycleFleet scope/wave authority must be separated."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "MEDIUM — The review Task title still names f7d151324 instead of the frozen 002ea9 candidate."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "MEDIUM — E22 wording overstates a dry-run allocation path as an existing isolated allocation; current truth is capability/path only until a disposable instance is provisioned and torn down with evidence."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h-6",
+      "level": 2,
+      "text": "Published remediation Tasks",
+      "type": "heading"
+    },
+    {
+      "id": "l-6",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "legendary-remediation-validator-unsealed-capacity — OPEN · READY TO IMPLEMENT. Fix phase-aware validation and add sealed/unsealed regressions."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "legendary-remediation-paper-html-authority — OPEN · READY TO IMPLEMENT. Repair blocks/body_html authority and add reader-path regressions."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "legendary-remediation-review-authority-contract — OPEN · READY TO IMPLEMENT. Correct immutable candidate gates, title, criteria ownership, and evidence projection."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "legendary-remediation-e22-allocation-truth — OPEN · READY TO IMPLEMENT. Correct wording now and gate future live-allocation claims on provenance, TTL, non-production scope, rollback, and teardown."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Parent legendary-quality-takeover-remediation-2026-07-16 — OPEN · READY FOR CHILD EXECUTION, not ready to close."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h-7",
+      "level": 2,
+      "text": "Ready-to-ship assessment",
+      "type": "heading"
+    },
+    {
+      "id": "l-7",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "BP evidence and task publication: SHIPPED to the production Barkpark dataset and read back."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Source changes: NOT YET IMPLEMENTED in this remediation wave, therefore there is no honest source commit to merge or push from this publication step."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Canonical main was verified equal to origin/main at bfc48beca6555d398be83e01144598761d541d38 when this report was prepared."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The takeover review Task must remain open/in_progress until its exact authority criterion is repaired and a renewed distinct three-lane review validates the fixes."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h-8",
+      "level": 2,
+      "text": "Execution order to finish",
+      "type": "heading"
+    },
+    {
+      "id": "l-8",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "1. Claim the validator and Paper HTML remediation Tasks to distinct gpt-5.6-sol high implementation lanes."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "2. Add regression tests first, implement the minimum source fixes in isolated worktrees, and run targeted suites plus lint/type/static checks."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "3. Commit each accepted slice, integrate to main, verify main, push origin/main, and record exact commit/tree evidence in BP code_refs."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "4. Repair the review authority contract and E22 wording without falsifying historical NOT_CREATED/0-capture evidence."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "5. Run a renewed three-lane high-effort review against the merged immutable candidate. Close the review and remediation parent only on evidence-backed PASS."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h-9",
+      "level": 2,
+      "text": "Stop condition",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The legendary quality takeover can advance beyond Strategize only after the phase-aware validator passes the honest opening projection, the Paper reader authority is coherent, the review contract is satisfiable, E22 wording is truthful, all accepted code is merged and pushed, and a renewed three-lane verdict is terminal PASS."
+        }
+      ],
+      "id": "p-9",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "title",
+        "level": 1,
+        "text": "Three-lane REQUEST CHANGES dossier — Legendary remediation, 2026-07-16",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Authority and review work are complete; four bounded fixes are published and ready for implementation. Source fixes are not yet shipped."
+          }
+        ],
+        "id": "status",
+        "title": "REQUEST CHANGES · REMEDIATION WAVE PUBLISHED",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "id": "h-1",
+        "level": 2,
+        "text": "Executive status",
+        "type": "heading"
+      },
+      {
+        "id": "l-1",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Prime and immutable authority reconciliation are complete. The canonical legendary CycleFleet remains in Strategize with 1,872 frozen units, 0 assigned, and a 0/135 fleet ledger; no downstream phase credit has been fabricated."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Three independent gpt-5.6-sol high code-reviewer lanes reached terminal REQUEST CHANGES verdicts. Their findings are preserved append-only and now have a published remediation wave with four bounded child Tasks."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "This report is an evidence and shipping ledger. It does not claim the source fixes are complete: implementation, targeted tests, renewed review, merge, and push remain required."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h-2",
+        "level": 2,
+        "text": "Immutable authority snapshot",
+        "type": "heading"
+      },
+      {
+        "id": "l-2",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Frozen candidate: 002ea9faa64d060a8578a9b66ab3c5b1d5a5ae01; tree: 3586226ac79e794ecd6b3eecc17ecb593b8da41d."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "CycleFleet wave revision: 9eb08d95-7d87-4e84-a033-8e7e0811c749."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Frozen inventory: 258 Papers + 1,614 Tasks = 1,872 class-prefixed units."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Inventory digest: 61b21c1f2cf21c61f84bd9a936f1acd5fcdfa4fc42d37ff53cdb949a38e1bf6f."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Plan digest: 9997fc50db5f1b83f1f53e33bd45dd111b2b06402b07a78b0673d2048f299e45."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reconciliation digest: 2d7a10bb018e654d8bad60343f0db376904af62edd698c10856006b4ae84e317."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h-3",
+        "level": 2,
+        "text": "Work completed",
+        "type": "heading"
+      },
+      {
+        "id": "l-3",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Opened and reconciled the durable legendary takeover root, wave Paper, exact inventory, immutable candidate identity, scale contract, and live CycleFleet projection."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Verified the opening ledger remains exact at 0 assigned / 135 required and that no Survey, Verify, Experiment, Build, or canonical Review assignment was counted early."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Ran three distinct high-effort review lanes: validator and phase semantics; failure modes and regression adequacy; Task/Paper/CycleFleet authority coherence."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Captured terminal raw review artifacts, checksums, and a durable context handoff under .omx/context."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Published remediation parent Task legendary-quality-takeover-remediation-2026-07-16."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Published four open remediation children with three evidence-bearing criteria each, label spines, priorities, Paper links, and explicit runnable gates."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h-4",
+        "level": 2,
+        "text": "Terminal review evidence",
+        "type": "heading"
+      },
+      {
+        "id": "l-4",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Validator/phase artifact sha256: 54984cbb0461e4306d3421e83740074315394d454ebb1ae460de159db7bfe062."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Failure-modes artifact sha256: 39f7d77b0f07a8fff1a531a78ae359acb81046183ff9da1c8d3eac96708b965a."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Authority/coherence artifact sha256: 1979fdbbeb20ce3b370c4e6e8634f28c5a3319fee11ce131d908bb085258e607."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "All three verdicts: REQUEST CHANGES. The prior failures remain append-only; this report does not rewrite them as success."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h-5",
+        "level": 2,
+        "text": "Ranked findings",
+        "type": "heading"
+      },
+      {
+        "id": "l-5",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "HIGH — Strategize validation compares copied capacity fields before the projection is sealed. Honest sealed=false/null opening state must pass, while post-seal drift must still fail closed."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "HIGH — Paper blocks can be current while cached body_html remains stale. Blocks mutation and rehydration need atomic authority or a digest-backed invalidation contract across scoped, public, and Studio readers."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "HIGH — The review runnable gate incorrectly depends on moving origin/main equality instead of validating the immutable candidate commit/tree directly."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "HIGH — The acceptance contract asks CycleFleet to carry git authority fields its live schema does not own. Task/Paper git identity and CycleFleet scope/wave authority must be separated."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "MEDIUM — The review Task title still names f7d151324 instead of the frozen 002ea9 candidate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "MEDIUM — E22 wording overstates a dry-run allocation path as an existing isolated allocation; current truth is capability/path only until a disposable instance is provisioned and torn down with evidence."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h-6",
+        "level": 2,
+        "text": "Published remediation Tasks",
+        "type": "heading"
+      },
+      {
+        "id": "l-6",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "legendary-remediation-validator-unsealed-capacity — OPEN · READY TO IMPLEMENT. Fix phase-aware validation and add sealed/unsealed regressions."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "legendary-remediation-paper-html-authority — OPEN · READY TO IMPLEMENT. Repair blocks/body_html authority and add reader-path regressions."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "legendary-remediation-review-authority-contract — OPEN · READY TO IMPLEMENT. Correct immutable candidate gates, title, criteria ownership, and evidence projection."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "legendary-remediation-e22-allocation-truth — OPEN · READY TO IMPLEMENT. Correct wording now and gate future live-allocation claims on provenance, TTL, non-production scope, rollback, and teardown."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Parent legendary-quality-takeover-remediation-2026-07-16 — OPEN · READY FOR CHILD EXECUTION, not ready to close."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h-7",
+        "level": 2,
+        "text": "Ready-to-ship assessment",
+        "type": "heading"
+      },
+      {
+        "id": "l-7",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "BP evidence and task publication: SHIPPED to the production Barkpark dataset and read back."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Source changes: NOT YET IMPLEMENTED in this remediation wave, therefore there is no honest source commit to merge or push from this publication step."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Canonical main was verified equal to origin/main at bfc48beca6555d398be83e01144598761d541d38 when this report was prepared."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The takeover review Task must remain open/in_progress until its exact authority criterion is repaired and a renewed distinct three-lane review validates the fixes."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h-8",
+        "level": 2,
+        "text": "Execution order to finish",
+        "type": "heading"
+      },
+      {
+        "id": "l-8",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "1. Claim the validator and Paper HTML remediation Tasks to distinct gpt-5.6-sol high implementation lanes."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2. Add regression tests first, implement the minimum source fixes in isolated worktrees, and run targeted suites plus lint/type/static checks."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3. Commit each accepted slice, integrate to main, verify main, push origin/main, and record exact commit/tree evidence in BP code_refs."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "4. Repair the review authority contract and E22 wording without falsifying historical NOT_CREATED/0-capture evidence."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "5. Run a renewed three-lane high-effort review against the merged immutable candidate. Close the review and remediation parent only on evidence-backed PASS."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h-9",
+        "level": 2,
+        "text": "Stop condition",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The legendary quality takeover can advance beyond Strategize only after the phase-aware validator passes the honest opening projection, the Paper reader authority is coherent, the review contract is satisfiable, E22 wording is truthful, all accepted code is merged and pushed, and a renewed three-lane verdict is terminal PASS."
+          }
+        ],
+        "id": "p-9",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Three-lane REQUEST CHANGES dossier — Legendary remediation, 2026-07-16</h1><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#8a6420;font-weight:600;margin:0 0 6px\">REQUEST CHANGES · REMEDIATION WAVE PUBLISHED</div><span>Authority and review work are complete; four bounded fixes are published and ready for implementation. Source fixes are not yet shipped.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Executive status</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Prime and immutable authority reconciliation are complete. The canonical legendary CycleFleet remains in Strategize with 1,872 frozen units, 0 assigned, and a 0/135 fleet ledger; no downstream phase credit has been fabricated.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Three independent gpt-5.6-sol high code-reviewer lanes reached terminal REQUEST CHANGES verdicts. Their findings are preserved append-only and now have a published remediation wave with four bounded child Tasks.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>This report is an evidence and shipping ledger. It does not claim the source fixes are complete: implementation, targeted tests, renewed review, merge, and push remain required.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Immutable authority snapshot</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Frozen candidate: 002ea9faa64d060a8578a9b66ab3c5b1d5a5ae01; tree: 3586226ac79e794ecd6b3eecc17ecb593b8da41d.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>CycleFleet wave revision: 9eb08d95-7d87-4e84-a033-8e7e0811c749.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Frozen inventory: 258 Papers + 1,614 Tasks = 1,872 class-prefixed units.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Inventory digest: 61b21c1f2cf21c61f84bd9a936f1acd5fcdfa4fc42d37ff53cdb949a38e1bf6f.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Plan digest: 9997fc50db5f1b83f1f53e33bd45dd111b2b06402b07a78b0673d2048f299e45.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Reconciliation digest: 2d7a10bb018e654d8bad60343f0db376904af62edd698c10856006b4ae84e317.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Work completed</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Opened and reconciled the durable legendary takeover root, wave Paper, exact inventory, immutable candidate identity, scale contract, and live CycleFleet projection.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Verified the opening ledger remains exact at 0 assigned / 135 required and that no Survey, Verify, Experiment, Build, or canonical Review assignment was counted early.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Ran three distinct high-effort review lanes: validator and phase semantics; failure modes and regression adequacy; Task/Paper/CycleFleet authority coherence.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Captured terminal raw review artifacts, checksums, and a durable context handoff under .omx/context.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Published remediation parent Task legendary-quality-takeover-remediation-2026-07-16.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Published four open remediation children with three evidence-bearing criteria each, label spines, priorities, Paper links, and explicit runnable gates.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Terminal review evidence</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Validator/phase artifact sha256: 54984cbb0461e4306d3421e83740074315394d454ebb1ae460de159db7bfe062.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Failure-modes artifact sha256: 39f7d77b0f07a8fff1a531a78ae359acb81046183ff9da1c8d3eac96708b965a.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Authority/coherence artifact sha256: 1979fdbbeb20ce3b370c4e6e8634f28c5a3319fee11ce131d908bb085258e607.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>All three verdicts: REQUEST CHANGES. The prior failures remain append-only; this report does not rewrite them as success.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Ranked findings</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>HIGH — Strategize validation compares copied capacity fields before the projection is sealed. Honest sealed=false/null opening state must pass, while post-seal drift must still fail closed.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>HIGH — Paper blocks can be current while cached body_html remains stale. Blocks mutation and rehydration need atomic authority or a digest-backed invalidation contract across scoped, public, and Studio readers.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>HIGH — The review runnable gate incorrectly depends on moving origin/main equality instead of validating the immutable candidate commit/tree directly.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>HIGH — The acceptance contract asks CycleFleet to carry git authority fields its live schema does not own. Task/Paper git identity and CycleFleet scope/wave authority must be separated.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>MEDIUM — The review Task title still names f7d151324 instead of the frozen 002ea9 candidate.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>MEDIUM — E22 wording overstates a dry-run allocation path as an existing isolated allocation; current truth is capability/path only until a disposable instance is provisioned and torn down with evidence.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Published remediation Tasks</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>legendary-remediation-validator-unsealed-capacity — OPEN · READY TO IMPLEMENT. Fix phase-aware validation and add sealed/unsealed regressions.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>legendary-remediation-paper-html-authority — OPEN · READY TO IMPLEMENT. Repair blocks/body_html authority and add reader-path regressions.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>legendary-remediation-review-authority-contract — OPEN · READY TO IMPLEMENT. Correct immutable candidate gates, title, criteria ownership, and evidence projection.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>legendary-remediation-e22-allocation-truth — OPEN · READY TO IMPLEMENT. Correct wording now and gate future live-allocation claims on provenance, TTL, non-production scope, rollback, and teardown.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Parent legendary-quality-takeover-remediation-2026-07-16 — OPEN · READY FOR CHILD EXECUTION, not ready to close.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Ready-to-ship assessment</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>BP evidence and task publication: SHIPPED to the production Barkpark dataset and read back.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Source changes: NOT YET IMPLEMENTED in this remediation wave, therefore there is no honest source commit to merge or push from this publication step.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Canonical main was verified equal to origin/main at bfc48beca6555d398be83e01144598761d541d38 when this report was prepared.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>The takeover review Task must remain open/in_progress until its exact authority criterion is repaired and a renewed distinct three-lane review validates the fixes.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Execution order to finish</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>1. Claim the validator and Paper HTML remediation Tasks to distinct gpt-5.6-sol high implementation lanes.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>2. Add regression tests first, implement the minimum source fixes in isolated worktrees, and run targeted suites plus lint/type/static checks.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>3. Commit each accepted slice, integrate to main, verify main, push origin/main, and record exact commit/tree evidence in BP code_refs.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>4. Repair the review authority contract and E22 wording without falsifying historical NOT_CREATED/0-capture evidence.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>5. Run a renewed three-lane high-effort review against the merged immutable candidate. Close the review and remediation parent only on evidence-backed PASS.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Stop condition</h2><p>The legendary quality takeover can advance beyond Strategize only after the phase-aware validator passes the honest opening projection, the Paper reader authority is coherent, the review contract is satisfiable, E22 wording is truthful, all accepted code is merged and pushed, and a renewed three-lane verdict is terminal PASS.</p>"
+  },
+  "description": "Terminal reviewer findings, immutable artifact hashes, published BP remediation readback, and exact source-shipping gates.",
+  "main_tag": "audit-trail",
+  "preview": {
+    "description": "Terminal reviewer findings, immutable artifact hashes, published BP remediation readback, and exact…",
+    "extensions": {
+      "tags": [
+        "audit-trail",
+        "research-note",
+        "testing"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/legendary-quality-remediation-wave-1-2026-07-16"
+  },
+  "related": [
+    "legendary-paper-task-quality-takeover-2026-07-15"
+  ],
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "The dossier preserves immutable authority, terminal verdicts, artifact hashes, and shipping state.",
+      "strength": 95,
+      "tag": "audit-trail"
+    },
+    {
+      "rationale": "It synthesizes the three independent review lanes into a durable findings record.",
+      "strength": 90,
+      "tag": "research-note"
+    },
+    {
+      "rationale": "Every remediation item carries explicit regression and readback gates.",
+      "strength": 85,
+      "tag": "testing"
+    }
+  ],
+  "title": "Three-lane REQUEST CHANGES dossier — Legendary remediation, 2026-07-16"
+}

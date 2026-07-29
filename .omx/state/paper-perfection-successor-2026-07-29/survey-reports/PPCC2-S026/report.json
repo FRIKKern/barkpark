@@ -1,0 +1,452 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S026",
+  "assignment_snapshot_sha256": "8e33f4ba3126d3c6596d48de2fdd13aeb9351e8cd3fb07b3fafd5dcd87c0af44",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 9,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "5c0c77052256d4d0c433edc7e2e371603c52d7f8f4bf6f5df3747fadcb02784a"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read across 209 native top-level blocks. Keep 3, repair 5, supersede 1. Hyperquiz Wave 3, the scaling decision, and the intuition-atlas verdict are concise and evidence-aware. Four supporting Hyperquiz papers need status or proof qualifiers refreshed. The two active Legendary authorities require repair for internal state/ledger contradictions and oversized embedded machine projections; the remediation dossier remains valuable but is historical rather than current authority.",
+  "verdict_counts": {
+    "keep": 3,
+    "repair": 5,
+    "superseded": 1
+  },
+  "checked_unit_ids": [
+    "paper:hyperquiz-epic-wave-3-2026-07-12",
+    "paper:hyperquiz-realtime-protocol",
+    "paper:hyperquiz-risks",
+    "paper:hyperquiz-scaling",
+    "paper:hyperquiz-vision",
+    "paper:intuition-atlas-verdict",
+    "paper:legendary-paper-task-quality-takeover-2026-07-15",
+    "paper:legendary-paper-task-quality-takeover-wave-2-2026-07-16",
+    "paper:legendary-quality-remediation-wave-1-2026-07-16"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 209,
+    "legacy_html_documents_read": 0,
+    "legacy_html_chars_read": 0,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:hyperquiz-epic-wave-3-2026-07-12 blocks[40]",
+      "evidence": "The live close stops at 5/6 without fixture creation or false stamps.",
+      "lesson": "Preserve honest partial state when deployment evidence is unavailable."
+    },
+    {
+      "block_ref": "paper:hyperquiz-scaling blocks[7]",
+      "evidence": "Sharding stays parked until a measured single-node ceiling appears.",
+      "lesson": "Tie architectural escalation to observed thresholds."
+    },
+    {
+      "block_ref": "paper:intuition-atlas-verdict blocks[14]",
+      "evidence": "Two visual-channel attempts failed before exact text fixed trust-boundary polarity.",
+      "lesson": "Use exact text for inversion-sensitive semantics."
+    },
+    {
+      "block_ref": "paper:legendary-quality-remediation-wave-1-2026-07-16 blocks[15]",
+      "evidence": "Evidence publication is separated from source implementation and no fictitious commit is claimed.",
+      "lesson": "Do not conflate ledger shipping with code shipping."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:hyperquiz-risks blocks[3]",
+      "evidence": "The browser/live-edit risk is marked closed while the canonical Wave 3 close remains 5/6.",
+      "reader_impact": "Risk posture is overstated."
+    },
+    {
+      "block_ref": "paper:hyperquiz-vision blocks[10]",
+      "evidence": "Status still describes the engine as a stranded local branch.",
+      "reader_impact": "The product vision points to obsolete implementation state."
+    },
+    {
+      "block_ref": "paper:legendary-paper-task-quality-takeover-2026-07-15 blocks[7]",
+      "evidence": "The authority snapshot says remediation remains open after the opening block declares renewed-pass closure.",
+      "reader_impact": "The same revision exposes conflicting current authority."
+    },
+    {
+      "block_ref": "paper:legendary-paper-task-quality-takeover-wave-2-2026-07-16 blocks[16]",
+      "evidence": "Ledger says zero assigned/shipped while two other blocks report six completed.",
+      "reader_impact": "Cycle progress cannot be trusted without reconciliation."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "hyperquiz-realtime-protocol",
+        "hyperquiz-risks",
+        "hyperquiz-scaling",
+        "hyperquiz-vision"
+      ],
+      "basis": "Four reconstructed Hyperquiz reference slices share identical provenance and repeat room, cursor, heatmap, and live-edit facts under different purposes.",
+      "disposition": "Keep separate purpose authorities, add a shared reconstruction/current-status header, and replace repeated facts with links to protocol/scaling owners."
+    },
+    {
+      "candidate_set": [
+        "legendary-paper-task-quality-takeover-2026-07-15",
+        "legendary-paper-task-quality-takeover-wave-2-2026-07-16",
+        "legendary-quality-remediation-wave-1-2026-07-16"
+      ],
+      "basis": "All three encode Legendary quality authority, but for different immutable inventories and historical phases; merging would contaminate frozen evidence.",
+      "disposition": "Keep Wave 1 and Wave 2 separate immutable authorities; label the remediation dossier superseded-current/historical and cross-link exact revision boundaries."
+    }
+  ],
+  "reader_risks": [
+    "Studio: lead with current authority, measured-versus-target state, and final disposition; collapse historical assignments and machine receipts.",
+    "TUI80: keep one claim or decision per screen, wrap tables, and avoid placing fleet payloads inside prose callouts.",
+    "email: send outcome, material caveat, and next owner action; link protocol tables, inventory hashes, and execution recipes.",
+    "public: remove internal branches, task ids, infrastructure topology, security seams, and mutable operational claims; retain verified product behavior and explicit limits.",
+    "CLI/API: preserve exact ids, revisions, hashes, phase counts, verdicts, and distinctions among planned, built, reviewed, merged, deployed, and live-proven."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:hyperquiz-epic-wave-3-2026-07-12",
+      "document_id": "hyperquiz-epic-wave-3-2026-07-12",
+      "document_rev": "2a9ac7bfb0ada6f5356393ba5dc02f9a",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 3 record for wiring live quiz binding, eliminating ghost-room creation, and closing the remaining live-proof obligation honestly.",
+      "opening_and_criteria": "blocks[0]-[15] state complete status, exact two-slice wish, user experience, evidence bar, and a corrected current callout.",
+      "outline_and_hierarchy": "Forty-three blocks carry a full but navigable Strategize→Survey→Verify→Decide→Review story with per-slice debrief and lead handoff.",
+      "human_voice_and_precision": "Excellent correction discipline: invalid UUID assumptions, ghost-room seam, permanent gate red, and stalled live proof are all named without defensiveness.",
+      "compression_and_restraint": "Keep; consider moving the 14-assignment survey plan to an appendix, but the current corrected callout makes the main authority legible.",
+      "evidence_and_truth": "blocks[26]-[30] separate runtime/file evidence from decisions; blocks[33]-[42] distinguish shipped code from the still-unproven deployed round trip.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[40]",
+          "evidence": "The runner stops at 5/6 with no scratch mutation or fabricated stamp because merge and deploy prerequisites are absent.",
+          "lesson": "A blocked live gate should preserve the honest partial state."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[33]",
+          "evidence": "The headline vision remains unproven live because neither PR existed by run end.",
+          "lesson": "Readers must not turn shipped branches into deployed product proof."
+        }
+      ],
+      "duplicate_disposition": "Distinct wave authority; cross-link the four Hyperquiz concept papers rather than merging them into this chronology.",
+      "reader_risks": [
+        "Studio: lead with current authority, measured-versus-target state, and final disposition; collapse historical assignments and machine receipts.",
+        "TUI80: keep one claim or decision per screen, wrap tables, and avoid placing fleet payloads inside prose callouts.",
+        "email: send outcome, material caveat, and next owner action; link protocol tables, inventory hashes, and execution recipes.",
+        "public: remove internal branches, task ids, infrastructure topology, security seams, and mutable operational claims; retain verified product behavior and explicit limits.",
+        "CLI/API: preserve exact ids, revisions, hashes, phase counts, verdicts, and distinctions among planned, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Keep: unusually strong current-status correction, premise refutation, and honest stalled-proof handling."
+    },
+    {
+      "unit_id": "paper:hyperquiz-realtime-protocol",
+      "document_id": "hyperquiz-realtime-protocol",
+      "document_rev": "6b1b4a515ee0458c3d2b4988c7c2f520",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Concise reconstructed protocol reference for server authority, topics, cursor batching, heatmap crossover, and Studio-to-room propagation.",
+      "opening_and_criteria": "blocks[0]-[2] disclose reconstruction provenance and state the server-authoritative invariant before transport details.",
+      "outline_and_hierarchy": "Twelve blocks are clear and properly sequenced from channels through cursor, heatmap, and live-edit flow.",
+      "human_voice_and_precision": "Technically direct and appropriately explicit about the corrected pointer gesture.",
+      "compression_and_restraint": "Repair only the live-proof language and missing description; keep the compact protocol shape.",
+      "evidence_and_truth": "blocks[4], [6]-[9], and [11] name topics, rates, payload size, and propagation path, but the final latency assertion lacks a measured receipt here.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[9]",
+          "evidence": "The heatmap is described as a fixed 32×32, 2,048-byte frame independent of player count.",
+          "lesson": "Protocol docs should name bounded payload shape."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[11]",
+          "evidence": "The paper states every screen updates in under a second without citing the still-stalled live round-trip proof recorded by Wave 3.",
+          "lesson": "Separate structural path confidence from deployed latency evidence."
+        }
+      ],
+      "duplicate_disposition": "Keep as the protocol slice of the Hyperquiz reference set; add explicit links to scaling and Wave 3 proof state.",
+      "reader_risks": [
+        "Studio: lead with current authority, measured-versus-target state, and final disposition; collapse historical assignments and machine receipts.",
+        "TUI80: keep one claim or decision per screen, wrap tables, and avoid placing fleet payloads inside prose callouts.",
+        "email: send outcome, material caveat, and next owner action; link protocol tables, inventory hashes, and execution recipes.",
+        "public: remove internal branches, task ids, infrastructure topology, security seams, and mutable operational claims; retain verified product behavior and explicit limits.",
+        "CLI/API: preserve exact ids, revisions, hashes, phase counts, verdicts, and distinctions among planned, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: concise and useful, but the deployed under-one-second assertion outruns its evidence and metadata lacks a description."
+    },
+    {
+      "unit_id": "paper:hyperquiz-risks",
+      "document_id": "hyperquiz-risks",
+      "document_rev": "06c4b405a3d5414c8114dfd3c2f32480",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Reconstructed risk register for browser proof, origin configuration, cursor scaling, single-node capacity, dormant socket, and provenance.",
+      "opening_and_criteria": "blocks[0]-[3] disclose reconstruction but immediately mark the browser gap closed.",
+      "outline_and_hierarchy": "Fourteen blocks are well partitioned by risk and mitigation, with no filler.",
+      "human_voice_and_precision": "Named failure modes and accepted tradeoffs are crisp, though statuses were not refreshed after Wave 3 stopped at 5/6.",
+      "compression_and_restraint": "Repair current status and add review dates/owners per risk; preserve the short register form.",
+      "evidence_and_truth": "blocks[5], [7], [9], [11], and [13] distinguish known mechanisms, target-based triggers, accepted tradeoff, and provenance.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[5]",
+          "evidence": "The Origin mismatch is tied to a silent websocket 403 and click-dead surface, with the exact host-control mechanism named.",
+          "lesson": "Risk entries should connect configuration to observable failure."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[3]",
+          "evidence": "Browser and Studio round-trip verification is called closed, while Wave 3’s debrief leaves the live close at 5/6.",
+          "lesson": "Risk status must follow the canonical evidence ledger."
+        }
+      ],
+      "duplicate_disposition": "Keep as the risk register; link rather than duplicate protocol/scaling facts.",
+      "reader_risks": [
+        "Studio: lead with current authority, measured-versus-target state, and final disposition; collapse historical assignments and machine receipts.",
+        "TUI80: keep one claim or decision per screen, wrap tables, and avoid placing fleet payloads inside prose callouts.",
+        "email: send outcome, material caveat, and next owner action; link protocol tables, inventory hashes, and execution recipes.",
+        "public: remove internal branches, task ids, infrastructure topology, security seams, and mutable operational claims; retain verified product behavior and explicit limits.",
+        "CLI/API: preserve exact ids, revisions, hashes, phase counts, verdicts, and distinctions among planned, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: strong risk structure, but the most prominent risk status conflicts with the later wave authority."
+    },
+    {
+      "unit_id": "paper:hyperquiz-scaling",
+      "document_id": "hyperquiz-scaling",
+      "document_rev": "5bc85e807ada8b899c106c62b36a49a8",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Compact scaling decision explaining why individual cursors cross over to a fixed heatmap and when sharding becomes justified.",
+      "opening_and_criteria": "blocks[0]-[2] disclose reconstruction and state the O(N²) fan-out problem before prescribing a solution.",
+      "outline_and_hierarchy": "Eight blocks move cleanly from constraint to hybrid to explicit sharding trigger.",
+      "human_voice_and_precision": "The document calls 2,000 players a target rather than a proven capacity and refuses speculative sharding.",
+      "compression_and_restraint": "Keep; add a last-measured load line when evidence exists, but do not expand the concise decision record.",
+      "evidence_and_truth": "blocks[4]-[7] name threshold, runtime setter, fixed payload, test boundary, target, and measurement-gated future decision.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "Multi-node sharding remains parked until a measured guerrilla ceiling demands it.",
+          "lesson": "State scale architecture as an evidence-triggered decision."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[5]",
+          "evidence": "The approximately 2,000-player single-node value is a target, not a demonstrated load result.",
+          "lesson": "Downstream summaries must retain the target qualifier."
+        }
+      ],
+      "duplicate_disposition": "Keep as the scaling authority; protocol and risk papers should link here instead of restating thresholds.",
+      "reader_risks": [
+        "Studio: lead with current authority, measured-versus-target state, and final disposition; collapse historical assignments and machine receipts.",
+        "TUI80: keep one claim or decision per screen, wrap tables, and avoid placing fleet payloads inside prose callouts.",
+        "email: send outcome, material caveat, and next owner action; link protocol tables, inventory hashes, and execution recipes.",
+        "public: remove internal branches, task ids, infrastructure topology, security seams, and mutable operational claims; retain verified product behavior and explicit limits.",
+        "CLI/API: preserve exact ids, revisions, hashes, phase counts, verdicts, and distinctions among planned, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Keep: short, bounded, and honest about target-versus-measurement."
+    },
+    {
+      "unit_id": "paper:hyperquiz-vision",
+      "document_id": "hyperquiz-vision",
+      "document_rev": "35b845cf0f7e34401b36b04ae336c499",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Product vision for a Barkpark-native live quiz spanning projector, phones, Studio editing, and honest realtime states.",
+      "opening_and_criteria": "blocks[0]-[6] communicate the desired experience and three surfaces vividly.",
+      "outline_and_hierarchy": "Eleven blocks are compact and progress from experience to architecture boundary and status.",
+      "human_voice_and_precision": "The vision is concrete and product-shaped, but its status belongs to a stranded-engine moment superseded by later waves.",
+      "compression_and_restraint": "Repair only the status and measured-state qualifiers; retain the concise vision language.",
+      "evidence_and_truth": "blocks[2], [4], [6], and [8] separate desired experience, surface roles, architectural strengths, and explicit non-MMO fence.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "The paper explicitly rejects MMO-scale simulation and names the product strengths it is actually using.",
+          "lesson": "Vision gains credibility from a clear non-goal boundary."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[10]",
+          "evidence": "Status says the engine exists only on a local recovered branch and landing it is the priority, which later wave papers supersede.",
+          "lesson": "Vision documents need a refreshed current-state footer."
+        }
+      ],
+      "duplicate_disposition": "Keep as product vision after repair; do not merge into implementation or protocol papers.",
+      "reader_risks": [
+        "Studio: lead with current authority, measured-versus-target state, and final disposition; collapse historical assignments and machine receipts.",
+        "TUI80: keep one claim or decision per screen, wrap tables, and avoid placing fleet payloads inside prose callouts.",
+        "email: send outcome, material caveat, and next owner action; link protocol tables, inventory hashes, and execution recipes.",
+        "public: remove internal branches, task ids, infrastructure topology, security seams, and mutable operational claims; retain verified product behavior and explicit limits.",
+        "CLI/API: preserve exact ids, revisions, hashes, phase counts, verdicts, and distinctions among planned, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: strong vision, but obsolete implementation status undermines authority."
+    },
+    {
+      "unit_id": "paper:intuition-atlas-verdict",
+      "document_id": "intuition-atlas-verdict",
+      "document_rev": "1aca7d20f70b3b04c5aafac8356ed03c",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Three-experiment verdict on optical maps as standing placement intuition, with text sidecars for dangerous semantic polarity.",
+      "opening_and_criteria": "blocks[0]-[7] state agent/sample scale, thesis, first experiment, exact results, and the wrong-but-valid mutation risk.",
+      "outline_and_hierarchy": "Nineteen blocks form a strong experiment sequence followed by generalized doctrine and related-series pointers.",
+      "human_voice_and_precision": "Specific, self-correcting, and careful about the joint contribution of map and abstention instruction.",
+      "compression_and_restraint": "Keep; the density is high but every example serves the channel-allocation doctrine.",
+      "evidence_and_truth": "blocks[6]-[16] distinguish three experiments, invention flags, tool-turn tradeoffs, two failed fixes, and the final sidecar rule.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[14]",
+          "evidence": "Putting trust-boundary polarity on the image still failed; only an authoritative text sidecar cleared the inversion.",
+          "lesson": "Dangerous semantic polarity belongs in exact text, not a blurry channel."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "A stale atlas can turn ignorance into confident wrong verbs.",
+          "lesson": "Adoption requires source-triggered regeneration and freshness discipline."
+        }
+      ],
+      "duplicate_disposition": "No purpose duplicate; retain as the decision-grade synthesis for its experiment series.",
+      "reader_risks": [
+        "Studio: lead with current authority, measured-versus-target state, and final disposition; collapse historical assignments and machine receipts.",
+        "TUI80: keep one claim or decision per screen, wrap tables, and avoid placing fleet payloads inside prose callouts.",
+        "email: send outcome, material caveat, and next owner action; link protocol tables, inventory hashes, and execution recipes.",
+        "public: remove internal branches, task ids, infrastructure topology, security seams, and mutable operational claims; retain verified product behavior and explicit limits.",
+        "CLI/API: preserve exact ids, revisions, hashes, phase counts, verdicts, and distinctions among planned, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Keep: clear experiments, concrete safety failure, and a well-bounded doctrine."
+    },
+    {
+      "unit_id": "paper:legendary-paper-task-quality-takeover-2026-07-15",
+      "document_id": "legendary-paper-task-quality-takeover-2026-07-15",
+      "document_rev": "c2eb503ab071e1df90ccbd2326f77f64",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Canonical 1,872-unit Legendary quality campaign authority, including remediation closure, frozen identity, rubrics, fleet plan, risks, and remaining gates.",
+      "opening_and_criteria": "blocks[0]-[5] clearly state remediation complete but Survey not started and define the zero-hard-failure campaign goal.",
+      "outline_and_hierarchy": "Forty blocks cover all authority surfaces, but large machine projections inside callouts overwhelm human reading and duplicate the live CycleFleet record.",
+      "human_voice_and_precision": "Strong distinctions among immutable git identity, moving main, historical evidence, and unallocated local capability are partially undermined by stale text later in the same snapshot.",
+      "compression_and_restraint": "Repair by reconciling block[7] with block[1], moving raw fleet/task projections to linked artifacts, and keeping a concise human authority summary.",
+      "evidence_and_truth": "blocks[1], [7], [21], [25], [27], [38], and [39] provide exact hashes and gates, but block[7] still describes remediation as open after block[1] declares it closed.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[25]",
+          "evidence": "The paper states allocation capability exists while explicitly refusing to claim a live disposable instance.",
+          "lesson": "Capability and observed allocation must remain separate modalities."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "Authority snapshot says three reviewers returned REQUEST CHANGES and remediation is open, contradicting the leading renewed-pass closure.",
+          "lesson": "One snapshot must not expose two current remediation states."
+        }
+      ],
+      "duplicate_disposition": "Primary Wave 1 authority; the remediation dossier should remain historical and be linked as superseded evidence.",
+      "reader_risks": [
+        "Studio: lead with current authority, measured-versus-target state, and final disposition; collapse historical assignments and machine receipts.",
+        "TUI80: keep one claim or decision per screen, wrap tables, and avoid placing fleet payloads inside prose callouts.",
+        "email: send outcome, material caveat, and next owner action; link protocol tables, inventory hashes, and execution recipes.",
+        "public: remove internal branches, task ids, infrastructure topology, security seams, and mutable operational claims; retain verified product behavior and explicit limits.",
+        "CLI/API: preserve exact ids, revisions, hashes, phase counts, verdicts, and distinctions among planned, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: excellent authority concepts, but internal state contradiction and machine-payload density materially hurt trust and reader usability."
+    },
+    {
+      "unit_id": "paper:legendary-paper-task-quality-takeover-wave-2-2026-07-16",
+      "document_id": "legendary-paper-task-quality-takeover-wave-2-2026-07-16",
+      "document_rev": "bbce337dd4b5146285d376515cb61cba",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 2 immutable 1,946-unit quality campaign authority with typed survey ownership, reader rubrics, experiment gates, and stop conditions.",
+      "opening_and_criteria": "blocks[0]-[12] clearly state 6/135 progress, frozen counts, identifiers, and a runnable inventory check.",
+      "outline_and_hierarchy": "Forty-two blocks provide complete governance, but enormous embedded fleet callouts duplicate artifact data and are hostile to TUI/email readers.",
+      "human_voice_and_precision": "Failure thresholds and ownership rules are precise, yet the visible CycleFleet ledger contradicts the completed-assignment headline.",
+      "compression_and_restraint": "Repair the ledger projection first, then replace raw assignment payloads with a compact count/status table plus artifact links.",
+      "evidence_and_truth": "blocks[1], [14], and [36] say six Survey assignments completed, while block[16] says zero assigned and zero shipped.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[34]",
+          "evidence": "Build is explicitly prohibited until all experiments complete and a capacity seal freezes the chosen format.",
+          "lesson": "Keep expensive repair fleets behind an evidence and capacity gate."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[16]",
+          "evidence": "The CycleFleet ledger reports 0 assigned/0 shipped even though the front and fleet block report six completed assignments.",
+          "lesson": "Canonical progress projections must reconcile within the same revision."
+        }
+      ],
+      "duplicate_disposition": "Distinct replacement wave with a new 1,946-unit freeze; cross-link Wave 1 and explicitly state why historical counts cannot merge.",
+      "reader_risks": [
+        "Studio: lead with current authority, measured-versus-target state, and final disposition; collapse historical assignments and machine receipts.",
+        "TUI80: keep one claim or decision per screen, wrap tables, and avoid placing fleet payloads inside prose callouts.",
+        "email: send outcome, material caveat, and next owner action; link protocol tables, inventory hashes, and execution recipes.",
+        "public: remove internal branches, task ids, infrastructure topology, security seams, and mutable operational claims; retain verified product behavior and explicit limits.",
+        "CLI/API: preserve exact ids, revisions, hashes, phase counts, verdicts, and distinctions among planned, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: comprehensive plan, but internal ledger contradiction and overembedded machine data break authority and constrained-reader fitness."
+    },
+    {
+      "unit_id": "paper:legendary-quality-remediation-wave-1-2026-07-16",
+      "document_id": "legendary-quality-remediation-wave-1-2026-07-16",
+      "document_rev": "a073f8f81927290272ea038778e7ae87",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Historical REQUEST CHANGES dossier that froze four pre-Survey remediation findings, child tasks, implementation order, and pass condition.",
+      "opening_and_criteria": "blocks[0]-[5] accurately frame the then-current request-changes state and immutable candidate.",
+      "outline_and_hierarchy": "Twenty blocks move efficiently from status through evidence, ranked findings, tasks, execution, and stop condition.",
+      "human_voice_and_precision": "Excellent historical honesty: published BP evidence is separated from unimplemented source fixes and prior failures are preserved append-only.",
+      "compression_and_restraint": "Retain immutable as historical evidence, but label it superseded and link the later renewed three-lane pass in the Wave 1 authority.",
+      "evidence_and_truth": "blocks[9]-[19] preserve hashes, ranked findings, open remediation tasks, source-not-shipped state, and exact exit gate.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[15]",
+          "evidence": "The dossier says BP evidence shipped while source changes did not, refusing to invent a source commit.",
+          "lesson": "Separate evidence publication from implementation completion."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[1]",
+          "evidence": "The leading REQUEST CHANGES/current remediation state has since been superseded by the renewed-pass closure in the takeover Paper.",
+          "lesson": "Historical dossiers need an explicit superseded banner to prevent stale operational use."
+        }
+      ],
+      "duplicate_disposition": "Superseded as current authority by legendary-paper-task-quality-takeover-2026-07-15; preserve append-only for audit, do not merge or delete.",
+      "reader_risks": [
+        "Studio: lead with current authority, measured-versus-target state, and final disposition; collapse historical assignments and machine receipts.",
+        "TUI80: keep one claim or decision per screen, wrap tables, and avoid placing fleet payloads inside prose callouts.",
+        "email: send outcome, material caveat, and next owner action; link protocol tables, inventory hashes, and execution recipes.",
+        "public: remove internal branches, task ids, infrastructure topology, security seams, and mutable operational claims; retain verified product behavior and explicit limits.",
+        "CLI/API: preserve exact ids, revisions, hashes, phase counts, verdicts, and distinctions among planned, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Superseded: high-quality historical dossier whose operational state is no longer current."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}

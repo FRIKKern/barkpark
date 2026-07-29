@@ -1,0 +1,183 @@
+{
+  "_createdAt": "2026-07-09T22:13:09.936727Z",
+  "_draft": false,
+  "_id": "hyperquiz-risks",
+  "_publishedId": "hyperquiz-risks",
+  "_rev": "06c4b405a3d5414c8114dfd3c2f32480",
+  "_type": "paper",
+  "_updatedAt": "2026-07-18T01:10:20.035074Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Hyperquiz — Risks",
+      "type": "heading"
+    },
+    {
+      "content": "Reconstructed 2026-07-10 from the Hyperquiz Founding Charter (.claude/workflows/bp-hyperquiz-charter.md) and the recovered engine branch hyperquiz-p1-recovered. The original localhost:4000 paper body was unreachable at reconstruction time, so this is rebuilt from those sources and the built code — not a byte-copy of the lost original. Canonical ledger: the hyperquiz-epic task tree on guerrilla.",
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "Browser-visual verification gap (being closed)",
+      "type": "heading"
+    },
+    {
+      "content": "The recovered engine verified the cursor canvas + heatmap cloud by wiring and decoder cross-checks in node, NOT in a real browser. Closed this wave (hq-w1-live-verify): chrome-devtools against live /quiz/host|play/:pin on guerrilla — websocket 101 (not 403), cursor canvas, answer flow, Studio live-edit round-trip, honest error states.",
+      "id": "block-3",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "check_origin footgun (Past-Mistake-11)",
+      "type": "heading"
+    },
+    {
+      "content": "The demo must reach guerrilla via its PHX_HOST domain (guerrilla.barkpark.cloud) or a BARKPARK_EXTRA_ORIGINS entry. A mismatched Origin makes /quiz/websocket 403 SILENTLY — the LiveView drops and the surface goes click-dead with no error. Same failure mode that killed Studio after the TLS cutover.",
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-6",
+      "level": 2,
+      "text": "O(N^2) cursor bandwidth ceiling",
+      "type": "heading"
+    },
+    {
+      "content": "Individual cursors saturate the fan-out at a few hundred concurrent pointers. Mitigation is built (Decision B): the O(1) heatmap above @heatmap_threshold 300. The residual risk is the threshold being mistuned for a given room — mitigated by the runtime set_heatmap_threshold/2 setter.",
+      "id": "block-7",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-8",
+      "level": 2,
+      "text": "Single-node load ceiling",
+      "type": "heading"
+    },
+    {
+      "content": "Decision B targets ~2,000/room on one node. If real load on guerrilla proves a lower ceiling, hq-p7-shard (multi-node) unparks — but only on measured evidence, not speculation.",
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-10",
+      "level": 2,
+      "text": "Dormant socket when plugin disabled",
+      "type": "heading"
+    },
+    {
+      "content": "Because the socket \"/quiz\" line compiles unconditionally (the one irreducible core edit), a disabled quiz plugin still exposes a dormant /quiz socket path. Harmless: no channel is reachable, so there is nothing to join. Accepted tradeoff, identical to Pulse.",
+      "id": "block-11",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-12",
+      "level": 2,
+      "text": "Provenance risk (mitigated)",
+      "type": "heading"
+    },
+    {
+      "content": "Decisions A/B/C were autopilot-recorded with no human sign-off, and the 45 local hq-* tasks are unpublished drafts. Mitigated by the charter ratification (human veto welcome, reversible-by-design) and by refiling a published task tree + these papers on guerrilla as the canonical ledger.",
+      "id": "block-13",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Hyperquiz — Risks",
+        "type": "heading"
+      },
+      {
+        "content": "Reconstructed 2026-07-10 from the Hyperquiz Founding Charter (.claude/workflows/bp-hyperquiz-charter.md) and the recovered engine branch hyperquiz-p1-recovered. The original localhost:4000 paper body was unreachable at reconstruction time, so this is rebuilt from those sources and the built code — not a byte-copy of the lost original. Canonical ledger: the hyperquiz-epic task tree on guerrilla.",
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "level": 2,
+        "text": "Browser-visual verification gap (being closed)",
+        "type": "heading"
+      },
+      {
+        "content": "The recovered engine verified the cursor canvas + heatmap cloud by wiring and decoder cross-checks in node, NOT in a real browser. Closed this wave (hq-w1-live-verify): chrome-devtools against live /quiz/host|play/:pin on guerrilla — websocket 101 (not 403), cursor canvas, answer flow, Studio live-edit round-trip, honest error states.",
+        "id": "block-3",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "check_origin footgun (Past-Mistake-11)",
+        "type": "heading"
+      },
+      {
+        "content": "The demo must reach guerrilla via its PHX_HOST domain (guerrilla.barkpark.cloud) or a BARKPARK_EXTRA_ORIGINS entry. A mismatched Origin makes /quiz/websocket 403 SILENTLY — the LiveView drops and the surface goes click-dead with no error. Same failure mode that killed Studio after the TLS cutover.",
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-6",
+        "level": 2,
+        "text": "O(N^2) cursor bandwidth ceiling",
+        "type": "heading"
+      },
+      {
+        "content": "Individual cursors saturate the fan-out at a few hundred concurrent pointers. Mitigation is built (Decision B): the O(1) heatmap above @heatmap_threshold 300. The residual risk is the threshold being mistuned for a given room — mitigated by the runtime set_heatmap_threshold/2 setter.",
+        "id": "block-7",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-8",
+        "level": 2,
+        "text": "Single-node load ceiling",
+        "type": "heading"
+      },
+      {
+        "content": "Decision B targets ~2,000/room on one node. If real load on guerrilla proves a lower ceiling, hq-p7-shard (multi-node) unparks — but only on measured evidence, not speculation.",
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-10",
+        "level": 2,
+        "text": "Dormant socket when plugin disabled",
+        "type": "heading"
+      },
+      {
+        "content": "Because the socket \"/quiz\" line compiles unconditionally (the one irreducible core edit), a disabled quiz plugin still exposes a dormant /quiz socket path. Harmless: no channel is reachable, so there is nothing to join. Accepted tradeoff, identical to Pulse.",
+        "id": "block-11",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-12",
+        "level": 2,
+        "text": "Provenance risk (mitigated)",
+        "type": "heading"
+      },
+      {
+        "content": "Decisions A/B/C were autopilot-recorded with no human sign-off, and the 45 local hq-* tasks are unpublished drafts. Mitigated by the charter ratification (human veto welcome, reversible-by-design) and by refiling a published task tree + these papers on guerrilla as the canonical ledger.",
+        "id": "block-13",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Hyperquiz — Risks</h1><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Browser-visual verification gap (being closed)</h2><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">check_origin footgun (Past-Mistake-11)</h2><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">O(N^2) cursor bandwidth ceiling</h2><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Single-node load ceiling</h2><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Dormant socket when plugin disabled</h2><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Provenance risk (mitigated)</h2><p></p>"
+  },
+  "body_html": "<h1>Hyperquiz — Risks</h1><p></p><h2>Browser-visual verification gap (being closed)</h2><p></p><h2>check_origin footgun (Past-Mistake-11)</h2><p></p><h2>O(N^2) cursor bandwidth ceiling</h2><p></p><h2>Single-node load ceiling</h2><p></p><h2>Dormant socket when plugin disabled</h2><p></p><h2>Provenance risk (mitigated)</h2><p></p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": null,
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/hyperquiz-risks"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Hyperquiz — Risks"
+}

@@ -1,0 +1,1372 @@
+{
+  "_createdAt": "2026-07-16T10:40:06.332880Z",
+  "_draft": false,
+  "_id": "intuition-atlas-verdict",
+  "_publishedId": "intuition-atlas-verdict",
+  "_rev": "1aca7d20f70b3b04c5aafac8356ed03c",
+  "_type": "paper",
+  "_updatedAt": "2026-07-16T11:29:05.366918Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "text": "Intuition atlases · CLI + grasp-of-relevance · two verdicts",
+      "type": "eyebrow"
+    },
+    {
+      "id": "block-1",
+      "level": 1,
+      "text": "The intuition atlas: instant grasp of relevance, zero inventions — and the traverser hallucinated first",
+      "type": "heading"
+    },
+    {
+      "id": "block-2",
+      "items": [
+        "79 agents · 3 experiments",
+        "CLI atlas 8/8 vs 4/8 at 586 tok",
+        "tier map: 0 inventions vs traverser's 1",
+        "epic map SHIPS: 213 tok + laws sidecar"
+      ],
+      "type": "byline"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A deliberately compressed optical map is not a document to work from — it is "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "standing intuition"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ": when an agent meets a detail cold, it already knows what the thing is, which law governs it, and which ONE file verifies it — instead of discovering that by traversal. Two experiments, both Opus 4.8: the map delivered placement quality matching free repo traversal (8.7 vs 9.3, beating or tying it on 6 of 8 details) at "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "zero tool-turns"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ", with "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "zero invented relations"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " — while the free traverser, with the whole repo in hand, tripped the invention flag once. The blurry map was the "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "safer"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " arm."
+        }
+      ],
+      "id": "block-3",
+      "title": "The thesis, stated and confirmed",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Experiment 1 — the whole CLI on one page (586 tokens)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "123 manifest commands + client builtins + gotchas, one optical page as sole reference vs priors-only. Columns: arm · exact-command correct · invented verbs."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "header": [
+        "Arm",
+        "Correct",
+        "Invented verbs"
+      ],
+      "id": "block-6",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "ATLAS"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "8/8"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "NO-ATLAS"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "4/8 (strictly 3/8)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "block-7",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The value is unknown-verb discovery"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — the misses were long-tail verbs priors can't supply: "
+          },
+          {
+            "type": "code",
+            "value": "task stamp --criterion"
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "type": "code",
+            "value": "ticket-key mint"
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "type": "code",
+            "value": "task prime"
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "type": "code",
+            "value": "onramp zed"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The decisive safety cell: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "asked about priming, the no-atlas agent answered "
+          },
+          {
+            "type": "code",
+            "value": "bp task next <worker>"
+          },
+          {
+            "type": "text",
+            "value": " — a wrong-but-VALID mutating command that silently claims and strands a real task. Invented verbs self-correct (instant usage error); "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "plausible-neighbor guesses that succeed do not"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". The atlas prevented exactly that class."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Staleness is THE failure mode: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "a stale atlas converts self-correcting ignorance into confident wrong verbs — regeneration from "
+          },
+          {
+            "type": "code",
+            "value": "GET /v1/capabilities"
+          },
+          {
+            "type": "text",
+            "value": " must ride the CLI-freshness discipline, or do not adopt."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-8",
+      "level": 2,
+      "text": "Experiment 2 — meeting a detail cold (the grasp-of-relevance test)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Eight real cold encounters ("
+        },
+        {
+          "type": "code",
+          "value": "scope_to_workspace/3"
+        },
+        {
+          "type": "text",
+          "value": " in review, "
+        },
+        {
+          "type": "code",
+          "value": "Repo.delete(workspace)"
+        },
+        {
+          "type": "text",
+          "value": " in a diff, "
+        },
+        {
+          "type": "code",
+          "value": "PHX_HOST=<IP>"
+        },
+        {
+          "type": "text",
+          "value": " while debugging click-dead Studio, a "
+        },
+        {
+          "type": "code",
+          "value": "@canonical"
+        },
+        {
+          "type": "text",
+          "value": " marker, the "
+        },
+        {
+          "type": "code",
+          "value": "post-merge"
+        },
+        {
+          "type": "text",
+          "value": " hook…). INTUIT = 4k optical tier map, NO repo access; TRAVERSE = free Grep/Read, no map. Judged on placement (what is it · which law · which verify file) with a strict invented-relation flag. Columns: arm · mean placement · invented relations · tool-turns."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "header": [
+        "Arm",
+        "Placement",
+        "Invented",
+        "Tool-turns"
+      ],
+      "id": "block-10",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "INTUIT (map only)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "8.7"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "0/8"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "0"
+                }
+              ],
+              "type": "strong"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "TRAVERSE (free repo)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "9.3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1/8"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "many/detail"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "block-11",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The map matched or beat traversal on 6/8 details"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — including a 10-vs-8 win where the traverser spent heavily AND tripped the invention flag (confidently claiming a @canonical marker was 'commented out' — the comment form IS its designed active state). Tool-turns can buy overconfidence."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The map's failure mode was the safe one. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "Both misses (Bulldocs ingest binding, PubSub section) drifted toward the nearest legible card, explicitly hedged 'not sure, will not assert' — and still named a correct verification path. One tool-turn repairs each."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The deficit is localized and fixable: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "both misses are the SAME thin spot — a multi-topic file (api/CLAUDE.md) whose section content lost salience to card filenames at 4k tokens. Nothing on the map was wrong; the fix is section-level headers for multi-topic files."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Zero inventions was produced by map + abstention discipline together"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — the prompt forbids inventing; the map licenses placement and the verify-file choice, never assertion."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-12",
+      "level": 2,
+      "text": "Experiment 3 — the generated epic map (SHIP, after a two-strike lesson)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "An auto-generator ("
+        },
+        {
+          "type": "code",
+          "value": "epic_map.py <keyword>"
+        },
+        {
+          "type": "text",
+          "value": ") mines a live epic — latest wave papers, ready tasks, file skeletons (moduledoc gist + public defs), and the mined reference graph — into "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "one 213-token page"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". Validated on the connectors epic with 6 cold details: 4/6 at traversal parity immediately; verdict SHIP-WITH-FIX on one invention."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-14",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The invention was surgically diagnosable — and it took TWO fixes. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "The map truncated a moduledoc mid-sentence, cutting the trust-boundary clause; the reader filled the polarity from priors (claimed CloudPolicy governs self-hosted when self-hosted never touches it). Putting the polarity sentence verbatim ON THE IMAGE was not enough — the reader inverted it again. Only moving it to an authoritative TEXT sidecar, with the instruction 'the text file wins for any boundary claim', cleared the cell: 9/9.5, zero inventions, n=2."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The generalized law: polarity is to meaning what a confusable hash is to strings. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "Unrecoverable from the blurry channel by construction — so it rides text, always. The epic map is the FGH posture applied to semantics: pixels carry shape (plan, skeletons, edges); text carries anything whose inversion is dangerous (boundary laws) plus a no-mid-sentence-truncation rule, since a dangling clause is a hallucination seed."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Also fixed by the laws channel: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "the abstention cell (ConnectTicket) rose 2→9 — richer coverage in the same budget."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-15",
+      "level": 2,
+      "text": "The atlas doctrine",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "An intuition atlas is a few hundred to a few thousand tokens of standing context that changes "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "where the agent looks first"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ", never "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "what it asserts"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". Rules: (1) verify-before-assert stays mandatory in the spawn prompt — grasp licenses the choice of verify file, every load-bearing claim gets its one traversal turn; (2) regenerate atlases on source change (CLI atlas from the capabilities manifest; staleness is worse than absence); (3) give multi-topic files section-level presence on the map; (4) keep each atlas one page — resistance to growth is a feature. Family so far: CLI atlas (586 tok, ADOPT-WITH-CAVEATS), doc-tier map (4k, YES-WITH-GUARDRAIL), epic map (same recipe per epic: plan + file skeletons + relevance edges — next build)."
+        }
+      ],
+      "id": "block-16",
+      "title": "Map for placement, traverse for truth",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "block-17",
+      "type": "divider"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Series: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "code",
+          "value": "fleet-primer-proof"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "type": "code",
+          "value": "optical-duels-results"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "type": "code",
+          "value": "whole-corpus-oracle-verdict"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "type": "code",
+          "value": "optical-compression-research-report"
+        },
+        {
+          "type": "text",
+          "value": " · tool "
+        },
+        {
+          "type": "code",
+          "value": "bp context pack"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "text": "Intuition atlases · CLI + grasp-of-relevance · two verdicts",
+        "type": "eyebrow"
+      },
+      {
+        "id": "block-1",
+        "level": 1,
+        "text": "The intuition atlas: instant grasp of relevance, zero inventions — and the traverser hallucinated first",
+        "type": "heading"
+      },
+      {
+        "id": "block-2",
+        "items": [
+          "79 agents · 3 experiments",
+          "CLI atlas 8/8 vs 4/8 at 586 tok",
+          "tier map: 0 inventions vs traverser's 1",
+          "epic map SHIPS: 213 tok + laws sidecar"
+        ],
+        "type": "byline"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "A deliberately compressed optical map is not a document to work from — it is "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "standing intuition"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ": when an agent meets a detail cold, it already knows what the thing is, which law governs it, and which ONE file verifies it — instead of discovering that by traversal. Two experiments, both Opus 4.8: the map delivered placement quality matching free repo traversal (8.7 vs 9.3, beating or tying it on 6 of 8 details) at "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "zero tool-turns"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ", with "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "zero invented relations"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — while the free traverser, with the whole repo in hand, tripped the invention flag once. The blurry map was the "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "safer"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " arm."
+          }
+        ],
+        "id": "block-3",
+        "title": "The thesis, stated and confirmed",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "Experiment 1 — the whole CLI on one page (586 tokens)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "123 manifest commands + client builtins + gotchas, one optical page as sole reference vs priors-only. Columns: arm · exact-command correct · invented verbs."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "header": [
+          "Arm",
+          "Correct",
+          "Invented verbs"
+        ],
+        "id": "block-6",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "ATLAS"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "8/8"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "0"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "NO-ATLAS"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "4/8 (strictly 3/8)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "3"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "block-7",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The value is unknown-verb discovery"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — the misses were long-tail verbs priors can't supply: "
+            },
+            {
+              "type": "code",
+              "value": "task stamp --criterion"
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "code",
+              "value": "ticket-key mint"
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "code",
+              "value": "task prime"
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "code",
+              "value": "onramp zed"
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The decisive safety cell: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "asked about priming, the no-atlas agent answered "
+            },
+            {
+              "type": "code",
+              "value": "bp task next <worker>"
+            },
+            {
+              "type": "text",
+              "value": " — a wrong-but-VALID mutating command that silently claims and strands a real task. Invented verbs self-correct (instant usage error); "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "plausible-neighbor guesses that succeed do not"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": ". The atlas prevented exactly that class."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Staleness is THE failure mode: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "a stale atlas converts self-correcting ignorance into confident wrong verbs — regeneration from "
+            },
+            {
+              "type": "code",
+              "value": "GET /v1/capabilities"
+            },
+            {
+              "type": "text",
+              "value": " must ride the CLI-freshness discipline, or do not adopt."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-8",
+        "level": 2,
+        "text": "Experiment 2 — meeting a detail cold (the grasp-of-relevance test)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Eight real cold encounters ("
+          },
+          {
+            "type": "code",
+            "value": "scope_to_workspace/3"
+          },
+          {
+            "type": "text",
+            "value": " in review, "
+          },
+          {
+            "type": "code",
+            "value": "Repo.delete(workspace)"
+          },
+          {
+            "type": "text",
+            "value": " in a diff, "
+          },
+          {
+            "type": "code",
+            "value": "PHX_HOST=<IP>"
+          },
+          {
+            "type": "text",
+            "value": " while debugging click-dead Studio, a "
+          },
+          {
+            "type": "code",
+            "value": "@canonical"
+          },
+          {
+            "type": "text",
+            "value": " marker, the "
+          },
+          {
+            "type": "code",
+            "value": "post-merge"
+          },
+          {
+            "type": "text",
+            "value": " hook…). INTUIT = 4k optical tier map, NO repo access; TRAVERSE = free Grep/Read, no map. Judged on placement (what is it · which law · which verify file) with a strict invented-relation flag. Columns: arm · mean placement · invented relations · tool-turns."
+          }
+        ],
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "header": [
+          "Arm",
+          "Placement",
+          "Invented",
+          "Tool-turns"
+        ],
+        "id": "block-10",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "INTUIT (map only)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "8.7"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "0/8"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "0"
+                  }
+                ],
+                "type": "strong"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "TRAVERSE (free repo)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "9.3"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "1/8"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "many/detail"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "block-11",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The map matched or beat traversal on 6/8 details"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — including a 10-vs-8 win where the traverser spent heavily AND tripped the invention flag (confidently claiming a @canonical marker was 'commented out' — the comment form IS its designed active state). Tool-turns can buy overconfidence."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The map's failure mode was the safe one. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "Both misses (Bulldocs ingest binding, PubSub section) drifted toward the nearest legible card, explicitly hedged 'not sure, will not assert' — and still named a correct verification path. One tool-turn repairs each."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The deficit is localized and fixable: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "both misses are the SAME thin spot — a multi-topic file (api/CLAUDE.md) whose section content lost salience to card filenames at 4k tokens. Nothing on the map was wrong; the fix is section-level headers for multi-topic files."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Zero inventions was produced by map + abstention discipline together"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — the prompt forbids inventing; the map licenses placement and the verify-file choice, never assertion."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-12",
+        "level": 2,
+        "text": "Experiment 3 — the generated epic map (SHIP, after a two-strike lesson)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "An auto-generator ("
+          },
+          {
+            "type": "code",
+            "value": "epic_map.py <keyword>"
+          },
+          {
+            "type": "text",
+            "value": ") mines a live epic — latest wave papers, ready tasks, file skeletons (moduledoc gist + public defs), and the mined reference graph — into "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "one 213-token page"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". Validated on the connectors epic with 6 cold details: 4/6 at traversal parity immediately; verdict SHIP-WITH-FIX on one invention."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-14",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The invention was surgically diagnosable — and it took TWO fixes. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "The map truncated a moduledoc mid-sentence, cutting the trust-boundary clause; the reader filled the polarity from priors (claimed CloudPolicy governs self-hosted when self-hosted never touches it). Putting the polarity sentence verbatim ON THE IMAGE was not enough — the reader inverted it again. Only moving it to an authoritative TEXT sidecar, with the instruction 'the text file wins for any boundary claim', cleared the cell: 9/9.5, zero inventions, n=2."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The generalized law: polarity is to meaning what a confusable hash is to strings. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "Unrecoverable from the blurry channel by construction — so it rides text, always. The epic map is the FGH posture applied to semantics: pixels carry shape (plan, skeletons, edges); text carries anything whose inversion is dangerous (boundary laws) plus a no-mid-sentence-truncation rule, since a dangling clause is a hallucination seed."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Also fixed by the laws channel: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "the abstention cell (ConnectTicket) rose 2→9 — richer coverage in the same budget."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-15",
+        "level": 2,
+        "text": "The atlas doctrine",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "An intuition atlas is a few hundred to a few thousand tokens of standing context that changes "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "where the agent looks first"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ", never "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "what it asserts"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". Rules: (1) verify-before-assert stays mandatory in the spawn prompt — grasp licenses the choice of verify file, every load-bearing claim gets its one traversal turn; (2) regenerate atlases on source change (CLI atlas from the capabilities manifest; staleness is worse than absence); (3) give multi-topic files section-level presence on the map; (4) keep each atlas one page — resistance to growth is a feature. Family so far: CLI atlas (586 tok, ADOPT-WITH-CAVEATS), doc-tier map (4k, YES-WITH-GUARDRAIL), epic map (same recipe per epic: plan + file skeletons + relevance edges — next build)."
+          }
+        ],
+        "id": "block-16",
+        "title": "Map for placement, traverse for truth",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "block-17",
+        "type": "divider"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Series: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "code",
+            "value": "fleet-primer-proof"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "type": "code",
+            "value": "optical-duels-results"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "type": "code",
+            "value": "whole-corpus-oracle-verdict"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "type": "code",
+            "value": "optical-compression-research-report"
+          },
+          {
+            "type": "text",
+            "value": " · tool "
+          },
+          {
+            "type": "code",
+            "value": "bp context pack"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "id": "block-18",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">Intuition atlases · CLI + grasp-of-relevance · two verdicts</p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">The intuition atlas: instant grasp of relevance, zero inventions — and the traverser hallucinated first</h1><p style=\"border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px\">79 agents · 3 experiments · CLI atlas 8/8 vs 4/8 at 586 tok · tier map: 0 inventions vs traverser&#39;s 1 · epic map SHIPS: 213 tok + laws sidecar</p><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">The thesis, stated and confirmed</div><span>A deliberately compressed optical map is not a document to work from — it is <span style=\"font-weight:bold\">standing intuition</span>: when an agent meets a detail cold, it already knows what the thing is, which law governs it, and which ONE file verifies it — instead of discovering that by traversal. Two experiments, both Opus 4.8: the map delivered placement quality matching free repo traversal (8.7 vs 9.3, beating or tying it on 6 of 8 details) at <span style=\"font-weight:bold\">zero tool-turns</span>, with <span style=\"font-weight:bold\">zero invented relations</span> — while the free traverser, with the whole repo in hand, tripped the invention flag once. The blurry map was the <span style=\"font-weight:bold\">safer</span> arm.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Experiment 1 — the whole CLI on one page (586 tokens)</h2><p>123 manifest commands + client builtins + gotchas, one optical page as sole reference vs priors-only. Columns: arm · exact-command correct · invented verbs.</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Arm</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Correct</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Invented verbs</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">ATLAS</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">8/8</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>0</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">NO-ATLAS</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>4/8 (strictly 3/8)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>3</span></td></tr></tbody></table><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">The value is unknown-verb discovery</span> — the misses were long-tail verbs priors can&#39;t supply: <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task stamp --criterion</code>, <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">ticket-key mint</code>, <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task prime</code>, <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">onramp zed</code>.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">The decisive safety cell: </span>asked about priming, the no-atlas agent answered <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bp task next &lt;worker&gt;</code> — a wrong-but-VALID mutating command that silently claims and strands a real task. Invented verbs self-correct (instant usage error); <span style=\"font-weight:bold\">plausible-neighbor guesses that succeed do not</span>. The atlas prevented exactly that class.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Staleness is THE failure mode: </span>a stale atlas converts self-correcting ignorance into confident wrong verbs — regeneration from <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">GET /v1/capabilities</code> must ride the CLI-freshness discipline, or do not adopt.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Experiment 2 — meeting a detail cold (the grasp-of-relevance test)</h2><p>Eight real cold encounters (<code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">scope_to_workspace/3</code> in review, <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Repo.delete(workspace)</code> in a diff, <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">PHX_HOST=&lt;IP&gt;</code> while debugging click-dead Studio, a <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">@canonical</code> marker, the <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">post-merge</code> hook…). INTUIT = 4k optical tier map, NO repo access; TRAVERSE = free Grep/Read, no map. Judged on placement (what is it · which law · which verify file) with a strict invented-relation flag. Columns: arm · mean placement · invented relations · tool-turns.</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Arm</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Placement</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Invented</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Tool-turns</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">INTUIT (map only)</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>8.7</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">0/8</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">0</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">TRAVERSE (free repo)</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>9.3</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>1/8</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>many/detail</span></td></tr></tbody></table><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">The map matched or beat traversal on 6/8 details</span> — including a 10-vs-8 win where the traverser spent heavily AND tripped the invention flag (confidently claiming a @canonical marker was &#39;commented out&#39; — the comment form IS its designed active state). Tool-turns can buy overconfidence.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">The map&#39;s failure mode was the safe one. </span>Both misses (Bulldocs ingest binding, PubSub section) drifted toward the nearest legible card, explicitly hedged &#39;not sure, will not assert&#39; — and still named a correct verification path. One tool-turn repairs each.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">The deficit is localized and fixable: </span>both misses are the SAME thin spot — a multi-topic file (api/CLAUDE.md) whose section content lost salience to card filenames at 4k tokens. Nothing on the map was wrong; the fix is section-level headers for multi-topic files.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Zero inventions was produced by map + abstention discipline together</span> — the prompt forbids inventing; the map licenses placement and the verify-file choice, never assertion.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Experiment 3 — the generated epic map (SHIP, after a two-strike lesson)</h2><p>An auto-generator (<code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">epic_map.py &lt;keyword&gt;</code>) mines a live epic — latest wave papers, ready tasks, file skeletons (moduledoc gist + public defs), and the mined reference graph — into <span style=\"font-weight:bold\">one 213-token page</span>. Validated on the connectors epic with 6 cold details: 4/6 at traversal parity immediately; verdict SHIP-WITH-FIX on one invention.</p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">The invention was surgically diagnosable — and it took TWO fixes. </span>The map truncated a moduledoc mid-sentence, cutting the trust-boundary clause; the reader filled the polarity from priors (claimed CloudPolicy governs self-hosted when self-hosted never touches it). Putting the polarity sentence verbatim ON THE IMAGE was not enough — the reader inverted it again. Only moving it to an authoritative TEXT sidecar, with the instruction &#39;the text file wins for any boundary claim&#39;, cleared the cell: 9/9.5, zero inventions, n=2.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">The generalized law: polarity is to meaning what a confusable hash is to strings. </span>Unrecoverable from the blurry channel by construction — so it rides text, always. The epic map is the FGH posture applied to semantics: pixels carry shape (plan, skeletons, edges); text carries anything whose inversion is dangerous (boundary laws) plus a no-mid-sentence-truncation rule, since a dangling clause is a hallucination seed.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Also fixed by the laws channel: </span>the abstention cell (ConnectTicket) rose 2→9 — richer coverage in the same budget.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The atlas doctrine</h2><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">Map for placement, traverse for truth</div><span>An intuition atlas is a few hundred to a few thousand tokens of standing context that changes <span style=\"font-weight:bold\">where the agent looks first</span>, never <span style=\"font-weight:bold\">what it asserts</span>. Rules: (1) verify-before-assert stays mandatory in the spawn prompt — grasp licenses the choice of verify file, every load-bearing claim gets its one traversal turn; (2) regenerate atlases on source change (CLI atlas from the capabilities manifest; staleness is worse than absence); (3) give multi-topic files section-level presence on the map; (4) keep each atlas one page — resistance to growth is a feature. Family so far: CLI atlas (586 tok, ADOPT-WITH-CAVEATS), doc-tier map (4k, YES-WITH-GUARDRAIL), epic map (same recipe per epic: plan + file skeletons + relevance edges — next build).</span></div><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><p><span style=\"font-weight:bold\">Series: </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">fleet-primer-proof</code> · <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">optical-duels-results</code> · <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">whole-corpus-oracle-verdict</code> · <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">optical-compression-research-report</code> · tool <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bp context pack</code>.</p>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\">Intuition atlases · CLI + grasp-of-relevance · two verdicts</p><h1>The intuition atlas: instant grasp of relevance, zero inventions — and the traverser hallucinated first</h1><p class=\"bp-role-byline\">79 agents · 3 experiments · CLI atlas 8/8 vs 4/8 at 586 tok · tier map: 0 inventions vs traverser&#39;s 1 · epic map SHIPS: 213 tok + laws sidecar</p><div class=\"bp-callout bp-callout--success\"><strong>The thesis, stated and confirmed</strong> <span>A deliberately compressed optical map is not a document to work from — it is <span style=\"font-weight:bold\">standing intuition</span>: when an agent meets a detail cold, it already knows what the thing is, which law governs it, and which ONE file verifies it — instead of discovering that by traversal. Two experiments, both Opus 4.8: the map delivered placement quality matching free repo traversal (8.7 vs 9.3, beating or tying it on 6 of 8 details) at <span style=\"font-weight:bold\">zero tool-turns</span>, with <span style=\"font-weight:bold\">zero invented relations</span> — while the free traverser, with the whole repo in hand, tripped the invention flag once. The blurry map was the <span style=\"font-weight:bold\">safer</span> arm.</span></div><h2>Experiment 1 — the whole CLI on one page (586 tokens)</h2><p>123 manifest commands + client builtins + gotchas, one optical page as sole reference vs priors-only. Columns: arm · exact-command correct · invented verbs.</p><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Arm</span></th><th class=\"bp-table__th\"><span>Correct</span></th><th class=\"bp-table__th\"><span>Invented verbs</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><code>ATLAS</code></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">8/8</span></td><td class=\"bp-table__td\"><span>0</span></td></tr><tr><td class=\"bp-table__td\"><code>NO-ATLAS</code></td><td class=\"bp-table__td\"><span>4/8 (strictly 3/8)</span></td><td class=\"bp-table__td\"><span>3</span></td></tr></tbody></table><ul><li><span><span style=\"font-weight:bold\">The value is unknown-verb discovery</span> — the misses were long-tail verbs priors can&#39;t supply: <code>task stamp --criterion</code>, <code>ticket-key mint</code>, <code>task prime</code>, <code>onramp zed</code>.</span></li><li><span><span style=\"font-weight:bold\">The decisive safety cell: </span>asked about priming, the no-atlas agent answered <code>bp task next &lt;worker&gt;</code> — a wrong-but-VALID mutating command that silently claims and strands a real task. Invented verbs self-correct (instant usage error); <span style=\"font-weight:bold\">plausible-neighbor guesses that succeed do not</span>. The atlas prevented exactly that class.</span></li><li><span><span style=\"font-weight:bold\">Staleness is THE failure mode: </span>a stale atlas converts self-correcting ignorance into confident wrong verbs — regeneration from <code>GET /v1/capabilities</code> must ride the CLI-freshness discipline, or do not adopt.</span></li></ul><h2>Experiment 2 — meeting a detail cold (the grasp-of-relevance test)</h2><p>Eight real cold encounters (<code>scope_to_workspace/3</code> in review, <code>Repo.delete(workspace)</code> in a diff, <code>PHX_HOST=&lt;IP&gt;</code> while debugging click-dead Studio, a <code>@canonical</code> marker, the <code>post-merge</code> hook…). INTUIT = 4k optical tier map, NO repo access; TRAVERSE = free Grep/Read, no map. Judged on placement (what is it · which law · which verify file) with a strict invented-relation flag. Columns: arm · mean placement · invented relations · tool-turns.</p><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Arm</span></th><th class=\"bp-table__th\"><span>Placement</span></th><th class=\"bp-table__th\"><span>Invented</span></th><th class=\"bp-table__th\"><span>Tool-turns</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><code>INTUIT (map only)</code></td><td class=\"bp-table__td\"><span>8.7</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">0/8</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">0</span></td></tr><tr><td class=\"bp-table__td\"><code>TRAVERSE (free repo)</code></td><td class=\"bp-table__td\"><span>9.3</span></td><td class=\"bp-table__td\"><span>1/8</span></td><td class=\"bp-table__td\"><span>many/detail</span></td></tr></tbody></table><ul><li><span><span style=\"font-weight:bold\">The map matched or beat traversal on 6/8 details</span> — including a 10-vs-8 win where the traverser spent heavily AND tripped the invention flag (confidently claiming a @canonical marker was &#39;commented out&#39; — the comment form IS its designed active state). Tool-turns can buy overconfidence.</span></li><li><span><span style=\"font-weight:bold\">The map&#39;s failure mode was the safe one. </span>Both misses (Bulldocs ingest binding, PubSub section) drifted toward the nearest legible card, explicitly hedged &#39;not sure, will not assert&#39; — and still named a correct verification path. One tool-turn repairs each.</span></li><li><span><span style=\"font-weight:bold\">The deficit is localized and fixable: </span>both misses are the SAME thin spot — a multi-topic file (api/CLAUDE.md) whose section content lost salience to card filenames at 4k tokens. Nothing on the map was wrong; the fix is section-level headers for multi-topic files.</span></li><li><span><span style=\"font-weight:bold\">Zero inventions was produced by map + abstention discipline together</span> — the prompt forbids inventing; the map licenses placement and the verify-file choice, never assertion.</span></li></ul><h2>Experiment 3 — the generated epic map (SHIP, after a two-strike lesson)</h2><p>An auto-generator (<code>epic_map.py &lt;keyword&gt;</code>) mines a live epic — latest wave papers, ready tasks, file skeletons (moduledoc gist + public defs), and the mined reference graph — into <span style=\"font-weight:bold\">one 213-token page</span>. Validated on the connectors epic with 6 cold details: 4/6 at traversal parity immediately; verdict SHIP-WITH-FIX on one invention.</p><ul><li><span><span style=\"font-weight:bold\">The invention was surgically diagnosable — and it took TWO fixes. </span>The map truncated a moduledoc mid-sentence, cutting the trust-boundary clause; the reader filled the polarity from priors (claimed CloudPolicy governs self-hosted when self-hosted never touches it). Putting the polarity sentence verbatim ON THE IMAGE was not enough — the reader inverted it again. Only moving it to an authoritative TEXT sidecar, with the instruction &#39;the text file wins for any boundary claim&#39;, cleared the cell: 9/9.5, zero inventions, n=2.</span></li><li><span><span style=\"font-weight:bold\">The generalized law: polarity is to meaning what a confusable hash is to strings. </span>Unrecoverable from the blurry channel by construction — so it rides text, always. The epic map is the FGH posture applied to semantics: pixels carry shape (plan, skeletons, edges); text carries anything whose inversion is dangerous (boundary laws) plus a no-mid-sentence-truncation rule, since a dangling clause is a hallucination seed.</span></li><li><span><span style=\"font-weight:bold\">Also fixed by the laws channel: </span>the abstention cell (ConnectTicket) rose 2→9 — richer coverage in the same budget.</span></li></ul><h2>The atlas doctrine</h2><div class=\"bp-callout bp-callout--info\"><strong>Map for placement, traverse for truth</strong> <span>An intuition atlas is a few hundred to a few thousand tokens of standing context that changes <span style=\"font-weight:bold\">where the agent looks first</span>, never <span style=\"font-weight:bold\">what it asserts</span>. Rules: (1) verify-before-assert stays mandatory in the spawn prompt — grasp licenses the choice of verify file, every load-bearing claim gets its one traversal turn; (2) regenerate atlases on source change (CLI atlas from the capabilities manifest; staleness is worse than absence); (3) give multi-topic files section-level presence on the map; (4) keep each atlas one page — resistance to growth is a feature. Family so far: CLI atlas (586 tok, ADOPT-WITH-CAVEATS), doc-tier map (4k, YES-WITH-GUARDRAIL), epic map (same recipe per epic: plan + file skeletons + relevance edges — next build).</span></div><div style=\"position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)\"><span style=\"position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem\">§</span></div><p><span style=\"font-weight:bold\">Series: </span><code>fleet-primer-proof</code> · <code>optical-duels-results</code> · <code>whole-corpus-oracle-verdict</code> · <code>optical-compression-research-report</code> · tool <code>bp context pack</code>.</p>",
+  "body_html_sv": 3,
+  "description": "Three experiments validating optical intuition atlases on Opus 4.8: the whole bp CLI on one 586-token page (8/8 vs 4/8, prevents wrong-but-valid mutating guesses), a 4k doc-tier map placing cold identifiers at 8.7/10 with zero invented relations while the free traverser hallucinated once, and an auto-generated per-epic map (213 tokens: plan, tasks, skeletons, edges) that reached ship quality after a two-strike lesson: trust-boundary polarity is unrecoverable from the blurry channel — it rides an authoritative TEXT laws sidecar, the FGH posture applied to semantics. Doctrine: map for placement, traverse for truth; pixels carry shape, text carries anything whose inversion is dangerous.",
+  "main_tag": "optical-compression",
+  "preview": {
+    "description": "Three experiments validating optical intuition atlases on Opus 4.8: the whole bp CLI on one 586-token page…",
+    "extensions": {
+      "tags": [
+        "optical-compression",
+        "research-note",
+        "context-management",
+        "token-efficiency"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/intuition-atlas-verdict"
+  },
+  "rev": 2,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "the intuition-atlas application of optical packing",
+      "strength": 85,
+      "tag": "optical-compression"
+    },
+    {
+      "rationale": "two judged experiments, strict invention flag",
+      "strength": 75,
+      "tag": "research-note"
+    },
+    {
+      "rationale": "standing atlases: placement vs truth division",
+      "strength": 70,
+      "tag": "context-management"
+    },
+    {
+      "rationale": "586-4k tokens of standing context replacing traversal turns",
+      "strength": 45,
+      "tag": "token-efficiency"
+    }
+  ],
+  "title": "The intuition atlas: instant grasp of relevance, zero inventions — and the traverser hallucinated first"
+}

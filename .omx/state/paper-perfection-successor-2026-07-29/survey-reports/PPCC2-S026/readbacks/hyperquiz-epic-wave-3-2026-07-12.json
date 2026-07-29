@@ -1,0 +1,780 @@
+{
+  "_createdAt": "2026-07-12T14:17:34.359701Z",
+  "_draft": false,
+  "_id": "hyperquiz-epic-wave-3-2026-07-12",
+  "_publishedId": "hyperquiz-epic-wave-3-2026-07-12",
+  "_rev": "2a9ac7bfb0ada6f5356393ba5dc02f9a",
+  "_type": "paper",
+  "_updatedAt": "2026-07-12T15:26:13.239584Z",
+  "blocks": [
+    {
+      "id": "hqw3-eyebrow",
+      "text": "Barkpark · Hyperquiz · wave 3 · complete (debrief 2026-07-12)",
+      "type": "eyebrow"
+    },
+    {
+      "id": "hqw3-h1",
+      "level": 1,
+      "text": "Hyperquiz Wave 3 — Wire the Bind + Kill the Ghost Room",
+      "type": "heading"
+    },
+    {
+      "id": "hqw3-byline",
+      "items": [
+        "one ~2-line wire is the wave's whole leverage: bind_quiz/3 gets its FIRST production call site",
+        "honest states: a typo'd pin must say so — no more silent ghost rooms",
+        "finish line: hq-w1-live-verify closes 6/6 with live evidence, criteria upgraded honestly"
+      ],
+      "type": "list"
+    },
+    {
+      "id": "hqw3-wish-h",
+      "level": 2,
+      "text": "The wish",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Two slices, in order. (1) hq-quiz-bind-wiring (p2): Quiz.bind_quiz/3 has ZERO production call sites, so Studio live-edit silently no-ops for every hosted room — the charter Vision's core promise (\"host live-edits a question mid-game and every connected screen updates in under a second\") is dead code. Wire the ?quiz=<id> mount into QuizHostLive so a hosted room binds its quiz doc; after merge + auto-deploy, prove the round trip live on guerrilla: host a room bound to a scratch quiz doc, publish an edit in Studio, watch host+play update in under ~1s (w2 evidence triad), tear down with proof. This also un-parks hq-w1-live-verify criterion 2's stronger form — upgrade that stamp honestly. (2) hq-invalid-pin-ux (p3): today /quiz/play/<pin> lazily creates a room for ANY non-empty pin ('x', 50-char, URL-encoded script tags — all render a working player view), so a typo lands a player alone in a ghost room that looks real. Ship an honest, styled error/empty state; after deploy, run hq-w1-live-verify criterion 3 ('invalid pin shows a real error, console clean') and CLOSE the task 6/6 — its builder claim has likely lapsed; re-claim honestly."
+        }
+      ],
+      "id": "hqw3-wish-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "hqw3-state-h",
+      "level": 2,
+      "text": "Where the epic stands (reconciled 2026-07-12)",
+      "type": "heading"
+    },
+    {
+      "id": "hqw3-state-1",
+      "items": [
+        "w1 (grade A, #2040): engine live on guerrilla as Barkpark.Plugins.Quiz, 99 tests green.",
+        "w2 (grade A-): live-verified WS origin proof + cursor triad in a real browser; hq-w1-live-verify at 5/6 met with two legs PARKED per Decision J (Studio live-edit not browser-drivable — bind unwired; heatmap has no prod lever).",
+        "PR #2816 (hq-w2-theme-reskin, Decision E) is OPEN with Elixir Test still running as this wave opens — the lead merges it and closes its task; wave 3 does NOT own it but MUST sequence around it (both slices may touch quiz.html.heex/LiveViews).",
+        "Open children this wave: hq-quiz-bind-wiring (p2, 0/2), hq-invalid-pin-ux (p3, 0/2), hq-w1-live-verify (in_progress, 5/6, claim likely lapsed).",
+        "NOT this wave: hq-heatmap-live-lever (p3, separate design), hq-orphan-branch-cleanup, hq-p7-* stay PARKED."
+      ],
+      "type": "list"
+    },
+    {
+      "id": "hqw3-dir-h",
+      "level": 2,
+      "text": "Strategic direction",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The finished experience: a host opens /quiz/host/<pin>?quiz=<doc-id> on the projector, phones join, and mid-game the host fixes a typo in Studio, hits publish — every screen updates before they look up. A player who fat-fingers the pin sees a calm, theme-token-styled \"nobody is hosting this room\" state — not a fake empty quiz. That closes the honesty loop the charter demands: no fake realtime, no fake rooms."
+        }
+      ],
+      "id": "hqw3-dir-1",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Tentative leans (Decide finalizes): (1) Bind wiring exactly as the task brief verified — extend QuizHostLive.mount/3 to accept \"quiz\" and call Quiz.bind_quiz(pin, qid) right after ensure_room; player LiveView untouched; guard the doc id against the known binary_id CastError footgun (raw junk id must NOT 500 the host page). (2) For invalid pins, lean option (b)+(c) combined: the PLAYER path never creates a room — it checks room existence without ensuring, and renders a soft honest state (\"nobody is hosting this room yet\") when absent; format validation alone (option a) cannot kill ghost rooms for well-formed typo pins, and join-only-if-hosted also closes a URL-scan resource-exhaustion hole for free. Host path keeps ensure_room. (3) Order matters: bind PR first (its live proof is the wave's headline), pin-UX second, both as own PRs through the Elixir Test gate (flake protocol Decision K, 2-rerun budget), both rebased over #2816 if it merges mid-wave. (4) Evidence bar is the w2 triad, verbatim: WS proof via curl handshake + onConnMessage cadence (chrome-devtools network panel never shows websockets — Decision I), scratch rooms/docs torn down with proof, no stamp over an unverified criterion."
+        }
+      ],
+      "id": "hqw3-dir-2",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Quality bar (Kinsta/Vercel): the invalid-pin state is a designed moment, not a plain <p> — it rides the derive(theme) token vocabulary the reskin just landed, matches the projector aesthetic, and keeps the console clean. The bind wire must be idempotent across host refresh/reconnect, and a bad ?quiz= id degrades gracefully (room still hosts, bind simply reports honestly)."
+        }
+      ],
+      "id": "hqw3-dir-3",
+      "type": "paragraph"
+    },
+    {
+      "id": "hqw3-survey-h",
+      "level": 2,
+      "text": "Survey plan (in flight)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "14 Sonnet surveyors are flying now. Each question + why:"
+        }
+      ],
+      "id": "hqw3-survey-0",
+      "type": "paragraph"
+    },
+    {
+      "id": "hqw3-survey-1",
+      "items": [
+        "bind-seam-anatomy — What exactly do Quiz.bind_quiz/3 and Bridge.bind do (quiz.ex:51 →), and what happens on a nonexistent/malformed quiz id? Why: the mount wire's error handling and CastError guard depend on it.",
+        "publish-propagation-path — Map the full path from a Studio publish of a quiz doc to a live room update (PubSub topic, Bridge subscription, LiveView event). Why: proves sub-1s is real, tells the verifier what event to observe.",
+        "quiz-doc-lifecycle — What schema is a quiz doc; exact bp/HTTP recipe to create, publish-edit, and delete a scratch quiz doc on guerrilla (incl. publish-wall tag requirements). Why: the live proof needs a scripted, tear-downable fixture.",
+        "host-mount-contract — QuizHostLive.mount today: params, error branches, behavior with ?quiz=<garbage>; binary_id CastError exposure. Why: the wire must not 500 the projector page.",
+        "player-join-path — Where the player path calls ensure_room; how to check room existence WITHOUT ensuring (Registry lookup?); race vs host; what self-reap does to connected players. Why: chooses between options a/b/c with facts.",
+        "error-state-precedent — The existing 'room is unavailable' branch + other honest empty states in the codebase: markup, classes, token usage. Why: the ghost-room fix should reuse, not invent.",
+        "reskin-interplay — PR #2816 diff: which token vocabulary lands in quiz.html.heex, merge status, conflict surface with both slices. Why: sequencing + the error state must ride the new tokens.",
+        "quiz-test-map — Where quiz tests live (bridge, LiveView mount), how to pin a mount-bind test and an invalid-pin test; studio-literal-check gate implications. Why: both PRs need protective tests, not vacuous green.",
+        "live-proof-recipe — Reconstruct the w2 verify triad as a runnable playbook (curl WS handshake, onConnMessage hook, isolated MCP session, teardown proof format) from the w2 paper/tasks. Why: wave-3's evidence bar is 'same triad'.",
+        "ledger-claims-state — hq-w1-live-verify: exact wording/stamps of all 6 criteria, claim state (lapsed?), correct re-claim + close sequence; hq-w2-theme-reskin close-on-merge ownership. Why: the wave ends in an honest 6/6 close, not a fabricated one.",
+        "deploy-latency — Confirm guerrilla blue/green auto-deploy on api/** merge, merge→live latency, and how to prove the live slot runs the new sha. Why: live proofs are meaningless against the old slot.",
+        "abuse-surface — Does lazy player-side room creation allow unbounded room spawn by URL scan? What P6 anti-abuse/max_children limits exist? Why: if join-only-if-hosted closes a real hole, that strengthens the design case and its test.",
+        "elixir-gate-health — task-13dacdcd75e1cabd status and current SupervisionIsolationTest flake rate on main. Why: two .ex PRs ride this gate; Decision K's 2-rerun budget may need updating.",
+        "bind-durability — Does a bind survive host LiveView remount/reconnect and room idle-reap; is rebind idempotent? Why: the projector page WILL be refreshed mid-game in real use."
+      ],
+      "type": "list"
+    },
+    {
+      "id": "hqw3-flight-h",
+      "level": 2,
+      "text": "In flight now",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Digest folded 14 survey reports (below) and dispatched a 6-assignment verify fleet (2 Opus, 4 Sonnet — plan below). Next: Decide appends decisions + the wave plan before builders fly. Tasks this wave drives: hq-quiz-bind-wiring, hq-invalid-pin-ux, hq-w1-live-verify (close 6/6). Epic: hyperquiz-epic."
+        },
+        {
+          "type": "text",
+          "value": " — CORRECTION (2026-07-12, review): this callout was written at Digest and went stale. Decide ran (Decisions M–S), both build slices flew and landed green, the review passed both clean with zero fixes, and PRs #2831/#2832 are filed. hq-w1-live-verify stalled honestly at 5/6 (Decision R gates it on merge+deploy). Full story in the Debrief below."
+        }
+      ],
+      "id": "hqw3-flight-1",
+      "title": "Status: wave complete (corrected 2026-07-12, review)",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "hqw3-digest-h",
+      "level": 2,
+      "text": "Survey digest — 14 reports, 2026-07-12",
+      "type": "heading"
+    },
+    {
+      "id": "hqw3-digest-1",
+      "text": "The wave's central premises all held under file:line evidence, and one premise of the strategic direction was REFUTED. Established: bind_quiz/3 (quiz.ex:50-53 → Bridge.bind/3) has zero production call sites, is idempotent (Map.put overwrite; MapSet-guarded subscribe), ALWAYS returns :ok, does an immediate synchronous load+apply at bind time, and degrades to a silent no-op on nonexistent, unpublished, or garbage quiz ids. Refuted: the binary_id CastError guard the direction called for does NOT apply to this chain — lookup is by doc_id, a plain string column (document.ex:13 vs :16; query.ex:730), never the binary_id PK. Builders must NOT add an Ecto.UUID.cast guard; it would wrongly reject valid non-UUID doc_ids.",
+      "type": "paragraph"
+    },
+    {
+      "id": "hqw3-digest-2",
+      "items": [
+        "Propagation is fully wired downstream of the missing bind: publish → post-commit broadcast on documents:<dataset> (broadcast.ex:53-99) → Bridge subscribes at bind time → apply_now → fresh uncached Repo.one → Room {:question_updated} on the room topic → QuizHostLive.handle_info already exists (quiz_host_live.ex:48-49). Sub-1s is structurally free. PUBLISH, never a bare patch, fires the event — the live proof must re-publish per edit.",
+        "Wire site: QuizHostLive.mount connected branch (quiz_host_live.ex:17-33); ?quiz= arrives in mount params on the plugin-declared :live route (plugins/quiz.ex:81-88, no handle_params). Refresh re-fires the connected mount, so re-bind-on-refresh is free and idempotent. Dataset arg defaults to \"production\" — must be a deliberate choice, not an accident.",
+        "Ghost-room mechanism: Room.ensure/1 (room.ex:99-112) spawns for ANY pin, reached by host mount (ensure_room), QuizPlayLive connected mount via Quiz.join (room.ex:132-136), and QuizChannel non-observer join. Room.whereis/1 (room.ex:88-95) is the proven zero-side-effect existence primitive (move/hover/call_existing already use it). Global cap 10_000 rooms exists (plugins/quiz.ex:69) but creation RATE is unthrottled; the player-side fix closes half the spawn surface for free, the host path stays open (flag to Decide as follow-up, not blocker).",
+        "Error state: reuse .q-status (3 precedents in the quiz LiveViews); after the #2816 reskin it inherits derive(theme) tokens with zero new CSS. Tone (quiet --ink-soft family vs danger tokens) is a Decide call — precedent argues quiet. quiz.html.heex IS scanned by studio-literal-check; no new hex literals.",
+        "Quiz docs are NOT publish-walled (@walled_types = paper, task — lifecycle.ex:58): the scratch fixture needs no tags/description. Teardown existence proof must use doc get, not doc ls (ls 404s on empty types). Exact bp doc create/publish/patch/delete bodies captured via --dry-run.",
+        "Test home: quiz_live_test.exs (async:false, unique pin, on_exit stop_room) for BOTH new tests; bridge_test.exs owns bind unit semantics. The mount-bind LiveView test and the connected-path invalid-pin test are genuinely new coverage. (One surveyor's 'no host-mount tests exist' was a too-narrow filename find — quiz_live_test.exs covers host mounts.)",
+        "Deploy: merge→live ≈4-5 min blue/green; live sha provable via authed GET /v1/capabilities?build=1 (.build.commit) — anonymous silently omits the build key.",
+        "Ledger: hq-w1-live-verify is 5/6, criteria 0-indexed; idx2 = park-satisfied Studio round trip (the upgrade target), idx3 = honest miss (invalid pin). Re-claim = same-worker targeted claim (renewal). hq-w2-theme-reskin's merge criterion is the LEAD's to close. Bind durability: bindings live only in Bridge memory with no unbind/GC (named slow leak, out of scope); a reaped room restarts on @default_question until the next publish/rebind — untested low-traffic staleness edge.",
+        "Elixir gate: the Decision-K flake is NOT fixed (task-13dacdcd75e1cabd open, unclaimed, p1) and hit 4 of the last 15 main runs; a SECOND uncharted flake (QueueTest queue_test.exs:385 Postgres plan-shape assert) hit 2 of 15 and is covered by no rerun protocol — Decide should file it."
+      ],
+      "type": "list"
+    },
+    {
+      "id": "hqw3-digest-3",
+      "text": "Contradictions (time-skew, not bad faith): three surveyors observed PR #2816 OPEN with Sobelow red (unbaselined XSS.Raw at quiz.html.heex:21, no .sobelow-skips entry) and the QueueTest flake red; two later surveyors observed it MERGED at 14:23:36Z with the reskin on origin/main and guerrilla serving commit 3d66c0dd (built 14:17Z — i.e. possibly PRE-merge). One surveyor also reported this local checkout as 'ahead 96, behind 5' vs origin/main — an alarming divergence claim that must be settled before any builder branches. Also settled in passing: the search verb is `bp search query \"<terms>\"` (bare `bp search` errors — several surveyors lost prior-art lookup to this).",
+      "type": "paragraph"
+    },
+    {
+      "id": "hqw3-cov-h",
+      "level": 3,
+      "text": "Coverage map — checked and found / checked and NOT found",
+      "type": "heading"
+    },
+    {
+      "id": "hqw3-cov-1",
+      "items": [
+        "FOUND: full bind contract + error shapes (bridge.ex end-to-end); publish→room chain with no cache anywhere; quiz schema live on guerrilla matching source; mount landing sites in both LiveViews; whereis/ensure split in room.ex; .q-status precedents + #2816 diff; all three quiz test files' harness patterns; deploy pipeline + timing from today's real runs; both wave tasks' acceptance criteria; both Elixir-gate flake signatures with run logs; Bridge bindings durability semantics.",
+        "NOT FOUND (absences that are decisions-in-waiting): NO rate limiter on room creation anywhere in the quiz surface; NO test for max_children/cap saturation; NO Room.terminate or reap broadcast — self-reaped rooms freeze connected players silently (second honesty gap, adjacent to but outside this wave's slices); NO unbind/GC path in Bridge; NO .sobelow-skips entry for quiz.html.heex at survey time; NO tracking task found for the QueueTest flake; NO CastError exposure on the ?quiz= path (guard not needed).",
+        "CORNERS NO SURVEYOR REACHED: Studio's actual edit/publish UI for type:quiz docs (the live proof says 'Studio publish' — nobody opened Studio; bp doc publish fires the identical broadcast as a fallback, but that's a Decide call); quiz_socket.ex connect auth in full; the /papers/hyperquiz-risks paper referenced by room.ex:30; the wave-2 Paper's full body; whether QuizPlayLive handles {:question_updated,...} (players updating live is the charter promise — host side confirmed, player side only inferred)."
+      ],
+      "type": "list"
+    },
+    {
+      "id": "hqw3-verify-h",
+      "level": 2,
+      "text": "Verify plan (in flight — 6 assignments, 2 Opus / 4 Sonnet)",
+      "type": "heading"
+    },
+    {
+      "id": "hqw3-verify-1",
+      "items": [
+        "pr2816-ground-truth (sonnet, RUNS git fetch + rev-list count, gh pr view 2816, git show origin/main:api/.sobelow-skips, authed build-info curl, bp task get hq-w2-theme-reskin) — settle merged/deployed/baselined state of the reskin and the local-divergence claim; builders branch from the answer.",
+        "ghost-room-seam (OPUS, RUNS the three quiz test files locally to prove the harness is green) — does the play page's quiz-cursors.js channel join still spawn a room when the LiveView error-renders on a bad pin? Decides the correct fix seam (Room.join/Quiz.join gate vs LiveView-only) and confirms player-side question_updated handling.",
+        "bind-wire-probe (OPUS, worktree probe: apply the ~2-line wire + write the mount-bind test + the fail-before invalid-pin assertion, RUN mix test) — proves ?quiz= actually reaches mount params on the plugin-injected route, bind→render works at unit level, and the invalid-pin test is honestly red today.",
+        "ledger-edges-claims (sonnet, RUNS bp task get + authed edges curl) — resolve hq-w1-live-verify's mystery dependency_count:1, confirm both wave tasks unclaimed, fetch /papers/hyperquiz-risks, confirm bp search query verb.",
+        "gate-flake-now (sonnet, RUNS gh run list + per-failure log classification) — current hit-rate of both flake signatures, whether QueueTest 385 is same-sha-nondeterministic, whether any task tracks it.",
+        "scratch-doc-live-cycle (sonnet, RUNS the full create→publish→get→patch→publish→delete→get-404 cycle on guerrilla with a scratch id, best-effort Studio visibility check) — builders inherit a PROVEN fixture recipe with teardown evidence, not a dry-run."
+      ],
+      "type": "list"
+    },
+    {
+      "id": "hqw3-verify-2",
+      "text": "What Decide cannot live without from this round: (1) the true #2816/deploy/local-divergence state — it gates branching, rebasing, and whether Sobelow will red our PRs; (2) the ghost-room seam answer — it decides WHERE the invalid-pin fix lives and whether one PR closes the whole player spawn surface; (3) the probe result — it converts the wave's central ~2-line assumption into a proven design; (4) claim/edge state on hq-w1-live-verify — it scripts the honest 6/6 close.",
+      "type": "paragraph"
+    },
+    {
+      "id": "hqw3-ver-h",
+      "level": 2,
+      "text": "Verification results — 5 deep assignments, 2026-07-12",
+      "type": "heading"
+    },
+    {
+      "id": "hqw3-ver-1",
+      "items": [
+        "pr2816-ground-truth: PR #2816 IS MERGED (14:23:36Z, mergeCommit c6d39c89, merged by the human lead) and LIVE on guerrilla (build.commit c6d39c89, built 14:26:00Z) — but it merged over a red Elixir Test gate: BOTH CI attempts failed on the identical queue_test.exs:385, and the 'Prod compile gate' the repo calls THE gate was skipped both times. main has NO branch protection ('Branch not protected', 404) — gate discipline is honor-system. Local main confirmed ahead 98 / behind 5 ('98\\t5'), but the 98 are runaway checkpoint noise from unrelated epics; the one hyperquiz local commit is byte-identical to origin (diff empty). NOT FOUND: any .sobelow-skips entry for quiz.html.heex (grep exit 1) — real un-paid baseline debt.",
+        "ghost-room-seam: CONFIRMED the wave's core worry — a LiveView-only fix ships the honest error AND still spawns the ghost: the cursor canvas renders in ALL branches incl. the error branch (quiz_play_live.ex:100-105, outside the cond at :109); quiz-cursors.js joins quiz:room:<pin> unconditionally → QuizChannel :52 → Quiz.join → Room.join → ensure/1 → SPAWN. Correct seam = whereis/1 gate at the join primitive (room.ex:90, the exact pattern call_existing already uses). The OBSERVER join (quiz_channel.ex:44) ALSO ensures — must be gated too or it stays a spawn vector. BONUS: QuizPlayLive DOES handle {:question_updated} (quiz_play_live.ex:81-82) — 'every phone updates' is player-side confirmed. Local quiz harness green: 30 tests, 0 failures.",
+        "bind-wire-probe: both slices proven at unit level — bind wire GREEN in quiz_live_test.exs (?quiz= reaches mount params on the plugin route; '1 test, 0 failures'), invalid-pin fail-before RED as expected.",
+        "ledger-edges-claims: hq-w1-live-verify's dependency_count:1 is an already-done edge (hq-w1-plugin-port, 6/6) — not a blocker; both wave tasks open+unclaimed; epoch-8 claim expired 14:47Z → wave-3 verify re-claims fresh. NOT FOUND: any /papers/hyperquiz-risks coverage of room-spawn abuse despite room.ex:30 citing it as the anti-abuse authority → filed hq-room-spawn-abuse-paper. Also: bare 'bp search' errors — the verb is 'bp search query'.",
+        "gate-flake-now: queue_test.exs:385 is NOT a flake — a NEW test from unrelated perf commit 422d4563 (13:27:52Z), red on 5/5 subsequent main runs and both #2816 attempts ('attempt1: failure / attempt2: failure', identical signature); the run immediately before that commit was fully green (10250 tests, 0 failures). Decision K's SupervisionIsolation signature hit only 1/5, never alone. NOT FOUND: any ledger task for queue_test:385 → filed hq-residue-queuetest-plan-red (p1).",
+        "scratch-doc-live-cycle: full quiz-doc lifecycle proven on guerrilla (create→publish→patch→publish→delete, 5-revision history) and torn down (count:0). TWO CLI traps proven: bp doc get/ls/query send NO token ever (auth_tier:none, run.go:197-211) and quiz is visibility:private → they 404 UNCONDITIONALLY even with --token (workaround: authed curl or bp doc history); bp doc patch takes the BARE id — the drafts. prefix 404s. Quiz is NOT publish-walled (zero tags needed). Studio's desk lists quiz docs under …Rest when count>0; the Studio EDITOR round trip remains unconfirmed → bp doc publish is the sanctioned mechanical equivalent (identical broadcast)."
+      ],
+      "type": "list"
+    },
+    {
+      "id": "hqw3-dec-h",
+      "level": 2,
+      "text": "Decisions (M–S — charter is the memory, this is the story)",
+      "type": "heading"
+    },
+    {
+      "id": "hqw3-dec-1",
+      "items": [
+        "M — Bind wire exactly as verified; NO Ecto.UUID.cast guard (premise REFUTED: lookup rides the doc_id STRING column, never the binary_id PK — a guard would reject valid ids); dataset arg omitted (production IS guerrilla's dataset); no error branch (bind always returns :ok, idempotent across refresh).",
+        "N — Ghost rooms die at the JOIN PRIMITIVE, not the LiveView: whereis-gate the player AND observer channel joins ({:error,:no_room}); host mount stays the SOLE creator; quiet .q-status honest state (ink tone, NOT danger-red — three precedents); registry-count protective test, fail-before/pass-after.",
+        "O — queue_test.exs:385 is a permanent red, not a flake: Decision K's 2-rerun budget stays SupervisionIsolation-only; builders never burn reruns on 385 — state the exact failure set honestly in the PR body and hand the merge call to the lead (never cite the wrong flake id; #2816's body did).",
+        "P — The bind PR pays the Sobelow baseline debt: one .sobelow-skips line for quiz.html.heex XSS.Raw (bulldocs.html.heex:67 precedent); advisory gate, but the epic's own file carries no unexplained red.",
+        "Q — Honest-ledger correction appended to hq-w2-theme-reskin: its criterion-4 'Test green on rerun' claim is contradicted by CI logs (both attempts red on 385); the deliverable itself is genuinely merged+live.",
+        "R — Wave 3 FINISHES hq-w1-live-verify: after both deploys (poll authed /v1/capabilities?build=1 for the merge sha, ~4-5 min), live-prove the bind round trip (bp doc publish is the honest Studio-equivalent — identical broadcast; try Studio first, note which ran), upgrade idx2, prove idx3, re-claim honestly, close 6/6. Heatmap (idx4) stays parked; P7 stays parked.",
+        "S — Builder ground rules: worktrees branch from origin/main ONLY (local main = 98 noise commits ahead); teardown proof via authed curl, never bp doc get (false-404s for quiz unconditionally); bp doc patch takes the bare id; publish (not patch) fires the broadcast; WS proof stays curl-handshake (Decision I)."
+      ],
+      "type": "list"
+    },
+    {
+      "id": "hqw3-plan-h",
+      "level": 2,
+      "text": "Wave plan — 3 slices, strict integration order",
+      "type": "heading"
+    },
+    {
+      "id": "hqw3-plan-1",
+      "items": [
+        "1. hq-quiz-bind-wiring (p2, opus, small) — surface: QuizHostLive mount. Files: quiz_host_live.ex, quiz_live_test.exs, api/.sobelow-skips. Decision M wire + bound-prompt/garbage-degrade tests + Decision P baseline line. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark_web/live/quiz_live_test.exs test/barkpark/quiz/bridge_test.exs (dry-run green at Decide, 30 tests).",
+        "2. hq-invalid-pin-ux (p3, fable, medium) — surface: join primitive + player LiveView + channel. Files: room.ex, quiz.ex, quiz_channel.ex, quiz_play_live.ex, quiz_live_test.exs, quiz_channel_test.exs. Decision N gate (player+observer), quiet honest state, fail-before/pass-after + registry-count tests. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark_web/live/quiz_live_test.exs test/barkpark_web/channels/quiz_channel_test.exs test/barkpark/quiz/bridge_test.exs.",
+        "3. hq-w1-live-verify close (p1, fable, medium) — surface: live guerrilla evidence, no repo files. Decision R sequence: live sha check → bind round trip <1s (upgrade idx2 + stamp hq-quiz-bind-wiring crit 1) → invalid-pin honest state console-clean (idx3) → teardown with authed-curl 404 proof → close 6/6. Gate: authed /v1/capabilities?build=1 sha check + bp task get hq-w1-live-verify showing 6/6 met."
+      ],
+      "type": "list"
+    },
+    {
+      "id": "hqw3-backlog-1",
+      "text": "Backlog seeded at Decide (published children of hyperquiz-epic): hq-residue-queuetest-plan-red (p1 — the uncharted permanent red every PR now inherits), hq-room-spawn-abuse-paper (p3 — risks paper silent on the surface room.ex:30 delegates to it), hq-doc-get-auth-tier-gap (p3 — CLI read verbs false-404 all private schemas), hq-bridge-binding-gc (p4), hq-host-mount-hard-match (p4). Charter committed at 23e660f2 (Decisions M–S + w2 close-out reconciled); local main is 98-ahead of origin so the charter commit rides in the checkout, and every decision is ALSO embedded in the slice task descriptions — the ledger is what builders see.",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "hqw3-debrief-h",
+      "level": 2,
+      "text": "Debrief — wave 3 review, 2026-07-12",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Both build slices shipped exactly to their decisions, first try, zero reviewer fixes; the wave's third leg (the live close) stalled honestly on its own merge gate rather than fabricating proof. The A- (not A) is because the wave ends without its finish line: no PR was even FILED by run end, so the live round-trip — the charter Vision's core promise and this wave's whole point — is still unproven on guerrilla. The reviewer filed PRs #2831/#2832 to close that gap."
+        }
+      ],
+      "id": "hqw3-deb-grade",
+      "title": "Grade: A-",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "hqw3-deb-s1-h",
+      "level": 3,
+      "text": "hq-quiz-bind-wiring — SHIPPED (PR #2831)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Branch loop-epic/wire-quiz-id-into-quizhostlive-mount-so--0 (d1e675fd), +61/-2 across 2 files. The first production bind_quiz/3 call site: QuizHostLive.mount's connected branch reads params[\"quiz\"] and binds when present and non-blank — exactly Decision M (no UUID guard, no dataset arg, no error branch). Review verified the load-bearing subtlety: bind is synchronous end-to-end (Bridge GenServer.call → Room apply_question is itself a call via call_existing), so the mount's state read picks up the bound question with no cast race. Two honest tests (bound-prompt render; garbage-id degrade to default). Sobelow baseline confirmed already present at .sobelow-skips:166 (Decision P satisfied, no new entry). Gate re-run by reviewer: 12/0. No fixes."
+        }
+      ],
+      "id": "hqw3-deb-s1",
+      "type": "paragraph"
+    },
+    {
+      "id": "hqw3-deb-s2-h",
+      "level": 3,
+      "text": "hq-invalid-pin-ux — SHIPPED (PR #2832)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Branch loop-epic/kill-the-ghost-room-at-the-join-primitiv-1 (a99f64e0), +159/-27 across 18 files. Decision N landed at the right seam: Room.join resolves via whereis and returns {:error,:no_room} — ensure/1 is now reachable ONLY from the host mount; the observer join gets the same gate behind a bounded 3×100ms await_room retry (accepted host-canvas race recorded in the PR body); QuizPlayLive renders the quiet .q-status honest state on var(--ink-soft), zero new color literals. Review chased the builder's own doubts: all four Quiz.join/ensure_room call sites grep-accounted; terminate/2's is_binary guard correctly skips leave on the error path; fail-before was real (4/4 RED pre-fix). Gate re-run: 34/0; full test/barkpark/quiz/ 73/0; formatter clean. No fixes."
+        }
+      ],
+      "id": "hqw3-deb-s2",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Cross-slice: the reviewer simulated the lead's integration (merge #2831 then #2832 onto main) — clean auto-merge despite the shared quiz_live_test.exs, and the combined suite runs 105/0 on the integrated state. The slices cohere: slice 1's host-only mount change is untouched by slice 2 (which deliberately left quiz_host_live.ex alone), and slice 2's join law is what slice 1's bound rooms will live under."
+        }
+      ],
+      "id": "hqw3-deb-cross",
+      "type": "paragraph"
+    },
+    {
+      "id": "hqw3-deb-s3-h",
+      "level": 3,
+      "text": "hq-w1-live-verify — STALLED HONESTLY at 5/6",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Decision R gates the close sequence on both wave PRs merged AND deployed; at its run end neither PR existed and guerrilla's build predated any wave-3 merge. The runner claimed honestly (epoch 12), polled ~4 min, and stopped with zero fabrication — no scratch docs, no rooms, no criterion flipped. Task left in_progress at 5/6 with a stall note; a full staged close recipe waits at /tmp/hq_w3_snippets.md (scratch doc hq-w3-scratch-bindproof, pins HQW3BIND/HQW3GHOST9, Decision S-b teardown via authed curl 404). This is the ledger working as designed: a gate that cannot be passed is reported, not painted over."
+        }
+      ],
+      "id": "hqw3-deb-s3",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Ledger audit: clean — no lies, no omissions. Both build tasks claimed before work, stamped mid-claim, merge-gated criteria honestly left open, lifecycle in_progress; the invalid-pin builder even self-corrected a 0-index stamp slip transparently. Reviewer added wave3_review notes to both build tasks (PR numbers + verdicts) and republished. One process debt found and paid: the w2/w3 charter amendments (23e660f2) lived only on the polluted local main — PR #2834 carries the amended charter + this wave's log entry to origin."
+        }
+      ],
+      "id": "hqw3-deb-ledger",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "(1) Lead: merge #2831 FIRST, then #2832, under the Decision-O protocol — expected Elixir Test failure set ⊆ {queue_test.exs:385} ∪ {Decision-K SupervisionIsolation signature, rerun budget 2}; close criterion 0 on both build tasks on merge; merge #2834 (doc-only) any time. (2) After deploy (~4-5 min; authed /v1/capabilities?build=1 must postdate both merge shas): run the hq-w1-live-verify close per Decision R — live bind round trip <1s with the w2 triad, upgrade idx2's park stamp, prove idx3 (honest pin state, console clean), stamp hq-quiz-bind-wiring criteria 0/1, teardown with authed-curl-404 proof, close 6/6. That closes wave 1's last open promise. (3) Candidate next-wave veins after that: hq-residue-queuetest-plan-red (p1, poisons every PR's gate), hq-heatmap-live-lever, hq-room-spawn-abuse-paper."
+        }
+      ],
+      "id": "hqw3-deb-next",
+      "title": "What the next actor takes",
+      "tone": "info",
+      "type": "callout"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "hqw3-eyebrow",
+        "text": "Barkpark · Hyperquiz · wave 3 · complete (debrief 2026-07-12)",
+        "type": "eyebrow"
+      },
+      {
+        "id": "hqw3-h1",
+        "level": 1,
+        "text": "Hyperquiz Wave 3 — Wire the Bind + Kill the Ghost Room",
+        "type": "heading"
+      },
+      {
+        "id": "hqw3-byline",
+        "items": [
+          "one ~2-line wire is the wave's whole leverage: bind_quiz/3 gets its FIRST production call site",
+          "honest states: a typo'd pin must say so — no more silent ghost rooms",
+          "finish line: hq-w1-live-verify closes 6/6 with live evidence, criteria upgraded honestly"
+        ],
+        "type": "list"
+      },
+      {
+        "id": "hqw3-wish-h",
+        "level": 2,
+        "text": "The wish",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Two slices, in order. (1) hq-quiz-bind-wiring (p2): Quiz.bind_quiz/3 has ZERO production call sites, so Studio live-edit silently no-ops for every hosted room — the charter Vision's core promise (\"host live-edits a question mid-game and every connected screen updates in under a second\") is dead code. Wire the ?quiz=<id> mount into QuizHostLive so a hosted room binds its quiz doc; after merge + auto-deploy, prove the round trip live on guerrilla: host a room bound to a scratch quiz doc, publish an edit in Studio, watch host+play update in under ~1s (w2 evidence triad), tear down with proof. This also un-parks hq-w1-live-verify criterion 2's stronger form — upgrade that stamp honestly. (2) hq-invalid-pin-ux (p3): today /quiz/play/<pin> lazily creates a room for ANY non-empty pin ('x', 50-char, URL-encoded script tags — all render a working player view), so a typo lands a player alone in a ghost room that looks real. Ship an honest, styled error/empty state; after deploy, run hq-w1-live-verify criterion 3 ('invalid pin shows a real error, console clean') and CLOSE the task 6/6 — its builder claim has likely lapsed; re-claim honestly."
+          }
+        ],
+        "id": "hqw3-wish-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "hqw3-state-h",
+        "level": 2,
+        "text": "Where the epic stands (reconciled 2026-07-12)",
+        "type": "heading"
+      },
+      {
+        "id": "hqw3-state-1",
+        "items": [
+          "w1 (grade A, #2040): engine live on guerrilla as Barkpark.Plugins.Quiz, 99 tests green.",
+          "w2 (grade A-): live-verified WS origin proof + cursor triad in a real browser; hq-w1-live-verify at 5/6 met with two legs PARKED per Decision J (Studio live-edit not browser-drivable — bind unwired; heatmap has no prod lever).",
+          "PR #2816 (hq-w2-theme-reskin, Decision E) is OPEN with Elixir Test still running as this wave opens — the lead merges it and closes its task; wave 3 does NOT own it but MUST sequence around it (both slices may touch quiz.html.heex/LiveViews).",
+          "Open children this wave: hq-quiz-bind-wiring (p2, 0/2), hq-invalid-pin-ux (p3, 0/2), hq-w1-live-verify (in_progress, 5/6, claim likely lapsed).",
+          "NOT this wave: hq-heatmap-live-lever (p3, separate design), hq-orphan-branch-cleanup, hq-p7-* stay PARKED."
+        ],
+        "type": "list"
+      },
+      {
+        "id": "hqw3-dir-h",
+        "level": 2,
+        "text": "Strategic direction",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The finished experience: a host opens /quiz/host/<pin>?quiz=<doc-id> on the projector, phones join, and mid-game the host fixes a typo in Studio, hits publish — every screen updates before they look up. A player who fat-fingers the pin sees a calm, theme-token-styled \"nobody is hosting this room\" state — not a fake empty quiz. That closes the honesty loop the charter demands: no fake realtime, no fake rooms."
+          }
+        ],
+        "id": "hqw3-dir-1",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Tentative leans (Decide finalizes): (1) Bind wiring exactly as the task brief verified — extend QuizHostLive.mount/3 to accept \"quiz\" and call Quiz.bind_quiz(pin, qid) right after ensure_room; player LiveView untouched; guard the doc id against the known binary_id CastError footgun (raw junk id must NOT 500 the host page). (2) For invalid pins, lean option (b)+(c) combined: the PLAYER path never creates a room — it checks room existence without ensuring, and renders a soft honest state (\"nobody is hosting this room yet\") when absent; format validation alone (option a) cannot kill ghost rooms for well-formed typo pins, and join-only-if-hosted also closes a URL-scan resource-exhaustion hole for free. Host path keeps ensure_room. (3) Order matters: bind PR first (its live proof is the wave's headline), pin-UX second, both as own PRs through the Elixir Test gate (flake protocol Decision K, 2-rerun budget), both rebased over #2816 if it merges mid-wave. (4) Evidence bar is the w2 triad, verbatim: WS proof via curl handshake + onConnMessage cadence (chrome-devtools network panel never shows websockets — Decision I), scratch rooms/docs torn down with proof, no stamp over an unverified criterion."
+          }
+        ],
+        "id": "hqw3-dir-2",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Quality bar (Kinsta/Vercel): the invalid-pin state is a designed moment, not a plain <p> — it rides the derive(theme) token vocabulary the reskin just landed, matches the projector aesthetic, and keeps the console clean. The bind wire must be idempotent across host refresh/reconnect, and a bad ?quiz= id degrades gracefully (room still hosts, bind simply reports honestly)."
+          }
+        ],
+        "id": "hqw3-dir-3",
+        "type": "paragraph"
+      },
+      {
+        "id": "hqw3-survey-h",
+        "level": 2,
+        "text": "Survey plan (in flight)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "14 Sonnet surveyors are flying now. Each question + why:"
+          }
+        ],
+        "id": "hqw3-survey-0",
+        "type": "paragraph"
+      },
+      {
+        "id": "hqw3-survey-1",
+        "items": [
+          "bind-seam-anatomy — What exactly do Quiz.bind_quiz/3 and Bridge.bind do (quiz.ex:51 →), and what happens on a nonexistent/malformed quiz id? Why: the mount wire's error handling and CastError guard depend on it.",
+          "publish-propagation-path — Map the full path from a Studio publish of a quiz doc to a live room update (PubSub topic, Bridge subscription, LiveView event). Why: proves sub-1s is real, tells the verifier what event to observe.",
+          "quiz-doc-lifecycle — What schema is a quiz doc; exact bp/HTTP recipe to create, publish-edit, and delete a scratch quiz doc on guerrilla (incl. publish-wall tag requirements). Why: the live proof needs a scripted, tear-downable fixture.",
+          "host-mount-contract — QuizHostLive.mount today: params, error branches, behavior with ?quiz=<garbage>; binary_id CastError exposure. Why: the wire must not 500 the projector page.",
+          "player-join-path — Where the player path calls ensure_room; how to check room existence WITHOUT ensuring (Registry lookup?); race vs host; what self-reap does to connected players. Why: chooses between options a/b/c with facts.",
+          "error-state-precedent — The existing 'room is unavailable' branch + other honest empty states in the codebase: markup, classes, token usage. Why: the ghost-room fix should reuse, not invent.",
+          "reskin-interplay — PR #2816 diff: which token vocabulary lands in quiz.html.heex, merge status, conflict surface with both slices. Why: sequencing + the error state must ride the new tokens.",
+          "quiz-test-map — Where quiz tests live (bridge, LiveView mount), how to pin a mount-bind test and an invalid-pin test; studio-literal-check gate implications. Why: both PRs need protective tests, not vacuous green.",
+          "live-proof-recipe — Reconstruct the w2 verify triad as a runnable playbook (curl WS handshake, onConnMessage hook, isolated MCP session, teardown proof format) from the w2 paper/tasks. Why: wave-3's evidence bar is 'same triad'.",
+          "ledger-claims-state — hq-w1-live-verify: exact wording/stamps of all 6 criteria, claim state (lapsed?), correct re-claim + close sequence; hq-w2-theme-reskin close-on-merge ownership. Why: the wave ends in an honest 6/6 close, not a fabricated one.",
+          "deploy-latency — Confirm guerrilla blue/green auto-deploy on api/** merge, merge→live latency, and how to prove the live slot runs the new sha. Why: live proofs are meaningless against the old slot.",
+          "abuse-surface — Does lazy player-side room creation allow unbounded room spawn by URL scan? What P6 anti-abuse/max_children limits exist? Why: if join-only-if-hosted closes a real hole, that strengthens the design case and its test.",
+          "elixir-gate-health — task-13dacdcd75e1cabd status and current SupervisionIsolationTest flake rate on main. Why: two .ex PRs ride this gate; Decision K's 2-rerun budget may need updating.",
+          "bind-durability — Does a bind survive host LiveView remount/reconnect and room idle-reap; is rebind idempotent? Why: the projector page WILL be refreshed mid-game in real use."
+        ],
+        "type": "list"
+      },
+      {
+        "id": "hqw3-flight-h",
+        "level": 2,
+        "text": "In flight now",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Digest folded 14 survey reports (below) and dispatched a 6-assignment verify fleet (2 Opus, 4 Sonnet — plan below). Next: Decide appends decisions + the wave plan before builders fly. Tasks this wave drives: hq-quiz-bind-wiring, hq-invalid-pin-ux, hq-w1-live-verify (close 6/6). Epic: hyperquiz-epic."
+          },
+          {
+            "type": "text",
+            "value": " — CORRECTION (2026-07-12, review): this callout was written at Digest and went stale. Decide ran (Decisions M–S), both build slices flew and landed green, the review passed both clean with zero fixes, and PRs #2831/#2832 are filed. hq-w1-live-verify stalled honestly at 5/6 (Decision R gates it on merge+deploy). Full story in the Debrief below."
+          }
+        ],
+        "id": "hqw3-flight-1",
+        "title": "Status: wave complete (corrected 2026-07-12, review)",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "id": "hqw3-digest-h",
+        "level": 2,
+        "text": "Survey digest — 14 reports, 2026-07-12",
+        "type": "heading"
+      },
+      {
+        "id": "hqw3-digest-1",
+        "text": "The wave's central premises all held under file:line evidence, and one premise of the strategic direction was REFUTED. Established: bind_quiz/3 (quiz.ex:50-53 → Bridge.bind/3) has zero production call sites, is idempotent (Map.put overwrite; MapSet-guarded subscribe), ALWAYS returns :ok, does an immediate synchronous load+apply at bind time, and degrades to a silent no-op on nonexistent, unpublished, or garbage quiz ids. Refuted: the binary_id CastError guard the direction called for does NOT apply to this chain — lookup is by doc_id, a plain string column (document.ex:13 vs :16; query.ex:730), never the binary_id PK. Builders must NOT add an Ecto.UUID.cast guard; it would wrongly reject valid non-UUID doc_ids.",
+        "type": "paragraph"
+      },
+      {
+        "id": "hqw3-digest-2",
+        "items": [
+          "Propagation is fully wired downstream of the missing bind: publish → post-commit broadcast on documents:<dataset> (broadcast.ex:53-99) → Bridge subscribes at bind time → apply_now → fresh uncached Repo.one → Room {:question_updated} on the room topic → QuizHostLive.handle_info already exists (quiz_host_live.ex:48-49). Sub-1s is structurally free. PUBLISH, never a bare patch, fires the event — the live proof must re-publish per edit.",
+          "Wire site: QuizHostLive.mount connected branch (quiz_host_live.ex:17-33); ?quiz= arrives in mount params on the plugin-declared :live route (plugins/quiz.ex:81-88, no handle_params). Refresh re-fires the connected mount, so re-bind-on-refresh is free and idempotent. Dataset arg defaults to \"production\" — must be a deliberate choice, not an accident.",
+          "Ghost-room mechanism: Room.ensure/1 (room.ex:99-112) spawns for ANY pin, reached by host mount (ensure_room), QuizPlayLive connected mount via Quiz.join (room.ex:132-136), and QuizChannel non-observer join. Room.whereis/1 (room.ex:88-95) is the proven zero-side-effect existence primitive (move/hover/call_existing already use it). Global cap 10_000 rooms exists (plugins/quiz.ex:69) but creation RATE is unthrottled; the player-side fix closes half the spawn surface for free, the host path stays open (flag to Decide as follow-up, not blocker).",
+          "Error state: reuse .q-status (3 precedents in the quiz LiveViews); after the #2816 reskin it inherits derive(theme) tokens with zero new CSS. Tone (quiet --ink-soft family vs danger tokens) is a Decide call — precedent argues quiet. quiz.html.heex IS scanned by studio-literal-check; no new hex literals.",
+          "Quiz docs are NOT publish-walled (@walled_types = paper, task — lifecycle.ex:58): the scratch fixture needs no tags/description. Teardown existence proof must use doc get, not doc ls (ls 404s on empty types). Exact bp doc create/publish/patch/delete bodies captured via --dry-run.",
+          "Test home: quiz_live_test.exs (async:false, unique pin, on_exit stop_room) for BOTH new tests; bridge_test.exs owns bind unit semantics. The mount-bind LiveView test and the connected-path invalid-pin test are genuinely new coverage. (One surveyor's 'no host-mount tests exist' was a too-narrow filename find — quiz_live_test.exs covers host mounts.)",
+          "Deploy: merge→live ≈4-5 min blue/green; live sha provable via authed GET /v1/capabilities?build=1 (.build.commit) — anonymous silently omits the build key.",
+          "Ledger: hq-w1-live-verify is 5/6, criteria 0-indexed; idx2 = park-satisfied Studio round trip (the upgrade target), idx3 = honest miss (invalid pin). Re-claim = same-worker targeted claim (renewal). hq-w2-theme-reskin's merge criterion is the LEAD's to close. Bind durability: bindings live only in Bridge memory with no unbind/GC (named slow leak, out of scope); a reaped room restarts on @default_question until the next publish/rebind — untested low-traffic staleness edge.",
+          "Elixir gate: the Decision-K flake is NOT fixed (task-13dacdcd75e1cabd open, unclaimed, p1) and hit 4 of the last 15 main runs; a SECOND uncharted flake (QueueTest queue_test.exs:385 Postgres plan-shape assert) hit 2 of 15 and is covered by no rerun protocol — Decide should file it."
+        ],
+        "type": "list"
+      },
+      {
+        "id": "hqw3-digest-3",
+        "text": "Contradictions (time-skew, not bad faith): three surveyors observed PR #2816 OPEN with Sobelow red (unbaselined XSS.Raw at quiz.html.heex:21, no .sobelow-skips entry) and the QueueTest flake red; two later surveyors observed it MERGED at 14:23:36Z with the reskin on origin/main and guerrilla serving commit 3d66c0dd (built 14:17Z — i.e. possibly PRE-merge). One surveyor also reported this local checkout as 'ahead 96, behind 5' vs origin/main — an alarming divergence claim that must be settled before any builder branches. Also settled in passing: the search verb is `bp search query \"<terms>\"` (bare `bp search` errors — several surveyors lost prior-art lookup to this).",
+        "type": "paragraph"
+      },
+      {
+        "id": "hqw3-cov-h",
+        "level": 3,
+        "text": "Coverage map — checked and found / checked and NOT found",
+        "type": "heading"
+      },
+      {
+        "id": "hqw3-cov-1",
+        "items": [
+          "FOUND: full bind contract + error shapes (bridge.ex end-to-end); publish→room chain with no cache anywhere; quiz schema live on guerrilla matching source; mount landing sites in both LiveViews; whereis/ensure split in room.ex; .q-status precedents + #2816 diff; all three quiz test files' harness patterns; deploy pipeline + timing from today's real runs; both wave tasks' acceptance criteria; both Elixir-gate flake signatures with run logs; Bridge bindings durability semantics.",
+          "NOT FOUND (absences that are decisions-in-waiting): NO rate limiter on room creation anywhere in the quiz surface; NO test for max_children/cap saturation; NO Room.terminate or reap broadcast — self-reaped rooms freeze connected players silently (second honesty gap, adjacent to but outside this wave's slices); NO unbind/GC path in Bridge; NO .sobelow-skips entry for quiz.html.heex at survey time; NO tracking task found for the QueueTest flake; NO CastError exposure on the ?quiz= path (guard not needed).",
+          "CORNERS NO SURVEYOR REACHED: Studio's actual edit/publish UI for type:quiz docs (the live proof says 'Studio publish' — nobody opened Studio; bp doc publish fires the identical broadcast as a fallback, but that's a Decide call); quiz_socket.ex connect auth in full; the /papers/hyperquiz-risks paper referenced by room.ex:30; the wave-2 Paper's full body; whether QuizPlayLive handles {:question_updated,...} (players updating live is the charter promise — host side confirmed, player side only inferred)."
+        ],
+        "type": "list"
+      },
+      {
+        "id": "hqw3-verify-h",
+        "level": 2,
+        "text": "Verify plan (in flight — 6 assignments, 2 Opus / 4 Sonnet)",
+        "type": "heading"
+      },
+      {
+        "id": "hqw3-verify-1",
+        "items": [
+          "pr2816-ground-truth (sonnet, RUNS git fetch + rev-list count, gh pr view 2816, git show origin/main:api/.sobelow-skips, authed build-info curl, bp task get hq-w2-theme-reskin) — settle merged/deployed/baselined state of the reskin and the local-divergence claim; builders branch from the answer.",
+          "ghost-room-seam (OPUS, RUNS the three quiz test files locally to prove the harness is green) — does the play page's quiz-cursors.js channel join still spawn a room when the LiveView error-renders on a bad pin? Decides the correct fix seam (Room.join/Quiz.join gate vs LiveView-only) and confirms player-side question_updated handling.",
+          "bind-wire-probe (OPUS, worktree probe: apply the ~2-line wire + write the mount-bind test + the fail-before invalid-pin assertion, RUN mix test) — proves ?quiz= actually reaches mount params on the plugin-injected route, bind→render works at unit level, and the invalid-pin test is honestly red today.",
+          "ledger-edges-claims (sonnet, RUNS bp task get + authed edges curl) — resolve hq-w1-live-verify's mystery dependency_count:1, confirm both wave tasks unclaimed, fetch /papers/hyperquiz-risks, confirm bp search query verb.",
+          "gate-flake-now (sonnet, RUNS gh run list + per-failure log classification) — current hit-rate of both flake signatures, whether QueueTest 385 is same-sha-nondeterministic, whether any task tracks it.",
+          "scratch-doc-live-cycle (sonnet, RUNS the full create→publish→get→patch→publish→delete→get-404 cycle on guerrilla with a scratch id, best-effort Studio visibility check) — builders inherit a PROVEN fixture recipe with teardown evidence, not a dry-run."
+        ],
+        "type": "list"
+      },
+      {
+        "id": "hqw3-verify-2",
+        "text": "What Decide cannot live without from this round: (1) the true #2816/deploy/local-divergence state — it gates branching, rebasing, and whether Sobelow will red our PRs; (2) the ghost-room seam answer — it decides WHERE the invalid-pin fix lives and whether one PR closes the whole player spawn surface; (3) the probe result — it converts the wave's central ~2-line assumption into a proven design; (4) claim/edge state on hq-w1-live-verify — it scripts the honest 6/6 close.",
+        "type": "paragraph"
+      },
+      {
+        "id": "hqw3-ver-h",
+        "level": 2,
+        "text": "Verification results — 5 deep assignments, 2026-07-12",
+        "type": "heading"
+      },
+      {
+        "id": "hqw3-ver-1",
+        "items": [
+          "pr2816-ground-truth: PR #2816 IS MERGED (14:23:36Z, mergeCommit c6d39c89, merged by the human lead) and LIVE on guerrilla (build.commit c6d39c89, built 14:26:00Z) — but it merged over a red Elixir Test gate: BOTH CI attempts failed on the identical queue_test.exs:385, and the 'Prod compile gate' the repo calls THE gate was skipped both times. main has NO branch protection ('Branch not protected', 404) — gate discipline is honor-system. Local main confirmed ahead 98 / behind 5 ('98\\t5'), but the 98 are runaway checkpoint noise from unrelated epics; the one hyperquiz local commit is byte-identical to origin (diff empty). NOT FOUND: any .sobelow-skips entry for quiz.html.heex (grep exit 1) — real un-paid baseline debt.",
+          "ghost-room-seam: CONFIRMED the wave's core worry — a LiveView-only fix ships the honest error AND still spawns the ghost: the cursor canvas renders in ALL branches incl. the error branch (quiz_play_live.ex:100-105, outside the cond at :109); quiz-cursors.js joins quiz:room:<pin> unconditionally → QuizChannel :52 → Quiz.join → Room.join → ensure/1 → SPAWN. Correct seam = whereis/1 gate at the join primitive (room.ex:90, the exact pattern call_existing already uses). The OBSERVER join (quiz_channel.ex:44) ALSO ensures — must be gated too or it stays a spawn vector. BONUS: QuizPlayLive DOES handle {:question_updated} (quiz_play_live.ex:81-82) — 'every phone updates' is player-side confirmed. Local quiz harness green: 30 tests, 0 failures.",
+          "bind-wire-probe: both slices proven at unit level — bind wire GREEN in quiz_live_test.exs (?quiz= reaches mount params on the plugin route; '1 test, 0 failures'), invalid-pin fail-before RED as expected.",
+          "ledger-edges-claims: hq-w1-live-verify's dependency_count:1 is an already-done edge (hq-w1-plugin-port, 6/6) — not a blocker; both wave tasks open+unclaimed; epoch-8 claim expired 14:47Z → wave-3 verify re-claims fresh. NOT FOUND: any /papers/hyperquiz-risks coverage of room-spawn abuse despite room.ex:30 citing it as the anti-abuse authority → filed hq-room-spawn-abuse-paper. Also: bare 'bp search' errors — the verb is 'bp search query'.",
+          "gate-flake-now: queue_test.exs:385 is NOT a flake — a NEW test from unrelated perf commit 422d4563 (13:27:52Z), red on 5/5 subsequent main runs and both #2816 attempts ('attempt1: failure / attempt2: failure', identical signature); the run immediately before that commit was fully green (10250 tests, 0 failures). Decision K's SupervisionIsolation signature hit only 1/5, never alone. NOT FOUND: any ledger task for queue_test:385 → filed hq-residue-queuetest-plan-red (p1).",
+          "scratch-doc-live-cycle: full quiz-doc lifecycle proven on guerrilla (create→publish→patch→publish→delete, 5-revision history) and torn down (count:0). TWO CLI traps proven: bp doc get/ls/query send NO token ever (auth_tier:none, run.go:197-211) and quiz is visibility:private → they 404 UNCONDITIONALLY even with --token (workaround: authed curl or bp doc history); bp doc patch takes the BARE id — the drafts. prefix 404s. Quiz is NOT publish-walled (zero tags needed). Studio's desk lists quiz docs under …Rest when count>0; the Studio EDITOR round trip remains unconfirmed → bp doc publish is the sanctioned mechanical equivalent (identical broadcast)."
+        ],
+        "type": "list"
+      },
+      {
+        "id": "hqw3-dec-h",
+        "level": 2,
+        "text": "Decisions (M–S — charter is the memory, this is the story)",
+        "type": "heading"
+      },
+      {
+        "id": "hqw3-dec-1",
+        "items": [
+          "M — Bind wire exactly as verified; NO Ecto.UUID.cast guard (premise REFUTED: lookup rides the doc_id STRING column, never the binary_id PK — a guard would reject valid ids); dataset arg omitted (production IS guerrilla's dataset); no error branch (bind always returns :ok, idempotent across refresh).",
+          "N — Ghost rooms die at the JOIN PRIMITIVE, not the LiveView: whereis-gate the player AND observer channel joins ({:error,:no_room}); host mount stays the SOLE creator; quiet .q-status honest state (ink tone, NOT danger-red — three precedents); registry-count protective test, fail-before/pass-after.",
+          "O — queue_test.exs:385 is a permanent red, not a flake: Decision K's 2-rerun budget stays SupervisionIsolation-only; builders never burn reruns on 385 — state the exact failure set honestly in the PR body and hand the merge call to the lead (never cite the wrong flake id; #2816's body did).",
+          "P — The bind PR pays the Sobelow baseline debt: one .sobelow-skips line for quiz.html.heex XSS.Raw (bulldocs.html.heex:67 precedent); advisory gate, but the epic's own file carries no unexplained red.",
+          "Q — Honest-ledger correction appended to hq-w2-theme-reskin: its criterion-4 'Test green on rerun' claim is contradicted by CI logs (both attempts red on 385); the deliverable itself is genuinely merged+live.",
+          "R — Wave 3 FINISHES hq-w1-live-verify: after both deploys (poll authed /v1/capabilities?build=1 for the merge sha, ~4-5 min), live-prove the bind round trip (bp doc publish is the honest Studio-equivalent — identical broadcast; try Studio first, note which ran), upgrade idx2, prove idx3, re-claim honestly, close 6/6. Heatmap (idx4) stays parked; P7 stays parked.",
+          "S — Builder ground rules: worktrees branch from origin/main ONLY (local main = 98 noise commits ahead); teardown proof via authed curl, never bp doc get (false-404s for quiz unconditionally); bp doc patch takes the bare id; publish (not patch) fires the broadcast; WS proof stays curl-handshake (Decision I)."
+        ],
+        "type": "list"
+      },
+      {
+        "id": "hqw3-plan-h",
+        "level": 2,
+        "text": "Wave plan — 3 slices, strict integration order",
+        "type": "heading"
+      },
+      {
+        "id": "hqw3-plan-1",
+        "items": [
+          "1. hq-quiz-bind-wiring (p2, opus, small) — surface: QuizHostLive mount. Files: quiz_host_live.ex, quiz_live_test.exs, api/.sobelow-skips. Decision M wire + bound-prompt/garbage-degrade tests + Decision P baseline line. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark_web/live/quiz_live_test.exs test/barkpark/quiz/bridge_test.exs (dry-run green at Decide, 30 tests).",
+          "2. hq-invalid-pin-ux (p3, fable, medium) — surface: join primitive + player LiveView + channel. Files: room.ex, quiz.ex, quiz_channel.ex, quiz_play_live.ex, quiz_live_test.exs, quiz_channel_test.exs. Decision N gate (player+observer), quiet honest state, fail-before/pass-after + registry-count tests. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark_web/live/quiz_live_test.exs test/barkpark_web/channels/quiz_channel_test.exs test/barkpark/quiz/bridge_test.exs.",
+          "3. hq-w1-live-verify close (p1, fable, medium) — surface: live guerrilla evidence, no repo files. Decision R sequence: live sha check → bind round trip <1s (upgrade idx2 + stamp hq-quiz-bind-wiring crit 1) → invalid-pin honest state console-clean (idx3) → teardown with authed-curl 404 proof → close 6/6. Gate: authed /v1/capabilities?build=1 sha check + bp task get hq-w1-live-verify showing 6/6 met."
+        ],
+        "type": "list"
+      },
+      {
+        "id": "hqw3-backlog-1",
+        "text": "Backlog seeded at Decide (published children of hyperquiz-epic): hq-residue-queuetest-plan-red (p1 — the uncharted permanent red every PR now inherits), hq-room-spawn-abuse-paper (p3 — risks paper silent on the surface room.ex:30 delegates to it), hq-doc-get-auth-tier-gap (p3 — CLI read verbs false-404 all private schemas), hq-bridge-binding-gc (p4), hq-host-mount-hard-match (p4). Charter committed at 23e660f2 (Decisions M–S + w2 close-out reconciled); local main is 98-ahead of origin so the charter commit rides in the checkout, and every decision is ALSO embedded in the slice task descriptions — the ledger is what builders see.",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "hqw3-debrief-h",
+        "level": 2,
+        "text": "Debrief — wave 3 review, 2026-07-12",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Both build slices shipped exactly to their decisions, first try, zero reviewer fixes; the wave's third leg (the live close) stalled honestly on its own merge gate rather than fabricating proof. The A- (not A) is because the wave ends without its finish line: no PR was even FILED by run end, so the live round-trip — the charter Vision's core promise and this wave's whole point — is still unproven on guerrilla. The reviewer filed PRs #2831/#2832 to close that gap."
+          }
+        ],
+        "id": "hqw3-deb-grade",
+        "title": "Grade: A-",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "id": "hqw3-deb-s1-h",
+        "level": 3,
+        "text": "hq-quiz-bind-wiring — SHIPPED (PR #2831)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Branch loop-epic/wire-quiz-id-into-quizhostlive-mount-so--0 (d1e675fd), +61/-2 across 2 files. The first production bind_quiz/3 call site: QuizHostLive.mount's connected branch reads params[\"quiz\"] and binds when present and non-blank — exactly Decision M (no UUID guard, no dataset arg, no error branch). Review verified the load-bearing subtlety: bind is synchronous end-to-end (Bridge GenServer.call → Room apply_question is itself a call via call_existing), so the mount's state read picks up the bound question with no cast race. Two honest tests (bound-prompt render; garbage-id degrade to default). Sobelow baseline confirmed already present at .sobelow-skips:166 (Decision P satisfied, no new entry). Gate re-run by reviewer: 12/0. No fixes."
+          }
+        ],
+        "id": "hqw3-deb-s1",
+        "type": "paragraph"
+      },
+      {
+        "id": "hqw3-deb-s2-h",
+        "level": 3,
+        "text": "hq-invalid-pin-ux — SHIPPED (PR #2832)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Branch loop-epic/kill-the-ghost-room-at-the-join-primitiv-1 (a99f64e0), +159/-27 across 18 files. Decision N landed at the right seam: Room.join resolves via whereis and returns {:error,:no_room} — ensure/1 is now reachable ONLY from the host mount; the observer join gets the same gate behind a bounded 3×100ms await_room retry (accepted host-canvas race recorded in the PR body); QuizPlayLive renders the quiet .q-status honest state on var(--ink-soft), zero new color literals. Review chased the builder's own doubts: all four Quiz.join/ensure_room call sites grep-accounted; terminate/2's is_binary guard correctly skips leave on the error path; fail-before was real (4/4 RED pre-fix). Gate re-run: 34/0; full test/barkpark/quiz/ 73/0; formatter clean. No fixes."
+          }
+        ],
+        "id": "hqw3-deb-s2",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Cross-slice: the reviewer simulated the lead's integration (merge #2831 then #2832 onto main) — clean auto-merge despite the shared quiz_live_test.exs, and the combined suite runs 105/0 on the integrated state. The slices cohere: slice 1's host-only mount change is untouched by slice 2 (which deliberately left quiz_host_live.ex alone), and slice 2's join law is what slice 1's bound rooms will live under."
+          }
+        ],
+        "id": "hqw3-deb-cross",
+        "type": "paragraph"
+      },
+      {
+        "id": "hqw3-deb-s3-h",
+        "level": 3,
+        "text": "hq-w1-live-verify — STALLED HONESTLY at 5/6",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Decision R gates the close sequence on both wave PRs merged AND deployed; at its run end neither PR existed and guerrilla's build predated any wave-3 merge. The runner claimed honestly (epoch 12), polled ~4 min, and stopped with zero fabrication — no scratch docs, no rooms, no criterion flipped. Task left in_progress at 5/6 with a stall note; a full staged close recipe waits at /tmp/hq_w3_snippets.md (scratch doc hq-w3-scratch-bindproof, pins HQW3BIND/HQW3GHOST9, Decision S-b teardown via authed curl 404). This is the ledger working as designed: a gate that cannot be passed is reported, not painted over."
+          }
+        ],
+        "id": "hqw3-deb-s3",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Ledger audit: clean — no lies, no omissions. Both build tasks claimed before work, stamped mid-claim, merge-gated criteria honestly left open, lifecycle in_progress; the invalid-pin builder even self-corrected a 0-index stamp slip transparently. Reviewer added wave3_review notes to both build tasks (PR numbers + verdicts) and republished. One process debt found and paid: the w2/w3 charter amendments (23e660f2) lived only on the polluted local main — PR #2834 carries the amended charter + this wave's log entry to origin."
+          }
+        ],
+        "id": "hqw3-deb-ledger",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "(1) Lead: merge #2831 FIRST, then #2832, under the Decision-O protocol — expected Elixir Test failure set ⊆ {queue_test.exs:385} ∪ {Decision-K SupervisionIsolation signature, rerun budget 2}; close criterion 0 on both build tasks on merge; merge #2834 (doc-only) any time. (2) After deploy (~4-5 min; authed /v1/capabilities?build=1 must postdate both merge shas): run the hq-w1-live-verify close per Decision R — live bind round trip <1s with the w2 triad, upgrade idx2's park stamp, prove idx3 (honest pin state, console clean), stamp hq-quiz-bind-wiring criteria 0/1, teardown with authed-curl-404 proof, close 6/6. That closes wave 1's last open promise. (3) Candidate next-wave veins after that: hq-residue-queuetest-plan-red (p1, poisons every PR's gate), hq-heatmap-live-lever, hq-room-spawn-abuse-paper."
+          }
+        ],
+        "id": "hqw3-deb-next",
+        "title": "What the next actor takes",
+        "tone": "info",
+        "type": "callout"
+      }
+    ]
+  },
+  "description": "Wave strategy paper: give bind_quiz/3 its first production call site so Studio live-edit reaches live rooms in under a second, then make a typo'd pin an honest error instead of a silent ghost room — and close hq-w1-live-verify 6/6.",
+  "main_tag": "elixir",
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "Both slices are .ex changes in the quiz plugin LiveViews (quiz_host_live mount wiring, player join path) behind the Elixir Test gate.",
+      "strength": 90,
+      "tag": "elixir"
+    },
+    {
+      "rationale": "Each slice ends in a live evidence-grade proof on guerrilla (w2 triad recipe) and unlocks the two parked hq-w1-live-verify criteria toward a 6/6 close.",
+      "strength": 75,
+      "tag": "testing"
+    },
+    {
+      "rationale": "The wave upgrades parked stamps honestly (never over-stamp), re-claims a lapsed builder claim, and closes hq-w1-live-verify with evidence.",
+      "strength": 55,
+      "tag": "ledger"
+    }
+  ],
+  "title": "Hyperquiz Wave 3 — Wire the Bind + Kill the Ghost Room"
+}

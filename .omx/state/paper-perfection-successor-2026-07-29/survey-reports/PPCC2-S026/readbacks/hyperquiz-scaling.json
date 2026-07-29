@@ -1,0 +1,155 @@
+{
+  "_createdAt": "2026-07-09T22:13:09.645467Z",
+  "_draft": false,
+  "_id": "hyperquiz-scaling",
+  "_publishedId": "hyperquiz-scaling",
+  "_rev": "5bc85e807ada8b899c106c62b36a49a8",
+  "_type": "paper",
+  "_updatedAt": "2026-07-18T01:03:46.406591Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Hyperquiz — Scaling",
+      "type": "heading"
+    },
+    {
+      "content": "Reconstructed 2026-07-10 from the Hyperquiz Founding Charter (.claude/workflows/bp-hyperquiz-charter.md) and the recovered engine branch hyperquiz-p1-recovered. The original localhost:4000 paper body was unreachable at reconstruction time, so this is rebuilt from those sources and the built code — not a byte-copy of the lost original. Canonical ledger: the hyperquiz-epic task tree on guerrilla.",
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "content": "The core scaling truth: individual live cursors are O(N^2) bandwidth — every player's pointer must reach every other screen, so cost grows with the square of the crowd. That gives a practical ceiling of a few hundred concurrent pointers before the fan-out saturates.",
+      "id": "block-2",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-3",
+      "level": 2,
+      "text": "The hybrid (Decision B)",
+      "type": "heading"
+    },
+    {
+      "content": "Below a crossover threshold the Room streams individual cursors (the spectacle). Above it, the Room switches to an O(1) 32x32 heatmap — a fixed 2,048-byte payload regardless of player count. Same swarm-feel on the projector, constant cost.",
+      "id": "block-4",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-5",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Threshold: @heatmap_threshold 300 (room.ex), with a live set_heatmap_threshold/2 setter — runtime-tunable, not a recompile."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Test-pinned on both sides of the crossover (individual below, heatmap above)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Target: ~2,000 players per room on a SINGLE node. Postgres carries content and results; the realtime fan-out is in-memory in the Room GenServer."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "block-6",
+      "level": 2,
+      "text": "When a second node is needed",
+      "type": "heading"
+    },
+    {
+      "content": "Multi-node sharding (hq-p7-shard) is PARKED. Decision B holds that a single node covers the ~2,000/room target; sharding unparks only if a MEASURED load ceiling on guerrilla demands it, not on speculation. Region placement needs nothing new — guerrilla already exists.",
+      "id": "block-7",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Hyperquiz — Scaling",
+        "type": "heading"
+      },
+      {
+        "content": "Reconstructed 2026-07-10 from the Hyperquiz Founding Charter (.claude/workflows/bp-hyperquiz-charter.md) and the recovered engine branch hyperquiz-p1-recovered. The original localhost:4000 paper body was unreachable at reconstruction time, so this is rebuilt from those sources and the built code — not a byte-copy of the lost original. Canonical ledger: the hyperquiz-epic task tree on guerrilla.",
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "content": "The core scaling truth: individual live cursors are O(N^2) bandwidth — every player's pointer must reach every other screen, so cost grows with the square of the crowd. That gives a practical ceiling of a few hundred concurrent pointers before the fan-out saturates.",
+        "id": "block-2",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-3",
+        "level": 2,
+        "text": "The hybrid (Decision B)",
+        "type": "heading"
+      },
+      {
+        "content": "Below a crossover threshold the Room streams individual cursors (the spectacle). Above it, the Room switches to an O(1) 32x32 heatmap — a fixed 2,048-byte payload regardless of player count. Same swarm-feel on the projector, constant cost.",
+        "id": "block-4",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-5",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Threshold: @heatmap_threshold 300 (room.ex), with a live set_heatmap_threshold/2 setter — runtime-tunable, not a recompile."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Test-pinned on both sides of the crossover (individual below, heatmap above)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Target: ~2,000 players per room on a SINGLE node. Postgres carries content and results; the realtime fan-out is in-memory in the Room GenServer."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "block-6",
+        "level": 2,
+        "text": "When a second node is needed",
+        "type": "heading"
+      },
+      {
+        "content": "Multi-node sharding (hq-p7-shard) is PARKED. Decision B holds that a single node covers the ~2,000/room target; sharding unparks only if a MEASURED load ceiling on guerrilla demands it, not on speculation. Region placement needs nothing new — guerrilla already exists.",
+        "id": "block-7",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Hyperquiz — Scaling</h1><p></p><p></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The hybrid (Decision B)</h2><p></p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Threshold: @heatmap_threshold 300 (room.ex), with a live set_heatmap_threshold/2 setter — runtime-tunable, not a recompile.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Test-pinned on both sides of the crossover (individual below, heatmap above).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Target: ~2,000 players per room on a SINGLE node. Postgres carries content and results; the realtime fan-out is in-memory in the Room GenServer.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">When a second node is needed</h2><p></p>"
+  },
+  "body_html": "<h1>Hyperquiz — Scaling</h1><p></p><p></p><h2>The hybrid (Decision B)</h2><p></p><ul><li><span>Threshold: @heatmap_threshold 300 (room.ex), with a live set_heatmap_threshold/2 setter — runtime-tunable, not a recompile.</span></li><li><span>Test-pinned on both sides of the crossover (individual below, heatmap above).</span></li><li><span>Target: ~2,000 players per room on a SINGLE node. Postgres carries content and results; the realtime fan-out is in-memory in the Room GenServer.</span></li></ul><h2>When a second node is needed</h2><p></p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": null,
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/hyperquiz-scaling"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Hyperquiz — Scaling"
+}

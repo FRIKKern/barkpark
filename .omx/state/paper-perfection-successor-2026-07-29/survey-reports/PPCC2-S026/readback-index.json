@@ -1,0 +1,89 @@
+{
+  "schema_version": "paper-perfection-successor-readback-index/v1",
+  "assignment_id": "PPCC2-S026",
+  "count": 9,
+  "all_pinned_revisions_read": true,
+  "reads": [
+    {
+      "unit_id": "paper:hyperquiz-epic-wave-3-2026-07-12",
+      "document_id": "hyperquiz-epic-wave-3-2026-07-12",
+      "document_rev": "2a9ac7bfb0ada6f5356393ba5dc02f9a",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S026/readbacks/hyperquiz-epic-wave-3-2026-07-12.json",
+      "readback_sha256": "d23fe8cbb9575ee3a9ff3446939afa2ba575f68411660c766d789ddd24a4fc9c",
+      "block_count": 43,
+      "body_html_chars": 0
+    },
+    {
+      "unit_id": "paper:hyperquiz-realtime-protocol",
+      "document_id": "hyperquiz-realtime-protocol",
+      "document_rev": "6b1b4a515ee0458c3d2b4988c7c2f520",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S026/readbacks/hyperquiz-realtime-protocol.json",
+      "readback_sha256": "ad93ee2be6cb704cef35a6649f60fc7780bf8bbeaa31fb56c44c41faf9121509",
+      "block_count": 12,
+      "body_html_chars": 743
+    },
+    {
+      "unit_id": "paper:hyperquiz-risks",
+      "document_id": "hyperquiz-risks",
+      "document_rev": "06c4b405a3d5414c8114dfd3c2f32480",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S026/readbacks/hyperquiz-risks.json",
+      "readback_sha256": "e7d35e310c1d69f3766a9d4ffb370b3796bc7430726ba9c07d1f926685edd6ea",
+      "block_count": 14,
+      "body_html_chars": 330
+    },
+    {
+      "unit_id": "paper:hyperquiz-scaling",
+      "document_id": "hyperquiz-scaling",
+      "document_rev": "5bc85e807ada8b899c106c62b36a49a8",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S026/readbacks/hyperquiz-scaling.json",
+      "readback_sha256": "df954086f72450d0c444a8e99fb8b54f28715142e2a7a0b141b3ccae83fb4614",
+      "block_count": 8,
+      "body_html_chars": 544
+    },
+    {
+      "unit_id": "paper:hyperquiz-vision",
+      "document_id": "hyperquiz-vision",
+      "document_rev": "35b845cf0f7e34401b36b04ae336c499",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S026/readbacks/hyperquiz-vision.json",
+      "readback_sha256": "03e3b223b263511ec85bf55898cd955ac6f0dcd8598849234e008e46f6d3ef05",
+      "block_count": 11,
+      "body_html_chars": 622
+    },
+    {
+      "unit_id": "paper:intuition-atlas-verdict",
+      "document_id": "intuition-atlas-verdict",
+      "document_rev": "1aca7d20f70b3b04c5aafac8356ed03c",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S026/readbacks/intuition-atlas-verdict.json",
+      "readback_sha256": "d168f038572f7c09bc80bc0c9021899fb74ae8e15093af34c737ee36d78d9dda",
+      "block_count": 19,
+      "body_html_chars": 8866
+    },
+    {
+      "unit_id": "paper:legendary-paper-task-quality-takeover-2026-07-15",
+      "document_id": "legendary-paper-task-quality-takeover-2026-07-15",
+      "document_rev": "c2eb503ab071e1df90ccbd2326f77f64",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S026/readbacks/legendary-paper-task-quality-takeover-2026-07-15.json",
+      "readback_sha256": "7d9c7fbc471d6f8ec5e640acf6e5f4d1b1b4daa801972299036d9ee3090b8613",
+      "block_count": 40,
+      "body_html_chars": 19973
+    },
+    {
+      "unit_id": "paper:legendary-paper-task-quality-takeover-wave-2-2026-07-16",
+      "document_id": "legendary-paper-task-quality-takeover-wave-2-2026-07-16",
+      "document_rev": "bbce337dd4b5146285d376515cb61cba",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S026/readbacks/legendary-paper-task-quality-takeover-wave-2-2026-07-16.json",
+      "readback_sha256": "4bafa92d2bd27436f143c7f42fdc393827fc6afe02a8b7e5df140711d4dec873",
+      "block_count": 42,
+      "body_html_chars": 24604
+    },
+    {
+      "unit_id": "paper:legendary-quality-remediation-wave-1-2026-07-16",
+      "document_id": "legendary-quality-remediation-wave-1-2026-07-16",
+      "document_rev": "a073f8f81927290272ea038778e7ae87",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S026/readbacks/legendary-quality-remediation-wave-1-2026-07-16.json",
+      "readback_sha256": "35ff052ce74693efc5d2176ea9b3f470d58b1bac482fc42d1b01973b5fc396e5",
+      "block_count": 20,
+      "body_html_chars": 0
+    }
+  ]
+}
