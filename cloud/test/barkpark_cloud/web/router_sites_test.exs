@@ -169,6 +169,39 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
+  defp sha256_hex(bytes),
+    do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+
+  # site-spawner W9: a content-bound static site that has OPTED IN to accepting
+  # builds produced somewhere other than its box.
+  defp prebuilt_site(bp, attrs \\ %{}) do
+    {:ok, site} = Registry.update_site_settings(static_site(bp, attrs), %{prebuilt_enabled: true})
+    site
+  end
+
+  # Mint a prebuilt deployment through the real route and hand back its JSON —
+  # every upload test starts from a row that exists but has NOT been started.
+  defp mint_prebuilt(site, token) do
+    conn = call(:post, "/v1/sites/#{site.id}/deploy", %{source: "prebuilt"}, token)
+    assert conn.status == 201
+    json_body(conn)["deployment"]
+  end
+
+  # What the deployment row looked like AT THE INSTANT its driver was started —
+  # left in THIS process's dictionary by the configured test starter
+  # (`Sites.Deploy.NoopStarter`). An ordering nothing can observe is an ordering
+  # nothing protects, and an after-the-fact DB read cannot see it: by then both
+  # writes have landed.
+  defp started_snapshot(deployment_id), do: Process.get({:deploy_started, deployment_id})
+
+  defp artifacts_for_site(site_id) do
+    import Ecto.Query
+
+    BarkparkCloud.Repo.all(
+      from a in BarkparkCloud.Registry.SiteArtifact, where: a.site_id == ^site_id
+    )
+  end
+
   ## POST /v1/sites — create
 
   describe "POST /v1/sites" do
@@ -528,10 +561,14 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     end
   end
 
-  ## POST /v1/sites/:id/artifact — tarball upload (P7).
+  ## POST /v1/sites/:id/artifact — tarball upload.
+  ##
+  ## site-spawner W9 (charter D91/D97): the sink is POSTGRES now, not a
+  ## host-local dir behind a `file://` URL nothing could open, and the gate is
+  ## write ABILITY, not the session-only default that 401'd every PAT.
 
   describe "POST /v1/sites/:id/artifact" do
-    test "writes the body to disk and returns a file:// URL → 201" do
+    test "stores the bytes in Postgres and returns an opaque id + digest → 201" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, site} = Registry.create_site(bp, %{name: "Demo", slug: "demo"})
@@ -544,20 +581,21 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
 
       assert conn.status == 201
       body = json_body(conn)
-      url = body["artifact_url"]
-      assert is_binary(url)
-      assert String.starts_with?(url, "file://")
+
+      assert body["sha256"] == sha256_hex(payload)
       assert body["bytes"] == byte_size(payload)
-      filename = body["filename"]
-      assert String.starts_with?(filename, "demo-")
-      assert String.ends_with?(filename, ".tar.gz")
+      assert is_binary(body["artifact_id"])
 
-      # And the file on disk has the exact bytes that came in.
-      "file://" <> path = url
-      assert File.read!(path) == payload
+      # The file:// plane is GONE — no path, no filename, nothing a caller could
+      # be tempted to open.
+      refute Map.has_key?(body, "artifact_url")
+      refute Map.has_key?(body, "filename")
 
-      # Clean up.
-      _ = File.rm(path)
+      # And the row holds the exact bytes that came in.
+      stored = BarkparkCloud.Repo.get!(BarkparkCloud.Registry.SiteArtifact, body["artifact_id"])
+      assert stored.bytes == payload
+      assert stored.site_id == site.id
+      assert stored.deployment_id == nil
     end
 
     test "another team's site → 404 (no existence leak)" do
@@ -572,17 +610,74 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert conn.status == 404
     end
 
-    test "body larger than the cap → 413 + no partial file" do
+    test "body larger than the cap → 413 + nothing stored" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, site} = Registry.create_site(bp, %{name: "Big", slug: "big"})
       token = login_token(user)
 
-      # test.exs caps max_artifact_bytes at 1 MiB; ship 2 MiB.
+      # The route's own cap is 32 MB (a build OUTPUT, not a project dir); the
+      # test env overrides it to 1 MiB so this ships kilobytes, not megabytes.
       big = :binary.copy(<<0>>, 2 * 1024 * 1024)
       conn = call_binary(:post, "/v1/sites/#{site.id}/artifact", big, token)
       assert conn.status == 413
       assert json_body(conn)["error"] == "artifact_too_large"
+
+      assert artifacts_for_site(site.id) == []
+    end
+
+    test "an EMPTY body → 422, not a 500" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "Empty", slug: "empty"})
+      token = login_token(user)
+
+      conn = call_binary(:post, "/v1/sites/#{site.id}/artifact", "", token)
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "empty_artifact"
+      assert artifacts_for_site(site.id) == []
+    end
+
+    ## THE AUTH-AXIS FLIP (charter D97).
+    ##
+    ## This route used to run on `with_team_site/2`'s `:session` default, which
+    ## 401s EVERY PAT — including a root one. A CI runner could therefore START a
+    ## deploy (`/deploy` is `{:ability, "write"}`) but could not UPLOAD to it:
+    ## uploading was not more gated, it was gated on the wrong AXIS. Nothing in
+    ## the suite pinned the old behaviour, so the flip ships with its own tests.
+    ## Revert the route to `with_team_site(conn, fn conn, site -> …`, and the
+    ## write-PAT test below goes red (401 instead of 201).
+
+    test "AUTH FLIP: a WRITE PAT can upload → 201" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "Pat", slug: "pat-w"})
+
+      {:ok, pat, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "ci-runner",
+          abilities: ["write"]
+        })
+
+      conn = call_binary(:post, "/v1/sites/#{site.id}/artifact", "tarball", pat)
+      assert conn.status == 201
+      assert json_body(conn)["sha256"] == sha256_hex("tarball")
+    end
+
+    test "AUTH FLIP: a READ-only PAT is refused → 403 (the ability, not the axis)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "Pat", slug: "pat-r"})
+
+      {:ok, pat, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "read-only",
+          abilities: ["read"]
+        })
+
+      conn = call_binary(:post, "/v1/sites/#{site.id}/artifact", "tarball", pat)
+      assert conn.status == 403
+      assert artifacts_for_site(site.id) == []
     end
 
     test "without auth → 401" do
@@ -1632,6 +1727,407 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert conn.status == 404
       # Untouched.
       refute Registry.get_site(site.id) == nil
+    end
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## site-spawner W9 — THE PREBUILT LANE (charter D86/D87/D91/D97)
+  ##
+  ## The build leaves the serving box. A prebuilt deploy MINTS first and UPLOADS
+  ## second, and that order is FORCED, not preferred: `build_id` is baked INTO
+  ## the bytes at build time (site-deploy.sh exports BARKPARK_BUILD_ID and HEALTH
+  ## asserts the served marker BY VALUE), and `content_rev` is computed by
+  ## relaying to the box with the instance admin token. Neither is knowable to an
+  ## uploader, so a digest — knowable only AFTER the build — can never be an
+  ## input to the build identity.
+  ## ---------------------------------------------------------------------------
+
+  describe "site-spawner W9: POST /v1/sites/:id/deploy {source: prebuilt}" do
+    test "mints 201 WITHOUT starting a deploy, carrying build_id + content_rev + where to upload" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      FakeBoxRelay.program([])
+
+      conn = call(:post, "/v1/sites/#{site.id}/deploy", %{source: "prebuilt"}, token)
+
+      assert conn.status == 201
+      body = json_body(conn)
+      d = body["deployment"]
+
+      assert d["source"] == "prebuilt"
+      assert d["status"] == "queued"
+      # Both halves of the build identity are ALREADY in the 201 — that is the
+      # whole reason the mint comes first.
+      assert is_binary(d["build_id"])
+      assert is_binary(d["content_rev"])
+      # No bytes yet, so no digest yet. Honest, never invented.
+      assert d["artifact_sha256"] == nil
+
+      # The verb is DISCOVERABLE from the response, not only from Go source.
+      assert body["upload"]["path"] == "/v1/sites/#{site.id}/deployments/#{d["id"]}/artifact"
+      assert body["upload"]["content_type"] == "application/octet-stream"
+      assert body["upload"]["detail"] =~ d["build_id"]
+
+      # And NOTHING was handed to the driver: the box has not been touched.
+      assert FakeBoxRelay.calls() == []
+    end
+
+    test "TWO prebuilt mints on unchanged content are TWO rows with DIFFERENT build_ids" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+
+      first = call(:post, "/v1/sites/#{site.id}/deploy", %{source: "prebuilt"}, token)
+      second = call(:post, "/v1/sites/#{site.id}/deploy", %{source: "prebuilt"}, token)
+
+      # The {:duplicate, _} arm answers 200 with the OLD row, mints nothing, and
+      # — because record_audit lives only in the {:ok, _} arm — leaves ZERO trace
+      # of the swallowed upload. Two different dists MUST NOT hash to one
+      # build_id, so a prebuilt mint is non-idempotent by construction.
+      assert first.status == 201
+      assert second.status == 201
+
+      a = json_body(first)["deployment"]
+      b = json_body(second)["deployment"]
+
+      refute a["id"] == b["id"]
+      refute a["build_id"] == b["build_id"]
+      assert length(Registry.list_deployments(site, 10)) == 2
+    end
+
+    test "a box build on the SAME site still dedupes — the nonce is prebuilt-only" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+
+      first = call(:post, "/v1/sites/#{site.id}/deploy", %{}, token)
+      second = call(:post, "/v1/sites/#{site.id}/deploy", %{}, token)
+
+      assert first.status == 201
+      # The pre-W9 idempotent no-op is untouched: prebuilt widened nothing else.
+      assert second.status == 200
+    end
+
+    test "prebuilt on a site that has NOT opted in → 422 prebuilt_not_enabled, no row" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      conn = call(:post, "/v1/sites/#{site.id}/deploy", %{source: "prebuilt"}, token)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "prebuilt_not_enabled"
+      assert json_body(conn)["detail"] =~ "prebuilt_enabled"
+      assert Registry.list_deployments(site, 10) == []
+    end
+
+    test "an unknown source is REFUSED, never silently treated as a box build" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+
+      conn = call(:post, "/v1/sites/#{site.id}/deploy", %{source: "prebuilt-v2"}, token)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "unknown_source"
+      assert Registry.list_deployments(site, 10) == []
+    end
+  end
+
+  describe "site-spawner W9: POST /v1/sites/:id/deployments/:dep_id/artifact" do
+    test "stores the bytes + digest and starts the driver ONLY AFTER the digest is recorded" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      dep = mint_prebuilt(site, token)
+
+      payload = :crypto.strong_rand_bytes(4096)
+      sha = sha256_hex(payload)
+
+      conn =
+        call_binary(
+          :post,
+          "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact",
+          payload,
+          token
+        )
+
+      assert conn.status == 201
+      body = json_body(conn)
+      assert body["artifact_sha256"] == sha
+      assert body["bytes"] == byte_size(payload)
+      assert body["deployment"]["artifact_sha256"] == sha
+
+      # The bytes are in Postgres, keyed to THIS deployment.
+      stored = Sites.Deploy.artifact_for(dep["id"])
+      assert stored.bytes == payload
+      assert stored.sha256 == sha
+
+      # ORDERING. The snapshot is what the row looked like AT THE MOMENT the
+      # driver was started: a driver started before the digest committed could
+      # reach the box with a deployment the control plane cannot describe.
+      assert started_snapshot(dep["id"]) == %{artifact_sha256: sha, artifact_present: true}
+    end
+
+    test "the SAME digest again is a 200 no-op — the driver is NOT started twice" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      dep = mint_prebuilt(site, token)
+      path = "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact"
+
+      assert call_binary(:post, path, "same-bytes", token).status == 201
+      assert started_snapshot(dep["id"])
+
+      # A client retry after a dropped response must not run the deploy twice.
+      Process.delete({:deploy_started, dep["id"]})
+      again = call_binary(:post, path, "same-bytes", token)
+
+      assert again.status == 200
+      assert json_body(again)["status"] == "already_uploaded"
+      assert started_snapshot(dep["id"]) == nil
+    end
+
+    test "a DIFFERENT digest for an already-uploaded deployment → 409, bytes untouched" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      dep = mint_prebuilt(site, token)
+      path = "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact"
+
+      assert call_binary(:post, path, "first-bytes", token).status == 201
+
+      conn = call_binary(:post, path, "second-bytes", token)
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "artifact_conflict"
+
+      # build_id is already baked into the first bytes — swapping them under it
+      # would be a lie about what is live.
+      assert Sites.Deploy.artifact_for(dep["id"]).sha256 == sha256_hex("first-bytes")
+    end
+
+    test "a BOX-BUILD deployment refuses the upload → 422 not_prebuilt" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      {:ok, d} = Registry.create_deployment(site, %{build_id: "boxb1"})
+
+      conn =
+        call_binary(:post, "/v1/sites/#{site.id}/deployments/#{d.id}/artifact", "bytes", token)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "not_prebuilt"
+      assert Sites.Deploy.artifact_for(d.id) == nil
+    end
+
+    test "a deployment that already left queued → 409 deployment_not_queued" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Registry.create_deployment(site, %{build_id: "pb1", source: "prebuilt"})
+
+      d
+      |> Ecto.Changeset.change(status: "building")
+      |> BarkparkCloud.Repo.update!()
+
+      conn =
+        call_binary(:post, "/v1/sites/#{site.id}/deployments/#{d.id}/artifact", "bytes", token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "deployment_not_queued"
+    end
+
+    test "over the cap → 413, and nothing is stored" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      dep = mint_prebuilt(site, token)
+
+      big = :binary.copy(<<0>>, 2 * 1024 * 1024)
+
+      conn =
+        call_binary(:post, "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact", big, token)
+
+      assert conn.status == 413
+      assert json_body(conn)["error"] == "artifact_too_large"
+      assert Sites.Deploy.artifact_for(dep["id"]) == nil
+    end
+
+    test "a declared X-Artifact-Sha256 that does not match the body → 422, nothing stored" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      dep = mint_prebuilt(site, token)
+
+      conn =
+        conn(:post, "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact", "real-bytes")
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> put_req_header("x-artifact-sha256", sha256_hex("other-bytes"))
+        |> Router.call(@opts)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "artifact_digest_mismatch"
+      assert Sites.Deploy.artifact_for(dep["id"]) == nil
+      assert started_snapshot(dep["id"]) == nil
+    end
+
+    test "a MATCHING X-Artifact-Sha256 is accepted" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      dep = mint_prebuilt(site, token)
+
+      conn =
+        conn(:post, "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact", "real-bytes")
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> put_req_header("x-artifact-sha256", String.upcase(sha256_hex("real-bytes")))
+        |> Router.call(@opts)
+
+      assert conn.status == 201
+      assert Sites.Deploy.artifact_for(dep["id"]).sha256 == sha256_hex("real-bytes")
+    end
+
+    test "an EMPTY body → 422 empty_artifact, and the driver is NOT started" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      dep = mint_prebuilt(site, token)
+
+      conn =
+        call_binary(:post, "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact", "", token)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "empty_artifact"
+      assert Sites.Deploy.artifact_for(dep["id"]) == nil
+      assert started_snapshot(dep["id"]) == nil
+    end
+
+    test "another team's site → 404, and a foreign deployment id → 404" do
+      {_o, other_team} = user_with_team()
+      # A plain (not "live") instance: `live_barkpark/1` pins one fixed URL, and
+      # two of them in the same test collide on the barkparks URL unique index.
+      other_bp = barkpark_fixture(other_team)
+      other_site = prebuilt_site(other_bp)
+
+      {:ok, foreign} =
+        Registry.create_deployment(other_site, %{build_id: "f1", source: "prebuilt"})
+
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+
+      assert call_binary(
+               :post,
+               "/v1/sites/#{other_site.id}/deployments/#{foreign.id}/artifact",
+               "b",
+               token
+             ).status == 404
+
+      # Right team, wrong deployment: still 404 (existence-leak protection).
+      assert call_binary(
+               :post,
+               "/v1/sites/#{site.id}/deployments/#{foreign.id}/artifact",
+               "b",
+               token
+             ).status == 404
+    end
+
+    ## AUTH-AXIS FLIP (charter D97) on the NEW route too — it ships gated on the
+    ## same axis as /deploy, and these three tests are what pin it.
+
+    test "AUTH FLIP: a WRITE PAT can upload → 201" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      session = login_token(user)
+      dep = mint_prebuilt(site, session)
+
+      {:ok, pat, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "ci-runner",
+          abilities: ["write"]
+        })
+
+      conn =
+        call_binary(:post, "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact", "b", pat)
+
+      assert conn.status == 201
+    end
+
+    test "AUTH FLIP: a READ-only PAT → 403, and nothing is stored" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      session = login_token(user)
+      dep = mint_prebuilt(site, session)
+
+      {:ok, pat, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "read-only",
+          abilities: ["read"]
+        })
+
+      conn =
+        call_binary(:post, "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact", "b", pat)
+
+      assert conn.status == 403
+      assert Sites.Deploy.artifact_for(dep["id"]) == nil
+    end
+
+    test "AUTH FLIP: no credential at all → 401" do
+      conn = call_binary(:post, "/v1/sites/x/deployments/y/artifact", "b", nil)
+      assert conn.status == 401
+    end
+  end
+
+  describe "site-spawner W9: PATCH /v1/sites/:id {prebuilt_enabled}" do
+    test "the flip LANDS — on the row and in the response" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      refute site.prebuilt_enabled
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{prebuilt_enabled: true}, token)
+
+      assert conn.status == 200
+      # The router keeps its OWN Map.take allow-list, independent of the
+      # changeset's cast list. Widening only one of the two is a green-looking
+      # no-op: 200, an unchanged row, and no error anywhere.
+      assert json_body(conn)["site"]["prebuilt_enabled"] == true
+      assert Registry.get_site(site.id).prebuilt_enabled
+    end
+
+    test "and back off again" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{prebuilt_enabled: false}, token)
+
+      assert conn.status == 200
+      refute Registry.get_site(site.id).prebuilt_enabled
     end
   end
 end
