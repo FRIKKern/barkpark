@@ -1,0 +1,456 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S038",
+  "assignment_snapshot_sha256": "4978fdbfa756dcd4bfe7381ae0f0dcbeb3edb2b35cba51da0fd58ad793e9b84a",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 13,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "b6d49a6a6068653813816f7155888d49c1916b5ab6792171780d4c80ec4d46ed"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read across 457 native top-level blocks. Keep 3, repair 5, and mark 1 superseded. The capstone strategy, dated status, and Wave A round-two proof are strong purpose-specific authorities. The field guide and three product/build plans need execution-status refreshes, Wave B needs a denser-ledger/round-two successor repair, and the initial Wave A paper is superseded by its r2 completion record.",
+  "verdict_counts": {
+    "keep": 3,
+    "repair": 5,
+    "superseded": 1
+  },
+  "checked_unit_ids": [
+    "paper:personal-dev-fleet-build-plan",
+    "paper:personal-dev-fleet-field-guide",
+    "paper:personal-dev-fleet-gui-plan",
+    "paper:personal-dev-fleet-mvp",
+    "paper:personal-dev-fleet-status-2026-07-23",
+    "paper:personal-dev-fleet-strategy",
+    "paper:personal-dev-fleet-wave-2026-07-22",
+    "paper:personal-dev-fleet-wave-2026-07-22-r2",
+    "paper:personal-dev-fleet-wave-b-2026-07-22"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 457,
+    "legacy_html_documents_read": 0,
+    "legacy_html_chars_read": 0,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:personal-dev-fleet-build-plan blocks[39]",
+      "evidence": "Every wave has a proof obligation a broken implementation cannot satisfy."
+    },
+    {
+      "block_ref": "paper:personal-dev-fleet-status-2026-07-23 blocks[9]",
+      "evidence": "Five short invariants compress the whole fleet strategy."
+    },
+    {
+      "block_ref": "paper:personal-dev-fleet-wave-2026-07-22-r2 blocks[30]",
+      "evidence": "The live kill proof and negative control are independently rerun 7/7."
+    },
+    {
+      "block_ref": "paper:personal-dev-fleet-wave-b-2026-07-22 blocks[37]",
+      "evidence": "Cross-slice review catches two cap-path defects invisible to component gates."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:personal-dev-fleet-field-guide blocks[49]",
+      "evidence": "Native presence/roster is called the single missing piece after Wave A ships it.",
+      "lesson": "Operators receive a false capability warning."
+    },
+    {
+      "block_ref": "paper:personal-dev-fleet-gui-plan blocks[55]",
+      "evidence": "Wave A is still named as the unchanged next buildable step.",
+      "lesson": "Product dependency status is stale."
+    },
+    {
+      "block_ref": "paper:personal-dev-fleet-mvp blocks[79]",
+      "evidence": "The immediate action is to file an epic and primitives represented by later completed waves.",
+      "lesson": "The roadmap reads as an instruction from the past."
+    },
+    {
+      "block_ref": "paper:personal-dev-fleet-wave-2026-07-22 blocks[46]",
+      "evidence": "The initial Wave A grade admits its headline proof is not live until R3.",
+      "lesson": "The predecessor is not completion authority."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "personal-dev-fleet-strategy",
+        "personal-dev-fleet-build-plan",
+        "personal-dev-fleet-mvp",
+        "personal-dev-fleet-gui-plan",
+        "personal-dev-fleet-field-guide"
+      ],
+      "basis": "These repeat the five-idea thesis but own distinct decisions: capstone direction, engineering proofs, MVP packaging, GUI states, and operator execution. Overlap is navigation material, not duplicate purpose.",
+      "disposition": "Keep purpose boundaries; make strategy the constellation index, update volatile progress through the dated status, and remove stale next-step duplication from companions."
+    },
+    {
+      "candidate_set": [
+        "personal-dev-fleet-wave-2026-07-22",
+        "personal-dev-fleet-wave-2026-07-22-r2"
+      ],
+      "basis": "The first owns Wave A design and round-one substrate; r2 owns native integration and the independently rerun kill-to-OFFLINE proof.",
+      "disposition": "Do not merge immutable ledgers. Mark the initial paper superseded for completion and keep r2 as final Wave A authority with reciprocal links."
+    },
+    {
+      "candidate_set": [
+        "personal-dev-fleet-status-2026-07-23",
+        "personal-dev-fleet-wave-b-2026-07-22"
+      ],
+      "basis": "The status paper compresses current multi-wave progress; Wave B preserves detailed measured-routing/cap evidence.",
+      "disposition": "Keep status as dated entry point and Wave B as repaired drill-down evidence; never copy its live/round state into an undated capstone."
+    }
+  ],
+  "reader_risks": [
+    "Studio: lead with document purpose and as-of status; collapse task ids, branch names, long implementation ledgers, and superseded next-step instructions.",
+    "TUI80: keep one command, decision, or state per screen; paginate roadmaps/tables and remove decorative empty divider blocks from the reading flow.",
+    "email: send current outcome, material caveat, and next action; link quickstarts, proof transcripts, wave ledgers, and pricing detail.",
+    "public: remove internal hosts, paths, PR/task ids, operational commands, live cost/resource measurements, and uncommitted commercial assumptions.",
+    "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:personal-dev-fleet-build-plan",
+      "document_id": "personal-dev-fleet-build-plan",
+      "document_rev": "adfead63388219643be7f6143a686c34",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Engineering roadmap from proven PoC to a six-wave fleet, with one non-vacuous proof obligation per wave and a product-level definition of done.",
+      "opening_and_criteria": "The ingress immediately distinguishes proven substrate from the path to perfection and block[39] makes success criteria falsifiable.",
+      "outline_and_hierarchy": "The sequence from receipts to gaps, waves, risks, proofs, and definition of done is sound; ten empty divider/roadmap blocks are harmless visually but noisy in constrained readers.",
+      "human_voice_and_precision": "The 'perfect is not more features' thesis keeps the roadmap human and restrained, while naming safety, cost, and unattended operation directly.",
+      "compression_and_restraint": "Update progress/as-of markers now that Waves A and B have executed; retain the proof-obligation table and delete/ignore empty reader blocks.",
+      "evidence_and_truth": "blocks[15] and [39] separate shipped substrate from future proofs, but block[46] still presents Waves A/B as the next path without acknowledging their later execution records.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[39]",
+          "evidence": "Each wave has a concrete proof that a broken implementation cannot satisfy, from TTL death to cap-braked routing and an unattended seal.",
+          "lesson": "Roadmaps should specify falsifiable proof, not only feature output."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[46]",
+          "evidence": "The sequence still says Waves A and B are the shortest path forward although both later wave records exist.",
+          "lesson": "Roadmaps need explicit progress overlays or dated status links."
+        }
+      ],
+      "duplicate_disposition": "Keep distinct from the strategy capstone: this paper owns engineering waves and proof obligations; repair its progress layer and link the dated status.",
+      "reader_risks": [
+        "Studio: lead with document purpose and as-of status; collapse task ids, branch names, long implementation ledgers, and superseded next-step instructions.",
+        "TUI80: keep one command, decision, or state per screen; paginate roadmaps/tables and remove decorative empty divider blocks from the reading flow.",
+        "email: send current outcome, material caveat, and next action; link quickstarts, proof transcripts, wave ledgers, and pricing detail.",
+        "public: remove internal hosts, paths, PR/task ids, operational commands, live cost/resource measurements, and uncommitted commercial assumptions.",
+        "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed."
+      ],
+      "rationale": "Repair because its purpose and proof design remain excellent, while its execution status is stale."
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-field-guide",
+      "document_id": "personal-dev-fleet-field-guide",
+      "document_rev": "ff28581c07b0118676642579ab0d6933",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Operator onboarding guide for starting local/cloud listeners, conducting work, routing by size, and surviving known fleet failure modes.",
+      "opening_and_criteria": "The two-command promise and task-ledger mental model orient a new operator quickly, followed by local/cloud quickstarts and role separation.",
+      "outline_and_hierarchy": "Guide structure is excellent and troubleshooting is experience-backed, but sixteen empty dividers and a stale shipped/next table interrupt constrained readers.",
+      "human_voice_and_precision": "The scars section is candid about background-work loss, fence lifecycle, dedup, scope mismatch, and input-shape traps.",
+      "compression_and_restraint": "Update commands and status claims against the post-Wave-A/B dialect; remove the 'one missing native piece' callout and retire workarounds only after current verification.",
+      "evidence_and_truth": "blocks[48]-[49] call presence/roster the one missing piece, contradicted by later Wave A records that ship native fleet beat/roster.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[52]",
+          "evidence": "Troubleshooting turns observed failures into precise rules about in-turn execution, unique fences, dedup, scope, priority, and block-shaped briefs.",
+          "lesson": "Field guides earn trust by preserving scars and their observable symptoms."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[49]",
+          "evidence": "The guide says native listener presence and roster are still missing, but the assigned Wave A round-two record proves them live and exercised.",
+          "lesson": "Operator guidance must not carry historical capability gaps as current fact."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from strategy/build documents because this owns executable onboarding; repair facts through links to Wave A/B receipts.",
+      "reader_risks": [
+        "Studio: lead with document purpose and as-of status; collapse task ids, branch names, long implementation ledgers, and superseded next-step instructions.",
+        "TUI80: keep one command, decision, or state per screen; paginate roadmaps/tables and remove decorative empty divider blocks from the reading flow.",
+        "email: send current outcome, material caveat, and next action; link quickstarts, proof transcripts, wave ledgers, and pricing detail.",
+        "public: remove internal hosts, paths, PR/task ids, operational commands, live cost/resource measurements, and uncommitted commercial assumptions.",
+        "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed."
+      ],
+      "rationale": "Repair because an otherwise strong field guide contains a now-false central capability warning."
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-gui-plan",
+      "document_id": "personal-dev-fleet-gui-plan",
+      "document_rev": "1eac07057b43366a3f1340dda51c6bbd",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Cloud-console product and interaction plan for buying a main, adding supports, viewing work/capacity, entering consoles, and enforcing spend/autonomy states.",
+      "opening_and_criteria": "The opening makes the commercial and operational surfaces one journey, and each screen is tied to data and a proof rather than aesthetic aspiration.",
+      "outline_and_hierarchy": "Screen-by-screen hierarchy, state catalogue, and proof table are clear; fifteen empty dividers should be suppressed outside Studio.",
+      "human_voice_and_precision": "The voice is product-forward but repeatedly refuses unsupported states, fake billing readiness, and hidden cap behavior.",
+      "compression_and_restraint": "Refresh the dependency/status layer now that Wave A presence/roster and Wave B capacity substrate exist; preserve the screen proofs and external billing gate.",
+      "evidence_and_truth": "blocks[53]-[55] say Wave A is the hard dependency and unchanged next step, which later assigned wave records have already executed.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[49]",
+          "evidence": "Every premium element defines empty, provisioning, healthy, blocked, offline, cap-hit, and conflict states with observable meanings.",
+          "lesson": "Design state catalogs before layouts so failure cannot collapse into a spinner."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[55]",
+          "evidence": "The closing says Wave A presence and roster remain the next buildable step.",
+          "lesson": "A GUI plan should distinguish completed data dependencies from still-unbuilt screens."
+        }
+      ],
+      "duplicate_disposition": "Distinct from MVP: this paper owns screen/state/proof architecture; repair dependency status and cross-link current substrate receipts.",
+      "reader_risks": [
+        "Studio: lead with document purpose and as-of status; collapse task ids, branch names, long implementation ledgers, and superseded next-step instructions.",
+        "TUI80: keep one command, decision, or state per screen; paginate roadmaps/tables and remove decorative empty divider blocks from the reading flow.",
+        "email: send current outcome, material caveat, and next action; link quickstarts, proof transcripts, wave ledgers, and pricing detail.",
+        "public: remove internal hosts, paths, PR/task ids, operational commands, live cost/resource measurements, and uncommitted commercial assumptions.",
+        "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed."
+      ],
+      "rationale": "Repair because the interaction model remains useful but its prerequisite status is stale."
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-mvp",
+      "document_id": "personal-dev-fleet-mvp",
+      "document_rev": "81208ed236ee68d2e302c2b01b64e280",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Product/MVP plan joining fleet shape, visible setup/offload, operator cockpit, autonomy dials, infrastructure unit, pricing, and staged delivery.",
+      "opening_and_criteria": "The main-plus-support thesis is immediate, and the setup journey is correctly treated as the MVP rather than a later wrapper.",
+      "outline_and_hierarchy": "The product ladder and sequence are coherent; seventeen empty decorative blocks and several overlapping plan sections can be compressed for non-Studio readers.",
+      "human_voice_and_precision": "The document is strongest where it refuses unbounded token pricing and states that the fleet-wide cap must halt cycles, not merely warn.",
+      "compression_and_restraint": "Update the immediate-next-step section and separate durable product doctrine from dated execution and price assumptions.",
+      "evidence_and_truth": "block[79] instructs filing the epic and MVP-0 tasks, work already represented by the status and Wave A/B records.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[70]",
+          "evidence": "The plan rejects bundling unbounded tokens and requires a fleet-wide hard cap because repeated spend-limit hits are observed, not hypothetical.",
+          "lesson": "Price volatile consumption behind a real operational brake."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[79]",
+          "evidence": "The immediate next step is to file the epic and build allocator/dispatcher/offload primitives that later records show underway or shipped.",
+          "lesson": "Plans need completed-step annotations rather than silently aging into false instructions."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from GUI and strategy because this owns MVP packaging and commerce questions; repair dated execution steps and mutable pricing facts.",
+      "reader_risks": [
+        "Studio: lead with document purpose and as-of status; collapse task ids, branch names, long implementation ledgers, and superseded next-step instructions.",
+        "TUI80: keep one command, decision, or state per screen; paginate roadmaps/tables and remove decorative empty divider blocks from the reading flow.",
+        "email: send current outcome, material caveat, and next action; link quickstarts, proof transcripts, wave ledgers, and pricing detail.",
+        "public: remove internal hosts, paths, PR/task ids, operational commands, live cost/resource measurements, and uncommitted commercial assumptions.",
+        "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed."
+      ],
+      "rationale": "Repair because the product reasoning is strong but the call to action no longer reflects the corpus chronology."
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-status-2026-07-23",
+      "document_id": "personal-dev-fleet-status-2026-07-23",
+      "document_rev": "1012c2b41fa8a4134c6812ef04f1f632",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Dated vision-first status report compressing the fleet doctrine, product ladder, sealed criteria, live Wave C fire, and remaining proofs.",
+      "opening_and_criteria": "The as-of date is explicit, the vision is stated before status, and the final verdict separates stable direction from proofs still owed.",
+      "outline_and_hierarchy": "At 27 blocks this is the best current-entry summary in the assignment; its diagrams and table compress rather than bury chronology.",
+      "human_voice_and_precision": "It explains machine isolation and billing-on-first-heartbeat in plain product language without losing proof vocabulary.",
+      "compression_and_restraint": "Keep intact as a dated snapshot; ensure surfaces preserve the date and do not present the Cycle 7 live-fire paragraph as real-time state.",
+      "evidence_and_truth": "blocks[19]-[22] distinguish sealed Presence/Efficiency from live Growth and future Stranger/Durability/Seal work, with exact proof denominators.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[9]",
+          "evidence": "The entire strategy compresses to ledger/bus, fence/lease, presence/heartbeat, best-fit router, and machine isolation.",
+          "lesson": "A status page needs a memorable invariant set before detail."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[22]",
+          "evidence": "The 'today' paragraph describes a live Cycle 7 fire and mutable infrastructure state.",
+          "lesson": "Dated status language must never be surfaced as a current operational dashboard."
+        }
+      ],
+      "duplicate_disposition": "This is the dated status entry point, not a replacement for strategy, guide, or immutable wave ledgers; link them rather than merge.",
+      "reader_risks": [
+        "Studio: lead with document purpose and as-of status; collapse task ids, branch names, long implementation ledgers, and superseded next-step instructions.",
+        "TUI80: keep one command, decision, or state per screen; paginate roadmaps/tables and remove decorative empty divider blocks from the reading flow.",
+        "email: send current outcome, material caveat, and next action; link quickstarts, proof transcripts, wave ledgers, and pricing detail.",
+        "public: remove internal hosts, paths, PR/task ids, operational commands, live cost/resource measurements, and uncommitted commercial assumptions.",
+        "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed."
+      ],
+      "rationale": "Keep because date, purpose, outcome, and remaining scope are explicit and unusually compressed."
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-strategy",
+      "document_id": "personal-dev-fleet-strategy",
+      "document_rev": "113bfdd11764f6dee14eea67802e4100",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Capstone strategy unifying product ladder, five system ideas, evidence-led choices, business model, provider neutrality, engineering waves, and companion-paper roles.",
+      "opening_and_criteria": "The ingress explicitly declares this the capstone and tells readers which companions own depth; the simplicity law arrives before roadmap detail.",
+      "outline_and_hierarchy": "The hierarchy is comprehensive without losing the central thesis; the paper constellation prevents accidental merging of guide, mechanism, product, and build purposes.",
+      "human_voice_and_precision": "It is confident but evidence-aware, elevating misses and reversals as part of the strategy rather than treating them as embarrassment.",
+      "compression_and_restraint": "Keep; add a dated status link beside the roadmap so planned wave labels do not imply live progress, and preserve mutable prices as assumptions.",
+      "evidence_and_truth": "blocks[22], [26], and [30]-[31] connect the five ideas to corrected choices and executed proof, while blocks[44] and [51] state roadmap and victory.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[31]",
+          "evidence": "The paper says a self-grading fleet must be incapable of dressing up a miss and treats a reported FAIL as a protocol input.",
+          "lesson": "A strategy becomes trustworthy when negative evidence changes its rules."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[44]",
+          "evidence": "The unified A-F/MVP roadmap has no completion markers even though later papers document completed A/B work.",
+          "lesson": "Capstone roadmaps should delegate volatile progress to a dated status surface."
+        }
+      ],
+      "duplicate_disposition": "Keep as direction authority; companions retain product, guide, GUI, build, and wave evidence purposes.",
+      "reader_risks": [
+        "Studio: lead with document purpose and as-of status; collapse task ids, branch names, long implementation ledgers, and superseded next-step instructions.",
+        "TUI80: keep one command, decision, or state per screen; paginate roadmaps/tables and remove decorative empty divider blocks from the reading flow.",
+        "email: send current outcome, material caveat, and next action; link quickstarts, proof transcripts, wave ledgers, and pricing detail.",
+        "public: remove internal hosts, paths, PR/task ids, operational commands, live cost/resource measurements, and uncommitted commercial assumptions.",
+        "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed."
+      ],
+      "rationale": "Keep because it explicitly resolves the paper constellation and carries durable doctrine rather than transient run state."
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-wave-2026-07-22",
+      "document_id": "personal-dev-fleet-wave-2026-07-22",
+      "document_rev": "e450f0134f2a74cfcf331efcaf50f0eb",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave A round-one record that designs and ships listener presence/roster plus the sync guard, deferring native runner beats and the live kill proof.",
+      "opening_and_criteria": "The opening clearly frames invisibility as the one native gap; block[41] explicitly marks the former in-flight note superseded and points to the debrief.",
+      "outline_and_hierarchy": "Strategy, live measurement, verification, decisions, plan, and round-one debrief are complete, but the headline acceptance proof remains deferred within this paper.",
+      "human_voice_and_precision": "It corrects tenancy and event-consumer assumptions and refuses a bespoke transport or client-side staleness formula.",
+      "compression_and_restraint": "Preserve as immutable round-one evidence and point current Wave A readers to the r2 paper; do not merge their distinct execution ledgers.",
+      "evidence_and_truth": "blocks[31]-[46] prove write costs, rendering, egress risk, decisions, shipped R1 slices, and the still-missing live kill harness.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[33]",
+          "evidence": "The event census finds the real Sync.Outbox leak and chooses a zero-row beat plus structural listener exclusion.",
+          "lesson": "Survey all consumers before deciding a heartbeat's write shape."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[46]",
+          "evidence": "The grade says the headline proof is only an injected-clock unit test until R3's live harness lands.",
+          "lesson": "Round-one implementation evidence must not stand in for the wave's live acceptance proof."
+        }
+      ],
+      "duplicate_disposition": "Superseded for Wave A completion by personal-dev-fleet-wave-2026-07-22-r2; retain separately as the R1 design/build ledger.",
+      "reader_risks": [
+        "Studio: lead with document purpose and as-of status; collapse task ids, branch names, long implementation ledgers, and superseded next-step instructions.",
+        "TUI80: keep one command, decision, or state per screen; paginate roadmaps/tables and remove decorative empty divider blocks from the reading flow.",
+        "email: send current outcome, material caveat, and next action; link quickstarts, proof transcripts, wave ledgers, and pricing detail.",
+        "public: remove internal hosts, paths, PR/task ids, operational commands, live cost/resource measurements, and uncommitted commercial assumptions.",
+        "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed."
+      ],
+      "rationale": "Superseded because the r2 document completes the exact deferred proof and native runner integration."
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-wave-2026-07-22-r2",
+      "document_id": "personal-dev-fleet-wave-2026-07-22-r2",
+      "document_rev": "46329a8b01a60a03d1ce21fdc183f505",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave A round-two completion record for native beats, independently reproducible kill-to-OFFLINE proof, charter recovery, and a review-discovered guard fix.",
+      "opening_and_criteria": "The top BUILDING callout is stale within the same paper, but the debrief clearly states all three slices green and makes the proof result authoritative.",
+      "outline_and_hierarchy": "Verification, decisions, compact plan, debrief, discovery, ledger audit, grade, and handoff form a coherent terminal record.",
+      "human_voice_and_precision": "The debrief is candid that CI/doc-gate claims were wrong and that a listener example contradicted its own prose until review.",
+      "compression_and_restraint": "Keep as final Wave A evidence; add a terminal-status banner above the old BUILDING callout and cross-link the initial R1 paper.",
+      "evidence_and_truth": "blocks[30]-[38] record independent 7/7 full and negative-control runs, per-slice outcomes, a root guard fix, and exact grade caveats.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[30]",
+          "evidence": "The kill-a-listener gate was re-run in a different worktree: full 7/7 PASS and negative control 7/7 exit 0.",
+          "lesson": "A live acceptance artifact should be independently reproducible and mutation-sensitive."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[38]",
+          "evidence": "Review found round-one code red on a blocking guard and corrected a listener example that contradicted its own status transitions.",
+          "lesson": "A terminal record should surface review-discovered contract failures alongside the green proof."
+        }
+      ],
+      "duplicate_disposition": "Keep as Wave A completion authority; do not merge the initial R1 ledger, but link it as predecessor evidence.",
+      "reader_risks": [
+        "Studio: lead with document purpose and as-of status; collapse task ids, branch names, long implementation ledgers, and superseded next-step instructions.",
+        "TUI80: keep one command, decision, or state per screen; paginate roadmaps/tables and remove decorative empty divider blocks from the reading flow.",
+        "email: send current outcome, material caveat, and next action; link quickstarts, proof transcripts, wave ledgers, and pricing detail.",
+        "public: remove internal hosts, paths, PR/task ids, operational commands, live cost/resource measurements, and uncommitted commercial assumptions.",
+        "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed."
+      ],
+      "rationale": "Keep because it closes the promised proof with independently rerun evidence and honest residual risks."
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-wave-b-2026-07-22",
+      "document_id": "personal-dev-fleet-wave-b-2026-07-22",
+      "document_rev": "a2187aa63cd2be3ecb857aed605250c0",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave B record for structured measured capacity, edge measurement, live-roster routing glue, spend-cap brake, listener egress seal, and charter landing.",
+      "opening_and_criteria": "The first callout truthfully says Round 1 closed and Round 2 proof remains dependent on merges, so readers can distinguish built substrate from the proof still owed.",
+      "outline_and_hierarchy": "The evidence-heavy strategy and review are traceable, but several 2-3.7K-character lists make the primary reading path dense.",
+      "human_voice_and_precision": "The paper applies 'measured never vibes' to both product and review, openly reporting two cross-slice defects in the headline cap path.",
+      "compression_and_restraint": "Promote the round-one summary and proof-pending boundary, compress long survey/decision ledgers, and add the eventual r2/status successor when available.",
+      "evidence_and_truth": "blocks[36]-[42] say items 1-3 built, item 4 deferred, describe two fixed cap-path integration defects, and specify the required merged live proof.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[37]",
+          "evidence": "Review catches a negative budget that silently offlined a listener and a wrong ledger key that would permanently stall dispatch.",
+          "lesson": "Cross-slice acceptance must exercise the contract between independently green components."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[41]",
+          "evidence": "Both headline brake defects escaped slice-local gates, and Codex usage shape was not live-verified.",
+          "lesson": "A wave cannot treat component gates as proof of the end-to-end cap path."
+        }
+      ],
+      "duplicate_disposition": "Distinct from Wave A and strategy: this owns measured-routing/cap execution. Repair the reading surface and terminal successor link rather than merging.",
+      "reader_risks": [
+        "Studio: lead with document purpose and as-of status; collapse task ids, branch names, long implementation ledgers, and superseded next-step instructions.",
+        "TUI80: keep one command, decision, or state per screen; paginate roadmaps/tables and remove decorative empty divider blocks from the reading flow.",
+        "email: send current outcome, material caveat, and next action; link quickstarts, proof transcripts, wave ledgers, and pricing detail.",
+        "public: remove internal hosts, paths, PR/task ids, operational commands, live cost/resource measurements, and uncommitted commercial assumptions.",
+        "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed."
+      ],
+      "rationale": "Repair because its evidence is strong and status-bounded, but its round-two acceptance remains outside the document and its dense ledgers impede readers."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}

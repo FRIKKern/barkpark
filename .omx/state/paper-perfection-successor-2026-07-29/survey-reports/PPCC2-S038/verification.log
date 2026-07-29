@@ -1,0 +1,15 @@
+PPCC2-S038 verification
+bound_snapshot_sha256:
+4978fdbfa756dcd4bfe7381ae0f0dcbeb3edb2b35cba51da0fd58ad793e9b84a
+source_snapshot_sha256:
+b6d49a6a6068653813816f7155888d49c1916b5ab6792171780d4c80ec4d46ed
+report_sha256:
+20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67
+json_lint: PASS
+python_compile: PASS
+tabnanny: PASS
+focused_validator: 17 PASS / 0 FAIL
+readback_exact_count: 9
+native_block_total: 457
+legacy_html_documents: 0
+legacy_html_chars: 0
