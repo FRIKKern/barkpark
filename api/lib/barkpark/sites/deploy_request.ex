@@ -42,6 +42,22 @@ defmodule Barkpark.Sites.DeployRequest do
   `env` is a CLOSED allow-list (`allowed_env_keys/0`) — an unknown key is a
   400, never a silent drop, because a caller that thinks it is passing a build
   var we quietly ignore would ship a site built against the wrong content.
+
+  `artifact_b64` + `artifact_sha256` (charter D86/D87 — the build leaves the
+  serving box) are the PREBUILT pair: a base64 `.tar.gz` of an already-built
+  `dist/` plus the digest the caller says it has. They are FIRST-CLASS struct
+  fields, deliberately NOT `env` keys — `env` is the caller-supplied BUILD var
+  allow-list and caps every value at 4096 bytes, three orders of magnitude
+  under a real bundle.
+
+  They are validated as a PAIR and are `mode: "deploy"` only, because the
+  alternative is the exact failure this closes: before this change an unknown
+  top-level param was SILENTLY DROPPED by `new/1`, so a control plane that
+  believed it had shipped prebuilt bytes to an un-upgraded box would get
+  `{:ok, req}` with no artifact, the box would rebuild from the template, HEALTH
+  would pass on genuine markers, and the site would go live with the WRONG
+  bytes. Half a handshake is worse than none: either both keys validate or the
+  request is a 400.
   """
 
   @enforce_keys [:slug, :mode]
@@ -51,6 +67,8 @@ defmodule Barkpark.Sites.DeployRequest do
             mode: :deploy,
             runtime_target: :static,
             template: nil,
+            artifact_b64: nil,
+            artifact_sha256: nil,
             env: %{}
 
   @type t :: %__MODULE__{
@@ -61,6 +79,8 @@ defmodule Barkpark.Sites.DeployRequest do
           runtime_target: :static | :node,
           template:
             :astro_starter | :next_starter | :search_starter | :astro_search_starter | nil,
+          artifact_b64: String.t() | nil,
+          artifact_sha256: String.t() | nil,
           env: %{optional(String.t()) => String.t()}
         }
 
@@ -87,11 +107,31 @@ defmodule Barkpark.Sites.DeployRequest do
   # bound it and keep it shell/path-inert.
   @content_rev_re ~r/\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\z/
 
+  # A lowercase-hex SHA-256, anchored \A..\z for the SAME reason as the others:
+  # `^[0-9a-f]{64}$` would accept "…\n" and the value is compared against a
+  # digest we compute ourselves.
+  @artifact_digest_re ~r/\A[0-9a-f]{64}\z/
+  # Base64's own alphabet, anchored. Whitespace is tolerated INSIDE (a wrapped
+  # body is a legitimate encoder choice) but nothing else is.
+  @artifact_b64_re ~r{\A[A-Za-z0-9+/=\s]+\z}
+
   @max_env_value_bytes 4096
+
+  # The raw (decoded) artifact cap. 32 MiB is ~2x the largest shippable output
+  # the charter measured (a Next standalone at 18 MB; an Astro `dist/` is 12–16
+  # KB), and it bounds the base64 body a single admin request may carry.
+  @max_artifact_bytes 32 * 1024 * 1024
+  # base64 is 4/3 + padding + newlines; refuse an oversized STRING before
+  # spending a decode on it.
+  @max_artifact_b64_bytes div(@max_artifact_bytes * 4, 3) + 64 * 1024
 
   @doc "The env vars a caller may supply. Anything else is rejected."
   @spec allowed_env_keys() :: [String.t()]
   def allowed_env_keys, do: @allowed_env_keys
+
+  @doc "The decoded-artifact byte cap enforced by `new/1`."
+  @spec max_artifact_bytes() :: pos_integer()
+  def max_artifact_bytes, do: @max_artifact_bytes
 
   @doc """
   Validate raw (string-keyed) request params into a `%DeployRequest{}`.
@@ -99,7 +139,8 @@ defmodule Barkpark.Sites.DeployRequest do
   Returns `{:error, code, message}` with a machine-readable `code`
   (`invalid_slug` | `invalid_build_id` | `invalid_content_rev` |
   `invalid_mode` | `invalid_runtime_target` | `invalid_template` |
-  `invalid_env`) on any violation.
+  `invalid_env` | `invalid_artifact` | `invalid_artifact_digest` |
+  `artifact_too_large`) on any violation.
   """
   @spec new(map()) :: {:ok, t()} | {:error, String.t(), String.t()}
   def new(params) when is_map(params) do
@@ -109,6 +150,12 @@ defmodule Barkpark.Sites.DeployRequest do
          {:ok, template} <- validate_template(Map.get(params, "template")),
          {:ok, build_id} <- validate_build_id(mode, Map.get(params, "build_id")),
          {:ok, content_rev} <- validate_content_rev(Map.get(params, "content_rev")),
+         {:ok, artifact_b64, artifact_sha256} <-
+           validate_artifact(
+             mode,
+             Map.get(params, "artifact_b64"),
+             Map.get(params, "artifact_sha256")
+           ),
          {:ok, env} <- validate_env(Map.get(params, "env")) do
       {:ok,
        %__MODULE__{
@@ -118,6 +165,8 @@ defmodule Barkpark.Sites.DeployRequest do
          mode: mode,
          runtime_target: runtime_target,
          template: template,
+         artifact_b64: artifact_b64,
+         artifact_sha256: artifact_sha256,
          env: env
        }}
     end
@@ -207,6 +256,97 @@ defmodule Barkpark.Sites.DeployRequest do
 
   defp validate_content_rev(_rev),
     do: {:error, "invalid_content_rev", "content_rev must be a string"}
+
+  @doc """
+  Is this request carrying a prebuilt artifact? True only when BOTH keys
+  survived `new/1` — the two are validated as a pair, so a half-set struct is
+  unrepresentable.
+  """
+  @spec prebuilt?(t()) :: boolean()
+  def prebuilt?(%__MODULE__{artifact_b64: b64, artifact_sha256: sha})
+      when is_binary(b64) and is_binary(sha),
+      do: true
+
+  def prebuilt?(%__MODULE__{}), do: false
+
+  # ── the prebuilt pair ───────────────────────────────────────────────────
+  #
+  # The two keys are validated TOGETHER and refused loudly. Every branch below
+  # that returns an error is a case that used to be a SILENT DROP: `new/1` read
+  # only the keys it knew, so `artifact_b64` on an un-upgraded box produced
+  # {:ok, req} with no artifact and a box-built site that passes HEALTH.
+  defp validate_artifact(_mode, nil, nil), do: {:ok, nil, nil}
+  defp validate_artifact(_mode, "", nil), do: {:ok, nil, nil}
+  defp validate_artifact(_mode, nil, ""), do: {:ok, nil, nil}
+  defp validate_artifact(_mode, "", ""), do: {:ok, nil, nil}
+
+  defp validate_artifact(mode, b64, sha) when mode != :deploy and (b64 != nil or sha != nil),
+    do:
+      {:error, "invalid_artifact",
+       "artifact_b64/artifact_sha256 are only valid with mode=deploy " <>
+         "(a rollback repoints a symlink; a teardown removes a site)"}
+
+  defp validate_artifact(_mode, b64, sha) when is_binary(b64) and not is_binary(sha),
+    do:
+      {:error, "invalid_artifact_digest",
+       "artifact_sha256 is required with artifact_b64 (a prebuilt artifact is " <>
+         "only accepted with the digest it must match)"}
+
+  defp validate_artifact(_mode, b64, sha) when not is_binary(b64) and is_binary(sha),
+    do:
+      {:error, "invalid_artifact",
+       "artifact_b64 is required with artifact_sha256 — a digest alone deploys nothing"}
+
+  defp validate_artifact(_mode, b64, sha) when is_binary(b64) and is_binary(sha) do
+    with {:ok, sha} <- validate_artifact_digest(sha),
+         {:ok, b64} <- validate_artifact_b64(b64) do
+      {:ok, b64, sha}
+    end
+  end
+
+  defp validate_artifact(_mode, _b64, _sha),
+    do: {:error, "invalid_artifact", "artifact_b64 and artifact_sha256 must be strings"}
+
+  defp validate_artifact_digest(sha) do
+    if Regex.match?(@artifact_digest_re, sha),
+      do: {:ok, sha},
+      else:
+        {:error, "invalid_artifact_digest", "artifact_sha256 must be 64 lowercase hex characters"}
+  end
+
+  # Cheap checks first (STRING size, then alphabet), and only then the decode —
+  # so a 400 MB body costs a byte_size, not a 400 MB allocation. The decoded
+  # bytes are discarded here: this is the gate, not the ingest.
+  # `Barkpark.Sites.PrebuiltArtifact` decodes for real.
+  defp validate_artifact_b64(b64) do
+    cond do
+      byte_size(b64) > @max_artifact_b64_bytes ->
+        {:error, "artifact_too_large", "artifact exceeds #{@max_artifact_bytes} bytes (decoded)"}
+
+      not Regex.match?(@artifact_b64_re, b64) ->
+        {:error, "invalid_artifact", "artifact_b64 must be base64"}
+
+      true ->
+        decode_artifact_b64(b64)
+    end
+  end
+
+  defp decode_artifact_b64(b64) do
+    case Base.decode64(b64, ignore: :whitespace) do
+      {:ok, raw} when byte_size(raw) > @max_artifact_bytes ->
+        {:error, "artifact_too_large",
+         "artifact is #{byte_size(raw)} bytes decoded, over the #{@max_artifact_bytes} byte cap"}
+
+      {:ok, ""} ->
+        {:error, "invalid_artifact", "artifact_b64 decodes to zero bytes"}
+
+      {:ok, _raw} ->
+        {:ok, b64}
+
+      :error ->
+        {:error, "invalid_artifact", "artifact_b64 must be base64"}
+    end
+  end
 
   defp validate_env(nil), do: {:ok, %{}}
 
