@@ -11692,6 +11692,21 @@ defmodule BarkparkCloud.Web.Router do
   defp sha256_hex(bytes) when is_binary(bytes),
     do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
 
+  # The client's declared digest, downcased, or nil when it sent none. A blank or
+  # malformed header reads as ABSENT rather than as a mismatch: this check exists
+  # to catch corrupted BYTES, and refusing a well-formed upload over a badly
+  # formed header would only turn a client bug into a deploy outage.
+  defp declared_artifact_digest(conn) do
+    case Plug.Conn.get_req_header(conn, "x-artifact-sha256") do
+      [value | _] ->
+        value = value |> String.trim() |> String.downcase()
+        if Regex.match?(~r/\A[0-9a-f]{64}\z/, value), do: value, else: nil
+
+      [] ->
+        nil
+    end
+  end
+
   # The upload half of mint-then-upload. Runs INSIDE `with_team_site`, so the
   # site is already team-scoped and the caller already carries write ability.
   defp upload_deployment_artifact(conn, site, deployment) do
@@ -11725,7 +11740,27 @@ defmodule BarkparkCloud.Web.Router do
         })
 
       {:ok, conn, bytes} ->
-        settle_deployment_artifact(conn, site, deployment, bytes, sha256_hex(bytes))
+        # The client declares the digest it computed over exactly the bytes it
+        # put on the wire (`X-Artifact-Sha256`). Comparing it here is what makes
+        # that header load-bearing rather than decorative: without it a body
+        # corrupted or altered between the client and the control plane would be
+        # stored, hashed by US, and re-verified by the box against OUR hash —
+        # i.e. every downstream check would agree on the wrong bytes. Optional,
+        # because an older client sends no header and nothing about this route
+        # requires one.
+        sha = sha256_hex(bytes)
+
+        case declared_artifact_digest(conn) do
+          declared when declared in [nil, sha] ->
+            settle_deployment_artifact(conn, site, deployment, bytes, sha)
+
+          declared ->
+            json(conn, 422, %{
+              error: "artifact_digest_mismatch",
+              detail:
+                "the body hashes to #{sha}, but X-Artifact-Sha256 declared #{declared} — the upload was altered in transit; retry it"
+            })
+        end
 
       {:error, :too_large, conn} ->
         json(conn, 413, %{error: "artifact_too_large", max_bytes: max_artifact_bytes()})

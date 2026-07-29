@@ -1966,6 +1966,44 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert Sites.Deploy.artifact_for(dep["id"]) == nil
     end
 
+    test "a declared X-Artifact-Sha256 that does not match the body → 422, nothing stored" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      dep = mint_prebuilt(site, token)
+
+      conn =
+        conn(:post, "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact", "real-bytes")
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> put_req_header("x-artifact-sha256", sha256_hex("other-bytes"))
+        |> Router.call(@opts)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "artifact_digest_mismatch"
+      assert Sites.Deploy.artifact_for(dep["id"]) == nil
+      assert started_snapshot(dep["id"]) == nil
+    end
+
+    test "a MATCHING X-Artifact-Sha256 is accepted" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      dep = mint_prebuilt(site, token)
+
+      conn =
+        conn(:post, "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact", "real-bytes")
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> put_req_header("x-artifact-sha256", String.upcase(sha256_hex("real-bytes")))
+        |> Router.call(@opts)
+
+      assert conn.status == 201
+      assert Sites.Deploy.artifact_for(dep["id"]).sha256 == sha256_hex("real-bytes")
+    end
+
     test "an EMPTY body → 422 empty_artifact, and the driver is NOT started" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
