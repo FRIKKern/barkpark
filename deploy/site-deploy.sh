@@ -1102,6 +1102,25 @@ FAKENPM
     check "a missing PREBUILT_DIR tree exits 11" \
       sh -c "[ \"\$(env PATH='$FAKEBIN:$PATH' SITE_SLUG=prebuilt BUILD_ID=pb5 CONTENT_REV=rev-1 SITE_SRC='$PSRC' PREBUILT_DIR='$E2E/absent-prebuilt' PREBUILT_SHA256='$SHA_A' BARKPARK_SITES_DIR='$E2E/sites' BARKPARK_CADDYFILE='$E2E/absent-caddyfile' BARKPARK_SITE_DEPLOY_LOCK='$E2E/prebuilt.lock' BARKPARK_CADDYFILE_LOCK='$E2E/caddyfile.lock' BARKPARK_SITE_NO_CAP=1 bash '$SELF' >/dev/null 2>&1; echo \$?)\" = 11 ]"
     check "current unmoved after both refusals"       [ "$(pb_livenow)" = releases/pb1 ]
+
+    echo "[selftest] e2e: the already-live no-op is DIGEST-AWARE for prebuilt bytes"
+    # pb1 is live carrying SHA_C.  The build_id no-op is keyed on build_id, and
+    # build_id does NOT determine prebuilt bytes — so a same-id upload of a
+    # DIFFERENT digest must not exit 0 reporting "already live".
+    mk_prebuilt "$E2E/prebuilt6" pb1 "UPLOADED-BYTES-pb1-v3"
+    : > "$PSRC/.npm-calls"
+    rc="$(pb_deploy pb1 "$E2E/prebuilt6" "$SHA_B")"
+    check "a same-build_id upload of DIFFERENT bytes is refused (exit 11)" [ "$rc" = 11 ]
+    check "PLAN failed, not noop"                     pb_saw PLAN failed pb1
+    check "the refusal names a NEW deployment as the move" pb_grep 'mint a NEW deployment'
+    check "the LIVE bytes are untouched"              grep -q 'UPLOADED-BYTES-pb1-v2' "$PB_SITE/current/index.html"
+    check "the live release keeps its own digest" \
+      [ "$(cat "$PB_SITE/releases/pb1/.bp-prebuilt-sha256" 2>/dev/null)" = "$SHA_C" ]
+    check "the refusal ran no npm"                    [ ! -s "$PSRC/.npm-calls" ]
+    # And re-uploading the SAME digest for the live build IS still a clean no-op.
+    rc="$(pb_deploy pb1 "$PB" "$SHA_C")"
+    check "a same-digest redeploy of the live build is a no-op (exit 0)" [ "$rc" = 0 ]
+    check "PLAN noop"                                 pb_saw PLAN noop pb1
   fi
 
   echo ""
@@ -1310,17 +1329,32 @@ fi
 # This path used to print ONE prose line and exit 0 — no SWITCH, no HEALTHY, no
 # stage words at all.  It now speaks for every stage: PLAN noop, the rest skipped.
 emit PLAN started
-if [ "$(live_build)" = "$BUILD_ID" ]; then
-  log "PLAN: build_id $BUILD_ID is already live for '$SITE_SLUG' — nothing to do"
-  emit PLAN noop "build $BUILD_ID is already live"
-  for s in BUILD STAGE HEALTH SWITCH RETIRE; do emit "$s" skipped "build $BUILD_ID is already live"; done
-  exit 0
-fi
 RELDIR="$RELEASES/$BUILD_ID"
 PREBUILT_DIR="${PREBUILT_DIR:-}"
 PREBUILT_SHA256="${PREBUILT_SHA256:-}"
 PREBUILT_SHORT=""
 PREBUILT_SIZE=""
+if [ "$(live_build)" = "$BUILD_ID" ]; then
+  # The no-op is keyed on build_id, and for a PREBUILT deploy build_id does not
+  # determine the bytes: two different `dist/` uploads for the same
+  # site+content+config mint the SAME id (the control plane nonces the mint
+  # precisely because of this, D87).  So a prebuilt run whose digest disagrees
+  # with what the live release records is NOT a no-op — exiting 0 there would
+  # report success while serving bytes nobody uploaded, the same hazard the
+  # PREBUILT arm's ordering closes, one gate earlier.  It is refused rather than
+  # re-staged: RELDIR is the LIVE tree here, and tearing it down to replace it
+  # would 404 the site mid-deploy.  A fresh mint (the normal path) has a fresh
+  # build_id and never reaches this line.
+  staged_sha="$(cat "$RELDIR/$PREBUILT_MARK" 2>/dev/null || true)"
+  if [ -n "$PREBUILT_DIR" ] && [ "$staged_sha" != "$PREBUILT_SHA256" ]; then
+    DETAIL="build $BUILD_ID is already LIVE carrying prebuilt '${staged_sha:-<none>}', but this upload declares ${PREBUILT_SHA256:0:12} — refusing to report a no-op over bytes that are not the ones uploaded; mint a NEW deployment for this artifact (a prebuilt mint is nonced for exactly this reason) and redeploy"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+  fi
+  log "PLAN: build_id $BUILD_ID is already live for '$SITE_SLUG' — nothing to do"
+  emit PLAN noop "build $BUILD_ID is already live"
+  for s in BUILD STAGE HEALTH SWITCH RETIRE; do emit "$s" skipped "build $BUILD_ID is already live"; done
+  exit 0
+fi
 # PLAN is tri-state (D88/D89).  ORDER IS LOAD-BEARING: the PREBUILT arm is tested
 # FIRST — before the already-staged arm and before the health-failed arm.  Below
 # the already-staged gate, a RE-UPLOAD of a build_id whose release dir happens to
