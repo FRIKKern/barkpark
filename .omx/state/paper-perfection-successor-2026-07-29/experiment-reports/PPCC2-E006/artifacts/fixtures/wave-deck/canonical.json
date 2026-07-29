@@ -1,0 +1,3079 @@
+{
+  "authored": {
+    "block_count": 98,
+    "blocks_sha256": "461cfce1cf37c6e757bda3ebb9079a3af93fe78d2d6007ce916f425355d5f51b",
+    "portable_doc": {
+      "blocks": [
+        {
+          "id": "wd-001",
+          "text": "Epic cycle · design handoff spec",
+          "type": "eyebrow"
+        },
+        {
+          "id": "wd-002",
+          "level": 1,
+          "text": "The Wave Deck — the epic cycle as an interactive, slide-by-slide experience",
+          "type": "heading"
+        },
+        {
+          "id": "wd-003",
+          "items": [
+            "One wave, one deck",
+            "5 decision gates",
+            "Live fleet, live ledger"
+          ],
+          "type": "byline"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "The 7-phase epic cycle already externalizes everything it knows into Barkpark — a living wave Paper, a published task ledger, a "
+            },
+            {
+              "type": "code",
+              "value": "wave_status"
+            },
+            {
+              "type": "text",
+              "value": " heartbeat. The Wave Deck renders that state as slides a human can ride: watch the fleet fly in realtime, see exactly what was checked and what wasn't, and DECIDE at five gates whether to research more, build, or land. This paper is the information spec: slide by slide, what each screen must inform, what is live, where the data already lives, and what is genuinely open for design."
+            }
+          ],
+          "id": "wd-004",
+          "type": "ingress"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "This is the "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "what-to-inform"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " spec for Claude design — content, data sources, decision moments, live elements. It deliberately says nothing about visual style, layout, or component aesthetics. Every slide below states its job in one line; if a slide can't, it shouldn't exist."
+            }
+          ],
+          "id": "wd-005",
+          "title": "What this paper is (and isn't)",
+          "tone": "info",
+          "type": "callout"
+        },
+        {
+          "id": "wd-006",
+          "type": "divider"
+        },
+        {
+          "id": "wd-007",
+          "level": 2,
+          "text": "Slide 0 — The Loop (orientation map)",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "one glance answers “where is the wave, and how many minds are on it right now?” The current phase is lit; every gate shows whether it's upcoming, open (waiting on the user), or passed."
+            }
+          ],
+          "id": "wd-008",
+          "type": "paragraph"
+        },
+        {
+          "caption": "The cycle with its five user gates. Every ↺ edge is a deliberate, cheap loop — research costs Sonnet minutes, not Opus hours.",
+          "id": "wd-009",
+          "source": "flowchart TD\n  S1[\"1 · Strategize\\n1 Fable · ~5 min\"] --> S2[\"2 · Survey\\n5–20 Sonnet · ~5 min\"]\n  S2 --> S3[\"3 · Digest\\n1 Fable · ~10 min\"]\n  S3 --> G1{\"GATE 1\\nenough ground?\"}\n  G1 -- \"research more ↺\" --> S2\n  G1 -- \"verify →\" --> S4[\"4 · Verify\\n1–15 Sonnet/Opus\"]\n  G1 -- \"skip ahead ⏩\" --> S5\n  S4 --> G2{\"GATE 2\\nproven enough?\"}\n  G2 -- \"verify more ↺\" --> S4\n  G2 -- \"proceed →\" --> S5[\"5 · Decide\\n1 Fable · open-ended\"]\n  S5 --> G3{\"GATE 3\\napprove the plan?\"}\n  G3 -- \"redirect ↺\" --> S3\n  G3 -- \"build →\" --> S6[\"6 · Build\\n1–8 Fable/Opus\"]\n  S6 --> S7[\"7 · Review\\n1 Fable · open-ended\"]\n  S7 --> G4{\"GATE 4\\nland it?\"}\n  G4 -- \"fix round ↺\" --> S6\n  G4 -- \"land →\" --> D[\"Debrief\\nPaper closed · grade\"]\n  D --> G5{\"GATE 5\\nnext wave?\"}\n  G5 -- \"fire ↺\" --> S1",
+          "type": "diagram"
+        },
+        {
+          "id": "wd-010",
+          "items": [
+            {
+              "label": "thinking phases (1 Fable each)",
+              "value": "4"
+            },
+            {
+              "label": "survey fleet",
+              "value": "5–20"
+            },
+            {
+              "label": "verify fleet",
+              "value": "≤15"
+            },
+            {
+              "label": "build fleet",
+              "value": "≤8"
+            },
+            {
+              "label": "user gates",
+              "value": "5"
+            }
+          ],
+          "type": "stats"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Must inform: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "current phase · live agent count (flying / done / stalled) · elapsed time per phase vs its budget (~5 min, ~5 min, ~10 min, open) · which gate comes next and what will be decided there."
+            }
+          ],
+          "id": "wd-011",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "phase + fleet counts from the workflow run (phase groups, agent labels); position also mirrored in the epic task's "
+            },
+            {
+              "type": "code",
+              "value": "wave_status"
+            },
+            {
+              "type": "text",
+              "value": " heartbeat (“wave: surveying — …”), so the deck can render from bp alone even after the run ends."
+            }
+          ],
+          "id": "wd-012",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-013",
+          "type": "divider"
+        },
+        {
+          "id": "wd-014",
+          "level": 2,
+          "text": "Slide 1 — The Wave Card (cover)",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "the wave at a glance — for someone who just walked in."
+            }
+          ],
+          "id": "wd-015",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-016",
+          "items": [
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "The wish, verbatim. "
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": "It is the focus of every phase; the deck leads with it, always visible (persistent header or recurring element)."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Epic + wave identity: "
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": "epic task id, wave Paper id, charter path, date."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Live status line: "
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": "the "
+              },
+              {
+                "type": "code",
+                "value": "wave_status"
+              },
+              {
+                "type": "text",
+                "value": " heartbeat, rendered as state — surveying / verifying / building 6 slices / complete, grade B+."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Outcome when closed: "
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": "grade with its one-line commentary hook — never a bare number (Cody mandate)."
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "code",
+              "value": "bp task get <epic>"
+            },
+            {
+              "type": "text",
+              "value": " → "
+            },
+            {
+              "type": "code",
+              "value": "wave_status"
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "type": "code",
+              "value": "wave_paper"
+            },
+            {
+              "type": "text",
+              "value": "; the Paper's title block."
+            }
+          ],
+          "id": "wd-017",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-018",
+          "type": "divider"
+        },
+        {
+          "id": "wd-019",
+          "level": 2,
+          "text": "Slide 2 — Direction (Strategize)",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "show the bet before the evidence — what the strategist thinks the finished experience is, and what it wants scouted."
+            }
+          ],
+          "id": "wd-020",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-021",
+          "items": [
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Direction statement"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — the bold hypothesis, marked clearly as tentative (“Decide finalizes after two explore rounds”)."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "The survey plan"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — every question with its "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "why"
+                  }
+                ],
+                "type": "em"
+              },
+              {
+                "type": "text",
+                "value": " (“how the answer changes the plan”). This is the first place the user can intervene: a wrong question at minute 5 is the cheapest bug in the whole cycle."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Soft gate"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — “fly the survey (N Sonnets)” is the default with a short countdown; the user can add/strike questions or annotate the direction before launch. Auto mode skips the pause entirely."
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "wave Paper §Strategize (direction + survey plan land there before the fleet flies)."
+            }
+          ],
+          "id": "wd-022",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-023",
+          "type": "divider"
+        },
+        {
+          "id": "wd-024",
+          "level": 2,
+          "text": "Slide 3 — Fleet in Flight (Survey, live)",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "the realtime spectacle with substance — you SEE 5–20 minds working, and each one is inspectable. This is where the deck rides the existing Studio chat surface: the wave is a chat session; the fleet is the agents rail; clicking an agent is the drill-down."
+            }
+          ],
+          "id": "wd-025",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Per-agent card (the unit of this slide):"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          "id": "wd-026",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-027",
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "assignment key + the question, one line ("
+              },
+              {
+                "type": "code",
+                "value": "survey:auth-seams"
+              },
+              {
+                "type": "text",
+                "value": ")"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "model tier badge (Sonnet/Opus/Fable) — the user asked to SEE the amount and kind of agents; make the fleet composition legible at a glance"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "state: queued · flying · reporting · done · died (agents can die on API errors — show it honestly, with what was lost)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "live activity: elapsed time, files touched so far, last action line (streamed from the agent transcript — the chat feature already streams this)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "on done: found/not-found/partial counts from its coverage[] — the card flips from activity to result"
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Liveness comes from two independent feeds and the deck must survive either going quiet: (1) the chat/workflow stream — agent spawn, phase change, tool activity, tokens; (2) the bp ledger — heartbeat, task stamps, Paper sections, which persist. Stream dies → deck degrades to polling bp and says so. Never render a frozen “live” view as if it were current."
+            }
+          ],
+          "id": "wd-028",
+          "title": "Realtime contract",
+          "tone": "warn",
+          "type": "callout"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "workflow phase groups + agent labels (spawn/complete events); Studio chat SESSIONS surface (agents rail, per-agent drill-down transcripts); tokens/elapsed from the run."
+            }
+          ],
+          "id": "wd-029",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-030",
+          "type": "divider"
+        },
+        {
+          "id": "wd-031",
+          "level": 2,
+          "text": "Slide 4 — The Coverage Map (Survey results)",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "make the EDGES of knowledge visible — this slide is the honest heart of the deck and the evidence base for Gate 1. Not “what did we learn” but “what did we check, what did we find, what did we check and NOT find, and where did nobody look”."
+            }
+          ],
+          "id": "wd-032",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-033",
+          "items": [
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Checked & found"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — path, what it was checked for, the one-line takeaway."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Checked & NOT found"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — rendered as loudly as found. “No existing rate limiter in api/” is a decision-in-waiting, not a footnote."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Partial"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — ran out of timebox; candidates for the verify round."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Unreached corners"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — named by the Digest; unlisted = unchecked is the rule, so the map must admit its own blank space."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Open questions"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — every surveyor's parked unknowns, deduped."
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Aggregations that matter: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "N files checked across M surveyors · found/not-found/partial ratio · which repo areas got zero coverage. A heatmap over repo areas is a natural fit; the raw per-file table must stay one tap away — trust comes from the ability to drill to the specific file and claim."
+            }
+          ],
+          "id": "wd-034",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "surveyors' structured "
+            },
+            {
+              "type": "code",
+              "value": "coverage[]"
+            },
+            {
+              "type": "text",
+              "value": " ({path, checked_for, found|not_found|partial, note}), folded into wave Paper §Survey digest by the Digest phase."
+            }
+          ],
+          "id": "wd-035",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-036",
+          "type": "divider"
+        },
+        {
+          "id": "wd-037",
+          "level": 2,
+          "text": "Slide 5 — Synthesis & GATE 1: enough ground?",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "the Digest Fable's synthesis, contradictions named, and the proposed verify fleet — then the wave STOPS and asks. This is the user's “research more?” moment and the reason the deck exists."
+            }
+          ],
+          "id": "wd-038",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Must inform before the user can decide:"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          "id": "wd-039",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-040",
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "what is now established (with the coverage map one slide back)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "where survey reports contradict each other or the direction — verbatim, both sides"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "what remains unknown that Decide cannot live without — the justification for every verify assignment"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "the proposed verify fleet: per assignment its question, model (Sonnet vs Opus — and "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "why the expensive one, when chosen"
+                  }
+                ],
+                "type": "em"
+              },
+              {
+                "type": "text",
+                "value": "), and what will be RUN as proof vs merely read"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "cost of each option: another survey round ≈ N Sonnet-minutes; the verify round ≈ this fleet; skipping ahead ≈ deciding on unproven claims (name which)"
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "id": "wd-041",
+          "items": [
+            {
+              "text": "Add or edit survey questions (user can type their own); another cheap Sonnet round flies; the Paper and coverage map grow — never fork.",
+              "title": "Research more ↺",
+              "tone": "info"
+            },
+            {
+              "text": "Approve the fleet as designed (default). User may strike or add assignments and flip a Sonnet↔Opus choice before launch.",
+              "title": "Verify →",
+              "tone": "ok"
+            },
+            {
+              "text": "“I already know enough.” Deck names the claims that will go unproven; the choice is logged into the Paper with a dated note.",
+              "title": "Skip ahead ⏩",
+              "tone": "warn"
+            }
+          ],
+          "type": "cards"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "wave Paper §Survey digest + §Verify plan (written BEFORE the fleet flies — the Paper always states what is in flight); gate choice appends a dated decision note to the Paper."
+            }
+          ],
+          "id": "wd-042",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-043",
+          "type": "divider"
+        },
+        {
+          "id": "wd-044",
+          "level": 2,
+          "text": "Slide 6 — Proof Runs (Verify, live)",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "same fleet view as Slide 3, but the cards are proof-oriented: which command is running, live output tail, pass/fail as it lands. Mixed fleet — the Sonnet/Opus badges now carry meaning the user chose at Gate 1."
+            }
+          ],
+          "id": "wd-045",
+          "type": "paragraph"
+        },
+        {
+          "children": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "$ verify:search-seal — RUNNING"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "CC=/usr/bin/clang mix test test/barkpark/access/grant_search_deny_test.exs"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "  ..."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "  1 test, 1 failure   ← RED: the leak is REAL (repro proves the hole)"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "footer": "A proof card mid-run — the decisive output line is the payload, not the pass/fail icon alone.",
+          "id": "wd-046",
+          "type": "terminal"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "agent transcripts (chat drill-down) for live tails; structured "
+            },
+            {
+              "type": "code",
+              "value": "proofs[]"
+            },
+            {
+              "type": "text",
+              "value": " ({claim, command, output_excerpt, passed}) on completion."
+            }
+          ],
+          "id": "wd-047",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-048",
+          "type": "divider"
+        },
+        {
+          "id": "wd-049",
+          "level": 2,
+          "text": "Slide 7 — The Proof Table & GATE 2: proven enough?",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "every load-bearing claim with its verdict and the actual output that earned it. Refuted premises get top billing — a premise that died here just saved a build slice."
+            }
+          ],
+          "id": "wd-050",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-051",
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "proof rows: claim → command → decisive output excerpt → PROVEN / REFUTED — the excerpt is mandatory (distrust vacuous green: a pass only counts if the right thing produced it)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "claims that arrived unproven (assignment had no runnable proof) — flagged, not hidden"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "verifier coverage delta — what the deep round checked that the survey hadn't"
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "id": "wd-052",
+          "items": [
+            {
+              "text": "Target the still-unproven claims; user can demand a specific proof (“run the deny repro against X”).",
+              "title": "Verify more ↺",
+              "tone": "info"
+            },
+            {
+              "text": "Default when every load-bearing claim is proven or consciously accepted as unproven (logged).",
+              "title": "Proceed to Decide →",
+              "tone": "ok"
+            }
+          ],
+          "type": "cards"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "wave Paper §Verification results (Decide writes it) + workflow return "
+            },
+            {
+              "type": "code",
+              "value": "proofs"
+            },
+            {
+              "type": "text",
+              "value": " count; per-claim rows from verifiers' structured output."
+            }
+          ],
+          "id": "wd-053",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-054",
+          "type": "divider"
+        },
+        {
+          "id": "wd-055",
+          "level": 2,
+          "text": "Slide 8 — The Plan & GATE 3: approve the wave",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "the biggest decision on the deck: exactly what will be built, by which class of mind, proven by what. Nothing here is hypothetical — every slice IS a published bp task the user can open."
+            }
+          ],
+          "id": "wd-056",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-057",
+          "items": [
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Decisions"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — each with its one-line why; where verification overturned the original direction, show the reversal explicitly (before → after)."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Slice cards = task cards: "
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": "title · bp task id (live link) · surface · builder model badge (Opus = well-specified; Fable = subtle/high-blast-radius — the badge carries the architect's reasoning on hover/tap) · the exact gate command · acceptance criteria with their merge-gated ones marked."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Backlog seeded"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — discovered-but-deferred tasks filed now; the ledger shows the future, render it."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Fleet preview"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — N builders about to fly, model mix, expected file-overlap = zero (slices are worktree-isolated by design)."
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "id": "wd-058",
+          "items": [
+            {
+              "text": "Fire the builders (default). The Paper already carries the plan; the heartbeat flips to “building N slices”.",
+              "title": "Build →",
+              "tone": "ok"
+            },
+            {
+              "text": "Strike slices (their tasks stay filed, unclaimed, honest in the backlog) or demote/promote a builder model; then fire.",
+              "title": "Trim / retarget",
+              "tone": "info"
+            },
+            {
+              "text": "The plan is wrong at the root — send it back to Digest with a note. Expensive and rare; the note becomes lead_notes for the re-run.",
+              "title": "Redirect ↺",
+              "tone": "warn"
+            }
+          ],
+          "type": "cards"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "wave Paper §Decisions + §Wave plan; slice tasks live via "
+            },
+            {
+              "type": "code",
+              "value": "task-board"
+            },
+            {
+              "type": "text",
+              "value": " query on "
+            },
+            {
+              "type": "code",
+              "value": "parent_id=<epic>"
+            },
+            {
+              "type": "text",
+              "value": " — this block type already exists in PortableDoc and renders the published ledger."
+            }
+          ],
+          "id": "wd-059",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-060",
+          "type": "divider"
+        },
+        {
+          "id": "wd-061",
+          "level": 2,
+          "text": "Slide 9 — The Build Board (live)",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "the long phase, made watchable. The ledger's stamp-as-you-go contract means the board moves the moment reality does — criteria flip with evidence attached, stalls surface with the builder's own note, nothing waits for the end of the run."
+            }
+          ],
+          "id": "wd-062",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-063",
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "per-slice: claim state (claimed by whom, when) → criteria flipping live, each with its evidence snippet → gate status (running/red/green) → branch + commit when done"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "stall = first-class state: the builder stamps why (“gate red on X, investigating”) — the card shows it the moment it's stamped, not at post-mortem"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "fleet strip: same per-agent cards as Slide 3 (builders now, model badges meaningful), drill-down into any builder's transcript mid-build"
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "published task ledger (criteria[], claim, lifecycle) — poll or realtime via the existing webhook/LiveView channel; agent stream for transcripts. The deck needs NO new write path: builders already stamp everything."
+            }
+          ],
+          "id": "wd-064",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-065",
+          "type": "divider"
+        },
+        {
+          "id": "wd-066",
+          "level": 2,
+          "text": "Slide 10 — The Verdict & GATE 4: land it?",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "the reviewer's honest account, slice by slice, then the wave's grade — and the user's call on landing."
+            }
+          ],
+          "id": "wd-067",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-068",
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "per slice: what the reviewer FIXED in place (or “none”) · final branch (-r if touched) · gate re-run result · the honest verdict incl. what the lead must know before merging"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "cross-slice coherence findings; ledger audit outcome (were the builders' live stamps truthful?)"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "The grade with its commentary"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — the commentary EARNS the grade; render them as one unit, never a bare letter (Cody mandate)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "what stalled and why, with its honest task state"
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "id": "wd-069",
+          "items": [
+            {
+              "text": "Merge the final branches; the lead closes merge-gated criteria on merge — the deck lists exactly which ones per slice.",
+              "title": "Land →",
+              "tone": "ok"
+            },
+            {
+              "text": "Named issues go back to build — as bp tasks, so the loop stays in the ledger.",
+              "title": "Fix round ↺",
+              "tone": "info"
+            },
+            {
+              "text": "Branches stay, tasks stay in_progress with honest notes; the debrief records the parking reason.",
+              "title": "Park",
+              "tone": "warn"
+            }
+          ],
+          "type": "cards"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Data: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "workflow return (reviewed[], grade, commentary, ledger_fixes) + wave Paper §Debrief."
+            }
+          ],
+          "id": "wd-070",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-071",
+          "type": "divider"
+        },
+        {
+          "id": "wd-072",
+          "level": 2,
+          "text": "Slide 11 — The Debrief & GATE 5: next wave?",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Job: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "close the story, open the next. The wave Paper is now complete — direction → coverage → proofs → decisions → outcome — and this slide is its executive rendering plus the loop-back."
+            }
+          ],
+          "id": "wd-073",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-074",
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "what shipped vs what the wish asked (holistic, not a checklist)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "the next_wave handoff — what the reviewer says the next wave should take, pre-filled as the next wave's draft direction"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "backlog state: open children on the epic, by priority — the future the Decide phase seeded"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "gate: fire the next wave (loops to Slide 2 with the handoff as input) or close the epic"
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Someone opening the Paper mid-wave must see exactly where the wave stands — the deck is that sentence, made navigable."
+            }
+          ],
+          "id": "wd-075",
+          "type": "pullquote"
+        },
+        {
+          "id": "wd-076",
+          "type": "divider"
+        },
+        {
+          "id": "wd-077",
+          "level": 2,
+          "text": "The fleet, everywhere: riding the chat surface",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "The user's explicit ask: "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "see the amount of agents, visualize details realtime, using our chat features."
+                }
+              ],
+              "type": "em"
+            },
+            {
+              "type": "text",
+              "value": " The Studio Claude chat (SESSIONS epic — terminal soul, composer cockpit, agents rail, per-agent drill-down) is the substrate; the deck is a projection over a wave-scoped session. Concretely:"
+            }
+          ],
+          "id": "wd-078",
+          "type": "paragraph"
+        },
+        {
+          "id": "wd-079",
+          "items": [
+            {
+              "label": "RAIL",
+              "lead": "The agents rail IS the fleet view.",
+              "text": "Scoped to the wave: one entry per agent, model badge, phase group, live state. The deck's Slides 3/6/9 are this rail, arranged."
+            },
+            {
+              "label": "DRILL",
+              "lead": "Every agent card opens its transcript.",
+              "text": "The drill-down already streams tool calls and output — proof tails and build activity come free."
+            },
+            {
+              "label": "COMPOSER",
+              "lead": "Gates are answered in the composer.",
+              "text": "Buttons for the default choices; free text for notes/redirects — a gate answer is just a message the lead consumes before firing the next phase."
+            },
+            {
+              "label": "COUNT",
+              "lead": "Agent counts are always visible.",
+              "text": "Per phase: flying/done/died. Per wave: total spawned, by model tier. The numbers are the pulse of the whole experience."
+            }
+          ],
+          "type": "notes"
+        },
+        {
+          "id": "wd-080",
+          "type": "divider"
+        },
+        {
+          "id": "wd-081",
+          "level": 2,
+          "text": "The data contract — every slide, sourced",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Nothing below requires a new backend write path. The cycle's liveness contract (heartbeat + stamp-as-you-go + Fable-owned Paper) was designed so any surface can render the wave from bp data plus the chat stream."
+            }
+          ],
+          "id": "wd-082",
+          "type": "paragraph"
+        },
+        {
+          "head": [
+            [
+              {
+                "type": "text",
+                "value": "Slide"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Primary data"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Lives where (today)"
+              }
+            ]
+          ],
+          "id": "wd-083",
+          "rows": [
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "0 Loop / 1 Wave Card"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "wave_status heartbeat, wave_paper link"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "epic task (flat fields), stamped by every Fable phase"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "2 Direction"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "direction + survey plan"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "wave Paper §Strategize"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "3/6/9 Fleet live"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "agent spawn/state/labels, transcripts, tokens"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "workflow run + chat session (agents rail, drill-down)"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "4 Coverage Map"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "coverage[] {path, checked_for, result, note}"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "surveyor structured output → Paper §Survey digest"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "5 Gate 1"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "synthesis, contradictions, verify plan w/ models"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "wave Paper (written BEFORE the fleet flies)"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "7 Proof Table"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "proofs[] {claim, command, output_excerpt, passed}"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "verifier structured output → Paper §Verification results"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "8 Plan / Gate 3"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "decisions, slice tasks, backlog, builder models"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "wave Paper §Wave plan + published tasks (task-board query)"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "9 Build Board"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "claim, criteria[] w/ evidence, lifecycle, stall notes"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "published task ledger (stamp-as-you-go), webhook/LiveView"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "10 Verdict"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "reviewed[], grade+commentary, ledger audit"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "workflow return + Paper §Debrief"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "11 Debrief"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "next_wave handoff, backlog by priority"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Paper §Debrief + epic task children"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "All gates"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "the choice + who made it + note"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "dated decision note appended to the Paper (new, tiny)"
+                }
+              ]
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Today the 7 phases run as ONE background workflow. Real gates need the run to pause on user input. The clean cut: the workflow already externalizes ALL state into Paper + tasks at every Fable boundary — exactly where the gates sit. So gates = run the cycle as phase segments the lead fires one at a time (the deck's gate answer is the lead's cue), or a workflow-level pause primitive if one lands later. No phase needs to change what it writes."
+            }
+          ],
+          "id": "wd-084",
+          "title": "The one honest engineering note",
+          "tone": "warn",
+          "type": "callout"
+        },
+        {
+          "id": "wd-085",
+          "type": "divider"
+        },
+        {
+          "id": "wd-086",
+          "level": 2,
+          "text": "Interaction doctrine",
+          "type": "heading"
+        },
+        {
+          "id": "wd-087",
+          "items": [
+            {
+              "label": "D1",
+              "lead": "Gates are optional; auto mode is today's behavior.",
+              "text": "Every gate has a default and (in auto) zero-wait pass-through. The deck adds decision power without taxing the user who trusts the loop."
+            },
+            {
+              "label": "D2",
+              "lead": "Research loops are cheap by design.",
+              "text": "“Research more” costs Sonnet-minutes. The deck shows the cost of each option AT the gate, so choosing more research feels safe, not indulgent."
+            },
+            {
+              "label": "D3",
+              "lead": "Loops grow one Paper; they never fork.",
+              "text": "Every extra round appends to the same wave Paper. The deck is a lens on the Paper — rewind any wave by scrolling it."
+            },
+            {
+              "label": "D4",
+              "lead": "Every gate answer is recorded.",
+              "text": "Choice, author, note, timestamp — appended to the Paper. The wave's story includes the human's decisions, not just the agents'."
+            },
+            {
+              "label": "D5",
+              "lead": "The wish never leaves the screen.",
+              "text": "Every gate is judged against it. Persistent, verbatim, untruncated."
+            }
+          ],
+          "type": "notes"
+        },
+        {
+          "id": "wd-088",
+          "type": "divider"
+        },
+        {
+          "id": "wd-089",
+          "level": 2,
+          "text": "Principles the design must carry",
+          "type": "heading"
+        },
+        {
+          "id": "wd-090",
+          "items": [
+            {
+              "label": "P1",
+              "lead": "Not-found is as loud as found.",
+              "text": "Absence of prior art, a refuted premise, an unreached corner — these change plans. Never render them smaller than positives."
+            },
+            {
+              "label": "P2",
+              "lead": "Always show what is in flight.",
+              "text": "The Paper states the plan before each fleet flies; the deck must too. A mid-wave visitor orients in one glance."
+            },
+            {
+              "label": "P3",
+              "lead": "Counts with faces.",
+              "text": "“14 agents” is a number; 14 cards with model badges, states, and assignments is a fleet. Aggregate AND enumerate."
+            },
+            {
+              "label": "P4",
+              "lead": "Never a bare number.",
+              "text": "Grade travels with commentary; pass travels with the output that produced it; count travels with the list behind it."
+            },
+            {
+              "label": "P5",
+              "lead": "Honest states everywhere.",
+              "text": "Agents die, gates go red, streams drop, builders stall. Each is a designed state, not an edge case — loading/empty/error at the Kinsta/Vercel bar."
+            },
+            {
+              "label": "P6",
+              "lead": "Drill-down is the trust mechanism.",
+              "text": "Every aggregate opens to its evidence: coverage cell → file+claim, proof row → full output, slice card → bp task, agent card → transcript."
+            },
+            {
+              "label": "P7",
+              "lead": "One vocabulary with the ledger.",
+              "text": "Deck states mirror task design language (open/claimed/in_progress/done, criteria met/unmet) — no parallel status taxonomy."
+            }
+          ],
+          "type": "notes"
+        },
+        {
+          "id": "wd-091",
+          "type": "divider"
+        },
+        {
+          "id": "wd-092",
+          "level": 2,
+          "text": "Open questions for Claude design",
+          "type": "heading"
+        },
+        {
+          "id": "wd-093",
+          "items": [
+            [
+              {
+                "type": "text",
+                "value": "Deck vs scroll: are slides discrete steps (carousel with the loop map as navigator) or sections of one scrollable live document? The Paper is a scroll; the gates argue for steps."
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Where do gate timeouts land — how long does a soft gate wait in attended mode before auto-defaulting, and how is that countdown shown?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Fleet view at 20 agents: cards, rows, or a swarm visualization with detail-on-hover? (80-col TUI parity exists as a constraint worth respecting — the deck should have a terminal projection someday.)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "How does the deck coexist with the raw chat transcript — tabs, split, or the deck AS the chat's rich rendering of a wave-scoped session?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Multi-wave epics: does the deck show one wave or the epic's wave history (Paper per wave, charter as the spine)?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Notification surface for gates in unattended mode — push, email, Studio inbox (tickets exists), or all three?"
+              }
+            ]
+          ],
+          "type": "list"
+        },
+        {
+          "id": "wd-094",
+          "type": "divider"
+        },
+        {
+          "id": "wd-095",
+          "level": 2,
+          "text": "Live reference material",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "A real wave is flying under the new cycle right now — its Paper is the best reference for what phases actually write:"
+            }
+          ],
+          "id": "wd-096",
+          "type": "paragraph"
+        },
+        {
+          "href": "https://guerrilla.barkpark.cloud/papers/airdrop-grants-wave-2026-07-10-close",
+          "id": "wd-097",
+          "label": "Open the live wave Paper (airdrop-grants close-out)",
+          "priority": "primary",
+          "type": "action"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "The cycle itself: "
+            },
+            {
+              "type": "code",
+              "value": ".claude/workflows/bp-epic-cycle.workflow.js"
+            },
+            {
+              "type": "text",
+              "value": " — every schema named in the data contract is defined there."
+            }
+          ],
+          "id": "wd-098",
+          "type": "paragraph"
+        }
+      ],
+      "version": 1
+    },
+    "typed_tree_stats": {
+      "invalid_typed_nodes": 0,
+      "max_json_depth": 7,
+      "null_nodes": 0,
+      "typed_nodes": 347
+    }
+  },
+  "document": {
+    "id": "wave-deck",
+    "revision": "e86c9ab685223febc97b25cc2c0e3b6e",
+    "title": "The Wave Deck — the epic cycle as an interactive, slide-by-slide experience"
+  },
+  "reader_contract": {
+    "canonical_source": "authored.portable_doc",
+    "cli_api": {
+      "format": "canonical JSON",
+      "round_trip": "byte-stable canonical encoding"
+    },
+    "email": {
+      "format": "script-free semantic HTML",
+      "logical_h1": 1
+    },
+    "node_order": "semantic_nodes.source_index ascending",
+    "single_h1_source": "document.title",
+    "studio": {
+      "format": "semantic HTML5",
+      "logical_h1": 1
+    },
+    "tui40": {
+      "format": "plain text",
+      "max_display_width": 40
+    },
+    "tui80": {
+      "format": "plain text",
+      "max_display_width": 80
+    }
+  },
+  "schema_version": "ppcc2-reader-adaptive-candidate/v1",
+  "semantic_nodes": [
+    {
+      "block_id": "wd-001",
+      "block_type": "eyebrow",
+      "segments": [
+        "Epic cycle · design handoff spec"
+      ],
+      "segments_sha256": "071e2bf5c32a4ff04495f2f7810a5641cf70fb8f8f5e39c1f45ad56c01adc367",
+      "source_index": 0
+    },
+    {
+      "block_id": "wd-002",
+      "block_type": "heading",
+      "segments": [
+        "The Wave Deck — the epic cycle as an interactive, slide-by-slide experience"
+      ],
+      "segments_sha256": "fc3ffac0efbb79d1b712b32d08d48c39931e456c77f740c962dd1f8879af3f40",
+      "source_index": 1
+    },
+    {
+      "block_id": "wd-003",
+      "block_type": "byline",
+      "segments": [
+        "One wave, one deck",
+        "5 decision gates",
+        "Live fleet, live ledger"
+      ],
+      "segments_sha256": "8af2cab0f642ee3ea63a87f36153708f39916ea0bbbef7962965c601c99458f1",
+      "source_index": 2
+    },
+    {
+      "block_id": "wd-004",
+      "block_type": "ingress",
+      "segments": [
+        "The 7-phase epic cycle already externalizes everything it knows into Barkpark — a living wave Paper, a published task ledger, a",
+        "wave_status",
+        "heartbeat. The Wave Deck renders that state as slides a human can ride: watch the fleet fly in realtime, see exactly what was checked and what wasn't, and DECIDE at five gates whether to research more, build, or land. This paper is the information spec: slide by slide, what each screen must inform, what is live, where the data already lives, and what is genuinely open for design."
+      ],
+      "segments_sha256": "eb8023e56e11dde7d2a78953dff54c13333ad02f399bd74ae5d5f01c7f800311",
+      "source_index": 3
+    },
+    {
+      "block_id": "wd-005",
+      "block_type": "callout",
+      "segments": [
+        "What this paper is (and isn't)",
+        "This is the",
+        "what-to-inform",
+        "spec for Claude design — content, data sources, decision moments, live elements. It deliberately says nothing about visual style, layout, or component aesthetics. Every slide below states its job in one line; if a slide can't, it shouldn't exist."
+      ],
+      "segments_sha256": "ffdb492a6440a4cee4f4c6f7b4f7b7e5f49f3c931b8d1d95d25083347b0c3088",
+      "source_index": 4
+    },
+    {
+      "block_id": "wd-006",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 5
+    },
+    {
+      "block_id": "wd-007",
+      "block_type": "heading",
+      "segments": [
+        "Slide 0 — The Loop (orientation map)"
+      ],
+      "segments_sha256": "8d0e4f211c0e3b25a9c64723d7cde943f19fd1bf013b946049f292712738d060",
+      "source_index": 6
+    },
+    {
+      "block_id": "wd-008",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "one glance answers “where is the wave, and how many minds are on it right now?” The current phase is lit; every gate shows whether it's upcoming, open (waiting on the user), or passed."
+      ],
+      "segments_sha256": "f75d83de9414e4c10bc5082ce201928f3be18243ebeb85ea97f86909f5dd6cfa",
+      "source_index": 7
+    },
+    {
+      "block_id": "wd-009",
+      "block_type": "diagram",
+      "segments": [
+        "The cycle with its five user gates. Every ↺ edge is a deliberate, cheap loop — research costs Sonnet minutes, not Opus hours.",
+        "flowchart TD S1[\"1 · Strategize\\n1 Fable · ~5 min\"] --> S2[\"2 · Survey\\n5–20 Sonnet · ~5 min\"] S2 --> S3[\"3 · Digest\\n1 Fable · ~10 min\"] S3 --> G1{\"GATE 1\\nenough ground?\"} G1 -- \"research more ↺\" --> S2 G1 -- \"verify →\" --> S4[\"4 · Verify\\n1–15 Sonnet/Opus\"] G1 -- \"skip ahead ⏩\" --> S5 S4 --> G2{\"GATE 2\\nproven enough?\"} G2 -- \"verify more ↺\" --> S4 G2 -- \"proceed →\" --> S5[\"5 · Decide\\n1 Fable · open-ended\"] S5 --> G3{\"GATE 3\\napprove the plan?\"} G3 -- \"redirect ↺\" --> S3 G3 -- \"build →\" --> S6[\"6 · Build\\n1–8 Fable/Opus\"] S6 --> S7[\"7 · Review\\n1 Fable · open-ended\"] S7 --> G4{\"GATE 4\\nland it?\"} G4 -- \"fix round ↺\" --> S6 G4 -- \"land →\" --> D[\"Debrief\\nPaper closed · grade\"] D --> G5{\"GATE 5\\nnext wave?\"} G5 -- \"fire ↺\" --> S1"
+      ],
+      "segments_sha256": "2d72d9aa7e61be6aec85969c409197440e7de9819b4466df5a7b37ef6c31452f",
+      "source_index": 8
+    },
+    {
+      "block_id": "wd-010",
+      "block_type": "stats",
+      "segments": [
+        "thinking phases (1 Fable each)",
+        "4",
+        "survey fleet",
+        "5–20",
+        "verify fleet",
+        "≤15",
+        "build fleet",
+        "≤8",
+        "user gates",
+        "5"
+      ],
+      "segments_sha256": "e1747f6c9cba760961b8d8ef7aa83e96e2eb50730509d3ef8975cb8d4e12fb8f",
+      "source_index": 9
+    },
+    {
+      "block_id": "wd-011",
+      "block_type": "paragraph",
+      "segments": [
+        "Must inform:",
+        "current phase · live agent count (flying / done / stalled) · elapsed time per phase vs its budget (~5 min, ~5 min, ~10 min, open) · which gate comes next and what will be decided there."
+      ],
+      "segments_sha256": "1a7d1df9288cad9be4698f30f8fc9065784a5629be499170280876c61895da85",
+      "source_index": 10
+    },
+    {
+      "block_id": "wd-012",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "phase + fleet counts from the workflow run (phase groups, agent labels); position also mirrored in the epic task's",
+        "wave_status",
+        "heartbeat (“wave: surveying — …”), so the deck can render from bp alone even after the run ends."
+      ],
+      "segments_sha256": "4bd59449776e51e7b2bbd5e922c222fa9f2ed7c95f43cbbca542c1919045e334",
+      "source_index": 11
+    },
+    {
+      "block_id": "wd-013",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 12
+    },
+    {
+      "block_id": "wd-014",
+      "block_type": "heading",
+      "segments": [
+        "Slide 1 — The Wave Card (cover)"
+      ],
+      "segments_sha256": "a16f4f24dd93018d04279be4f4723221feb340a76dbadf83696a608cbfdffebc",
+      "source_index": 13
+    },
+    {
+      "block_id": "wd-015",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "the wave at a glance — for someone who just walked in."
+      ],
+      "segments_sha256": "ab8ed74d43989ed4bc85cecab84099f13897be018d3d0fac27f6bdaef31dfc7c",
+      "source_index": 14
+    },
+    {
+      "block_id": "wd-016",
+      "block_type": "list",
+      "segments": [
+        "The wish, verbatim.",
+        "It is the focus of every phase; the deck leads with it, always visible (persistent header or recurring element).",
+        "Epic + wave identity:",
+        "epic task id, wave Paper id, charter path, date.",
+        "Live status line:",
+        "the",
+        "wave_status",
+        "heartbeat, rendered as state — surveying / verifying / building 6 slices / complete, grade B+.",
+        "Outcome when closed:",
+        "grade with its one-line commentary hook — never a bare number (Cody mandate)."
+      ],
+      "segments_sha256": "487bad55def51911ccd0b6116f1022bb7243e308d22634daef0f03ad6e9c24d8",
+      "source_index": 15
+    },
+    {
+      "block_id": "wd-017",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "bp task get <epic>",
+        "→",
+        "wave_status",
+        ",",
+        "wave_paper",
+        "; the Paper's title block."
+      ],
+      "segments_sha256": "1fc2325cce234c950d6e3255e2618b6bc7a7e601fb4ef5d9fdac2a24e6aa0013",
+      "source_index": 16
+    },
+    {
+      "block_id": "wd-018",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 17
+    },
+    {
+      "block_id": "wd-019",
+      "block_type": "heading",
+      "segments": [
+        "Slide 2 — Direction (Strategize)"
+      ],
+      "segments_sha256": "12ef0c899737c20c14ecb5706b9f39d2bfc325e0772eb62417a0f1aa2afd7da8",
+      "source_index": 18
+    },
+    {
+      "block_id": "wd-020",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "show the bet before the evidence — what the strategist thinks the finished experience is, and what it wants scouted."
+      ],
+      "segments_sha256": "6d0d9c8026a5df741eab2c072ed1e22bd437ac1d01987f08773712289c4e8650",
+      "source_index": 19
+    },
+    {
+      "block_id": "wd-021",
+      "block_type": "list",
+      "segments": [
+        "Direction statement",
+        "— the bold hypothesis, marked clearly as tentative (“Decide finalizes after two explore rounds”).",
+        "The survey plan",
+        "— every question with its",
+        "why",
+        "(“how the answer changes the plan”). This is the first place the user can intervene: a wrong question at minute 5 is the cheapest bug in the whole cycle.",
+        "Soft gate",
+        "— “fly the survey (N Sonnets)” is the default with a short countdown; the user can add/strike questions or annotate the direction before launch. Auto mode skips the pause entirely."
+      ],
+      "segments_sha256": "be4fa8b3c6ce3d87f53ed2a319a4ed93a17ccaf9ed6774f89aced548a756a8b0",
+      "source_index": 20
+    },
+    {
+      "block_id": "wd-022",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "wave Paper §Strategize (direction + survey plan land there before the fleet flies)."
+      ],
+      "segments_sha256": "aae1917a58123772d4f8377531e602eb12796f082f54fd0f66f1c3f859c19cd6",
+      "source_index": 21
+    },
+    {
+      "block_id": "wd-023",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 22
+    },
+    {
+      "block_id": "wd-024",
+      "block_type": "heading",
+      "segments": [
+        "Slide 3 — Fleet in Flight (Survey, live)"
+      ],
+      "segments_sha256": "21e3d53367359cd602ea059ed8a7ccaa99af0ae63cef0473eae0a2eee126dc1a",
+      "source_index": 23
+    },
+    {
+      "block_id": "wd-025",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "the realtime spectacle with substance — you SEE 5–20 minds working, and each one is inspectable. This is where the deck rides the existing Studio chat surface: the wave is a chat session; the fleet is the agents rail; clicking an agent is the drill-down."
+      ],
+      "segments_sha256": "ffd47897c68be3ac1f64189db6b73871d9f9544dd13e496d759ad0549718a454",
+      "source_index": 24
+    },
+    {
+      "block_id": "wd-026",
+      "block_type": "paragraph",
+      "segments": [
+        "Per-agent card (the unit of this slide):"
+      ],
+      "segments_sha256": "839a7d4605ba85ed536642b69883bfe5ee190cc83a52ad14d404372879443e0e",
+      "source_index": 25
+    },
+    {
+      "block_id": "wd-027",
+      "block_type": "list",
+      "segments": [
+        "assignment key + the question, one line (",
+        "survey:auth-seams",
+        ")",
+        "model tier badge (Sonnet/Opus/Fable) — the user asked to SEE the amount and kind of agents; make the fleet composition legible at a glance",
+        "state: queued · flying · reporting · done · died (agents can die on API errors — show it honestly, with what was lost)",
+        "live activity: elapsed time, files touched so far, last action line (streamed from the agent transcript — the chat feature already streams this)",
+        "on done: found/not-found/partial counts from its coverage[] — the card flips from activity to result"
+      ],
+      "segments_sha256": "92dba378b5b40f958c1b520ffed322104ce84d6b06a7bfd9292ae6f6078bf2ba",
+      "source_index": 26
+    },
+    {
+      "block_id": "wd-028",
+      "block_type": "callout",
+      "segments": [
+        "Realtime contract",
+        "Liveness comes from two independent feeds and the deck must survive either going quiet: (1) the chat/workflow stream — agent spawn, phase change, tool activity, tokens; (2) the bp ledger — heartbeat, task stamps, Paper sections, which persist. Stream dies → deck degrades to polling bp and says so. Never render a frozen “live” view as if it were current."
+      ],
+      "segments_sha256": "9b997480e9868cfb40ff8a209f16c27c37c5aa6e0c40d6a28a2a4cd70203357f",
+      "source_index": 27
+    },
+    {
+      "block_id": "wd-029",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "workflow phase groups + agent labels (spawn/complete events); Studio chat SESSIONS surface (agents rail, per-agent drill-down transcripts); tokens/elapsed from the run."
+      ],
+      "segments_sha256": "7e024be033c07b4e41c5f0f00aaf53c7df8b34426445719bef269e96421740c6",
+      "source_index": 28
+    },
+    {
+      "block_id": "wd-030",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 29
+    },
+    {
+      "block_id": "wd-031",
+      "block_type": "heading",
+      "segments": [
+        "Slide 4 — The Coverage Map (Survey results)"
+      ],
+      "segments_sha256": "f56cba5d881d7034b5dc1f07fa83e781022201cc3c69a99f0232a7e6bc61e400",
+      "source_index": 30
+    },
+    {
+      "block_id": "wd-032",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "make the EDGES of knowledge visible — this slide is the honest heart of the deck and the evidence base for Gate 1. Not “what did we learn” but “what did we check, what did we find, what did we check and NOT find, and where did nobody look”."
+      ],
+      "segments_sha256": "95070ca93c16416766e5df3afe86f5f8a7423828c102eef766eee9ccffadf46b",
+      "source_index": 31
+    },
+    {
+      "block_id": "wd-033",
+      "block_type": "list",
+      "segments": [
+        "Checked & found",
+        "— path, what it was checked for, the one-line takeaway.",
+        "Checked & NOT found",
+        "— rendered as loudly as found. “No existing rate limiter in api/” is a decision-in-waiting, not a footnote.",
+        "Partial",
+        "— ran out of timebox; candidates for the verify round.",
+        "Unreached corners",
+        "— named by the Digest; unlisted = unchecked is the rule, so the map must admit its own blank space.",
+        "Open questions",
+        "— every surveyor's parked unknowns, deduped."
+      ],
+      "segments_sha256": "6c64714c24aa835bec59b16c15c4d2a2453bf1347ccd5ffba8bac1c716982074",
+      "source_index": 32
+    },
+    {
+      "block_id": "wd-034",
+      "block_type": "paragraph",
+      "segments": [
+        "Aggregations that matter:",
+        "N files checked across M surveyors · found/not-found/partial ratio · which repo areas got zero coverage. A heatmap over repo areas is a natural fit; the raw per-file table must stay one tap away — trust comes from the ability to drill to the specific file and claim."
+      ],
+      "segments_sha256": "c85ed1a16ca5f1eafe128bd5cbd4b7f58db697c66cc1b326db37eff0aac4f2ed",
+      "source_index": 33
+    },
+    {
+      "block_id": "wd-035",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "surveyors' structured",
+        "coverage[]",
+        "({path, checked_for, found|not_found|partial, note}), folded into wave Paper §Survey digest by the Digest phase."
+      ],
+      "segments_sha256": "539a48e4bd08da14ed8c40152bff68adf3a41ad46ce3c669deb27ab4b7796044",
+      "source_index": 34
+    },
+    {
+      "block_id": "wd-036",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 35
+    },
+    {
+      "block_id": "wd-037",
+      "block_type": "heading",
+      "segments": [
+        "Slide 5 — Synthesis & GATE 1: enough ground?"
+      ],
+      "segments_sha256": "fd7a93cfe4448494d663630068b95f74611707d396a890462a67ab2bdb3484e9",
+      "source_index": 36
+    },
+    {
+      "block_id": "wd-038",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "the Digest Fable's synthesis, contradictions named, and the proposed verify fleet — then the wave STOPS and asks. This is the user's “research more?” moment and the reason the deck exists."
+      ],
+      "segments_sha256": "c8061f58c28abdce8c16d64eb898da30cbcf9e7a362b98f280a642232feb52cf",
+      "source_index": 37
+    },
+    {
+      "block_id": "wd-039",
+      "block_type": "paragraph",
+      "segments": [
+        "Must inform before the user can decide:"
+      ],
+      "segments_sha256": "b239c365cf993586799d90b17f3ff2fdb74fdcba8b87da1fdb50d831165197a3",
+      "source_index": 38
+    },
+    {
+      "block_id": "wd-040",
+      "block_type": "list",
+      "segments": [
+        "what is now established (with the coverage map one slide back)",
+        "where survey reports contradict each other or the direction — verbatim, both sides",
+        "what remains unknown that Decide cannot live without — the justification for every verify assignment",
+        "the proposed verify fleet: per assignment its question, model (Sonnet vs Opus — and",
+        "why the expensive one, when chosen",
+        "), and what will be RUN as proof vs merely read",
+        "cost of each option: another survey round ≈ N Sonnet-minutes; the verify round ≈ this fleet; skipping ahead ≈ deciding on unproven claims (name which)"
+      ],
+      "segments_sha256": "f782709e63eebfbdee85de3908e9b8bcd7ff8bf3bcaabaadb0a40a1670a85ef0",
+      "source_index": 39
+    },
+    {
+      "block_id": "wd-041",
+      "block_type": "cards",
+      "segments": [
+        "Research more ↺",
+        "Add or edit survey questions (user can type their own); another cheap Sonnet round flies; the Paper and coverage map grow — never fork.",
+        "Verify →",
+        "Approve the fleet as designed (default). User may strike or add assignments and flip a Sonnet↔Opus choice before launch.",
+        "Skip ahead ⏩",
+        "“I already know enough.” Deck names the claims that will go unproven; the choice is logged into the Paper with a dated note."
+      ],
+      "segments_sha256": "e2f2f21a824a3de6644484699b48b4e31eb87802a06566d3caf85868d40688ea",
+      "source_index": 40
+    },
+    {
+      "block_id": "wd-042",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "wave Paper §Survey digest + §Verify plan (written BEFORE the fleet flies — the Paper always states what is in flight); gate choice appends a dated decision note to the Paper."
+      ],
+      "segments_sha256": "8bfb81f7a9bc409cb11dad5e3722199441526dbfb948c6d5293986774772b4f0",
+      "source_index": 41
+    },
+    {
+      "block_id": "wd-043",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 42
+    },
+    {
+      "block_id": "wd-044",
+      "block_type": "heading",
+      "segments": [
+        "Slide 6 — Proof Runs (Verify, live)"
+      ],
+      "segments_sha256": "c72eb2bfb288e3cfd87719d7c9729e318a621daa92d63c8c9c85e82b15dfad1b",
+      "source_index": 43
+    },
+    {
+      "block_id": "wd-045",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "same fleet view as Slide 3, but the cards are proof-oriented: which command is running, live output tail, pass/fail as it lands. Mixed fleet — the Sonnet/Opus badges now carry meaning the user chose at Gate 1."
+      ],
+      "segments_sha256": "38025cbad35fcfa00548691b47115be953bc836188607720236e8adb50c6ecfa",
+      "source_index": 44
+    },
+    {
+      "block_id": "wd-046",
+      "block_type": "terminal",
+      "segments": [
+        "$ verify:search-seal — RUNNING",
+        "CC=/usr/bin/clang mix test test/barkpark/access/grant_search_deny_test.exs",
+        "...",
+        "1 test, 1 failure ← RED: the leak is REAL (repro proves the hole)",
+        "A proof card mid-run — the decisive output line is the payload, not the pass/fail icon alone."
+      ],
+      "segments_sha256": "2bbaefc028413e46c5250f754a989f90b145bec713e9363b6c622eb601f35580",
+      "source_index": 45
+    },
+    {
+      "block_id": "wd-047",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "agent transcripts (chat drill-down) for live tails; structured",
+        "proofs[]",
+        "({claim, command, output_excerpt, passed}) on completion."
+      ],
+      "segments_sha256": "8779398aa19654bcebd2cb2eff6688c93b92e3fabbba3ea051c118c094c0b674",
+      "source_index": 46
+    },
+    {
+      "block_id": "wd-048",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 47
+    },
+    {
+      "block_id": "wd-049",
+      "block_type": "heading",
+      "segments": [
+        "Slide 7 — The Proof Table & GATE 2: proven enough?"
+      ],
+      "segments_sha256": "1a18f56bc2a0fede650f068da3e0938cf24f19d4c3923c42104de7c9b522e302",
+      "source_index": 48
+    },
+    {
+      "block_id": "wd-050",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "every load-bearing claim with its verdict and the actual output that earned it. Refuted premises get top billing — a premise that died here just saved a build slice."
+      ],
+      "segments_sha256": "debfe01469a6a2ef4e9ff112fbaac7e7dd599654c67f785d23988935fc6a302f",
+      "source_index": 49
+    },
+    {
+      "block_id": "wd-051",
+      "block_type": "list",
+      "segments": [
+        "proof rows: claim → command → decisive output excerpt → PROVEN / REFUTED — the excerpt is mandatory (distrust vacuous green: a pass only counts if the right thing produced it)",
+        "claims that arrived unproven (assignment had no runnable proof) — flagged, not hidden",
+        "verifier coverage delta — what the deep round checked that the survey hadn't"
+      ],
+      "segments_sha256": "ca9e8f79d310631d52f19beffb8b61ba69b34832b1d594f0eaa880ccae53d7ed",
+      "source_index": 50
+    },
+    {
+      "block_id": "wd-052",
+      "block_type": "cards",
+      "segments": [
+        "Verify more ↺",
+        "Target the still-unproven claims; user can demand a specific proof (“run the deny repro against X”).",
+        "Proceed to Decide →",
+        "Default when every load-bearing claim is proven or consciously accepted as unproven (logged)."
+      ],
+      "segments_sha256": "fea38df90a69d15763252b074498ea8a2c9974945dcb478ce5f08e44e9e5f25b",
+      "source_index": 51
+    },
+    {
+      "block_id": "wd-053",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "wave Paper §Verification results (Decide writes it) + workflow return",
+        "proofs",
+        "count; per-claim rows from verifiers' structured output."
+      ],
+      "segments_sha256": "9ef1f554f55f31cf988e818d7cc67ec0cd0b6a4111c6d8e0c41ea97c00a955c9",
+      "source_index": 52
+    },
+    {
+      "block_id": "wd-054",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 53
+    },
+    {
+      "block_id": "wd-055",
+      "block_type": "heading",
+      "segments": [
+        "Slide 8 — The Plan & GATE 3: approve the wave"
+      ],
+      "segments_sha256": "6f85f2b47fa8ac51f6e10bfdf9c76bf66184fa16d55366fd9948ea010b1da958",
+      "source_index": 54
+    },
+    {
+      "block_id": "wd-056",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "the biggest decision on the deck: exactly what will be built, by which class of mind, proven by what. Nothing here is hypothetical — every slice IS a published bp task the user can open."
+      ],
+      "segments_sha256": "da816fcff09ef2d592476a3e5a68db4725df903342dbf88ec49f67742136d746",
+      "source_index": 55
+    },
+    {
+      "block_id": "wd-057",
+      "block_type": "list",
+      "segments": [
+        "Decisions",
+        "— each with its one-line why; where verification overturned the original direction, show the reversal explicitly (before → after).",
+        "Slice cards = task cards:",
+        "title · bp task id (live link) · surface · builder model badge (Opus = well-specified; Fable = subtle/high-blast-radius — the badge carries the architect's reasoning on hover/tap) · the exact gate command · acceptance criteria with their merge-gated ones marked.",
+        "Backlog seeded",
+        "— discovered-but-deferred tasks filed now; the ledger shows the future, render it.",
+        "Fleet preview",
+        "— N builders about to fly, model mix, expected file-overlap = zero (slices are worktree-isolated by design)."
+      ],
+      "segments_sha256": "b49e8dd703213b6b63e851da429f6782305ce881f2f2594dd592231bedf5b94f",
+      "source_index": 56
+    },
+    {
+      "block_id": "wd-058",
+      "block_type": "cards",
+      "segments": [
+        "Build →",
+        "Fire the builders (default). The Paper already carries the plan; the heartbeat flips to “building N slices”.",
+        "Trim / retarget",
+        "Strike slices (their tasks stay filed, unclaimed, honest in the backlog) or demote/promote a builder model; then fire.",
+        "Redirect ↺",
+        "The plan is wrong at the root — send it back to Digest with a note. Expensive and rare; the note becomes lead_notes for the re-run."
+      ],
+      "segments_sha256": "8eecda8d8338a8c86d22d902b0ade19279cf61cdeb6e00f2ec3bd44586e5346b",
+      "source_index": 57
+    },
+    {
+      "block_id": "wd-059",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "wave Paper §Decisions + §Wave plan; slice tasks live via",
+        "task-board",
+        "query on",
+        "parent_id=<epic>",
+        "— this block type already exists in PortableDoc and renders the published ledger."
+      ],
+      "segments_sha256": "7a3cd1d16370a062f5214d7461a3a7681abacdcc95aadbfd48331f265ab2e867",
+      "source_index": 58
+    },
+    {
+      "block_id": "wd-060",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 59
+    },
+    {
+      "block_id": "wd-061",
+      "block_type": "heading",
+      "segments": [
+        "Slide 9 — The Build Board (live)"
+      ],
+      "segments_sha256": "5de00ca96414406daf484922abc743e80930f82b2be712677c933fea0234f837",
+      "source_index": 60
+    },
+    {
+      "block_id": "wd-062",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "the long phase, made watchable. The ledger's stamp-as-you-go contract means the board moves the moment reality does — criteria flip with evidence attached, stalls surface with the builder's own note, nothing waits for the end of the run."
+      ],
+      "segments_sha256": "bd15a8cea59096dd6d64616a04ce36cb2e7d36636ba7f97c258d11af7494f63e",
+      "source_index": 61
+    },
+    {
+      "block_id": "wd-063",
+      "block_type": "list",
+      "segments": [
+        "per-slice: claim state (claimed by whom, when) → criteria flipping live, each with its evidence snippet → gate status (running/red/green) → branch + commit when done",
+        "stall = first-class state: the builder stamps why (“gate red on X, investigating”) — the card shows it the moment it's stamped, not at post-mortem",
+        "fleet strip: same per-agent cards as Slide 3 (builders now, model badges meaningful), drill-down into any builder's transcript mid-build"
+      ],
+      "segments_sha256": "b815634a21d12923954efb7d9b8e55c4db450c8e3ed10e4bd3dfb3a50816355d",
+      "source_index": 62
+    },
+    {
+      "block_id": "wd-064",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "published task ledger (criteria[], claim, lifecycle) — poll or realtime via the existing webhook/LiveView channel; agent stream for transcripts. The deck needs NO new write path: builders already stamp everything."
+      ],
+      "segments_sha256": "d0caa0b177ca4e72d7b7b23fcc050258f6d3ea812d141994dc6cc9311e35c2f4",
+      "source_index": 63
+    },
+    {
+      "block_id": "wd-065",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 64
+    },
+    {
+      "block_id": "wd-066",
+      "block_type": "heading",
+      "segments": [
+        "Slide 10 — The Verdict & GATE 4: land it?"
+      ],
+      "segments_sha256": "293fc7b2baa99eba5b9522c1cf7d2f8461d87e3edd01db0551f579f744d8c0e6",
+      "source_index": 65
+    },
+    {
+      "block_id": "wd-067",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "the reviewer's honest account, slice by slice, then the wave's grade — and the user's call on landing."
+      ],
+      "segments_sha256": "311e069c27c8cfa1c2d1b39f787d4ced802d868aa73ece38970ab7c03a391824",
+      "source_index": 66
+    },
+    {
+      "block_id": "wd-068",
+      "block_type": "list",
+      "segments": [
+        "per slice: what the reviewer FIXED in place (or “none”) · final branch (-r if touched) · gate re-run result · the honest verdict incl. what the lead must know before merging",
+        "cross-slice coherence findings; ledger audit outcome (were the builders' live stamps truthful?)",
+        "The grade with its commentary",
+        "— the commentary EARNS the grade; render them as one unit, never a bare letter (Cody mandate)",
+        "what stalled and why, with its honest task state"
+      ],
+      "segments_sha256": "6f69f9815e0df43f3df92a752d320cf455ef001387726207c0ccf06f5626d034",
+      "source_index": 67
+    },
+    {
+      "block_id": "wd-069",
+      "block_type": "cards",
+      "segments": [
+        "Land →",
+        "Merge the final branches; the lead closes merge-gated criteria on merge — the deck lists exactly which ones per slice.",
+        "Fix round ↺",
+        "Named issues go back to build — as bp tasks, so the loop stays in the ledger.",
+        "Park",
+        "Branches stay, tasks stay in_progress with honest notes; the debrief records the parking reason."
+      ],
+      "segments_sha256": "0211b62bb566bf55bf94515ed14f56967ce0858af341b3399d77ca62e6060f1c",
+      "source_index": 68
+    },
+    {
+      "block_id": "wd-070",
+      "block_type": "paragraph",
+      "segments": [
+        "Data:",
+        "workflow return (reviewed[], grade, commentary, ledger_fixes) + wave Paper §Debrief."
+      ],
+      "segments_sha256": "92639c4099f81151538b6c84df9ae979aabdf61d9ce2f0fd78694f818e5014c1",
+      "source_index": 69
+    },
+    {
+      "block_id": "wd-071",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 70
+    },
+    {
+      "block_id": "wd-072",
+      "block_type": "heading",
+      "segments": [
+        "Slide 11 — The Debrief & GATE 5: next wave?"
+      ],
+      "segments_sha256": "b4053627b7336f13a7153576ec9caaa743ac8602035e5e4ff083808459fbac97",
+      "source_index": 71
+    },
+    {
+      "block_id": "wd-073",
+      "block_type": "paragraph",
+      "segments": [
+        "Job:",
+        "close the story, open the next. The wave Paper is now complete — direction → coverage → proofs → decisions → outcome — and this slide is its executive rendering plus the loop-back."
+      ],
+      "segments_sha256": "2392cc57e8436f04ced3aba56ff14b469d9d2fd9aaed472661f936ba28c40f1b",
+      "source_index": 72
+    },
+    {
+      "block_id": "wd-074",
+      "block_type": "list",
+      "segments": [
+        "what shipped vs what the wish asked (holistic, not a checklist)",
+        "the next_wave handoff — what the reviewer says the next wave should take, pre-filled as the next wave's draft direction",
+        "backlog state: open children on the epic, by priority — the future the Decide phase seeded",
+        "gate: fire the next wave (loops to Slide 2 with the handoff as input) or close the epic"
+      ],
+      "segments_sha256": "e7e2b652d9d2886eb7f549438d9780873b35db479326a6844796a5fb9022c504",
+      "source_index": 73
+    },
+    {
+      "block_id": "wd-075",
+      "block_type": "pullquote",
+      "segments": [
+        "Someone opening the Paper mid-wave must see exactly where the wave stands — the deck is that sentence, made navigable."
+      ],
+      "segments_sha256": "07526e89c348188a98c3f15d2feee3297a946d6618b30692c1eb6ddc3d9bf5f5",
+      "source_index": 74
+    },
+    {
+      "block_id": "wd-076",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 75
+    },
+    {
+      "block_id": "wd-077",
+      "block_type": "heading",
+      "segments": [
+        "The fleet, everywhere: riding the chat surface"
+      ],
+      "segments_sha256": "a7bf15d1b1d2ce732c26140068c690ed842d48dc69723ae27acefc8369bbb7ef",
+      "source_index": 76
+    },
+    {
+      "block_id": "wd-078",
+      "block_type": "paragraph",
+      "segments": [
+        "The user's explicit ask:",
+        "see the amount of agents, visualize details realtime, using our chat features.",
+        "The Studio Claude chat (SESSIONS epic — terminal soul, composer cockpit, agents rail, per-agent drill-down) is the substrate; the deck is a projection over a wave-scoped session. Concretely:"
+      ],
+      "segments_sha256": "57f08ad7b4e16d919b6a524d68e52b405aba1bb358fc8e605f36482a6a97bb8d",
+      "source_index": 77
+    },
+    {
+      "block_id": "wd-079",
+      "block_type": "notes",
+      "segments": [
+        "Scoped to the wave: one entry per agent, model badge, phase group, live state. The deck's Slides 3/6/9 are this rail, arranged.",
+        "RAIL",
+        "The agents rail IS the fleet view.",
+        "The drill-down already streams tool calls and output — proof tails and build activity come free.",
+        "DRILL",
+        "Every agent card opens its transcript.",
+        "Buttons for the default choices; free text for notes/redirects — a gate answer is just a message the lead consumes before firing the next phase.",
+        "COMPOSER",
+        "Gates are answered in the composer.",
+        "Per phase: flying/done/died. Per wave: total spawned, by model tier. The numbers are the pulse of the whole experience.",
+        "COUNT",
+        "Agent counts are always visible."
+      ],
+      "segments_sha256": "473247b7d0dea77f02d16f1fbfc719ab9abba9d41fb73e6e9cd887a6d908a53a",
+      "source_index": 78
+    },
+    {
+      "block_id": "wd-080",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 79
+    },
+    {
+      "block_id": "wd-081",
+      "block_type": "heading",
+      "segments": [
+        "The data contract — every slide, sourced"
+      ],
+      "segments_sha256": "c8607e67cf5373b48416430cb8c4aabb5a190c9f416262f280f69120dcd7dd96",
+      "source_index": 80
+    },
+    {
+      "block_id": "wd-082",
+      "block_type": "paragraph",
+      "segments": [
+        "Nothing below requires a new backend write path. The cycle's liveness contract (heartbeat + stamp-as-you-go + Fable-owned Paper) was designed so any surface can render the wave from bp data plus the chat stream."
+      ],
+      "segments_sha256": "6f801ebd4d5d6252983d10f17cca7ae06fdfcda093b255159d4322bde24ca6da",
+      "source_index": 81
+    },
+    {
+      "block_id": "wd-083",
+      "block_type": "table",
+      "segments": [
+        "0 Loop / 1 Wave Card",
+        "wave_status heartbeat, wave_paper link",
+        "epic task (flat fields), stamped by every Fable phase",
+        "2 Direction",
+        "direction + survey plan",
+        "wave Paper §Strategize",
+        "3/6/9 Fleet live",
+        "agent spawn/state/labels, transcripts, tokens",
+        "workflow run + chat session (agents rail, drill-down)",
+        "4 Coverage Map",
+        "coverage[] {path, checked_for, result, note}",
+        "surveyor structured output → Paper §Survey digest",
+        "5 Gate 1",
+        "synthesis, contradictions, verify plan w/ models",
+        "wave Paper (written BEFORE the fleet flies)",
+        "7 Proof Table",
+        "proofs[] {claim, command, output_excerpt, passed}",
+        "verifier structured output → Paper §Verification results",
+        "8 Plan / Gate 3",
+        "decisions, slice tasks, backlog, builder models",
+        "wave Paper §Wave plan + published tasks (task-board query)",
+        "9 Build Board",
+        "claim, criteria[] w/ evidence, lifecycle, stall notes",
+        "published task ledger (stamp-as-you-go), webhook/LiveView",
+        "10 Verdict",
+        "reviewed[], grade+commentary, ledger audit",
+        "workflow return + Paper §Debrief",
+        "11 Debrief",
+        "next_wave handoff, backlog by priority",
+        "Paper §Debrief + epic task children",
+        "All gates",
+        "the choice + who made it + note",
+        "dated decision note appended to the Paper (new, tiny)",
+        "Slide",
+        "Primary data",
+        "Lives where (today)"
+      ],
+      "segments_sha256": "8d8b8956c2abab3461013be827743906a5fac1a4e8688c115ab42f3a016d53e4",
+      "source_index": 82
+    },
+    {
+      "block_id": "wd-084",
+      "block_type": "callout",
+      "segments": [
+        "The one honest engineering note",
+        "Today the 7 phases run as ONE background workflow. Real gates need the run to pause on user input. The clean cut: the workflow already externalizes ALL state into Paper + tasks at every Fable boundary — exactly where the gates sit. So gates = run the cycle as phase segments the lead fires one at a time (the deck's gate answer is the lead's cue), or a workflow-level pause primitive if one lands later. No phase needs to change what it writes."
+      ],
+      "segments_sha256": "0ca729ef3b81c006c658ec418a087867ba4d281a2b523875bf20f19daece37b3",
+      "source_index": 83
+    },
+    {
+      "block_id": "wd-085",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 84
+    },
+    {
+      "block_id": "wd-086",
+      "block_type": "heading",
+      "segments": [
+        "Interaction doctrine"
+      ],
+      "segments_sha256": "5038b7e0823b1c339e339abe688b009da05e81f739e0b1faf0732aa7b37e4d61",
+      "source_index": 85
+    },
+    {
+      "block_id": "wd-087",
+      "block_type": "notes",
+      "segments": [
+        "Every gate has a default and (in auto) zero-wait pass-through. The deck adds decision power without taxing the user who trusts the loop.",
+        "D1",
+        "Gates are optional; auto mode is today's behavior.",
+        "“Research more” costs Sonnet-minutes. The deck shows the cost of each option AT the gate, so choosing more research feels safe, not indulgent.",
+        "D2",
+        "Research loops are cheap by design.",
+        "Every extra round appends to the same wave Paper. The deck is a lens on the Paper — rewind any wave by scrolling it.",
+        "D3",
+        "Loops grow one Paper; they never fork.",
+        "Choice, author, note, timestamp — appended to the Paper. The wave's story includes the human's decisions, not just the agents'.",
+        "D4",
+        "Every gate answer is recorded.",
+        "Every gate is judged against it. Persistent, verbatim, untruncated.",
+        "D5",
+        "The wish never leaves the screen."
+      ],
+      "segments_sha256": "4c4bea287631297a6927f59bb498c53a41874bcc3ad59b749180c222d2e8b879",
+      "source_index": 86
+    },
+    {
+      "block_id": "wd-088",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 87
+    },
+    {
+      "block_id": "wd-089",
+      "block_type": "heading",
+      "segments": [
+        "Principles the design must carry"
+      ],
+      "segments_sha256": "74f9f8de2670b0918ce2a14aa1ae1426fca700080acb325d75d3a48b60493d54",
+      "source_index": 88
+    },
+    {
+      "block_id": "wd-090",
+      "block_type": "notes",
+      "segments": [
+        "Absence of prior art, a refuted premise, an unreached corner — these change plans. Never render them smaller than positives.",
+        "P1",
+        "Not-found is as loud as found.",
+        "The Paper states the plan before each fleet flies; the deck must too. A mid-wave visitor orients in one glance.",
+        "P2",
+        "Always show what is in flight.",
+        "“14 agents” is a number; 14 cards with model badges, states, and assignments is a fleet. Aggregate AND enumerate.",
+        "P3",
+        "Counts with faces.",
+        "Grade travels with commentary; pass travels with the output that produced it; count travels with the list behind it.",
+        "P4",
+        "Never a bare number.",
+        "Agents die, gates go red, streams drop, builders stall. Each is a designed state, not an edge case — loading/empty/error at the Kinsta/Vercel bar.",
+        "P5",
+        "Honest states everywhere.",
+        "Every aggregate opens to its evidence: coverage cell → file+claim, proof row → full output, slice card → bp task, agent card → transcript.",
+        "P6",
+        "Drill-down is the trust mechanism.",
+        "Deck states mirror task design language (open/claimed/in_progress/done, criteria met/unmet) — no parallel status taxonomy.",
+        "P7",
+        "One vocabulary with the ledger."
+      ],
+      "segments_sha256": "edda0e28eba670f1ea8eee25282a3127b9cbaf8e625ecf3ffa4881fe95725ef4",
+      "source_index": 89
+    },
+    {
+      "block_id": "wd-091",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 90
+    },
+    {
+      "block_id": "wd-092",
+      "block_type": "heading",
+      "segments": [
+        "Open questions for Claude design"
+      ],
+      "segments_sha256": "d29784bc641eced30d4b3a322c769e6ac80b5031dda07398b51096892233445c",
+      "source_index": 91
+    },
+    {
+      "block_id": "wd-093",
+      "block_type": "list",
+      "segments": [
+        "Deck vs scroll: are slides discrete steps (carousel with the loop map as navigator) or sections of one scrollable live document? The Paper is a scroll; the gates argue for steps.",
+        "Where do gate timeouts land — how long does a soft gate wait in attended mode before auto-defaulting, and how is that countdown shown?",
+        "Fleet view at 20 agents: cards, rows, or a swarm visualization with detail-on-hover? (80-col TUI parity exists as a constraint worth respecting — the deck should have a terminal projection someday.)",
+        "How does the deck coexist with the raw chat transcript — tabs, split, or the deck AS the chat's rich rendering of a wave-scoped session?",
+        "Multi-wave epics: does the deck show one wave or the epic's wave history (Paper per wave, charter as the spine)?",
+        "Notification surface for gates in unattended mode — push, email, Studio inbox (tickets exists), or all three?"
+      ],
+      "segments_sha256": "7c021b1ab25702503cad10ab0d57a2dc97ff174e3e1d6ff4a272bc1bdcc1aa3b",
+      "source_index": 92
+    },
+    {
+      "block_id": "wd-094",
+      "block_type": "divider",
+      "segments": [],
+      "segments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "source_index": 93
+    },
+    {
+      "block_id": "wd-095",
+      "block_type": "heading",
+      "segments": [
+        "Live reference material"
+      ],
+      "segments_sha256": "61673de2d1d1f10ad63552ebecdad573d22b454e685c6fcb6ee7e4e69714d496",
+      "source_index": 94
+    },
+    {
+      "block_id": "wd-096",
+      "block_type": "paragraph",
+      "segments": [
+        "A real wave is flying under the new cycle right now — its Paper is the best reference for what phases actually write:"
+      ],
+      "segments_sha256": "d09568af2ed0fab9a14cc2fd9028a790ed1bb00a1e76cf4792535d56e431678a",
+      "source_index": 95
+    },
+    {
+      "block_id": "wd-097",
+      "block_type": "action",
+      "segments": [
+        "Open the live wave Paper (airdrop-grants close-out)",
+        "primary"
+      ],
+      "segments_sha256": "42099f31405204cd47915d3db4ed0c7f2d6b282e0ad7033396cd3064142a0478",
+      "source_index": 96
+    },
+    {
+      "block_id": "wd-098",
+      "block_type": "paragraph",
+      "segments": [
+        "The cycle itself:",
+        ".claude/workflows/bp-epic-cycle.workflow.js",
+        "— every schema named in the data contract is defined there."
+      ],
+      "segments_sha256": "8bd7f010af6f9ad668bad3de82e38da5abe3af10d9d34b1670f9b549435e569e",
+      "source_index": 97
+    }
+  ],
+  "semantic_segments_sha256": "2d9cbc479bc5fe3343fd63c0359a17666ee2baf769489011f830c119a421ad5c",
+  "unit_id": "paper:wave-deck"
+}

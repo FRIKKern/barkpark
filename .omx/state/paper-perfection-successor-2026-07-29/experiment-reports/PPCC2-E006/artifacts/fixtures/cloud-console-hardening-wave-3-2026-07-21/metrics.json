@@ -1,0 +1,108 @@
+{
+  "accessibility": {
+    "all_regions_aria_labeled": true,
+    "deterministic_reading_order": true,
+    "email_logical_h1_count": 1,
+    "pass": true,
+    "studio_logical_h1_count": 1
+  },
+  "block_count": 186,
+  "cli_api_round_trip": {
+    "canonical_sha256": "64c375f4217d1d79f350a8921622ebbd4e9803ab73a27c9abb12b61ef8979327",
+    "decode_encode_byte_stable": true,
+    "pass": true
+  },
+  "content_preservation": {
+    "authored_blocks_exactly_embedded": true,
+    "invented_decisive_facts": 0,
+    "missing_authored_strings": {
+      "email": [],
+      "studio": [],
+      "tui40": [],
+      "tui80": []
+    },
+    "pass": true
+  },
+  "document_id": "cloud-console-hardening-wave-3-2026-07-21",
+  "document_rev": "bc89039eb1bcc908b5be80ce33148094",
+  "email_safety": {
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "script_free": true,
+    "unresolved_runtime_structure": false
+  },
+  "hard_gate_pass": true,
+  "hard_gates": {
+    "accessibility": true,
+    "cli_api_round_trip": true,
+    "content_preservation": true,
+    "email_safety": true,
+    "portable_doc_schema_validity": true,
+    "studio_structural_completeness": true,
+    "tui_width": true
+  },
+  "portable_doc_schema_validity": {
+    "blocks_sha256": "ca4ac752935aafc9b693bce391b97d664d2e11e8a71331ae3cc4025ded17792e",
+    "generic_adapter_dropped_nodes": 0,
+    "generic_adapter_placeholder_nodes": 0,
+    "invalid_typed_nodes": 0,
+    "max_json_depth": 6,
+    "null_nodes": 0,
+    "pass": true,
+    "top_level_blocks": 186,
+    "typed_nodes": 404
+  },
+  "projection_determinism": {
+    "cli_api": {
+      "pass": true,
+      "repeat_sha256": [
+        "64c375f4217d1d79f350a8921622ebbd4e9803ab73a27c9abb12b61ef8979327",
+        "64c375f4217d1d79f350a8921622ebbd4e9803ab73a27c9abb12b61ef8979327"
+      ]
+    },
+    "email": {
+      "pass": true,
+      "repeat_sha256": [
+        "321d5cff3005b38a284559eaf486e68e6292b361a620dfebab7b92e92322f398",
+        "321d5cff3005b38a284559eaf486e68e6292b361a620dfebab7b92e92322f398"
+      ]
+    },
+    "studio": {
+      "pass": true,
+      "repeat_sha256": [
+        "df38cacb4bf20685ae96602805f654b6a6d6ca85baee67a15b24fb38529e805a",
+        "df38cacb4bf20685ae96602805f654b6a6d6ca85baee67a15b24fb38529e805a"
+      ]
+    },
+    "tui40": {
+      "pass": true,
+      "repeat_sha256": [
+        "9257609edf170fa3fe172c2f9dac41424a04ed48e39f8ef7cd4e71c11c581de7",
+        "9257609edf170fa3fe172c2f9dac41424a04ed48e39f8ef7cd4e71c11c581de7"
+      ]
+    },
+    "tui80": {
+      "pass": true,
+      "repeat_sha256": [
+        "7ef6df815e2663fa4b42c41ced7ac71b9b9103e894fcc83a4fd1585988f6d0e1",
+        "7ef6df815e2663fa4b42c41ced7ac71b9b9103e894fcc83a4fd1585988f6d0e1"
+      ]
+    }
+  },
+  "semantic_node_count": 186,
+  "semantic_segment_count": 443,
+  "studio_structural_completeness": {
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true
+  },
+  "tui_width": {
+    "pass": true,
+    "tui40_max_display_width": 40,
+    "tui40_overflow_lines": 0,
+    "tui80_max_display_width": 80,
+    "tui80_overflow_lines": 0
+  },
+  "unit_id": "paper:cloud-console-hardening-wave-3-2026-07-21"
+}

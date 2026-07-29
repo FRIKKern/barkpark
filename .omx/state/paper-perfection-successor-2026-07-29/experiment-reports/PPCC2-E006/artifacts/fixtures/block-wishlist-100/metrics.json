@@ -1,0 +1,108 @@
+{
+  "accessibility": {
+    "all_regions_aria_labeled": true,
+    "deterministic_reading_order": true,
+    "email_logical_h1_count": 1,
+    "pass": true,
+    "studio_logical_h1_count": 1
+  },
+  "block_count": 440,
+  "cli_api_round_trip": {
+    "canonical_sha256": "f24df6b0a2b9f2c08a9d255d504e0df5949a3a2e18d9ff8cff832e91c4d99c23",
+    "decode_encode_byte_stable": true,
+    "pass": true
+  },
+  "content_preservation": {
+    "authored_blocks_exactly_embedded": true,
+    "invented_decisive_facts": 0,
+    "missing_authored_strings": {
+      "email": [],
+      "studio": [],
+      "tui40": [],
+      "tui80": []
+    },
+    "pass": true
+  },
+  "document_id": "block-wishlist-100",
+  "document_rev": "4a848abc89f77860416de0871d5d5bf4",
+  "email_safety": {
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "script_free": true,
+    "unresolved_runtime_structure": false
+  },
+  "hard_gate_pass": true,
+  "hard_gates": {
+    "accessibility": true,
+    "cli_api_round_trip": true,
+    "content_preservation": true,
+    "email_safety": true,
+    "portable_doc_schema_validity": true,
+    "studio_structural_completeness": true,
+    "tui_width": true
+  },
+  "portable_doc_schema_validity": {
+    "blocks_sha256": "47bbeec4a5d3a4346993a98eede99526626be6bd248f08718b7ffce25f2320dc",
+    "generic_adapter_dropped_nodes": 0,
+    "generic_adapter_placeholder_nodes": 0,
+    "invalid_typed_nodes": 0,
+    "max_json_depth": 9,
+    "null_nodes": 0,
+    "pass": true,
+    "top_level_blocks": 440,
+    "typed_nodes": 708
+  },
+  "projection_determinism": {
+    "cli_api": {
+      "pass": true,
+      "repeat_sha256": [
+        "f24df6b0a2b9f2c08a9d255d504e0df5949a3a2e18d9ff8cff832e91c4d99c23",
+        "f24df6b0a2b9f2c08a9d255d504e0df5949a3a2e18d9ff8cff832e91c4d99c23"
+      ]
+    },
+    "email": {
+      "pass": true,
+      "repeat_sha256": [
+        "bd35e23471be6429daacd99a62d2f7d44c521ff724bf7343d5358d57c12815ed",
+        "bd35e23471be6429daacd99a62d2f7d44c521ff724bf7343d5358d57c12815ed"
+      ]
+    },
+    "studio": {
+      "pass": true,
+      "repeat_sha256": [
+        "d5517a79dfd83062f6d763152e8947c1bba504fa1dc048cc605547b760db57fb",
+        "d5517a79dfd83062f6d763152e8947c1bba504fa1dc048cc605547b760db57fb"
+      ]
+    },
+    "tui40": {
+      "pass": true,
+      "repeat_sha256": [
+        "586b2a2b417d811ac7246c3190a1353b812424b6ba7df3df2a2d5479f6d4a256",
+        "586b2a2b417d811ac7246c3190a1353b812424b6ba7df3df2a2d5479f6d4a256"
+      ]
+    },
+    "tui80": {
+      "pass": true,
+      "repeat_sha256": [
+        "7d64e3d5be3e09fd7f2bc2a2fc5b26d4032dcaa69ffd2a4743cbdc88d2a64a7b",
+        "7d64e3d5be3e09fd7f2bc2a2fc5b26d4032dcaa69ffd2a4743cbdc88d2a64a7b"
+      ]
+    }
+  },
+  "semantic_node_count": 440,
+  "semantic_segment_count": 519,
+  "studio_structural_completeness": {
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true
+  },
+  "tui_width": {
+    "pass": true,
+    "tui40_max_display_width": 40,
+    "tui40_overflow_lines": 0,
+    "tui80_max_display_width": 80,
+    "tui80_overflow_lines": 0
+  },
+  "unit_id": "paper:block-wishlist-100"
+}
