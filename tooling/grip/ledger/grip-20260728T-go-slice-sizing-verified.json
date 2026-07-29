@@ -1,0 +1,34 @@
+{
+  "id": "grip-20260728T-go-slice-sizing-verified",
+  "wave": "barkpark-tasks-mobile-wave-2026-07-28-last-mile",
+  "assignment": "go-slice-sizing",
+  "base": "origin/main @ ab396959c77b01f87800e7399d5616ed8fd99a7b",
+  "verdict": "MERGE THE TWO ROWS INTO ONE SLICE. mob-bl-go-tail-cap-parity and mob-bl-runtime-gen-advance-2 collide inside a 3-line window in internal/chat/reduce.go (:527 vs the comment block :528-533) — separate branches guarantee a textual conflict. The wire dependency the gen row rides is PROVEN REAL.",
+  "recipes": [
+    {
+      "claim": "Go chat tests are green on main",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && CC=clang go test ./internal/chat/... 2>&1 | tail -20",
+      "expect": "ok  \tgithub.com/FRIKKern/barkpark/internal/chat"
+    },
+    {
+      "claim": "turn_started reaches the mobile SSE client as event: runtime with kind:\"turn_started\"",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && mix run --no-start -e 'ev = %Barkpark.StudioChat.Runtime.Event{kind: :turn_started, session_id: \"s1\", turn_id: \"t1\"}; IO.puts(inspect(BarkparkWeb.ChatController.sse_runtime_frame(ev)))'",
+      "expect": "\"event: runtime\\ndata: {...\\\"kind\\\":\\\"turn_started\\\"...}\\n\\n\""
+    },
+    {
+      "claim": "Neither reducer has a turn_started branch today",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'turn_started' apps/mobile/src/chat/reducer.ts internal/chat/reduce.go; echo exit=$?",
+      "expect": "no matches; exit=1"
+    },
+    {
+      "claim": "The Go tail is unbounded — no cap constant anywhere in internal/",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -rn 'MaxTail\\|262144\\|262_144' internal/ --include='*.go' | grep -v worktrees",
+      "expect": "only internal/apiclient/listen.go:25 (a comment about the server-side per-frame bound), zero cap in internal/chat"
+    },
+    {
+      "claim": "The collision window",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'st.Tail +=\\|st.TailGen = st.Gen\\|st.Gen++' internal/chat/reduce.go",
+      "expect": "428 Gen++, 454 Tail+=, 458 TailGen=, 527 Tail+=, 534 TailGen="
+    }
+  ]
+}
