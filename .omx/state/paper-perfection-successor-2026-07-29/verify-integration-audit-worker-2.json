@@ -1,0 +1,3901 @@
+{
+  "schema_version": "paper-perfection-successor-verify-integration-audit/v1",
+  "generated_at": "2026-07-29T09:02:30.121115Z",
+  "audit_task": {
+    "team": "execute-exact-ppcc2-v-263c172a",
+    "task_id": "10",
+    "worker": "worker-2",
+    "role": "epic-verifier",
+    "classification": "NON-COUNTING independent integration audit",
+    "mode": "read_only_authority_audit_plus_local_durable_artifact",
+    "constraints": {
+      "cyclefleet_append_performed": false,
+      "production_paper_mutation_performed": false,
+      "cyclefleet_mutation_performed": false,
+      "root_task_mutation_performed": false,
+      "source_mutation_performed": false,
+      "team_launch_performed": false
+    }
+  },
+  "verdict": "PASS",
+  "errors": [],
+  "authoritative_artifacts": {
+    "verify_assignment_map": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-assignments.json",
+      "sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76"
+    },
+    "verify_lanes": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-lanes.json",
+      "sha256": "4cfc5040fa9b8ea8006527a58b7238fc81ad96e2ab71b7349365cf14ce275379"
+    },
+    "canonical_validator": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/validate_verify_reports.py",
+      "sha256": "c8a0b470ed45980559395d1781b0df556a4d581b967d39cf3e933f74228022a2"
+    },
+    "integrated_validation_index": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-reports/validation-index.json",
+      "sha256": "a7c8cafe335d8a50eb8f8bb6bbb25ca8fe03b7028c31f03f4c1ab8633c82b918"
+    },
+    "assignment_receipts": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-cycle/assignments/assignment-receipts.json",
+      "sha256": "48220c568f0fdf1ae32f2281d82ba706fee3181d65ab264a1eb3a3018e12662f"
+    },
+    "cycle_after_assignments": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-cycle/cycle-after-assignments.json",
+      "sha256": "995ad13fae6796b4afc31a9b29fb09fd06bc74f741eb8801b0a8c6f09d87d060"
+    },
+    "live_after_assignments": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-cycle/live-after-assignments.json",
+      "sha256": "8e35234ded50c15ea5b301f7e1ab83e86cb81e571792f8ee5092194ec47d8347"
+    }
+  },
+  "integration_summary": {
+    "assignment_count": 30,
+    "report_count": 30,
+    "unit_count": 563,
+    "unique_unit_count": 563,
+    "exact_partition": true,
+    "outcome_counts": {
+      "proven": 300,
+      "carried_risk": 194,
+      "refuted": 69
+    },
+    "canonical_counting_team_tasks_in_lane_order": [
+      "1",
+      "6",
+      "3"
+    ],
+    "cyclefleet_verify_state": {
+      "planned": 30,
+      "started": 30,
+      "completed": 0,
+      "failed": 0,
+      "missing": 30,
+      "interpretation": "Assignments were appended, but Verify results were intentionally not appended by this audit; durable reports and Team terminals are audited separately."
+    }
+  },
+  "counting_lane_bindings": [
+    {
+      "worker": "worker-1",
+      "canonical_team_task_id": "1",
+      "assignment_range": [
+        "PPCC2-V001",
+        "PPCC2-V010"
+      ],
+      "assignment_count": 10,
+      "unit_count": 190,
+      "agent_type": "epic-verifier",
+      "effort": "medium",
+      "mutation_policy": "read_only"
+    },
+    {
+      "worker": "worker-2",
+      "canonical_team_task_id": "6",
+      "assignment_range": [
+        "PPCC2-V011",
+        "PPCC2-V020"
+      ],
+      "assignment_count": 10,
+      "unit_count": 190,
+      "agent_type": "epic-verifier",
+      "effort": "medium",
+      "mutation_policy": "read_only"
+    },
+    {
+      "worker": "worker-3",
+      "canonical_team_task_id": "3",
+      "assignment_range": [
+        "PPCC2-V021",
+        "PPCC2-V030"
+      ],
+      "assignment_count": 10,
+      "unit_count": 183,
+      "agent_type": "epic-verifier",
+      "effort": "medium",
+      "mutation_policy": "read_only"
+    }
+  ],
+  "typed_terminal_provenance": {
+    "terminal_tasks": [
+      {
+        "task_id": "1",
+        "worker": "worker-1",
+        "status": "completed",
+        "subject": "Verify lane worker-1: PPCC2-V001..V010",
+        "role_field": "epic-verifier",
+        "completed_at": "2026-07-29T08:52:38.824Z",
+        "result_sha256": "52a900315dd5a105b31e0aae8e64a06c76e12dfda7a640292d7fcb8855fe7bce",
+        "typed_role_binding": "direct task.role + identity + receipt snapshot + report attestation"
+      },
+      {
+        "task_id": "6",
+        "worker": "worker-2",
+        "status": "completed",
+        "subject": "Verify lane worker-2: PPCC2-V011..V020 (canonical retry)",
+        "role_field": null,
+        "completed_at": "2026-07-29T08:55:00.632Z",
+        "result_sha256": "ff8bf2a29ad411c884c4c7641f31a0142400fa01a2b41cacf0c251795e16bbcf",
+        "typed_role_binding": "recovered binding via identity + receipt snapshot team_evidence + report agent_type/personal attestation; task.role is null"
+      },
+      {
+        "task_id": "3",
+        "worker": "worker-3",
+        "status": "completed",
+        "subject": "Verify lane worker-3: PPCC2-V021..V030",
+        "role_field": "epic-verifier",
+        "completed_at": "2026-07-29T08:49:41.455Z",
+        "result_sha256": "d843fb60403af4305d8b9419d7f82f7bb88897c8e8ba4df85aeb5965938ad692",
+        "typed_role_binding": "direct task.role + identity + receipt snapshot + report attestation"
+      }
+    ],
+    "worker_identities_and_panes": [
+      {
+        "worker": "worker-1",
+        "role": "epic-verifier",
+        "pane_id": "%40102",
+        "pane_live": true,
+        "working_dir": "/Volumes/SATECHI/github/barkpark/.omx/team/execute-exact-ppcc2-v-263c172a/worktrees/worker-1",
+        "identity_sha256": "8bc2f8ee331074da6718f959d24051b933c32b6a452bca0bb8c8032de5ea90b3"
+      },
+      {
+        "worker": "worker-2",
+        "role": "epic-verifier",
+        "pane_id": "%40103",
+        "pane_live": true,
+        "working_dir": "/Volumes/SATECHI/github/barkpark/.omx/team/execute-exact-ppcc2-v-263c172a/worktrees/worker-2",
+        "identity_sha256": "08183fb82320d8c964ad1c4c7747f96d56b020ba5f759211eb87a7438dba2e19"
+      },
+      {
+        "worker": "worker-3",
+        "role": "epic-verifier",
+        "pane_id": "%40104",
+        "pane_live": true,
+        "working_dir": "/Volumes/SATECHI/github/barkpark/.omx/team/execute-exact-ppcc2-v-263c172a/worktrees/worker-3",
+        "identity_sha256": "8e49b7f76eff156d8bd219cc40199fd43769644fe4d22d57c4dca3b3211f448f"
+      }
+    ],
+    "task_6_role_field_caveat": "Team task 6 has role=null. Its epic-verifier typing is nevertheless directly bound by worker-2 identity/pane, all ten CycleFleet snapshot team_evidence records, all ten assignment receipts, and all ten report agent_type/personal attestations. This audit does not rewrite the task field."
+  },
+  "non_counting_task_boundary": [
+    {
+      "task_id": "2",
+      "status": "completed",
+      "classification": "premature schema/command lookup completion",
+      "why_excluded": "Produced no V011..V020 evidence probes or reports; task 6 is the canonical replacement and all receipts bind worker-2 to task 6."
+    },
+    {
+      "task_id": "4",
+      "status": "completed",
+      "classification": "bootstrap mutation-guardrail ACK",
+      "why_excluded": "Explicit NON-COUNTING reconciliation fragment."
+    },
+    {
+      "task_id": "5",
+      "status": "completed",
+      "classification": "typed startup ACK",
+      "why_excluded": "Explicit NON-COUNTING reconciliation fragment."
+    },
+    {
+      "task_id": "7",
+      "status": "failed",
+      "classification": "failed premature dependency probe",
+      "why_excluded": "Observed only 20/30 reports before task 6 recovery and created no successor packet; it is not Verify assignment execution."
+    }
+  ],
+  "assignment_receipt_audit": {
+    "schema_version": "paper-perfection-successor-verify-receipts/v1",
+    "receipt_count": 30,
+    "unique_cycle_assignment_ids": 30,
+    "unique_snapshot_digests": 30,
+    "canonical_task_distribution": {
+      "1": 10,
+      "6": 10,
+      "3": 10
+    },
+    "rows": [
+      {
+        "assignment_id": "PPCC2-V001",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "cycle_assignment_id": "0a253b09-ee57-4311-9257-7835a2b81656",
+        "snapshot_digest": "83ec53b6e8d0a78b5b066804604cbe82d5847ce453564015fa2ecaf73d10b3b2",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V002",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "cycle_assignment_id": "8189f0ab-9d93-46e7-af60-ddd5482e7ec6",
+        "snapshot_digest": "06dcd4b8f46423ad0b8511caf4ccdfcdcef2a4f2740458487e17d9c210126498",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V003",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "cycle_assignment_id": "5ee20ea5-0264-482f-a2ec-831744b84f21",
+        "snapshot_digest": "d154a828054fae466b28955a9d400716bd43bf455118fd41eb71cb5ffaac4b09",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V004",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "cycle_assignment_id": "8ae71c17-1327-4d5c-a06e-7814e2b009b1",
+        "snapshot_digest": "183b7eec5abcfca5579aaed7545c92deb30730476ceb4552964cbf0428bcb33c",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V005",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "cycle_assignment_id": "6e613eea-86a9-4e8e-ac5e-5cd6b8897f0c",
+        "snapshot_digest": "b969db62b3fdb36ad7fffdadc9a25bc7b8062cd4f2238798240ae554a4be1c81",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V006",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "cycle_assignment_id": "9a2fb97f-41c2-46eb-ac8a-1f839ceb1f7f",
+        "snapshot_digest": "800b52cf0e851b02f0a4f41b075b927ab4b0d8d8ff6002a0ab416d41eeb9fc68",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V007",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "cycle_assignment_id": "15eca9a9-df86-406c-a506-5872b70db672",
+        "snapshot_digest": "b1fafb40c6f35154397a6c73d1a82e6f186c589b7b225999298ddfaac0951f68",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V008",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "cycle_assignment_id": "8e2fd7a0-0cc3-4beb-a679-dd7b66018517",
+        "snapshot_digest": "7fdb4e0e1e16493948c601eef9c6020a5ebbaefa96b0aab9d33f37b7fce5ac60",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V009",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "cycle_assignment_id": "ffe046cf-ad64-47c9-b39e-27e6c5058fdd",
+        "snapshot_digest": "373c31b7d3df2fadae217449ac0fc1dec17477b67af0e8920d6705a7a3fc4e1c",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V010",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "cycle_assignment_id": "6c26ebf9-26d8-4277-bf10-138a568ad884",
+        "snapshot_digest": "dbf7b5ee81926c3fd65c63eb84c8cc2898f4d1559fa1ecdeb68ee6630fb981ab",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V011",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "cycle_assignment_id": "1b2f8f55-8aab-4345-bd0a-40fe635587c4",
+        "snapshot_digest": "f910b446656d6dce88c53b90bf98728e03ae68d12c972ed6d067830c006d9fac",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V012",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "cycle_assignment_id": "309a052c-f5cc-4ea2-bfe4-1ab0a031a1ec",
+        "snapshot_digest": "fd93c953a45c5a98167c2330ce4436b9c6d9a061582449e0b7112ecbfed4f0b1",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V013",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "cycle_assignment_id": "4df6309f-6af4-43da-8b15-71282c3753ad",
+        "snapshot_digest": "e3171c933834e9989646a14a6e956e75d10d30e4445c93b6f977beed2583184f",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V014",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "cycle_assignment_id": "94b3818d-163a-43e2-8991-4cb6ca820c24",
+        "snapshot_digest": "a38a828716d69c846218c3f1f3bc8c4e29485cd7a8a61721405def485b312ad1",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V015",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "cycle_assignment_id": "cad48fe3-06f7-453f-8ba3-8df718b3bcc3",
+        "snapshot_digest": "cbe582dc59f8423e6b9379246e77d6b8c33d0f47bd8a367c48788ee503f3f62c",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V016",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "cycle_assignment_id": "feea4249-875f-4e94-9f28-a935e60708c9",
+        "snapshot_digest": "83e7bb41943bc6ccd505426793536a7dc21bc8d4b3268daa0fa324e8952be1f9",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V017",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "cycle_assignment_id": "a72a2f2c-07c9-44bf-b9a9-edc3999955cb",
+        "snapshot_digest": "cc7bac5b24637e6bb320a60603090474da378534a0b346de2d4a53b065859b1a",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V018",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "cycle_assignment_id": "eba6870a-610e-490d-988b-daa249949c1b",
+        "snapshot_digest": "dbb6daf883b083addf5724d04b4dd029f3477a5c78dd325ef8c6823003048082",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V019",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "cycle_assignment_id": "02f9974b-1da3-4755-96ad-b799f8aefd1f",
+        "snapshot_digest": "ae4707874d75a687187d18b24e25fd4396b23a1c84ef9c9b47383eb0fefdd9c3",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V020",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "cycle_assignment_id": "08069cb9-6b81-4a3e-8b46-60318afff477",
+        "snapshot_digest": "efb3bdcabee1cd2cb02ad46cebd6d3868fe0944c0abbe0a09a0f3d5b09cd611d",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V021",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "cycle_assignment_id": "7385222d-a39e-417b-b29c-cdb9542aa420",
+        "snapshot_digest": "7056d333f3bb56b767ba982e7ef5b579b502c31851c3f48c207b6045b862f37d",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V022",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "cycle_assignment_id": "b5caf8f0-0c1a-497e-80ef-8c2b2c9a94a3",
+        "snapshot_digest": "ff3f312b892368146ff010b62603093b1a2a4aea7c2463174a0b10e1ec1621ec",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V023",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "cycle_assignment_id": "bb998928-4530-4b21-8744-53e710e5628d",
+        "snapshot_digest": "60842874f988a9331b2aeefdf61121c23679b07029f29b14605a6424d764de62",
+        "unit_count": 19,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V024",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "cycle_assignment_id": "79993cb4-a62e-43e0-a2c7-c8f576016189",
+        "snapshot_digest": "04e3c30de47a6f971fbedd713cfcaa8fcb086ebad55a884c12bb84a8cbb805ed",
+        "unit_count": 18,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V025",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "cycle_assignment_id": "0c9610bb-1b35-4b47-8a92-e1076e59789b",
+        "snapshot_digest": "2ffdd400c5979acdf5980ab816175bb9779f08ff1b79b17a9c4f55a96e65dba6",
+        "unit_count": 18,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V026",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "cycle_assignment_id": "4f0e8f73-3abb-4040-a380-2f6f2c8302bd",
+        "snapshot_digest": "63d01234745fb00ceaa004c92bd2afab671185c10f9f91972a1b6a424e1bf031",
+        "unit_count": 18,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V027",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "cycle_assignment_id": "4dd0df08-3e91-4d21-917d-d006021d482b",
+        "snapshot_digest": "d8303e565b7ab5d45067763da2f74b5c0ca4759ed265f83801d4c96fa7ce7be4",
+        "unit_count": 18,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V028",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "cycle_assignment_id": "9d31a7d8-55f6-4093-a308-5e67af6071bf",
+        "snapshot_digest": "3bcb999db041642497601bb2b2aebb79d521ac0ac39a99616dfeb7d525446feb",
+        "unit_count": 18,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V029",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "cycle_assignment_id": "c7fec610-1f65-44c9-b323-82eff534a3d1",
+        "snapshot_digest": "2382782a22a178a418488794717acf9bbc445ff9505c6ae54d7b8d45042feb89",
+        "unit_count": 18,
+        "typed_snapshot_binding_valid": true
+      },
+      {
+        "assignment_id": "PPCC2-V030",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "cycle_assignment_id": "b00d6fb8-20d2-4bbf-b3e0-b11e2f9701e4",
+        "snapshot_digest": "84d0411475add1192e03d471180305cf79dd7da0a07fe96ec46a13d3d5b2f747",
+        "unit_count": 18,
+        "typed_snapshot_binding_valid": true
+      }
+    ]
+  },
+  "report_and_attestation_audit": {
+    "report_count": 30,
+    "all_personal_attestations_valid": true,
+    "all_mutation_attestations_false": true,
+    "all_unvisited_scope_empty": true,
+    "all_independent_schema_and_row_checks_pass": true,
+    "rows": [
+      {
+        "assignment_id": "PPCC2-V001",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "unit_count": 19,
+        "report_sha256": "c4887d7825665815d84d749ed012c6aa6e16b6a79213140c4e424b0dc2ff0a7d",
+        "outcome_counts": {
+          "proven": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V002",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "unit_count": 19,
+        "report_sha256": "b5f1aa1a37bca24cadf4a2d9e2b2d12a768f9f4ce8c3fa5f6a85829910439392",
+        "outcome_counts": {
+          "proven": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V003",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "unit_count": 19,
+        "report_sha256": "3cf9ac5853c6f69a4f1159b8feb17121e58bf6a86a47ee3abbdcdc3217fc6471",
+        "outcome_counts": {
+          "proven": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V004",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "unit_count": 19,
+        "report_sha256": "5809c63ae00d003752f6af3d88831c2b16d4803fee77eefb27afe42ca83d3bf2",
+        "outcome_counts": {
+          "proven": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V005",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "unit_count": 19,
+        "report_sha256": "5e11ffc7e78aabb4b8d62119e823058477a346a14de5cf1b73b5db026013d178",
+        "outcome_counts": {
+          "proven": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V006",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "unit_count": 19,
+        "report_sha256": "429e6937f12eb793bb01faf1f2fc01b54d84f8be58d859b6ef023dd141081532",
+        "outcome_counts": {
+          "proven": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V007",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "unit_count": 19,
+        "report_sha256": "cf1de37d7d0c26086198011bf789aca9de598104a9fe6847c9197d2963146f27",
+        "outcome_counts": {
+          "carried_risk": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V008",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "unit_count": 19,
+        "report_sha256": "66cf6f9ad17c8b1dad8c4d11a4200cdef80f6dc76144bf8842a4562ccc5e0840",
+        "outcome_counts": {
+          "carried_risk": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V009",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "unit_count": 19,
+        "report_sha256": "f07eb9f1a2bb9a6711a60526a72072046d4039a5c97bb6c4b56bfed768dfc5eb",
+        "outcome_counts": {
+          "carried_risk": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V010",
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "unit_count": 19,
+        "report_sha256": "637fc0aee3a0d49993c34dc6e02adadf53116f0e90f0aa365cae2c19e79cd8ef",
+        "outcome_counts": {
+          "carried_risk": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V011",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "unit_count": 19,
+        "report_sha256": "02678522f35d9632c9af2445684c1cd580e2842f6adf0ad3d5e48494b1b2d2bb",
+        "outcome_counts": {
+          "proven": 18,
+          "refuted": 1
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V012",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "unit_count": 19,
+        "report_sha256": "61bb7cda62c3aaba5d5a751422515c6998f7716cf29041926dbfd3a64b5376d2",
+        "outcome_counts": {
+          "proven": 16,
+          "refuted": 3
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V013",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "unit_count": 19,
+        "report_sha256": "1cdf2473d4c46bd26dd821ba867d30443f54b9b6bc653aabf104973d822a5bfb",
+        "outcome_counts": {
+          "proven": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V014",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "unit_count": 19,
+        "report_sha256": "67b8cef383b7ac4db5db03b09385abab509b2a9205004fb4db83fd17f94d4659",
+        "outcome_counts": {
+          "proven": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V015",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "unit_count": 19,
+        "report_sha256": "6509e651e366e9b1906c74472834a0ead2638546788eab5e8c06674c4b498991",
+        "outcome_counts": {
+          "proven": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V016",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "unit_count": 19,
+        "report_sha256": "93bbb4887337eed2114555b3df3646d798d74d7212c306976685843214dbb679",
+        "outcome_counts": {
+          "carried_risk": 16,
+          "refuted": 3
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V017",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "unit_count": 19,
+        "report_sha256": "f0f9e615d60650fa7b31641ef88d3363d3fd9b5ad0df299680737d8f44b61efa",
+        "outcome_counts": {
+          "carried_risk": 17,
+          "refuted": 2
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V018",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "unit_count": 19,
+        "report_sha256": "28ca9dd7cf04abc1e688a8eb550e20282020817243c8107f104395ad2231a29a",
+        "outcome_counts": {
+          "carried_risk": 16,
+          "refuted": 3
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V019",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "unit_count": 19,
+        "report_sha256": "815846c56f45bf5f33258f62ef430fdc4651d10d3531f72cd13d3825fa962281",
+        "outcome_counts": {
+          "refuted": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V020",
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "unit_count": 19,
+        "report_sha256": "d4d30fdb8fb7361f00e03ed883a20aef15f8b5635784d1a0258c786f5929e592",
+        "outcome_counts": {
+          "refuted": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V021",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "unit_count": 19,
+        "report_sha256": "3a248d5000621628ae5c66d2eee3ca95da7caa8f946542b049c2e5cd6ba3fcf0",
+        "outcome_counts": {
+          "refuted": 19
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V022",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "unit_count": 19,
+        "report_sha256": "82691954094b7588a5e849dc1827a5c7227a11f7a381c39dbd76a4c1c1fe3250",
+        "outcome_counts": {
+          "proven": 17,
+          "carried_risk": 2
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V023",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "unit_count": 19,
+        "report_sha256": "21caa2daf26695697502d81cd3c6dc735917f5cc569b8df84f92c5b5324bb59b",
+        "outcome_counts": {
+          "proven": 12,
+          "carried_risk": 7
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V024",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "unit_count": 18,
+        "report_sha256": "a3409240d73c712cbe9ca3685885bc517917a65067f24a9a0455b70e62a8a6c1",
+        "outcome_counts": {
+          "carried_risk": 6,
+          "proven": 12
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V025",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "unit_count": 18,
+        "report_sha256": "e2d5f4d5130adfe2ba1fc262070279e74ac7be8309a2e99c04ce8d894bad9f16",
+        "outcome_counts": {
+          "proven": 18
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V026",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "unit_count": 18,
+        "report_sha256": "b428171cd5e6f4188c991de0d010090df6548dfd3b5bef350280b7b973001c57",
+        "outcome_counts": {
+          "proven": 18
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V027",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "unit_count": 18,
+        "report_sha256": "b3dea7b23a4a61900df4d100293a0e8ed9b2fd935576c4ebd249424fc926a0c2",
+        "outcome_counts": {
+          "proven": 18
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V028",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "unit_count": 18,
+        "report_sha256": "69bdf7f7892799bc46bedd2fa3575ed7f23d03cdd74c385b7838def350307d27",
+        "outcome_counts": {
+          "carried_risk": 18
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V029",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "unit_count": 18,
+        "report_sha256": "15a38dce71ab3ef1a13ab921f8e4fc1ca6f277f86af9c78c6bc4b2467fa3d536",
+        "outcome_counts": {
+          "carried_risk": 18
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      },
+      {
+        "assignment_id": "PPCC2-V030",
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "unit_count": 18,
+        "report_sha256": "b60206e308a358d959e07516e656bab16014714c7f8ee6ccff30e8554afb7f38",
+        "outcome_counts": {
+          "carried_risk": 18
+        },
+        "personal_verification_attestation_valid": true,
+        "mutation_attestation_all_false": true,
+        "unvisited_scope_empty": true,
+        "independent_schema_and_row_validation": "PASS"
+      }
+    ]
+  },
+  "canonical_validation_evidence": {
+    "integrated": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-reports/validation-index.json",
+      "sha256": "a7c8cafe335d8a50eb8f8bb6bbb25ca8fe03b7028c31f03f4c1ab8633c82b918",
+      "valid": true,
+      "assignment_count": 30,
+      "unit_count": 563,
+      "unique_unit_count": 563,
+      "outcome_counts": {
+        "proven": 300,
+        "carried_risk": 194,
+        "refuted": 69
+      }
+    },
+    "lanes": [
+      {
+        "worker": "worker-1",
+        "canonical_team_task_id": "1",
+        "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-reports/validation-PPCC2-V001-PPCC2-V010.json",
+        "sha256": "31324e600be195fc6d2b778cdce77bb83af9ec22c4fba08d8fc39e3c244a8d41",
+        "valid": true,
+        "assignment_count": 10,
+        "unit_count": 190,
+        "unique_unit_count": 190,
+        "outcome_counts": {
+          "proven": 114,
+          "carried_risk": 76
+        }
+      },
+      {
+        "worker": "worker-2",
+        "canonical_team_task_id": "6",
+        "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-reports/validation-PPCC2-V011-PPCC2-V020.json",
+        "sha256": "b448a7e62b5b970bbcc4efeccf6c2b8bc1f3927e9be59039a09fc663556892e0",
+        "valid": true,
+        "assignment_count": 10,
+        "unit_count": 190,
+        "unique_unit_count": 190,
+        "outcome_counts": {
+          "proven": 91,
+          "refuted": 50,
+          "carried_risk": 49
+        }
+      },
+      {
+        "worker": "worker-3",
+        "canonical_team_task_id": "3",
+        "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-reports/validation-PPCC2-V021-PPCC2-V030.json",
+        "sha256": "7270ded32a690759f361e66fb35f2b237a105b3da40da8f9a5e09116e3e80e29",
+        "valid": true,
+        "assignment_count": 10,
+        "unit_count": 183,
+        "unique_unit_count": 183,
+        "outcome_counts": {
+          "refuted": 19,
+          "proven": 95,
+          "carried_risk": 69
+        }
+      }
+    ]
+  },
+  "no_append_mutation_launch_boundary": {
+    "verify_cycle_result_file_count": 1,
+    "verify_cycle_result_files": [
+      {
+        "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/verify-cycle/results/transport-plan.json",
+        "size_bytes": 4375,
+        "sha256": "4ec30d2504b4f22fedb352f27d902e3c92f8572dd7344526773e47cba57b82b1"
+      }
+    ],
+    "appended_result_artifact_count": 0,
+    "concurrent_follow_on_tasks": [
+      {
+        "task_id": "8",
+        "status": "completed",
+        "classification": "NON-COUNTING transport preparation"
+      },
+      {
+        "task_id": "9",
+        "status": "completed",
+        "classification": "NON-COUNTING successor packet preparation"
+      }
+    ],
+    "report_mutation_attestation_fields_checked": [
+      "production_papers_mutated",
+      "cyclefleet_mutated",
+      "root_task_mutated",
+      "source_mutated"
+    ],
+    "historical_claim_scope": "This audit verifies the exact persisted false attestations and immutable/report/receipt bindings. It does not infer unrecorded historical side effects beyond those artifacts.",
+    "audit_actions": [
+      "read immutable map/lanes/reports/receipts/task/identity files",
+      "read live tmux pane metadata",
+      "write this local durable audit artifact",
+      "no CycleFleet result append",
+      "no successor launch"
+    ]
+  },
+  "checks": [
+    {
+      "check": "immutable_map_sha256",
+      "passed": true,
+      "detail": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76"
+    },
+    {
+      "check": "immutable_lanes_sha256",
+      "passed": true,
+      "detail": "4cfc5040fa9b8ea8006527a58b7238fc81ad96e2ab71b7349365cf14ce275379"
+    },
+    {
+      "check": "assignment_ids_exact_order",
+      "passed": true,
+      "detail": "count=30 first=['PPCC2-V001'] last=['PPCC2-V030']"
+    },
+    {
+      "check": "map_assignment_count",
+      "passed": true,
+      "detail": "30"
+    },
+    {
+      "check": "map_exact_partition",
+      "passed": true,
+      "detail": "unit_count=563 unique=563 exact=True"
+    },
+    {
+      "check": "map_unit_coverage",
+      "passed": true,
+      "detail": "total=563 unique=563"
+    },
+    {
+      "check": "lanes_seal_map",
+      "passed": true,
+      "detail": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76"
+    },
+    {
+      "check": "lane_count",
+      "passed": true,
+      "detail": "3"
+    },
+    {
+      "check": "worker-1_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "worker-1_lane_type",
+      "passed": true,
+      "detail": "agent_type=epic-verifier effort=medium policy=read_only"
+    },
+    {
+      "check": "worker-1_lane_content",
+      "passed": true,
+      "detail": "PPCC2-V001..PPCC2-V010"
+    },
+    {
+      "check": "worker-1_lane_units",
+      "passed": true,
+      "detail": "190"
+    },
+    {
+      "check": "PPCC2-V001_single_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "PPCC2-V002_single_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "PPCC2-V003_single_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "PPCC2-V004_single_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "PPCC2-V005_single_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "PPCC2-V006_single_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "PPCC2-V007_single_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "PPCC2-V008_single_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "PPCC2-V009_single_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "PPCC2-V010_single_lane_owner",
+      "passed": true,
+      "detail": "worker-1"
+    },
+    {
+      "check": "worker-2_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "worker-2_lane_type",
+      "passed": true,
+      "detail": "agent_type=epic-verifier effort=medium policy=read_only"
+    },
+    {
+      "check": "worker-2_lane_content",
+      "passed": true,
+      "detail": "PPCC2-V011..PPCC2-V020"
+    },
+    {
+      "check": "worker-2_lane_units",
+      "passed": true,
+      "detail": "190"
+    },
+    {
+      "check": "PPCC2-V011_single_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "PPCC2-V012_single_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "PPCC2-V013_single_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "PPCC2-V014_single_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "PPCC2-V015_single_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "PPCC2-V016_single_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "PPCC2-V017_single_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "PPCC2-V018_single_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "PPCC2-V019_single_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "PPCC2-V020_single_lane_owner",
+      "passed": true,
+      "detail": "worker-2"
+    },
+    {
+      "check": "worker-3_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "worker-3_lane_type",
+      "passed": true,
+      "detail": "agent_type=epic-verifier effort=medium policy=read_only"
+    },
+    {
+      "check": "worker-3_lane_content",
+      "passed": true,
+      "detail": "PPCC2-V021..PPCC2-V030"
+    },
+    {
+      "check": "worker-3_lane_units",
+      "passed": true,
+      "detail": "183"
+    },
+    {
+      "check": "PPCC2-V021_single_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "PPCC2-V022_single_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "PPCC2-V023_single_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "PPCC2-V024_single_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "PPCC2-V025_single_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "PPCC2-V026_single_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "PPCC2-V027_single_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "PPCC2-V028_single_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "PPCC2-V029_single_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "PPCC2-V030_single_lane_owner",
+      "passed": true,
+      "detail": "worker-3"
+    },
+    {
+      "check": "lanes_cover_exact_ids",
+      "passed": true,
+      "detail": "30"
+    },
+    {
+      "check": "worker-1_typed_identity",
+      "passed": true,
+      "detail": "name=worker-1 role=epic-verifier"
+    },
+    {
+      "check": "worker-1_pane_id",
+      "passed": true,
+      "detail": "%40102"
+    },
+    {
+      "check": "worker-1_identity_config_manifest_match",
+      "passed": true,
+      "detail": "hash=8bc2f8ee331074da6718f959d24051b933c32b6a452bca0bb8c8032de5ea90b3"
+    },
+    {
+      "check": "worker-1_pane_live_and_bound",
+      "passed": true,
+      "detail": "{'pane_id': '%40102', 'pane_pid': 20995, 'current_path': '/Volumes/SATECHI/github/barkpark/.omx/team/execute-exact-ppcc2-v-263c172a/worktrees/worker-1', 'dead': False, 'title': 'worker-1'}"
+    },
+    {
+      "check": "worker-2_typed_identity",
+      "passed": true,
+      "detail": "name=worker-2 role=epic-verifier"
+    },
+    {
+      "check": "worker-2_pane_id",
+      "passed": true,
+      "detail": "%40103"
+    },
+    {
+      "check": "worker-2_identity_config_manifest_match",
+      "passed": true,
+      "detail": "hash=08183fb82320d8c964ad1c4c7747f96d56b020ba5f759211eb87a7438dba2e19"
+    },
+    {
+      "check": "worker-2_pane_live_and_bound",
+      "passed": true,
+      "detail": "{'pane_id': '%40103', 'pane_pid': 21038, 'current_path': '/Volumes/SATECHI/github/barkpark/.omx/team/execute-exact-ppcc2-v-263c172a/worktrees/worker-2', 'dead': False, 'title': '⠇ worker-2'}"
+    },
+    {
+      "check": "worker-3_typed_identity",
+      "passed": true,
+      "detail": "name=worker-3 role=epic-verifier"
+    },
+    {
+      "check": "worker-3_pane_id",
+      "passed": true,
+      "detail": "%40104"
+    },
+    {
+      "check": "worker-3_identity_config_manifest_match",
+      "passed": true,
+      "detail": "hash=8e49b7f76eff156d8bd219cc40199fd43769644fe4d22d57c4dca3b3211f448f"
+    },
+    {
+      "check": "worker-3_pane_live_and_bound",
+      "passed": true,
+      "detail": "{'pane_id': '%40104', 'pane_pid': 21073, 'current_path': '/Volumes/SATECHI/github/barkpark/.omx/team/execute-exact-ppcc2-v-263c172a/worktrees/worker-3', 'dead': False, 'title': 'worker-3'}"
+    },
+    {
+      "check": "pane_ids_unique",
+      "passed": true,
+      "detail": "['%40102', '%40103', '%40104']"
+    },
+    {
+      "check": "task_1_completed_owner",
+      "passed": true,
+      "detail": "status=completed owner=worker-1"
+    },
+    {
+      "check": "task_6_completed_owner",
+      "passed": true,
+      "detail": "status=completed owner=worker-2"
+    },
+    {
+      "check": "task_3_completed_owner",
+      "passed": true,
+      "detail": "status=completed owner=worker-3"
+    },
+    {
+      "check": "tasks_1_3_direct_typed_roles",
+      "passed": true,
+      "detail": "task1=epic-verifier task3=epic-verifier"
+    },
+    {
+      "check": "task_6_role_field_truthfully_recorded_null",
+      "passed": true,
+      "detail": "typed binding must be triangulated rather than inferred from task.role"
+    },
+    {
+      "check": "task_6_recovery_semantics",
+      "passed": true,
+      "detail": "Verify lane worker-2: PPCC2-V011..V020 (canonical retry)"
+    },
+    {
+      "check": "task_2_premature_non_counting_evidence",
+      "passed": true,
+      "detail": "completed lookup only; excluded from counting provenance"
+    },
+    {
+      "check": "tasks_4_5_bootstrap_non_counting",
+      "passed": true,
+      "detail": "subjects explicitly NON-COUNTING"
+    },
+    {
+      "check": "task_7_failed_premature_dependency_probe",
+      "passed": true,
+      "detail": "failed before canonical worker-2 recovery; excluded"
+    },
+    {
+      "check": "receipt_schema",
+      "passed": true,
+      "detail": "paper-perfection-successor-verify-receipts/v1"
+    },
+    {
+      "check": "receipt_ids_exact_order",
+      "passed": true,
+      "detail": "count=30"
+    },
+    {
+      "check": "receipt_ids_unique",
+      "passed": true,
+      "detail": "30"
+    },
+    {
+      "check": "receipt_cycle_ids_and_digests_unique",
+      "passed": true,
+      "detail": "30 unique ids and 30 unique digests"
+    },
+    {
+      "check": "cycle_after_attribution_receipt_binding",
+      "passed": true,
+      "detail": "found=30 expected=30"
+    },
+    {
+      "check": "cycle_after_verify_assignment_state",
+      "passed": true,
+      "detail": "planned=30 started=30 completed=0 failed=0 invalid=0 missing=30"
+    },
+    {
+      "check": "live_after_attribution_receipt_binding",
+      "passed": true,
+      "detail": "found=30 expected=30"
+    },
+    {
+      "check": "live_after_verify_assignment_state",
+      "passed": true,
+      "detail": "planned=30 started=30 completed=0 failed=0 invalid=0 missing=30"
+    },
+    {
+      "check": "PPCC2-V001_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-1/task-1/19"
+    },
+    {
+      "check": "PPCC2-V001_receipt_live_identity",
+      "passed": true,
+      "detail": "0a253b09-ee57-4311-9257-7835a2b81656"
+    },
+    {
+      "check": "PPCC2-V001_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V001_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=83ec53b6e8d0a78b5b066804604cbe82d5847ce453564015fa2ecaf73d10b3b2"
+    },
+    {
+      "check": "PPCC2-V001_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-1/task-1/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V001_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V001_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V002_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-1/task-1/19"
+    },
+    {
+      "check": "PPCC2-V002_receipt_live_identity",
+      "passed": true,
+      "detail": "8189f0ab-9d93-46e7-af60-ddd5482e7ec6"
+    },
+    {
+      "check": "PPCC2-V002_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V002_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=06dcd4b8f46423ad0b8511caf4ccdfcdcef2a4f2740458487e17d9c210126498"
+    },
+    {
+      "check": "PPCC2-V002_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-1/task-1/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V002_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V002_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V003_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-1/task-1/19"
+    },
+    {
+      "check": "PPCC2-V003_receipt_live_identity",
+      "passed": true,
+      "detail": "5ee20ea5-0264-482f-a2ec-831744b84f21"
+    },
+    {
+      "check": "PPCC2-V003_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V003_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=d154a828054fae466b28955a9d400716bd43bf455118fd41eb71cb5ffaac4b09"
+    },
+    {
+      "check": "PPCC2-V003_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-1/task-1/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V003_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V003_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V004_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-1/task-1/19"
+    },
+    {
+      "check": "PPCC2-V004_receipt_live_identity",
+      "passed": true,
+      "detail": "8ae71c17-1327-4d5c-a06e-7814e2b009b1"
+    },
+    {
+      "check": "PPCC2-V004_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V004_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=183b7eec5abcfca5579aaed7545c92deb30730476ceb4552964cbf0428bcb33c"
+    },
+    {
+      "check": "PPCC2-V004_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-1/task-1/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V004_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V004_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V005_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-1/task-1/19"
+    },
+    {
+      "check": "PPCC2-V005_receipt_live_identity",
+      "passed": true,
+      "detail": "6e613eea-86a9-4e8e-ac5e-5cd6b8897f0c"
+    },
+    {
+      "check": "PPCC2-V005_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V005_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=b969db62b3fdb36ad7fffdadc9a25bc7b8062cd4f2238798240ae554a4be1c81"
+    },
+    {
+      "check": "PPCC2-V005_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-1/task-1/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V005_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V005_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V006_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-1/task-1/19"
+    },
+    {
+      "check": "PPCC2-V006_receipt_live_identity",
+      "passed": true,
+      "detail": "9a2fb97f-41c2-46eb-ac8a-1f839ceb1f7f"
+    },
+    {
+      "check": "PPCC2-V006_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V006_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=800b52cf0e851b02f0a4f41b075b927ab4b0d8d8ff6002a0ab416d41eeb9fc68"
+    },
+    {
+      "check": "PPCC2-V006_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-1/task-1/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V006_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V006_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V007_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-1/task-1/19"
+    },
+    {
+      "check": "PPCC2-V007_receipt_live_identity",
+      "passed": true,
+      "detail": "15eca9a9-df86-406c-a506-5872b70db672"
+    },
+    {
+      "check": "PPCC2-V007_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V007_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=b1fafb40c6f35154397a6c73d1a82e6f186c589b7b225999298ddfaac0951f68"
+    },
+    {
+      "check": "PPCC2-V007_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-1/task-1/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V007_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V007_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V008_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-1/task-1/19"
+    },
+    {
+      "check": "PPCC2-V008_receipt_live_identity",
+      "passed": true,
+      "detail": "8e2fd7a0-0cc3-4beb-a679-dd7b66018517"
+    },
+    {
+      "check": "PPCC2-V008_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V008_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=7fdb4e0e1e16493948c601eef9c6020a5ebbaefa96b0aab9d33f37b7fce5ac60"
+    },
+    {
+      "check": "PPCC2-V008_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-1/task-1/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V008_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V008_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V009_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-1/task-1/19"
+    },
+    {
+      "check": "PPCC2-V009_receipt_live_identity",
+      "passed": true,
+      "detail": "ffe046cf-ad64-47c9-b39e-27e6c5058fdd"
+    },
+    {
+      "check": "PPCC2-V009_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V009_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=373c31b7d3df2fadae217449ac0fc1dec17477b67af0e8920d6705a7a3fc4e1c"
+    },
+    {
+      "check": "PPCC2-V009_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-1/task-1/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V009_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V009_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V010_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-1/task-1/19"
+    },
+    {
+      "check": "PPCC2-V010_receipt_live_identity",
+      "passed": true,
+      "detail": "6c26ebf9-26d8-4277-bf10-138a568ad884"
+    },
+    {
+      "check": "PPCC2-V010_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V010_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=dbf7b5ee81926c3fd65c63eb84c8cc2898f4d1559fa1ecdeb68ee6630fb981ab"
+    },
+    {
+      "check": "PPCC2-V010_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-1/task-1/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V010_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V010_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V011_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-2/task-6/19"
+    },
+    {
+      "check": "PPCC2-V011_receipt_live_identity",
+      "passed": true,
+      "detail": "1b2f8f55-8aab-4345-bd0a-40fe635587c4"
+    },
+    {
+      "check": "PPCC2-V011_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V011_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=f910b446656d6dce88c53b90bf98728e03ae68d12c972ed6d067830c006d9fac"
+    },
+    {
+      "check": "PPCC2-V011_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-2/task-6/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V011_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V011_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V012_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-2/task-6/19"
+    },
+    {
+      "check": "PPCC2-V012_receipt_live_identity",
+      "passed": true,
+      "detail": "309a052c-f5cc-4ea2-bfe4-1ab0a031a1ec"
+    },
+    {
+      "check": "PPCC2-V012_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V012_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=fd93c953a45c5a98167c2330ce4436b9c6d9a061582449e0b7112ecbfed4f0b1"
+    },
+    {
+      "check": "PPCC2-V012_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-2/task-6/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V012_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V012_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V013_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-2/task-6/19"
+    },
+    {
+      "check": "PPCC2-V013_receipt_live_identity",
+      "passed": true,
+      "detail": "4df6309f-6af4-43da-8b15-71282c3753ad"
+    },
+    {
+      "check": "PPCC2-V013_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V013_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=e3171c933834e9989646a14a6e956e75d10d30e4445c93b6f977beed2583184f"
+    },
+    {
+      "check": "PPCC2-V013_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-2/task-6/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V013_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V013_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V014_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-2/task-6/19"
+    },
+    {
+      "check": "PPCC2-V014_receipt_live_identity",
+      "passed": true,
+      "detail": "94b3818d-163a-43e2-8991-4cb6ca820c24"
+    },
+    {
+      "check": "PPCC2-V014_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V014_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=a38a828716d69c846218c3f1f3bc8c4e29485cd7a8a61721405def485b312ad1"
+    },
+    {
+      "check": "PPCC2-V014_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-2/task-6/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V014_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V014_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V015_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-2/task-6/19"
+    },
+    {
+      "check": "PPCC2-V015_receipt_live_identity",
+      "passed": true,
+      "detail": "cad48fe3-06f7-453f-8ba3-8df718b3bcc3"
+    },
+    {
+      "check": "PPCC2-V015_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V015_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=cbe582dc59f8423e6b9379246e77d6b8c33d0f47bd8a367c48788ee503f3f62c"
+    },
+    {
+      "check": "PPCC2-V015_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-2/task-6/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V015_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V015_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V016_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-2/task-6/19"
+    },
+    {
+      "check": "PPCC2-V016_receipt_live_identity",
+      "passed": true,
+      "detail": "feea4249-875f-4e94-9f28-a935e60708c9"
+    },
+    {
+      "check": "PPCC2-V016_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V016_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=83e7bb41943bc6ccd505426793536a7dc21bc8d4b3268daa0fa324e8952be1f9"
+    },
+    {
+      "check": "PPCC2-V016_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-2/task-6/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V016_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V016_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V017_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-2/task-6/19"
+    },
+    {
+      "check": "PPCC2-V017_receipt_live_identity",
+      "passed": true,
+      "detail": "a72a2f2c-07c9-44bf-b9a9-edc3999955cb"
+    },
+    {
+      "check": "PPCC2-V017_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V017_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=cc7bac5b24637e6bb320a60603090474da378534a0b346de2d4a53b065859b1a"
+    },
+    {
+      "check": "PPCC2-V017_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-2/task-6/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V017_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V017_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V018_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-2/task-6/19"
+    },
+    {
+      "check": "PPCC2-V018_receipt_live_identity",
+      "passed": true,
+      "detail": "eba6870a-610e-490d-988b-daa249949c1b"
+    },
+    {
+      "check": "PPCC2-V018_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V018_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=dbb6daf883b083addf5724d04b4dd029f3477a5c78dd325ef8c6823003048082"
+    },
+    {
+      "check": "PPCC2-V018_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-2/task-6/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V018_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V018_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V019_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-2/task-6/19"
+    },
+    {
+      "check": "PPCC2-V019_receipt_live_identity",
+      "passed": true,
+      "detail": "02f9974b-1da3-4755-96ad-b799f8aefd1f"
+    },
+    {
+      "check": "PPCC2-V019_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V019_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=ae4707874d75a687187d18b24e25fd4396b23a1c84ef9c9b47383eb0fefdd9c3"
+    },
+    {
+      "check": "PPCC2-V019_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-2/task-6/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V019_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V019_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V020_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-2/task-6/19"
+    },
+    {
+      "check": "PPCC2-V020_receipt_live_identity",
+      "passed": true,
+      "detail": "08069cb9-6b81-4a3e-8b46-60318afff477"
+    },
+    {
+      "check": "PPCC2-V020_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V020_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=efb3bdcabee1cd2cb02ad46cebd6d3868fe0944c0abbe0a09a0f3d5b09cd611d"
+    },
+    {
+      "check": "PPCC2-V020_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-2/task-6/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V020_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V020_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V021_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-3/task-3/19"
+    },
+    {
+      "check": "PPCC2-V021_receipt_live_identity",
+      "passed": true,
+      "detail": "7385222d-a39e-417b-b29c-cdb9542aa420"
+    },
+    {
+      "check": "PPCC2-V021_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V021_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=7056d333f3bb56b767ba982e7ef5b579b502c31851c3f48c207b6045b862f37d"
+    },
+    {
+      "check": "PPCC2-V021_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-3/task-3/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V021_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V021_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V022_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-3/task-3/19"
+    },
+    {
+      "check": "PPCC2-V022_receipt_live_identity",
+      "passed": true,
+      "detail": "b5caf8f0-0c1a-497e-80ef-8c2b2c9a94a3"
+    },
+    {
+      "check": "PPCC2-V022_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V022_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=ff3f312b892368146ff010b62603093b1a2a4aea7c2463174a0b10e1ec1621ec"
+    },
+    {
+      "check": "PPCC2-V022_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-3/task-3/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V022_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V022_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V023_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-3/task-3/19"
+    },
+    {
+      "check": "PPCC2-V023_receipt_live_identity",
+      "passed": true,
+      "detail": "bb998928-4530-4b21-8744-53e710e5628d"
+    },
+    {
+      "check": "PPCC2-V023_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V023_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=60842874f988a9331b2aeefdf61121c23679b07029f29b14605a6424d764de62"
+    },
+    {
+      "check": "PPCC2-V023_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-3/task-3/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V023_snapshot_immutable_units",
+      "passed": true,
+      "detail": "19"
+    },
+    {
+      "check": "PPCC2-V023_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V024_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-3/task-3/18"
+    },
+    {
+      "check": "PPCC2-V024_receipt_live_identity",
+      "passed": true,
+      "detail": "79993cb4-a62e-43e0-a2c7-c8f576016189"
+    },
+    {
+      "check": "PPCC2-V024_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V024_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=04e3c30de47a6f971fbedd713cfcaa8fcb086ebad55a884c12bb84a8cbb805ed"
+    },
+    {
+      "check": "PPCC2-V024_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-3/task-3/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V024_snapshot_immutable_units",
+      "passed": true,
+      "detail": "18"
+    },
+    {
+      "check": "PPCC2-V024_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V025_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-3/task-3/18"
+    },
+    {
+      "check": "PPCC2-V025_receipt_live_identity",
+      "passed": true,
+      "detail": "0c9610bb-1b35-4b47-8a92-e1076e59789b"
+    },
+    {
+      "check": "PPCC2-V025_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V025_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=2ffdd400c5979acdf5980ab816175bb9779f08ff1b79b17a9c4f55a96e65dba6"
+    },
+    {
+      "check": "PPCC2-V025_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-3/task-3/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V025_snapshot_immutable_units",
+      "passed": true,
+      "detail": "18"
+    },
+    {
+      "check": "PPCC2-V025_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V026_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-3/task-3/18"
+    },
+    {
+      "check": "PPCC2-V026_receipt_live_identity",
+      "passed": true,
+      "detail": "4f0e8f73-3abb-4040-a380-2f6f2c8302bd"
+    },
+    {
+      "check": "PPCC2-V026_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V026_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=63d01234745fb00ceaa004c92bd2afab671185c10f9f91972a1b6a424e1bf031"
+    },
+    {
+      "check": "PPCC2-V026_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-3/task-3/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V026_snapshot_immutable_units",
+      "passed": true,
+      "detail": "18"
+    },
+    {
+      "check": "PPCC2-V026_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V027_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-3/task-3/18"
+    },
+    {
+      "check": "PPCC2-V027_receipt_live_identity",
+      "passed": true,
+      "detail": "4dd0df08-3e91-4d21-917d-d006021d482b"
+    },
+    {
+      "check": "PPCC2-V027_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V027_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=d8303e565b7ab5d45067763da2f74b5c0ca4759ed265f83801d4c96fa7ce7be4"
+    },
+    {
+      "check": "PPCC2-V027_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-3/task-3/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V027_snapshot_immutable_units",
+      "passed": true,
+      "detail": "18"
+    },
+    {
+      "check": "PPCC2-V027_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V028_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-3/task-3/18"
+    },
+    {
+      "check": "PPCC2-V028_receipt_live_identity",
+      "passed": true,
+      "detail": "9d31a7d8-55f6-4093-a308-5e67af6071bf"
+    },
+    {
+      "check": "PPCC2-V028_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V028_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=3bcb999db041642497601bb2b2aebb79d521ac0ac39a99616dfeb7d525446feb"
+    },
+    {
+      "check": "PPCC2-V028_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-3/task-3/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V028_snapshot_immutable_units",
+      "passed": true,
+      "detail": "18"
+    },
+    {
+      "check": "PPCC2-V028_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V029_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-3/task-3/18"
+    },
+    {
+      "check": "PPCC2-V029_receipt_live_identity",
+      "passed": true,
+      "detail": "c7fec610-1f65-44c9-b323-82eff534a3d1"
+    },
+    {
+      "check": "PPCC2-V029_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V029_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=2382782a22a178a418488794717acf9bbc445ff9505c6ae54d7b8d45042feb89"
+    },
+    {
+      "check": "PPCC2-V029_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-3/task-3/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V029_snapshot_immutable_units",
+      "passed": true,
+      "detail": "18"
+    },
+    {
+      "check": "PPCC2-V029_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "PPCC2-V030_receipt_task_worker_units",
+      "passed": true,
+      "detail": "worker-3/task-3/18"
+    },
+    {
+      "check": "PPCC2-V030_receipt_live_identity",
+      "passed": true,
+      "detail": "b00d6fb8-20d2-4bbf-b3e0-b11e2f9701e4"
+    },
+    {
+      "check": "PPCC2-V030_live_typed_assignment",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V030_dry_live_snapshot_match",
+      "passed": true,
+      "detail": "snapshot_digest=84d0411475add1192e03d471180305cf79dd7da0a07fe96ec46a13d3d5b2f747"
+    },
+    {
+      "check": "PPCC2-V030_snapshot_team_evidence",
+      "passed": true,
+      "detail": "worker-3/task-3/epic-verifier"
+    },
+    {
+      "check": "PPCC2-V030_snapshot_immutable_units",
+      "passed": true,
+      "detail": "18"
+    },
+    {
+      "check": "PPCC2-V030_snapshot_immutable_hashes",
+      "passed": true,
+      "detail": "map+lanes sealed"
+    },
+    {
+      "check": "report_paths_exact_30",
+      "passed": true,
+      "detail": "count=30"
+    },
+    {
+      "check": "PPCC2-V001_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V001_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V001_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V001_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V001_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V001_personal_attestation",
+      "passed": true,
+      "detail": "worker-1/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V001_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V001_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V001_integrated_index_row",
+      "passed": true,
+      "detail": "c4887d7825665815d84d749ed012c6aa6e16b6a79213140c4e424b0dc2ff0a7d"
+    },
+    {
+      "check": "PPCC2-V002_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V002_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V002_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V002_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V002_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V002_personal_attestation",
+      "passed": true,
+      "detail": "worker-1/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V002_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V002_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V002_integrated_index_row",
+      "passed": true,
+      "detail": "b5f1aa1a37bca24cadf4a2d9e2b2d12a768f9f4ce8c3fa5f6a85829910439392"
+    },
+    {
+      "check": "PPCC2-V003_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V003_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V003_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V003_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V003_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V003_personal_attestation",
+      "passed": true,
+      "detail": "worker-1/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V003_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V003_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V003_integrated_index_row",
+      "passed": true,
+      "detail": "3cf9ac5853c6f69a4f1159b8feb17121e58bf6a86a47ee3abbdcdc3217fc6471"
+    },
+    {
+      "check": "PPCC2-V004_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V004_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V004_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V004_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V004_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V004_personal_attestation",
+      "passed": true,
+      "detail": "worker-1/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V004_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V004_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V004_integrated_index_row",
+      "passed": true,
+      "detail": "5809c63ae00d003752f6af3d88831c2b16d4803fee77eefb27afe42ca83d3bf2"
+    },
+    {
+      "check": "PPCC2-V005_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V005_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V005_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V005_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V005_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V005_personal_attestation",
+      "passed": true,
+      "detail": "worker-1/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V005_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V005_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V005_integrated_index_row",
+      "passed": true,
+      "detail": "5e11ffc7e78aabb4b8d62119e823058477a346a14de5cf1b73b5db026013d178"
+    },
+    {
+      "check": "PPCC2-V006_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V006_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V006_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V006_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V006_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V006_personal_attestation",
+      "passed": true,
+      "detail": "worker-1/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V006_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V006_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V006_integrated_index_row",
+      "passed": true,
+      "detail": "429e6937f12eb793bb01faf1f2fc01b54d84f8be58d859b6ef023dd141081532"
+    },
+    {
+      "check": "PPCC2-V007_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V007_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V007_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V007_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V007_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V007_personal_attestation",
+      "passed": true,
+      "detail": "worker-1/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V007_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V007_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V007_integrated_index_row",
+      "passed": true,
+      "detail": "cf1de37d7d0c26086198011bf789aca9de598104a9fe6847c9197d2963146f27"
+    },
+    {
+      "check": "PPCC2-V008_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V008_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V008_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V008_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V008_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V008_personal_attestation",
+      "passed": true,
+      "detail": "worker-1/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V008_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V008_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V008_integrated_index_row",
+      "passed": true,
+      "detail": "66cf6f9ad17c8b1dad8c4d11a4200cdef80f6dc76144bf8842a4562ccc5e0840"
+    },
+    {
+      "check": "PPCC2-V009_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V009_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V009_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V009_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V009_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V009_personal_attestation",
+      "passed": true,
+      "detail": "worker-1/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V009_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V009_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V009_integrated_index_row",
+      "passed": true,
+      "detail": "f07eb9f1a2bb9a6711a60526a72072046d4039a5c97bb6c4b56bfed768dfc5eb"
+    },
+    {
+      "check": "PPCC2-V010_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-1/task-1"
+    },
+    {
+      "check": "PPCC2-V010_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V010_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V010_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V010_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V010_personal_attestation",
+      "passed": true,
+      "detail": "worker-1/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V010_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V010_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V010_integrated_index_row",
+      "passed": true,
+      "detail": "637fc0aee3a0d49993c34dc6e02adadf53116f0e90f0aa365cae2c19e79cd8ef"
+    },
+    {
+      "check": "PPCC2-V011_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V011_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V011_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V011_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V011_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V011_personal_attestation",
+      "passed": true,
+      "detail": "worker-2/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V011_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V011_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V011_integrated_index_row",
+      "passed": true,
+      "detail": "02678522f35d9632c9af2445684c1cd580e2842f6adf0ad3d5e48494b1b2d2bb"
+    },
+    {
+      "check": "PPCC2-V012_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V012_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V012_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V012_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V012_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V012_personal_attestation",
+      "passed": true,
+      "detail": "worker-2/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V012_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V012_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V012_integrated_index_row",
+      "passed": true,
+      "detail": "61bb7cda62c3aaba5d5a751422515c6998f7716cf29041926dbfd3a64b5376d2"
+    },
+    {
+      "check": "PPCC2-V013_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V013_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V013_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V013_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V013_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V013_personal_attestation",
+      "passed": true,
+      "detail": "worker-2/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V013_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V013_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V013_integrated_index_row",
+      "passed": true,
+      "detail": "1cdf2473d4c46bd26dd821ba867d30443f54b9b6bc653aabf104973d822a5bfb"
+    },
+    {
+      "check": "PPCC2-V014_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V014_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V014_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V014_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V014_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V014_personal_attestation",
+      "passed": true,
+      "detail": "worker-2/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V014_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V014_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V014_integrated_index_row",
+      "passed": true,
+      "detail": "67b8cef383b7ac4db5db03b09385abab509b2a9205004fb4db83fd17f94d4659"
+    },
+    {
+      "check": "PPCC2-V015_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V015_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V015_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V015_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V015_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V015_personal_attestation",
+      "passed": true,
+      "detail": "worker-2/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V015_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V015_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V015_integrated_index_row",
+      "passed": true,
+      "detail": "6509e651e366e9b1906c74472834a0ead2638546788eab5e8c06674c4b498991"
+    },
+    {
+      "check": "PPCC2-V016_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V016_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V016_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V016_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V016_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V016_personal_attestation",
+      "passed": true,
+      "detail": "worker-2/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V016_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V016_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V016_integrated_index_row",
+      "passed": true,
+      "detail": "93bbb4887337eed2114555b3df3646d798d74d7212c306976685843214dbb679"
+    },
+    {
+      "check": "PPCC2-V017_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V017_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V017_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V017_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V017_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V017_personal_attestation",
+      "passed": true,
+      "detail": "worker-2/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V017_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V017_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V017_integrated_index_row",
+      "passed": true,
+      "detail": "f0f9e615d60650fa7b31641ef88d3363d3fd9b5ad0df299680737d8f44b61efa"
+    },
+    {
+      "check": "PPCC2-V018_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V018_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V018_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V018_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V018_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V018_personal_attestation",
+      "passed": true,
+      "detail": "worker-2/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V018_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V018_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V018_integrated_index_row",
+      "passed": true,
+      "detail": "28ca9dd7cf04abc1e688a8eb550e20282020817243c8107f104395ad2231a29a"
+    },
+    {
+      "check": "PPCC2-V019_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V019_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V019_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V019_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V019_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V019_personal_attestation",
+      "passed": true,
+      "detail": "worker-2/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V019_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V019_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V019_integrated_index_row",
+      "passed": true,
+      "detail": "815846c56f45bf5f33258f62ef430fdc4651d10d3531f72cd13d3825fa962281"
+    },
+    {
+      "check": "PPCC2-V020_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-2/task-6"
+    },
+    {
+      "check": "PPCC2-V020_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V020_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V020_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V020_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V020_personal_attestation",
+      "passed": true,
+      "detail": "worker-2/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V020_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V020_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V020_integrated_index_row",
+      "passed": true,
+      "detail": "d4d30fdb8fb7361f00e03ed883a20aef15f8b5635784d1a0258c786f5929e592"
+    },
+    {
+      "check": "PPCC2-V021_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V021_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V021_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V021_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V021_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V021_personal_attestation",
+      "passed": true,
+      "detail": "worker-3/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V021_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V021_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V021_integrated_index_row",
+      "passed": true,
+      "detail": "3a248d5000621628ae5c66d2eee3ca95da7caa8f946542b049c2e5cd6ba3fcf0"
+    },
+    {
+      "check": "PPCC2-V022_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V022_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V022_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V022_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V022_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V022_personal_attestation",
+      "passed": true,
+      "detail": "worker-3/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V022_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V022_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V022_integrated_index_row",
+      "passed": true,
+      "detail": "82691954094b7588a5e849dc1827a5c7227a11f7a381c39dbd76a4c1c1fe3250"
+    },
+    {
+      "check": "PPCC2-V023_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V023_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V023_checked_unit_ids",
+      "passed": true,
+      "detail": "19 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V023_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V023_unit_rows",
+      "passed": true,
+      "detail": "19 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V023_personal_attestation",
+      "passed": true,
+      "detail": "worker-3/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V023_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V023_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V023_integrated_index_row",
+      "passed": true,
+      "detail": "21caa2daf26695697502d81cd3c6dc735917f5cc569b8df84f92c5b5324bb59b"
+    },
+    {
+      "check": "PPCC2-V024_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V024_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V024_checked_unit_ids",
+      "passed": true,
+      "detail": "18 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V024_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V024_unit_rows",
+      "passed": true,
+      "detail": "18 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V024_personal_attestation",
+      "passed": true,
+      "detail": "worker-3/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V024_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V024_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V024_integrated_index_row",
+      "passed": true,
+      "detail": "a3409240d73c712cbe9ca3685885bc517917a65067f24a9a0455b70e62a8a6c1"
+    },
+    {
+      "check": "PPCC2-V025_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V025_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V025_checked_unit_ids",
+      "passed": true,
+      "detail": "18 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V025_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V025_unit_rows",
+      "passed": true,
+      "detail": "18 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V025_personal_attestation",
+      "passed": true,
+      "detail": "worker-3/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V025_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V025_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V025_integrated_index_row",
+      "passed": true,
+      "detail": "e2d5f4d5130adfe2ba1fc262070279e74ac7be8309a2e99c04ce8d894bad9f16"
+    },
+    {
+      "check": "PPCC2-V026_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V026_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V026_checked_unit_ids",
+      "passed": true,
+      "detail": "18 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V026_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V026_unit_rows",
+      "passed": true,
+      "detail": "18 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V026_personal_attestation",
+      "passed": true,
+      "detail": "worker-3/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V026_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V026_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V026_integrated_index_row",
+      "passed": true,
+      "detail": "b428171cd5e6f4188c991de0d010090df6548dfd3b5bef350280b7b973001c57"
+    },
+    {
+      "check": "PPCC2-V027_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V027_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V027_checked_unit_ids",
+      "passed": true,
+      "detail": "18 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V027_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V027_unit_rows",
+      "passed": true,
+      "detail": "18 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V027_personal_attestation",
+      "passed": true,
+      "detail": "worker-3/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V027_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V027_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V027_integrated_index_row",
+      "passed": true,
+      "detail": "b3dea7b23a4a61900df4d100293a0e8ed9b2fd935576c4ebd249424fc926a0c2"
+    },
+    {
+      "check": "PPCC2-V028_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V028_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V028_checked_unit_ids",
+      "passed": true,
+      "detail": "18 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V028_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V028_unit_rows",
+      "passed": true,
+      "detail": "18 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V028_personal_attestation",
+      "passed": true,
+      "detail": "worker-3/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V028_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V028_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V028_integrated_index_row",
+      "passed": true,
+      "detail": "69bdf7f7892799bc46bedd2fa3575ed7f23d03cdd74c385b7838def350307d27"
+    },
+    {
+      "check": "PPCC2-V029_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V029_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V029_checked_unit_ids",
+      "passed": true,
+      "detail": "18 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V029_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V029_unit_rows",
+      "passed": true,
+      "detail": "18 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V029_personal_attestation",
+      "passed": true,
+      "detail": "worker-3/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V029_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V029_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V029_integrated_index_row",
+      "passed": true,
+      "detail": "15a38dce71ab3ef1a13ab921f8e4fc1ca6f277f86af9c78c6bc4b2467fa3d536"
+    },
+    {
+      "check": "PPCC2-V030_fixed_report_fields",
+      "passed": true,
+      "detail": "worker-3/task-3"
+    },
+    {
+      "check": "PPCC2-V030_direct_answer",
+      "passed": true,
+      "detail": "nonempty"
+    },
+    {
+      "check": "PPCC2-V030_checked_unit_ids",
+      "passed": true,
+      "detail": "18 exact ordered units"
+    },
+    {
+      "check": "PPCC2-V030_claim_proof_contract",
+      "passed": true,
+      "detail": "required evidence fields and owned affected ids"
+    },
+    {
+      "check": "PPCC2-V030_unit_rows",
+      "passed": true,
+      "detail": "18 exact evidenced rows"
+    },
+    {
+      "check": "PPCC2-V030_personal_attestation",
+      "passed": true,
+      "detail": "worker-3/epic-verifier/personally verified"
+    },
+    {
+      "check": "PPCC2-V030_mutation_attestation",
+      "passed": true,
+      "detail": "all four false"
+    },
+    {
+      "check": "PPCC2-V030_unvisited_scope_empty",
+      "passed": true,
+      "detail": "[]"
+    },
+    {
+      "check": "PPCC2-V030_integrated_index_row",
+      "passed": true,
+      "detail": "b60206e308a358d959e07516e656bab16014714c7f8ee6ccff30e8554afb7f38"
+    },
+    {
+      "check": "integrated_report_unit_coverage",
+      "passed": true,
+      "detail": "total=563 unique=563"
+    },
+    {
+      "check": "integrated_outcomes",
+      "passed": true,
+      "detail": "{'proven': 300, 'carried_risk': 194, 'refuted': 69}"
+    },
+    {
+      "check": "integrated_validation_index_core",
+      "passed": true,
+      "detail": "valid=True reports=30"
+    },
+    {
+      "check": "integrated_validation_index_report_order",
+      "passed": true,
+      "detail": "PPCC2-V001..V030"
+    },
+    {
+      "check": "worker-1_lane_validation_core",
+      "passed": true,
+      "detail": "PPCC2-V001..PPCC2-V010 units=190"
+    },
+    {
+      "check": "worker-1_lane_validation_rows",
+      "passed": true,
+      "detail": "{'proven': 114, 'carried_risk': 76}"
+    },
+    {
+      "check": "worker-2_lane_validation_core",
+      "passed": true,
+      "detail": "PPCC2-V011..PPCC2-V020 units=190"
+    },
+    {
+      "check": "worker-2_lane_validation_rows",
+      "passed": true,
+      "detail": "{'proven': 91, 'refuted': 50, 'carried_risk': 49}"
+    },
+    {
+      "check": "worker-3_lane_validation_core",
+      "passed": true,
+      "detail": "PPCC2-V021..PPCC2-V030 units=183"
+    },
+    {
+      "check": "worker-3_lane_validation_rows",
+      "passed": true,
+      "detail": "{'refuted': 19, 'proven': 95, 'carried_risk': 69}"
+    },
+    {
+      "check": "verify_cycle_results_not_appended",
+      "passed": true,
+      "detail": "payload/response/receipt artifacts=0; transport preparation is non-counting"
+    },
+    {
+      "check": "task_8_non_counting_transport_preparation",
+      "passed": true,
+      "detail": "prepared fail-closed transport only"
+    },
+    {
+      "check": "task_9_non_counting_successor_packet",
+      "passed": true,
+      "detail": "post-gate packet preparation only"
+    }
+  ],
+  "unvisited_scope": []
+}
