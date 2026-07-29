@@ -82,6 +82,12 @@ export function pushNotice(result: RegisterPushResult | undefined): string | und
     case 'server-error':
       return `Push is not set up: Cloud returned HTTP ${result.httpStatus}.`
   }
+  // EXHAUSTIVENESS, not decoration: a new RegisterPushResult variant must be
+  // given words deliberately. Without this binding TypeScript would let the
+  // switch fall through and return `undefined` — i.e. the new verdict would be
+  // SILENT, which is precisely the defect this function exists to kill.
+  const unhandled: never = result
+  return `Push is not set up: ${(unhandled as RegisterPushResult).status}.`
 }
 
 /**
