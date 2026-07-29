@@ -1430,7 +1430,7 @@ type SiteDeployment struct {
 	BuildID       string      `json:"build_id"`
 	ContentRev    string      `json:"content_rev,omitempty"`
 	Source        string      `json:"source,omitempty"`
-	SourceDigest  string      `json:"source_digest,omitempty"`
+	SourceDigest  string      `json:"artifact_sha256,omitempty"`
 	URL           string      `json:"url"`
 	Trigger       string      `json:"trigger,omitempty"`
 	RuntimeTarget string      `json:"runtime_target,omitempty"`

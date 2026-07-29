@@ -462,9 +462,18 @@ What it refuses, all before the upload: a directory that is empty, one with no
 root `index.html` (that is the project dir, not the output dir), and — after the
 mint — bytes whose `<meta name="bp-build-id">` is not the id this deployment
 minted, because HEALTH asserts that marker **by value** and such an upload is a
-guaranteed red one round trip later. Build with the printed exports and re-run
-the same command; an unforced re-mint is idempotent, so the deployment is reused
-rather than duplicated.
+guaranteed red one round trip later. Build with the printed exports and then ship
+to **that** deployment:
+
+```bash
+bp cloud site deploy my-blog --prebuilt ./dist --deployment <id>   # the refusal prints this line
+```
+
+`--deployment` is not a convenience — it is what makes the loop terminate. A
+prebuilt mint is deliberately **nonced** on the control plane (so two different
+`dist/` builds of the same content can never collide on one `build_id`), which
+means a plain re-run mints a *new* id and refuses again. The second run mints
+nothing, reads the named row, and uploads.
 
 What it packs: the directory's contents at the archive ROOT (no `dist/` prefix).
 The dotenv family, `.git` and `.DS_Store` are excluded; the ignore list is

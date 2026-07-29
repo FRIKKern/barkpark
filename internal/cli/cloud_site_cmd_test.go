@@ -1597,6 +1597,97 @@ func TestCloudSitePrebuiltRefusesBytesWithTheWrongBuildID(t *testing.T) {
 			t.Fatalf("the refusal must carry %q:\n%s", want, all)
 		}
 	}
+	// THE LOOP MUST TERMINATE. A prebuilt mint is nonced on the control plane, so
+	// "re-run the same command" would mint a DIFFERENT build id and refuse again,
+	// forever. The refusal has to hand back the deployment the user just built
+	// against.
+	if !strings.Contains(all, "--deployment dep-1") {
+		t.Fatalf("the refusal must name the deployment to ship to, or the retry loop never converges:\n%s", all)
+	}
+	if strings.Contains(all, "run this same command again") {
+		t.Fatalf("the refusal must not promise a plain re-run reuses the deployment — a prebuilt mint is nonced:\n%s", all)
+	}
+}
+
+// TestCloudSitePrebuiltResumesAnAlreadyMintedDeployment is the second half of
+// the loop the refusal above starts: with --deployment the CLI mints NOTHING,
+// reads the named row, and uploads against the build id already baked into the
+// bytes. Without this the lane cannot succeed at all — the nonced mint would
+// hand out a new build id on every run.
+func TestCloudSitePrebuiltResumesAnAlreadyMintedDeployment(t *testing.T) {
+	const buildID = "mintedbuild00001"
+	dir := writeDistFixture(t, buildID)
+
+	cp := newSiteCP(t)
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"queued","stage":"PLAN","build_id":"` + buildID + `","content_rev":"cr-42","source":"prebuilt"}}`}
+	cp.artifactResp = fakeResp{201, `{"artifact_sha256":"x","bytes":1}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir, "--deployment", "dep-1", "--no-follow")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if cp.deployHits != 0 {
+		t.Fatalf("deploy hits=%d — --deployment must mint NOTHING", cp.deployHits)
+	}
+	if cp.artifactHits != 1 {
+		t.Fatalf("artifact hits=%d want 1", cp.artifactHits)
+	}
+	if cp.artifactPath != "/v1/sites/"+testSiteID+"/deployments/dep-1/artifact" {
+		t.Fatalf("artifact went to %q", cp.artifactPath)
+	}
+	if !strings.Contains(stdout, "already-minted deployment dep-1") {
+		t.Fatalf("the receipt must say it reused the deployment:\n%s", stdout)
+	}
+}
+
+// TestCloudSitePrebuiltRefusesAResumeThatCannotAcceptBytes: a deployment that has
+// left `queued`, or that was never prebuilt, can never read an artifact. Say so
+// before packing rather than after a 409.
+func TestCloudSitePrebuiltRefusesAResumeThatCannotAcceptBytes(t *testing.T) {
+	dir := writeDistFixture(t, "b1")
+
+	cp := newSiteCP(t)
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"live","build_id":"b1","source":"prebuilt"}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir, "--deployment", "dep-1")
+	if code == exitOK {
+		t.Fatalf("a non-queued deployment must not exit 0\n%s%s", stdout, stderr)
+	}
+	if cp.artifactHits != 0 {
+		t.Fatalf("nothing may be uploaded to a settled deployment (hits=%d)", cp.artifactHits)
+	}
+	if !strings.Contains(stdout+stderr, "already live") {
+		t.Fatalf("the refusal must name the state that blocks it:\n%s%s", stdout, stderr)
+	}
+
+	cp2 := newSiteCP(t)
+	cp2.pollResp = fakeResp{200, `{"deployment":{"id":"dep-2","status":"queued","build_id":"b1","source":"box-build"}}`}
+	cp2.serve()
+
+	stdout, stderr, code = runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir, "--deployment", "dep-2")
+	if code == exitOK {
+		t.Fatalf("a box-build deployment must not accept an artifact\n%s%s", stdout, stderr)
+	}
+	if cp2.artifactHits != 0 {
+		t.Fatalf("nothing may be uploaded to a box-build deployment (hits=%d)", cp2.artifactHits)
+	}
+}
+
+// TestCloudSiteDeploymentFlagNeedsPrebuilt: --deployment alone is a usage error,
+// not a silently ignored flag.
+func TestCloudSiteDeploymentFlagNeedsPrebuilt(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--deployment", "dep-1")
+	if code != exitUsage {
+		t.Fatalf("exit=%d want %d\n%s%s", code, exitUsage, stdout, stderr)
+	}
+	if cp.deployHits != 0 {
+		t.Fatalf("a usage error must touch no route (hits=%d)", cp.deployHits)
+	}
 }
 
 // TestCloudSitePrebuiltRefusesABadDirBeforeAnyCall: an empty dir and a project
@@ -1637,7 +1728,7 @@ func TestCloudSitePrebuiltRefusesABadDirBeforeAnyCall(t *testing.T) {
 // unrecoverable elsewhere (only the box computes it). This pins all three
 // prebuilt fields by decoding a payload that carries them.
 func TestSiteDeploymentDecodesPrebuiltFields(t *testing.T) {
-	const payload = `{"id":"dep-1","status":"live","build_id":"b1","content_rev":"cr-42","source":"prebuilt","source_digest":"deadbeef","trigger":"manual"}`
+	const payload = `{"id":"dep-1","status":"live","build_id":"b1","content_rev":"cr-42","source":"prebuilt","artifact_sha256":"deadbeef","trigger":"manual"}`
 	var d cloudclient.SiteDeployment
 	if err := json.Unmarshal([]byte(payload), &d); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -1649,7 +1740,7 @@ func TestSiteDeploymentDecodesPrebuiltFields(t *testing.T) {
 		t.Fatalf("source dropped: %+v", d)
 	}
 	if d.SourceDigest != "deadbeef" {
-		t.Fatalf("source_digest dropped: %+v", d)
+		t.Fatalf("artifact_sha256 dropped: %+v", d)
 	}
 	if d.BuildID != "b1" || d.Trigger != "manual" {
 		t.Fatalf("existing fields regressed: %+v", d)
