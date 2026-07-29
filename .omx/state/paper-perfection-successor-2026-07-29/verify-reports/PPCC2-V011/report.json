@@ -1,0 +1,807 @@
+{
+  "schema_version": "paper-perfection-successor-verify-report/v1",
+  "assignment_id": "PPCC2-V011",
+  "agent_type": "epic-verifier",
+  "effort": "medium",
+  "phase": "verify",
+  "worker": "worker-2",
+  "mutation_policy": "read_only",
+  "claim_id": "tui-80",
+  "claim": "The proposed hierarchy and evidence capsule remain usable at an 80-column terminal width.",
+  "command_or_probe": "Render or simulate representative pinned content at 80 columns and record wrapping, hierarchy, and scan-path failures.",
+  "verify_assignment_map_sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76",
+  "assignment_sha256": "e2c1b5628ba12297a8216449277e4ab161606f4e21b25938b3d5390020024506",
+  "direct_answer": "REFUTED: Personally checked 19/19 ordered pinned units; outcomes={'proven': 18, 'refuted': 1}; production snapshot sha256=a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786; probe artifact=.omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json.",
+  "checked_unit_ids": [
+    "paper:scaffy-command-showcase",
+    "paper:task-components-editable-demo",
+    "paper:task-quality-build-wave-01-2026-07-18",
+    "paper:task-quality-build-wave-02-2026-07-18",
+    "paper:task-quality-build-wave-03-2026-07-18",
+    "paper:task-quality-build-wave-04-2026-07-18",
+    "paper:task-quality-build-wave-05-2026-07-18",
+    "paper:task-quality-build-wave-06-2026-07-18",
+    "paper:task-quality-build-wave-07-2026-07-18",
+    "paper:task-quality-build-wave-08-2026-07-18",
+    "paper:task-quality-build-wave-09-2026-07-18",
+    "paper:task-quality-survey-wave-12-2026-07-18",
+    "paper:task-quality-survey-wave-13-2026-07-18",
+    "paper:task-quality-survey-wave-14-2026-07-18",
+    "paper:task-quality-survey-wave-15-2026-07-18",
+    "paper:task-quality-survey-wave-17-2026-07-18",
+    "paper:task-quality-survey-wave-18-2026-07-18",
+    "paper:task-quality-survey-wave-19-2026-07-18",
+    "paper:agent-epistemics-portabledoc-2026-07"
+  ],
+  "verification_result": {
+    "claim": "The proposed hierarchy and evidence capsule remain usable at an 80-column terminal width.",
+    "command_or_probe": "Render or simulate representative pinned content at 80 columns and record wrapping, hierarchy, and scan-path failures.",
+    "fixture_ids": [
+      "https://guerrilla.barkpark.cloud/v1/data/query/production/paper",
+      ".omx/state/paper-perfection-successor-2026-07-29/survey-reports",
+      ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json"
+    ],
+    "observed_output": "Personally checked 19/19 ordered pinned units; outcomes={'proven': 18, 'refuted': 1}; production snapshot sha256=a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786; probe artifact=.omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json.",
+    "verdict": "refuted",
+    "affected_unit_ids": [
+      "paper:agent-epistemics-portabledoc-2026-07"
+    ],
+    "residual_risk": "No owned scope was unvisited. 1 units have refuted or carried-risk outcomes detailed in unit_results."
+  },
+  "unit_results": [
+    {
+      "class": "paper",
+      "document_id": "scaffy-command-showcase",
+      "document_rev": "f391a01acf2fab4bb87d5c67d70c3b2d",
+      "unit_id": "paper:scaffy-command-showcase",
+      "survey_assignment_id": "PPCC2-S042",
+      "survey_worker": "worker-3",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "6e15ba20c10936a6aa8710b661289c9b7b6319e1ad51662084de86816af59c25",
+      "live_projection_sha256": "5513083a92f7b0ef645b6223258f04260eaf461fca12c579fa7c4998d64945ea",
+      "live_blocks_sha256": "fd36ff9b3cd257c30c86d1a100c2359e23f6742bfd040ae466a31334a25f1dbc",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:scaffy-command-showcase@f391a01acf2fab4bb87d5c67d70c3b2d",
+        "survey-report:PPCC2-S042@6e15ba20c10936a6aa8710b661289c9b7b6319e1ad51662084de86816af59c25",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=150 headings=22 rendered_lines=3960 max_line_width=80 max_source_block_chars=28324 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against scaffy-command-showcase at immutable revision f391a01acf2fab4bb87d5c67d70c3b2d and its hash-pinned Survey row; 80-column structural replay: blocks=150 headings=22 rendered_lines=3960 max_line_width=80 max_source_block_chars=28324 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:scaffy-command-showcase@f391a01acf2fab4bb87d5c67d70c3b2d",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=scaffy-command-showcase]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=fd36ff9b3cd257c30c86d1a100c2359e23f6742bfd040ae466a31334a25f1dbc observed_blocks_sha256=fd36ff9b3cd257c30c86d1a100c2359e23f6742bfd040ae466a31334a25f1dbc; 80-column structural replay: blocks=150 headings=22 rendered_lines=3960 max_line_width=80 max_source_block_chars=28324 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S042@6e15ba20c10936a6aa8710b661289c9b7b6319e1ad51662084de86816af59c25",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S042/report.json#unit_verdicts[unit_id=paper:scaffy-command-showcase]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:scaffy-command-showcase]",
+          "observed_output": "80-column structural replay: blocks=150 headings=22 rendered_lines=3960 max_line_width=80 max_source_block_chars=28324 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-components-editable-demo",
+      "document_rev": "703c14f9d729b5deb4455e60b588243e",
+      "unit_id": "paper:task-components-editable-demo",
+      "survey_assignment_id": "PPCC2-S050",
+      "survey_worker": "worker-2",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "58553b14c3a71f5812c2d418ec1734efe6bae87ee3fcca315e6148edaa1cb019",
+      "live_projection_sha256": "5cb69412bb03860e43e71e7873ad2d9b55ebce5f725bfa0fa2f5c0067b56f6ec",
+      "live_blocks_sha256": "aed7f17e50df937f1ec6e702f7f425de9343c3d193d46f159bac392fda79739f",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-components-editable-demo@703c14f9d729b5deb4455e60b588243e",
+        "survey-report:PPCC2-S050@58553b14c3a71f5812c2d418ec1734efe6bae87ee3fcca315e6148edaa1cb019",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=18 max_line_width=80 max_source_block_chars=232 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-components-editable-demo at immutable revision 703c14f9d729b5deb4455e60b588243e and its hash-pinned Survey row; 80-column structural replay: blocks=11 headings=5 rendered_lines=18 max_line_width=80 max_source_block_chars=232 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-components-editable-demo@703c14f9d729b5deb4455e60b588243e",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-components-editable-demo]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=aed7f17e50df937f1ec6e702f7f425de9343c3d193d46f159bac392fda79739f observed_blocks_sha256=aed7f17e50df937f1ec6e702f7f425de9343c3d193d46f159bac392fda79739f; 80-column structural replay: blocks=11 headings=5 rendered_lines=18 max_line_width=80 max_source_block_chars=232 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S050@58553b14c3a71f5812c2d418ec1734efe6bae87ee3fcca315e6148edaa1cb019",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S050/report.json#unit_verdicts[unit_id=paper:task-components-editable-demo]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-components-editable-demo]",
+          "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=18 max_line_width=80 max_source_block_chars=232 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-build-wave-01-2026-07-18",
+      "document_rev": "b228613707bdbe1f65faf31eae40b3bf",
+      "unit_id": "paper:task-quality-build-wave-01-2026-07-18",
+      "survey_assignment_id": "PPCC2-S051",
+      "survey_worker": "worker-3",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+      "live_projection_sha256": "a3d55eae4a04eb38c9b99eb3e63269b54f7a08fc4ee44352529c9450f7f0cfb5",
+      "live_blocks_sha256": "87866fd5609073879362b7b80bdef02027743cceab07e2d20d1b2b4767858755",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-build-wave-01-2026-07-18@b228613707bdbe1f65faf31eae40b3bf",
+        "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=15 headings=6 rendered_lines=64 max_line_width=80 max_source_block_chars=682 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-build-wave-01-2026-07-18 at immutable revision b228613707bdbe1f65faf31eae40b3bf and its hash-pinned Survey row; 80-column structural replay: blocks=15 headings=6 rendered_lines=64 max_line_width=80 max_source_block_chars=682 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-build-wave-01-2026-07-18@b228613707bdbe1f65faf31eae40b3bf",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-build-wave-01-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=87866fd5609073879362b7b80bdef02027743cceab07e2d20d1b2b4767858755 observed_blocks_sha256=87866fd5609073879362b7b80bdef02027743cceab07e2d20d1b2b4767858755; 80-column structural replay: blocks=15 headings=6 rendered_lines=64 max_line_width=80 max_source_block_chars=682 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S051/report.json#unit_verdicts[unit_id=paper:task-quality-build-wave-01-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-build-wave-01-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=15 headings=6 rendered_lines=64 max_line_width=80 max_source_block_chars=682 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-build-wave-02-2026-07-18",
+      "document_rev": "7a748c513af7464b33d3c99ba65fe378",
+      "unit_id": "paper:task-quality-build-wave-02-2026-07-18",
+      "survey_assignment_id": "PPCC2-S051",
+      "survey_worker": "worker-3",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+      "live_projection_sha256": "fb2dfcc8c472a2691fbc63b7fd93e9383c477f12a3c080378a289168abf69209",
+      "live_blocks_sha256": "bc4d518b2543911ff9429aba037ec02f160dff0bfe8b164e6fa1620821413fe2",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-build-wave-02-2026-07-18@7a748c513af7464b33d3c99ba65fe378",
+        "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=16 headings=6 rendered_lines=79 max_line_width=80 max_source_block_chars=930 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-build-wave-02-2026-07-18 at immutable revision 7a748c513af7464b33d3c99ba65fe378 and its hash-pinned Survey row; 80-column structural replay: blocks=16 headings=6 rendered_lines=79 max_line_width=80 max_source_block_chars=930 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-build-wave-02-2026-07-18@7a748c513af7464b33d3c99ba65fe378",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-build-wave-02-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=bc4d518b2543911ff9429aba037ec02f160dff0bfe8b164e6fa1620821413fe2 observed_blocks_sha256=bc4d518b2543911ff9429aba037ec02f160dff0bfe8b164e6fa1620821413fe2; 80-column structural replay: blocks=16 headings=6 rendered_lines=79 max_line_width=80 max_source_block_chars=930 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S051/report.json#unit_verdicts[unit_id=paper:task-quality-build-wave-02-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-build-wave-02-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=16 headings=6 rendered_lines=79 max_line_width=80 max_source_block_chars=930 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-build-wave-03-2026-07-18",
+      "document_rev": "8a17e6074dfdb28b2c8c6c540f75c372",
+      "unit_id": "paper:task-quality-build-wave-03-2026-07-18",
+      "survey_assignment_id": "PPCC2-S051",
+      "survey_worker": "worker-3",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+      "live_projection_sha256": "e88851bc16dc802e80ca411ea0ca4d90e259d7394a75fcdda6bd6dc62357b657",
+      "live_blocks_sha256": "48cda5d8a911696ea052b949c616d4e975429aa655fb293c909098e01e221d7c",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-build-wave-03-2026-07-18@8a17e6074dfdb28b2c8c6c540f75c372",
+        "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=16 headings=7 rendered_lines=62 max_line_width=80 max_source_block_chars=562 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-build-wave-03-2026-07-18 at immutable revision 8a17e6074dfdb28b2c8c6c540f75c372 and its hash-pinned Survey row; 80-column structural replay: blocks=16 headings=7 rendered_lines=62 max_line_width=80 max_source_block_chars=562 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-build-wave-03-2026-07-18@8a17e6074dfdb28b2c8c6c540f75c372",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-build-wave-03-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=48cda5d8a911696ea052b949c616d4e975429aa655fb293c909098e01e221d7c observed_blocks_sha256=48cda5d8a911696ea052b949c616d4e975429aa655fb293c909098e01e221d7c; 80-column structural replay: blocks=16 headings=7 rendered_lines=62 max_line_width=80 max_source_block_chars=562 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S051/report.json#unit_verdicts[unit_id=paper:task-quality-build-wave-03-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-build-wave-03-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=16 headings=7 rendered_lines=62 max_line_width=80 max_source_block_chars=562 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-build-wave-04-2026-07-18",
+      "document_rev": "d45f8eb91c1156d439c99558572a9f06",
+      "unit_id": "paper:task-quality-build-wave-04-2026-07-18",
+      "survey_assignment_id": "PPCC2-S051",
+      "survey_worker": "worker-3",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+      "live_projection_sha256": "cf4c1eff38f25dddf3a42c8ca4def2f06a343a2b31f1822c34d6fe57b3ead9b2",
+      "live_blocks_sha256": "41d74de5decff55e966fe839a7a3ef4634579cf19a6d39b84b9db79d2ea9c78f",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-build-wave-04-2026-07-18@d45f8eb91c1156d439c99558572a9f06",
+        "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=52 max_line_width=80 max_source_block_chars=463 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-build-wave-04-2026-07-18 at immutable revision d45f8eb91c1156d439c99558572a9f06 and its hash-pinned Survey row; 80-column structural replay: blocks=16 headings=8 rendered_lines=52 max_line_width=80 max_source_block_chars=463 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-build-wave-04-2026-07-18@d45f8eb91c1156d439c99558572a9f06",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-build-wave-04-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=41d74de5decff55e966fe839a7a3ef4634579cf19a6d39b84b9db79d2ea9c78f observed_blocks_sha256=41d74de5decff55e966fe839a7a3ef4634579cf19a6d39b84b9db79d2ea9c78f; 80-column structural replay: blocks=16 headings=8 rendered_lines=52 max_line_width=80 max_source_block_chars=463 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S051/report.json#unit_verdicts[unit_id=paper:task-quality-build-wave-04-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-build-wave-04-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=52 max_line_width=80 max_source_block_chars=463 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-build-wave-05-2026-07-18",
+      "document_rev": "46cbf46f82ad875e45bd85736852b4a3",
+      "unit_id": "paper:task-quality-build-wave-05-2026-07-18",
+      "survey_assignment_id": "PPCC2-S051",
+      "survey_worker": "worker-3",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+      "live_projection_sha256": "c9dba220baa2d5382c92bee03bc3f96273ec67a5e396be98b95ba186a0fc3bb8",
+      "live_blocks_sha256": "537d44930bc64ac918e4f725b8f81891a0212071729219fd97abca43a2dcf959",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-build-wave-05-2026-07-18@46cbf46f82ad875e45bd85736852b4a3",
+        "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=52 max_line_width=80 max_source_block_chars=455 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-build-wave-05-2026-07-18 at immutable revision 46cbf46f82ad875e45bd85736852b4a3 and its hash-pinned Survey row; 80-column structural replay: blocks=16 headings=8 rendered_lines=52 max_line_width=80 max_source_block_chars=455 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-build-wave-05-2026-07-18@46cbf46f82ad875e45bd85736852b4a3",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-build-wave-05-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=537d44930bc64ac918e4f725b8f81891a0212071729219fd97abca43a2dcf959 observed_blocks_sha256=537d44930bc64ac918e4f725b8f81891a0212071729219fd97abca43a2dcf959; 80-column structural replay: blocks=16 headings=8 rendered_lines=52 max_line_width=80 max_source_block_chars=455 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S051/report.json#unit_verdicts[unit_id=paper:task-quality-build-wave-05-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-build-wave-05-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=52 max_line_width=80 max_source_block_chars=455 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-build-wave-06-2026-07-18",
+      "document_rev": "74b31e7f0b3f82a9cc888a7bb648873b",
+      "unit_id": "paper:task-quality-build-wave-06-2026-07-18",
+      "survey_assignment_id": "PPCC2-S051",
+      "survey_worker": "worker-3",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+      "live_projection_sha256": "d2bb2515d76191b30529d26f3f84abce08e676635978dc0203fe99c5b1d02e4f",
+      "live_blocks_sha256": "064e577c2871f4c80cc4d34da54da5dac60a9d93e69435d5c75a34e440725d26",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-build-wave-06-2026-07-18@74b31e7f0b3f82a9cc888a7bb648873b",
+        "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=51 max_line_width=80 max_source_block_chars=453 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-build-wave-06-2026-07-18 at immutable revision 74b31e7f0b3f82a9cc888a7bb648873b and its hash-pinned Survey row; 80-column structural replay: blocks=16 headings=8 rendered_lines=51 max_line_width=80 max_source_block_chars=453 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-build-wave-06-2026-07-18@74b31e7f0b3f82a9cc888a7bb648873b",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-build-wave-06-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=064e577c2871f4c80cc4d34da54da5dac60a9d93e69435d5c75a34e440725d26 observed_blocks_sha256=064e577c2871f4c80cc4d34da54da5dac60a9d93e69435d5c75a34e440725d26; 80-column structural replay: blocks=16 headings=8 rendered_lines=51 max_line_width=80 max_source_block_chars=453 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S051/report.json#unit_verdicts[unit_id=paper:task-quality-build-wave-06-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-build-wave-06-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=51 max_line_width=80 max_source_block_chars=453 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-build-wave-07-2026-07-18",
+      "document_rev": "91b8d71839716d204f308370b4679b1f",
+      "unit_id": "paper:task-quality-build-wave-07-2026-07-18",
+      "survey_assignment_id": "PPCC2-S051",
+      "survey_worker": "worker-3",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+      "live_projection_sha256": "56ad5dd0034b2501361f2fa016b2b571b0b8b406a63f4341d0222b426108464d",
+      "live_blocks_sha256": "68cdb3ab450142247c51d9cdb33cef65de50cb08ea9905c8b81bba818ac0fd15",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-build-wave-07-2026-07-18@91b8d71839716d204f308370b4679b1f",
+        "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=51 max_line_width=80 max_source_block_chars=528 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-build-wave-07-2026-07-18 at immutable revision 91b8d71839716d204f308370b4679b1f and its hash-pinned Survey row; 80-column structural replay: blocks=16 headings=8 rendered_lines=51 max_line_width=80 max_source_block_chars=528 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-build-wave-07-2026-07-18@91b8d71839716d204f308370b4679b1f",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-build-wave-07-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=68cdb3ab450142247c51d9cdb33cef65de50cb08ea9905c8b81bba818ac0fd15 observed_blocks_sha256=68cdb3ab450142247c51d9cdb33cef65de50cb08ea9905c8b81bba818ac0fd15; 80-column structural replay: blocks=16 headings=8 rendered_lines=51 max_line_width=80 max_source_block_chars=528 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S051/report.json#unit_verdicts[unit_id=paper:task-quality-build-wave-07-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-build-wave-07-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=51 max_line_width=80 max_source_block_chars=528 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-build-wave-08-2026-07-18",
+      "document_rev": "b2637f9474a2d27ae4d1a0ff921c0d73",
+      "unit_id": "paper:task-quality-build-wave-08-2026-07-18",
+      "survey_assignment_id": "PPCC2-S051",
+      "survey_worker": "worker-3",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+      "live_projection_sha256": "1d0d46fd801df32880628b3898defcf306d2cbc1020b5771e53c2360847b8b68",
+      "live_blocks_sha256": "8bb6fbe844a5cc7d0d3abd09195793bc91962bb1c95fed88737bd331f8fdc049",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-build-wave-08-2026-07-18@b2637f9474a2d27ae4d1a0ff921c0d73",
+        "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=50 max_line_width=80 max_source_block_chars=536 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-build-wave-08-2026-07-18 at immutable revision b2637f9474a2d27ae4d1a0ff921c0d73 and its hash-pinned Survey row; 80-column structural replay: blocks=16 headings=8 rendered_lines=50 max_line_width=80 max_source_block_chars=536 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-build-wave-08-2026-07-18@b2637f9474a2d27ae4d1a0ff921c0d73",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-build-wave-08-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=8bb6fbe844a5cc7d0d3abd09195793bc91962bb1c95fed88737bd331f8fdc049 observed_blocks_sha256=8bb6fbe844a5cc7d0d3abd09195793bc91962bb1c95fed88737bd331f8fdc049; 80-column structural replay: blocks=16 headings=8 rendered_lines=50 max_line_width=80 max_source_block_chars=536 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S051/report.json#unit_verdicts[unit_id=paper:task-quality-build-wave-08-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-build-wave-08-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=50 max_line_width=80 max_source_block_chars=536 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-build-wave-09-2026-07-18",
+      "document_rev": "32b26e70e53ba133459f79f40d35e66c",
+      "unit_id": "paper:task-quality-build-wave-09-2026-07-18",
+      "survey_assignment_id": "PPCC2-S051",
+      "survey_worker": "worker-3",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+      "live_projection_sha256": "296a43ce472f32047a65a3b2664575913e8b4dba9b6337c1ff36f723e1d00c46",
+      "live_blocks_sha256": "eebaa18e8a3629e29cc400bf3755b5f8adf1a300ea7d65e74153e67f0a3c8e27",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-build-wave-09-2026-07-18@32b26e70e53ba133459f79f40d35e66c",
+        "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=49 max_line_width=80 max_source_block_chars=513 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-build-wave-09-2026-07-18 at immutable revision 32b26e70e53ba133459f79f40d35e66c and its hash-pinned Survey row; 80-column structural replay: blocks=16 headings=8 rendered_lines=49 max_line_width=80 max_source_block_chars=513 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-build-wave-09-2026-07-18@32b26e70e53ba133459f79f40d35e66c",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-build-wave-09-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=eebaa18e8a3629e29cc400bf3755b5f8adf1a300ea7d65e74153e67f0a3c8e27 observed_blocks_sha256=eebaa18e8a3629e29cc400bf3755b5f8adf1a300ea7d65e74153e67f0a3c8e27; 80-column structural replay: blocks=16 headings=8 rendered_lines=49 max_line_width=80 max_source_block_chars=513 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S051@2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S051/report.json#unit_verdicts[unit_id=paper:task-quality-build-wave-09-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-build-wave-09-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=49 max_line_width=80 max_source_block_chars=513 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-survey-wave-12-2026-07-18",
+      "document_rev": "0451f00640f302a7df09f35284d3efee",
+      "unit_id": "paper:task-quality-survey-wave-12-2026-07-18",
+      "survey_assignment_id": "PPCC2-S055",
+      "survey_worker": "worker-1",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+      "live_projection_sha256": "3b4cd33f7f67eed369493d6aed64ed7dc3fafe410b15835ef9dfbf09d000d052",
+      "live_blocks_sha256": "57fb5c024319f17cce520c4b53740c200773cb1d75a9de1a230d1b57f86d5e1c",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-survey-wave-12-2026-07-18@0451f00640f302a7df09f35284d3efee",
+        "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=380 max_line_width=80 max_source_block_chars=10284 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-survey-wave-12-2026-07-18 at immutable revision 0451f00640f302a7df09f35284d3efee and its hash-pinned Survey row; 80-column structural replay: blocks=11 headings=5 rendered_lines=380 max_line_width=80 max_source_block_chars=10284 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-survey-wave-12-2026-07-18@0451f00640f302a7df09f35284d3efee",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-survey-wave-12-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=57fb5c024319f17cce520c4b53740c200773cb1d75a9de1a230d1b57f86d5e1c observed_blocks_sha256=57fb5c024319f17cce520c4b53740c200773cb1d75a9de1a230d1b57f86d5e1c; 80-column structural replay: blocks=11 headings=5 rendered_lines=380 max_line_width=80 max_source_block_chars=10284 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S055/report.json#unit_verdicts[unit_id=paper:task-quality-survey-wave-12-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-survey-wave-12-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=380 max_line_width=80 max_source_block_chars=10284 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-survey-wave-13-2026-07-18",
+      "document_rev": "8b39d127e8e58df2a4513af384df76af",
+      "unit_id": "paper:task-quality-survey-wave-13-2026-07-18",
+      "survey_assignment_id": "PPCC2-S055",
+      "survey_worker": "worker-1",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+      "live_projection_sha256": "4f981ff58fbd185331bccd417ee3e58151d1d4071e1ad736c96d243d25515b67",
+      "live_blocks_sha256": "efe83706113f408522cd81dc96a3e6c2acd0cb65afcd2f215a161622482c9e8a",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-survey-wave-13-2026-07-18@8b39d127e8e58df2a4513af384df76af",
+        "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=368 max_line_width=80 max_source_block_chars=9676 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-survey-wave-13-2026-07-18 at immutable revision 8b39d127e8e58df2a4513af384df76af and its hash-pinned Survey row; 80-column structural replay: blocks=11 headings=5 rendered_lines=368 max_line_width=80 max_source_block_chars=9676 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-survey-wave-13-2026-07-18@8b39d127e8e58df2a4513af384df76af",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-survey-wave-13-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=efe83706113f408522cd81dc96a3e6c2acd0cb65afcd2f215a161622482c9e8a observed_blocks_sha256=efe83706113f408522cd81dc96a3e6c2acd0cb65afcd2f215a161622482c9e8a; 80-column structural replay: blocks=11 headings=5 rendered_lines=368 max_line_width=80 max_source_block_chars=9676 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S055/report.json#unit_verdicts[unit_id=paper:task-quality-survey-wave-13-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-survey-wave-13-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=368 max_line_width=80 max_source_block_chars=9676 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-survey-wave-14-2026-07-18",
+      "document_rev": "fe8df68e85bfae0d33bc466c7a5d5f74",
+      "unit_id": "paper:task-quality-survey-wave-14-2026-07-18",
+      "survey_assignment_id": "PPCC2-S055",
+      "survey_worker": "worker-1",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+      "live_projection_sha256": "d506099d14a966302bef11b6d6547f9b954884c83b14386329688f708bc4b5ab",
+      "live_blocks_sha256": "003d1451ad872a41c99104f561e8152468195c6e61cedbd1f8e7415ba719df62",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-survey-wave-14-2026-07-18@fe8df68e85bfae0d33bc466c7a5d5f74",
+        "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=279 max_line_width=80 max_source_block_chars=7822 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-survey-wave-14-2026-07-18 at immutable revision fe8df68e85bfae0d33bc466c7a5d5f74 and its hash-pinned Survey row; 80-column structural replay: blocks=11 headings=5 rendered_lines=279 max_line_width=80 max_source_block_chars=7822 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-survey-wave-14-2026-07-18@fe8df68e85bfae0d33bc466c7a5d5f74",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-survey-wave-14-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=003d1451ad872a41c99104f561e8152468195c6e61cedbd1f8e7415ba719df62 observed_blocks_sha256=003d1451ad872a41c99104f561e8152468195c6e61cedbd1f8e7415ba719df62; 80-column structural replay: blocks=11 headings=5 rendered_lines=279 max_line_width=80 max_source_block_chars=7822 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S055/report.json#unit_verdicts[unit_id=paper:task-quality-survey-wave-14-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-survey-wave-14-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=279 max_line_width=80 max_source_block_chars=7822 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-survey-wave-15-2026-07-18",
+      "document_rev": "b8c3ed359dd1e9be431ab9052673f41d",
+      "unit_id": "paper:task-quality-survey-wave-15-2026-07-18",
+      "survey_assignment_id": "PPCC2-S055",
+      "survey_worker": "worker-1",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+      "live_projection_sha256": "38638489a8f0b4301df5abd55faed539ee315db507816b0e7acb156f0da6258e",
+      "live_blocks_sha256": "700d71c2b9d08f6abcfd8707fb2d47fc5105970f64f68ae13cc38bfee5173bce",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-survey-wave-15-2026-07-18@b8c3ed359dd1e9be431ab9052673f41d",
+        "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=297 max_line_width=80 max_source_block_chars=9045 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-survey-wave-15-2026-07-18 at immutable revision b8c3ed359dd1e9be431ab9052673f41d and its hash-pinned Survey row; 80-column structural replay: blocks=11 headings=5 rendered_lines=297 max_line_width=80 max_source_block_chars=9045 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-survey-wave-15-2026-07-18@b8c3ed359dd1e9be431ab9052673f41d",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-survey-wave-15-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=700d71c2b9d08f6abcfd8707fb2d47fc5105970f64f68ae13cc38bfee5173bce observed_blocks_sha256=700d71c2b9d08f6abcfd8707fb2d47fc5105970f64f68ae13cc38bfee5173bce; 80-column structural replay: blocks=11 headings=5 rendered_lines=297 max_line_width=80 max_source_block_chars=9045 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S055/report.json#unit_verdicts[unit_id=paper:task-quality-survey-wave-15-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-survey-wave-15-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=297 max_line_width=80 max_source_block_chars=9045 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-survey-wave-17-2026-07-18",
+      "document_rev": "b359cc0e8bfda3ad258e12daa231d97f",
+      "unit_id": "paper:task-quality-survey-wave-17-2026-07-18",
+      "survey_assignment_id": "PPCC2-S055",
+      "survey_worker": "worker-1",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+      "live_projection_sha256": "4498c0968b71c0487ed7e6af3b7a81ec32f61702315a8b058a851ceb8827520d",
+      "live_blocks_sha256": "a27fd56e7efcb8f734b8f41bf6e76edf045bc9a7f02a3282997b696faab4afba",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-survey-wave-17-2026-07-18@b359cc0e8bfda3ad258e12daa231d97f",
+        "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=261 max_line_width=80 max_source_block_chars=6609 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-survey-wave-17-2026-07-18 at immutable revision b359cc0e8bfda3ad258e12daa231d97f and its hash-pinned Survey row; 80-column structural replay: blocks=11 headings=5 rendered_lines=261 max_line_width=80 max_source_block_chars=6609 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-survey-wave-17-2026-07-18@b359cc0e8bfda3ad258e12daa231d97f",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-survey-wave-17-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=a27fd56e7efcb8f734b8f41bf6e76edf045bc9a7f02a3282997b696faab4afba observed_blocks_sha256=a27fd56e7efcb8f734b8f41bf6e76edf045bc9a7f02a3282997b696faab4afba; 80-column structural replay: blocks=11 headings=5 rendered_lines=261 max_line_width=80 max_source_block_chars=6609 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S055/report.json#unit_verdicts[unit_id=paper:task-quality-survey-wave-17-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-survey-wave-17-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=261 max_line_width=80 max_source_block_chars=6609 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-survey-wave-18-2026-07-18",
+      "document_rev": "0856b30df73a9d030d91c2ef84041b2b",
+      "unit_id": "paper:task-quality-survey-wave-18-2026-07-18",
+      "survey_assignment_id": "PPCC2-S055",
+      "survey_worker": "worker-1",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+      "live_projection_sha256": "14783eabd26e3791f81bb011b98063711c0f3b9f52e4da1a873660dd45ca03ed",
+      "live_blocks_sha256": "9c4ab2f91ab9c899843694dbba6315fa7689d487cb70e72b47942ce4ff8f83a1",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-survey-wave-18-2026-07-18@0856b30df73a9d030d91c2ef84041b2b",
+        "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=254 max_line_width=80 max_source_block_chars=6418 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-survey-wave-18-2026-07-18 at immutable revision 0856b30df73a9d030d91c2ef84041b2b and its hash-pinned Survey row; 80-column structural replay: blocks=11 headings=5 rendered_lines=254 max_line_width=80 max_source_block_chars=6418 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-survey-wave-18-2026-07-18@0856b30df73a9d030d91c2ef84041b2b",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-survey-wave-18-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=9c4ab2f91ab9c899843694dbba6315fa7689d487cb70e72b47942ce4ff8f83a1 observed_blocks_sha256=9c4ab2f91ab9c899843694dbba6315fa7689d487cb70e72b47942ce4ff8f83a1; 80-column structural replay: blocks=11 headings=5 rendered_lines=254 max_line_width=80 max_source_block_chars=6418 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S055/report.json#unit_verdicts[unit_id=paper:task-quality-survey-wave-18-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-survey-wave-18-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=254 max_line_width=80 max_source_block_chars=6418 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "task-quality-survey-wave-19-2026-07-18",
+      "document_rev": "4e645d8a38fbc10b0306211364403d40",
+      "unit_id": "paper:task-quality-survey-wave-19-2026-07-18",
+      "survey_assignment_id": "PPCC2-S055",
+      "survey_worker": "worker-1",
+      "survey_verdict": "merge-candidate",
+      "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+      "live_projection_sha256": "2f7deebd58474ec4a0d7a628e9663dafc9c5ef0bd5f76aaad11e4b6ddebb03f8",
+      "live_blocks_sha256": "14fa53889e66cc0e04a0006971aa020ede054f4fed0a2116d959cc8e7252c584",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:task-quality-survey-wave-19-2026-07-18@4e645d8a38fbc10b0306211364403d40",
+        "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=306 max_line_width=80 max_source_block_chars=10559 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition merge-candidate survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "rationale": "Personally executed the tui-80 read-only probe against task-quality-survey-wave-19-2026-07-18 at immutable revision 4e645d8a38fbc10b0306211364403d40 and its hash-pinned Survey row; 80-column structural replay: blocks=11 headings=5 rendered_lines=306 max_line_width=80 max_source_block_chars=10559 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:task-quality-survey-wave-19-2026-07-18@4e645d8a38fbc10b0306211364403d40",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=task-quality-survey-wave-19-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=14fa53889e66cc0e04a0006971aa020ede054f4fed0a2116d959cc8e7252c584 observed_blocks_sha256=14fa53889e66cc0e04a0006971aa020ede054f4fed0a2116d959cc8e7252c584; 80-column structural replay: blocks=11 headings=5 rendered_lines=306 max_line_width=80 max_source_block_chars=10559 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S055@c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S055/report.json#unit_verdicts[unit_id=paper:task-quality-survey-wave-19-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=merge-candidate."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:task-quality-survey-wave-19-2026-07-18]",
+          "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=306 max_line_width=80 max_source_block_chars=10559 evidence_capsule=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "agent-epistemics-portabledoc-2026-07",
+      "document_rev": "ae3b4c3019040ea11f38a323dcf69527",
+      "unit_id": "paper:agent-epistemics-portabledoc-2026-07",
+      "survey_assignment_id": "PPCC2-S001",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "1d7c3b14e8175f5a1271af9c7bcf31f0b4dcddc1aa3d4ea4410512e317310cec",
+      "live_projection_sha256": "c00a3cd7ab639d956c61215c771c65834ba50a9f7fc700d6b27b421548167c6d",
+      "live_blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:agent-epistemics-portabledoc-2026-07@ae3b4c3019040ea11f38a323dcf69527",
+        "survey-report:PPCC2-S001@1d7c3b14e8175f5a1271af9c7bcf31f0b4dcddc1aa3d4ea4410512e317310cec",
+        "probe-output:PPCC2-V011"
+      ],
+      "observed_output": "80-column structural replay: blocks=0 headings=0 rendered_lines=0 max_line_width=0 max_source_block_chars=0 evidence_capsule=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "Pinned Paper has no PortableDoc blocks, so an 80-column hierarchy or evidence capsule cannot be rendered.",
+      "rationale": "Personally executed the tui-80 read-only probe against agent-epistemics-portabledoc-2026-07 at immutable revision ae3b4c3019040ea11f38a323dcf69527 and its hash-pinned Survey row; 80-column structural replay: blocks=0 headings=0 rendered_lines=0 max_line_width=0 max_source_block_chars=0 evidence_capsule=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:agent-epistemics-portabledoc-2026-07@ae3b4c3019040ea11f38a323dcf69527",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=agent-epistemics-portabledoc-2026-07]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b observed_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b; 80-column structural replay: blocks=0 headings=0 rendered_lines=0 max_line_width=0 max_source_block_chars=0 evidence_capsule=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S001@1d7c3b14e8175f5a1271af9c7bcf31f0b4dcddc1aa3d4ea4410512e317310cec",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S001/report.json#unit_verdicts[unit_id=paper:agent-epistemics-portabledoc-2026-07]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V011",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V011/probe-output.json#unit_results[unit_id=paper:agent-epistemics-portabledoc-2026-07]",
+          "observed_output": "80-column structural replay: blocks=0 headings=0 rendered_lines=0 max_line_width=0 max_source_block_chars=0 evidence_capsule=true"
+        }
+      ]
+    }
+  ],
+  "personal_verification_attestation": {
+    "worker": "worker-2",
+    "agent_type": "epic-verifier",
+    "personally_verified_all_final_rows": true,
+    "helpers_used_only_for_non_counting_preparation": true
+  },
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "root_task_mutated": false,
+    "source_mutated": false
+  }
+}

@@ -1,0 +1,554 @@
+{
+  "schema_version": "paper-perfection-successor-verify-probe/v1",
+  "assignment_id": "PPCC2-V012",
+  "worker": "worker-2",
+  "claim_id": "tui-80",
+  "command_or_probe": "Render or simulate representative pinned content at 80 columns and record wrapping, hierarchy, and scan-path failures.",
+  "actual_command": "python3 .omx/state/paper-perfection-successor-2026-07-29/verify-reports/run_worker2_probes.py --authority-root /Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29 --snapshot /tmp/ppcc2-worker2-papers-full-20260729.ndjson --output-root .omx/state/paper-perfection-successor-2026-07-29/verify-reports",
+  "input_seals": {
+    "verify_assignment_map_sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76",
+    "verify_lanes_sha256": "4cfc5040fa9b8ea8006527a58b7238fc81ad96e2ab71b7349365cf14ce275379",
+    "production_snapshot_sha256": "a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786",
+    "production_snapshot_document_count": 588,
+    "production_query": "GET https://guerrilla.barkpark.cloud/v1/data/query/production/paper?limit=100&offset={0,100,200,300,400,500}"
+  },
+  "unit_count": 19,
+  "outcome_counts": {
+    "proven": 16,
+    "refuted": 3
+  },
+  "unit_results": [
+    {
+      "unit_id": "paper:authoring-excellence-wave-2026-07-12",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=48 headings=20 rendered_lines=491 max_line_width=80 max_source_block_chars=6331 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "f15d0b833b6eddf499394fbd5b3b01bdb31a3630566e8c4ef6edb1cd42883e0f",
+        "document_revision": "ca151c7a0601df977d408fece63eaa7c",
+        "blocks_sha256": "a0abcd0e4ac0d6e8c6b7c938cc912b88612932fd037bac8dbf7d2f66c40d4fea",
+        "survey_report_sha256": "1d7c3b14e8175f5a1271af9c7bcf31f0b4dcddc1aa3d4ea4410512e317310cec",
+        "survey_disposition": "repair",
+        "block_count": 48,
+        "block_types": {
+          "callout": 1,
+          "eyebrow": 1,
+          "heading": 20,
+          "byline": 1,
+          "paragraph": 13,
+          "list": 11,
+          "table": 1
+        },
+        "heading_count": 20,
+        "rendered_line_count": 491,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 6331,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:authoring-excellence-wave-2026-07-12b",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=44 headings=17 rendered_lines=481 max_line_width=80 max_source_block_chars=3207 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "c54d50e0bcfc818efc1d32d0f405cf465413c878c859a95ff0a55ac4a127163c",
+        "document_revision": "f5307a15adbaaeeb1ee815acac8dfc49",
+        "blocks_sha256": "d2fb05d6f44530cbe47d393de1155c1851093ba75735dec9dc3ba6f3130e8763",
+        "survey_report_sha256": "1d7c3b14e8175f5a1271af9c7bcf31f0b4dcddc1aa3d4ea4410512e317310cec",
+        "survey_disposition": "repair",
+        "block_count": 44,
+        "block_types": {
+          "callout": 1,
+          "heading": 17,
+          "paragraph": 19,
+          "list": 7
+        },
+        "heading_count": 17,
+        "rendered_line_count": 481,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 3207,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:authoring-excellence-wave-2026-07-22",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=38 headings=15 rendered_lines=425 max_line_width=80 max_source_block_chars=3581 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "bad6d3f2ad9eead8b529a7a9cef2f093864248bd83b728a6f593f7b4bb3b21e3",
+        "document_revision": "b69a9746110f0000842d09a5e2363174",
+        "blocks_sha256": "a8dc3ba3c51845df3fbe893d82a1d58ada27e8064acb1cf734d49f1d4f131b65",
+        "survey_report_sha256": "1d7c3b14e8175f5a1271af9c7bcf31f0b4dcddc1aa3d4ea4410512e317310cec",
+        "survey_disposition": "repair",
+        "block_count": 38,
+        "block_types": {
+          "heading": 15,
+          "paragraph": 11,
+          "list": 10,
+          "callout": 2
+        },
+        "heading_count": 15,
+        "rendered_line_count": 425,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 3581,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:axi-agent-ergonomics-review",
+      "outcome": "refuted",
+      "observed_output": "80-column structural replay: blocks=0 headings=0 rendered_lines=0 max_line_width=0 max_source_block_chars=0 evidence_capsule=true",
+      "residual_risk": "Pinned Paper has no PortableDoc blocks, so an 80-column hierarchy or evidence capsule cannot be rendered.",
+      "metrics": {
+        "document_sha256": "b08d2220b461bfd716384765212f648ce8ddd3972df9298fe6e6eb045ebc82f4",
+        "document_revision": "1e93b68305ad40f62b2a435ac2393023",
+        "blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "survey_report_sha256": "1d7c3b14e8175f5a1271af9c7bcf31f0b4dcddc1aa3d4ea4410512e317310cec",
+        "survey_disposition": "repair",
+        "block_count": 0,
+        "block_types": {},
+        "heading_count": 0,
+        "rendered_line_count": 0,
+        "max_rendered_line_width": 0,
+        "max_source_block_chars": 0,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:barkpark-chat-tui-wave-2026-07-12",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=42 headings=11 rendered_lines=406 max_line_width=80 max_source_block_chars=2750 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "6f8e9815db6e22dbfce4d1fa928ecc82a58ddd50123b4f239cc7f51c9f071e0b",
+        "document_revision": "b5456b40e0e08c54541d953fc48f9678",
+        "blocks_sha256": "3e5da1cec4c128e483629034eca3b10646b0c49c112fa85a29fa03efdef34bc6",
+        "survey_report_sha256": "1d7c3b14e8175f5a1271af9c7bcf31f0b4dcddc1aa3d4ea4410512e317310cec",
+        "survey_disposition": "repair",
+        "block_count": 42,
+        "block_types": {
+          "eyebrow": 1,
+          "heading": 11,
+          "byline": 1,
+          "callout": 4,
+          "paragraph": 17,
+          "table": 6,
+          "list": 2
+        },
+        "heading_count": 11,
+        "rendered_line_count": 406,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 2750,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:barkpark-cli-reliability-wave-2026-07-22",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=62 headings=16 rendered_lines=434 max_line_width=80 max_source_block_chars=1236 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "40bdc3ad9f3976d7f280cab9be64f620a8e9d5e759c8713b68cc12806fccd078",
+        "document_revision": "ddb2fadb805daadc553d1be5b7ce12c3",
+        "blocks_sha256": "3eb46e163eb12d3e9ce201c2e5613c31b5f97afcf3793ff51b220d4e22a15805",
+        "survey_report_sha256": "1d7c3b14e8175f5a1271af9c7bcf31f0b4dcddc1aa3d4ea4410512e317310cec",
+        "survey_disposition": "repair",
+        "block_count": 62,
+        "block_types": {
+          "eyebrow": 1,
+          "heading": 16,
+          "byline": 1,
+          "callout": 31,
+          "paragraph": 13
+        },
+        "heading_count": 16,
+        "rendered_line_count": 434,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 1236,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:barkpark-estate",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=36 headings=9 rendered_lines=145 max_line_width=80 max_source_block_chars=1111 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "9f9244f768835c6d100b48e8c82577870472295f49dce9b1c04de545ef21d18c",
+        "document_revision": "09022412c78ebeb5c153ece215b34281",
+        "blocks_sha256": "b83717ceff9b7ac93d2744d025705ceea937443d9153f434d26cda8055f8d9d6",
+        "survey_report_sha256": "a3c2e1f0fe6788d413743564c697391a87afeb86fbdc0a9c0cf00ecc73dbbef7",
+        "survey_disposition": "repair",
+        "block_count": 36,
+        "block_types": {
+          "eyebrow": 1,
+          "heading": 9,
+          "byline": 1,
+          "ingress": 1,
+          "stats": 2,
+          "pullquote": 1,
+          "diagram": 2,
+          "paragraph": 5,
+          "table": 1,
+          "cards": 1,
+          "list": 1,
+          "terminal": 1,
+          "pipeline": 1,
+          "roadmap": 1,
+          "notes": 1,
+          "divider": 1,
+          "callout": 1,
+          "action": 5
+        },
+        "heading_count": 9,
+        "rendered_line_count": 145,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 1111,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:barkpark-onboarding-painpoint-audit-2026-07-13",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=72 headings=29 rendered_lines=520 max_line_width=80 max_source_block_chars=6672 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "1fc6fda91f6ac34317529fecf7067fe6ffa7b17a4ce7cca993506e45ee8f6650",
+        "document_revision": "9e66a46c400a9b63a5db81340f3c3057",
+        "blocks_sha256": "ad6a08a667c22a81bfce1f24a12b309169059380183320125891b116ab982731",
+        "survey_report_sha256": "a3c2e1f0fe6788d413743564c697391a87afeb86fbdc0a9c0cf00ecc73dbbef7",
+        "survey_disposition": "repair",
+        "block_count": 72,
+        "block_types": {
+          "eyebrow": 1,
+          "heading": 29,
+          "ingress": 1,
+          "byline": 1,
+          "callout": 5,
+          "divider": 1,
+          "paragraph": 15,
+          "pullquote": 1,
+          "list": 8,
+          "table": 3,
+          "diagram": 1,
+          "section": 3,
+          "code": 2,
+          "action": 1
+        },
+        "heading_count": 29,
+        "rendered_line_count": 520,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 6672,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-capstone",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=104 headings=16 rendered_lines=834 max_line_width=80 max_source_block_chars=6076 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "45b1fbc3d0b2027d6002e203546343a44abdc2cd5d2813038e0b1a1492cdd802",
+        "document_revision": "1c7faad970614422b3620c044508f632",
+        "blocks_sha256": "be72ef84b6e0ef0353de2301446e131b7e424994b062c8df0bf7b1f76df90fe4",
+        "survey_report_sha256": "a3c2e1f0fe6788d413743564c697391a87afeb86fbdc0a9c0cf00ecc73dbbef7",
+        "survey_disposition": "repair",
+        "block_count": 104,
+        "block_types": {
+          "eyebrow": 14,
+          "heading": 16,
+          "ingress": 1,
+          "byline": 1,
+          "stats": 1,
+          "toc": 1,
+          "divider": 13,
+          "paragraph": 20,
+          "table": 13,
+          "callout": 12,
+          "pullquote": 2,
+          "diagram": 3,
+          "note": 6,
+          "task-list": 1
+        },
+        "heading_count": 16,
+        "rendered_line_count": 834,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 6076,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-wave-2026-07-23",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=72 headings=16 rendered_lines=671 max_line_width=80 max_source_block_chars=7325 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "ced5edf87835b2029132afe7fbdddd92608233cbada5176a1d91f577a02f1eb9",
+        "document_revision": "573d9935091ec0b684a1785e4550666b",
+        "blocks_sha256": "da99a153912a71891c9952cf1e0c629485d91a016f3928da1952ff09fc5f67a1",
+        "survey_report_sha256": "3afab73aedfee710a586d383b88b097db195bd6dcc7f867209aaa1c3e74a2850",
+        "survey_disposition": "repair",
+        "block_count": 72,
+        "block_types": {
+          "eyebrow": 8,
+          "heading": 16,
+          "ingress": 1,
+          "callout": 4,
+          "divider": 6,
+          "paragraph": 28,
+          "table": 4,
+          "note": 3,
+          "list": 2
+        },
+        "heading_count": 16,
+        "rendered_line_count": 671,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 7325,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-wave-2026-07-26",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=59 headings=13 rendered_lines=615 max_line_width=80 max_source_block_chars=6004 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "2cd7f750e5d77289954991bb2bb823b9af160483c95e094a2ed7b80f7dc709c2",
+        "document_revision": "127793b2648d581c185da5ae8d273e75",
+        "blocks_sha256": "002ebed20829708d03574dbc33f286f29aecc4beac2ae54275055fcb869e9f57",
+        "survey_report_sha256": "3afab73aedfee710a586d383b88b097db195bd6dcc7f867209aaa1c3e74a2850",
+        "survey_disposition": "repair",
+        "block_count": 59,
+        "block_types": {
+          "heading": 13,
+          "paragraph": 41,
+          "list": 2,
+          "table": 1,
+          "callout": 2
+        },
+        "heading_count": 13,
+        "rendered_line_count": 615,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 6004,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-wave-2026-07-26-blocks",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=97 headings=17 rendered_lines=644 max_line_width=80 max_source_block_chars=2962 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "c8a5c7e0dff8eb0ba335efca4b562eeaa8304c64be1e772acd11d3a9aa7c9c3b",
+        "document_revision": "597705f2db1bd9845d0b6bbc1faae001",
+        "blocks_sha256": "b325c2a98fc40f0d09f844e3d50245051cb12df603fa0fd0b79f83aa747529f9",
+        "survey_report_sha256": "3afab73aedfee710a586d383b88b097db195bd6dcc7f867209aaa1c3e74a2850",
+        "survey_disposition": "repair",
+        "block_count": 97,
+        "block_types": {
+          "heading": 17,
+          "paragraph": 80
+        },
+        "heading_count": 17,
+        "rendered_line_count": 644,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 2962,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-wave-2026-07-26-seal",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=89 headings=12 rendered_lines=610 max_line_width=80 max_source_block_chars=4146 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "41a8f73e209781549b83e2c20500f8b944a9b611554e3ce6a0b4a49fc8988e1d",
+        "document_revision": "fdde1f5abc05633ea520701fd68890cd",
+        "blocks_sha256": "13565dea61c58e68eca31bc4948a22c2f9cb37023f6cb3d7adba4eebdd60fa2b",
+        "survey_report_sha256": "3afab73aedfee710a586d383b88b097db195bd6dcc7f867209aaa1c3e74a2850",
+        "survey_disposition": "repair",
+        "block_count": 89,
+        "block_types": {
+          "heading": 12,
+          "paragraph": 76,
+          "list": 1
+        },
+        "heading_count": 12,
+        "rendered_line_count": 610,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 4146,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:barkpark-tasks-mobile-wave-2026-07-28-last-mile",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=190 headings=20 rendered_lines=952 max_line_width=80 max_source_block_chars=4079 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "2eed01d5da72b4a69dd10ba0740c9dc16c488c4c749edfb52914967458f334b8",
+        "document_revision": "b91e74812f31e83689ba44e9d04ce7f6",
+        "blocks_sha256": "aec0a6ac3498f7bf96ed7679e590c97a8f38f260d6a0b9ff480f64cdec96d38d",
+        "survey_report_sha256": "3afab73aedfee710a586d383b88b097db195bd6dcc7f867209aaa1c3e74a2850",
+        "survey_disposition": "repair",
+        "block_count": 190,
+        "block_types": {
+          "heading": 20,
+          "paragraph": 152,
+          "list": 6,
+          "table": 7,
+          "callout": 5
+        },
+        "heading_count": 20,
+        "rendered_line_count": 952,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 4079,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:block-wishlist-wave-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=87 headings=25 rendered_lines=521 max_line_width=80 max_source_block_chars=3003 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "515b1704939a5273f079ed7b1c9f1035621e7cba345a8c94af95614a3503dcd2",
+        "document_revision": "af4a5f3bb3d3c45524d27fcac9341c31",
+        "blocks_sha256": "d22121ebddb365e53fb723b8647d91fe1f4f644198dac8c418d026f866c33599",
+        "survey_report_sha256": "cca96cde761fb8d19c0840776c984e50364b0d04e6a95f1d5b18a9a5272e45b9",
+        "survey_disposition": "repair",
+        "block_count": 87,
+        "block_types": {
+          "paragraph": 59,
+          "heading": 25,
+          "list": 2,
+          "table": 1
+        },
+        "heading_count": 25,
+        "rendered_line_count": 521,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 3003,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:bp-mcp-serve-epic-wave-2026-07-11",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=48 headings=21 rendered_lines=410 max_line_width=80 max_source_block_chars=5172 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "870d4eb0a52b1eb18df973a89eb85334d0624f4f285ff3473bd56fa1ad5e8bda",
+        "document_revision": "fa17412c2711d62f429791bcca329f55",
+        "blocks_sha256": "3b446bca1830371b28e1ea2d8fdf4d9ae046848bc0b213618672144dcba6eba1",
+        "survey_report_sha256": "cca96cde761fb8d19c0840776c984e50364b0d04e6a95f1d5b18a9a5272e45b9",
+        "survey_disposition": "repair",
+        "block_count": 48,
+        "block_types": {
+          "heading": 21,
+          "paragraph": 17,
+          "list": 8,
+          "table": 1,
+          "callout": 1
+        },
+        "heading_count": 21,
+        "rendered_line_count": 410,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 5172,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:bp-onboarding-composition-wave-2026-07-13",
+      "outcome": "refuted",
+      "observed_output": "80-column structural replay: blocks=0 headings=0 rendered_lines=0 max_line_width=0 max_source_block_chars=0 evidence_capsule=true",
+      "residual_risk": "Pinned Paper has no PortableDoc blocks, so an 80-column hierarchy or evidence capsule cannot be rendered.",
+      "metrics": {
+        "document_sha256": "b9f6ab35cc9f6c4c3cb252f5b7f898f2101ad4e2540695db79f0adbcea4c7c5f",
+        "document_revision": "b62ba5bbff3b04f0b0b59ebb82cc6dc4",
+        "blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "survey_report_sha256": "cca96cde761fb8d19c0840776c984e50364b0d04e6a95f1d5b18a9a5272e45b9",
+        "survey_disposition": "repair",
+        "block_count": 0,
+        "block_types": {},
+        "heading_count": 0,
+        "rendered_line_count": 0,
+        "max_rendered_line_width": 0,
+        "max_source_block_chars": 0,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave-2026-07-16",
+      "outcome": "refuted",
+      "observed_output": "80-column structural replay: blocks=0 headings=0 rendered_lines=0 max_line_width=0 max_source_block_chars=0 evidence_capsule=true",
+      "residual_risk": "Pinned Paper has no PortableDoc blocks, so an 80-column hierarchy or evidence capsule cannot be rendered.",
+      "metrics": {
+        "document_sha256": "0ba577ff1fdc474d5baf29345c3c4ee5e9ef3495bbc6997498f81c3343608921",
+        "document_revision": "c8b40e0cb517a6920e1fa1ad4821cb7d",
+        "blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "survey_disposition": "repair",
+        "block_count": 0,
+        "block_types": {},
+        "heading_count": 0,
+        "rendered_line_count": 0,
+        "max_rendered_line_width": 0,
+        "max_source_block_chars": 0,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave-2026-07-23",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=48 headings=21 rendered_lines=432 max_line_width=80 max_source_block_chars=3545 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "a7dd1c1f16d20b36fc8529ab589dd354d2611d0fe57162395d94fe055bb2eaeb",
+        "document_revision": "46ded8e9a6feb893dc8fbb0f6a05ffc6",
+        "blocks_sha256": "90b8ea8b1b850aa8e727325ccddf7758a1e32bf95732a8fcf47c24896439a8ac",
+        "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "survey_disposition": "repair",
+        "block_count": 48,
+        "block_types": {
+          "eyebrow": 1,
+          "heading": 21,
+          "callout": 9,
+          "paragraph": 6,
+          "list": 11
+        },
+        "heading_count": 21,
+        "rendered_line_count": 432,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 3545,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    }
+  ],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "root_task_mutated": false,
+    "source_mutated": false
+  }
+}

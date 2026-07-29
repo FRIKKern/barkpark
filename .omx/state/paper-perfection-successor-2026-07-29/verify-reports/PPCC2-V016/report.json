@@ -1,0 +1,825 @@
+{
+  "schema_version": "paper-perfection-successor-verify-report/v1",
+  "assignment_id": "PPCC2-V016",
+  "agent_type": "epic-verifier",
+  "effort": "medium",
+  "phase": "verify",
+  "worker": "worker-2",
+  "mutation_policy": "read_only",
+  "claim_id": "public-reader",
+  "claim": "Public projection is reader-safe and does not expose internal-only operational or security-sensitive detail.",
+  "command_or_probe": "Audit representative pinned evidence for audience boundaries, title clarity, sensitive detail, and public-reader context.",
+  "verify_assignment_map_sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76",
+  "assignment_sha256": "0d43d212b220dd3485f6df7c95a3db6c27b0e65c83ff22eaf04b994fdc6f09d5",
+  "direct_answer": "REFUTED: Personally checked 19/19 ordered pinned units; outcomes={'carried_risk': 16, 'refuted': 3}; production snapshot sha256=a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786; probe artifact=.omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json.",
+  "checked_unit_ids": [
+    "paper:console-gui-build-outline",
+    "paper:context-compression-benchmark",
+    "paper:criminality-constraint-frontiers-draft",
+    "paper:ctx-compression-capstone",
+    "paper:ctx-compression-handle-doctrine",
+    "paper:ctx-compression-taskboard-flagship",
+    "paper:ctx-compression-view-tiers-seam",
+    "paper:deploy-with-barkpark",
+    "paper:desktop-fleets-masterplan",
+    "paper:dispatch-frontier-wave-2026-07-10",
+    "paper:enterprise-auth-gates-debrief",
+    "paper:enterprise-ready-barkpark",
+    "paper:epic-cycle-session-card",
+    "paper:expressive-agent-loops-wave-2026-07-11",
+    "paper:felix-pristine-charter",
+    "paper:felix-pristine-wave-10-2026-07-13",
+    "paper:felix-pristine-wave-12-2026-07-16",
+    "paper:felix-pristine-wave-13-2026-07-21",
+    "paper:felix-pristine-wave-14-2026-07-22"
+  ],
+  "verification_result": {
+    "claim": "Public projection is reader-safe and does not expose internal-only operational or security-sensitive detail.",
+    "command_or_probe": "Audit representative pinned evidence for audience boundaries, title clarity, sensitive detail, and public-reader context.",
+    "fixture_ids": [
+      "https://guerrilla.barkpark.cloud/v1/data/query/production/paper",
+      ".omx/state/paper-perfection-successor-2026-07-29/survey-reports",
+      ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json"
+    ],
+    "observed_output": "Personally checked 19/19 ordered pinned units; outcomes={'carried_risk': 16, 'refuted': 3}; production snapshot sha256=a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786; probe artifact=.omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json.",
+    "verdict": "refuted",
+    "affected_unit_ids": [
+      "paper:console-gui-build-outline",
+      "paper:context-compression-benchmark",
+      "paper:criminality-constraint-frontiers-draft",
+      "paper:ctx-compression-capstone",
+      "paper:ctx-compression-handle-doctrine",
+      "paper:ctx-compression-taskboard-flagship",
+      "paper:ctx-compression-view-tiers-seam",
+      "paper:deploy-with-barkpark",
+      "paper:desktop-fleets-masterplan",
+      "paper:dispatch-frontier-wave-2026-07-10",
+      "paper:enterprise-auth-gates-debrief",
+      "paper:enterprise-ready-barkpark",
+      "paper:epic-cycle-session-card",
+      "paper:expressive-agent-loops-wave-2026-07-11",
+      "paper:felix-pristine-charter",
+      "paper:felix-pristine-wave-10-2026-07-13",
+      "paper:felix-pristine-wave-12-2026-07-16",
+      "paper:felix-pristine-wave-13-2026-07-21",
+      "paper:felix-pristine-wave-14-2026-07-22"
+    ],
+    "residual_risk": "No owned scope was unvisited. 19 units have refuted or carried-risk outcomes detailed in unit_results."
+  },
+  "unit_results": [
+    {
+      "class": "paper",
+      "document_id": "console-gui-build-outline",
+      "document_rev": "5fcf9d18be6979fd9fae38e68e619082",
+      "unit_id": "paper:console-gui-build-outline",
+      "survey_assignment_id": "PPCC2-S016",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "7c1664fdd128c02ddb19c6a104f0b7fcafae3aa7f098da1f575c61f279471438",
+      "live_projection_sha256": "a1fa2f216ea3eded3ca7d5ab5157d476a92f25f2cb1f4fbeacda2829fdf649f7",
+      "live_blocks_sha256": "72d2ea333d36541b495d051e27e44936ad94e824b87977dafbdfb4b46adc28c2",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:console-gui-build-outline@5fcf9d18be6979fd9fae38e68e619082",
+        "survey-report:PPCC2-S016@7c1664fdd128c02ddb19c6a104f0b7fcafae3aa7f098da1f575c61f279471438",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=12096 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against console-gui-build-outline at immutable revision 5fcf9d18be6979fd9fae38e68e619082 and its hash-pinned Survey row; public content audit: chars=12096 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:console-gui-build-outline@5fcf9d18be6979fd9fae38e68e619082",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=console-gui-build-outline]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=72d2ea333d36541b495d051e27e44936ad94e824b87977dafbdfb4b46adc28c2 observed_blocks_sha256=72d2ea333d36541b495d051e27e44936ad94e824b87977dafbdfb4b46adc28c2; public content audit: chars=12096 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S016@7c1664fdd128c02ddb19c6a104f0b7fcafae3aa7f098da1f575c61f279471438",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S016/report.json#unit_verdicts[unit_id=paper:console-gui-build-outline]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:console-gui-build-outline]",
+          "observed_output": "public content audit: chars=12096 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "context-compression-benchmark",
+      "document_rev": "92fc8945a2e24e2787abf75c01551a41",
+      "unit_id": "paper:context-compression-benchmark",
+      "survey_assignment_id": "PPCC2-S017",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+      "live_projection_sha256": "320be0292754a07ad86bef45f3612fe924ccc68d05fd04aff116a4b1e6e06880",
+      "live_blocks_sha256": "b518b018c5788b9606aaa996148b310f342b15703451268949ae609501f61a40",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:context-compression-benchmark@92fc8945a2e24e2787abf75c01551a41",
+        "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=7646 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against context-compression-benchmark at immutable revision 92fc8945a2e24e2787abf75c01551a41 and its hash-pinned Survey row; public content audit: chars=7646 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:context-compression-benchmark@92fc8945a2e24e2787abf75c01551a41",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=context-compression-benchmark]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=b518b018c5788b9606aaa996148b310f342b15703451268949ae609501f61a40 observed_blocks_sha256=b518b018c5788b9606aaa996148b310f342b15703451268949ae609501f61a40; public content audit: chars=7646 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S017/report.json#unit_verdicts[unit_id=paper:context-compression-benchmark]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:context-compression-benchmark]",
+          "observed_output": "public content audit: chars=7646 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "criminality-constraint-frontiers-draft",
+      "document_rev": "aff12235cd69f94c0336d6f69d30e843",
+      "unit_id": "paper:criminality-constraint-frontiers-draft",
+      "survey_assignment_id": "PPCC2-S017",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+      "live_projection_sha256": "0857b9e97ca04f12a373cdb0ca049186cd7c61bb9c9460be56afeb6006486315",
+      "live_blocks_sha256": "b4dbe6b3c897d59e61de5a43a49fc1077e06b35c9a43bfc07c643f916439627e",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:criminality-constraint-frontiers-draft@aff12235cd69f94c0336d6f69d30e843",
+        "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=18011 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against criminality-constraint-frontiers-draft at immutable revision aff12235cd69f94c0336d6f69d30e843 and its hash-pinned Survey row; public content audit: chars=18011 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:criminality-constraint-frontiers-draft@aff12235cd69f94c0336d6f69d30e843",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=criminality-constraint-frontiers-draft]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=b4dbe6b3c897d59e61de5a43a49fc1077e06b35c9a43bfc07c643f916439627e observed_blocks_sha256=b4dbe6b3c897d59e61de5a43a49fc1077e06b35c9a43bfc07c643f916439627e; public content audit: chars=18011 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S017/report.json#unit_verdicts[unit_id=paper:criminality-constraint-frontiers-draft]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:criminality-constraint-frontiers-draft]",
+          "observed_output": "public content audit: chars=18011 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "ctx-compression-capstone",
+      "document_rev": "aa9506bd1d165273e9648140d5d44bd3",
+      "unit_id": "paper:ctx-compression-capstone",
+      "survey_assignment_id": "PPCC2-S017",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+      "live_projection_sha256": "202fe7fc8137e7b8521143522d9aeb21e1d56e261ec554fb70706f0d4b72c2b3",
+      "live_blocks_sha256": "208c33104019a910e8d9308ed35eb465b0af3f404ab76b537cff5e863711710f",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:ctx-compression-capstone@aa9506bd1d165273e9648140d5d44bd3",
+        "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=52581 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against ctx-compression-capstone at immutable revision aa9506bd1d165273e9648140d5d44bd3 and its hash-pinned Survey row; public content audit: chars=52581 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:ctx-compression-capstone@aa9506bd1d165273e9648140d5d44bd3",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=ctx-compression-capstone]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=208c33104019a910e8d9308ed35eb465b0af3f404ab76b537cff5e863711710f observed_blocks_sha256=208c33104019a910e8d9308ed35eb465b0af3f404ab76b537cff5e863711710f; public content audit: chars=52581 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S017/report.json#unit_verdicts[unit_id=paper:ctx-compression-capstone]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:ctx-compression-capstone]",
+          "observed_output": "public content audit: chars=52581 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "ctx-compression-handle-doctrine",
+      "document_rev": "876141f25e33c7762ea615af5cd7b537",
+      "unit_id": "paper:ctx-compression-handle-doctrine",
+      "survey_assignment_id": "PPCC2-S017",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+      "live_projection_sha256": "714e5d20b16172c9b3e82e5bca955527c2c51dbcb480a8394272de2770436f96",
+      "live_blocks_sha256": "3d09d3c9d37e06b55fb17818d76bfe5548d4f693144e0ff09e179dd29e6d6e04",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:ctx-compression-handle-doctrine@876141f25e33c7762ea615af5cd7b537",
+        "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=30171 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against ctx-compression-handle-doctrine at immutable revision 876141f25e33c7762ea615af5cd7b537 and its hash-pinned Survey row; public content audit: chars=30171 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:ctx-compression-handle-doctrine@876141f25e33c7762ea615af5cd7b537",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=ctx-compression-handle-doctrine]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=3d09d3c9d37e06b55fb17818d76bfe5548d4f693144e0ff09e179dd29e6d6e04 observed_blocks_sha256=3d09d3c9d37e06b55fb17818d76bfe5548d4f693144e0ff09e179dd29e6d6e04; public content audit: chars=30171 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S017/report.json#unit_verdicts[unit_id=paper:ctx-compression-handle-doctrine]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:ctx-compression-handle-doctrine]",
+          "observed_output": "public content audit: chars=30171 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "ctx-compression-taskboard-flagship",
+      "document_rev": "ace7021a9cfe9799edc3e38958e4052b",
+      "unit_id": "paper:ctx-compression-taskboard-flagship",
+      "survey_assignment_id": "PPCC2-S017",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+      "live_projection_sha256": "00b9518da8ca757eea8c43f3aac2487b310fafdc7feb1c2960e0dd5a9d7b040c",
+      "live_blocks_sha256": "2cc9890094c716888d23391694f5239939913ec857a882f2637222ca65dcb353",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:ctx-compression-taskboard-flagship@ace7021a9cfe9799edc3e38958e4052b",
+        "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=35389 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against ctx-compression-taskboard-flagship at immutable revision ace7021a9cfe9799edc3e38958e4052b and its hash-pinned Survey row; public content audit: chars=35389 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:ctx-compression-taskboard-flagship@ace7021a9cfe9799edc3e38958e4052b",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=ctx-compression-taskboard-flagship]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=2cc9890094c716888d23391694f5239939913ec857a882f2637222ca65dcb353 observed_blocks_sha256=2cc9890094c716888d23391694f5239939913ec857a882f2637222ca65dcb353; public content audit: chars=35389 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S017/report.json#unit_verdicts[unit_id=paper:ctx-compression-taskboard-flagship]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:ctx-compression-taskboard-flagship]",
+          "observed_output": "public content audit: chars=35389 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "ctx-compression-view-tiers-seam",
+      "document_rev": "0d1dafe21a10db854bdad2ca612bbeb4",
+      "unit_id": "paper:ctx-compression-view-tiers-seam",
+      "survey_assignment_id": "PPCC2-S017",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+      "live_projection_sha256": "2bb9b8472aa0320bd75355778b30fdf41108365d9e2cec5b74d5d707cc5bc966",
+      "live_blocks_sha256": "f7529097e87dbf4aa334eabfb54a9123764719536d70eaa9c4b72586f237270f",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:ctx-compression-view-tiers-seam@0d1dafe21a10db854bdad2ca612bbeb4",
+        "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=31715 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against ctx-compression-view-tiers-seam at immutable revision 0d1dafe21a10db854bdad2ca612bbeb4 and its hash-pinned Survey row; public content audit: chars=31715 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:ctx-compression-view-tiers-seam@0d1dafe21a10db854bdad2ca612bbeb4",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=ctx-compression-view-tiers-seam]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=f7529097e87dbf4aa334eabfb54a9123764719536d70eaa9c4b72586f237270f observed_blocks_sha256=f7529097e87dbf4aa334eabfb54a9123764719536d70eaa9c4b72586f237270f; public content audit: chars=31715 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S017@c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S017/report.json#unit_verdicts[unit_id=paper:ctx-compression-view-tiers-seam]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:ctx-compression-view-tiers-seam]",
+          "observed_output": "public content audit: chars=31715 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "deploy-with-barkpark",
+      "document_rev": "cc6914e4c58b586928d68449a2321560",
+      "unit_id": "paper:deploy-with-barkpark",
+      "survey_assignment_id": "PPCC2-S018",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+      "live_projection_sha256": "60abaef3b437accde3c35bfbd134375d5255191df6288e4c57e8da8dc328bcee",
+      "live_blocks_sha256": "347c09aee804f3a47d7b20085ca0d91e168e08ad36720bcff8fe237ccbf5f7e9",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:deploy-with-barkpark@cc6914e4c58b586928d68449a2321560",
+        "survey-report:PPCC2-S018@878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=10761 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The pinned content contains operational, path, private-network, or credential-like material that requires redaction or an explicit internal-only audience boundary.",
+      "rationale": "Personally executed the public-reader read-only probe against deploy-with-barkpark at immutable revision cc6914e4c58b586928d68449a2321560 and its hash-pinned Survey row; public content audit: chars=10761 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:deploy-with-barkpark@cc6914e4c58b586928d68449a2321560",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=deploy-with-barkpark]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=347c09aee804f3a47d7b20085ca0d91e168e08ad36720bcff8fe237ccbf5f7e9 observed_blocks_sha256=347c09aee804f3a47d7b20085ca0d91e168e08ad36720bcff8fe237ccbf5f7e9; public content audit: chars=10761 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S018@878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S018/report.json#unit_verdicts[unit_id=paper:deploy-with-barkpark]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:deploy-with-barkpark]",
+          "observed_output": "public content audit: chars=10761 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "desktop-fleets-masterplan",
+      "document_rev": "449bfdf95fff7ffeff5e918028b7220e",
+      "unit_id": "paper:desktop-fleets-masterplan",
+      "survey_assignment_id": "PPCC2-S018",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+      "live_projection_sha256": "f413a6d735d922630572b05330249de161e43154608609c3bb1427ea63c07b5e",
+      "live_blocks_sha256": "6d97230993e89c68130bcfbb66fe01d5c365af01e06bc38329dc9a70903bb4bc",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:desktop-fleets-masterplan@449bfdf95fff7ffeff5e918028b7220e",
+        "survey-report:PPCC2-S018@878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=22482 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against desktop-fleets-masterplan at immutable revision 449bfdf95fff7ffeff5e918028b7220e and its hash-pinned Survey row; public content audit: chars=22482 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:desktop-fleets-masterplan@449bfdf95fff7ffeff5e918028b7220e",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=desktop-fleets-masterplan]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=6d97230993e89c68130bcfbb66fe01d5c365af01e06bc38329dc9a70903bb4bc observed_blocks_sha256=6d97230993e89c68130bcfbb66fe01d5c365af01e06bc38329dc9a70903bb4bc; public content audit: chars=22482 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S018@878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S018/report.json#unit_verdicts[unit_id=paper:desktop-fleets-masterplan]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:desktop-fleets-masterplan]",
+          "observed_output": "public content audit: chars=22482 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "dispatch-frontier-wave-2026-07-10",
+      "document_rev": "201735ea4880bfd5fbf4198f346dac42",
+      "unit_id": "paper:dispatch-frontier-wave-2026-07-10",
+      "survey_assignment_id": "PPCC2-S018",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+      "live_projection_sha256": "3811a148699190c2cac471631362295e5dba5dd798fcc0f1bd2e8ea5a2af254f",
+      "live_blocks_sha256": "80eb95964aa452c9ddb3dbeeb0596d88b47c1297b4a2ac9b25ecf51c6490cbe5",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:dispatch-frontier-wave-2026-07-10@201735ea4880bfd5fbf4198f346dac42",
+        "survey-report:PPCC2-S018@878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=27526 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against dispatch-frontier-wave-2026-07-10 at immutable revision 201735ea4880bfd5fbf4198f346dac42 and its hash-pinned Survey row; public content audit: chars=27526 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:dispatch-frontier-wave-2026-07-10@201735ea4880bfd5fbf4198f346dac42",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=dispatch-frontier-wave-2026-07-10]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=80eb95964aa452c9ddb3dbeeb0596d88b47c1297b4a2ac9b25ecf51c6490cbe5 observed_blocks_sha256=80eb95964aa452c9ddb3dbeeb0596d88b47c1297b4a2ac9b25ecf51c6490cbe5; public content audit: chars=27526 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S018@878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S018/report.json#unit_verdicts[unit_id=paper:dispatch-frontier-wave-2026-07-10]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:dispatch-frontier-wave-2026-07-10]",
+          "observed_output": "public content audit: chars=27526 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "enterprise-auth-gates-debrief",
+      "document_rev": "4658dbabff060853b4bc4a939ce38584",
+      "unit_id": "paper:enterprise-auth-gates-debrief",
+      "survey_assignment_id": "PPCC2-S019",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+      "live_projection_sha256": "5c74a46c72b933ec305d0997ef44d92ccf5483a24454b7dce15f36ae8bc909f4",
+      "live_blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:enterprise-auth-gates-debrief@4658dbabff060853b4bc4a939ce38584",
+        "survey-report:PPCC2-S019@0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=62 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against enterprise-auth-gates-debrief at immutable revision 4658dbabff060853b4bc4a939ce38584 and its hash-pinned Survey row; public content audit: chars=62 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:enterprise-auth-gates-debrief@4658dbabff060853b4bc4a939ce38584",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=enterprise-auth-gates-debrief]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b observed_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b; public content audit: chars=62 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S019@0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S019/report.json#unit_verdicts[unit_id=paper:enterprise-auth-gates-debrief]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:enterprise-auth-gates-debrief]",
+          "observed_output": "public content audit: chars=62 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "enterprise-ready-barkpark",
+      "document_rev": "cdfc06cc8ce59d48555d923d6b2644be",
+      "unit_id": "paper:enterprise-ready-barkpark",
+      "survey_assignment_id": "PPCC2-S019",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+      "live_projection_sha256": "8a08e00d214a1b2a47ad8d634971af350a8972ca071bd72c2027ec2f4458c894",
+      "live_blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:enterprise-ready-barkpark@cdfc06cc8ce59d48555d923d6b2644be",
+        "survey-report:PPCC2-S019@0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=53 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against enterprise-ready-barkpark at immutable revision cdfc06cc8ce59d48555d923d6b2644be and its hash-pinned Survey row; public content audit: chars=53 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:enterprise-ready-barkpark@cdfc06cc8ce59d48555d923d6b2644be",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=enterprise-ready-barkpark]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b observed_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b; public content audit: chars=53 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S019@0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S019/report.json#unit_verdicts[unit_id=paper:enterprise-ready-barkpark]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:enterprise-ready-barkpark]",
+          "observed_output": "public content audit: chars=53 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "epic-cycle-session-card",
+      "document_rev": "9a74b57dcbf8f94b8463dcb7be37f263",
+      "unit_id": "paper:epic-cycle-session-card",
+      "survey_assignment_id": "PPCC2-S019",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+      "live_projection_sha256": "fbad72f4deb3d7035ffc1fc27b3da4b3c4e8020935a5e2b564f37e63a848644c",
+      "live_blocks_sha256": "8b6652a9a429eb9b9638655936d712c97cb54b51575802804eaa48944944915b",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:epic-cycle-session-card@9a74b57dcbf8f94b8463dcb7be37f263",
+        "survey-report:PPCC2-S019@0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=17033 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against epic-cycle-session-card at immutable revision 9a74b57dcbf8f94b8463dcb7be37f263 and its hash-pinned Survey row; public content audit: chars=17033 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:epic-cycle-session-card@9a74b57dcbf8f94b8463dcb7be37f263",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=epic-cycle-session-card]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=8b6652a9a429eb9b9638655936d712c97cb54b51575802804eaa48944944915b observed_blocks_sha256=8b6652a9a429eb9b9638655936d712c97cb54b51575802804eaa48944944915b; public content audit: chars=17033 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S019@0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S019/report.json#unit_verdicts[unit_id=paper:epic-cycle-session-card]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:epic-cycle-session-card]",
+          "observed_output": "public content audit: chars=17033 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "expressive-agent-loops-wave-2026-07-11",
+      "document_rev": "fdb8655adfa9d64d7a893cdb94dabd3f",
+      "unit_id": "paper:expressive-agent-loops-wave-2026-07-11",
+      "survey_assignment_id": "PPCC2-S020",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "3c533d19b1b1f975518abdf83f2121c0d36bdf894e25ae91f502ec000c5716a5",
+      "live_projection_sha256": "74f184b8dd3c208675228b7bcc6c2d6b94b8c6083faeaa86dbe8fe1d9daf5457",
+      "live_blocks_sha256": "77e5051aa5ef53ea3fa4500491202c4514320485980c5c123638f63269fa9cdb",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:expressive-agent-loops-wave-2026-07-11@fdb8655adfa9d64d7a893cdb94dabd3f",
+        "survey-report:PPCC2-S020@3c533d19b1b1f975518abdf83f2121c0d36bdf894e25ae91f502ec000c5716a5",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=29270 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The pinned content contains operational, path, private-network, or credential-like material that requires redaction or an explicit internal-only audience boundary.",
+      "rationale": "Personally executed the public-reader read-only probe against expressive-agent-loops-wave-2026-07-11 at immutable revision fdb8655adfa9d64d7a893cdb94dabd3f and its hash-pinned Survey row; public content audit: chars=29270 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:expressive-agent-loops-wave-2026-07-11@fdb8655adfa9d64d7a893cdb94dabd3f",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=expressive-agent-loops-wave-2026-07-11]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=77e5051aa5ef53ea3fa4500491202c4514320485980c5c123638f63269fa9cdb observed_blocks_sha256=77e5051aa5ef53ea3fa4500491202c4514320485980c5c123638f63269fa9cdb; public content audit: chars=29270 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S020@3c533d19b1b1f975518abdf83f2121c0d36bdf894e25ae91f502ec000c5716a5",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S020/report.json#unit_verdicts[unit_id=paper:expressive-agent-loops-wave-2026-07-11]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:expressive-agent-loops-wave-2026-07-11]",
+          "observed_output": "public content audit: chars=29270 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "felix-pristine-charter",
+      "document_rev": "fc2ee8727a453f573358e4aedbb0ef98",
+      "unit_id": "paper:felix-pristine-charter",
+      "survey_assignment_id": "PPCC2-S021",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+      "live_projection_sha256": "60c87407a0c1e85b7cb1408c9658537c0122db94e0aa0062935e42f697926dd4",
+      "live_blocks_sha256": "6b31f394c2f5c306cef0964ab35cfe111e530de3739de46412d0dae139f6f52b",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:felix-pristine-charter@fc2ee8727a453f573358e4aedbb0ef98",
+        "survey-report:PPCC2-S021@fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=9768 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against felix-pristine-charter at immutable revision fc2ee8727a453f573358e4aedbb0ef98 and its hash-pinned Survey row; public content audit: chars=9768 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:felix-pristine-charter@fc2ee8727a453f573358e4aedbb0ef98",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=felix-pristine-charter]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=6b31f394c2f5c306cef0964ab35cfe111e530de3739de46412d0dae139f6f52b observed_blocks_sha256=6b31f394c2f5c306cef0964ab35cfe111e530de3739de46412d0dae139f6f52b; public content audit: chars=9768 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S021@fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S021/report.json#unit_verdicts[unit_id=paper:felix-pristine-charter]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:felix-pristine-charter]",
+          "observed_output": "public content audit: chars=9768 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "felix-pristine-wave-10-2026-07-13",
+      "document_rev": "99be49e593d1c5843335e098e29a2bbd",
+      "unit_id": "paper:felix-pristine-wave-10-2026-07-13",
+      "survey_assignment_id": "PPCC2-S021",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+      "live_projection_sha256": "f7fcae75292b821cac3fc60bfb77144c972c120c6510a1ee517f1e8f4ed2508e",
+      "live_blocks_sha256": "d2e8e70ffe5a6ed678d9f43ff00fcac514ed53234e02124c4d7c79b10b3cede5",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:felix-pristine-wave-10-2026-07-13@99be49e593d1c5843335e098e29a2bbd",
+        "survey-report:PPCC2-S021@fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=38763 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=1 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The pinned content contains operational, path, private-network, or credential-like material that requires redaction or an explicit internal-only audience boundary.",
+      "rationale": "Personally executed the public-reader read-only probe against felix-pristine-wave-10-2026-07-13 at immutable revision 99be49e593d1c5843335e098e29a2bbd and its hash-pinned Survey row; public content audit: chars=38763 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=1 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:felix-pristine-wave-10-2026-07-13@99be49e593d1c5843335e098e29a2bbd",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=felix-pristine-wave-10-2026-07-13]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=d2e8e70ffe5a6ed678d9f43ff00fcac514ed53234e02124c4d7c79b10b3cede5 observed_blocks_sha256=d2e8e70ffe5a6ed678d9f43ff00fcac514ed53234e02124c4d7c79b10b3cede5; public content audit: chars=38763 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=1 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S021@fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S021/report.json#unit_verdicts[unit_id=paper:felix-pristine-wave-10-2026-07-13]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:felix-pristine-wave-10-2026-07-13]",
+          "observed_output": "public content audit: chars=38763 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=1 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "felix-pristine-wave-12-2026-07-16",
+      "document_rev": "15597e02418722fc81389b9133ecde5f",
+      "unit_id": "paper:felix-pristine-wave-12-2026-07-16",
+      "survey_assignment_id": "PPCC2-S021",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+      "live_projection_sha256": "af360f72fb2c13651d55027b53e68d9af9745ec7affe175e791ed0e1e797fe8a",
+      "live_blocks_sha256": "07c749b80ed239234168067a3ec5fa398e7b30239b2d0d1c24854a083bd3b333",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:felix-pristine-wave-12-2026-07-16@15597e02418722fc81389b9133ecde5f",
+        "survey-report:PPCC2-S021@fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=36395 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against felix-pristine-wave-12-2026-07-16 at immutable revision 15597e02418722fc81389b9133ecde5f and its hash-pinned Survey row; public content audit: chars=36395 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:felix-pristine-wave-12-2026-07-16@15597e02418722fc81389b9133ecde5f",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=felix-pristine-wave-12-2026-07-16]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=07c749b80ed239234168067a3ec5fa398e7b30239b2d0d1c24854a083bd3b333 observed_blocks_sha256=07c749b80ed239234168067a3ec5fa398e7b30239b2d0d1c24854a083bd3b333; public content audit: chars=36395 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S021@fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S021/report.json#unit_verdicts[unit_id=paper:felix-pristine-wave-12-2026-07-16]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:felix-pristine-wave-12-2026-07-16]",
+          "observed_output": "public content audit: chars=36395 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "felix-pristine-wave-13-2026-07-21",
+      "document_rev": "c21c3699fc37297e0801d04e3b4cc246",
+      "unit_id": "paper:felix-pristine-wave-13-2026-07-21",
+      "survey_assignment_id": "PPCC2-S021",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+      "live_projection_sha256": "4b40195d7c13711c52884c51902070e22ace595e777fa3c35c34b219da0d21ae",
+      "live_blocks_sha256": "fb1af06b74a1765c377dad99c376410777366cbd74e6e98c1e14bf0eff03ccb7",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:felix-pristine-wave-13-2026-07-21@c21c3699fc37297e0801d04e3b4cc246",
+        "survey-report:PPCC2-S021@fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=32629 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against felix-pristine-wave-13-2026-07-21 at immutable revision c21c3699fc37297e0801d04e3b4cc246 and its hash-pinned Survey row; public content audit: chars=32629 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:felix-pristine-wave-13-2026-07-21@c21c3699fc37297e0801d04e3b4cc246",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=felix-pristine-wave-13-2026-07-21]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=fb1af06b74a1765c377dad99c376410777366cbd74e6e98c1e14bf0eff03ccb7 observed_blocks_sha256=fb1af06b74a1765c377dad99c376410777366cbd74e6e98c1e14bf0eff03ccb7; public content audit: chars=32629 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S021@fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S021/report.json#unit_verdicts[unit_id=paper:felix-pristine-wave-13-2026-07-21]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:felix-pristine-wave-13-2026-07-21]",
+          "observed_output": "public content audit: chars=32629 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "felix-pristine-wave-14-2026-07-22",
+      "document_rev": "97ac414889044da4134f330f5ba3a14c",
+      "unit_id": "paper:felix-pristine-wave-14-2026-07-22",
+      "survey_assignment_id": "PPCC2-S021",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+      "live_projection_sha256": "573dd0503b3a9bc7d9395494223fa5e3f671491b37f356532609f340f6c36312",
+      "live_blocks_sha256": "1dd829c5cc3deba98491d3329a3ee6e907459d88735286364053a40267bbc3e0",
+      "outcome": "carried_risk",
+      "fixture_ids": [
+        "live-paper:felix-pristine-wave-14-2026-07-22@97ac414889044da4134f330f5ba3a14c",
+        "survey-report:PPCC2-S021@fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+        "probe-output:PPCC2-V016"
+      ],
+      "observed_output": "public content audit: chars=33074 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is not directly contradicted, but remains conditional on the named residual reader/runtime risk.",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "rationale": "Personally executed the public-reader read-only probe against felix-pristine-wave-14-2026-07-22 at immutable revision 97ac414889044da4134f330f5ba3a14c and its hash-pinned Survey row; public content audit: chars=33074 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:felix-pristine-wave-14-2026-07-22@97ac414889044da4134f330f5ba3a14c",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=felix-pristine-wave-14-2026-07-22]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=1dd829c5cc3deba98491d3329a3ee6e907459d88735286364053a40267bbc3e0 observed_blocks_sha256=1dd829c5cc3deba98491d3329a3ee6e907459d88735286364053a40267bbc3e0; public content audit: chars=33074 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S021@fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S021/report.json#unit_verdicts[unit_id=paper:felix-pristine-wave-14-2026-07-22]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V016",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V016/probe-output.json#unit_results[unit_id=paper:felix-pristine-wave-14-2026-07-22]",
+          "observed_output": "public content audit: chars=33074 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true"
+        }
+      ]
+    }
+  ],
+  "personal_verification_attestation": {
+    "worker": "worker-2",
+    "agent_type": "epic-verifier",
+    "personally_verified_all_final_rows": true,
+    "helpers_used_only_for_non_counting_preparation": true
+  },
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "root_task_mutated": false,
+    "source_mutated": false
+  }
+}

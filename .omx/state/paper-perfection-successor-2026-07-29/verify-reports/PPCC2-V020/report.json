@@ -1,0 +1,825 @@
+{
+  "schema_version": "paper-perfection-successor-verify-report/v1",
+  "assignment_id": "PPCC2-V020",
+  "agent_type": "epic-verifier",
+  "effort": "medium",
+  "phase": "verify",
+  "worker": "worker-2",
+  "mutation_policy": "read_only",
+  "claim_id": "cli-api",
+  "claim": "CLI/API projections expose enough typed state for machines to distinguish current truth from checkpoint history.",
+  "command_or_probe": "Inspect representative raw JSON and identify the exact fields required for status, provenance, disposition, and risk.",
+  "verify_assignment_map_sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76",
+  "assignment_sha256": "4b3e8467d86fb6f7db40d2554f12895b0ea0a5b10dfec8e2b822696af51ee6b5",
+  "direct_answer": "REFUTED: Personally checked 19/19 ordered pinned units; outcomes={'refuted': 19}; production snapshot sha256=a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786; probe artifact=.omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json.",
+  "checked_unit_ids": [
+    "paper:pds-wave-9-verdict-2026-07-20",
+    "paper:perfect-portabledoc-blog-next-astro-phoenix",
+    "paper:personal-agent-provider-bridge",
+    "paper:personal-dev-fleet-build-plan",
+    "paper:personal-dev-fleet-field-guide",
+    "paper:personal-dev-fleet-gui-plan",
+    "paper:personal-dev-fleet-mvp",
+    "paper:personal-dev-fleet-wave-b-2026-07-22",
+    "paper:personal-dev-fleet-wave-b-2026-07-22-r2",
+    "paper:personal-dev-fleet-wave-c-2026-07-23",
+    "paper:personal-dev-fleet-wave-c-2026-07-23-r2",
+    "paper:personal-dev-fleet-wave-mvp0-2026-07-24",
+    "paper:personal-dev-fleet-worker-protocol",
+    "paper:personal-development-server-plan",
+    "paper:phoenix-mastery-corpus",
+    "paper:portabledoc-doctrine",
+    "paper:portabledoc-render-unification-w7-2026-07-16",
+    "paper:production-truth-wave-2026-07-20",
+    "paper:provider-horizon"
+  ],
+  "verification_result": {
+    "claim": "CLI/API projections expose enough typed state for machines to distinguish current truth from checkpoint history.",
+    "command_or_probe": "Inspect representative raw JSON and identify the exact fields required for status, provenance, disposition, and risk.",
+    "fixture_ids": [
+      "https://guerrilla.barkpark.cloud/v1/data/query/production/paper",
+      ".omx/state/paper-perfection-successor-2026-07-29/survey-reports",
+      ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json"
+    ],
+    "observed_output": "Personally checked 19/19 ordered pinned units; outcomes={'refuted': 19}; production snapshot sha256=a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786; probe artifact=.omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json.",
+    "verdict": "refuted",
+    "affected_unit_ids": [
+      "paper:pds-wave-9-verdict-2026-07-20",
+      "paper:perfect-portabledoc-blog-next-astro-phoenix",
+      "paper:personal-agent-provider-bridge",
+      "paper:personal-dev-fleet-build-plan",
+      "paper:personal-dev-fleet-field-guide",
+      "paper:personal-dev-fleet-gui-plan",
+      "paper:personal-dev-fleet-mvp",
+      "paper:personal-dev-fleet-wave-b-2026-07-22",
+      "paper:personal-dev-fleet-wave-b-2026-07-22-r2",
+      "paper:personal-dev-fleet-wave-c-2026-07-23",
+      "paper:personal-dev-fleet-wave-c-2026-07-23-r2",
+      "paper:personal-dev-fleet-wave-mvp0-2026-07-24",
+      "paper:personal-dev-fleet-worker-protocol",
+      "paper:personal-development-server-plan",
+      "paper:phoenix-mastery-corpus",
+      "paper:portabledoc-doctrine",
+      "paper:portabledoc-render-unification-w7-2026-07-16",
+      "paper:production-truth-wave-2026-07-20",
+      "paper:provider-horizon"
+    ],
+    "residual_risk": "No owned scope was unvisited. 19 units have refuted or carried-risk outcomes detailed in unit_results."
+  },
+  "unit_results": [
+    {
+      "class": "paper",
+      "document_id": "pds-wave-9-verdict-2026-07-20",
+      "document_rev": "943d7b2c72864c0485927ca52371f01b",
+      "unit_id": "paper:pds-wave-9-verdict-2026-07-20",
+      "survey_assignment_id": "PPCC2-S036",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "15bac9f4ccd32b647e1eae53210ecb32fb80719fff0cbcb310e1f6fad2ca952f",
+      "live_projection_sha256": "4a73faefdcf6a56ab9c08324c9bf6c6ecac5d9630c7529473cbbbf7ba152929f",
+      "live_blocks_sha256": "b93ff8732f0eeae72362724abecb68f4da18d4b64fb0e1a0f028a5eb94b98c26",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:pds-wave-9-verdict-2026-07-20@943d7b2c72864c0485927ca52371f01b",
+        "survey-report:PPCC2-S036@15bac9f4ccd32b647e1eae53210ecb32fb80719fff0cbcb310e1f6fad2ca952f",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against pds-wave-9-verdict-2026-07-20 at immutable revision 943d7b2c72864c0485927ca52371f01b and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:pds-wave-9-verdict-2026-07-20@943d7b2c72864c0485927ca52371f01b",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=pds-wave-9-verdict-2026-07-20]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=b93ff8732f0eeae72362724abecb68f4da18d4b64fb0e1a0f028a5eb94b98c26 observed_blocks_sha256=b93ff8732f0eeae72362724abecb68f4da18d4b64fb0e1a0f028a5eb94b98c26; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S036@15bac9f4ccd32b647e1eae53210ecb32fb80719fff0cbcb310e1f6fad2ca952f",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S036/report.json#unit_verdicts[unit_id=paper:pds-wave-9-verdict-2026-07-20]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:pds-wave-9-verdict-2026-07-20]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "perfect-portabledoc-blog-next-astro-phoenix",
+      "document_rev": "012e5850524a137bca90a3cae1bc8bf0",
+      "unit_id": "paper:perfect-portabledoc-blog-next-astro-phoenix",
+      "survey_assignment_id": "PPCC2-S037",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "8ea4048483a34492257e3f851e2726d29f737ea4f8cbe49eddb5501f7f4cbbfa",
+      "live_projection_sha256": "009c0f281d20d4b80dec91f960c0ae93c5f6989a4a4c77e56138ac0e90f1b62a",
+      "live_blocks_sha256": "48c271f6bb16c22b29aefdc2cd165f1022812cd27831a3a05e91cfa742a05a8d",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:perfect-portabledoc-blog-next-astro-phoenix@012e5850524a137bca90a3cae1bc8bf0",
+        "survey-report:PPCC2-S037@8ea4048483a34492257e3f851e2726d29f737ea4f8cbe49eddb5501f7f4cbbfa",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against perfect-portabledoc-blog-next-astro-phoenix at immutable revision 012e5850524a137bca90a3cae1bc8bf0 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:perfect-portabledoc-blog-next-astro-phoenix@012e5850524a137bca90a3cae1bc8bf0",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=perfect-portabledoc-blog-next-astro-phoenix]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=48c271f6bb16c22b29aefdc2cd165f1022812cd27831a3a05e91cfa742a05a8d observed_blocks_sha256=48c271f6bb16c22b29aefdc2cd165f1022812cd27831a3a05e91cfa742a05a8d; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S037@8ea4048483a34492257e3f851e2726d29f737ea4f8cbe49eddb5501f7f4cbbfa",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S037/report.json#unit_verdicts[unit_id=paper:perfect-portabledoc-blog-next-astro-phoenix]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:perfect-portabledoc-blog-next-astro-phoenix]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-agent-provider-bridge",
+      "document_rev": "39bc36cf7512809911d630da635ffc0d",
+      "unit_id": "paper:personal-agent-provider-bridge",
+      "survey_assignment_id": "PPCC2-S037",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "8ea4048483a34492257e3f851e2726d29f737ea4f8cbe49eddb5501f7f4cbbfa",
+      "live_projection_sha256": "45f6da4c75fd4eb6ab26e951110e7d0c3890b68e61710b8a9bb269ad08936555",
+      "live_blocks_sha256": "f4e00d26b4ed41b9b59f7006ade69b4d017e03280e36cfe96a251344832f7544",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-agent-provider-bridge@39bc36cf7512809911d630da635ffc0d",
+        "survey-report:PPCC2-S037@8ea4048483a34492257e3f851e2726d29f737ea4f8cbe49eddb5501f7f4cbbfa",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-agent-provider-bridge at immutable revision 39bc36cf7512809911d630da635ffc0d and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-agent-provider-bridge@39bc36cf7512809911d630da635ffc0d",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-agent-provider-bridge]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=f4e00d26b4ed41b9b59f7006ade69b4d017e03280e36cfe96a251344832f7544 observed_blocks_sha256=f4e00d26b4ed41b9b59f7006ade69b4d017e03280e36cfe96a251344832f7544; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S037@8ea4048483a34492257e3f851e2726d29f737ea4f8cbe49eddb5501f7f4cbbfa",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S037/report.json#unit_verdicts[unit_id=paper:personal-agent-provider-bridge]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-agent-provider-bridge]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-dev-fleet-build-plan",
+      "document_rev": "adfead63388219643be7f6143a686c34",
+      "unit_id": "paper:personal-dev-fleet-build-plan",
+      "survey_assignment_id": "PPCC2-S038",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+      "live_projection_sha256": "bfc617dce41b002a86ae034bdcf93f33a5a4dfa39d3a556932fc2d8922329820",
+      "live_blocks_sha256": "52f1182d2d298a1a76af998887f0dff67413938da309af6e0b4df3b0f0cd4fee",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-dev-fleet-build-plan@adfead63388219643be7f6143a686c34",
+        "survey-report:PPCC2-S038@20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-dev-fleet-build-plan at immutable revision adfead63388219643be7f6143a686c34 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-dev-fleet-build-plan@adfead63388219643be7f6143a686c34",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-dev-fleet-build-plan]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=52f1182d2d298a1a76af998887f0dff67413938da309af6e0b4df3b0f0cd4fee observed_blocks_sha256=52f1182d2d298a1a76af998887f0dff67413938da309af6e0b4df3b0f0cd4fee; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S038@20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S038/report.json#unit_verdicts[unit_id=paper:personal-dev-fleet-build-plan]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-dev-fleet-build-plan]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-dev-fleet-field-guide",
+      "document_rev": "ff28581c07b0118676642579ab0d6933",
+      "unit_id": "paper:personal-dev-fleet-field-guide",
+      "survey_assignment_id": "PPCC2-S038",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+      "live_projection_sha256": "8fd51d76aa402d1583a285069b3b6b97902462de883eea31c3d309aa4a49587a",
+      "live_blocks_sha256": "bdaeccbc66076312d57223c0ec6dae3c7675408d962ea3ce568150f3370b9ec4",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-dev-fleet-field-guide@ff28581c07b0118676642579ab0d6933",
+        "survey-report:PPCC2-S038@20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-dev-fleet-field-guide at immutable revision ff28581c07b0118676642579ab0d6933 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-dev-fleet-field-guide@ff28581c07b0118676642579ab0d6933",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-dev-fleet-field-guide]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=bdaeccbc66076312d57223c0ec6dae3c7675408d962ea3ce568150f3370b9ec4 observed_blocks_sha256=bdaeccbc66076312d57223c0ec6dae3c7675408d962ea3ce568150f3370b9ec4; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S038@20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S038/report.json#unit_verdicts[unit_id=paper:personal-dev-fleet-field-guide]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-dev-fleet-field-guide]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-dev-fleet-gui-plan",
+      "document_rev": "1eac07057b43366a3f1340dda51c6bbd",
+      "unit_id": "paper:personal-dev-fleet-gui-plan",
+      "survey_assignment_id": "PPCC2-S038",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+      "live_projection_sha256": "f923f5c2cc62e338b92a6956b2f2ee9351b43796616ab29902db15f12d2b83cc",
+      "live_blocks_sha256": "fdd3aa7c0f0c6c60b86a757331d3aa6d62f9083355aae18c78b8a56fa3775b9c",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-dev-fleet-gui-plan@1eac07057b43366a3f1340dda51c6bbd",
+        "survey-report:PPCC2-S038@20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-dev-fleet-gui-plan at immutable revision 1eac07057b43366a3f1340dda51c6bbd and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-dev-fleet-gui-plan@1eac07057b43366a3f1340dda51c6bbd",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-dev-fleet-gui-plan]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=fdd3aa7c0f0c6c60b86a757331d3aa6d62f9083355aae18c78b8a56fa3775b9c observed_blocks_sha256=fdd3aa7c0f0c6c60b86a757331d3aa6d62f9083355aae18c78b8a56fa3775b9c; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S038@20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S038/report.json#unit_verdicts[unit_id=paper:personal-dev-fleet-gui-plan]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-dev-fleet-gui-plan]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-dev-fleet-mvp",
+      "document_rev": "81208ed236ee68d2e302c2b01b64e280",
+      "unit_id": "paper:personal-dev-fleet-mvp",
+      "survey_assignment_id": "PPCC2-S038",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+      "live_projection_sha256": "e69b7726c33b2f3997deea26533e392a6285febb951d4500d4819c869bf64e90",
+      "live_blocks_sha256": "7ad84c6a949b2a4f5021636400e7adc87ecde34575abf1ab3108c118cc6d995a",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-dev-fleet-mvp@81208ed236ee68d2e302c2b01b64e280",
+        "survey-report:PPCC2-S038@20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-dev-fleet-mvp at immutable revision 81208ed236ee68d2e302c2b01b64e280 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-dev-fleet-mvp@81208ed236ee68d2e302c2b01b64e280",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-dev-fleet-mvp]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=7ad84c6a949b2a4f5021636400e7adc87ecde34575abf1ab3108c118cc6d995a observed_blocks_sha256=7ad84c6a949b2a4f5021636400e7adc87ecde34575abf1ab3108c118cc6d995a; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S038@20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S038/report.json#unit_verdicts[unit_id=paper:personal-dev-fleet-mvp]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-dev-fleet-mvp]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-dev-fleet-wave-b-2026-07-22",
+      "document_rev": "a2187aa63cd2be3ecb857aed605250c0",
+      "unit_id": "paper:personal-dev-fleet-wave-b-2026-07-22",
+      "survey_assignment_id": "PPCC2-S038",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+      "live_projection_sha256": "d12b4275034e54f6cf4f39745e63185c5336777fd7a8f49ec9d17baa509f2893",
+      "live_blocks_sha256": "f695e696c50f7f08de5c407b398b5f3397a7ca9b05fc85faa0f5afe956f9d97a",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-dev-fleet-wave-b-2026-07-22@a2187aa63cd2be3ecb857aed605250c0",
+        "survey-report:PPCC2-S038@20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-dev-fleet-wave-b-2026-07-22 at immutable revision a2187aa63cd2be3ecb857aed605250c0 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-dev-fleet-wave-b-2026-07-22@a2187aa63cd2be3ecb857aed605250c0",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-dev-fleet-wave-b-2026-07-22]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=f695e696c50f7f08de5c407b398b5f3397a7ca9b05fc85faa0f5afe956f9d97a observed_blocks_sha256=f695e696c50f7f08de5c407b398b5f3397a7ca9b05fc85faa0f5afe956f9d97a; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S038@20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S038/report.json#unit_verdicts[unit_id=paper:personal-dev-fleet-wave-b-2026-07-22]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-dev-fleet-wave-b-2026-07-22]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-dev-fleet-wave-b-2026-07-22-r2",
+      "document_rev": "bd4ed9f1ae231e13eb7caafd1a04a270",
+      "unit_id": "paper:personal-dev-fleet-wave-b-2026-07-22-r2",
+      "survey_assignment_id": "PPCC2-S039",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+      "live_projection_sha256": "a035181377f78e511f057fa567794582dfb9d4db15face6cc13097f0a1388a52",
+      "live_blocks_sha256": "8324b2d46477a11451ae9d5db02c635d63a7cd5f3d8ef63db09f40aa9f7fc7a8",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-dev-fleet-wave-b-2026-07-22-r2@bd4ed9f1ae231e13eb7caafd1a04a270",
+        "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-dev-fleet-wave-b-2026-07-22-r2 at immutable revision bd4ed9f1ae231e13eb7caafd1a04a270 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-dev-fleet-wave-b-2026-07-22-r2@bd4ed9f1ae231e13eb7caafd1a04a270",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-dev-fleet-wave-b-2026-07-22-r2]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=8324b2d46477a11451ae9d5db02c635d63a7cd5f3d8ef63db09f40aa9f7fc7a8 observed_blocks_sha256=8324b2d46477a11451ae9d5db02c635d63a7cd5f3d8ef63db09f40aa9f7fc7a8; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S039/report.json#unit_verdicts[unit_id=paper:personal-dev-fleet-wave-b-2026-07-22-r2]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-dev-fleet-wave-b-2026-07-22-r2]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-dev-fleet-wave-c-2026-07-23",
+      "document_rev": "eda6ecc1ff5c3cd275b377c17404ad6e",
+      "unit_id": "paper:personal-dev-fleet-wave-c-2026-07-23",
+      "survey_assignment_id": "PPCC2-S039",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+      "live_projection_sha256": "dfdef8f774e6de1e325521e02ae54cc480e8c737d70ab63906bc44571eb50f9e",
+      "live_blocks_sha256": "2d1c3cdd9f4d1485f16ab6e9e13ba6e4c7cefec324484e72844c355885ecdd91",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-dev-fleet-wave-c-2026-07-23@eda6ecc1ff5c3cd275b377c17404ad6e",
+        "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-dev-fleet-wave-c-2026-07-23 at immutable revision eda6ecc1ff5c3cd275b377c17404ad6e and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-dev-fleet-wave-c-2026-07-23@eda6ecc1ff5c3cd275b377c17404ad6e",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-dev-fleet-wave-c-2026-07-23]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=2d1c3cdd9f4d1485f16ab6e9e13ba6e4c7cefec324484e72844c355885ecdd91 observed_blocks_sha256=2d1c3cdd9f4d1485f16ab6e9e13ba6e4c7cefec324484e72844c355885ecdd91; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S039/report.json#unit_verdicts[unit_id=paper:personal-dev-fleet-wave-c-2026-07-23]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-dev-fleet-wave-c-2026-07-23]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-dev-fleet-wave-c-2026-07-23-r2",
+      "document_rev": "43e442f37602c467feee03debe2eb42d",
+      "unit_id": "paper:personal-dev-fleet-wave-c-2026-07-23-r2",
+      "survey_assignment_id": "PPCC2-S039",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+      "live_projection_sha256": "b13c30b59036782d68b2d383882a5fd8f5e7994940945be93bfee833afa71f53",
+      "live_blocks_sha256": "f010bfc0ea298377f685318cf6fb5fd3c7c02d460523eaf18987b8755605788e",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-dev-fleet-wave-c-2026-07-23-r2@43e442f37602c467feee03debe2eb42d",
+        "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-dev-fleet-wave-c-2026-07-23-r2 at immutable revision 43e442f37602c467feee03debe2eb42d and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-dev-fleet-wave-c-2026-07-23-r2@43e442f37602c467feee03debe2eb42d",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-dev-fleet-wave-c-2026-07-23-r2]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=f010bfc0ea298377f685318cf6fb5fd3c7c02d460523eaf18987b8755605788e observed_blocks_sha256=f010bfc0ea298377f685318cf6fb5fd3c7c02d460523eaf18987b8755605788e; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S039/report.json#unit_verdicts[unit_id=paper:personal-dev-fleet-wave-c-2026-07-23-r2]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-dev-fleet-wave-c-2026-07-23-r2]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-dev-fleet-wave-mvp0-2026-07-24",
+      "document_rev": "581e22e50e7c1af28eec35458dfcdd5c",
+      "unit_id": "paper:personal-dev-fleet-wave-mvp0-2026-07-24",
+      "survey_assignment_id": "PPCC2-S039",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+      "live_projection_sha256": "f2f3fec23b595cbe3350161ab011d371235edf59f14f548a00c19f3d28f47279",
+      "live_blocks_sha256": "f83b25d706a3508bef02bab7bf449b0f29d698733910c87eadd8bdcc5cd7bb53",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-dev-fleet-wave-mvp0-2026-07-24@581e22e50e7c1af28eec35458dfcdd5c",
+        "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-dev-fleet-wave-mvp0-2026-07-24 at immutable revision 581e22e50e7c1af28eec35458dfcdd5c and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-dev-fleet-wave-mvp0-2026-07-24@581e22e50e7c1af28eec35458dfcdd5c",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-dev-fleet-wave-mvp0-2026-07-24]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=f83b25d706a3508bef02bab7bf449b0f29d698733910c87eadd8bdcc5cd7bb53 observed_blocks_sha256=f83b25d706a3508bef02bab7bf449b0f29d698733910c87eadd8bdcc5cd7bb53; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S039/report.json#unit_verdicts[unit_id=paper:personal-dev-fleet-wave-mvp0-2026-07-24]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-dev-fleet-wave-mvp0-2026-07-24]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-dev-fleet-worker-protocol",
+      "document_rev": "390e4bd4059a5f484731f73121285897",
+      "unit_id": "paper:personal-dev-fleet-worker-protocol",
+      "survey_assignment_id": "PPCC2-S039",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+      "live_projection_sha256": "95ad06704efc1b90c37305ab1c6b096686050954d74ab08c8d3870d6836ecd07",
+      "live_blocks_sha256": "217a392ba2e22295b0ca044196a69613d4d58e110521299befe1b162b13bb681",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-dev-fleet-worker-protocol@390e4bd4059a5f484731f73121285897",
+        "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-dev-fleet-worker-protocol at immutable revision 390e4bd4059a5f484731f73121285897 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-dev-fleet-worker-protocol@390e4bd4059a5f484731f73121285897",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-dev-fleet-worker-protocol]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=217a392ba2e22295b0ca044196a69613d4d58e110521299befe1b162b13bb681 observed_blocks_sha256=217a392ba2e22295b0ca044196a69613d4d58e110521299befe1b162b13bb681; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S039/report.json#unit_verdicts[unit_id=paper:personal-dev-fleet-worker-protocol]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-dev-fleet-worker-protocol]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "personal-development-server-plan",
+      "document_rev": "b2cd2b2cfb5c86e0821145d0515301e0",
+      "unit_id": "paper:personal-development-server-plan",
+      "survey_assignment_id": "PPCC2-S039",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+      "live_projection_sha256": "f0cd3c634fc1412ba47c79c2ee63caaa9e46c069e48369dfddb95ff673ac9300",
+      "live_blocks_sha256": "11f8360973a1a8ba70fbd9702b8426fd25ba41a4a5522ae1ab4b23b77128f018",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:personal-development-server-plan@b2cd2b2cfb5c86e0821145d0515301e0",
+        "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against personal-development-server-plan at immutable revision b2cd2b2cfb5c86e0821145d0515301e0 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:personal-development-server-plan@b2cd2b2cfb5c86e0821145d0515301e0",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=personal-development-server-plan]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=11f8360973a1a8ba70fbd9702b8426fd25ba41a4a5522ae1ab4b23b77128f018 observed_blocks_sha256=11f8360973a1a8ba70fbd9702b8426fd25ba41a4a5522ae1ab4b23b77128f018; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S039/report.json#unit_verdicts[unit_id=paper:personal-development-server-plan]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:personal-development-server-plan]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "phoenix-mastery-corpus",
+      "document_rev": "5621918e9341d07aa6846fb3acb38952",
+      "unit_id": "paper:phoenix-mastery-corpus",
+      "survey_assignment_id": "PPCC2-S039",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+      "live_projection_sha256": "0dbb52d02a121498e05ac68319a1026cbb6ed4b786d8f0dfbdbaa7856eb69505",
+      "live_blocks_sha256": "02b5a57aea53212bd4840451ef0b046fed355ff5fb15187784e856d029f86789",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:phoenix-mastery-corpus@5621918e9341d07aa6846fb3acb38952",
+        "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"preview\", \"rev\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against phoenix-mastery-corpus at immutable revision 5621918e9341d07aa6846fb3acb38952 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"preview\", \"rev\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:phoenix-mastery-corpus@5621918e9341d07aa6846fb3acb38952",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=phoenix-mastery-corpus]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=02b5a57aea53212bd4840451ef0b046fed355ff5fb15187784e856d029f86789 observed_blocks_sha256=02b5a57aea53212bd4840451ef0b046fed355ff5fb15187784e856d029f86789; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"preview\", \"rev\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S039@8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S039/report.json#unit_verdicts[unit_id=paper:phoenix-mastery-corpus]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:phoenix-mastery-corpus]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"preview\", \"rev\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "portabledoc-doctrine",
+      "document_rev": "3cf9bb1ba031cd02378bb10e9699b571",
+      "unit_id": "paper:portabledoc-doctrine",
+      "survey_assignment_id": "PPCC2-S040",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "02174247a6008aa4e9b1f5eca76df6a9d5a2463c6d1ec0128ea7fa7dd0b9c38d",
+      "live_projection_sha256": "4be61380a7ffe2e087953b99319cae70bb5326f7313ee2b0ef9a9bc3cf66ee9d",
+      "live_blocks_sha256": "29a821f448ff196180af5fda2544e90edf77b2eec4f2addd16e89a9ea0772aa8",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:portabledoc-doctrine@3cf9bb1ba031cd02378bb10e9699b571",
+        "survey-report:PPCC2-S040@02174247a6008aa4e9b1f5eca76df6a9d5a2463c6d1ec0128ea7fa7dd0b9c38d",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"preview\", \"slug\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against portabledoc-doctrine at immutable revision 3cf9bb1ba031cd02378bb10e9699b571 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"preview\", \"slug\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:portabledoc-doctrine@3cf9bb1ba031cd02378bb10e9699b571",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=portabledoc-doctrine]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=29a821f448ff196180af5fda2544e90edf77b2eec4f2addd16e89a9ea0772aa8 observed_blocks_sha256=29a821f448ff196180af5fda2544e90edf77b2eec4f2addd16e89a9ea0772aa8; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"preview\", \"slug\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S040@02174247a6008aa4e9b1f5eca76df6a9d5a2463c6d1ec0128ea7fa7dd0b9c38d",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S040/report.json#unit_verdicts[unit_id=paper:portabledoc-doctrine]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:portabledoc-doctrine]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"preview\", \"slug\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "portabledoc-render-unification-w7-2026-07-16",
+      "document_rev": "d74a1db4b9b07e757c3433456a121665",
+      "unit_id": "paper:portabledoc-render-unification-w7-2026-07-16",
+      "survey_assignment_id": "PPCC2-S041",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+      "live_projection_sha256": "9fad773e6e4b7d37ae17f2352f63d8b67a26ef254414f62435c6fec886767d01",
+      "live_blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:portabledoc-render-unification-w7-2026-07-16@d74a1db4b9b07e757c3433456a121665",
+        "survey-report:PPCC2-S041@a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"body_html\", \"description\", \"main_tag\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against portabledoc-render-unification-w7-2026-07-16 at immutable revision d74a1db4b9b07e757c3433456a121665 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"body_html\", \"description\", \"main_tag\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:portabledoc-render-unification-w7-2026-07-16@d74a1db4b9b07e757c3433456a121665",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=portabledoc-render-unification-w7-2026-07-16]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b observed_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"body_html\", \"description\", \"main_tag\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S041@a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/report.json#unit_verdicts[unit_id=paper:portabledoc-render-unification-w7-2026-07-16]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:portabledoc-render-unification-w7-2026-07-16]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"body_html\", \"description\", \"main_tag\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "production-truth-wave-2026-07-20",
+      "document_rev": "2c26416ccffd98018850928ff92e1e34",
+      "unit_id": "paper:production-truth-wave-2026-07-20",
+      "survey_assignment_id": "PPCC2-S041",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+      "live_projection_sha256": "9b5fe683fa6a7f8d032852ca9e6fba3e9ad4ffc6d3bfc937d2c4f7ef102403ff",
+      "live_blocks_sha256": "66d536abcb78eb8ce673975ca221e42308a93ad77ae575f436b944eab36fcf53",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:production-truth-wave-2026-07-20@2c26416ccffd98018850928ff92e1e34",
+        "survey-report:PPCC2-S041@a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"slug\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "rationale": "Personally executed the cli-api read-only probe against production-truth-wave-2026-07-20 at immutable revision 2c26416ccffd98018850928ff92e1e34 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"slug\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:production-truth-wave-2026-07-20@2c26416ccffd98018850928ff92e1e34",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=production-truth-wave-2026-07-20]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=66d536abcb78eb8ce673975ca221e42308a93ad77ae575f436b944eab36fcf53 observed_blocks_sha256=66d536abcb78eb8ce673975ca221e42308a93ad77ae575f436b944eab36fcf53; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"slug\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S041@a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/report.json#unit_verdicts[unit_id=paper:production-truth-wave-2026-07-20]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:production-truth-wave-2026-07-20]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"slug\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "provider-horizon",
+      "document_rev": "f8de7acedb8a6219954695eefcfb6ec4",
+      "unit_id": "paper:provider-horizon",
+      "survey_assignment_id": "PPCC2-S041",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+      "live_projection_sha256": "5d2aa49234ce9f939248b8a934711c0f715fb203d8464d6204858dba2e27a8ec",
+      "live_blocks_sha256": "0895e0f12aff1af6e3c83c0a699a7a3c36ed15ff06d263d59a1a8977c7e78761",
+      "outcome": "refuted",
+      "fixture_ids": [
+        "live-paper:provider-horizon@f8de7acedb8a6219954695eefcfb6ec4",
+        "survey-report:PPCC2-S041@a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+        "probe-output:PPCC2-V020"
+      ],
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"preview\", \"rev\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true blocks_hash_match=false expected_blocks_sha256=0895e0f12aff1af6e3c83c0a699a7a3c36ed15ff06d263d59a1a8977c7e78761 observed_blocks_sha256=7abb563f871f0fde95e250b7d2d2239e6d5d91d416b210e6f87860086ff7973e",
+      "survey_outcome_assessment": "The pinned Survey disposition repair is constrained by a concrete reader/projection failure found by this probe.",
+      "residual_risk": "The read-only production query returned the pinned revision with a different normalized blocks digest, so the frozen reader/source boundary is not replay-stable.",
+      "rationale": "Personally executed the cli-api read-only probe against provider-horizon at immutable revision f8de7acedb8a6219954695eefcfb6ec4 and its hash-pinned Survey row; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"preview\", \"rev\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true blocks_hash_match=false expected_blocks_sha256=0895e0f12aff1af6e3c83c0a699a7a3c36ed15ff06d263d59a1a8977c7e78761 observed_blocks_sha256=7abb563f871f0fde95e250b7d2d2239e6d5d91d416b210e6f87860086ff7973e.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:provider-horizon@f8de7acedb8a6219954695eefcfb6ec4",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=provider-horizon]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=false expected_blocks_sha256=0895e0f12aff1af6e3c83c0a699a7a3c36ed15ff06d263d59a1a8977c7e78761 observed_blocks_sha256=7abb563f871f0fde95e250b7d2d2239e6d5d91d416b210e6f87860086ff7973e; raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"preview\", \"rev\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true blocks_hash_match=false expected_blocks_sha256=0895e0f12aff1af6e3c83c0a699a7a3c36ed15ff06d263d59a1a8977c7e78761 observed_blocks_sha256=7abb563f871f0fde95e250b7d2d2239e6d5d91d416b210e6f87860086ff7973e"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S041@a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/report.json#unit_verdicts[unit_id=paper:provider-horizon]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V020",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V020/probe-output.json#unit_results[unit_id=paper:provider-horizon]",
+          "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"preview\", \"rev\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true blocks_hash_match=false expected_blocks_sha256=0895e0f12aff1af6e3c83c0a699a7a3c36ed15ff06d263d59a1a8977c7e78761 observed_blocks_sha256=7abb563f871f0fde95e250b7d2d2239e6d5d91d416b210e6f87860086ff7973e"
+        }
+      ]
+    }
+  ],
+  "personal_verification_attestation": {
+    "worker": "worker-2",
+    "agent_type": "epic-verifier",
+    "personally_verified_all_final_rows": true,
+    "helpers_used_only_for_non_counting_preparation": true
+  },
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "root_task_mutated": false,
+    "source_mutated": false
+  }
+}

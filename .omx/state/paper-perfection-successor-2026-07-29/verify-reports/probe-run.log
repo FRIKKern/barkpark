@@ -1,0 +1,125 @@
+{
+  "valid": true,
+  "worker": "worker-2",
+  "assignment_count": 10,
+  "unit_count": 190,
+  "outcome_counts": {
+    "proven": 91,
+    "refuted": 50,
+    "carried_risk": 49
+  },
+  "production_snapshot_sha256": "a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786",
+  "reports": [
+    {
+      "assignment_id": "PPCC2-V011",
+      "claim_id": "tui-80",
+      "unit_count": 19,
+      "verdict": "refuted",
+      "outcome_counts": {
+        "proven": 18,
+        "refuted": 1
+      },
+      "report_sha256": "02678522f35d9632c9af2445684c1cd580e2842f6adf0ad3d5e48494b1b2d2bb"
+    },
+    {
+      "assignment_id": "PPCC2-V012",
+      "claim_id": "tui-80",
+      "unit_count": 19,
+      "verdict": "refuted",
+      "outcome_counts": {
+        "proven": 16,
+        "refuted": 3
+      },
+      "report_sha256": "61bb7cda62c3aaba5d5a751422515c6998f7716cf29041926dbfd3a64b5376d2"
+    },
+    {
+      "assignment_id": "PPCC2-V013",
+      "claim_id": "email-reader",
+      "unit_count": 19,
+      "verdict": "proven",
+      "outcome_counts": {
+        "proven": 19
+      },
+      "report_sha256": "1cdf2473d4c46bd26dd821ba867d30443f54b9b6bc653aabf104973d822a5bfb"
+    },
+    {
+      "assignment_id": "PPCC2-V014",
+      "claim_id": "email-reader",
+      "unit_count": 19,
+      "verdict": "proven",
+      "outcome_counts": {
+        "proven": 19
+      },
+      "report_sha256": "67b8cef383b7ac4db5db03b09385abab509b2a9205004fb4db83fd17f94d4659"
+    },
+    {
+      "assignment_id": "PPCC2-V015",
+      "claim_id": "email-reader",
+      "unit_count": 19,
+      "verdict": "proven",
+      "outcome_counts": {
+        "proven": 19
+      },
+      "report_sha256": "6509e651e366e9b1906c74472834a0ead2638546788eab5e8c06674c4b498991"
+    },
+    {
+      "assignment_id": "PPCC2-V016",
+      "claim_id": "public-reader",
+      "unit_count": 19,
+      "verdict": "refuted",
+      "outcome_counts": {
+        "carried_risk": 16,
+        "refuted": 3
+      },
+      "report_sha256": "93bbb4887337eed2114555b3df3646d798d74d7212c306976685843214dbb679"
+    },
+    {
+      "assignment_id": "PPCC2-V017",
+      "claim_id": "public-reader",
+      "unit_count": 19,
+      "verdict": "refuted",
+      "outcome_counts": {
+        "carried_risk": 17,
+        "refuted": 2
+      },
+      "report_sha256": "f0f9e615d60650fa7b31641ef88d3363d3fd9b5ad0df299680737d8f44b61efa"
+    },
+    {
+      "assignment_id": "PPCC2-V018",
+      "claim_id": "public-reader",
+      "unit_count": 19,
+      "verdict": "refuted",
+      "outcome_counts": {
+        "carried_risk": 16,
+        "refuted": 3
+      },
+      "report_sha256": "28ca9dd7cf04abc1e688a8eb550e20282020817243c8107f104395ad2231a29a"
+    },
+    {
+      "assignment_id": "PPCC2-V019",
+      "claim_id": "cli-api",
+      "unit_count": 19,
+      "verdict": "refuted",
+      "outcome_counts": {
+        "refuted": 19
+      },
+      "report_sha256": "815846c56f45bf5f33258f62ef430fdc4651d10d3531f72cd13d3825fa962281"
+    },
+    {
+      "assignment_id": "PPCC2-V020",
+      "claim_id": "cli-api",
+      "unit_count": 19,
+      "verdict": "refuted",
+      "outcome_counts": {
+        "refuted": 19
+      },
+      "report_sha256": "d4d30fdb8fb7361f00e03ed883a20aef15f8b5635784d1a0258c786f5929e592"
+    }
+  ],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "root_task_mutated": false,
+    "source_mutated": false
+  }
+}

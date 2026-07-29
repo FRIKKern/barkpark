@@ -1,0 +1,124 @@
+{
+  "schema_version": "paper-perfection-successor-verify-validation/v1",
+  "valid": true,
+  "scope": "worker_lane",
+  "verify_assignment_map_sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76",
+  "verify_lanes_sha256": "4cfc5040fa9b8ea8006527a58b7238fc81ad96e2ab71b7349365cf14ce275379",
+  "validator_sha256": "c8a0b470ed45980559395d1781b0df556a4d581b967d39cf3e933f74228022a2",
+  "assignment_count": 10,
+  "unit_count": 190,
+  "unique_unit_count": 190,
+  "outcome_counts": {
+    "proven": 91,
+    "refuted": 50,
+    "carried_risk": 49
+  },
+  "validation_index_path": "/Volumes/SATECHI/github/barkpark/.omx/team/execute-exact-ppcc2-v-263c172a/worktrees/worker-2/.omx/state/paper-perfection-successor-2026-07-29/verify-reports/validation-PPCC2-V011-PPCC2-V020.json",
+  "reports": [
+    {
+      "assignment_id": "PPCC2-V011",
+      "worker": "worker-2",
+      "claim_id": "tui-80",
+      "unit_count": 19,
+      "report_sha256": "02678522f35d9632c9af2445684c1cd580e2842f6adf0ad3d5e48494b1b2d2bb",
+      "outcome_counts": {
+        "proven": 18,
+        "refuted": 1
+      }
+    },
+    {
+      "assignment_id": "PPCC2-V012",
+      "worker": "worker-2",
+      "claim_id": "tui-80",
+      "unit_count": 19,
+      "report_sha256": "61bb7cda62c3aaba5d5a751422515c6998f7716cf29041926dbfd3a64b5376d2",
+      "outcome_counts": {
+        "proven": 16,
+        "refuted": 3
+      }
+    },
+    {
+      "assignment_id": "PPCC2-V013",
+      "worker": "worker-2",
+      "claim_id": "email-reader",
+      "unit_count": 19,
+      "report_sha256": "1cdf2473d4c46bd26dd821ba867d30443f54b9b6bc653aabf104973d822a5bfb",
+      "outcome_counts": {
+        "proven": 19
+      }
+    },
+    {
+      "assignment_id": "PPCC2-V014",
+      "worker": "worker-2",
+      "claim_id": "email-reader",
+      "unit_count": 19,
+      "report_sha256": "67b8cef383b7ac4db5db03b09385abab509b2a9205004fb4db83fd17f94d4659",
+      "outcome_counts": {
+        "proven": 19
+      }
+    },
+    {
+      "assignment_id": "PPCC2-V015",
+      "worker": "worker-2",
+      "claim_id": "email-reader",
+      "unit_count": 19,
+      "report_sha256": "6509e651e366e9b1906c74472834a0ead2638546788eab5e8c06674c4b498991",
+      "outcome_counts": {
+        "proven": 19
+      }
+    },
+    {
+      "assignment_id": "PPCC2-V016",
+      "worker": "worker-2",
+      "claim_id": "public-reader",
+      "unit_count": 19,
+      "report_sha256": "93bbb4887337eed2114555b3df3646d798d74d7212c306976685843214dbb679",
+      "outcome_counts": {
+        "carried_risk": 16,
+        "refuted": 3
+      }
+    },
+    {
+      "assignment_id": "PPCC2-V017",
+      "worker": "worker-2",
+      "claim_id": "public-reader",
+      "unit_count": 19,
+      "report_sha256": "f0f9e615d60650fa7b31641ef88d3363d3fd9b5ad0df299680737d8f44b61efa",
+      "outcome_counts": {
+        "carried_risk": 17,
+        "refuted": 2
+      }
+    },
+    {
+      "assignment_id": "PPCC2-V018",
+      "worker": "worker-2",
+      "claim_id": "public-reader",
+      "unit_count": 19,
+      "report_sha256": "28ca9dd7cf04abc1e688a8eb550e20282020817243c8107f104395ad2231a29a",
+      "outcome_counts": {
+        "carried_risk": 16,
+        "refuted": 3
+      }
+    },
+    {
+      "assignment_id": "PPCC2-V019",
+      "worker": "worker-2",
+      "claim_id": "cli-api",
+      "unit_count": 19,
+      "report_sha256": "815846c56f45bf5f33258f62ef430fdc4651d10d3531f72cd13d3825fa962281",
+      "outcome_counts": {
+        "refuted": 19
+      }
+    },
+    {
+      "assignment_id": "PPCC2-V020",
+      "worker": "worker-2",
+      "claim_id": "cli-api",
+      "unit_count": 19,
+      "report_sha256": "d4d30fdb8fb7361f00e03ed883a20aef15f8b5635784d1a0258c786f5929e592",
+      "outcome_counts": {
+        "refuted": 19
+      }
+    }
+  ]
+}
