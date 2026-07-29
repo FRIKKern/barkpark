@@ -22,7 +22,7 @@
 # NO BEAM, NO DEPS, NO NETWORK. Pure text over the baseline plus the sources it
 # names — ~1s — which is why it runs in the BLOCKING job next to the overlap
 # ratchet, not in the advisory Sobelow job. BOTH its `--selftest` and its run
-# against the real baseline are BLOCKING as of wave 24. It was reporting-only
+# against the real baseline are BLOCKING as of wave 24. It ran without blocking
 # while the residue was non-zero (50 stale on main 2026-07-28, 31 after wave 23
 # S1) because a step that reds on arrival would have turned a green, meaningful
 # job permanently red; wave 24 deleted the 32 dead rows (89 -> 57), the residue
