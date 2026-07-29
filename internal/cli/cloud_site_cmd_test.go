@@ -1675,6 +1675,45 @@ func TestCloudSitePrebuiltRefusesAResumeThatCannotAcceptBytes(t *testing.T) {
 	}
 }
 
+// TestRunCloudSiteSettingsPrebuiltEnabled: the control plane refuses
+// {"source":"prebuilt"} until the SITE opts in, so without this flag the whole
+// lane is unreachable from bp — the 422 would have no answer in the CLI. Both
+// polarities PATCH a real boolean (not the string the flag arrives as).
+func TestRunCloudSiteSettingsPrebuiltEnabled(t *testing.T) {
+	const siteJSON = `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","prebuilt_enabled":true}}`
+
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, siteJSON}
+	cp.patchResp = fakeResp{200, siteJSON}
+	cp.serve()
+
+	_, stderr, code := runSite(t, "table", "settings", testSiteID, "--prebuilt-enabled", "true")
+	if code != exitOK {
+		t.Fatalf("settings exit=%d want 0\n%s", code, stderr)
+	}
+	if !bytes.Contains(cp.patchBody, []byte(`"prebuilt_enabled":true`)) {
+		t.Fatalf("settings must PATCH a boolean prebuilt_enabled: %s", cp.patchBody)
+	}
+
+	cp2 := newSiteCP(t)
+	cp2.getResp = fakeResp{200, siteJSON}
+	cp2.patchResp = fakeResp{200, siteJSON}
+	cp2.serve()
+	if _, _, code = runSite(t, "table", "settings", testSiteID, "--prebuilt-enabled", "false"); code != exitOK {
+		t.Fatalf("settings --prebuilt-enabled false exit=%d want 0", code)
+	}
+	if !bytes.Contains(cp2.patchBody, []byte(`"prebuilt_enabled":false`)) {
+		t.Fatalf("settings must PATCH false, not omit it: %s", cp2.patchBody)
+	}
+
+	cp3 := newSiteCP(t)
+	cp3.serve()
+	stdout, stderr, code := runSite(t, "table", "settings", testSiteID, "--prebuilt-enabled", "maybe")
+	if code != exitUsage {
+		t.Fatalf("a non-boolean must be a usage error, got exit=%d\n%s%s", code, stdout, stderr)
+	}
+}
+
 // TestCloudSiteDeploymentFlagNeedsPrebuilt: --deployment alone is a usage error,
 // not a silently ignored flag.
 func TestCloudSiteDeploymentFlagNeedsPrebuilt(t *testing.T) {

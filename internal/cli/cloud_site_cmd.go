@@ -931,8 +931,8 @@ func renderSiteDeleted(out *writer, ref string, res cloudclient.SiteDeleteResult
 // change is an honest usage error. The new values take effect on the NEXT
 // deploy — the receipt says so.
 func runCloudSiteSettings(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site settings <site> [--theme evergreen|ember|fjord|charple] [--doc-type <type>]"
-	a, err := parseHzArgs(args, []string{"theme", "doc-type"}, nil, usage)
+	const usage = "bp cloud site settings <site> [--theme evergreen|ember|fjord|charple] [--doc-type <type>] [--prebuilt-enabled true|false]"
+	a, err := parseHzArgs(args, []string{"theme", "doc-type", "prebuilt-enabled"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -948,9 +948,23 @@ func runCloudSiteSettings(out *writer, g globals, args []string) int {
 	if v := strings.TrimSpace(a.val("doc-type")); v != "" {
 		patch["doc_type"] = v
 	}
+	// The per-site opt-in for `--prebuilt` deploys. Without a flag here the
+	// control plane's `prebuilt_not_enabled` 422 would be unanswerable from bp:
+	// the lane exists and nothing in the CLI could turn it on.
+	if v := strings.TrimSpace(a.val("prebuilt-enabled")); v != "" {
+		switch strings.ToLower(v) {
+		case "true", "yes", "on", "1":
+			patch["prebuilt_enabled"] = true
+		case "false", "no", "off", "0":
+			patch["prebuilt_enabled"] = false
+		default:
+			return useError(out, "usage",
+				fmt.Sprintf("--prebuilt-enabled wants true or false, got %q (usage: %s)", v, usage), exitUsage)
+		}
+	}
 	if len(patch) == 0 {
 		return useError(out, "usage",
-			"nothing to change — pass --theme and/or --doc-type (usage: "+usage+")", exitUsage)
+			"nothing to change — pass --theme, --doc-type and/or --prebuilt-enabled (usage: "+usage+")", exitUsage)
 	}
 
 	cfg, ok := siteCloudConfig(out, "update a site's settings")
@@ -1361,7 +1375,7 @@ USAGE
   bp cloud site status    <site>
   bp cloud site open       <site> [--print-only]
   bp cloud site preflight [--dir <path>] [--skip-build]
-  bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>]
+  bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>] [--prebuilt-enabled true|false]
 
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
   builds and serves on that box). List yours with 'bp cloud status'.
@@ -1380,7 +1394,8 @@ USAGE
   HEALTH asserts that marker by value — so build with those exports and then ship
   to THAT deployment with --deployment <id>, which the refusal prints for you
   (a prebuilt mint is nonced, so a plain re-run would mint a new id and refuse
-  again). Secrets (.env*) and .git are never packed.
+  again). Secrets (.env*) and .git are never packed. The site must opt in first:
+  bp cloud site settings <site> --prebuilt-enabled true
   --force re-runs a build even when content and config are unchanged — it folds a
   fresh nonce so a new release is minted instead of the cached deployment.
   --deploy on create is the one-motion: it chains straight into the deploy stream
