@@ -1,0 +1,457 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S047",
+  "assignment_snapshot_sha256": "8d9c603967990369e18a34eea6adbea96eddd12f2ae4af332e90ea25871a340f",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 16,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "83dc8c1aa81c05b061eb5e6654767e159f2689b9ecc975726d5d509d54a49438"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read: 667 native top-level blocks plus one 10,281-character legacy-HTML paper (19 semantic units). Keep 5, repair 1, and mark 3 superseded. The deployed round-trip and scrim waves are the current inspector authorities; the native SSP visual addendum replaces its legacy reader entry point; the desk advance replaces the founding in-flight paper; and Studio Premium needs its promised terminal Review/debrief.",
+  "verdict_counts": {
+    "keep": 5,
+    "repair": 1,
+    "superseded": 3
+  },
+  "checked_unit_ids": [
+    "paper:spd-inspector-successor-wave-2026-07-20",
+    "paper:spd-round-trip-fidelity-wave-2026-07-21",
+    "paper:spd-standard-scrim-crush-wave-2026-07-21",
+    "paper:ssp-visual-addendum",
+    "paper:ssp-w2-visual-addendum-evidence",
+    "paper:studio-chat-w12-wave-2026-07-10",
+    "paper:studio-premium-wave-2026-07-14",
+    "paper:studio-responsive-desk-wave-2026-07-19",
+    "paper:studio-space-priority-desk-advance-2026-07-19"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 667,
+    "legacy_html_documents_read": 1,
+    "legacy_html_semantic_units_read": 19,
+    "legacy_html_chars_read": 10281,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:spd-round-trip-fidelity-wave-2026-07-21 blocks[46]",
+      "evidence": "Review repeats the full deployed sweep after hardening the instrument and preserves the 27/27 result."
+    },
+    {
+      "block_ref": "paper:spd-standard-scrim-crush-wave-2026-07-21 blocks[96]",
+      "evidence": "The final two fixes remove both the invalid compound state and the harmful paint if it recurs."
+    },
+    {
+      "block_ref": "paper:ssp-visual-addendum blocks[3]",
+      "evidence": "The visual story declares live environment and non-mockup provenance before its screenshot sequence."
+    },
+    {
+      "block_ref": "paper:studio-chat-w12-wave-2026-07-10 blocks[34]",
+      "evidence": "Review attacks determinism and lifecycle defects rather than merely repeating slice gates."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:spd-inspector-successor-wave-2026-07-20 blocks[209]",
+      "evidence": "Repeated missing charter authority and a thin non-browser instrument gate undermine terminality.",
+      "lesson": "Use the later deployed papers for current status."
+    },
+    {
+      "block_ref": "paper:ssp-w2-visual-addendum-evidence body_html[18]",
+      "evidence": "The pristine workspace state was not captured live and rests on combined API/config evidence.",
+      "lesson": "Keep composite proof distinct from screenshot proof."
+    },
+    {
+      "block_ref": "paper:studio-premium-wave-2026-07-14 blocks[68]",
+      "evidence": "The paper ends by promising a Review fold that is absent.",
+      "lesson": "Living wave papers need terminal outcome sections."
+    },
+    {
+      "block_ref": "paper:studio-responsive-desk-wave-2026-07-19 blocks[39]",
+      "evidence": "The founding paper ends with round one still in flight.",
+      "lesson": "Route current readers to the later advance/debrief."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "studio-responsive-desk-wave-2026-07-19",
+        "studio-space-priority-desk-advance-2026-07-19",
+        "spd-inspector-successor-wave-2026-07-20",
+        "spd-round-trip-fidelity-wave-2026-07-21",
+        "spd-standard-scrim-crush-wave-2026-07-21"
+      ],
+      "basis": "They are a chronological authority chain for one desk/inspector epic: founding design, round-one advance, inspector shape, deployed round trip, and final standard scrim closure.",
+      "disposition": "Do not merge immutable wave ledgers. Mark the founding and inspector predecessor superseded for current status, preserve them as history, and link readers through the later deployed authorities."
+    },
+    {
+      "candidate_set": [
+        "ssp-visual-addendum",
+        "ssp-w2-visual-addendum-evidence"
+      ],
+      "basis": "They document the same five deployed visual states; the native paper is the accessible gallery, while the legacy companion adds build/gate provenance and deeper structural observations.",
+      "disposition": "Use the native paper as canonical reader entry point; retain the legacy artifact only as dated supporting evidence or migrate its unique provenance into a linked appendix."
+    },
+    {
+      "candidate_set": [
+        "studio-chat-w12-wave-2026-07-10",
+        "studio-premium-wave-2026-07-14"
+      ],
+      "basis": "Both improve Studio interaction quality, but Chat W12 owns agent capability/orchestration while Premium W5 owns editor/navigation/action polish.",
+      "disposition": "Do not merge; add epic/purpose subtitles and repair only Premium’s missing terminal debrief."
+    }
+  ],
+  "reader_risks": [
+    "Studio: surface the current outcome, date, predecessor/successor relation, and one caveat before long wave ledgers; keep image alt text and collapse branch detail.",
+    "TUI80: wrap proof matrices and branch ledgers, preserve block order, and render legacy HTML as bounded semantic paragraphs rather than a raw tag stream.",
+    "email: send the verdict, current status, one decisive proof, one residual, and a link; omit commands, task ids, branch names, and full matrices.",
+    "public: remove internal hosts, deployment slots, commit/PR/task identifiers, credential paths, and operational topology; distinguish shipped, merged, deployed, and modeled claims.",
+    "CLI/API: preserve exact ids/revisions, widths, counts, lifecycle states, gate totals, and the difference between source proof, modeled proof, and deployed-browser proof."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:spd-inspector-successor-wave-2026-07-20",
+      "document_id": "spd-inspector-successor-wave-2026-07-20",
+      "document_rev": "44ce6ce860011494d225c553c018b436",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-10 execution and review ledger establishing the user-opened inspector tier ladder, summoned narrow destination, rule-deletion fidelity harness, and a round-trip-capable measurement instrument.",
+      "opening_and_criteria": "The wish and tier direction are explicit, and the terminal debrief states four round-one slices green while preserving deliberately deferred rounds.",
+      "outline_and_hierarchy": "A very long but complete living wave record moves through ground truth, decisions, builds, review corrections, ledger audit, grade, and sequenced next wave.",
+      "human_voice_and_precision": "The review is unusually candid: it leaves a false charter-commit claim standing, names the unexercised browser surface, and records the round-trip zero-byte bug rather than polishing the history.",
+      "compression_and_restraint": "Preserve as immutable Wave-10 evidence, but route current desk/inspector truth through the later deployed round-trip and standard-scrim papers; add a compact successor banner.",
+      "evidence_and_truth": "blocks[193]-[211] distinguish shipped source shape, reviewer repairs, lack of deployed proof, escapability debt, and the exact dependency order for later waves.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[195]",
+          "evidence": "The ladder slice keeps the old 40-cell lock load-bearing through an additive-arity equivalence bridge and mutation-proves the new tier clause.",
+          "lesson": "Preserve predecessor invariants while extending the state model."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[209]",
+          "evidence": "The grade records a repeated missing-charter-citation failure, an almost non-existent gate around the largest instrument diff, and the still-unfinished deployed measurement.",
+          "lesson": "Do not let a rich source-level ledger masquerade as the terminal deployed verdict."
+        }
+      ],
+      "duplicate_disposition": "Superseded for current status by spd-round-trip-fidelity-wave-2026-07-21 and spd-standard-scrim-crush-wave-2026-07-21; retain as the Wave-10 implementation receipt.",
+      "reader_risks": [
+        "Studio: surface the current outcome, date, predecessor/successor relation, and one caveat before long wave ledgers; keep image alt text and collapse branch detail.",
+        "TUI80: wrap proof matrices and branch ledgers, preserve block order, and render legacy HTML as bounded semantic paragraphs rather than a raw tag stream.",
+        "email: send the verdict, current status, one decisive proof, one residual, and a link; omit commands, task ids, branch names, and full matrices.",
+        "public: remove internal hosts, deployment slots, commit/PR/task identifiers, credential paths, and operational topology; distinguish shipped, merged, deployed, and modeled claims.",
+        "CLI/API: preserve exact ids/revisions, widths, counts, lifecycle states, gate totals, and the difference between source proof, modeled proof, and deployed-browser proof."
+      ],
+      "rationale": "Superseded because later papers execute the deployed round trip and close the remaining standard-bucket scrim defect that this wave explicitly deferred."
+    },
+    {
+      "unit_id": "paper:spd-round-trip-fidelity-wave-2026-07-21",
+      "document_id": "spd-round-trip-fidelity-wave-2026-07-21",
+      "document_rev": "0808aedd0ea991657ccd19a6794124b2",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Terminal deployed-fidelity wave proving that default → open → dismiss returns the reading surface bit-identically across the inspector matrix.",
+      "opening_and_criteria": "The opening immediately answers the long-standing question with 27/27 deployed cells, four authenticated sweeps, exact widths, faces, SHA, and bracket state.",
+      "outline_and_hierarchy": "Headline result, per-assignment proof/refutation, decisions, plan, adversarial review, ledger audit, grade, and merge instructions form a complete terminal evidence story.",
+      "human_voice_and_precision": "The paper separates a true round-trip pass from a changed absolute 1280 geometry and openly records two cross-slice guards that would otherwise have gone vacuously green.",
+      "compression_and_restraint": "Keep as deployed round-trip authority; surface the 27/27 result and the 1280 geometry caveat first, while collapsing the branch-heavy middle for ordinary readers.",
+      "evidence_and_truth": "blocks[4]-[8] and [45]-[64] preserve exact deployed counts, repeatability, reviewer repairs, residual merge work, and the distinction between fidelity and absolute geometry.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[46]",
+          "evidence": "Review re-runs three full authenticated sweeps after hardening the instrument and confirms 27/27 bit-identical cells against one served SHA.",
+          "lesson": "A terminal claim should survive adversarial reruns after its measurement preconditions are strengthened."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[62]",
+          "evidence": "The grade docks a latent cross-slice vacuous guard, a headline-metric withdrawal hole left by its builder, and a seventh recurrence of the stranded-charter problem.",
+          "lesson": "Green results need integration-aware guards and committed decision authority."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from the inspector predecessor and scrim successor: this paper uniquely owns deployed round-trip fidelity, not general desk history or scrim closure.",
+      "reader_risks": [
+        "Studio: surface the current outcome, date, predecessor/successor relation, and one caveat before long wave ledgers; keep image alt text and collapse branch detail.",
+        "TUI80: wrap proof matrices and branch ledgers, preserve block order, and render legacy HTML as bounded semantic paragraphs rather than a raw tag stream.",
+        "email: send the verdict, current status, one decisive proof, one residual, and a link; omit commands, task ids, branch names, and full matrices.",
+        "public: remove internal hosts, deployment slots, commit/PR/task identifiers, credential paths, and operational topology; distinguish shipped, merged, deployed, and modeled claims.",
+        "CLI/API: preserve exact ids/revisions, widths, counts, lifecycle states, gate totals, and the difference between source proof, modeled proof, and deployed-browser proof."
+      ],
+      "rationale": "Keep because it is deployed, repeated, falsifiable, self-correcting, and explicit about the one absolute-geometry finding that is not a round-trip failure."
+    },
+    {
+      "unit_id": "paper:spd-standard-scrim-crush-wave-2026-07-21",
+      "document_id": "spd-standard-scrim-crush-wave-2026-07-21",
+      "document_rev": "9004955fa6115fd5250b9b6ede2b224f",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-15 ledger eliminating the last reachable standard-bucket prose crush through an identity-gated secondary-pane clear plus a defensive scrim suppressor.",
+      "opening_and_criteria": "The opening locates the remaining compound state precisely and distinguishes clean standard geometry from the secondary-doc state that crosses the container threshold.",
+      "outline_and_hierarchy": "Epic status, exact defect mechanics, invariant-first direction, verification, decisions, two-slice plan, review, ledger audit, grade, and operator seal path are complete.",
+      "human_voice_and_precision": "The prose is precise about belt-and-suspenders intent and does not hide that the CSS proof is a cascade model rather than a live rendered pixel.",
+      "compression_and_restraint": "Keep as the scrim-fix wave authority, but present its modeled-versus-live proof boundary and the operator-only seal steps before implementation detail.",
+      "evidence_and_truth": "blocks[95]-[105] name both shipped halves, reproduce mutation proofs, grade the limits, audit honest merge-gated criteria, and specify the remaining live-render seal.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[96]",
+          "evidence": "Review treats the behavioral clear and CSS suppression as two coherent defenses and reruns both directions of their mutation proofs.",
+          "lesson": "Redundant fixes are justified when they remove both the invalid state and its harmful rendering consequence."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[101]",
+          "evidence": "The grade says the no-scrim claim rests on a faithful cascade model, not a live compound-state pixel, and names an unpinned future-navigation invariant.",
+          "lesson": "Model proof must remain visibly distinct from deployed visual proof."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from round-trip fidelity: this is the later standard-compound scrim authority, while the round-trip paper owns return fidelity across widths/faces.",
+      "reader_risks": [
+        "Studio: surface the current outcome, date, predecessor/successor relation, and one caveat before long wave ledgers; keep image alt text and collapse branch detail.",
+        "TUI80: wrap proof matrices and branch ledgers, preserve block order, and render legacy HTML as bounded semantic paragraphs rather than a raw tag stream.",
+        "email: send the verdict, current status, one decisive proof, one residual, and a link; omit commands, task ids, branch names, and full matrices.",
+        "public: remove internal hosts, deployment slots, commit/PR/task identifiers, credential paths, and operational topology; distinguish shipped, merged, deployed, and modeled claims.",
+        "CLI/API: preserve exact ids/revisions, widths, counts, lifecycle states, gate totals, and the difference between source proof, modeled proof, and deployed-browser proof."
+      ],
+      "rationale": "Keep because it fully records the two minimal fixes, adversarial gates, honest proof boundary, and exact remaining operator seal."
+    },
+    {
+      "unit_id": "paper:ssp-visual-addendum",
+      "document_id": "ssp-visual-addendum",
+      "document_rev": "6fa0e14882aeacc17ee7f4fdb404a537",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Concise native visual addendum showing the tiered Studio desk, enabled-plugin placement, honest Rest census, Workspace Settings, and styleguide across light and dark themes.",
+      "opening_and_criteria": "The ingress establishes live guerrilla provenance and immediately says these are real deployed database-backed states, not mockups.",
+      "outline_and_hierarchy": "Five short state sections repeat heading, explanatory claim, and paired light/dark images, ending with two clearly scoped structural observations.",
+      "human_voice_and_precision": "Captions and alt text make specific claims instead of repeating generic screenshot labels, and the final callout avoids turning unrelated observations into a visual-token failure.",
+      "compression_and_restraint": "Keep as the reader entry point; link the deeper legacy evidence as provenance if retained, and add the exact build/revision stamp from the evidence companion.",
+      "evidence_and_truth": "blocks[3]-[30] provide ten paired screenshots with state-specific claims and openly list the settings-scope and empty-schema feedback risks.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[3]",
+          "evidence": "The ingress states deployed provenance, real database state, five captured states, and no mockups before the image sequence.",
+          "lesson": "Visual evidence should disclose environment and authenticity before asking readers to trust pixels."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[30]",
+          "evidence": "The final callout records wrong-workspace write risk and missing feedback when an enabled plugin has no schema types.",
+          "lesson": "A visual addendum should preserve nearby behavioral risks even when the pixels are on-theme."
+        }
+      ],
+      "duplicate_disposition": "Use as the canonical visual entry point and mark ssp-w2-visual-addendum-evidence superseded for reader navigation; preserve the latter only as deeper dated proof.",
+      "reader_risks": [
+        "Studio: surface the current outcome, date, predecessor/successor relation, and one caveat before long wave ledgers; keep image alt text and collapse branch detail.",
+        "TUI80: wrap proof matrices and branch ledgers, preserve block order, and render legacy HTML as bounded semantic paragraphs rather than a raw tag stream.",
+        "email: send the verdict, current status, one decisive proof, one residual, and a link; omit commands, task ids, branch names, and full matrices.",
+        "public: remove internal hosts, deployment slots, commit/PR/task identifiers, credential paths, and operational topology; distinguish shipped, merged, deployed, and modeled claims.",
+        "CLI/API: preserve exact ids/revisions, widths, counts, lifecycle states, gate totals, and the difference between source proof, modeled proof, and deployed-browser proof."
+      ],
+      "rationale": "Keep because it is native, compact, accessible, visually grounded, and honest about two non-visual defects."
+    },
+    {
+      "unit_id": "paper:ssp-w2-visual-addendum-evidence",
+      "document_id": "ssp-w2-visual-addendum-evidence",
+      "document_rev": "40ff01de62135a19864e177dc215d790",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Legacy-HTML proof companion documenting the same Wave-2 Studio/Structure Polish states with build stamp, live environment, gate results, and deeper structural observations.",
+      "opening_and_criteria": "The opening provides build 8f7489fd, merge/deploy context, capture date, host, viewport, themes, and a direct visual verdict.",
+      "outline_and_hierarchy": "Verdict, five state sections, theme conclusion, and two structural observations are coherent, but the legacy representation duplicates the native addendum and embeds image evidence outside semantic blocks.",
+      "human_voice_and_precision": "The prose is evidence-rich and careful about what was live versus inferred, especially for the fresh-workspace state that could not be photographed directly.",
+      "compression_and_restraint": "Preserve as dated deep proof or migrate its unique provenance into the native addendum; do not leave two competing visual entry points.",
+      "evidence_and_truth": "body_html[1]-[18] records exact capture provenance, visual conclusions, test gates, and two limitations, including the absence of a live pristine-workspace screenshot.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[15]",
+          "evidence": "The token verdict ties live pixels to two green automated gates and explicitly records that no token or exemption file changed.",
+          "lesson": "A no-change conclusion is evidence when the observation and invariant gates are both named."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[18]",
+          "evidence": "The pristine fresh-workspace image could not be captured live; the claimed clean state is assembled from API tree evidence plus settings configuration amid scope inconsistency.",
+          "lesson": "Composite evidence must not be presented with the same certainty as an actual captured state."
+        }
+      ],
+      "duplicate_disposition": "Superseded for reader navigation by ssp-visual-addendum; retain only the unique build/gate provenance and deeper structural findings, preferably through links or a dated appendix.",
+      "reader_risks": [
+        "Studio: surface the current outcome, date, predecessor/successor relation, and one caveat before long wave ledgers; keep image alt text and collapse branch detail.",
+        "TUI80: wrap proof matrices and branch ledgers, preserve block order, and render legacy HTML as bounded semantic paragraphs rather than a raw tag stream.",
+        "email: send the verdict, current status, one decisive proof, one residual, and a link; omit commands, task ids, branch names, and full matrices.",
+        "public: remove internal hosts, deployment slots, commit/PR/task identifiers, credential paths, and operational topology; distinguish shipped, merged, deployed, and modeled claims.",
+        "CLI/API: preserve exact ids/revisions, widths, counts, lifecycle states, gate totals, and the difference between source proof, modeled proof, and deployed-browser proof."
+      ],
+      "rationale": "Superseded because the native addendum is the clearer accessible entry point for the same visual job, while this legacy page should remain only as supporting provenance."
+    },
+    {
+      "unit_id": "paper:studio-chat-w12-wave-2026-07-10",
+      "document_id": "studio-chat-w12-wave-2026-07-10",
+      "document_rev": "177eb0ac353bc3b7fb3d823d9e2b230f",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Closed Studio Chat wave turning the transcript viewer into a capability-aware coworker with Barkpark MCP loopback, native chips, needs-you signaling, notifications, and fork groundwork.",
+      "opening_and_criteria": "The opening defines a concrete product sentence and protects the existing Claude experience with a capability matrix and no-tax render lock.",
+      "outline_and_hierarchy": "Strategy, dependency order, survey/verification evidence, decisions, eight-slice plan, and a full closed-wave review debrief are all present.",
+      "human_voice_and_precision": "The paper corrects its own credential assumption, records reviewer-found defects, and distinguishes the completed in-product strip from the still-unwired email recipient path.",
+      "compression_and_restraint": "Keep as the Wave-12 authority; lead with the closed status and demo-sentence truth table, and collapse raw MCP wire and branch detail for constrained readers.",
+      "evidence_and_truth": "blocks[32]-[38] close all eight slices, document three reviewer repairs, audit ledger truth, name deliberate deferrals, and define the next wave.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[34]",
+          "evidence": "Review catches a compile-SHA-contaminated golden, a non-atomic argv fake, and an unpruned debounce ledger, then reruns final gates.",
+          "lesson": "Adversarial review should attack test determinism and operational lifetime, not only feature behavior."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[37]",
+          "evidence": "The demo sentence remains one recipient-wiring task short of an email ping, and cron installation and hands-state UI are explicitly deferred.",
+          "lesson": "Product narratives must distinguish an in-app signal from a fully wired outbound notification loop."
+        }
+      ],
+      "duplicate_disposition": "Distinct from premium and desk waves: it owns chat capability and orchestration surfaces, not general Studio polish or pane geometry.",
+      "reader_risks": [
+        "Studio: surface the current outcome, date, predecessor/successor relation, and one caveat before long wave ledgers; keep image alt text and collapse branch detail.",
+        "TUI80: wrap proof matrices and branch ledgers, preserve block order, and render legacy HTML as bounded semantic paragraphs rather than a raw tag stream.",
+        "email: send the verdict, current status, one decisive proof, one residual, and a link; omit commands, task ids, branch names, and full matrices.",
+        "public: remove internal hosts, deployment slots, commit/PR/task identifiers, credential paths, and operational topology; distinguish shipped, merged, deployed, and modeled claims.",
+        "CLI/API: preserve exact ids/revisions, widths, counts, lifecycle states, gate totals, and the difference between source proof, modeled proof, and deployed-browser proof."
+      ],
+      "rationale": "Keep because it is a complete, reviewed, self-correcting wave record with explicit shipped/deferred boundaries."
+    },
+    {
+      "unit_id": "paper:studio-premium-wave-2026-07-14",
+      "document_id": "studio-premium-wave-2026-07-14",
+      "document_rev": "9999fb34a16b1934c192cb7fe3910a85",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-5 interaction-polish ledger for editor status, navigation semantics, paper-canvas error surfacing, and document-action hierarchy within the existing Studio Premium epic.",
+      "opening_and_criteria": "A post-resume correction clearly rejects the false founding-wave frame and anchors work to the existing charter, epic, and three verified residual slices.",
+      "outline_and_hierarchy": "The paper contains a strong resumed digest and Decide cut, but ends with builders flying and an instruction for Review to append the merged debrief; the terminal outcome is absent.",
+      "human_voice_and_precision": "The correction is candid about the spend-cap interruption and the prior-art search gap, and it avoids claiming the three residual slices shipped.",
+      "compression_and_restraint": "Append the missing Review/debrief or a dated successor link: per-slice final branches, rerun gates, merge/live status, reviewer fixes, ledger audit, grade, and remaining debt.",
+      "evidence_and_truth": "blocks[47]-[68] re-establish current ground truth, prove buildability, amend the canonical charter, cut three slices, and explicitly leave final review for later.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[61]",
+          "evidence": "Decide amends the existing canonical charter instead of forking it and records three file-disjoint, red-to-green-proven slices.",
+          "lesson": "A resumed wave should reconcile authority before dispatching more work."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[68]",
+          "evidence": "The last paragraph says Review will fold merged slices and grade back into the charter, but no Review section or terminal outcome follows.",
+          "lesson": "A living wave paper needs a terminal debrief or an explicit successor pointer before it can serve as current authority."
+        }
+      ],
+      "duplicate_disposition": "Keep distinct from broader Studio chat and desk epics; repair this paper in place with its own missing Wave-5 terminal record.",
+      "reader_risks": [
+        "Studio: surface the current outcome, date, predecessor/successor relation, and one caveat before long wave ledgers; keep image alt text and collapse branch detail.",
+        "TUI80: wrap proof matrices and branch ledgers, preserve block order, and render legacy HTML as bounded semantic paragraphs rather than a raw tag stream.",
+        "email: send the verdict, current status, one decisive proof, one residual, and a link; omit commands, task ids, branch names, and full matrices.",
+        "public: remove internal hosts, deployment slots, commit/PR/task identifiers, credential paths, and operational topology; distinguish shipped, merged, deployed, and modeled claims.",
+        "CLI/API: preserve exact ids/revisions, widths, counts, lifecycle states, gate totals, and the difference between source proof, modeled proof, and deployed-browser proof."
+      ],
+      "rationale": "Repair because its strategy and Decide evidence are strong, but it stops at build dispatch and lacks the promised final review/merge truth."
+    },
+    {
+      "unit_id": "paper:studio-responsive-desk-wave-2026-07-19",
+      "document_id": "studio-responsive-desk-wave-2026-07-19",
+      "document_rev": "c50b444efd1dec8fa53f101027bfcf78",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Founding Wave-1 strategy and Decide ledger for a space-priority Studio desk that protects the active content pane and progressively rails, overlays, or drills surrounding chrome.",
+      "opening_and_criteria": "The opening captures the crushed-reader screenshot problem and sets explicit readable-measure, priority, bucket, and navigation-state goals.",
+      "outline_and_hierarchy": "Ground truth, candidate debate, survey, contradictions, verification, decisions, and wave plan are complete, but the document ends with round one still building.",
+      "human_voice_and_precision": "The direction rejects a tempting CSS-only half-solution and is careful to separate a 720px ceiling from an absent readability floor.",
+      "compression_and_restraint": "Preserve as founding design history; point current status to studio-space-priority-desk-advance-2026-07-19 and later inspector/round-trip/scrim ledgers.",
+      "evidence_and_truth": "blocks[19]-[39] establish live and static crush evidence, harden the state model, cut the wave, and then stop at an in-flight round-one state.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[20]",
+          "evidence": "The digest combines live pixel measurements with CSS mechanics to derive the fixed-chrome total and the approximate viewport break-even.",
+          "lesson": "Responsive strategy is strongest when the threshold comes from both runtime pixels and layout arithmetic."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[39]",
+          "evidence": "The terminal callout says round one is still building and assigns future rounds to a later Review that never appears in this paper.",
+          "lesson": "An in-flight founding paper must not remain the current-status entry point after an advance/debrief paper exists."
+        }
+      ],
+      "duplicate_disposition": "Superseded for current status by studio-space-priority-desk-advance-2026-07-19; retain as the founding wish, alternatives, and D1-D18 context.",
+      "reader_risks": [
+        "Studio: surface the current outcome, date, predecessor/successor relation, and one caveat before long wave ledgers; keep image alt text and collapse branch detail.",
+        "TUI80: wrap proof matrices and branch ledgers, preserve block order, and render legacy HTML as bounded semantic paragraphs rather than a raw tag stream.",
+        "email: send the verdict, current status, one decisive proof, one residual, and a link; omit commands, task ids, branch names, and full matrices.",
+        "public: remove internal hosts, deployment slots, commit/PR/task identifiers, credential paths, and operational topology; distinguish shipped, merged, deployed, and modeled claims.",
+        "CLI/API: preserve exact ids/revisions, widths, counts, lifecycle states, gate totals, and the difference between source proof, modeled proof, and deployed-browser proof."
+      ],
+      "rationale": "Superseded because the later advance paper owns executed and reviewed progress, while this document ends before even round one closes."
+    },
+    {
+      "unit_id": "paper:studio-space-priority-desk-advance-2026-07-19",
+      "document_id": "studio-space-priority-desk-advance-2026-07-19",
+      "document_rev": "4a8f2e57e566bbec52df6fe46969ae81",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Advance wave converting the founding space-priority desk plan into four reviewed round-one slices: chrome measurement, content-floor enforcement, progressive rail, and instrumentation.",
+      "opening_and_criteria": "The opening resumes from the founding wave, names the exact round-one dependency surface, and defines advancement rather than pretending the whole epic seals here.",
+      "outline_and_hierarchy": "Inherited context, verification, decisions, four-slice plan, reviewer fixes, ledger audit, grade, and next-round handoff create a complete advancement record.",
+      "human_voice_and_precision": "The debrief directly retracts the file-disjointness premise after two cross-slice defects and calls out a temporary accessibility regression window and an unidentified flake.",
+      "compression_and_restraint": "Keep as the round-one execution authority; surface its four shipped slices, reviewer coupling fixes, and deferred rounds before the long inherited investigation.",
+      "evidence_and_truth": "blocks[90]-[104] close four green slices, explain two cross-slice defects, record honest residue, grade the wave, and define sequenced round-two/three work.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[91]",
+          "evidence": "The debrief reports four green reviewed slices and immediately names the two cross-slice defects that disproved the original file-disjointness claim.",
+          "lesson": "A wave debrief should update its planning model from integration evidence, not preserve convenient assumptions."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[98]",
+          "evidence": "The review records a deliberate accessibility regression window, CSS claims not proven by gates, and one unidentified flake.",
+          "lesson": "A green wave still needs explicit user-risk and proof-gap accounting."
+        }
+      ],
+      "duplicate_disposition": "Current round-one authority over studio-responsive-desk-wave-2026-07-19; keep later inspector, round-trip, and scrim papers separate as subsequent state-specific waves.",
+      "reader_risks": [
+        "Studio: surface the current outcome, date, predecessor/successor relation, and one caveat before long wave ledgers; keep image alt text and collapse branch detail.",
+        "TUI80: wrap proof matrices and branch ledgers, preserve block order, and render legacy HTML as bounded semantic paragraphs rather than a raw tag stream.",
+        "email: send the verdict, current status, one decisive proof, one residual, and a link; omit commands, task ids, branch names, and full matrices.",
+        "public: remove internal hosts, deployment slots, commit/PR/task identifiers, credential paths, and operational topology; distinguish shipped, merged, deployed, and modeled claims.",
+        "CLI/API: preserve exact ids/revisions, widths, counts, lifecycle states, gate totals, and the difference between source proof, modeled proof, and deployed-browser proof."
+      ],
+      "rationale": "Keep because it advances the founding plan with reviewed execution, repairs integration defects, and hands later rounds forward honestly."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}

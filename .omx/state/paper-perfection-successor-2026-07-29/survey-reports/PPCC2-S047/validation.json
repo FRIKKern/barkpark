@@ -1,0 +1,265 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report-validation/v1",
+  "assignment_id": "PPCC2-S047",
+  "valid": true,
+  "checks": [
+    {
+      "name": "bound-snapshot-sha",
+      "status": "PASS",
+      "evidence": "8d9c603967990369e18a34eea6adbea96eddd12f2ae4af332e90ea25871a340f"
+    },
+    {
+      "name": "source-snapshot-sha",
+      "status": "PASS",
+      "evidence": "83dc8c1aa81c05b061eb5e6654767e159f2689b9ecc975726d5d509d54a49438"
+    },
+    {
+      "name": "bound-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S047",
+        "status": "cyclefleet_bound",
+        "unit_count": 9
+      }
+    },
+    {
+      "name": "immutable-wave-binding",
+      "status": "PASS",
+      "evidence": {
+        "status": "cyclefleet_bound",
+        "wave_id": "paper-perfection-successor-wave-2026-07-29",
+        "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+        "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+        "source_snapshot_sha256": "83dc8c1aa81c05b061eb5e6654767e159f2689b9ecc975726d5d509d54a49438"
+      }
+    },
+    {
+      "name": "report-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S047",
+        "worker": "worker-2"
+      }
+    },
+    {
+      "name": "ordered-checked-unit-ids",
+      "status": "PASS",
+      "evidence": [
+        "paper:spd-inspector-successor-wave-2026-07-20",
+        "paper:spd-round-trip-fidelity-wave-2026-07-21",
+        "paper:spd-standard-scrim-crush-wave-2026-07-21",
+        "paper:ssp-visual-addendum",
+        "paper:ssp-w2-visual-addendum-evidence",
+        "paper:studio-chat-w12-wave-2026-07-10",
+        "paper:studio-premium-wave-2026-07-14",
+        "paper:studio-responsive-desk-wave-2026-07-19",
+        "paper:studio-space-priority-desk-advance-2026-07-19"
+      ]
+    },
+    {
+      "name": "one-verdict-per-unit",
+      "status": "PASS",
+      "evidence": 9
+    },
+    {
+      "name": "verdict-metadata-pinned",
+      "status": "PASS",
+      "evidence": "all document ids and immutable revisions match"
+    },
+    {
+      "name": "allowed-verdicts-and-counts",
+      "status": "PASS",
+      "evidence": {
+        "keep": 5,
+        "repair": 1,
+        "superseded": 3
+      }
+    },
+    {
+      "name": "editorial-dimensions-complete",
+      "status": "PASS",
+      "evidence": [
+        "compression_and_restraint",
+        "duplicate_disposition",
+        "evidence_and_truth",
+        "human_voice_and_precision",
+        "opening_and_criteria",
+        "outline_and_hierarchy",
+        "purpose_and_larger_goal",
+        "rationale"
+      ]
+    },
+    {
+      "name": "specific-existing-evidence-refs",
+      "status": "PASS",
+      "evidence": [
+        {
+          "document_id": "spd-inspector-successor-wave-2026-07-20",
+          "ref": "blocks[195]",
+          "exists": true
+        },
+        {
+          "document_id": "spd-inspector-successor-wave-2026-07-20",
+          "ref": "blocks[209]",
+          "exists": true
+        },
+        {
+          "document_id": "spd-round-trip-fidelity-wave-2026-07-21",
+          "ref": "blocks[46]",
+          "exists": true
+        },
+        {
+          "document_id": "spd-round-trip-fidelity-wave-2026-07-21",
+          "ref": "blocks[62]",
+          "exists": true
+        },
+        {
+          "document_id": "spd-standard-scrim-crush-wave-2026-07-21",
+          "ref": "blocks[96]",
+          "exists": true
+        },
+        {
+          "document_id": "spd-standard-scrim-crush-wave-2026-07-21",
+          "ref": "blocks[101]",
+          "exists": true
+        },
+        {
+          "document_id": "ssp-visual-addendum",
+          "ref": "blocks[3]",
+          "exists": true
+        },
+        {
+          "document_id": "ssp-visual-addendum",
+          "ref": "blocks[30]",
+          "exists": true
+        },
+        {
+          "document_id": "ssp-w2-visual-addendum-evidence",
+          "ref": "body_html[15]",
+          "exists": true
+        },
+        {
+          "document_id": "ssp-w2-visual-addendum-evidence",
+          "ref": "body_html[18]",
+          "exists": true
+        },
+        {
+          "document_id": "studio-chat-w12-wave-2026-07-10",
+          "ref": "blocks[34]",
+          "exists": true
+        },
+        {
+          "document_id": "studio-chat-w12-wave-2026-07-10",
+          "ref": "blocks[37]",
+          "exists": true
+        },
+        {
+          "document_id": "studio-premium-wave-2026-07-14",
+          "ref": "blocks[61]",
+          "exists": true
+        },
+        {
+          "document_id": "studio-premium-wave-2026-07-14",
+          "ref": "blocks[68]",
+          "exists": true
+        },
+        {
+          "document_id": "studio-responsive-desk-wave-2026-07-19",
+          "ref": "blocks[20]",
+          "exists": true
+        },
+        {
+          "document_id": "studio-responsive-desk-wave-2026-07-19",
+          "ref": "blocks[39]",
+          "exists": true
+        },
+        {
+          "document_id": "studio-space-priority-desk-advance-2026-07-19",
+          "ref": "blocks[91]",
+          "exists": true
+        },
+        {
+          "document_id": "studio-space-priority-desk-advance-2026-07-19",
+          "ref": "blocks[98]",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "five-reader-risks",
+      "status": "PASS",
+      "evidence": [
+        "CLI/API",
+        "Studio",
+        "TUI80",
+        "email",
+        "public"
+      ]
+    },
+    {
+      "name": "read-only-mutation-attestation",
+      "status": "PASS",
+      "evidence": {
+        "production_papers_mutated": false,
+        "cyclefleet_mutated": false,
+        "bp_cycle_assign_called": false,
+        "bp_cycle_result_called": false
+      }
+    },
+    {
+      "name": "unvisited-scope-empty",
+      "status": "PASS",
+      "evidence": []
+    },
+    {
+      "name": "readbacks-exact-and-hashed",
+      "status": "PASS",
+      "evidence": "all 9 raw ids/revisions and SHA-256 receipts match"
+    },
+    {
+      "name": "native-and-legacy-representation",
+      "status": "PASS",
+      "evidence": {
+        "native_block_total": 667,
+        "legacy_html_chars": 10281
+      }
+    },
+    {
+      "name": "purpose-based-duplicate-analysis",
+      "status": "PASS",
+      "evidence": [
+        {
+          "candidate_set": [
+            "studio-responsive-desk-wave-2026-07-19",
+            "studio-space-priority-desk-advance-2026-07-19",
+            "spd-inspector-successor-wave-2026-07-20",
+            "spd-round-trip-fidelity-wave-2026-07-21",
+            "spd-standard-scrim-crush-wave-2026-07-21"
+          ],
+          "basis": "They are a chronological authority chain for one desk/inspector epic: founding design, round-one advance, inspector shape, deployed round trip, and final standard scrim closure.",
+          "disposition": "Do not merge immutable wave ledgers. Mark the founding and inspector predecessor superseded for current status, preserve them as history, and link readers through the later deployed authorities."
+        },
+        {
+          "candidate_set": [
+            "ssp-visual-addendum",
+            "ssp-w2-visual-addendum-evidence"
+          ],
+          "basis": "They document the same five deployed visual states; the native paper is the accessible gallery, while the legacy companion adds build/gate provenance and deeper structural observations.",
+          "disposition": "Use the native paper as canonical reader entry point; retain the legacy artifact only as dated supporting evidence or migrate its unique provenance into a linked appendix."
+        },
+        {
+          "candidate_set": [
+            "studio-chat-w12-wave-2026-07-10",
+            "studio-premium-wave-2026-07-14"
+          ],
+          "basis": "Both improve Studio interaction quality, but Chat W12 owns agent capability/orchestration while Premium W5 owns editor/navigation/action polish.",
+          "disposition": "Do not merge; add epic/purpose subtitles and repair only Premium’s missing terminal debrief."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  }
+}
