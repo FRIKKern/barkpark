@@ -1,0 +1,263 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report-validation/v1",
+  "assignment_id": "PPCC2-S035",
+  "valid": true,
+  "checks": [
+    {
+      "name": "bound-snapshot-sha",
+      "status": "PASS",
+      "evidence": "f500ac64e67966c2bf971af0e6304a4cf0bbfda297a9d46810b4c260db77cef0"
+    },
+    {
+      "name": "source-snapshot-sha",
+      "status": "PASS",
+      "evidence": "9f137bde55df51b0ec0317e299cad582e2c0ca4c272e6a4ce0e774aa020e3b18"
+    },
+    {
+      "name": "bound-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S035",
+        "status": "cyclefleet_bound",
+        "unit_count": 9
+      }
+    },
+    {
+      "name": "immutable-wave-binding",
+      "status": "PASS",
+      "evidence": {
+        "status": "cyclefleet_bound",
+        "wave_id": "paper-perfection-successor-wave-2026-07-29",
+        "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+        "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+        "source_snapshot_sha256": "9f137bde55df51b0ec0317e299cad582e2c0ca4c272e6a4ce0e774aa020e3b18"
+      }
+    },
+    {
+      "name": "report-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S035",
+        "worker": "worker-2"
+      }
+    },
+    {
+      "name": "ordered-checked-unit-ids",
+      "status": "PASS",
+      "evidence": [
+        "paper:pds-wave-17-2026-07-21",
+        "paper:pds-wave-18-2026-07-21",
+        "paper:pds-wave-19-2026-07-21",
+        "paper:pds-wave-2-2026-07-19",
+        "paper:pds-wave-20-2026-07-21",
+        "paper:pds-wave-2026-07-19",
+        "paper:pds-wave-21-2026-07-21",
+        "paper:pds-wave-22-2026-07-27",
+        "paper:pds-wave-23-2026-07-28"
+      ]
+    },
+    {
+      "name": "one-verdict-per-unit",
+      "status": "PASS",
+      "evidence": 9
+    },
+    {
+      "name": "verdict-metadata-pinned",
+      "status": "PASS",
+      "evidence": "all document ids and immutable revisions match"
+    },
+    {
+      "name": "allowed-verdicts-and-counts",
+      "status": "PASS",
+      "evidence": {
+        "repair": 1,
+        "superseded": 8
+      }
+    },
+    {
+      "name": "editorial-dimensions-complete",
+      "status": "PASS",
+      "evidence": [
+        "compression_and_restraint",
+        "duplicate_disposition",
+        "evidence_and_truth",
+        "human_voice_and_precision",
+        "opening_and_criteria",
+        "outline_and_hierarchy",
+        "purpose_and_larger_goal",
+        "rationale"
+      ]
+    },
+    {
+      "name": "specific-existing-evidence-refs",
+      "status": "PASS",
+      "evidence": [
+        {
+          "document_id": "pds-wave-17-2026-07-21",
+          "ref": "blocks[10]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-17-2026-07-21",
+          "ref": "blocks[2]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-18-2026-07-21",
+          "ref": "blocks[97]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-18-2026-07-21",
+          "ref": "blocks[92]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-19-2026-07-21",
+          "ref": "blocks[60]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-19-2026-07-21",
+          "ref": "blocks[67]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-2-2026-07-19",
+          "ref": "blocks[64]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-2-2026-07-19",
+          "ref": "blocks[60]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-20-2026-07-21",
+          "ref": "blocks[74]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-20-2026-07-21",
+          "ref": "blocks[76]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-2026-07-19",
+          "ref": "blocks[43]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-2026-07-19",
+          "ref": "blocks[45]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-21-2026-07-21",
+          "ref": "blocks[133]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-21-2026-07-21",
+          "ref": "blocks[131]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-22-2026-07-27",
+          "ref": "blocks[86]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-22-2026-07-27",
+          "ref": "blocks[87]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-23-2026-07-28",
+          "ref": "blocks[144]",
+          "exists": true
+        },
+        {
+          "document_id": "pds-wave-23-2026-07-28",
+          "ref": "blocks[146]",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "five-reader-risks",
+      "status": "PASS",
+      "evidence": [
+        "CLI/API",
+        "Studio",
+        "TUI80",
+        "email",
+        "public"
+      ]
+    },
+    {
+      "name": "read-only-mutation-attestation",
+      "status": "PASS",
+      "evidence": {
+        "production_papers_mutated": false,
+        "cyclefleet_mutated": false,
+        "bp_cycle_assign_called": false,
+        "bp_cycle_result_called": false
+      }
+    },
+    {
+      "name": "unvisited-scope-empty",
+      "status": "PASS",
+      "evidence": []
+    },
+    {
+      "name": "readbacks-exact-and-hashed",
+      "status": "PASS",
+      "evidence": "all 9 raw ids/revisions and SHA-256 receipts match"
+    },
+    {
+      "name": "native-and-legacy-representation",
+      "status": "PASS",
+      "evidence": {
+        "native_block_total": 820
+      }
+    },
+    {
+      "name": "purpose-based-duplicate-analysis",
+      "status": "PASS",
+      "evidence": [
+        {
+          "candidate_set": [
+            "pds-wave-17-2026-07-21",
+            "pds-wave-18-2026-07-21",
+            "pds-wave-19-2026-07-21",
+            "pds-wave-20-2026-07-21",
+            "pds-wave-21-2026-07-21"
+          ],
+          "basis": "Successive crown subgoal stages own different evidence: strategy, moving-source failure, rearm hazards, floor derivation, and final one-run seal. Repeated context is causal lineage, not interchangeable purpose.",
+          "disposition": "Do not merge immutable wave ledgers. Mark 17-20 superseded by successor links; preserve wave 21 as final crown-seal history but superseded for current epic direction."
+        },
+        {
+          "candidate_set": [
+            "pds-wave-2026-07-19",
+            "pds-wave-2-2026-07-19"
+          ],
+          "basis": "Wave 1 builds foundational export/boot/catalog/import surfaces; wave 2 builds the dev dialect and proof instruments. They repeat the deferred crown promise but own different shipped prerequisites.",
+          "disposition": "Keep separate historical records, cross-link the handoff, and route current status to the later sealed-crown authority."
+        },
+        {
+          "candidate_set": [
+            "pds-wave-22-2026-07-27",
+            "pds-wave-23-2026-07-28"
+          ],
+          "basis": "Wave 22 discovers and partially fixes success-without-readback defects; wave 23 explicitly executes its deferred flagship and debts. The latter is the current authority.",
+          "disposition": "Keep both ledgers; mark wave 22 superseded and repair wave 23 as the human-first current entry point."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  }
+}

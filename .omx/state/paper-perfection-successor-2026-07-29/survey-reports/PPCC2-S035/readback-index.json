@@ -1,0 +1,89 @@
+{
+  "schema_version": "paper-perfection-successor-readback-index/v1",
+  "assignment_id": "PPCC2-S035",
+  "count": 9,
+  "all_pinned_revisions_read": true,
+  "reads": [
+    {
+      "unit_id": "paper:pds-wave-17-2026-07-21",
+      "document_id": "pds-wave-17-2026-07-21",
+      "document_rev": "c5fd7713b2e0c9da632dde4e38030772",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S035/readbacks/pds-wave-17-2026-07-21.json",
+      "readback_sha256": "4eccba21783810cd3c1be25995950b63e9607e1f8cbbb5f69dd91b132c6d8d0c",
+      "block_count": 51,
+      "body_html_chars": 20878
+    },
+    {
+      "unit_id": "paper:pds-wave-18-2026-07-21",
+      "document_id": "pds-wave-18-2026-07-21",
+      "document_rev": "5f8f3b8347efb957c3c94072411d653c",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S035/readbacks/pds-wave-18-2026-07-21.json",
+      "readback_sha256": "f6e3d41c5b911835e854783ded4e3df0407b9d8493f0671568009fbc5c2a9bd7",
+      "block_count": 100,
+      "body_html_chars": 40378
+    },
+    {
+      "unit_id": "paper:pds-wave-19-2026-07-21",
+      "document_id": "pds-wave-19-2026-07-21",
+      "document_rev": "a6b51bc6d6424f04f53ba86cadf83e15",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S035/readbacks/pds-wave-19-2026-07-21.json",
+      "readback_sha256": "9edf4cd7318aa822f26adc0cbcd854cc2381fa99ed16b4cff10fb7a93a388a6c",
+      "block_count": 71,
+      "body_html_chars": 30933
+    },
+    {
+      "unit_id": "paper:pds-wave-2-2026-07-19",
+      "document_id": "pds-wave-2-2026-07-19",
+      "document_rev": "be72ae2571ad8eb5fc97209cbffb5554",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S035/readbacks/pds-wave-2-2026-07-19.json",
+      "readback_sha256": "a4ae17558ff447db99900f70a1bd282e2a04f0b3d86b1bea41c5ee4477a3c29b",
+      "block_count": 68,
+      "body_html_chars": 32882
+    },
+    {
+      "unit_id": "paper:pds-wave-20-2026-07-21",
+      "document_id": "pds-wave-20-2026-07-21",
+      "document_rev": "96f7b64999ec3d08ecba9188dd2639b7",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S035/readbacks/pds-wave-20-2026-07-21.json",
+      "readback_sha256": "16c0541af822d6f67215e5c0b84270899cfba14c5e8fc5c9c0947f191e44cb59",
+      "block_count": 83,
+      "body_html_chars": 43634
+    },
+    {
+      "unit_id": "paper:pds-wave-2026-07-19",
+      "document_id": "pds-wave-2026-07-19",
+      "document_rev": "5619b12dd86afe3c7ebc34095fd9b288",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S035/readbacks/pds-wave-2026-07-19.json",
+      "readback_sha256": "9ad9bebd4e4034599bfd2efcbddcfeee475998143fab6f95196bff0e12001058",
+      "block_count": 47,
+      "body_html_chars": 38267
+    },
+    {
+      "unit_id": "paper:pds-wave-21-2026-07-21",
+      "document_id": "pds-wave-21-2026-07-21",
+      "document_rev": "ced814561791ba31a5d6475174999eeb",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S035/readbacks/pds-wave-21-2026-07-21.json",
+      "readback_sha256": "d6128e86d50c75d48ee28833a5594cc1c0dafa0af1e68f36cf98be745e8a35dd",
+      "block_count": 139,
+      "body_html_chars": 47202
+    },
+    {
+      "unit_id": "paper:pds-wave-22-2026-07-27",
+      "document_id": "pds-wave-22-2026-07-27",
+      "document_rev": "04d24c029f240abaa15e37497f3c9d61",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S035/readbacks/pds-wave-22-2026-07-27.json",
+      "readback_sha256": "5da8ffc7510b344a7c2af6311b47e8d0f16cc784cc675decee3b480cb10fca39",
+      "block_count": 93,
+      "body_html_chars": 27673
+    },
+    {
+      "unit_id": "paper:pds-wave-23-2026-07-28",
+      "document_id": "pds-wave-23-2026-07-28",
+      "document_rev": "ca81403646f9af291c96f7517ae9b71a",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S035/readbacks/pds-wave-23-2026-07-28.json",
+      "readback_sha256": "d379cdf02f10f5989e15ccb542fd5915157f2e2273c430399d8cdb607d5a98ea",
+      "block_count": 168,
+      "body_html_chars": 75440
+    }
+  ]
+}

@@ -1,0 +1,455 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S035",
+  "assignment_snapshot_sha256": "f500ac64e67966c2bf971af0e6304a4cf0bbfda297a9d46810b4c260db77cef0",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 12,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "9f137bde55df51b0ec0317e299cad582e2c0ca4c272e6a4ce0e774aa020e3b18"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read across 820 native top-level blocks. Repair the current wave-23 authority and mark eight predecessor wave papers superseded for current status while preserving their immutable evidence. The main corpus defect is not truthfulness: it is chronology presentation. Stale opening statuses, materially corrected debriefs, 90 empty blocks in wave 23, and multi-thousand-character tables make terminal truth harder to find than the evidence warrants.",
+  "verdict_counts": {
+    "repair": 1,
+    "superseded": 8
+  },
+  "checked_unit_ids": [
+    "paper:pds-wave-17-2026-07-21",
+    "paper:pds-wave-18-2026-07-21",
+    "paper:pds-wave-19-2026-07-21",
+    "paper:pds-wave-2-2026-07-19",
+    "paper:pds-wave-20-2026-07-21",
+    "paper:pds-wave-2026-07-19",
+    "paper:pds-wave-21-2026-07-21",
+    "paper:pds-wave-22-2026-07-27",
+    "paper:pds-wave-23-2026-07-28"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 820,
+    "legacy_html_documents_read": 0,
+    "legacy_html_chars_read": 0,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:pds-wave-17-2026-07-21 blocks[10]",
+      "evidence": "Wave 17 measures production safety after the 1.4 GB export rather than assuming it."
+    },
+    {
+      "block_ref": "paper:pds-wave-20-2026-07-21 blocks[74]",
+      "evidence": "Wave 20 mutation-proves both coupled floor controls and rechecks unit arithmetic."
+    },
+    {
+      "block_ref": "paper:pds-wave-21-2026-07-21 blocks[133]",
+      "evidence": "Wave 21's correction gives one-run identity, exact 11/11 denominator, attempt number, and the recovered failing rung."
+    },
+    {
+      "block_ref": "paper:pds-wave-23-2026-07-28 blocks[144]",
+      "evidence": "Wave 23 praises corrections to its own brief and refuses a falsely strong memory claim."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:pds-wave-17-2026-07-21 blocks[2]",
+      "evidence": "The paper remains SURVEYING and ends after dispatch, without a terminal phase.",
+      "lesson": "It can be mistaken for a live wave."
+    },
+    {
+      "block_ref": "paper:pds-wave-18-2026-07-21 blocks[92]",
+      "evidence": "The A− review describes a likely stand-down that blocks[95]-[99] later supersede with a fired FAIL.",
+      "lesson": "Constrained readers may stop at the wrong outcome."
+    },
+    {
+      "block_ref": "paper:pds-wave-21-2026-07-21 blocks[131]",
+      "evidence": "The authoritative correction says the preceding no-fire B-grade debrief is wrong.",
+      "lesson": "Two complete outcomes compete in one reading path."
+    },
+    {
+      "block_ref": "paper:pds-wave-23-2026-07-28 blocks[146]",
+      "evidence": "The current wave admits a thin registry and two unexecuted code paths, while its first COMPLETE status appears only at block[167].",
+      "lesson": "Authority and caveats arrive too late."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "pds-wave-17-2026-07-21",
+        "pds-wave-18-2026-07-21",
+        "pds-wave-19-2026-07-21",
+        "pds-wave-20-2026-07-21",
+        "pds-wave-21-2026-07-21"
+      ],
+      "basis": "Successive crown subgoal stages own different evidence: strategy, moving-source failure, rearm hazards, floor derivation, and final one-run seal. Repeated context is causal lineage, not interchangeable purpose.",
+      "disposition": "Do not merge immutable wave ledgers. Mark 17-20 superseded by successor links; preserve wave 21 as final crown-seal history but superseded for current epic direction."
+    },
+    {
+      "candidate_set": [
+        "pds-wave-2026-07-19",
+        "pds-wave-2-2026-07-19"
+      ],
+      "basis": "Wave 1 builds foundational export/boot/catalog/import surfaces; wave 2 builds the dev dialect and proof instruments. They repeat the deferred crown promise but own different shipped prerequisites.",
+      "disposition": "Keep separate historical records, cross-link the handoff, and route current status to the later sealed-crown authority."
+    },
+    {
+      "candidate_set": [
+        "pds-wave-22-2026-07-27",
+        "pds-wave-23-2026-07-28"
+      ],
+      "basis": "Wave 22 discovers and partially fixes success-without-readback defects; wave 23 explicitly executes its deferred flagship and debts. The latter is the current authority.",
+      "disposition": "Keep both ledgers; mark wave 22 superseded and repair wave 23 as the human-first current entry point."
+    }
+  ],
+  "reader_risks": [
+    "Studio: show the latest authoritative outcome first; collapse phase-by-phase ledgers, internal branch paths, task ids, and large survey tables behind drill-downs.",
+    "TUI80: keep one decision or outcome per screen, replace multi-thousand-character tables with paged summaries, and remove empty spacer blocks.",
+    "email: send outcome, material caveat, and next owner action; link the immutable wave chronology and machine receipts rather than reproducing them.",
+    "public: remove internal paths, hostnames, IPs, branch/PR/task identifiers, operational commands, runtime resource measurements, and mutable deployment state.",
+    "CLI/API: preserve exact wave order, ids, revisions, run ids, denominators, gate states, corrections, and distinctions among planned, built, merged, deployed, fired, and sealed."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:pds-wave-17-2026-07-21",
+      "document_id": "pds-wave-17-2026-07-21",
+      "document_rev": "c5fd7713b2e0c9da632dde4e38030772",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Strategize-only record for a proposed zero-cost crown re-fire after wave 16's partial live climb.",
+      "opening_and_criteria": "The opening states the wish and the then-current 9/12 crown state, but the STATUS: SURVEYING callout remains the only terminal status because Digest and later phases never landed here.",
+      "outline_and_hierarchy": "The direction debate, attacks, and sixteen-question survey plan are unusually explicit; as a document, however, it ends at dispatch rather than outcome.",
+      "human_voice_and_precision": "It speaks candidly about the difference between a partial artifact and a green result and names the single-run attribution ambiguity before spending an attempt.",
+      "compression_and_restraint": "Preserve as strategy provenance, but add a superseded banner and link wave 18; do not present its free-reuse premise or survey status as current.",
+      "evidence_and_truth": "blocks[8]-[10] carry measured wave-16 safety and partial-result evidence, while blocks[23]-[29] expose the load-bearing reuse/fence assumption rather than hiding it.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[10]",
+          "evidence": "Production safety was measured after the 1.4 GB export with HTTP, memory, and OOM evidence.",
+          "lesson": "Measure the protected system after the risky operation rather than infer safety from the harness."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The first status remains SURVEYING and the paper ends after survey dispatch, with no digest, decision, build, or review outcome.",
+          "lesson": "A living paper that stops mid-wave needs an explicit successor and terminal disposition."
+        }
+      ],
+      "duplicate_disposition": "Superseded by pds-wave-18-2026-07-21, which re-measured the reuse premise and executed the next fire attempt; keep this immutable strategy record separate.",
+      "reader_risks": [
+        "Studio: show the latest authoritative outcome first; collapse phase-by-phase ledgers, internal branch paths, task ids, and large survey tables behind drill-downs.",
+        "TUI80: keep one decision or outcome per screen, replace multi-thousand-character tables with paged summaries, and remove empty spacer blocks.",
+        "email: send outcome, material caveat, and next owner action; link the immutable wave chronology and machine receipts rather than reproducing them.",
+        "public: remove internal paths, hostnames, IPs, branch/PR/task identifiers, operational commands, runtime resource measurements, and mutable deployment state.",
+        "CLI/API: preserve exact wave order, ids, revisions, run ids, denominators, gate states, corrections, and distinctions among planned, built, merged, deployed, fired, and sealed."
+      ],
+      "rationale": "Superseded because its planned wave did not advance beyond Strategize and its zero-cost premise was invalidated by later live state."
+    },
+    {
+      "unit_id": "paper:pds-wave-18-2026-07-21",
+      "document_id": "pds-wave-18-2026-07-21",
+      "document_rev": "5f8f3b8347efb957c3c94072411d653c",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Execution record for booting the scratch target, arming a fresh-export crown climb, and honestly classifying its failure under a moving deployment source.",
+      "opening_and_criteria": "The paper gives a strong correction to the free-refire premise early and ends with an authoritative correction, but the earlier review grade and likely-stand-down reading remain in the main flow.",
+      "outline_and_hierarchy": "Strategy, survey, verification, build, review, and dated correction form a complete audit trail; the correction should be elevated above the now-wrong debrief interpretation.",
+      "human_voice_and_precision": "The final correction carefully distinguishes harness/environment failure from engine failure and treats guard refusals as successful honesty mechanisms.",
+      "compression_and_restraint": "Keep the immutable chronology, but front-load blocks[95]-[99] as the terminal outcome and mark the preceding standing-down reading superseded in constrained views.",
+      "evidence_and_truth": "blocks[95]-[99] document draw 70, 7 PASS/2 ABORT/2 FAIL, changing source SHAs, the structural settled-source requirement, and the refusal to stamp anything.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[97]",
+          "evidence": "The two failures and two aborts are traced to an active deploy storm and moving-target guards, not relabeled as an engine defect.",
+          "lesson": "Classify guard-triggered refusal at the boundary it actually proves."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[92]",
+          "evidence": "The grade text says the crown remains 9/12 and is standing down, a reading explicitly superseded minutes later by the fired FAIL correction.",
+          "lesson": "When a detached run finishes after review, current outcome must be promoted above the stale mid-run grade."
+        }
+      ],
+      "duplicate_disposition": "Superseded by waves 19-21 for current crown status; preserve as the failed-fire evidence that motivated settled-source and clean-transcript controls.",
+      "reader_risks": [
+        "Studio: show the latest authoritative outcome first; collapse phase-by-phase ledgers, internal branch paths, task ids, and large survey tables behind drill-downs.",
+        "TUI80: keep one decision or outcome per screen, replace multi-thousand-character tables with paged summaries, and remove empty spacer blocks.",
+        "email: send outcome, material caveat, and next owner action; link the immutable wave chronology and machine receipts rather than reproducing them.",
+        "public: remove internal paths, hostnames, IPs, branch/PR/task identifiers, operational commands, runtime resource measurements, and mutable deployment state.",
+        "CLI/API: preserve exact wave order, ids, revisions, run ids, denominators, gate states, corrections, and distinctions among planned, built, merged, deployed, fired, and sealed."
+      ],
+      "rationale": "Superseded because later waves resolved its blockers and ultimately sealed the crown, while its failure diagnosis remains essential provenance."
+    },
+    {
+      "unit_id": "paper:pds-wave-19-2026-07-21",
+      "document_id": "pds-wave-19-2026-07-21",
+      "document_rev": "a6b51bc6d6424f04f53ba86cadf83e15",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Verification-and-decision record for safely rearming after wave 18 by eliminating stale transcript, ancestry, harness-path, scratch, and budget hazards.",
+      "opening_and_criteria": "The opening announces a verifying wave and the decisive findings arrive in blocks[60]-[66], but the document stops at an in-flight two-round plan without build or review closure.",
+      "outline_and_hierarchy": "The deep round cleanly separates PROVEN from CORRECTED findings and converts them into numbered decisions; terminal execution evidence is absent.",
+      "human_voice_and_precision": "The paper corrects its own ancestry and harness-environment assumptions in direct language, improving trust rather than defending the initial brief.",
+      "compression_and_restraint": "Preserve the verified hazard map, add a superseded banner, and route readers to waves 20-21 for execution and seal outcome.",
+      "evidence_and_truth": "blocks[60]-[66] prove the stale-transcript collision and correct false ancestry, memory, harness, and freeze assumptions before defining the arm plan.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[60]",
+          "evidence": "A re-arm would append to wave 18's failed transcript and collect stale terminal lines; archiving the state dir was proven to preserve the scratch handle.",
+          "lesson": "Inspect persistent state for prior terminal evidence before reusing a run tag."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[67]",
+          "evidence": "The final section is explicitly 'Plan (in flight)' and no build, fire, or review result follows.",
+          "lesson": "A decision paper without a terminal phase must not be read as execution authority."
+        }
+      ],
+      "duplicate_disposition": "Superseded by pds-wave-20-2026-07-21 and pds-wave-21-2026-07-21; retain its hazard corrections as inputs, not current state.",
+      "reader_risks": [
+        "Studio: show the latest authoritative outcome first; collapse phase-by-phase ledgers, internal branch paths, task ids, and large survey tables behind drill-downs.",
+        "TUI80: keep one decision or outcome per screen, replace multi-thousand-character tables with paged summaries, and remove empty spacer blocks.",
+        "email: send outcome, material caveat, and next owner action; link the immutable wave chronology and machine receipts rather than reproducing them.",
+        "public: remove internal paths, hostnames, IPs, branch/PR/task identifiers, operational commands, runtime resource measurements, and mutable deployment state.",
+        "CLI/API: preserve exact wave order, ids, revisions, run ids, denominators, gate states, corrections, and distinctions among planned, built, merged, deployed, fired, and sealed."
+      ],
+      "rationale": "Superseded because later waves implemented the floor and completed the crown, while this paper ends before execution."
+    },
+    {
+      "unit_id": "paper:pds-wave-2-2026-07-19",
+      "document_id": "pds-wave-2-2026-07-19",
+      "document_rev": "be72ae2571ad8eb5fc97209cbffb5554",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Second PDS delivery wave: implement the dev export dialect, scratch harness, and value-based secret scan that later crown proof consumes.",
+      "opening_and_criteria": "The first callout is unusually honest that round 1 completed while the crown proof did not run, and the debrief repeats the boundary with exact deferrals.",
+      "outline_and_hierarchy": "Grounding, verification, corrections, per-slice debrief, and next-wave dispatch make a strong build record, though the very long slice list challenges constrained readers.",
+      "human_voice_and_precision": "The prose practices anti-vacuity: controls must be able to fail, and reviewer-found defects are described concretely rather than buried in grade language.",
+      "compression_and_restraint": "Retain as historical component-delivery authority; add a successor link to the eventual crown seal and collapse the 4,104-character per-slice ledger in primary readers.",
+      "evidence_and_truth": "blocks[56]-[65] record executed gates, reviewer fixes, deliberate deferrals, and the explicit unpaid live-proof claim.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[64]",
+          "evidence": "The grade explains that every deny has a positive control and every instrument is proven able to fail.",
+          "lesson": "Anti-vacuity is an editorial and testing doctrine: show why a green could not be free."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[60]",
+          "evidence": "The paper says the crown proof did not run and nothing here proves a real pull is secret-free.",
+          "lesson": "Component completion must not be promoted into end-to-end trust."
+        }
+      ],
+      "duplicate_disposition": "Superseded for program status by the later crown waves; keep separate as the implementation record for instruments those waves consumed.",
+      "reader_risks": [
+        "Studio: show the latest authoritative outcome first; collapse phase-by-phase ledgers, internal branch paths, task ids, and large survey tables behind drill-downs.",
+        "TUI80: keep one decision or outcome per screen, replace multi-thousand-character tables with paged summaries, and remove empty spacer blocks.",
+        "email: send outcome, material caveat, and next owner action; link the immutable wave chronology and machine receipts rather than reproducing them.",
+        "public: remove internal paths, hostnames, IPs, branch/PR/task identifiers, operational commands, runtime resource measurements, and mutable deployment state.",
+        "CLI/API: preserve exact wave order, ids, revisions, run ids, denominators, gate states, corrections, and distinctions among planned, built, merged, deployed, fired, and sealed."
+      ],
+      "rationale": "Superseded as current authority, not merged, because it owns distinct shipped prerequisites and an honest end-to-end shortfall."
+    },
+    {
+      "unit_id": "paper:pds-wave-20-2026-07-21",
+      "document_id": "pds-wave-20-2026-07-21",
+      "document_rev": "96f7b64999ec3d08ecba9188dd2639b7",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Derive the deployed streaming engine's real memory floor, wire all launcher gates consistently, and unblock a crown fire in the actual host regime.",
+      "opening_and_criteria": "The opening names the fossil 2200 MiB premise and the derivation goal directly; the debrief clearly distinguishes the shipped floor slice from deferred fire and collection rounds.",
+      "outline_and_hierarchy": "The evidence chain from regime survey to three-knob derivation, mutation proof, review, grade, and handoff is coherent and relatively compact.",
+      "human_voice_and_precision": "The paper is precise about units and explicitly rejects the attractive but wrong absolute-peak and wire-byte interpretations.",
+      "compression_and_restraint": "Preserve as the floor-decision authority, but mark program status superseded and link wave 21's actual fire/seal; retain the review caveat about paired controls.",
+      "evidence_and_truth": "blocks[72]-[80] record the 897 MiB three-knob change, independent mutation proofs, arithmetic, honest deferred rounds, and grade.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[74]",
+          "evidence": "Reverting either coupled knob group makes the selftest fail, and the 98.16 + 798.81 = 896.97 MiB derivation is independently rechecked.",
+          "lesson": "Prove configuration coupling by mutation, not by reading the three assignments."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[76]",
+          "evidence": "The ledger evidence overstates mutation FAIL counts as 15/14 while review measured 4/3 and leaves the text uncorrected.",
+          "lesson": "Even non-material numeric overstatement should be corrected where the reader encounters it."
+        }
+      ],
+      "duplicate_disposition": "Superseded by pds-wave-21-2026-07-21 for current crown status; retain separately because it owns the floor derivation and launcher proof.",
+      "reader_risks": [
+        "Studio: show the latest authoritative outcome first; collapse phase-by-phase ledgers, internal branch paths, task ids, and large survey tables behind drill-downs.",
+        "TUI80: keep one decision or outcome per screen, replace multi-thousand-character tables with paged summaries, and remove empty spacer blocks.",
+        "email: send outcome, material caveat, and next owner action; link the immutable wave chronology and machine receipts rather than reproducing them.",
+        "public: remove internal paths, hostnames, IPs, branch/PR/task identifiers, operational commands, runtime resource measurements, and mutable deployment state.",
+        "CLI/API: preserve exact wave order, ids, revisions, run ids, denominators, gate states, corrections, and distinctions among planned, built, merged, deployed, fired, and sealed."
+      ],
+      "rationale": "Superseded because its deferred fire later completed, while its derivation remains a durable technical decision."
+    },
+    {
+      "unit_id": "paper:pds-wave-2026-07-19",
+      "document_id": "pds-wave-2026-07-19",
+      "document_rev": "5619b12dd86afe3c7ebc34095fd9b288",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "First PDS wave: make export negotiation, local boot/media, dev catalog, and merge import fail-closed enough to support later personal-server pull proof.",
+      "opening_and_criteria": "The opening states the three product goals and a BUILDING status; the later debrief supplies the actual round-1 outcome and explicit deferred end-to-end proof.",
+      "outline_and_hierarchy": "The record moves from grounded code survey through plan to adversarial per-slice review, but the current outcome is buried after the stale opening status.",
+      "human_voice_and_precision": "Reviewer language is specific about zero-byte writes, PII classification, and merge behavior; limitations are named alongside green gates.",
+      "compression_and_restraint": "Keep as historical foundation, add a terminal/superseded banner, and collapse the dense per-slice ledger for Studio/TUI/email while retaining exact proof in drill-down.",
+      "evidence_and_truth": "blocks[41]-[46] give the final built/reviewed scope, substantive fixes, honest ledger, grade, and the still-unproven live crown promise.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[43]",
+          "evidence": "The reviewer reproduced and fixed a zero-byte blob success lie and a PII-bearing catalog classification error before merge.",
+          "lesson": "Adversarial review should run the dangerous path and report the defect class, not only the final green."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[45]",
+          "evidence": "The grade admits the wave's central real-pull and zero-secret promise remains unproven until later rounds.",
+          "lesson": "A strong foundation wave is still not its deferred end-to-end claim."
+        }
+      ],
+      "duplicate_disposition": "Superseded for current program state by wave 2 and the crown sequence; keep separate as the first shipped foundation record.",
+      "reader_risks": [
+        "Studio: show the latest authoritative outcome first; collapse phase-by-phase ledgers, internal branch paths, task ids, and large survey tables behind drill-downs.",
+        "TUI80: keep one decision or outcome per screen, replace multi-thousand-character tables with paged summaries, and remove empty spacer blocks.",
+        "email: send outcome, material caveat, and next owner action; link the immutable wave chronology and machine receipts rather than reproducing them.",
+        "public: remove internal paths, hostnames, IPs, branch/PR/task identifiers, operational commands, runtime resource measurements, and mutable deployment state.",
+        "CLI/API: preserve exact wave order, ids, revisions, run ids, denominators, gate states, corrections, and distinctions among planned, built, merged, deployed, fired, and sealed."
+      ],
+      "rationale": "Superseded because later waves consumed and extended its components and ultimately supplied the missing live proof."
+    },
+    {
+      "unit_id": "paper:pds-wave-21-2026-07-21",
+      "document_id": "pds-wave-21-2026-07-21",
+      "document_rev": "ced814561791ba31a5d6475174999eeb",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Diagnose the rung-1 transaction abort without spending the last attempt on a guess, then execute the final crown fire and seal the 12/12 proof.",
+      "opening_and_criteria": "The opening frames two valid outcomes and the investigation is rigorous, but a complete B-grade debrief claiming no fire is later overturned by an authoritative same-day correction.",
+      "outline_and_hierarchy": "Survey, verification, decision, build, wrong mid-race debrief, and corrected seal form a valuable but cognitively hazardous chronology.",
+      "human_voice_and_precision": "The correction is exceptionally candid about duplicate-builder race, premature observation, and coordination luck despite the successful technical result.",
+      "compression_and_restraint": "Preserve the full audit trail, but make blocks[130]-[138] the first-view authority and visually quarantine the superseded B-grade debrief.",
+      "evidence_and_truth": "blocks[131]-[138] give the authoritative 11/11 run, 12/12 seal, exact run id, merge/stamp sequence, and duplicate-builder risk.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[133]",
+          "evidence": "The corrected outcome records RESULT: PASS, 11 PASS/0 ABORT/0 FAIL, attempt 6 of 7, and a green rung 1 under one run id.",
+          "lesson": "Terminal proof should name run identity, denominator, attempt budget, and the previously failing criterion."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[131]",
+          "evidence": "The correction states the preceding debrief's 'fire NOT armed, grade B' conclusion is wrong because it sampled a race window.",
+          "lesson": "A materially wrong debrief must be demoted, not left to compete with the terminal truth."
+        }
+      ],
+      "duplicate_disposition": "Superseded for ongoing program status by waves 22-23, but it remains the definitive crown-seal history; never merge it into later unattended-owner work.",
+      "reader_risks": [
+        "Studio: show the latest authoritative outcome first; collapse phase-by-phase ledgers, internal branch paths, task ids, and large survey tables behind drill-downs.",
+        "TUI80: keep one decision or outcome per screen, replace multi-thousand-character tables with paged summaries, and remove empty spacer blocks.",
+        "email: send outcome, material caveat, and next owner action; link the immutable wave chronology and machine receipts rather than reproducing them.",
+        "public: remove internal paths, hostnames, IPs, branch/PR/task identifiers, operational commands, runtime resource measurements, and mutable deployment state.",
+        "CLI/API: preserve exact wave order, ids, revisions, run ids, denominators, gate states, corrections, and distinctions among planned, built, merged, deployed, fired, and sealed."
+      ],
+      "rationale": "Superseded only as current epic direction: its seal evidence is final for the crown subgoal, while later waves pursue different trust guarantees."
+    },
+    {
+      "unit_id": "paper:pds-wave-22-2026-07-27",
+      "document_id": "pds-wave-22-2026-07-27",
+      "document_rev": "04d24c029f240abaa15e37497f3c9d61",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Shift the sealed PDS from supervised success to unattended-owner trust by fixing operations that report success without observable post-condition proof.",
+      "opening_and_criteria": "The opening correctly closes the crown and states the new defect class; the debrief provides seven-slice outcome, ledger census, losses, grade, and specific next wave.",
+      "outline_and_hierarchy": "The concept-to-evidence hierarchy is strong, but multiple 2.5-8.7K-character tables make the main reading path more like an evidence warehouse.",
+      "human_voice_and_precision": "The paper indicts its own wave for losing 61 percent of park reasons, an unusually honest application of its success-observability law.",
+      "compression_and_restraint": "Retain as predecessor authority and link wave 23; extract long tables, promote the B+ debrief, and mark the next-wave instructions historical.",
+      "evidence_and_truth": "blocks[69]-[92] record seven shipped slices, the 19 evaporated parks, merge-order constraints, a 137-row audit, B+ grade, and exact successor work.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[86]",
+          "evidence": "The grade credits fixes that first reproduced real defects and mutation-tested four of five repairs against main.",
+          "lesson": "A success-observability wave should show the broken behavior before the fix."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[87]",
+          "evidence": "The debrief says 19 of 31 parked rows lost their reasons—61 percent—inside a wave devoted to observable success.",
+          "lesson": "Audit whether the evidence record itself survives after the operation reports success."
+        }
+      ],
+      "duplicate_disposition": "Superseded by pds-wave-23-2026-07-28, which executes the deferred deploy readback, durable ledger fix, census, and measured debts.",
+      "reader_risks": [
+        "Studio: show the latest authoritative outcome first; collapse phase-by-phase ledgers, internal branch paths, task ids, and large survey tables behind drill-downs.",
+        "TUI80: keep one decision or outcome per screen, replace multi-thousand-character tables with paged summaries, and remove empty spacer blocks.",
+        "email: send outcome, material caveat, and next owner action; link the immutable wave chronology and machine receipts rather than reproducing them.",
+        "public: remove internal paths, hostnames, IPs, branch/PR/task identifiers, operational commands, runtime resource measurements, and mutable deployment state.",
+        "CLI/API: preserve exact wave order, ids, revisions, run ids, denominators, gate states, corrections, and distinctions among planned, built, merged, deployed, fired, and sealed."
+      ],
+      "rationale": "Superseded because wave 23 explicitly continues and pays its named debts, while wave 22 remains valuable as the failure-discovery record."
+    },
+    {
+      "unit_id": "paper:pds-wave-23-2026-07-28",
+      "document_id": "pds-wave-23-2026-07-28",
+      "document_rev": "ca81403646f9af291c96f7517ae9b71a",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Current PDS wave authority: give the success-observability law executable teeth across deploy, CLI receipts, ledger durability, bounded import, blob storage, harness liveness, and cold owner verbs.",
+      "opening_and_criteria": "The opening shows STRATEGIZE complete while the authoritative COMPLETE/A− callout is block[167]; current readers must traverse 167 blocks to learn the result.",
+      "outline_and_hierarchy": "The research-to-verification-to-decision-to-build-to-review structure is excellent, but 90 empty spacer paragraphs and several 2.4-7.4K-character tables create avoidable reader friction.",
+      "human_voice_and_precision": "The paper corrects three briefed premises, withdraws a charter decision, and later corrects its own duplicate filing without laundering the mistake.",
+      "compression_and_restraint": "Promote block[167] and the A− debrief to the top; delete empty paragraphs; turn giant tables into summaries with linked evidence; retain exact corrections and proof receipts.",
+      "evidence_and_truth": "blocks[101]-[113] show a complete verification round with refuted premises and decisions; blocks[132]-[167] give seven reviewed PRs, exact misses, corrections, risks, handoff, and final status.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[144]",
+          "evidence": "The reviewer highlights three cases where builders corrected requested numbers, proved a fake green, and refused 'constant memory' despite an attractive sample.",
+          "lesson": "Apply the anti-lie doctrine to the wave's own prose and brief, not only to product code."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[146]",
+          "evidence": "The registry is thinner than its framing, A1/A2/A3 judgment still lives in prose, and two code paths are read but not run.",
+          "lesson": "State where an enforcement artifact still depends on judgment or lacks executable coverage."
+        }
+      ],
+      "duplicate_disposition": "This is the current authority after wave 22. Keep it separate from all predecessor ledgers, but repair its primary reading surface and reciprocal lineage links.",
+      "reader_risks": [
+        "Studio: show the latest authoritative outcome first; collapse phase-by-phase ledgers, internal branch paths, task ids, and large survey tables behind drill-downs.",
+        "TUI80: keep one decision or outcome per screen, replace multi-thousand-character tables with paged summaries, and remove empty spacer blocks.",
+        "email: send outcome, material caveat, and next owner action; link the immutable wave chronology and machine receipts rather than reproducing them.",
+        "public: remove internal paths, hostnames, IPs, branch/PR/task identifiers, operational commands, runtime resource measurements, and mutable deployment state.",
+        "CLI/API: preserve exact wave order, ids, revisions, run ids, denominators, gate states, corrections, and distinctions among planned, built, merged, deployed, fired, and sealed."
+      ],
+      "rationale": "Repair because the evidence and conclusions are authoritative, while the stale opening, 90 empty blocks, and giant tables make current truth unnecessarily hard to reach."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}
