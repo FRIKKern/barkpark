@@ -1,0 +1,1756 @@
+{
+  "_createdAt": "2026-07-18T16:37:04.383201Z",
+  "_draft": false,
+  "_id": "netlify-vercel-next-screen-asks",
+  "_publishedId": "netlify-vercel-next-screen-asks",
+  "_rev": "5d5598549bfdde3c122e953d4b42e92e",
+  "_type": "paper",
+  "_updatedAt": "2026-07-18T16:37:04.383201Z",
+  "blocks": [
+    {
+      "id": "nva-001",
+      "text": "Strategy · console surface planning · Netlify + Vercel",
+      "type": "eyebrow"
+    },
+    {
+      "id": "nva-002",
+      "level": 1,
+      "text": "Ten more screens — what closing on Netlify and Vercel actually requires",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Both competitor consoles held against our "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "51-surface build outline"
+            }
+          ],
+          "href": "/papers/console-gui-build-outline",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": ": which surfaces do they have that we never specified, which fit Barkpark's identity, and which are deliberate skips. Output: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "seven screens to request from the designer now"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (N-01…N-07, each mapped to a backend capability that exists or is wave-planned) and "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "three concept sketches"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " for the differentiators (N-08…N-10). Filter applied throughout: no Netlify/Vercel cosplay — a screen earns a request only if it serves the named-box, price-transparent, content-first identity. Companions: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Vercel gap analysis"
+            }
+          ],
+          "href": "/papers/site-autodeploy-vercel-gap-analysis",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "auto-deploy target UI"
+            }
+          ],
+          "href": "/papers/autodeploy-target-ui-approved",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "nva-003",
+      "type": "ingress"
+    },
+    {
+      "id": "nva-004",
+      "level": 2,
+      "text": "Request from the designer now (N-01…N-07)",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "#"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Screen"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Modeled on"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Why it clears the bar"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Backend reality"
+          }
+        ]
+      ],
+      "id": "nva-005",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-01"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Logs viewer"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — instance tab + site drill-in: journal tail, Caddy access lines, level/source filter, follow mode"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Vercel Logs / Netlify function logs"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Both competitors treat logs as a core tab; we ship a box the user OWNS and still make them SSH for logs — the worst of both worlds"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Agent command allowlist already has "
+            },
+            {
+              "type": "code",
+              "value": "logs"
+            },
+            {
+              "type": "text",
+              "value": " (journalctl -n 200); Caddy access logs sit on-box; needs a streaming relay endpoint, no new infra"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-02"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Site settings"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — composed page: general (name, framework, scale mode), git, previews + protection, danger zone (delete)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Vercel project settings / Netlify site settings"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Our outline has the pieces (E-03/06/07, F-05) but no composed home; competitors prove settings-as-place matters for findability"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Pure composition of existing PATCH endpoints"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-03"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Usage & cost dashboard"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " (team-level) — meters × provider pricing = real €/month per instance, projected next invoice, per-site attribution"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Vercel spend management — but honest"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The identity flagship."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " Vercel projects usage-billing anxiety; we can show an actual server price. Nobody else in this market can render a true bill preview"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Hetzner pricing catalog (EUR) + Azure retail cache (USD) already in the plane; 13 meters + quota model live; join is arithmetic"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-04"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Lock production"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — pin the published deploy: stop git-auto AND content-auto publishing until unlocked; banner explains what's held"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Netlify \"stop auto-publishing\""
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Netlify's most-loved safety valve; ours is stronger because it also holds the content loop (publish-gated batching from the gap paper's wave 3)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Prototype already carries a "
+            },
+            {
+              "type": "code",
+              "value": "publishMode"
+            },
+            {
+              "type": "text",
+              "value": " prop; backend = one site flag consumed by both webhook paths"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-05"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Import-from-GitHub front door"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — create-site entry: pick repo (list_repos) → framework auto-detect → content binding → site; templates become tab two"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Vercel \"Import Git Repository\" / Netlify \"Import from Git\""
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Both competitors open with import-from-git; our E-04 opens with templates. Post-gh-1 the import path is the growth wedge — merge F-01 into E-04 as the first tab"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "GitHub App seam has "
+            },
+            {
+              "type": "code",
+              "value": "list_repos"
+            },
+            {
+              "type": "text",
+              "value": "; framework sniff is package.json reading; rest is the existing create flow"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-06"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "DNS records editor"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — for domains delegated to a connected provider: A/CNAME/TXT table, upsert/delete, \"managed by Barkpark\" state"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Netlify DNS (zone hosting)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Closes the last mile of the domain story: today we checklist DNS but send users elsewhere to fix it; with a Hetzner/Cloudflare token connected we can just fix it"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "DNS upsert/delete seams exist for both providers; needs list-records added to the seams"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-07"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Redirects editor"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — per-site ordered rules table (from → to → status), validated, applied on deploy"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Netlify _redirects / Vercel vercel.json redirects"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Table-stakes for real sites (moved pages, apex↔www, campaign URLs); absence forces users back into code for config"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "New: per-site rules blob rendered into the Caddy site block at deploy; small, contained"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "nva-006",
+      "level": 2,
+      "text": "Concept sketches — the differentiators (N-08…N-10)",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "#"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Concept"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Modeled on — then inverted"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The Barkpark twist"
+          }
+        ]
+      ],
+      "id": "nva-007",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-08"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Forms inbox"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — form submissions from hosted sites land as documents; console shows per-site inbox (new/seen, spam state, export)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Netlify Forms"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Submissions become "
+            },
+            {
+              "type": "code",
+              "value": "type:form_submission"
+            },
+            {
+              "type": "text",
+              "value": " "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "documents in the bound dataset"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — queryable, schema-validated, visible in Studio, exportable via the content API. Netlify bolts an inbox onto hosting; we already ARE the content store. Likely the single strongest Netlify-parity move available to us"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-09"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Preview feedback → tasks"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — a lightweight comment affordance on preview sites; each comment files a bp task (screenshot, URL, viewport) linked to the deployment"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Vercel Comments / Netlify Drawer"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Their comments die in the platform; ours land in the task system the team already works from ("
+            },
+            {
+              "type": "code",
+              "value": "bp task"
+            },
+            {
+              "type": "text",
+              "value": ", boards, claim queue). Collaboration parity without building a chat product"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-10"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Site analytics panel"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — per-site traffic: requests/s, bandwidth, p95, status-code split; Plausible embed when the template ships it"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Netlify Analytics / Vercel Web Analytics"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Server-side from Caddy logs on the box the user owns — no client JS, no cookie banner, honest \"unmetered\" when quiet. Requires per-site metering split (today meters are per-instance) — that's the real cost, hence sketch-first"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "nva-008",
+      "level": 2,
+      "text": "Deliberate skips — confirmed anti-goals",
+      "type": "heading"
+    },
+    {
+      "id": "nva-009",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Functions / edge middleware / cron-as-product UI"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — no FaaS; the box is the compute story."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Feature flags, Edge Config, split testing"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — needs edge logic we refuse; revisit only if cf_proxied grows programmable."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Integrations marketplace"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — templates + providers are our integration surface."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Domain registrar (buy domains)"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — connect-your-provider stays the model; reselling domains is a support burden with no identity payoff."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Observability suite / log drains / APM"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — N-01's honest tail is the commitment; full observability is a different product."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "AI review / codegen consoles"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — out of scope for the hosting surface."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "nva-010",
+      "level": 2,
+      "text": "Sequencing against the build",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "N-02, N-04, N-05 belong to the "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "auto-deploy design batch"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " — same screens the designer just prototyped, request immediately as one package. N-01 and N-03 are standalone and high-identity-value — request now, build in phase 3/4. N-06/N-07 wait on small seam additions; request designs once those tasks are filed. N-08…N-10 go to the designer as concept briefs only after an owner call on whether Forms (N-08) enters the product — it is the one with real backend scope. Updated outline arithmetic: 51 → "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "61 surfaces"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (58 request-able now, 3 concept-gated)."
+        }
+      ],
+      "id": "nva-011",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Close on Vercel by finishing the git loop (already chartered); close on Netlify by taking Forms and Lock-production, which land "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "better"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " on a content platform than they do on Netlify; and refuse everything that would blur the named-box identity both competitors abstracted away."
+        }
+      ],
+      "id": "nva-012",
+      "title": "The one-line strategy",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "nva-013",
+      "type": "divider"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Compiled 2026-07-18 against Netlify and Vercel console surfaces. Chain: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "51-surface outline"
+            }
+          ],
+          "href": "/papers/console-gui-build-outline",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Vercel gap analysis"
+            }
+          ],
+          "href": "/papers/site-autodeploy-vercel-gap-analysis",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "auto-deploy target UI approved"
+            }
+          ],
+          "href": "/papers/autodeploy-target-ui-approved",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "nva-014",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "nva-001",
+        "text": "Strategy · console surface planning · Netlify + Vercel",
+        "type": "eyebrow"
+      },
+      {
+        "id": "nva-002",
+        "level": 1,
+        "text": "Ten more screens — what closing on Netlify and Vercel actually requires",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Both competitor consoles held against our "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "51-surface build outline"
+              }
+            ],
+            "href": "/papers/console-gui-build-outline",
+            "type": "link"
+          },
+          {
+            "type": "text",
+            "value": ": which surfaces do they have that we never specified, which fit Barkpark's identity, and which are deliberate skips. Output: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "seven screens to request from the designer now"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " (N-01…N-07, each mapped to a backend capability that exists or is wave-planned) and "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "three concept sketches"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " for the differentiators (N-08…N-10). Filter applied throughout: no Netlify/Vercel cosplay — a screen earns a request only if it serves the named-box, price-transparent, content-first identity. Companions: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Vercel gap analysis"
+              }
+            ],
+            "href": "/papers/site-autodeploy-vercel-gap-analysis",
+            "type": "link"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "auto-deploy target UI"
+              }
+            ],
+            "href": "/papers/autodeploy-target-ui-approved",
+            "type": "link"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "id": "nva-003",
+        "type": "ingress"
+      },
+      {
+        "id": "nva-004",
+        "level": 2,
+        "text": "Request from the designer now (N-01…N-07)",
+        "type": "heading"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "#"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Screen"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Modeled on"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Why it clears the bar"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Backend reality"
+            }
+          ]
+        ],
+        "id": "nva-005",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-01"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Logs viewer"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — instance tab + site drill-in: journal tail, Caddy access lines, level/source filter, follow mode"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Vercel Logs / Netlify function logs"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Both competitors treat logs as a core tab; we ship a box the user OWNS and still make them SSH for logs — the worst of both worlds"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Agent command allowlist already has "
+              },
+              {
+                "type": "code",
+                "value": "logs"
+              },
+              {
+                "type": "text",
+                "value": " (journalctl -n 200); Caddy access logs sit on-box; needs a streaming relay endpoint, no new infra"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-02"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Site settings"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — composed page: general (name, framework, scale mode), git, previews + protection, danger zone (delete)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Vercel project settings / Netlify site settings"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Our outline has the pieces (E-03/06/07, F-05) but no composed home; competitors prove settings-as-place matters for findability"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Pure composition of existing PATCH endpoints"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-03"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Usage & cost dashboard"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " (team-level) — meters × provider pricing = real €/month per instance, projected next invoice, per-site attribution"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Vercel spend management — but honest"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "The identity flagship."
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " Vercel projects usage-billing anxiety; we can show an actual server price. Nobody else in this market can render a true bill preview"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Hetzner pricing catalog (EUR) + Azure retail cache (USD) already in the plane; 13 meters + quota model live; join is arithmetic"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-04"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Lock production"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — pin the published deploy: stop git-auto AND content-auto publishing until unlocked; banner explains what's held"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Netlify \"stop auto-publishing\""
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Netlify's most-loved safety valve; ours is stronger because it also holds the content loop (publish-gated batching from the gap paper's wave 3)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Prototype already carries a "
+              },
+              {
+                "type": "code",
+                "value": "publishMode"
+              },
+              {
+                "type": "text",
+                "value": " prop; backend = one site flag consumed by both webhook paths"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-05"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Import-from-GitHub front door"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — create-site entry: pick repo (list_repos) → framework auto-detect → content binding → site; templates become tab two"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Vercel \"Import Git Repository\" / Netlify \"Import from Git\""
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Both competitors open with import-from-git; our E-04 opens with templates. Post-gh-1 the import path is the growth wedge — merge F-01 into E-04 as the first tab"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "GitHub App seam has "
+              },
+              {
+                "type": "code",
+                "value": "list_repos"
+              },
+              {
+                "type": "text",
+                "value": "; framework sniff is package.json reading; rest is the existing create flow"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-06"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "DNS records editor"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — for domains delegated to a connected provider: A/CNAME/TXT table, upsert/delete, \"managed by Barkpark\" state"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Netlify DNS (zone hosting)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Closes the last mile of the domain story: today we checklist DNS but send users elsewhere to fix it; with a Hetzner/Cloudflare token connected we can just fix it"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "DNS upsert/delete seams exist for both providers; needs list-records added to the seams"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-07"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Redirects editor"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — per-site ordered rules table (from → to → status), validated, applied on deploy"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Netlify _redirects / Vercel vercel.json redirects"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Table-stakes for real sites (moved pages, apex↔www, campaign URLs); absence forces users back into code for config"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "New: per-site rules blob rendered into the Caddy site block at deploy; small, contained"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "nva-006",
+        "level": 2,
+        "text": "Concept sketches — the differentiators (N-08…N-10)",
+        "type": "heading"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "#"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Concept"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Modeled on — then inverted"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The Barkpark twist"
+            }
+          ]
+        ],
+        "id": "nva-007",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-08"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Forms inbox"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — form submissions from hosted sites land as documents; console shows per-site inbox (new/seen, spam state, export)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Netlify Forms"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Submissions become "
+              },
+              {
+                "type": "code",
+                "value": "type:form_submission"
+              },
+              {
+                "type": "text",
+                "value": " "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "documents in the bound dataset"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — queryable, schema-validated, visible in Studio, exportable via the content API. Netlify bolts an inbox onto hosting; we already ARE the content store. Likely the single strongest Netlify-parity move available to us"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-09"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Preview feedback → tasks"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — a lightweight comment affordance on preview sites; each comment files a bp task (screenshot, URL, viewport) linked to the deployment"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Vercel Comments / Netlify Drawer"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Their comments die in the platform; ours land in the task system the team already works from ("
+              },
+              {
+                "type": "code",
+                "value": "bp task"
+              },
+              {
+                "type": "text",
+                "value": ", boards, claim queue). Collaboration parity without building a chat product"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-10"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Site analytics panel"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — per-site traffic: requests/s, bandwidth, p95, status-code split; Plausible embed when the template ships it"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Netlify Analytics / Vercel Web Analytics"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Server-side from Caddy logs on the box the user owns — no client JS, no cookie banner, honest \"unmetered\" when quiet. Requires per-site metering split (today meters are per-instance) — that's the real cost, hence sketch-first"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "nva-008",
+        "level": 2,
+        "text": "Deliberate skips — confirmed anti-goals",
+        "type": "heading"
+      },
+      {
+        "id": "nva-009",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Functions / edge middleware / cron-as-product UI"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — no FaaS; the box is the compute story."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Feature flags, Edge Config, split testing"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — needs edge logic we refuse; revisit only if cf_proxied grows programmable."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Integrations marketplace"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — templates + providers are our integration surface."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Domain registrar (buy domains)"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — connect-your-provider stays the model; reselling domains is a support burden with no identity payoff."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Observability suite / log drains / APM"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — N-01's honest tail is the commitment; full observability is a different product."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "AI review / codegen consoles"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — out of scope for the hosting surface."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "nva-010",
+        "level": 2,
+        "text": "Sequencing against the build",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "N-02, N-04, N-05 belong to the "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "auto-deploy design batch"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — same screens the designer just prototyped, request immediately as one package. N-01 and N-03 are standalone and high-identity-value — request now, build in phase 3/4. N-06/N-07 wait on small seam additions; request designs once those tasks are filed. N-08…N-10 go to the designer as concept briefs only after an owner call on whether Forms (N-08) enters the product — it is the one with real backend scope. Updated outline arithmetic: 51 → "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "61 surfaces"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " (58 request-able now, 3 concept-gated)."
+          }
+        ],
+        "id": "nva-011",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Close on Vercel by finishing the git loop (already chartered); close on Netlify by taking Forms and Lock-production, which land "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "better"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " on a content platform than they do on Netlify; and refuse everything that would blur the named-box identity both competitors abstracted away."
+          }
+        ],
+        "id": "nva-012",
+        "title": "The one-line strategy",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "nva-013",
+        "type": "divider"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Compiled 2026-07-18 against Netlify and Vercel console surfaces. Chain: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "51-surface outline"
+              }
+            ],
+            "href": "/papers/console-gui-build-outline",
+            "type": "link"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Vercel gap analysis"
+              }
+            ],
+            "href": "/papers/site-autodeploy-vercel-gap-analysis",
+            "type": "link"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "auto-deploy target UI approved"
+              }
+            ],
+            "href": "/papers/autodeploy-target-ui-approved",
+            "type": "link"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "id": "nva-014",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">Strategy · console surface planning · Netlify + Vercel</p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Ten more screens — what closing on Netlify and Vercel actually requires</h1><p style=\"margin:0 0 10px;line-height:1.55;font-size:18px\">Both competitor consoles held against our <a href=\"/papers/console-gui-build-outline\" style=\"color:#1e5347;text-decoration:underline\">51-surface build outline</a>: which surfaces do they have that we never specified, which fit Barkpark&#39;s identity, and which are deliberate skips. Output: <span style=\"font-weight:bold\">seven screens to request from the designer now</span> (N-01…N-07, each mapped to a backend capability that exists or is wave-planned) and <span style=\"font-weight:bold\">three concept sketches</span> for the differentiators (N-08…N-10). Filter applied throughout: no Netlify/Vercel cosplay — a screen earns a request only if it serves the named-box, price-transparent, content-first identity. Companions: <a href=\"/papers/site-autodeploy-vercel-gap-analysis\" style=\"color:#1e5347;text-decoration:underline\">Vercel gap analysis</a> · <a href=\"/papers/autodeploy-target-ui-approved\" style=\"color:#1e5347;text-decoration:underline\">auto-deploy target UI</a>.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Request from the designer now (N-01…N-07)</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>#</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Screen</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Modeled on</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Why it clears the bar</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Backend reality</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-01</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Logs viewer</span><span> — instance tab + site drill-in: journal tail, Caddy access lines, level/source filter, follow mode</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Vercel Logs / Netlify function logs</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Both competitors treat logs as a core tab; we ship a box the user OWNS and still make them SSH for logs — the worst of both worlds</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Agent command allowlist already has </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">logs</code><span> (journalctl -n 200); Caddy access logs sit on-box; needs a streaming relay endpoint, no new infra</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-02</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Site settings</span><span> — composed page: general (name, framework, scale mode), git, previews + protection, danger zone (delete)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Vercel project settings / Netlify site settings</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Our outline has the pieces (E-03/06/07, F-05) but no composed home; competitors prove settings-as-place matters for findability</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Pure composition of existing PATCH endpoints</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-03</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Usage &amp; cost dashboard</span><span> (team-level) — meters × provider pricing = real €/month per instance, projected next invoice, per-site attribution</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Vercel spend management — but honest</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">The identity flagship.</span><span> Vercel projects usage-billing anxiety; we can show an actual server price. Nobody else in this market can render a true bill preview</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Hetzner pricing catalog (EUR) + Azure retail cache (USD) already in the plane; 13 meters + quota model live; join is arithmetic</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-04</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Lock production</span><span> — pin the published deploy: stop git-auto AND content-auto publishing until unlocked; banner explains what&#39;s held</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Netlify &quot;stop auto-publishing&quot;</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Netlify&#39;s most-loved safety valve; ours is stronger because it also holds the content loop (publish-gated batching from the gap paper&#39;s wave 3)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Prototype already carries a </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">publishMode</code><span> prop; backend = one site flag consumed by both webhook paths</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-05</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Import-from-GitHub front door</span><span> — create-site entry: pick repo (list_repos) → framework auto-detect → content binding → site; templates become tab two</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Vercel &quot;Import Git Repository&quot; / Netlify &quot;Import from Git&quot;</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Both competitors open with import-from-git; our E-04 opens with templates. Post-gh-1 the import path is the growth wedge — merge F-01 into E-04 as the first tab</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>GitHub App seam has </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">list_repos</code><span>; framework sniff is package.json reading; rest is the existing create flow</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-06</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">DNS records editor</span><span> — for domains delegated to a connected provider: A/CNAME/TXT table, upsert/delete, &quot;managed by Barkpark&quot; state</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Netlify DNS (zone hosting)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Closes the last mile of the domain story: today we checklist DNS but send users elsewhere to fix it; with a Hetzner/Cloudflare token connected we can just fix it</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>DNS upsert/delete seams exist for both providers; needs list-records added to the seams</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-07</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Redirects editor</span><span> — per-site ordered rules table (from → to → status), validated, applied on deploy</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Netlify _redirects / Vercel vercel.json redirects</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Table-stakes for real sites (moved pages, apex↔www, campaign URLs); absence forces users back into code for config</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>New: per-site rules blob rendered into the Caddy site block at deploy; small, contained</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Concept sketches — the differentiators (N-08…N-10)</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>#</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Concept</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Modeled on — then inverted</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>The Barkpark twist</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-08</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Forms inbox</span><span> — form submissions from hosted sites land as documents; console shows per-site inbox (new/seen, spam state, export)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Netlify Forms</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Submissions become </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">type:form_submission</code><span> </span><span style=\"font-weight:bold\">documents in the bound dataset</span><span> — queryable, schema-validated, visible in Studio, exportable via the content API. Netlify bolts an inbox onto hosting; we already ARE the content store. Likely the single strongest Netlify-parity move available to us</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-09</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Preview feedback → tasks</span><span> — a lightweight comment affordance on preview sites; each comment files a bp task (screenshot, URL, viewport) linked to the deployment</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Vercel Comments / Netlify Drawer</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Their comments die in the platform; ours land in the task system the team already works from (</span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bp task</code><span>, boards, claim queue). Collaboration parity without building a chat product</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-10</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Site analytics panel</span><span> — per-site traffic: requests/s, bandwidth, p95, status-code split; Plausible embed when the template ships it</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Netlify Analytics / Vercel Web Analytics</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Server-side from Caddy logs on the box the user owns — no client JS, no cookie banner, honest &quot;unmetered&quot; when quiet. Requires per-site metering split (today meters are per-instance) — that&#39;s the real cost, hence sketch-first</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Deliberate skips — confirmed anti-goals</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Functions / edge middleware / cron-as-product UI</span> — no FaaS; the box is the compute story.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Feature flags, Edge Config, split testing</span> — needs edge logic we refuse; revisit only if cf_proxied grows programmable.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Integrations marketplace</span> — templates + providers are our integration surface.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Domain registrar (buy domains)</span> — connect-your-provider stays the model; reselling domains is a support burden with no identity payoff.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Observability suite / log drains / APM</span> — N-01&#39;s honest tail is the commitment; full observability is a different product.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">AI review / codegen consoles</span> — out of scope for the hosting surface.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Sequencing against the build</h2><p>N-02, N-04, N-05 belong to the <span style=\"font-weight:bold\">auto-deploy design batch</span> — same screens the designer just prototyped, request immediately as one package. N-01 and N-03 are standalone and high-identity-value — request now, build in phase 3/4. N-06/N-07 wait on small seam additions; request designs once those tasks are filed. N-08…N-10 go to the designer as concept briefs only after an owner call on whether Forms (N-08) enters the product — it is the one with real backend scope. Updated outline arithmetic: 51 → <span style=\"font-weight:bold\">61 surfaces</span> (58 request-able now, 3 concept-gated).</p><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">The one-line strategy</div><span>Close on Vercel by finishing the git loop (already chartered); close on Netlify by taking Forms and Lock-production, which land <span style=\"font-weight:bold\">better</span> on a content platform than they do on Netlify; and refuse everything that would blur the named-box identity both competitors abstracted away.</span></div><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><p>Compiled 2026-07-18 against Netlify and Vercel console surfaces. Chain: <a href=\"/papers/console-gui-build-outline\" style=\"color:#1e5347;text-decoration:underline\">51-surface outline</a> · <a href=\"/papers/site-autodeploy-vercel-gap-analysis\" style=\"color:#1e5347;text-decoration:underline\">Vercel gap analysis</a> · <a href=\"/papers/autodeploy-target-ui-approved\" style=\"color:#1e5347;text-decoration:underline\">auto-deploy target UI approved</a>.</p>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\">Strategy · console surface planning · Netlify + Vercel</p><h1>Ten more screens — what closing on Netlify and Vercel actually requires</h1><p class=\"bp-role-ingress\">Both competitor consoles held against our <a href=\"/papers/console-gui-build-outline\" style=\"color:var(--paper-accent, #1e5347)\">51-surface build outline</a>: which surfaces do they have that we never specified, which fit Barkpark&#39;s identity, and which are deliberate skips. Output: <span style=\"font-weight:bold\">seven screens to request from the designer now</span> (N-01…N-07, each mapped to a backend capability that exists or is wave-planned) and <span style=\"font-weight:bold\">three concept sketches</span> for the differentiators (N-08…N-10). Filter applied throughout: no Netlify/Vercel cosplay — a screen earns a request only if it serves the named-box, price-transparent, content-first identity. Companions: <a href=\"/papers/site-autodeploy-vercel-gap-analysis\" style=\"color:var(--paper-accent, #1e5347)\">Vercel gap analysis</a> · <a href=\"/papers/autodeploy-target-ui-approved\" style=\"color:var(--paper-accent, #1e5347)\">auto-deploy target UI</a>.</p><h2>Request from the designer now (N-01…N-07)</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>#</span></th><th class=\"bp-table__th\"><span>Screen</span></th><th class=\"bp-table__th\"><span>Modeled on</span></th><th class=\"bp-table__th\"><span>Why it clears the bar</span></th><th class=\"bp-table__th\"><span>Backend reality</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>N-01</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Logs viewer</span><span> — instance tab + site drill-in: journal tail, Caddy access lines, level/source filter, follow mode</span></td><td class=\"bp-table__td\"><span>Vercel Logs / Netlify function logs</span></td><td class=\"bp-table__td\"><span>Both competitors treat logs as a core tab; we ship a box the user OWNS and still make them SSH for logs — the worst of both worlds</span></td><td class=\"bp-table__td\"><span>Agent command allowlist already has </span><code>logs</code><span> (journalctl -n 200); Caddy access logs sit on-box; needs a streaming relay endpoint, no new infra</span></td></tr><tr><td class=\"bp-table__td\"><span>N-02</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Site settings</span><span> — composed page: general (name, framework, scale mode), git, previews + protection, danger zone (delete)</span></td><td class=\"bp-table__td\"><span>Vercel project settings / Netlify site settings</span></td><td class=\"bp-table__td\"><span>Our outline has the pieces (E-03/06/07, F-05) but no composed home; competitors prove settings-as-place matters for findability</span></td><td class=\"bp-table__td\"><span>Pure composition of existing PATCH endpoints</span></td></tr><tr><td class=\"bp-table__td\"><span>N-03</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Usage &amp; cost dashboard</span><span> (team-level) — meters × provider pricing = real €/month per instance, projected next invoice, per-site attribution</span></td><td class=\"bp-table__td\"><span>Vercel spend management — but honest</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">The identity flagship.</span><span> Vercel projects usage-billing anxiety; we can show an actual server price. Nobody else in this market can render a true bill preview</span></td><td class=\"bp-table__td\"><span>Hetzner pricing catalog (EUR) + Azure retail cache (USD) already in the plane; 13 meters + quota model live; join is arithmetic</span></td></tr><tr><td class=\"bp-table__td\"><span>N-04</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Lock production</span><span> — pin the published deploy: stop git-auto AND content-auto publishing until unlocked; banner explains what&#39;s held</span></td><td class=\"bp-table__td\"><span>Netlify &quot;stop auto-publishing&quot;</span></td><td class=\"bp-table__td\"><span>Netlify&#39;s most-loved safety valve; ours is stronger because it also holds the content loop (publish-gated batching from the gap paper&#39;s wave 3)</span></td><td class=\"bp-table__td\"><span>Prototype already carries a </span><code>publishMode</code><span> prop; backend = one site flag consumed by both webhook paths</span></td></tr><tr><td class=\"bp-table__td\"><span>N-05</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Import-from-GitHub front door</span><span> — create-site entry: pick repo (list_repos) → framework auto-detect → content binding → site; templates become tab two</span></td><td class=\"bp-table__td\"><span>Vercel &quot;Import Git Repository&quot; / Netlify &quot;Import from Git&quot;</span></td><td class=\"bp-table__td\"><span>Both competitors open with import-from-git; our E-04 opens with templates. Post-gh-1 the import path is the growth wedge — merge F-01 into E-04 as the first tab</span></td><td class=\"bp-table__td\"><span>GitHub App seam has </span><code>list_repos</code><span>; framework sniff is package.json reading; rest is the existing create flow</span></td></tr><tr><td class=\"bp-table__td\"><span>N-06</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">DNS records editor</span><span> — for domains delegated to a connected provider: A/CNAME/TXT table, upsert/delete, &quot;managed by Barkpark&quot; state</span></td><td class=\"bp-table__td\"><span>Netlify DNS (zone hosting)</span></td><td class=\"bp-table__td\"><span>Closes the last mile of the domain story: today we checklist DNS but send users elsewhere to fix it; with a Hetzner/Cloudflare token connected we can just fix it</span></td><td class=\"bp-table__td\"><span>DNS upsert/delete seams exist for both providers; needs list-records added to the seams</span></td></tr><tr><td class=\"bp-table__td\"><span>N-07</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Redirects editor</span><span> — per-site ordered rules table (from → to → status), validated, applied on deploy</span></td><td class=\"bp-table__td\"><span>Netlify _redirects / Vercel vercel.json redirects</span></td><td class=\"bp-table__td\"><span>Table-stakes for real sites (moved pages, apex↔www, campaign URLs); absence forces users back into code for config</span></td><td class=\"bp-table__td\"><span>New: per-site rules blob rendered into the Caddy site block at deploy; small, contained</span></td></tr></tbody></table><h2>Concept sketches — the differentiators (N-08…N-10)</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>#</span></th><th class=\"bp-table__th\"><span>Concept</span></th><th class=\"bp-table__th\"><span>Modeled on — then inverted</span></th><th class=\"bp-table__th\"><span>The Barkpark twist</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>N-08</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Forms inbox</span><span> — form submissions from hosted sites land as documents; console shows per-site inbox (new/seen, spam state, export)</span></td><td class=\"bp-table__td\"><span>Netlify Forms</span></td><td class=\"bp-table__td\"><span>Submissions become </span><code>type:form_submission</code><span> </span><span style=\"font-weight:bold\">documents in the bound dataset</span><span> — queryable, schema-validated, visible in Studio, exportable via the content API. Netlify bolts an inbox onto hosting; we already ARE the content store. Likely the single strongest Netlify-parity move available to us</span></td></tr><tr><td class=\"bp-table__td\"><span>N-09</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Preview feedback → tasks</span><span> — a lightweight comment affordance on preview sites; each comment files a bp task (screenshot, URL, viewport) linked to the deployment</span></td><td class=\"bp-table__td\"><span>Vercel Comments / Netlify Drawer</span></td><td class=\"bp-table__td\"><span>Their comments die in the platform; ours land in the task system the team already works from (</span><code>bp task</code><span>, boards, claim queue). Collaboration parity without building a chat product</span></td></tr><tr><td class=\"bp-table__td\"><span>N-10</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Site analytics panel</span><span> — per-site traffic: requests/s, bandwidth, p95, status-code split; Plausible embed when the template ships it</span></td><td class=\"bp-table__td\"><span>Netlify Analytics / Vercel Web Analytics</span></td><td class=\"bp-table__td\"><span>Server-side from Caddy logs on the box the user owns — no client JS, no cookie banner, honest &quot;unmetered&quot; when quiet. Requires per-site metering split (today meters are per-instance) — that&#39;s the real cost, hence sketch-first</span></td></tr></tbody></table><h2>Deliberate skips — confirmed anti-goals</h2><ul><li><span><span style=\"font-weight:bold\">Functions / edge middleware / cron-as-product UI</span> — no FaaS; the box is the compute story.</span></li><li><span><span style=\"font-weight:bold\">Feature flags, Edge Config, split testing</span> — needs edge logic we refuse; revisit only if cf_proxied grows programmable.</span></li><li><span><span style=\"font-weight:bold\">Integrations marketplace</span> — templates + providers are our integration surface.</span></li><li><span><span style=\"font-weight:bold\">Domain registrar (buy domains)</span> — connect-your-provider stays the model; reselling domains is a support burden with no identity payoff.</span></li><li><span><span style=\"font-weight:bold\">Observability suite / log drains / APM</span> — N-01&#39;s honest tail is the commitment; full observability is a different product.</span></li><li><span><span style=\"font-weight:bold\">AI review / codegen consoles</span> — out of scope for the hosting surface.</span></li></ul><h2>Sequencing against the build</h2><p>N-02, N-04, N-05 belong to the <span style=\"font-weight:bold\">auto-deploy design batch</span> — same screens the designer just prototyped, request immediately as one package. N-01 and N-03 are standalone and high-identity-value — request now, build in phase 3/4. N-06/N-07 wait on small seam additions; request designs once those tasks are filed. N-08…N-10 go to the designer as concept briefs only after an owner call on whether Forms (N-08) enters the product — it is the one with real backend scope. Updated outline arithmetic: 51 → <span style=\"font-weight:bold\">61 surfaces</span> (58 request-able now, 3 concept-gated).</p><div class=\"bp-callout bp-callout--info\"><strong>The one-line strategy</strong> <span>Close on Vercel by finishing the git loop (already chartered); close on Netlify by taking Forms and Lock-production, which land <span style=\"font-weight:bold\">better</span> on a content platform than they do on Netlify; and refuse everything that would blur the named-box identity both competitors abstracted away.</span></div><div style=\"position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)\"><span style=\"position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem\">§</span></div><p>Compiled 2026-07-18 against Netlify and Vercel console surfaces. Chain: <a href=\"/papers/console-gui-build-outline\" style=\"color:var(--paper-accent, #1e5347)\">51-surface outline</a> · <a href=\"/papers/site-autodeploy-vercel-gap-analysis\" style=\"color:var(--paper-accent, #1e5347)\">Vercel gap analysis</a> · <a href=\"/papers/autodeploy-target-ui-approved\" style=\"color:var(--paper-accent, #1e5347)\">auto-deploy target UI approved</a>.</p>",
+  "body_html_sv": 3,
+  "description": "Netlify + Vercel consoles held against the 51-surface outline: seven new designer requests (logs viewer, site settings, honest cost dashboard, lock-production, import front door, DNS editor, redirects) and three concept sketches (Forms-as-documents, preview-feedback-to-tasks, server-side analytics), plus confirmed anti-goals.",
+  "main_tag": "cloud-strategy",
+  "preview": {
+    "description": "Netlify + Vercel consoles held against the 51-surface outline: seven new designer requests (logs viewer, site…",
+    "extensions": {
+      "tags": [
+        "cloud-strategy",
+        "cloud-console",
+        "design-doc"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/netlify-vercel-next-screen-asks"
+  },
+  "rev": 1,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "Competitive surface planning against Netlify and Vercel consoles.",
+      "strength": 87,
+      "tag": "cloud-strategy"
+    },
+    {
+      "rationale": "Extends the console build outline with ten new numbered surfaces.",
+      "strength": 69,
+      "tag": "cloud-console"
+    },
+    {
+      "rationale": "Forms the next design-request package sent to the designer.",
+      "strength": 51,
+      "tag": "design-doc"
+    }
+  ],
+  "title": "Ten more screens — what closing on Netlify and Vercel actually requires"
+}

@@ -1,0 +1,2765 @@
+{
+  "_createdAt": "2026-07-27T01:15:55.918697Z",
+  "_draft": false,
+  "_id": "mobile-crown-floor-pd-parity",
+  "_publishedId": "mobile-crown-floor-pd-parity",
+  "_rev": "0b73f7e2d14fd73e0bedb807e4c97c52",
+  "_type": "paper",
+  "_updatedAt": "2026-07-28T16:32:48.959597Z",
+  "blocks": [
+    {
+      "id": "h1",
+      "level": 1,
+      "text": "Mobile Crown Floor — every PortableDoc type, rendered from the pd-parity corpus",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Machine-generated from the 60 generator-owned pd-parity fixtures. Each section below carries the exact block input the Elixir emitter froze its cross-surface golden from, so opening this paper in the native reader drives every registered renderer once. The oracle for this page is mechanical: an on-device uiautomator dump must contain zero hits for the degrade box the dispatcher paints when it does not recognise a type. This sentence deliberately does NOT quote that label — an earlier draft did, and the paper then matched the very grep that is supposed to prove it clean."
+        }
+      ],
+      "id": "intro",
+      "type": "paragraph"
+    },
+    {
+      "id": "h2-action",
+      "level": 2,
+      "text": "action",
+      "type": "heading"
+    },
+    {
+      "href": "https://example.com/docs",
+      "id": "b-action",
+      "label": "Read the docs",
+      "priority": "primary",
+      "type": "action"
+    },
+    {
+      "id": "h2-api-endpoint",
+      "level": 2,
+      "text": "api-endpoint",
+      "type": "heading"
+    },
+    {
+      "id": "b-api-endpoint",
+      "method": "POST",
+      "params": [
+        {
+          "in": "path",
+          "name": "dataset",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "path": "/v1/data/mutate",
+      "type": "api-endpoint"
+    },
+    {
+      "id": "h2-asciicast",
+      "level": 2,
+      "text": "asciicast",
+      "type": "heading"
+    },
+    {
+      "caption": "A terminal walkthrough",
+      "id": "b-asciicast",
+      "src": "https://example.com/casts/demo.cast",
+      "type": "asciicast"
+    },
+    {
+      "id": "h2-bar-chart",
+      "level": 2,
+      "text": "bar-chart",
+      "type": "heading"
+    },
+    {
+      "bars": [
+        {
+          "label": "paragraph",
+          "value": 40
+        },
+        {
+          "label": "heading",
+          "value": 25
+        },
+        {
+          "label": "list",
+          "value": 10
+        }
+      ],
+      "id": "b-bar-chart",
+      "type": "bar-chart",
+      "values": true
+    },
+    {
+      "id": "h2-blockquote",
+      "level": 2,
+      "text": "blockquote",
+      "type": "heading"
+    },
+    {
+      "cite": "Alan Kay",
+      "content": [
+        {
+          "type": "text",
+          "value": "The best way to predict the future is to invent it."
+        }
+      ],
+      "id": "b-blockquote",
+      "type": "blockquote"
+    },
+    {
+      "id": "h2-byline",
+      "level": 2,
+      "text": "byline",
+      "type": "heading"
+    },
+    {
+      "id": "b-byline",
+      "items": [
+        "Jane Rae",
+        "2026-07-16"
+      ],
+      "type": "byline"
+    },
+    {
+      "id": "h2-callout",
+      "level": 2,
+      "text": "callout",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "This is a warning callout body."
+        }
+      ],
+      "id": "b-callout",
+      "title": "Heads up",
+      "tone": "warn",
+      "type": "callout"
+    },
+    {
+      "id": "h2-card",
+      "level": 2,
+      "text": "card",
+      "type": "heading"
+    },
+    {
+      "id": "b-card",
+      "slots": {
+        "action": [
+          {
+            "href": "https://example.com/board",
+            "label": "Open the board",
+            "type": "action"
+          }
+        ],
+        "body": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Card body text."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "title": [
+          {
+            "text": "Card title",
+            "type": "heading"
+          }
+        ]
+      },
+      "tone": "info",
+      "type": "card"
+    },
+    {
+      "id": "h2-cards",
+      "level": 2,
+      "text": "cards",
+      "type": "heading"
+    },
+    {
+      "id": "b-cards",
+      "items": [
+        {
+          "text": "The first rule body.",
+          "title": "Rule one",
+          "tone": "info"
+        },
+        {
+          "text": "The second rule body.",
+          "title": "Rule two",
+          "tone": "warn"
+        }
+      ],
+      "type": "cards"
+    },
+    {
+      "id": "h2-chart",
+      "level": 2,
+      "text": "chart",
+      "type": "heading"
+    },
+    {
+      "axes": {
+        "xLabels": [
+          "W1",
+          "W2",
+          "W3",
+          "W4"
+        ]
+      },
+      "caption": "Coverage over time",
+      "id": "b-chart",
+      "kind": "line",
+      "series": [
+        {
+          "label": "Covered",
+          "points": [
+            10,
+            20,
+            35,
+            42
+          ]
+        }
+      ],
+      "type": "chart"
+    },
+    {
+      "id": "h2-chat-approval",
+      "level": 2,
+      "text": "chat-approval",
+      "type": "heading"
+    },
+    {
+      "approval_status": "pending",
+      "id": "b-chat-approval",
+      "summary": "rm -rf api/_build/prod",
+      "tool_name": "Bash",
+      "type": "chat-approval"
+    },
+    {
+      "id": "h2-chat-plan",
+      "level": 2,
+      "text": "chat-plan",
+      "type": "heading"
+    },
+    {
+      "approval_status": "pending",
+      "id": "b-chat-plan",
+      "preview": "Collapse five renderers to three, prove parity per block.",
+      "title": "Unify the renderers",
+      "type": "chat-plan"
+    },
+    {
+      "id": "h2-chat-question",
+      "level": 2,
+      "text": "chat-question",
+      "type": "heading"
+    },
+    {
+      "approval_status": "pending",
+      "id": "b-chat-question",
+      "questions": [
+        {
+          "options": [
+            "Elixir",
+            "Go",
+            "JS"
+          ],
+          "question": "Which renderer is canonical?"
+        }
+      ],
+      "type": "chat-question"
+    },
+    {
+      "id": "h2-chat-thinking",
+      "level": 2,
+      "text": "chat-thinking",
+      "type": "heading"
+    },
+    {
+      "id": "b-chat-thinking",
+      "tokens": 1200,
+      "type": "chat-thinking"
+    },
+    {
+      "id": "h2-chat-todo",
+      "level": 2,
+      "text": "chat-todo",
+      "type": "heading"
+    },
+    {
+      "id": "b-chat-todo",
+      "todos": [
+        {
+          "content": "Author the array",
+          "status": "completed"
+        },
+        {
+          "active_form": "Wiring the generator",
+          "content": "Wire the generator",
+          "status": "in_progress"
+        },
+        {
+          "content": "Prove parity",
+          "status": "pending"
+        }
+      ],
+      "type": "chat-todo"
+    },
+    {
+      "id": "h2-chat-tool-diff",
+      "level": 2,
+      "text": "chat-tool-diff",
+      "type": "heading"
+    },
+    {
+      "id": "b-chat-tool-diff",
+      "input": {
+        "file_path": "lib/foo.ex",
+        "new_string": "def hello do\n  :new\nend",
+        "old_string": "def hello do\n  :old\nend"
+      },
+      "type": "chat-tool-diff"
+    },
+    {
+      "id": "h2-code-tabs",
+      "level": 2,
+      "text": "code-tabs",
+      "type": "heading"
+    },
+    {
+      "id": "b-code-tabs",
+      "syncKey": "lang",
+      "tabs": [
+        {
+          "label": "JS",
+          "language": "js",
+          "value": "console.log(1)"
+        },
+        {
+          "label": "Go",
+          "language": "go",
+          "value": "fmt.Println(1)"
+        }
+      ],
+      "type": "code-tabs"
+    },
+    {
+      "id": "h2-code",
+      "level": 2,
+      "text": "code",
+      "type": "heading"
+    },
+    {
+      "id": "b-code",
+      "type": "code",
+      "value": "def hello do\n  :world\nend"
+    },
+    {
+      "id": "h2-columns",
+      "level": 2,
+      "text": "columns",
+      "type": "heading"
+    },
+    {
+      "columns": [
+        [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Left column body."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Right column body."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ]
+      ],
+      "id": "b-columns",
+      "type": "columns"
+    },
+    {
+      "id": "h2-criteria-progress",
+      "level": 2,
+      "text": "criteria-progress",
+      "type": "heading"
+    },
+    {
+      "id": "b-criteria-progress",
+      "rows": [
+        {
+          "label": "Survey every corpus chapter",
+          "met": 2,
+          "total": 5
+        },
+        {
+          "label": "File child tasks",
+          "met": 5,
+          "total": 5
+        }
+      ],
+      "type": "criteria-progress"
+    },
+    {
+      "id": "h2-diagram",
+      "level": 2,
+      "text": "diagram",
+      "type": "heading"
+    },
+    {
+      "caption": "The three-stage pipeline",
+      "id": "b-diagram",
+      "source": "graph TD; A[Ingest] --> B[Render] --> C[Publish]",
+      "type": "diagram"
+    },
+    {
+      "id": "h2-diff",
+      "level": 2,
+      "text": "diff",
+      "type": "heading"
+    },
+    {
+      "diff": "diff --git a/lib/render/compose.ex b/lib/render/compose.ex\nindex 3f9c2d1..8a41b7e 100644\n--- a/lib/render/compose.ex\n+++ b/lib/render/compose.ex\n@@ -1,4 +1,5 @@\n defmodule Render.Compose do\n-  def compose(block), do: starter(block)\n+  def compose(block), do: grown(block)\n+  defp grown(block), do: block\n end",
+      "file": "lib/render/compose.ex",
+      "id": "b-diff",
+      "lang": "elixir",
+      "type": "diff"
+    },
+    {
+      "id": "h2-divider",
+      "level": 2,
+      "text": "divider",
+      "type": "heading"
+    },
+    {
+      "id": "b-divider",
+      "type": "divider"
+    },
+    {
+      "id": "h2-equation",
+      "level": 2,
+      "text": "equation",
+      "type": "heading"
+    },
+    {
+      "display": true,
+      "id": "b-equation",
+      "tex": "E = mc^2",
+      "type": "equation"
+    },
+    {
+      "id": "h2-expandable",
+      "level": 2,
+      "text": "expandable",
+      "type": "heading"
+    },
+    {
+      "blocks": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Hidden detail."
+            }
+          ],
+          "id": "b-expandable-0",
+          "type": "paragraph"
+        }
+      ],
+      "id": "b-expandable",
+      "open": false,
+      "summary": "Show the full trace",
+      "type": "expandable"
+    },
+    {
+      "id": "h2-eyebrow",
+      "level": 2,
+      "text": "eyebrow",
+      "type": "heading"
+    },
+    {
+      "id": "b-eyebrow",
+      "text": "Dispatches",
+      "type": "eyebrow"
+    },
+    {
+      "id": "h2-figure",
+      "level": 2,
+      "text": "figure",
+      "type": "heading"
+    },
+    {
+      "caption": "Figure with a captioned child",
+      "child": {
+        "content": [
+          {
+            "type": "text",
+            "value": "The figure body."
+          }
+        ],
+        "type": "paragraph"
+      },
+      "id": "b-figure",
+      "type": "figure"
+    },
+    {
+      "id": "h2-filetree",
+      "level": 2,
+      "text": "filetree",
+      "type": "heading"
+    },
+    {
+      "id": "b-filetree",
+      "legend": "● created · ○ injected · ✕ removed",
+      "text": "api/lib/barkpark/portable_doc/render/\n├── components.ex ● diff_html/1 + filetree_html/1\n├── compose.ex ○ grew the diff + filetree clauses\n└── starter_stub.ex ✕ removed",
+      "type": "filetree"
+    },
+    {
+      "id": "h2-footnote",
+      "level": 2,
+      "text": "footnote",
+      "type": "heading"
+    },
+    {
+      "id": "b-footnote",
+      "notes": [
+        {
+          "id": "fn1",
+          "text": "The board updates live."
+        },
+        {
+          "id": "fn2",
+          "text": "You always feel progress."
+        }
+      ],
+      "type": "footnote"
+    },
+    {
+      "id": "h2-form",
+      "level": 2,
+      "text": "form",
+      "type": "heading"
+    },
+    {
+      "id": "b-form",
+      "kind": "grill",
+      "questions": [
+        {
+          "id": "q1",
+          "prompt": "Ship it?",
+          "type": "yesno"
+        },
+        {
+          "id": "q2",
+          "options": [
+            "Next",
+            "Astro",
+            "Phoenix"
+          ],
+          "prompt": "Pick a surface",
+          "type": "single"
+        },
+        {
+          "id": "q3",
+          "options": [
+            "Elixir",
+            "Go",
+            "JS"
+          ],
+          "prompt": "Which renderers to keep",
+          "type": "multi"
+        },
+        {
+          "id": "q4",
+          "prompt": "Confidence",
+          "scale": {
+            "max": 5,
+            "min": 1
+          },
+          "type": "scale"
+        },
+        {
+          "id": "q5",
+          "prompt": "Anything else?",
+          "type": "text"
+        }
+      ],
+      "type": "form"
+    },
+    {
+      "id": "h2-gauge-list",
+      "level": 2,
+      "text": "gauge-list",
+      "type": "heading"
+    },
+    {
+      "id": "b-gauge-list",
+      "rows": [
+        {
+          "label": "Elixir",
+          "note": "source of truth",
+          "value": 2
+        },
+        {
+          "label": "Go",
+          "value": 1
+        },
+        {
+          "label": "JS",
+          "value": 1
+        }
+      ],
+      "title": "Coverage by surface",
+      "type": "gauge-list"
+    },
+    {
+      "id": "h2-heading",
+      "level": 2,
+      "text": "heading",
+      "type": "heading"
+    },
+    {
+      "id": "b-heading",
+      "level": 2,
+      "text": "The render path",
+      "type": "heading"
+    },
+    {
+      "id": "h2-heatmap",
+      "level": 2,
+      "text": "heatmap",
+      "type": "heading"
+    },
+    {
+      "cells": [
+        [
+          0.1,
+          0.4,
+          0.9
+        ],
+        [
+          0.6,
+          0.2,
+          0.5
+        ]
+      ],
+      "id": "b-heatmap",
+      "type": "heatmap"
+    },
+    {
+      "id": "h2-image",
+      "level": 2,
+      "text": "image",
+      "type": "heading"
+    },
+    {
+      "alt": "Cover art",
+      "height": 360,
+      "id": "b-image",
+      "src": "https://cdn.example.com/cover.png",
+      "type": "image",
+      "width": 640
+    },
+    {
+      "id": "h2-ingress",
+      "level": 2,
+      "text": "ingress",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A lead paragraph that opens the article."
+        }
+      ],
+      "id": "b-ingress",
+      "type": "ingress"
+    },
+    {
+      "id": "h2-list",
+      "level": 2,
+      "text": "list",
+      "type": "heading"
+    },
+    {
+      "id": "b-list",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "First point"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Second point"
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h2-note",
+      "level": 2,
+      "text": "note",
+      "type": "heading"
+    },
+    {
+      "id": "b-note",
+      "label": "Note",
+      "lead": "Run-in",
+      "text": "A single annotated row.",
+      "type": "note"
+    },
+    {
+      "id": "h2-notes",
+      "level": 2,
+      "text": "notes",
+      "type": "heading"
+    },
+    {
+      "id": "b-notes",
+      "items": [
+        {
+          "label": "Upgrade",
+          "lead": "Instant",
+          "text": "The board updates live."
+        },
+        {
+          "label": "Why",
+          "lead": "Trust",
+          "text": "You always feel progress."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "id": "h2-paragraph",
+      "level": 2,
+      "text": "paragraph",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A body paragraph with "
+        },
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "bold emphasis"
+        },
+        {
+          "type": "text",
+          "value": " inside it."
+        }
+      ],
+      "id": "b-paragraph",
+      "type": "paragraph"
+    },
+    {
+      "id": "h2-pipeline",
+      "level": 2,
+      "text": "pipeline",
+      "type": "heading"
+    },
+    {
+      "id": "b-pipeline",
+      "nodes": [
+        {
+          "detail": "reads the queue",
+          "kind": "source",
+          "source": true,
+          "title": "Ingest"
+        },
+        {
+          "detail": "maps the rows",
+          "kind": "emit",
+          "source": "queue.ex:42",
+          "title": "Transform"
+        },
+        {
+          "detail": "writes the board",
+          "kind": "gate",
+          "title": "Publish"
+        }
+      ],
+      "type": "pipeline"
+    },
+    {
+      "id": "h2-pullquote",
+      "level": 2,
+      "text": "pullquote",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The best interface is no interface."
+        }
+      ],
+      "id": "b-pullquote",
+      "type": "pullquote"
+    },
+    {
+      "id": "h2-questionnaire",
+      "level": 2,
+      "text": "questionnaire",
+      "type": "heading"
+    },
+    {
+      "id": "b-questionnaire",
+      "questions": [
+        {
+          "id": "q1",
+          "prompt": "Ready to review?",
+          "type": "yesno"
+        },
+        {
+          "id": "q2",
+          "prompt": "Notes",
+          "type": "text"
+        }
+      ],
+      "type": "questionnaire"
+    },
+    {
+      "id": "h2-roadmap",
+      "level": 2,
+      "text": "roadmap",
+      "type": "heading"
+    },
+    {
+      "id": "b-roadmap",
+      "scale": [
+        "Q1",
+        "Q2",
+        "Q3"
+      ],
+      "snapshot": [
+        {
+          "left": 0,
+          "phase_row": true,
+          "status": "done",
+          "title": "Foundation",
+          "width": 40
+        },
+        {
+          "left": 40,
+          "status": "in_progress",
+          "title": "Ship the board",
+          "width": 35
+        }
+      ],
+      "type": "roadmap"
+    },
+    {
+      "id": "h2-section",
+      "level": 2,
+      "text": "section",
+      "type": "heading"
+    },
+    {
+      "blocks": [
+        {
+          "id": "b-section-0",
+          "slots": {
+            "title": [
+              {
+                "text": "Alpha cell",
+                "type": "heading"
+              }
+            ]
+          },
+          "type": "card"
+        },
+        {
+          "id": "b-section-1",
+          "slots": {
+            "title": [
+              {
+                "text": "Beta cell",
+                "type": "heading"
+              }
+            ]
+          },
+          "span": 2,
+          "type": "card"
+        }
+      ],
+      "id": "b-section",
+      "layout": {
+        "gap": "md",
+        "mode": "grid",
+        "tracks": 2
+      },
+      "type": "section"
+    },
+    {
+      "id": "h2-sheet",
+      "level": 2,
+      "text": "sheet",
+      "type": "heading"
+    },
+    {
+      "id": "b-sheet",
+      "ref": "budget-2026",
+      "snapshot": {
+        "col_widths": [
+          12,
+          8
+        ],
+        "head": [
+          "Item",
+          "Cost"
+        ],
+        "rows": [
+          [
+            "Hosting",
+            "42"
+          ],
+          [
+            "Domains",
+            "18"
+          ]
+        ]
+      },
+      "type": "sheet"
+    },
+    {
+      "id": "h2-stage",
+      "level": 2,
+      "text": "stage",
+      "type": "heading"
+    },
+    {
+      "detail": "checks the criteria",
+      "id": "b-stage",
+      "kind": "gate",
+      "source": true,
+      "title": "Review",
+      "type": "stage"
+    },
+    {
+      "id": "h2-stat-grid",
+      "level": 2,
+      "text": "stat-grid",
+      "type": "heading"
+    },
+    {
+      "id": "b-stat-grid",
+      "items": [
+        {
+          "label": "Renderers today",
+          "value": "5"
+        },
+        {
+          "label": "Renderers target",
+          "value": "3"
+        }
+      ],
+      "type": "stat-grid"
+    },
+    {
+      "id": "h2-stat",
+      "level": 2,
+      "text": "stat",
+      "type": "heading"
+    },
+    {
+      "denom": "118",
+      "id": "b-stat",
+      "label": "Blocks covered",
+      "max": 118,
+      "spark": [
+        3,
+        5,
+        8,
+        13,
+        21
+      ],
+      "type": "stat",
+      "value": "71"
+    },
+    {
+      "id": "h2-stats",
+      "level": 2,
+      "text": "stats",
+      "type": "heading"
+    },
+    {
+      "id": "b-stats",
+      "items": [
+        {
+          "label": "In-scope types",
+          "value": "42"
+        },
+        {
+          "label": "Renderers",
+          "value": "3"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "id": "h2-status-legend",
+      "level": 2,
+      "text": "status-legend",
+      "type": "heading"
+    },
+    {
+      "id": "b-status-legend",
+      "type": "status-legend"
+    },
+    {
+      "id": "h2-steps",
+      "level": 2,
+      "text": "steps",
+      "type": "heading"
+    },
+    {
+      "id": "b-steps",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Run bp task next."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Claim the task"
+        },
+        {
+          "title": "Stamp evidence"
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "id": "h2-table",
+      "level": 2,
+      "text": "table",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Surface"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Renderer"
+          }
+        ]
+      ],
+      "id": "b-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Phoenix"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Elixir"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Next"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "React"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "h2-tabs",
+      "level": 2,
+      "text": "tabs",
+      "type": "heading"
+    },
+    {
+      "id": "b-tabs",
+      "tabs": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "brew install barkpark"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "label": "macOS"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "curl -fsSL install.sh | sh"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "label": "Linux"
+        }
+      ],
+      "type": "tabs"
+    },
+    {
+      "id": "h2-task-board",
+      "level": 2,
+      "text": "task-board",
+      "type": "heading"
+    },
+    {
+      "id": "b-task-board",
+      "snapshot": [
+        {
+          "status": "open",
+          "title": "Backlog groom"
+        },
+        {
+          "priority": "1",
+          "status": "ready",
+          "title": "Wire the harness"
+        },
+        {
+          "priority": "0",
+          "status": "in_progress",
+          "title": "Render the board"
+        },
+        {
+          "status": "blocked",
+          "title": "Await review"
+        },
+        {
+          "criteria": {
+            "met": 2,
+            "total": 2
+          },
+          "status": "done",
+          "title": "Ship the legend"
+        }
+      ],
+      "type": "task-board"
+    },
+    {
+      "id": "h2-task-detail",
+      "level": 2,
+      "text": "task-detail",
+      "type": "heading"
+    },
+    {
+      "id": "b-task-detail",
+      "task": {
+        "criteria": [
+          {
+            "met": true,
+            "text": "Gen emits fixtures"
+          },
+          {
+            "met": false,
+            "text": "JS realizes the golden"
+          }
+        ],
+        "labels": [
+          "parity",
+          "w1"
+        ],
+        "priority": "1",
+        "status": "in_progress",
+        "timeline": [
+          {
+            "label": "Filed",
+            "status": "open"
+          },
+          {
+            "label": "Building",
+            "status": "in_progress"
+          },
+          {
+            "label": "Shipped",
+            "status": "done"
+          }
+        ],
+        "title": "Wire the harness"
+      },
+      "type": "task-detail"
+    },
+    {
+      "id": "h2-task-list",
+      "level": 2,
+      "text": "task-list",
+      "type": "heading"
+    },
+    {
+      "id": "b-task-list",
+      "snapshot": [
+        {
+          "status": "ready",
+          "title": "Seed the renderer"
+        },
+        {
+          "status": "open",
+          "title": "Close the gaps"
+        }
+      ],
+      "type": "task-list"
+    },
+    {
+      "id": "h2-tasks",
+      "level": 2,
+      "text": "tasks",
+      "type": "heading"
+    },
+    {
+      "id": "b-tasks",
+      "snapshot": [
+        {
+          "status": "done",
+          "title": "Author the array"
+        },
+        {
+          "priority": "0",
+          "status": "in_progress",
+          "title": "Wire the generator"
+        },
+        {
+          "status": "ready",
+          "title": "Prove parity"
+        }
+      ],
+      "type": "tasks"
+    },
+    {
+      "id": "h2-terminal",
+      "level": 2,
+      "text": "terminal",
+      "type": "heading"
+    },
+    {
+      "children": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Inside the frame."
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "footer": "q to quit",
+      "id": "b-terminal",
+      "live": true,
+      "title": "bp tasks",
+      "type": "terminal"
+    },
+    {
+      "id": "h2-toc",
+      "level": 2,
+      "text": "toc",
+      "type": "heading"
+    },
+    {
+      "depth": 2,
+      "id": "b-toc",
+      "items": [
+        {
+          "anchor": "getting-started",
+          "level": 2,
+          "text": "Getting started"
+        },
+        {
+          "anchor": "installation",
+          "level": 3,
+          "text": "Installation"
+        },
+        {
+          "anchor": "advanced-usage",
+          "level": 2,
+          "text": "Advanced usage"
+        }
+      ],
+      "numbered": true,
+      "type": "toc"
+    },
+    {
+      "id": "h2-video",
+      "level": 2,
+      "text": "video",
+      "type": "heading"
+    },
+    {
+      "captions": [
+        {
+          "lang": "en",
+          "src": "https://ex.com/en.vtt"
+        }
+      ],
+      "id": "b-video",
+      "poster": "https://ex.com/demo-poster.jpg",
+      "src": "https://ex.com/demo.mp4",
+      "type": "video"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "h1",
+        "level": 1,
+        "text": "Mobile Crown Floor — every PortableDoc type, rendered from the pd-parity corpus",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Machine-generated from the 60 generator-owned pd-parity fixtures. Each section below carries the exact block input the Elixir emitter froze its cross-surface golden from, so opening this paper in the native reader drives every registered renderer once. The oracle for this page is mechanical: an on-device uiautomator dump must contain zero hits for the degrade box the dispatcher paints when it does not recognise a type. This sentence deliberately does NOT quote that label — an earlier draft did, and the paper then matched the very grep that is supposed to prove it clean."
+          }
+        ],
+        "id": "intro",
+        "type": "paragraph"
+      },
+      {
+        "id": "h2-action",
+        "level": 2,
+        "text": "action",
+        "type": "heading"
+      },
+      {
+        "href": "https://example.com/docs",
+        "id": "b-action",
+        "label": "Read the docs",
+        "priority": "primary",
+        "type": "action"
+      },
+      {
+        "id": "h2-api-endpoint",
+        "level": 2,
+        "text": "api-endpoint",
+        "type": "heading"
+      },
+      {
+        "id": "b-api-endpoint",
+        "method": "POST",
+        "params": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "path": "/v1/data/mutate",
+        "type": "api-endpoint"
+      },
+      {
+        "id": "h2-asciicast",
+        "level": 2,
+        "text": "asciicast",
+        "type": "heading"
+      },
+      {
+        "caption": "A terminal walkthrough",
+        "id": "b-asciicast",
+        "src": "https://example.com/casts/demo.cast",
+        "type": "asciicast"
+      },
+      {
+        "id": "h2-bar-chart",
+        "level": 2,
+        "text": "bar-chart",
+        "type": "heading"
+      },
+      {
+        "bars": [
+          {
+            "label": "paragraph",
+            "value": 40
+          },
+          {
+            "label": "heading",
+            "value": 25
+          },
+          {
+            "label": "list",
+            "value": 10
+          }
+        ],
+        "id": "b-bar-chart",
+        "type": "bar-chart",
+        "values": true
+      },
+      {
+        "id": "h2-blockquote",
+        "level": 2,
+        "text": "blockquote",
+        "type": "heading"
+      },
+      {
+        "cite": "Alan Kay",
+        "content": [
+          {
+            "type": "text",
+            "value": "The best way to predict the future is to invent it."
+          }
+        ],
+        "id": "b-blockquote",
+        "type": "blockquote"
+      },
+      {
+        "id": "h2-byline",
+        "level": 2,
+        "text": "byline",
+        "type": "heading"
+      },
+      {
+        "id": "b-byline",
+        "items": [
+          "Jane Rae",
+          "2026-07-16"
+        ],
+        "type": "byline"
+      },
+      {
+        "id": "h2-callout",
+        "level": 2,
+        "text": "callout",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "This is a warning callout body."
+          }
+        ],
+        "id": "b-callout",
+        "title": "Heads up",
+        "tone": "warn",
+        "type": "callout"
+      },
+      {
+        "id": "h2-card",
+        "level": 2,
+        "text": "card",
+        "type": "heading"
+      },
+      {
+        "id": "b-card",
+        "slots": {
+          "action": [
+            {
+              "href": "https://example.com/board",
+              "label": "Open the board",
+              "type": "action"
+            }
+          ],
+          "body": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Card body text."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": [
+            {
+              "text": "Card title",
+              "type": "heading"
+            }
+          ]
+        },
+        "tone": "info",
+        "type": "card"
+      },
+      {
+        "id": "h2-cards",
+        "level": 2,
+        "text": "cards",
+        "type": "heading"
+      },
+      {
+        "id": "b-cards",
+        "items": [
+          {
+            "text": "The first rule body.",
+            "title": "Rule one",
+            "tone": "info"
+          },
+          {
+            "text": "The second rule body.",
+            "title": "Rule two",
+            "tone": "warn"
+          }
+        ],
+        "type": "cards"
+      },
+      {
+        "id": "h2-chart",
+        "level": 2,
+        "text": "chart",
+        "type": "heading"
+      },
+      {
+        "axes": {
+          "xLabels": [
+            "W1",
+            "W2",
+            "W3",
+            "W4"
+          ]
+        },
+        "caption": "Coverage over time",
+        "id": "b-chart",
+        "kind": "line",
+        "series": [
+          {
+            "label": "Covered",
+            "points": [
+              10,
+              20,
+              35,
+              42
+            ]
+          }
+        ],
+        "type": "chart"
+      },
+      {
+        "id": "h2-chat-approval",
+        "level": 2,
+        "text": "chat-approval",
+        "type": "heading"
+      },
+      {
+        "approval_status": "pending",
+        "id": "b-chat-approval",
+        "summary": "rm -rf api/_build/prod",
+        "tool_name": "Bash",
+        "type": "chat-approval"
+      },
+      {
+        "id": "h2-chat-plan",
+        "level": 2,
+        "text": "chat-plan",
+        "type": "heading"
+      },
+      {
+        "approval_status": "pending",
+        "id": "b-chat-plan",
+        "preview": "Collapse five renderers to three, prove parity per block.",
+        "title": "Unify the renderers",
+        "type": "chat-plan"
+      },
+      {
+        "id": "h2-chat-question",
+        "level": 2,
+        "text": "chat-question",
+        "type": "heading"
+      },
+      {
+        "approval_status": "pending",
+        "id": "b-chat-question",
+        "questions": [
+          {
+            "options": [
+              "Elixir",
+              "Go",
+              "JS"
+            ],
+            "question": "Which renderer is canonical?"
+          }
+        ],
+        "type": "chat-question"
+      },
+      {
+        "id": "h2-chat-thinking",
+        "level": 2,
+        "text": "chat-thinking",
+        "type": "heading"
+      },
+      {
+        "id": "b-chat-thinking",
+        "tokens": 1200,
+        "type": "chat-thinking"
+      },
+      {
+        "id": "h2-chat-todo",
+        "level": 2,
+        "text": "chat-todo",
+        "type": "heading"
+      },
+      {
+        "id": "b-chat-todo",
+        "todos": [
+          {
+            "content": "Author the array",
+            "status": "completed"
+          },
+          {
+            "active_form": "Wiring the generator",
+            "content": "Wire the generator",
+            "status": "in_progress"
+          },
+          {
+            "content": "Prove parity",
+            "status": "pending"
+          }
+        ],
+        "type": "chat-todo"
+      },
+      {
+        "id": "h2-chat-tool-diff",
+        "level": 2,
+        "text": "chat-tool-diff",
+        "type": "heading"
+      },
+      {
+        "id": "b-chat-tool-diff",
+        "input": {
+          "file_path": "lib/foo.ex",
+          "new_string": "def hello do\n  :new\nend",
+          "old_string": "def hello do\n  :old\nend"
+        },
+        "type": "chat-tool-diff"
+      },
+      {
+        "id": "h2-code-tabs",
+        "level": 2,
+        "text": "code-tabs",
+        "type": "heading"
+      },
+      {
+        "id": "b-code-tabs",
+        "syncKey": "lang",
+        "tabs": [
+          {
+            "label": "JS",
+            "language": "js",
+            "value": "console.log(1)"
+          },
+          {
+            "label": "Go",
+            "language": "go",
+            "value": "fmt.Println(1)"
+          }
+        ],
+        "type": "code-tabs"
+      },
+      {
+        "id": "h2-code",
+        "level": 2,
+        "text": "code",
+        "type": "heading"
+      },
+      {
+        "id": "b-code",
+        "type": "code",
+        "value": "def hello do\n  :world\nend"
+      },
+      {
+        "id": "h2-columns",
+        "level": 2,
+        "text": "columns",
+        "type": "heading"
+      },
+      {
+        "columns": [
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Left column body."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Right column body."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ]
+        ],
+        "id": "b-columns",
+        "type": "columns"
+      },
+      {
+        "id": "h2-criteria-progress",
+        "level": 2,
+        "text": "criteria-progress",
+        "type": "heading"
+      },
+      {
+        "id": "b-criteria-progress",
+        "rows": [
+          {
+            "label": "Survey every corpus chapter",
+            "met": 2,
+            "total": 5
+          },
+          {
+            "label": "File child tasks",
+            "met": 5,
+            "total": 5
+          }
+        ],
+        "type": "criteria-progress"
+      },
+      {
+        "id": "h2-diagram",
+        "level": 2,
+        "text": "diagram",
+        "type": "heading"
+      },
+      {
+        "caption": "The three-stage pipeline",
+        "id": "b-diagram",
+        "source": "graph TD; A[Ingest] --> B[Render] --> C[Publish]",
+        "type": "diagram"
+      },
+      {
+        "id": "h2-diff",
+        "level": 2,
+        "text": "diff",
+        "type": "heading"
+      },
+      {
+        "diff": "diff --git a/lib/render/compose.ex b/lib/render/compose.ex\nindex 3f9c2d1..8a41b7e 100644\n--- a/lib/render/compose.ex\n+++ b/lib/render/compose.ex\n@@ -1,4 +1,5 @@\n defmodule Render.Compose do\n-  def compose(block), do: starter(block)\n+  def compose(block), do: grown(block)\n+  defp grown(block), do: block\n end",
+        "file": "lib/render/compose.ex",
+        "id": "b-diff",
+        "lang": "elixir",
+        "type": "diff"
+      },
+      {
+        "id": "h2-divider",
+        "level": 2,
+        "text": "divider",
+        "type": "heading"
+      },
+      {
+        "id": "b-divider",
+        "type": "divider"
+      },
+      {
+        "id": "h2-equation",
+        "level": 2,
+        "text": "equation",
+        "type": "heading"
+      },
+      {
+        "display": true,
+        "id": "b-equation",
+        "tex": "E = mc^2",
+        "type": "equation"
+      },
+      {
+        "id": "h2-expandable",
+        "level": 2,
+        "text": "expandable",
+        "type": "heading"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Hidden detail."
+              }
+            ],
+            "id": "b-expandable-0",
+            "type": "paragraph"
+          }
+        ],
+        "id": "b-expandable",
+        "open": false,
+        "summary": "Show the full trace",
+        "type": "expandable"
+      },
+      {
+        "id": "h2-eyebrow",
+        "level": 2,
+        "text": "eyebrow",
+        "type": "heading"
+      },
+      {
+        "id": "b-eyebrow",
+        "text": "Dispatches",
+        "type": "eyebrow"
+      },
+      {
+        "id": "h2-figure",
+        "level": 2,
+        "text": "figure",
+        "type": "heading"
+      },
+      {
+        "caption": "Figure with a captioned child",
+        "child": {
+          "content": [
+            {
+              "type": "text",
+              "value": "The figure body."
+            }
+          ],
+          "type": "paragraph"
+        },
+        "id": "b-figure",
+        "type": "figure"
+      },
+      {
+        "id": "h2-filetree",
+        "level": 2,
+        "text": "filetree",
+        "type": "heading"
+      },
+      {
+        "id": "b-filetree",
+        "legend": "● created · ○ injected · ✕ removed",
+        "text": "api/lib/barkpark/portable_doc/render/\n├── components.ex ● diff_html/1 + filetree_html/1\n├── compose.ex ○ grew the diff + filetree clauses\n└── starter_stub.ex ✕ removed",
+        "type": "filetree"
+      },
+      {
+        "id": "h2-footnote",
+        "level": 2,
+        "text": "footnote",
+        "type": "heading"
+      },
+      {
+        "id": "b-footnote",
+        "notes": [
+          {
+            "id": "fn1",
+            "text": "The board updates live."
+          },
+          {
+            "id": "fn2",
+            "text": "You always feel progress."
+          }
+        ],
+        "type": "footnote"
+      },
+      {
+        "id": "h2-form",
+        "level": 2,
+        "text": "form",
+        "type": "heading"
+      },
+      {
+        "id": "b-form",
+        "kind": "grill",
+        "questions": [
+          {
+            "id": "q1",
+            "prompt": "Ship it?",
+            "type": "yesno"
+          },
+          {
+            "id": "q2",
+            "options": [
+              "Next",
+              "Astro",
+              "Phoenix"
+            ],
+            "prompt": "Pick a surface",
+            "type": "single"
+          },
+          {
+            "id": "q3",
+            "options": [
+              "Elixir",
+              "Go",
+              "JS"
+            ],
+            "prompt": "Which renderers to keep",
+            "type": "multi"
+          },
+          {
+            "id": "q4",
+            "prompt": "Confidence",
+            "scale": {
+              "max": 5,
+              "min": 1
+            },
+            "type": "scale"
+          },
+          {
+            "id": "q5",
+            "prompt": "Anything else?",
+            "type": "text"
+          }
+        ],
+        "type": "form"
+      },
+      {
+        "id": "h2-gauge-list",
+        "level": 2,
+        "text": "gauge-list",
+        "type": "heading"
+      },
+      {
+        "id": "b-gauge-list",
+        "rows": [
+          {
+            "label": "Elixir",
+            "note": "source of truth",
+            "value": 2
+          },
+          {
+            "label": "Go",
+            "value": 1
+          },
+          {
+            "label": "JS",
+            "value": 1
+          }
+        ],
+        "title": "Coverage by surface",
+        "type": "gauge-list"
+      },
+      {
+        "id": "h2-heading",
+        "level": 2,
+        "text": "heading",
+        "type": "heading"
+      },
+      {
+        "id": "b-heading",
+        "level": 2,
+        "text": "The render path",
+        "type": "heading"
+      },
+      {
+        "id": "h2-heatmap",
+        "level": 2,
+        "text": "heatmap",
+        "type": "heading"
+      },
+      {
+        "cells": [
+          [
+            0.1,
+            0.4,
+            0.9
+          ],
+          [
+            0.6,
+            0.2,
+            0.5
+          ]
+        ],
+        "id": "b-heatmap",
+        "type": "heatmap"
+      },
+      {
+        "id": "h2-image",
+        "level": 2,
+        "text": "image",
+        "type": "heading"
+      },
+      {
+        "alt": "Cover art",
+        "height": 360,
+        "id": "b-image",
+        "src": "https://cdn.example.com/cover.png",
+        "type": "image",
+        "width": 640
+      },
+      {
+        "id": "h2-ingress",
+        "level": 2,
+        "text": "ingress",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "A lead paragraph that opens the article."
+          }
+        ],
+        "id": "b-ingress",
+        "type": "ingress"
+      },
+      {
+        "id": "h2-list",
+        "level": 2,
+        "text": "list",
+        "type": "heading"
+      },
+      {
+        "id": "b-list",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "First point"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Second point"
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h2-note",
+        "level": 2,
+        "text": "note",
+        "type": "heading"
+      },
+      {
+        "id": "b-note",
+        "label": "Note",
+        "lead": "Run-in",
+        "text": "A single annotated row.",
+        "type": "note"
+      },
+      {
+        "id": "h2-notes",
+        "level": 2,
+        "text": "notes",
+        "type": "heading"
+      },
+      {
+        "id": "b-notes",
+        "items": [
+          {
+            "label": "Upgrade",
+            "lead": "Instant",
+            "text": "The board updates live."
+          },
+          {
+            "label": "Why",
+            "lead": "Trust",
+            "text": "You always feel progress."
+          }
+        ],
+        "type": "notes"
+      },
+      {
+        "id": "h2-paragraph",
+        "level": 2,
+        "text": "paragraph",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "A body paragraph with "
+          },
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "bold emphasis"
+          },
+          {
+            "type": "text",
+            "value": " inside it."
+          }
+        ],
+        "id": "b-paragraph",
+        "type": "paragraph"
+      },
+      {
+        "id": "h2-pipeline",
+        "level": 2,
+        "text": "pipeline",
+        "type": "heading"
+      },
+      {
+        "id": "b-pipeline",
+        "nodes": [
+          {
+            "detail": "reads the queue",
+            "kind": "source",
+            "source": true,
+            "title": "Ingest"
+          },
+          {
+            "detail": "maps the rows",
+            "kind": "emit",
+            "source": "queue.ex:42",
+            "title": "Transform"
+          },
+          {
+            "detail": "writes the board",
+            "kind": "gate",
+            "title": "Publish"
+          }
+        ],
+        "type": "pipeline"
+      },
+      {
+        "id": "h2-pullquote",
+        "level": 2,
+        "text": "pullquote",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The best interface is no interface."
+          }
+        ],
+        "id": "b-pullquote",
+        "type": "pullquote"
+      },
+      {
+        "id": "h2-questionnaire",
+        "level": 2,
+        "text": "questionnaire",
+        "type": "heading"
+      },
+      {
+        "id": "b-questionnaire",
+        "questions": [
+          {
+            "id": "q1",
+            "prompt": "Ready to review?",
+            "type": "yesno"
+          },
+          {
+            "id": "q2",
+            "prompt": "Notes",
+            "type": "text"
+          }
+        ],
+        "type": "questionnaire"
+      },
+      {
+        "id": "h2-roadmap",
+        "level": 2,
+        "text": "roadmap",
+        "type": "heading"
+      },
+      {
+        "id": "b-roadmap",
+        "scale": [
+          "Q1",
+          "Q2",
+          "Q3"
+        ],
+        "snapshot": [
+          {
+            "left": 0,
+            "phase_row": true,
+            "status": "done",
+            "title": "Foundation",
+            "width": 40
+          },
+          {
+            "left": 40,
+            "status": "in_progress",
+            "title": "Ship the board",
+            "width": 35
+          }
+        ],
+        "type": "roadmap"
+      },
+      {
+        "id": "h2-section",
+        "level": 2,
+        "text": "section",
+        "type": "heading"
+      },
+      {
+        "blocks": [
+          {
+            "id": "b-section-0",
+            "slots": {
+              "title": [
+                {
+                  "text": "Alpha cell",
+                  "type": "heading"
+                }
+              ]
+            },
+            "type": "card"
+          },
+          {
+            "id": "b-section-1",
+            "slots": {
+              "title": [
+                {
+                  "text": "Beta cell",
+                  "type": "heading"
+                }
+              ]
+            },
+            "span": 2,
+            "type": "card"
+          }
+        ],
+        "id": "b-section",
+        "layout": {
+          "gap": "md",
+          "mode": "grid",
+          "tracks": 2
+        },
+        "type": "section"
+      },
+      {
+        "id": "h2-sheet",
+        "level": 2,
+        "text": "sheet",
+        "type": "heading"
+      },
+      {
+        "id": "b-sheet",
+        "ref": "budget-2026",
+        "snapshot": {
+          "col_widths": [
+            12,
+            8
+          ],
+          "head": [
+            "Item",
+            "Cost"
+          ],
+          "rows": [
+            [
+              "Hosting",
+              "42"
+            ],
+            [
+              "Domains",
+              "18"
+            ]
+          ]
+        },
+        "type": "sheet"
+      },
+      {
+        "id": "h2-stage",
+        "level": 2,
+        "text": "stage",
+        "type": "heading"
+      },
+      {
+        "detail": "checks the criteria",
+        "id": "b-stage",
+        "kind": "gate",
+        "source": true,
+        "title": "Review",
+        "type": "stage"
+      },
+      {
+        "id": "h2-stat-grid",
+        "level": 2,
+        "text": "stat-grid",
+        "type": "heading"
+      },
+      {
+        "id": "b-stat-grid",
+        "items": [
+          {
+            "label": "Renderers today",
+            "value": "5"
+          },
+          {
+            "label": "Renderers target",
+            "value": "3"
+          }
+        ],
+        "type": "stat-grid"
+      },
+      {
+        "id": "h2-stat",
+        "level": 2,
+        "text": "stat",
+        "type": "heading"
+      },
+      {
+        "denom": "118",
+        "id": "b-stat",
+        "label": "Blocks covered",
+        "max": 118,
+        "spark": [
+          3,
+          5,
+          8,
+          13,
+          21
+        ],
+        "type": "stat",
+        "value": "71"
+      },
+      {
+        "id": "h2-stats",
+        "level": 2,
+        "text": "stats",
+        "type": "heading"
+      },
+      {
+        "id": "b-stats",
+        "items": [
+          {
+            "label": "In-scope types",
+            "value": "42"
+          },
+          {
+            "label": "Renderers",
+            "value": "3"
+          }
+        ],
+        "type": "stats"
+      },
+      {
+        "id": "h2-status-legend",
+        "level": 2,
+        "text": "status-legend",
+        "type": "heading"
+      },
+      {
+        "id": "b-status-legend",
+        "type": "status-legend"
+      },
+      {
+        "id": "h2-steps",
+        "level": 2,
+        "text": "steps",
+        "type": "heading"
+      },
+      {
+        "id": "b-steps",
+        "steps": [
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Run bp task next."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Claim the task"
+          },
+          {
+            "title": "Stamp evidence"
+          }
+        ],
+        "type": "steps"
+      },
+      {
+        "id": "h2-table",
+        "level": 2,
+        "text": "table",
+        "type": "heading"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "Surface"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Renderer"
+            }
+          ]
+        ],
+        "id": "b-table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Phoenix"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Elixir"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Next"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "React"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "h2-tabs",
+        "level": 2,
+        "text": "tabs",
+        "type": "heading"
+      },
+      {
+        "id": "b-tabs",
+        "tabs": [
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "brew install barkpark"
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "label": "macOS"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "curl -fsSL install.sh | sh"
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "label": "Linux"
+          }
+        ],
+        "type": "tabs"
+      },
+      {
+        "id": "h2-task-board",
+        "level": 2,
+        "text": "task-board",
+        "type": "heading"
+      },
+      {
+        "id": "b-task-board",
+        "snapshot": [
+          {
+            "status": "open",
+            "title": "Backlog groom"
+          },
+          {
+            "priority": "1",
+            "status": "ready",
+            "title": "Wire the harness"
+          },
+          {
+            "priority": "0",
+            "status": "in_progress",
+            "title": "Render the board"
+          },
+          {
+            "status": "blocked",
+            "title": "Await review"
+          },
+          {
+            "criteria": {
+              "met": 2,
+              "total": 2
+            },
+            "status": "done",
+            "title": "Ship the legend"
+          }
+        ],
+        "type": "task-board"
+      },
+      {
+        "id": "h2-task-detail",
+        "level": 2,
+        "text": "task-detail",
+        "type": "heading"
+      },
+      {
+        "id": "b-task-detail",
+        "task": {
+          "criteria": [
+            {
+              "met": true,
+              "text": "Gen emits fixtures"
+            },
+            {
+              "met": false,
+              "text": "JS realizes the golden"
+            }
+          ],
+          "labels": [
+            "parity",
+            "w1"
+          ],
+          "priority": "1",
+          "status": "in_progress",
+          "timeline": [
+            {
+              "label": "Filed",
+              "status": "open"
+            },
+            {
+              "label": "Building",
+              "status": "in_progress"
+            },
+            {
+              "label": "Shipped",
+              "status": "done"
+            }
+          ],
+          "title": "Wire the harness"
+        },
+        "type": "task-detail"
+      },
+      {
+        "id": "h2-task-list",
+        "level": 2,
+        "text": "task-list",
+        "type": "heading"
+      },
+      {
+        "id": "b-task-list",
+        "snapshot": [
+          {
+            "status": "ready",
+            "title": "Seed the renderer"
+          },
+          {
+            "status": "open",
+            "title": "Close the gaps"
+          }
+        ],
+        "type": "task-list"
+      },
+      {
+        "id": "h2-tasks",
+        "level": 2,
+        "text": "tasks",
+        "type": "heading"
+      },
+      {
+        "id": "b-tasks",
+        "snapshot": [
+          {
+            "status": "done",
+            "title": "Author the array"
+          },
+          {
+            "priority": "0",
+            "status": "in_progress",
+            "title": "Wire the generator"
+          },
+          {
+            "status": "ready",
+            "title": "Prove parity"
+          }
+        ],
+        "type": "tasks"
+      },
+      {
+        "id": "h2-terminal",
+        "level": 2,
+        "text": "terminal",
+        "type": "heading"
+      },
+      {
+        "children": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Inside the frame."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "footer": "q to quit",
+        "id": "b-terminal",
+        "live": true,
+        "title": "bp tasks",
+        "type": "terminal"
+      },
+      {
+        "id": "h2-toc",
+        "level": 2,
+        "text": "toc",
+        "type": "heading"
+      },
+      {
+        "depth": 2,
+        "id": "b-toc",
+        "items": [
+          {
+            "anchor": "getting-started",
+            "level": 2,
+            "text": "Getting started"
+          },
+          {
+            "anchor": "installation",
+            "level": 3,
+            "text": "Installation"
+          },
+          {
+            "anchor": "advanced-usage",
+            "level": 2,
+            "text": "Advanced usage"
+          }
+        ],
+        "numbered": true,
+        "type": "toc"
+      },
+      {
+        "id": "h2-video",
+        "level": 2,
+        "text": "video",
+        "type": "heading"
+      },
+      {
+        "captions": [
+          {
+            "lang": "en",
+            "src": "https://ex.com/en.vtt"
+          }
+        ],
+        "id": "b-video",
+        "poster": "https://ex.com/demo-poster.jpg",
+        "src": "https://ex.com/demo.mp4",
+        "type": "video"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Mobile Crown Floor — every PortableDoc type, rendered from the pd-parity corpus</h1><p>Machine-generated from the 60 generator-owned pd-parity fixtures. Each section below carries the exact block input the Elixir emitter froze its cross-surface golden from, so opening this paper in the native reader drives every registered renderer once. The oracle for this page is mechanical: an on-device uiautomator dump must contain zero hits for the degrade box the dispatcher paints when it does not recognise a type. This sentence deliberately does NOT quote that label — an earlier draft did, and the paper then matched the very grep that is supposed to prove it clean.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">action</h2><a href=\"https://example.com/docs\" style=\"display:inline-block;padding:10px 20px;background:#1e5347;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0\">Read the docs</a><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">api-endpoint</h2><div class=\"bp-api-endpoint\"><div class=\"bp-api-endpoint__head\"><span class=\"bp-api-endpoint__method bp-api-endpoint__method--post\">POST</span><code class=\"bp-api-endpoint__path\">/v1/data/mutate</code></div><table class=\"bp-api-endpoint__params\"><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr></thead><tbody><tr><td>dataset</td><td>path</td><td>string</td><td>Yes</td></tr></tbody></table></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">asciicast</h2><figure style=\"margin:16px 0\"><a href=\"https://example.com/casts/demo.cast\">Terminal recording</a><div style=\"color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px\">A terminal walkthrough</div></figure><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">bar-chart</h2><div style=\"background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;margin:2px 0\">paragraph: 40</div><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;margin:2px 0\">heading: 25</div><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;margin:2px 0\">list: 10</div><div style=\"font-size:11px;color:#55635e;margin-top:6px;font-style:italic\">Open the paper to see the live chart.</div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">blockquote</h2><blockquote style=\"margin:0 0 16px;padding:2px 0 2px 16px;border-left:3px solid #dde7e2;color:#55635e;font-style:italic;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif\">The best way to predict the future is to invent it.<cite style=\"display:block;margin-top:6px;font-style:normal;font-size:14px;color:#55635e\">— Alan Kay</cite></blockquote><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">byline</h2><p style=\"border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px\">Jane Rae · 2026-07-16</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">callout</h2><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">Heads up</div><span>This is a warning callout body.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">card</h2><div style=\"background:#ffffff;border:1px solid #dde7e2;border-top:3px solid #2563eb;border-radius:10px;padding:14px 16px\"><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Card title</h2><p>Card body text.</p><a href=\"https://example.com/board\" style=\"display:inline-block;padding:10px 20px;border:2px solid #1e5347;color:#1e5347;text-decoration:none;font-weight:bold;border-radius:0\">Open the board</a></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">cards</h2><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;border-collapse:collapse;margin:12px 0\"><tr><td style=\"width:50%;vertical-align:top;padding:0 6px 12px 6px\"><div style=\"background:#ffffff;border:1px solid #dde7e2;border-top:3px solid #2563eb;border-radius:10px;padding:14px 16px\"><div style=\"font-weight:700;font-size:15px;line-height:1.3;color:#15211d;margin-bottom:4px\">Rule one</div><div style=\"font-size:14px;line-height:1.55;color:#55635e\">The first rule body.</div></div></td><td style=\"width:50%;vertical-align:top;padding:0 6px 12px 6px\"><div style=\"background:#ffffff;border:1px solid #dde7e2;border-top:3px solid #d97706;border-radius:10px;padding:14px 16px\"><div style=\"font-weight:700;font-size:15px;line-height:1.3;color:#15211d;margin-bottom:4px\">Rule two</div><div style=\"font-size:14px;line-height:1.55;color:#55635e\">The second rule body.</div></div></td></tr></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">chart</h2><div style=\"background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><div style=\"font-size:13px;font-weight:600;color:#15211d;margin-bottom:6px\">Coverage over time</div><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#55635e;margin:2px 0\"><span style=\"display:inline-block;width:12px;height:3px;border-radius:2px;background:#1e5347;margin-right:8px;vertical-align:middle\"></span>Covered · 10 → 42 · now 42</div><div style=\"font-size:11px;color:#55635e;margin-top:6px;font-style:italic\">Open the paper to see the live chart.</div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">chat-approval</h2><div class=\"bp-chat-approval text-xs\" style=\"font-family: var(--font-mono);\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span style=\"font-weight: 600;\">Allow Bash?</span><span class=\"text-dim\" style=\"margin-left: auto; white-space: nowrap;\">pending</span></div><div style=\"opacity: 0.85; overflow-wrap: anywhere; margin-top: 2px;\">rm -rf api/_build/prod</div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">chat-plan</h2><div class=\"bp-chat-plan text-xs\" style=\"font-family: var(--font-mono);\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span style=\"font-weight: 600;\">Unify the renderers</span><span class=\"text-dim\" style=\"margin-left: auto; white-space: nowrap;\">pending</span></div><div style=\"opacity: 0.85; overflow-wrap: anywhere; margin-top: 2px;\">Collapse five renderers to three, prove parity per block.</div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">chat-question</h2><div class=\"bp-chat-question text-xs\" style=\"font-family: var(--font-mono);\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span style=\"font-weight: 600;\">Question</span><span class=\"text-dim\" style=\"margin-left: auto; white-space: nowrap;\">pending</span></div><div style=\"margin-top: 4px;\"><div style=\"overflow-wrap: anywhere;\">Which renderer is canonical?</div><div style=\"margin: 2px 0 0 12px;\"><span style=\"display: inline-block; padding: 0 6px; margin: 2px 4px 0 0; border: 1px solid var(--border-muted); border-radius: 4px;\">Elixir</span><span style=\"display: inline-block; padding: 0 6px; margin: 2px 4px 0 0; border: 1px solid var(--border-muted); border-radius: 4px;\">Go</span><span style=\"display: inline-block; padding: 0 6px; margin: 2px 4px 0 0; border: 1px solid var(--border-muted); border-radius: 4px;\">JS</span></div></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">chat-thinking</h2><div class=\"bp-chat-thinking text-xs text-dim\" style=\"font-family: var(--font-mono);\"><span aria-hidden=\"true\">✻</span> thought for ~1200 tokens</div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">chat-todo</h2><div class=\"bp-chat-todo\" style=\"font-family: var(--font-mono);\"><div class=\"text-xs\" style=\"overflow-wrap: anywhere;\"><span style=\"color: var(--primary);\">●</span> <span>Update todos</span> <span style=\"opacity: 0.6;\"> · 1/3 done</span></div><ul style=\"list-style: none; margin: 4px 0 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 2px;\"><li class=\"text-xs\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span aria-hidden=\"true\" style=\"flex: none; color: var(--ok);\">☒</span><span style=\"overflow-wrap: anywhere; opacity: 0.6; text-decoration: line-through;\">Author the array</span></div></li><li class=\"text-xs\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span aria-hidden=\"true\" style=\"flex: none; color: var(--primary);\">◐</span><span style=\"overflow-wrap: anywhere; color: var(--primary); font-weight: 600;\">Wire the generator</span></div><div class=\"text-dim\" style=\"padding-left: 20px; opacity: 0.75;\">→ Wiring the generator</div></li><li class=\"text-xs\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span aria-hidden=\"true\" style=\"flex: none; opacity: 0.6;\">☐</span><span style=\"overflow-wrap: anywhere;\">Prove parity</span></div></li></ul></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">chat-tool-diff</h2><div class=\"bp-chat-tool-diff text-xs\" style=\"font-family: var(--font-mono); margin: 4px 0 0 16px; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;\"><div class=\"text-dim\" style=\"font-size: 11px; margin-bottom: 4px;\"><span style=\"color: var(--ok);\">+1</span> <span style=\"color: var(--danger);\">−1</span></div><div style=\"color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">&nbsp;&nbsp;def hello do</div><div style=\"color: var(--ok); background: var(--ok-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">+   :new</div><div style=\"color: var(--danger); background: var(--danger-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">-   :old</div><div style=\"color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">&nbsp;&nbsp;end</div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">code-tabs</h2><div class=\"bp-code-tabs\"><div class=\"bp-code-tabs__panel\"><p class=\"bp-code-tabs__label\">JS</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">console.log(1)</pre></div><div class=\"bp-code-tabs__panel\"><p class=\"bp-code-tabs__label\">Go</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">fmt.Println(1)</pre></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">code</h2><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">def hello do</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  :world</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">end</code></span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">columns</h2><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;border-collapse:separate;margin:12px 0\"><tr><td style=\"vertical-align:top;width:50.0%;padding:0 16px 0 0\"><p>Left column body.</p></td><td style=\"vertical-align:top;width:50.0%;padding:0\"><p>Right column body.</p></td></tr></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">criteria-progress</h2><div style=\"background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;margin:2px 0\">Survey every corpus chapter: 2/5</div><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;margin:2px 0\">File child tasks: 5/5</div><div style=\"font-size:11px;color:#55635e;margin-top:6px;font-style:italic\">Open the paper to see the live progress.</div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">diagram</h2><figure style=\"margin:16px 0\"><pre style=\"background:#f3f4f6;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:0.9em;overflow:auto;white-space:pre-wrap\">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><div style=\"color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px\">The three-stage pipeline</div></figure><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">diff</h2><div class=\"bp-diff text-xs\" style=\"font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;\"><div class=\"text-dim\" style=\"font-size: 11px; margin-bottom: 4px;\"><span style=\"font-weight: 600;\">lib/render/compose.ex</span> · elixir · <span style=\"color: var(--ok);\">+2</span> <span style=\"color: var(--danger);\">−1</span></div><div style=\"font-weight: 600; margin: 4px 0 1px; white-space: pre-wrap; overflow-wrap: anywhere;\">lib/render/compose.ex</div><div style=\"color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">&nbsp;&nbsp;@@ -1,4 +1,5 @@</div><div style=\"color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">&nbsp;&nbsp;defmodule Render.Compose do</div><div style=\"color: var(--danger); background: var(--danger-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">-   def compose(block), do: starter(block)</div><div style=\"color: var(--ok); background: var(--ok-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">+   def compose(block), do: grown(block)</div><div style=\"color: var(--ok); background: var(--ok-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">+   defp grown(block), do: block</div><div style=\"color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">&nbsp;&nbsp;end</div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">divider</h2><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">equation</h2><div style=\"border:1px solid #ddd;border-radius:10px;padding:10px 13px;font-family:monospace;font-size:13px;margin:12px 0\">E = mc^2</div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">expandable</h2><details open class=\"bp-expandable\"><summary>Show the full trace</summary><div class=\"bp-expandable__body\"><p>Hidden detail.</p></div></details><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">eyebrow</h2><p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">Dispatches</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">figure</h2><figure style=\"margin:16px 0\"><p>The figure body.</p><div style=\"color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px\">Figure with a captioned child</div></figure><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">filetree</h2><div class=\"bp-filetree text-xs\" style=\"font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;\"><div style=\"white-space: pre;\">api/lib/barkpark/portable_doc/render/</div><div style=\"white-space: pre;\">├── components.ex<span class=\"bp-filetree-note\" style=\"color: var(--ok);\"> ● diff_html/1 + filetree_html/1</span></div><div style=\"white-space: pre;\">├── compose.ex<span class=\"bp-filetree-note\" style=\"color: var(--fg-dim);\"> ○ grew the diff + filetree clauses</span></div><div style=\"white-space: pre;\">└── starter_stub.ex<span class=\"bp-filetree-note\" style=\"color: var(--danger);\"> ✕ removed</span></div><div class=\"bp-filetree-legend text-dim\" style=\"font-size: 11px; margin-top: 4px;\">● created · ○ injected · ✕ removed</div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">footnote</h2><ol class=\"bp-footnote\"><li id=\"fn-fn1\" class=\"bp-footnote__note\">The board updates live.</li><li id=\"fn-fn2\" class=\"bp-footnote__note\">You always feel progress.</li></ol><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">form</h2><section class=\"bp-form bp-form-grill\"><fieldset class=\"bp-form-question bp-form-q--yesno\"><legend>Ship it?</legend><div class=\"bp-form-opts\"><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q1\" value=\"Yes\"> <span>Yes</span></label><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q1\" value=\"No\"> <span>No</span></label></div></fieldset><fieldset class=\"bp-form-question bp-form-q--single\"><legend>Pick a surface</legend><div class=\"bp-form-opts\"><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q2\" value=\"Next\"> <span>Next</span></label><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q2\" value=\"Astro\"> <span>Astro</span></label><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q2\" value=\"Phoenix\"> <span>Phoenix</span></label></div></fieldset><fieldset class=\"bp-form-question bp-form-q--multi\"><legend>Which renderers to keep</legend><div class=\"bp-form-opts\"><label style=\"display:block;margin:0.2rem 0\"><input type=\"checkbox\" name=\"q3\" value=\"Elixir\"> <span>Elixir</span></label><label style=\"display:block;margin:0.2rem 0\"><input type=\"checkbox\" name=\"q3\" value=\"Go\"> <span>Go</span></label><label style=\"display:block;margin:0.2rem 0\"><input type=\"checkbox\" name=\"q3\" value=\"JS\"> <span>JS</span></label></div></fieldset><fieldset class=\"bp-form-question bp-form-q--scale\"><legend>Confidence</legend><div class=\"bp-form-opts\"><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q4\" value=\"1\"> <span>1</span></label><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q4\" value=\"2\"> <span>2</span></label><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q4\" value=\"3\"> <span>3</span></label><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q4\" value=\"4\"> <span>4</span></label><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q4\" value=\"5\"> <span>5</span></label></div></fieldset><fieldset class=\"bp-form-question bp-form-q--text\"><legend>Anything else?</legend><div class=\"bp-form-opts\"><textarea name=\"q5\" rows=\"3\"></textarea></div></fieldset></section><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">gauge-list</h2><div style=\"background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><div style=\"font-weight:700;color:#15211d;margin-bottom:8px\">Coverage by surface</div><table role=\"presentation\" style=\"border-collapse:collapse;width:100%\"><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">Elixir</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:50%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">50%</td><td style=\"font-size:11px;color:#55635e;padding:3px 0 3px 10px;white-space:nowrap\">source of truth</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">Go</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:25%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">25%</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 10px 3px 0;white-space:nowrap\">JS</td><td style=\"width:60%;padding:3px 0\"><div style=\"height:8px;border-radius:4px;background:#dde7e2\"><div style=\"height:8px;border-radius:4px;width:25%;background:#1e5347\"></div></div></td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#15211d;padding:3px 0 3px 10px;text-align:right;white-space:nowrap\">25%</td></tr></table></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">heading</h2><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The render path</h2><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">heatmap</h2><div style=\"display:inline-block;background:#ffffff;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:12px 0\"><table cellspacing=\"3\" cellpadding=\"0\" style=\"border-collapse:separate\"><tr><td style=\"width:22px;height:18px;border-radius:3px;background:#d3dfdb\" title=\"0.1\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#8faba4\" title=\"0.4\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#1e5347\" title=\"0.9\"></td></tr><tr><td style=\"width:22px;height:18px;border-radius:3px;background:#62887f\" title=\"0.6\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#bdcec9\" title=\"0.2\"></td><td style=\"width:22px;height:18px;border-radius:3px;background:#799991\" title=\"0.5\"></td></tr></table></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">image</h2><img src=\"https://cdn.example.com/cover.png\" alt=\"Cover art\" style=\"max-width:100%;height:auto\" width=\"640\" height=\"360\"><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">ingress</h2><p style=\"margin:0 0 10px;line-height:1.55;font-size:18px\">A lead paragraph that opens the article.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">list</h2><ul style=\"margin:0 0 24px;padding-left:24px;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.7\"><li style=\"margin:4pt 0 0\"><span>First point</span></li><li style=\"margin:4pt 0 0\"><span>Second point</span></li></ul><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">note</h2><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;border-collapse:collapse;margin:12px 0\"><tr><td style=\"width:132px;vertical-align:top;padding:6px 12px 6px 0\"><span style=\"display:inline-block;background:#e4eae9;color:#1e5347;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;line-height:1.3;padding:3px 8px;border-radius:6px\">Note</span></td><td style=\"vertical-align:top;padding:6px 0;font-size:14px;line-height:1.55;color:#15211d\"><b>Run-in</b> A single annotated row.</td></tr></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">notes</h2><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;border-collapse:collapse;margin:12px 0\"><tr><td style=\"width:132px;vertical-align:top;padding:6px 12px 6px 0\"><span style=\"display:inline-block;background:#e4eae9;color:#1e5347;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;line-height:1.3;padding:3px 8px;border-radius:6px\">Upgrade</span></td><td style=\"vertical-align:top;padding:6px 0;font-size:14px;line-height:1.55;color:#15211d\"><b>Instant</b> The board updates live.</td></tr><tr><td style=\"width:132px;vertical-align:top;padding:6px 12px 6px 0\"><span style=\"display:inline-block;background:#e4eae9;color:#1e5347;font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:600;line-height:1.3;padding:3px 8px;border-radius:6px\">Why</span></td><td style=\"vertical-align:top;padding:6px 0;font-size:14px;line-height:1.55;color:#15211d\"><b>Trust</b> You always feel progress.</td></tr></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">paragraph</h2><p>A body paragraph with <span style=\"font-weight:bold\">bold emphasis</span> inside it.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">pipeline</h2><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;margin:12px 0\"><tr><td style=\"vertical-align:top;padding:0\"><div style=\"display:inline-block;min-width:120px;vertical-align:top;background:#ffffff;border:1px solid #1e5347;border-radius:10px;padding:10px 12px\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#1e5347;margin-bottom:4px\">source</div><div style=\"font-size:14px;font-weight:600;line-height:1.3;color:#15211d;margin-bottom:2px\">Ingest</div><div style=\"font-size:13px;line-height:1.45;color:#55635e\">reads the queue</div></div></td><td style=\"vertical-align:middle;padding:0 8px;font-size:18px;color:#55635e\">→</td><td style=\"vertical-align:top;padding:0\"><div style=\"display:inline-block;min-width:120px;vertical-align:top;background:#ffffff;border:1px solid #dde7e2;border-radius:10px;padding:10px 12px\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#1e5347;margin-bottom:4px\">emit</div><div style=\"font-size:14px;font-weight:600;line-height:1.3;color:#15211d;margin-bottom:2px\">Transform</div><div style=\"font-size:13px;line-height:1.45;color:#55635e\">maps the rows</div><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;margin-top:6px\">queue.ex:42</div></div></td><td style=\"vertical-align:middle;padding:0 8px;font-size:18px;color:#55635e\">→</td><td style=\"vertical-align:top;padding:0\"><div style=\"display:inline-block;min-width:120px;vertical-align:top;background:#ffffff;border:1px solid #dde7e2;border-radius:10px;padding:10px 12px\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#1e5347;margin-bottom:4px\">gate</div><div style=\"font-size:14px;font-weight:600;line-height:1.3;color:#15211d;margin-bottom:2px\">Publish</div><div style=\"font-size:13px;line-height:1.45;color:#55635e\">writes the board</div></div></td></tr></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">pullquote</h2><p style=\"margin:22px 0;padding:2px 0 2px 16px;border-left:3px solid #1e5347;color:#15211d;font-size:19px;font-style:italic\">The best interface is no interface.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">questionnaire</h2><section class=\"bp-form bp-form-questionnaire\"><fieldset class=\"bp-form-question bp-form-q--yesno\"><legend>Ready to review?</legend><div class=\"bp-form-opts\"><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q1\" value=\"Yes\"> <span>Yes</span></label><label style=\"display:block;margin:0.2rem 0\"><input type=\"radio\" name=\"q1\" value=\"No\"> <span>No</span></label></div></fieldset><fieldset class=\"bp-form-question bp-form-q--text\"><legend>Notes</legend><div class=\"bp-form-opts\"><textarea name=\"q2\" rows=\"3\"></textarea></div></fieldset></section><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">roadmap</h2><div style=\"background:#ffffff;border:1px solid #dde7e2;border-radius:10px;padding:14px 16px;margin:12px 0\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td width=\"34%\"></td><td><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td width=\"33%\" style=\"font-size:10px;color:#55635e;font-family:ui-monospace,Menlo,monospace;padding-bottom:4px\">Q1</td><td width=\"33%\" style=\"font-size:10px;color:#55635e;font-family:ui-monospace,Menlo,monospace;padding-bottom:4px\">Q2</td><td width=\"33%\" style=\"font-size:10px;color:#55635e;font-family:ui-monospace,Menlo,monospace;padding-bottom:4px\">Q3</td></tr></table></td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td width=\"34%\" valign=\"middle\" style=\"font-size:12px;font-weight:700;color:#15211d;padding:4px 8px 4px 0\">Foundation</td><td valign=\"middle\" style=\"padding:4px 0\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;background:#d6e1dd;border-radius:4px\"><tr><td width=\"40%\" style=\"height:8px;background:#0d9488;border-radius:4px;font-size:0;line-height:0\">&nbsp;</td><td width=\"60%\" style=\"font-size:0;line-height:0\"></td></tr></table></td></tr><tr><td width=\"34%\" valign=\"middle\" style=\"font-size:12px;font-weight:500;color:#15211d;padding:4px 8px 4px 0\">Ship the board</td><td valign=\"middle\" style=\"padding:4px 0\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;background:#d6e1dd;border-radius:4px\"><tr><td width=\"40%\" style=\"font-size:0;line-height:0\"></td><td width=\"35%\" style=\"height:8px;background:#2563eb;border-radius:4px;font-size:0;line-height:0\">&nbsp;</td><td width=\"25%\" style=\"font-size:0;line-height:0\"></td></tr></table></td></tr></table></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">section</h2><div style=\"display:flex;flex-direction:column\"><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><div style=\"background:#ffffff;border:1px solid #dde7e2;border-top:3px solid #dde7e2;border-radius:10px;padding:14px 16px\"><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Alpha cell</h2></div><div style=\"background:#ffffff;border:1px solid #dde7e2;border-top:3px solid #dde7e2;border-radius:10px;padding:14px 16px\"><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Beta cell</h2></div><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">sheet</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%\"><thead><tr><th style=\"width:12px;border-bottom:2px solid #dde7e2;padding:6px 10px;text-align:left;font-weight:bold\">Item</th><th style=\"width:8px;border-bottom:2px solid #dde7e2;padding:6px 10px;text-align:left;font-weight:bold\">Cost</th></tr></thead><tbody><tr><td style=\"width:12px;border:1px solid #dde7e2;padding:6px 10px;vertical-align:top\">Hosting</td><td class=\"sheet-al-right\" style=\"width:8px;border:1px solid #dde7e2;padding:6px 10px;vertical-align:top\">42</td></tr><tr><td style=\"width:12px;border:1px solid #dde7e2;padding:6px 10px;vertical-align:top\">Domains</td><td class=\"sheet-al-right\" style=\"width:8px;border:1px solid #dde7e2;padding:6px 10px;vertical-align:top\">18</td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">stage</h2><div style=\"display:inline-block;min-width:120px;vertical-align:top;background:#ffffff;border:1px solid #1e5347;border-radius:10px;padding:10px 12px\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#1e5347;margin-bottom:4px\">gate</div><div style=\"font-size:14px;font-weight:600;line-height:1.3;color:#15211d;margin-bottom:2px\">Review</div><div style=\"font-size:13px;line-height:1.45;color:#55635e\">checks the criteria</div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">stat-grid</h2><div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">5</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Renderers today</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">3</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Renderers target</div></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">stat</h2><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"height:6px;border-radius:3px;background:#dde7e2;margin-bottom:6px\"><div style=\"height:6px;border-radius:3px;width:60.2%;background:#1e5347\"></div></div><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">71</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Blocks covered</div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">stats</h2><div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">42</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">In-scope types</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">3</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Renderers</div></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">status-legend</h2><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:separate;border:1px solid #dde7e2;border-radius:10px;background:#ffffff;margin:12px 0\"><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:14px;color:#55635e;padding:6px 10px;text-align:center;width:1.4em\">○</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:600;color:#15211d;padding:6px 10px;white-space:nowrap\">open</td><td style=\"font-size:13px;color:#55635e;padding:6px 10px\">backlog — not ready yet</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:14px;color:#15211d;padding:6px 10px;text-align:center;width:1.4em\">○</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:600;color:#15211d;padding:6px 10px;white-space:nowrap\">ready</td><td style=\"font-size:13px;color:#55635e;padding:6px 10px\">unchecked — claim it now</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:14px;color:#2563eb;padding:6px 10px;text-align:center;width:1.4em\">⠿</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:600;color:#15211d;padding:6px 10px;white-space:nowrap\">in progress</td><td style=\"font-size:13px;color:#55635e;padding:6px 10px\">being worked right now</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:14px;color:#d97706;padding:6px 10px;text-align:center;width:1.4em\">!</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:600;color:#15211d;padding:6px 10px;white-space:nowrap\">blocked</td><td style=\"font-size:13px;color:#55635e;padding:6px 10px\">something is required first</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:14px;color:#0d9488;padding:6px 10px;text-align:center;width:1.4em\">✓</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:600;color:#15211d;padding:6px 10px;white-space:nowrap\">done</td><td style=\"font-size:13px;color:#55635e;padding:6px 10px\">complete</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:14px;color:#55635e;padding:6px 10px;text-align:center;width:1.4em\">✕</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:600;color:#15211d;padding:6px 10px;white-space:nowrap\">cancelled</td><td style=\"font-size:13px;color:#55635e;padding:6px 10px\">abandoned or superseded</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:14px;color:#55635e;padding:6px 10px;text-align:center;width:1.4em\">◌</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:600;color:#15211d;padding:6px 10px;white-space:nowrap\">considering</td><td style=\"font-size:13px;color:#55635e;padding:6px 10px\">a candidate being weighed</td></tr><tr><td style=\"font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:14px;color:#7c3aed;padding:6px 10px;text-align:center;width:1.4em\">◎</td><td style=\"font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:600;color:#15211d;padding:6px 10px;white-space:nowrap\">researching</td><td style=\"font-size:13px;color:#55635e;padding:6px 10px\">under active investigation</td></tr></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">steps</h2><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Claim the task</div><div class=\"bp-steps__body\"><p>Run bp task next.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Stamp evidence</div><div class=\"bp-steps__body\"></div></li></ol><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">table</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Surface</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Renderer</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Phoenix</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Elixir</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Next</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>React</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">tabs</h2><div class=\"bp-tabs\"><div class=\"bp-tabs__section\"><p class=\"bp-tabs__label\">macOS</p><p>brew install barkpark</p></div><div class=\"bp-tabs__section\"><p class=\"bp-tabs__label\">Linux</p><p>curl -fsSL install.sh | sh</p></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">task-board</h2><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:separate;border-spacing:6px 0;margin:12px 0\"><tr><td valign=\"top\" width=\"20%\" style=\"border-top:3px solid #15211d;background:#eaf1ee;border-radius:6px;padding:8px\"><div style=\"font-size:11px;font-family:ui-monospace,Menlo,monospace;color:#55635e;text-transform:uppercase;letter-spacing:.03em\"><b style=\"color:#15211d\">Open</b> 1</div><div style=\"background:#ffffff;border:1px solid #dde7e2;border-radius:5px;padding:6px 8px;margin-top:6px\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td valign=\"top\" width=\"16\" style=\"color:#55635e;font-family:ui-monospace,Menlo,monospace;font-size:12px\">○</td><td valign=\"top\" style=\"font-size:12px;color:#15211d;padding-left:5px\">Backlog groom</td></tr></table></div></td><td valign=\"top\" width=\"20%\" style=\"border-top:3px solid #15211d;background:#eaf1ee;border-radius:6px;padding:8px\"><div style=\"font-size:11px;font-family:ui-monospace,Menlo,monospace;color:#55635e;text-transform:uppercase;letter-spacing:.03em\"><b style=\"color:#15211d\">Ready</b> 1</div><div style=\"background:#ffffff;border:1px solid #dde7e2;border-radius:5px;padding:6px 8px;margin-top:6px\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td valign=\"top\" width=\"16\" style=\"color:#15211d;font-family:ui-monospace,Menlo,monospace;font-size:12px\">○</td><td valign=\"top\" style=\"font-size:12px;color:#15211d;padding-left:5px\">Wire the harness<div style=\"font-size:11px;color:#55635e;font-family:ui-monospace,Menlo,monospace;margin-top:2px\">P1</div></td></tr></table></div></td><td valign=\"top\" width=\"20%\" style=\"border-top:3px solid #2563eb;background:#eaf1ee;border-radius:6px;padding:8px\"><div style=\"font-size:11px;font-family:ui-monospace,Menlo,monospace;color:#55635e;text-transform:uppercase;letter-spacing:.03em\"><b style=\"color:#15211d\">In progress</b> 1</div><div style=\"background:#ffffff;border:1px solid #dde7e2;border-radius:5px;padding:6px 8px;margin-top:6px\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td valign=\"top\" width=\"16\" style=\"color:#2563eb;font-family:ui-monospace,Menlo,monospace;font-size:12px\">⠿</td><td valign=\"top\" style=\"font-size:12px;color:#15211d;padding-left:5px\">Render the board<div style=\"font-size:11px;color:#55635e;font-family:ui-monospace,Menlo,monospace;margin-top:2px\">P0</div></td></tr></table></div></td><td valign=\"top\" width=\"20%\" style=\"border-top:3px solid #d97706;background:#eaf1ee;border-radius:6px;padding:8px\"><div style=\"font-size:11px;font-family:ui-monospace,Menlo,monospace;color:#55635e;text-transform:uppercase;letter-spacing:.03em\"><b style=\"color:#15211d\">Blocked</b> 1</div><div style=\"background:#ffffff;border:1px solid #dde7e2;border-radius:5px;padding:6px 8px;margin-top:6px\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td valign=\"top\" width=\"16\" style=\"color:#d97706;font-family:ui-monospace,Menlo,monospace;font-size:12px\">!</td><td valign=\"top\" style=\"font-size:12px;color:#15211d;padding-left:5px\">Await review</td></tr></table></div></td><td valign=\"top\" width=\"20%\" style=\"border-top:3px solid #0d9488;background:#eaf1ee;border-radius:6px;padding:8px\"><div style=\"font-size:11px;font-family:ui-monospace,Menlo,monospace;color:#55635e;text-transform:uppercase;letter-spacing:.03em\"><b style=\"color:#15211d\">Done</b> 1</div><div style=\"background:#ffffff;border:1px solid #dde7e2;border-radius:5px;padding:6px 8px;margin-top:6px\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td valign=\"top\" width=\"16\" style=\"color:#0d9488;font-family:ui-monospace,Menlo,monospace;font-size:12px\">✓</td><td valign=\"top\" style=\"font-size:12px;color:#15211d;padding-left:5px\">Ship the legend<div style=\"font-size:11px;color:#55635e;font-family:ui-monospace,Menlo,monospace;margin-top:2px\">2/2</div></td></tr></table></div></td></tr></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">task-detail</h2><div style=\"background:#ffffff;border:1px solid #dde7e2;border-radius:10px;padding:14px 16px;margin:12px 0\"><div style=\"font-size:17px;font-weight:700;color:#15211d;margin-bottom:6px\">Wire the harness</div><div style=\"margin:2px 0 6px\"><span style=\"color:#2563eb;font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-right:6px\">⠿</span><span style=\"font-size:12px;color:#55635e;font-family:ui-monospace,Menlo,monospace\">in_progress · P1</span></div><div style=\"margin:6px 0;line-height:1.9\"><span style=\"white-space:nowrap\"><span style=\"color:#55635e;font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-right:6px\">○</span><span style=\"font-size:12px;color:#15211d\">Filed</span></span> <span style=\"color:#55635e\">→</span> <span style=\"white-space:nowrap\"><span style=\"color:#2563eb;font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-right:6px\">⠿</span><span style=\"font-size:12px;color:#15211d\">Building</span></span> <span style=\"color:#55635e\">→</span> <span style=\"white-space:nowrap\"><span style=\"color:#0d9488;font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-right:6px\">✓</span><span style=\"font-size:12px;color:#15211d\">Shipped</span></span></div><div style=\"font-size:11px;font-weight:700;color:#55635e;text-transform:uppercase;letter-spacing:.04em;font-family:ui-monospace,Menlo,monospace;margin:10px 0 2px\">Criteria · 1/2</div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td valign=\"top\" width=\"18\" style=\"color:#0d9488;font-family:ui-monospace,Menlo,monospace;font-size:13px;padding:2px 0\">✓</td><td valign=\"top\" style=\"font-size:13px;color:#15211d;padding:2px 0 2px 6px\">Gen emits fixtures</td></tr><tr><td valign=\"top\" width=\"18\" style=\"color:#15211d;font-family:ui-monospace,Menlo,monospace;font-size:13px;padding:2px 0\">○</td><td valign=\"top\" style=\"font-size:13px;color:#15211d;padding:2px 0 2px 6px\">JS realizes the golden</td></tr></table><div style=\"margin-top:2px\"><span style=\"display:inline-block;font-size:11px;color:#55635e;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:1px 8px;margin:6px 6px 0 0;font-family:ui-monospace,Menlo,monospace\">parity</span><span style=\"display:inline-block;font-size:11px;color:#55635e;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:1px 8px;margin:6px 6px 0 0;font-family:ui-monospace,Menlo,monospace\">w1</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">task-list</h2><div style=\"background:#ffffff;border:1px solid #dde7e2;border-radius:10px;padding:14px 16px;margin:12px 0\"><div style=\"font-size:12px;color:#55635e;font-family:ui-monospace,Menlo,monospace;margin:2px 0 4px\"><span style=\"color:#2563eb\">⠿</span> <b style=\"color:#15211d\">0</b> in flight · <span style=\"color:#15211d\">○</span> <b style=\"color:#15211d\">1</b> ready · <span style=\"color:#0d9488\">✓</span> <b style=\"color:#15211d\">0</b> done · <b style=\"color:#15211d\">0%</b></div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;margin-bottom:8px\"><tr><td style=\"height:6px;background:#dde7e2;border-radius:3px;font-size:0;line-height:0\">&nbsp;</td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td valign=\"top\" width=\"18\" style=\"color:#15211d;font-family:ui-monospace,Menlo,monospace;font-size:13px;padding:3px 0\">○</td><td valign=\"top\" style=\"font-size:13px;color:#15211d;padding:3px 8px 3px 6px\">Seed the renderer</td></tr><tr><td valign=\"top\" width=\"18\" style=\"color:#55635e;font-family:ui-monospace,Menlo,monospace;font-size:13px;padding:3px 0\">○</td><td valign=\"top\" style=\"font-size:13px;color:#15211d;padding:3px 8px 3px 6px\">Close the gaps</td></tr></table></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">tasks</h2><div style=\"background:#ffffff;border:1px solid #dde7e2;border-radius:10px;padding:14px 16px;margin:12px 0\"><div style=\"font-size:12px;color:#55635e;font-family:ui-monospace,Menlo,monospace;margin:2px 0 4px\"><span style=\"color:#2563eb\">⠿</span> <b style=\"color:#15211d\">1</b> in flight · <span style=\"color:#15211d\">○</span> <b style=\"color:#15211d\">1</b> ready · <span style=\"color:#0d9488\">✓</span> <b style=\"color:#15211d\">1</b> done · <b style=\"color:#15211d\">33%</b></div><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;margin-bottom:8px\"><tr><td width=\"33%\" style=\"height:6px;background:#1e5347;border-radius:3px;font-size:0;line-height:0\">&nbsp;</td><td style=\"height:6px;background:#dde7e2;border-radius:3px;font-size:0;line-height:0\">&nbsp;</td></tr></table><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse\"><tr><td valign=\"top\" width=\"18\" style=\"color:#0d9488;font-family:ui-monospace,Menlo,monospace;font-size:13px;padding:3px 0\">✓</td><td valign=\"top\" style=\"font-size:13px;color:#15211d;padding:3px 8px 3px 6px\">Author the array</td></tr><tr><td valign=\"top\" width=\"18\" style=\"color:#2563eb;font-family:ui-monospace,Menlo,monospace;font-size:13px;padding:3px 0\">⠿</td><td valign=\"top\" style=\"font-size:13px;color:#15211d;padding:3px 8px 3px 6px\">Wire the generator</td><td valign=\"top\" align=\"right\" style=\"font-size:11px;color:#55635e;font-family:ui-monospace,Menlo,monospace;white-space:nowrap;padding:3px 0\">P0</td></tr><tr><td valign=\"top\" width=\"18\" style=\"color:#15211d;font-family:ui-monospace,Menlo,monospace;font-size:13px;padding:3px 0\">○</td><td valign=\"top\" style=\"font-size:13px;color:#15211d;padding:3px 8px 3px 6px\">Prove parity</td></tr></table></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">terminal</h2><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%;border-collapse:separate;border:1px solid #dde7e2;border-radius:10px;background:#ffffff;margin:12px 0\"><tr><td style=\"padding:8px 12px;border-bottom:1px solid #dde7e2;background:#eaf1ee\"><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:100%\"><tr><td style=\"padding-right:10px;white-space:nowrap;vertical-align:middle\"><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding-right:6px\"><div style=\"width:11px;height:11px;border-radius:50%;background:#ef4444;font-size:0;line-height:0\">&nbsp;</div></td><td style=\"padding-right:6px\"><div style=\"width:11px;height:11px;border-radius:50%;background:#f59e0b;font-size:0;line-height:0\">&nbsp;</div></td><td style=\"\"><div style=\"width:11px;height:11px;border-radius:50%;background:#22c55e;font-size:0;line-height:0\">&nbsp;</div></td></tr></table></td><td style=\"width:100%;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#55635e;vertical-align:middle\">bp tasks</td><td align=\"right\" style=\"font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#0d9488;white-space:nowrap\"><span style=\"display:inline-block;width:7px;height:7px;border-radius:50%;background:#0d9488;vertical-align:middle;margin-right:5px\"></span>live</td></tr></table></td></tr><tr><td style=\"padding:8px 8px\"><p>Inside the frame.</p></td></tr><tr><td style=\"padding:8px 12px;border-top:1px solid #dde7e2;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;background:#eaf1ee\">q to quit</td></tr></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">toc</h2><nav class=\"bp-toc\"><ol class=\"bp-toc__list\"><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#getting-started\">1. Getting started</a></li><li class=\"bp-toc__item\" data-level=\"2\"><a href=\"#installation\">1.1. Installation</a></li><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#advanced-usage\">2. Advanced usage</a></li></ol></nav><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">video</h2><figure style=\"margin:16px 0\"><img src=\"https://ex.com/demo-poster.jpg\" alt=\"\" style=\"max-width:100%;border-radius:6px;display:block;margin-bottom:8px\"><a href=\"https://ex.com/demo.mp4\">Watch the video</a></figure>"
+  },
+  "body_html": "<h1>Mobile Crown Floor — every PortableDoc type, rendered from the pd-parity corpus</h1><p>Machine-generated from the 60 generator-owned pd-parity fixtures. Each section below carries the exact block input the Elixir emitter froze its cross-surface golden from, so opening this paper in the native reader drives every registered renderer once. The oracle for this page is mechanical: an on-device uiautomator dump must contain zero hits for the degrade box the dispatcher paints when it does not recognise a type. This sentence deliberately does NOT quote that label — an earlier draft did, and the paper then matched the very grep that is supposed to prove it clean.</p><h2>action</h2><a href=\"https://example.com/docs\" class=\"bp-button bp-button--primary\">Read the docs</a><h2>api-endpoint</h2><div class=\"bp-api-endpoint\"><div class=\"bp-api-endpoint__head\"><span class=\"bp-api-endpoint__method bp-api-endpoint__method--post\">POST</span><code class=\"bp-api-endpoint__path\">/v1/data/mutate</code></div><table class=\"bp-api-endpoint__params\"><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr></thead><tbody><tr><td>dataset</td><td>path</td><td>string</td><td>Yes</td></tr></tbody></table></div><h2>asciicast</h2><figure style=\"margin:1.6rem 0\"><div class=\"bp-asciicast\" data-cast-src=\"https://example.com/casts/demo.cast\" style=\"border:1px solid #dde7e2;border-radius:6px;overflow:hidden\"></div><figcaption style=\"margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif\">A terminal walkthrough</figcaption></figure><h2>bar-chart</h2><div class=\"bp-bar-chart\"><div class=\"bp-bar-chart__row\"><span class=\"bp-bar-chart__l\">paragraph</span><span class=\"bp-bar-chart__bar\"><i style=\"width:100%\"></i></span><span class=\"bp-bar-chart__d\">40</span></div><div class=\"bp-bar-chart__row\"><span class=\"bp-bar-chart__l\">heading</span><span class=\"bp-bar-chart__bar\"><i style=\"width:62.5%\"></i></span><span class=\"bp-bar-chart__d\">25</span></div><div class=\"bp-bar-chart__row\"><span class=\"bp-bar-chart__l\">list</span><span class=\"bp-bar-chart__bar\"><i style=\"width:25%\"></i></span><span class=\"bp-bar-chart__d\">10</span></div></div><h2>blockquote</h2><blockquote class=\"bp-blockquote\"><p>The best way to predict the future is to invent it.</p><cite class=\"bp-blockquote__cite\">Alan Kay</cite></blockquote><h2>byline</h2><p class=\"bp-role-byline\">Jane Rae · 2026-07-16</p><h2>callout</h2><div class=\"bp-callout bp-callout--info\"><strong>Heads up</strong> <span>This is a warning callout body.</span></div><h2>card</h2><div class=\"bp-card bp-card--info\"><h2>Card title</h2><p>Card body text.</p><a href=\"https://example.com/board\" class=\"bp-button\">Open the board</a></div><h2>cards</h2><div class=\"bp-cards\"><div class=\"bp-card bp-card--info\"><div class=\"bp-card__t\">Rule one</div><div class=\"bp-card__d\">The first rule body.</div></div><div class=\"bp-card bp-card--warn\"><div class=\"bp-card__t\">Rule two</div><div class=\"bp-card__d\">The second rule body.</div></div></div><h2>chart</h2><div class=\"bp-chart\"><div class=\"bp-chart__t\">Coverage over time</div><svg viewBox=\"0 0 640 190\" preserveAspectRatio=\"none\" role=\"img\"><line class=\"bp-chart__grid\" x1=\"46\" y1=\"8\" x2=\"630\" y2=\"8\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"12\" text-anchor=\"end\">42</text><line class=\"bp-chart__grid\" x1=\"46\" y1=\"58.7\" x2=\"630\" y2=\"58.7\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"62.7\" text-anchor=\"end\">31.3</text><line class=\"bp-chart__grid\" x1=\"46\" y1=\"109.3\" x2=\"630\" y2=\"109.3\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"113.3\" text-anchor=\"end\">20.7</text><line class=\"bp-chart__grid\" x1=\"46\" y1=\"160\" x2=\"630\" y2=\"160\"/><text class=\"bp-chart__tick\" x=\"40\" y=\"164\" text-anchor=\"end\">10</text><line class=\"bp-chart__axis\" x1=\"46\" y1=\"160\" x2=\"630\" y2=\"160\"/><polyline class=\"bp-chart__s bp-chart__s0\" points=\"46,160 240.7,112.5 435.3,41.3 630,8\"/><text class=\"bp-chart__tick\" x=\"46\" y=\"176\" text-anchor=\"start\">W1</text><text class=\"bp-chart__tick\" x=\"630\" y=\"176\" text-anchor=\"end\">W4</text></svg><div class=\"bp-chart__legend\"><span class=\"bp-chart__key\"><i class=\"bp-chart__swatch bp-chart__s0\"></i>Covered</span></div></div><h2>chat-approval</h2><div class=\"bp-chat-approval text-xs\" style=\"font-family: var(--font-mono);\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span style=\"font-weight: 600;\">Allow Bash?</span><span class=\"text-dim\" style=\"margin-left: auto; white-space: nowrap;\">pending</span></div><div style=\"opacity: 0.85; overflow-wrap: anywhere; margin-top: 2px;\">rm -rf api/_build/prod</div></div><h2>chat-plan</h2><div class=\"bp-chat-plan text-xs\" style=\"font-family: var(--font-mono);\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span style=\"font-weight: 600;\">Unify the renderers</span><span class=\"text-dim\" style=\"margin-left: auto; white-space: nowrap;\">pending</span></div><div style=\"opacity: 0.85; overflow-wrap: anywhere; margin-top: 2px;\">Collapse five renderers to three, prove parity per block.</div></div><h2>chat-question</h2><div class=\"bp-chat-question text-xs\" style=\"font-family: var(--font-mono);\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span style=\"font-weight: 600;\">Question</span><span class=\"text-dim\" style=\"margin-left: auto; white-space: nowrap;\">pending</span></div><div style=\"margin-top: 4px;\"><div style=\"overflow-wrap: anywhere;\">Which renderer is canonical?</div><div style=\"margin: 2px 0 0 12px;\"><span style=\"display: inline-block; padding: 0 6px; margin: 2px 4px 0 0; border: 1px solid var(--border-muted); border-radius: 4px;\">Elixir</span><span style=\"display: inline-block; padding: 0 6px; margin: 2px 4px 0 0; border: 1px solid var(--border-muted); border-radius: 4px;\">Go</span><span style=\"display: inline-block; padding: 0 6px; margin: 2px 4px 0 0; border: 1px solid var(--border-muted); border-radius: 4px;\">JS</span></div></div></div><h2>chat-thinking</h2><div class=\"bp-chat-thinking text-xs text-dim\" style=\"font-family: var(--font-mono);\"><span aria-hidden=\"true\">✻</span> thought for ~1200 tokens</div><h2>chat-todo</h2><div class=\"bp-chat-todo\" style=\"font-family: var(--font-mono);\"><div class=\"text-xs\" style=\"overflow-wrap: anywhere;\"><span style=\"color: var(--primary);\">●</span> <span>Update todos</span> <span style=\"opacity: 0.6;\"> · 1/3 done</span></div><ul style=\"list-style: none; margin: 4px 0 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 2px;\"><li class=\"text-xs\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span aria-hidden=\"true\" style=\"flex: none; color: var(--ok);\">☒</span><span style=\"overflow-wrap: anywhere; opacity: 0.6; text-decoration: line-through;\">Author the array</span></div></li><li class=\"text-xs\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span aria-hidden=\"true\" style=\"flex: none; color: var(--primary);\">◐</span><span style=\"overflow-wrap: anywhere; color: var(--primary); font-weight: 600;\">Wire the generator</span></div><div class=\"text-dim\" style=\"padding-left: 20px; opacity: 0.75;\">→ Wiring the generator</div></li><li class=\"text-xs\"><div style=\"display: flex; gap: 6px; align-items: baseline;\"><span aria-hidden=\"true\" style=\"flex: none; opacity: 0.6;\">☐</span><span style=\"overflow-wrap: anywhere;\">Prove parity</span></div></li></ul></div><h2>chat-tool-diff</h2><div class=\"bp-chat-tool-diff text-xs\" style=\"font-family: var(--font-mono); margin: 4px 0 0 16px; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;\"><div class=\"text-dim\" style=\"font-size: 11px; margin-bottom: 4px;\"><span style=\"color: var(--ok);\">+1</span> <span style=\"color: var(--danger);\">−1</span></div><div style=\"color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">&nbsp;&nbsp;def hello do</div><div style=\"color: var(--ok); background: var(--ok-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">+   :new</div><div style=\"color: var(--danger); background: var(--danger-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">-   :old</div><div style=\"color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">&nbsp;&nbsp;end</div></div><h2>code-tabs</h2><div class=\"bp-code-tabs\" data-sync-key=\"lang\"><div class=\"bp-code-tabs__strip\" role=\"tablist\"><button type=\"button\" class=\"bp-code-tabs__tab bp-code-tabs__tab--active\" role=\"tab\" aria-selected=\"true\" data-lang=\"js\">JS</button><button type=\"button\" class=\"bp-code-tabs__tab\" role=\"tab\" aria-selected=\"false\" data-lang=\"go\">Go</button></div><div class=\"bp-code-tabs__panels\"><div class=\"bp-code-tabs__panel\" data-lang=\"js\"><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">console.log(1)</pre></div><div class=\"bp-code-tabs__panel\" data-lang=\"go\"><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">fmt.Println(1)</pre></div></div></div><h2>code</h2><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">def hello do\n  :world\nend</pre><h2>columns</h2><div class=\"bp-cols\" style=\"--bp-cols:2\"><div class=\"bp-cols__c\"><p>Left column body.</p></div><div class=\"bp-cols__c\"><p>Right column body.</p></div></div><h2>criteria-progress</h2><div class=\"bp-criteria-progress\"><div class=\"bp-criteria-progress__row\"><span class=\"bp-criteria-progress__l\">Survey every corpus chapter</span><span class=\"bp-criteria-progress__bar\"><i style=\"width:40%\"></i></span><span class=\"bp-criteria-progress__d\">2/5</span></div><div class=\"bp-criteria-progress__row\"><span class=\"bp-criteria-progress__l\">File child tasks</span><span class=\"bp-criteria-progress__bar\"><i style=\"width:100%\"></i></span><span class=\"bp-criteria-progress__d\">5/5</span></div></div><h2>diagram</h2><figure style=\"margin:1.6rem 0;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px\"><pre class=\"mermaid\">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><figcaption style=\"margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif\">The three-stage pipeline</figcaption></figure><h2>diff</h2><div class=\"bp-diff text-xs\" style=\"font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;\"><div class=\"text-dim\" style=\"font-size: 11px; margin-bottom: 4px;\"><span style=\"font-weight: 600;\">lib/render/compose.ex</span> · elixir · <span style=\"color: var(--ok);\">+2</span> <span style=\"color: var(--danger);\">−1</span></div><div style=\"font-weight: 600; margin: 4px 0 1px; white-space: pre-wrap; overflow-wrap: anywhere;\">lib/render/compose.ex</div><div style=\"color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">&nbsp;&nbsp;@@ -1,4 +1,5 @@</div><div style=\"color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">&nbsp;&nbsp;defmodule Render.Compose do</div><div style=\"color: var(--danger); background: var(--danger-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">-   def compose(block), do: starter(block)</div><div style=\"color: var(--ok); background: var(--ok-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">+   def compose(block), do: grown(block)</div><div style=\"color: var(--ok); background: var(--ok-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">+   defp grown(block), do: block</div><div style=\"color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;\">&nbsp;&nbsp;end</div></div><h2>divider</h2><div style=\"position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)\"><span style=\"position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem\">§</span></div><h2>equation</h2><div class=\"bp-equation\"><math display=\"block\"><mi>E</mi><mo>=</mo><mi>m</mi><msup><mrow><mi>c</mi></mrow><mrow><mn>2</mn></mrow></msup></math></div><h2>expandable</h2><details class=\"bp-expandable\"><summary>Show the full trace</summary><div class=\"bp-expandable__body\"><p>Hidden detail.</p></div></details><h2>eyebrow</h2><p class=\"bp-role-eyebrow\">Dispatches</p><h2>figure</h2><figure style=\"margin:1.6rem 0\"><p>The figure body.</p><figcaption style=\"margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif\">Figure with a captioned child</figcaption></figure><h2>filetree</h2><div class=\"bp-filetree text-xs\" style=\"font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;\"><div style=\"white-space: pre;\">api/lib/barkpark/portable_doc/render/</div><div style=\"white-space: pre;\">├── components.ex<span class=\"bp-filetree-note\" style=\"color: var(--ok);\"> ● diff_html/1 + filetree_html/1</span></div><div style=\"white-space: pre;\">├── compose.ex<span class=\"bp-filetree-note\" style=\"color: var(--fg-dim);\"> ○ grew the diff + filetree clauses</span></div><div style=\"white-space: pre;\">└── starter_stub.ex<span class=\"bp-filetree-note\" style=\"color: var(--danger);\"> ✕ removed</span></div><div class=\"bp-filetree-legend text-dim\" style=\"font-size: 11px; margin-top: 4px;\">● created · ○ injected · ✕ removed</div></div><h2>footnote</h2><ol class=\"bp-footnote\"><li id=\"fn-fn1\" class=\"bp-footnote__note\">The board updates live.</li><li id=\"fn-fn2\" class=\"bp-footnote__note\">You always feel progress.</li></ol><h2>form</h2><section class=\"bp-form bp-form-grill\"><fieldset class=\"bp-form-question bp-form-q--yesno\"><legend>Ship it?</legend><div class=\"bp-form-opts\"><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q1\" value=\"Yes\"> <span>Yes</span></label><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q1\" value=\"No\"> <span>No</span></label></div></fieldset><fieldset class=\"bp-form-question bp-form-q--single\"><legend>Pick a surface</legend><div class=\"bp-form-opts\"><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q2\" value=\"Next\"> <span>Next</span></label><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q2\" value=\"Astro\"> <span>Astro</span></label><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q2\" value=\"Phoenix\"> <span>Phoenix</span></label></div></fieldset><fieldset class=\"bp-form-question bp-form-q--multi\"><legend>Which renderers to keep</legend><div class=\"bp-form-opts\"><label class=\"bp-form-opt\"><input type=\"checkbox\" name=\"q3\" value=\"Elixir\"> <span>Elixir</span></label><label class=\"bp-form-opt\"><input type=\"checkbox\" name=\"q3\" value=\"Go\"> <span>Go</span></label><label class=\"bp-form-opt\"><input type=\"checkbox\" name=\"q3\" value=\"JS\"> <span>JS</span></label></div></fieldset><fieldset class=\"bp-form-question bp-form-q--scale\"><legend>Confidence</legend><div class=\"bp-form-opts\"><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q4\" value=\"1\"> <span>1</span></label><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q4\" value=\"2\"> <span>2</span></label><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q4\" value=\"3\"> <span>3</span></label><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q4\" value=\"4\"> <span>4</span></label><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q4\" value=\"5\"> <span>5</span></label></div></fieldset><fieldset class=\"bp-form-question bp-form-q--text\"><legend>Anything else?</legend><div class=\"bp-form-opts\"><textarea name=\"q5\" rows=\"3\"></textarea></div></fieldset></section><h2>gauge-list</h2><div class=\"bp-gauge\"><div class=\"bp-gauge__t\">Coverage by surface</div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">Elixir</span><span class=\"bp-gauge__bar\"><i style=\"width:50%\"></i></span><span class=\"bp-gauge__d\">50%</span><span class=\"bp-gauge__n\">source of truth</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">Go</span><span class=\"bp-gauge__bar\"><i style=\"width:25%\"></i></span><span class=\"bp-gauge__d\">25%</span></div><div class=\"bp-gauge__row\"><span class=\"bp-gauge__l\">JS</span><span class=\"bp-gauge__bar\"><i style=\"width:25%\"></i></span><span class=\"bp-gauge__d\">25%</span></div></div><h2>heading</h2><h2>The render path</h2><h2>heatmap</h2><div class=\"bp-heat\"><div class=\"bp-heat__grid\" style=\"grid-template-columns:repeat(3,minmax(10px,28px))\"><i class=\"bp-heat__c\" style=\"--i:0.111\" title=\"0.1\"></i><i class=\"bp-heat__c\" style=\"--i:0.444\" title=\"0.4\"></i><i class=\"bp-heat__c\" style=\"--i:1.000\" title=\"0.9\"></i><i class=\"bp-heat__c\" style=\"--i:0.667\" title=\"0.6\"></i><i class=\"bp-heat__c\" style=\"--i:0.222\" title=\"0.2\"></i><i class=\"bp-heat__c\" style=\"--i:0.556\" title=\"0.5\"></i></div><div class=\"bp-heat__legend\">less <i class=\"bp-heat__c\" style=\"--i:0.150\"></i><i class=\"bp-heat__c\" style=\"--i:0.350\"></i><i class=\"bp-heat__c\" style=\"--i:0.550\"></i><i class=\"bp-heat__c\" style=\"--i:0.750\"></i><i class=\"bp-heat__c\" style=\"--i:1.000\"></i> more</div></div><h2>image</h2><img src=\"https://cdn.example.com/cover.png\" alt=\"Cover art\" style=\"max-width:100%;height:auto\" width=\"640\" height=\"360\"><h2>ingress</h2><p class=\"bp-role-ingress\">A lead paragraph that opens the article.</p><h2>list</h2><ul><li><span>First point</span></li><li><span>Second point</span></li></ul><h2>note</h2><div class=\"bp-note\"><span class=\"bp-note__k\">Note</span><div class=\"bp-note__d\"><b>Run-in</b> A single annotated row.</div></div><h2>notes</h2><div class=\"bp-notes\"><div class=\"bp-note\"><span class=\"bp-note__k\">Upgrade</span><div class=\"bp-note__d\"><b>Instant</b> The board updates live.</div></div><div class=\"bp-note\"><span class=\"bp-note__k\">Why</span><div class=\"bp-note__d\"><b>Trust</b> You always feel progress.</div></div></div><h2>paragraph</h2><p>A body paragraph with <span style=\"font-weight:bold\">bold emphasis</span> inside it.</p><h2>pipeline</h2><div class=\"bp-pipe-scroll\"><div class=\"bp-pipe\"><div class=\"bp-pnode bp-pnode--src\"><div class=\"bp-pnode__k\">source</div><div class=\"bp-pnode__t\">Ingest</div><div class=\"bp-pnode__d\">reads the queue</div></div><span class=\"bp-pipe__arr\">→</span><div class=\"bp-pnode\"><div class=\"bp-pnode__k\">emit</div><div class=\"bp-pnode__t\">Transform</div><div class=\"bp-pnode__d\">maps the rows</div><div class=\"bp-pnode__src\">queue.ex:42</div></div><span class=\"bp-pipe__arr\">→</span><div class=\"bp-pnode\"><div class=\"bp-pnode__k\">gate</div><div class=\"bp-pnode__t\">Publish</div><div class=\"bp-pnode__d\">writes the board</div></div></div></div><h2>pullquote</h2><p class=\"bp-role-pullquote\" style=\"font-style:italic\">The best interface is no interface.</p><h2>questionnaire</h2><section class=\"bp-form bp-form-questionnaire\"><fieldset class=\"bp-form-question bp-form-q--yesno\"><legend>Ready to review?</legend><div class=\"bp-form-opts\"><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q1\" value=\"Yes\"> <span>Yes</span></label><label class=\"bp-form-opt\"><input type=\"radio\" name=\"q1\" value=\"No\"> <span>No</span></label></div></fieldset><fieldset class=\"bp-form-question bp-form-q--text\"><legend>Notes</legend><div class=\"bp-form-opts\"><textarea name=\"q2\" rows=\"3\"></textarea></div></fieldset></section><h2>roadmap</h2><div class=\"bp-roadmap\"><div class=\"bp-rm__scale\"><span>Q1</span><span>Q2</span><span>Q3</span></div><div class=\"bp-rm__lanes\"><div class=\"bp-rm__lane bp-rm__lane--phase\"><span class=\"bp-rm__lbl\">Foundation</span><div class=\"bp-rm__track\"><span class=\"bp-rm__bar bp-rm__bar--done\" style=\"left:0%;width:40%\"></span></div></div><div class=\"bp-rm__lane\"><span class=\"bp-rm__lbl\">Ship the board</span><div class=\"bp-rm__track\"><span class=\"bp-rm__bar bp-rm__bar--progress\" style=\"left:40%;width:35%\"></span></div></div></div></div><h2>section</h2><div style=\"display:flex;flex-direction:column\"><hr class=\"bp-hr\"><div class=\"bp-section__grid\" style=\"--bp-tracks:2;--bp-grid-gap:var(--bp-space-md,1.6rem)\"><div class=\"bp-section__cell\"><div class=\"bp-card\"><h2>Alpha cell</h2></div></div><div class=\"bp-section__cell\" style=\"grid-column:span 2\"><div class=\"bp-card\"><h2>Beta cell</h2></div></div></div><hr class=\"bp-hr\"></div><h2>sheet</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-sheet__th\" style=\"width:12px;\">Item</th><th class=\"bp-sheet__th\" style=\"width:8px;\">Cost</th></tr></thead><tbody><tr><td class=\"bp-sheet__td\" style=\"width:12px;\">Hosting</td><td class=\"bp-sheet__td sheet-al-right\" style=\"width:8px;\">42</td></tr><tr><td class=\"bp-sheet__td\" style=\"width:12px;\">Domains</td><td class=\"bp-sheet__td sheet-al-right\" style=\"width:8px;\">18</td></tr></tbody></table><h2>stage</h2><div class=\"bp-pnode bp-pnode--src\"><div class=\"bp-pnode__k\">gate</div><div class=\"bp-pnode__t\">Review</div><div class=\"bp-pnode__d\">checks the criteria</div></div><h2>stat-grid</h2><div class=\"bp-stats\"><div class=\"bp-stat\"><div class=\"bp-stat__v\">5</div><div class=\"bp-stat__l\">Renderers today</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">3</div><div class=\"bp-stat__l\">Renderers target</div></div></div><h2>stat</h2><div class=\"bp-stat\"><div class=\"bp-stat__bar\"><i style=\"width:60.2%\"></i></div><div class=\"bp-stat__v\">71<span class=\"bp-stat__denom\">/118</span></div><div class=\"bp-stat__l\">Blocks covered</div><svg class=\"bp-stat__spark\" viewBox=\"0 0 120 26\" preserveAspectRatio=\"none\" aria-hidden=\"true\"><polyline points=\"0,24 30,21.6 60,17.9 90,11.8 120,2\"/></svg></div><h2>stats</h2><div class=\"bp-stats\"><div class=\"bp-stat\"><div class=\"bp-stat__v\">42</div><div class=\"bp-stat__l\">In-scope types</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">3</div><div class=\"bp-stat__l\">Renderers</div></div></div><h2>status-legend</h2><div class=\"bp-legend\"><div class=\"bp-legend__r\"><span class=\"bp-g bp-g--open\">○</span><span class=\"bp-legend__n\">open</span><span class=\"bp-legend__d\">backlog — not ready yet</span></div><div class=\"bp-legend__r\"><span class=\"bp-g bp-g--ready\">○</span><span class=\"bp-legend__n\">ready</span><span class=\"bp-legend__d\">unchecked — claim it now</span></div><div class=\"bp-legend__r\"><span class=\"bp-g bp-g--progress\" aria-label=\"in progress\"></span><span class=\"bp-legend__n\">in progress</span><span class=\"bp-legend__d\">being worked right now</span></div><div class=\"bp-legend__r\"><span class=\"bp-g bp-g--blocked\">!</span><span class=\"bp-legend__n\">blocked</span><span class=\"bp-legend__d\">something is required first</span></div><div class=\"bp-legend__r\"><span class=\"bp-g bp-g--done\">✓</span><span class=\"bp-legend__n\">done</span><span class=\"bp-legend__d\">complete</span></div><div class=\"bp-legend__r\"><span class=\"bp-g bp-g--cancel\">✕</span><span class=\"bp-legend__n\">cancelled</span><span class=\"bp-legend__d\">abandoned or superseded</span></div><div class=\"bp-legend__r\"><span class=\"bp-g bp-g--considering\">◌</span><span class=\"bp-legend__n\">considering</span><span class=\"bp-legend__d\">a candidate being weighed</span></div><div class=\"bp-legend__r\"><span class=\"bp-g bp-g--researching\">◎</span><span class=\"bp-legend__n\">researching</span><span class=\"bp-legend__d\">under active investigation</span></div></div><h2>steps</h2><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Claim the task</div><div class=\"bp-steps__body\"><p>Run bp task next.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Stamp evidence</div><div class=\"bp-steps__body\"></div></li></ol><h2>table</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Surface</span></th><th class=\"bp-table__th\"><span>Renderer</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>Phoenix</span></td><td class=\"bp-table__td\"><span>Elixir</span></td></tr><tr><td class=\"bp-table__td\"><span>Next</span></td><td class=\"bp-table__td\"><span>React</span></td></tr></tbody></table><h2>tabs</h2><div class=\"bp-tabs\"><div class=\"bp-tabs__strip\" role=\"tablist\"><button type=\"button\" class=\"bp-tabs__tab bp-tabs__tab--active\" role=\"tab\" aria-selected=\"true\" data-tab-index=\"0\">macOS</button><button type=\"button\" class=\"bp-tabs__tab\" role=\"tab\" aria-selected=\"false\" data-tab-index=\"1\">Linux</button></div><div class=\"bp-tabs__panels\"><div class=\"bp-tabs__panel\" data-tab-index=\"0\"><p>brew install barkpark</p></div><div class=\"bp-tabs__panel\" data-tab-index=\"1\"><p>curl -fsSL install.sh | sh</p></div></div></div><h2>task-board</h2><div class=\"bp-board\"><div class=\"bp-board__col bp-board__col--open\"><div class=\"bp-board__head\"><span class=\"bp-board__label\">Open</span><span class=\"bp-board__count\">1</span></div><div class=\"bp-board__cards\"><div class=\"bp-bcard\"><span class=\"bp-g bp-g--open\">○</span><span class=\"bp-bcard__t\">Backlog groom</span></div></div></div><div class=\"bp-board__col bp-board__col--ready\"><div class=\"bp-board__head\"><span class=\"bp-board__label\">Ready</span><span class=\"bp-board__count\">1</span></div><div class=\"bp-board__cards\"><div class=\"bp-bcard\"><span class=\"bp-g bp-g--ready\">○</span><span class=\"bp-bcard__t\">Wire the harness</span><div class=\"bp-bcard__m\"><span class=\"bp-trow__p\" data-p=\"1\">P1</span></div></div></div></div><div class=\"bp-board__col bp-board__col--progress\"><div class=\"bp-board__head\"><span class=\"bp-board__label\">In progress</span><span class=\"bp-board__count\">1</span></div><div class=\"bp-board__cards\"><div class=\"bp-bcard\"><span class=\"bp-g bp-g--progress\" aria-label=\"in progress\"></span><span class=\"bp-bcard__t\">Render the board</span><div class=\"bp-bcard__m\"><span class=\"bp-trow__p\" data-p=\"0\">P0</span></div></div></div></div><div class=\"bp-board__col bp-board__col--blocked\"><div class=\"bp-board__head\"><span class=\"bp-board__label\">Blocked</span><span class=\"bp-board__count\">1</span></div><div class=\"bp-board__cards\"><div class=\"bp-bcard\"><span class=\"bp-g bp-g--blocked\">!</span><span class=\"bp-bcard__t\">Await review</span></div></div></div><div class=\"bp-board__col bp-board__col--done\"><div class=\"bp-board__head\"><span class=\"bp-board__label\">Done</span><span class=\"bp-board__count\">1</span></div><div class=\"bp-board__cards\"><div class=\"bp-bcard\"><span class=\"bp-g bp-g--done\">✓</span><span class=\"bp-bcard__t\">Ship the legend</span><div class=\"bp-bcard__m\"><span class=\"bp-trow__cn\">2/2</span></div></div></div></div></div><h2>task-detail</h2><div class=\"bp-tdetail\"><div class=\"bp-tdetail__title\">Wire the harness</div><div class=\"bp-tdetail__meta\"><span class=\"bp-g bp-g--progress\" aria-label=\"in progress\"></span><span>in_progress · P1</span></div><div class=\"bp-tdetail__timeline\"><span class=\"bp-tl__seg\"><span class=\"bp-g bp-g--open\">○</span><span>Filed</span></span><span class=\"bp-tl__arr\">→</span><span class=\"bp-tl__seg\"><span class=\"bp-g bp-g--progress\" aria-label=\"in progress\"></span><span>Building</span></span><span class=\"bp-tl__arr\">→</span><span class=\"bp-tl__seg\"><span class=\"bp-g bp-g--done\">✓</span><span>Shipped</span></span></div><div class=\"bp-tdetail__lbl\">Criteria · 1/2</div><div class=\"bp-tdetail__crit\"><div class=\"bp-crit bp-crit--met\"><span class=\"bp-g bp-g--done\">✓</span><span class=\"bp-crit__t\">Gen emits fixtures</span></div><div class=\"bp-crit\"><span class=\"bp-g bp-g--ready\">○</span><span class=\"bp-crit__t\">JS realizes the golden</span></div></div><div class=\"bp-tdetail__labels\">parity · w1</div></div><h2>task-list</h2><div class=\"bp-tasks\"><div class=\"bp-momentum\"><div class=\"bp-momentum__row\"><span class=\"bp-momentum__i\"><span class=\"bp-g bp-g--progress\" aria-label=\"in progress\"></span><b>0</b> in flight</span><span class=\"bp-momentum__i bp-g--ready\">○ <b>1</b> ready</span><span class=\"bp-momentum__i bp-g--done\">✓ <b>0</b> done</span><span class=\"bp-momentum__grow\"></span><span class=\"bp-momentum__pct\">0%</span></div><div class=\"bp-momentum__track\"><span class=\"bp-momentum__fill\" style=\"width:0%\"></span></div></div><div class=\"bp-tasks__list\"><div class=\"bp-trow bp-trow--ready\" style=\"padding-left:14px\"><span class=\"bp-g bp-g--ready\">○</span><span class=\"bp-trow__t\">Seed the renderer</span></div><div class=\"bp-trow bp-trow--open\" style=\"padding-left:14px\"><span class=\"bp-g bp-g--open\">○</span><span class=\"bp-trow__t\">Close the gaps</span></div></div></div><h2>tasks</h2><div class=\"bp-tasks\"><div class=\"bp-momentum\"><div class=\"bp-momentum__row\"><span class=\"bp-momentum__i\"><span class=\"bp-g bp-g--progress\" aria-label=\"in progress\"></span><b>1</b> in flight</span><span class=\"bp-momentum__i bp-g--ready\">○ <b>1</b> ready</span><span class=\"bp-momentum__i bp-g--done\">✓ <b>1</b> done</span><span class=\"bp-momentum__grow\"></span><span class=\"bp-momentum__pct\">33%</span></div><div class=\"bp-momentum__track\"><span class=\"bp-momentum__fill\" style=\"width:33%\"></span></div></div><div class=\"bp-tasks__list\"><div class=\"bp-trow bp-trow--done\" style=\"padding-left:14px\"><span class=\"bp-g bp-g--done\">✓</span><span class=\"bp-trow__t\">Author the array</span></div><div class=\"bp-trow bp-trow--progress\" style=\"padding-left:14px\"><span class=\"bp-g bp-g--progress\" aria-label=\"in progress\"></span><span class=\"bp-trow__t\">Wire the generator</span><span class=\"bp-trow__m\"><span class=\"bp-trow__p\" data-p=\"0\">P0</span></span></div><div class=\"bp-trow bp-trow--ready\" style=\"padding-left:14px\"><span class=\"bp-g bp-g--ready\">○</span><span class=\"bp-trow__t\">Prove parity</span></div></div></div><h2>terminal</h2><div class=\"bp-term\"><div class=\"bp-term__bar\"><span class=\"bp-term__dots\"><i></i><i></i><i></i></span><span class=\"bp-term__title\">bp tasks</span><span class=\"bp-term__live\">live</span></div><div class=\"bp-term__body\"><p>Inside the frame.</p></div><div class=\"bp-term__foot\">q to quit</div></div><h2>toc</h2><nav class=\"bp-toc\"><ol class=\"bp-toc__list\"><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#getting-started\">1. Getting started</a></li><li class=\"bp-toc__item\" data-level=\"2\"><a href=\"#installation\">1.1. Installation</a></li><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#advanced-usage\">2. Advanced usage</a></li></ol></nav><h2>video</h2><figure style=\"margin:1.6rem 0\"><video controls playsinline style=\"max-width:100%;border-radius:6px\" poster=\"https://ex.com/demo-poster.jpg\" src=\"https://ex.com/demo.mp4\"><track kind=\"captions\" srclang=\"en\" src=\"https://ex.com/en.vtt\"></video></figure>",
+  "body_html_sv": "c18f53335d0cddd150ef2c1749afc3f83072e9160a011cac63d103bd03fdd308",
+  "description": "Machine-generated emulator-oracle corpus for the mobile zero-unknown-blocks crown: one section per registered PortableDoc block type, each carrying the exact pd-parity fixture input. Opening it in the native reader drives all 66 registered renderers; the proof is a uiautomator dump with zero hits for the unrecognised-type degrade box. (Neither this description nor the intro quotes that label verbatim — the paper must not match the grep that certifies it.)",
+  "main_tag": "portabledoc",
+  "preview": {
+    "description": "Machine-generated emulator-oracle corpus for the mobile zero-unknown-blocks crown: one section per registered…",
+    "extensions": {
+      "tags": [
+        "portabledoc",
+        "mobile",
+        "testing"
+      ]
+    },
+    "image": {
+      "alt": "Cover art",
+      "height": 360,
+      "type": null,
+      "url": "https://cdn.example.com/cover.png",
+      "width": 640
+    },
+    "title": null,
+    "type": "paper",
+    "url": "/papers/mobile-crown-floor-pd-parity"
+  },
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "one section per registered PortableDoc block type, derived from the parity corpus",
+      "strength": 95,
+      "tag": "portabledoc"
+    },
+    {
+      "rationale": "the emulator oracle for the mobile crown floor reads this paper",
+      "strength": 80,
+      "tag": "mobile"
+    },
+    {
+      "rationale": "a corpus artifact whose only purpose is to be measured on a device",
+      "strength": 70,
+      "tag": "testing"
+    }
+  ],
+  "title": "Mobile Crown Floor — every PortableDoc type, rendered from the pd-parity corpus"
+}

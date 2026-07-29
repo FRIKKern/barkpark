@@ -1,0 +1,1859 @@
+{
+  "_createdAt": "2026-07-01T19:19:21.423074Z",
+  "_draft": false,
+  "_id": "nextgen-wiki-living-values-v1",
+  "_publishedId": "nextgen-wiki-living-values-v1",
+  "_rev": "d0c5ef68af33d2c7888f1568eab154a9",
+  "_type": "paper",
+  "_updatedAt": "2026-07-18T01:04:43.338111Z",
+  "blocks": [
+    {
+      "id": "b01",
+      "level": 1,
+      "text": "Next-Gen Wiki — Living Values v1 (pared-down spec)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A wiki where canonical values live once, render live inside prose across many docs, and every doc that depends on a value shows up in an impact panel — source-of-truth-aware, impact-aware, AI-navigable. NOT pages-with-links: living documents over the graph Barkpark already has."
+        }
+      ],
+      "id": "b02",
+      "type": "ingress"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Amended 2026-07-01 after a 62-agent ground-truth review; 22 confirmed findings applied. Review synthesis drives the amendments."
+        }
+      ],
+      "id": "b-prov",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Audience: Barkpark maintainers. Scope: the lean cut of the next-generation semantic wiki vision — reuse the existing graph, build only ONE new primitive, defer the rest. This revision folds Tasks into the same fabric under a philosophy of expectation."
+        }
+      ],
+      "id": "b03",
+      "type": "paragraph"
+    },
+    {
+      "id": "b04",
+      "level": 2,
+      "text": "1. North star",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "One line: a wiki where canonical values live once, render live inside prose across many docs, and every doc that depends on a value shows up in an impact panel. Source-of-truth-aware, impact-aware, AI-navigable — living documents over the graph Barkpark already has, not pages with links."
+        }
+      ],
+      "id": "b05",
+      "type": "paragraph"
+    },
+    {
+      "id": "b06",
+      "level": 2,
+      "text": "2. What already exists (REUSE — do not rebuild)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Every capability below already ships. The v1 job is to compose them, not re-implement them."
+        }
+      ],
+      "id": "b07",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        "Node",
+        "What already ships",
+        "Reuse note"
+      ],
+      "id": "b08",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Node"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "documents rows are graph nodes (content/graph.ex:521)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reuse"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Edge"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "content_edges table + Content.Edge + async EdgeProjector + BFS Content.Graph.traverse + backlinks reverse_referencers + /v1/graph/* + shipped blast-radius pane studio/graph_view.ex; kind is free-string so a new relation type needs ZERO migration"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reuse — biggest 'don't duplicate'"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Impact / used-by / dangling / orphans"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "reverse_referencers + traverse + dangling/orphans, already shipped and consumed"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reuse"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Truth-at-a-time (partial)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "revisions table snapshots the whole doc on every mutation; draft/published lifecycle"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reuse"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Canonical value rendered from a resolver (block-level)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "field-reference + codelist already resolve a value from another doc at render via an injected resolver (render.ex:130-168, fields.go:108-131)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reuse / extend"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "acceptance_criteria (the expectation primitive — already present, inert)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "already [{criterion, met, evidence}] on every task (tasks/schema.ex:224) — declared, stored, shape-validated"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100% ADVISORY: nothing reads met/evidence; a task closes with all criteria unmet (close.ex never references it; validation.ex:126 only shape-checks). THE expectation primitive exists as inert data."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "design_doc (task→paper reference field, schema.ex:204)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "auto-projects a content_edges edge of kind 'design_doc' via the generic reference-field extractor (content/edges.ex:221)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The paper<->task graph link EXISTS; nobody has pointed impact traversal inward yet. Projects only when the task doc is PUBLISHED — which the bp task lifecycle never does (tasks stay status: draft by design). Any demo of this edge must publish the task docs first via the generic publish API."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "TWO edge tables (do NOT merge)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "task_edges = CLOSED allowlist {blocks, discovered-from}, task<->task only, drives ready-gating + cascading unblock (close.ex:152) + fencing-epoch close. content_edges = OPEN kinds; tasks + their design_doc/parent_id/attachments references participate"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reuse both, separately — expectations/values ride content_edges; the gating DAG stays in task_edges."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Edge reprojection on paper edit"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "WriteScope.fire_after (write_scope.ex:338-361) enqueues reprojection on generic Content.Writer saves and publish/unpublish/delete — but NOT on the paper block-op writers (upsert_paper / apply_paper_block_op / apply_paper_block_ops, block_ops.ex:197-202, 334, 444), which do raw Repo writes. Those are exactly the paths the Studio canvas and Bulldocs ingest use. Wiring reprojection into those three writers is net-new (wire §7)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The event seam for 'reflag on edit' EXISTS; the reaction does not."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Task bodies"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tasks do NOT have PortableDoc block bodies today — description/design are plain-text fields (schema.ex:184,193); papers DO have PortableDoc bodies"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Gap — blocks tasks-in-tasks; deliver tasks-in-papers first."
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "b09",
+      "level": 2,
+      "text": "3. Track A — Values — the ONE loop (v1 scope)",
+      "type": "heading"
+    },
+    {
+      "id": "b10",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Canonical value = a document / typed field (EXISTS)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Inline live-reference = ONE new inline node type that renders the CURRENT value in running prose, reusing the existing field-reference/codelist resolver seam. A live-rendered value can't go stale on surfaces that resolve at request time; the public reader's write-time body_html cache and pre-rendered delta frames stay stale until the referencing paper is re-edited (see wire §Freshness)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Used-by / impact = reverse_referencers + traverse (read side SHIPPED; the edges themselves require the net-new body-walk extractor — wire §7)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Stale detection = ONE comparison (fallback literal vs resolved value) computed inside the render-time pre-resolve pass. The plugin checkers seam (Barkpark.Validation.Checker) is a pure value-validation behaviour with no Repo access and structurally cannot resolve target.field on another document — no standalone checker."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Who fills it = AI proposes marks/values as DRAFTS; human/authorized agent approves via the existing draft→publish gate (that IS 'Review' — no new state machine)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Provenance = every AI assertion carries a source edge; NEVER overwrite prose."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "b11",
+      "level": 2,
+      "text": "4. Key design decision (DECIDED)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Blocks have stable ids + id-addressed patch ops and survive edits; character offsets drift the instant prose is edited and would silently rot every claim built on them. Sub-block character ranges are deferred until a real use case proves block-grain too coarse. This is recorded as decided, not open."
+        }
+      ],
+      "id": "b12",
+      "type": "paragraph"
+    },
+    {
+      "id": "b13",
+      "level": 2,
+      "text": "5. Blind spots / risks (honest)",
+      "type": "heading"
+    },
+    {
+      "id": "b14",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Range is research-grade (collaborative-anchoring / drift). Block-anchoring sidesteps it for v1."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Who writes observations is the graveyard of semantic wikis; the AI-suggestion-with-provenance loop + human gate is the answer, not a schema."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Contradiction is only 'structural' if both sides are pre-structured; comparing free prose to a value is NLP-hard, not a graph query. The marking is the cost."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "FOUR surfaces must land in lockstep: Elixir api/lib/barkpark/portable_doc/render/inline.ex (raises), Go internal/pdrender/inline.go (blanks childless unknowns), React web/components/portable-doc.tsx (vanishes), AND the Studio paper editor's TipTap converter api/assets/paper-editor/src/convert.js (drops childless unknown inline nodes on load and rewrites the block's whole content on save — one keystroke in a paragraph containing the node deletes it permanently, in both the per-block editor and the prod-enabled canvas). The TS kernel cited at render.ex:4-5 does not exist in this repo — record it as retired or locate it before counting surfaces. Repo-side owner for this contract: docs/contracts/portable-doc-inline.md."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Today's edges come from schema reference FIELDS, not marked prose. 'Marked text → edge' is a new extraction path; blockref (block-id anchor) is the existing sub-doc link and the hint to anchor at block grain."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "b15",
+      "level": 2,
+      "text": "6. YAGNI defer list (NOT in v1)",
+      "type": "heading"
+    },
+    {
+      "id": "b16",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Character-offset ranges + overlapping marks"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Observation table with confidence floats"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Review state machine"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Concept & Context node kinds"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Declaring 13 node kinds / 10 edge verbs up front (let kind accrete)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "All heatmaps / visualization"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Tasks get PortableDoc block bodies (prerequisite for tasks-in-tasks) — deferred"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Reflag-on-paper-edit reactor — deferred until surfacing proves demand"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Hard close-enforcement of acceptance_criteria — deferred (surface first, enforce later)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "PERMANENTLY deferred: merging the two edge tables (task_edges stays separate from content_edges — never merge)"
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "b17",
+      "level": 2,
+      "text": "7. Keep sacred",
+      "type": "heading"
+    },
+    {
+      "id": "b18",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Marked text → semantic truth"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Source-of-truth-aware"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Never silently overwrite prose"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "AI suggestions are marked as suggestions"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Provenance on every machine assertion"
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "b19",
+      "level": 2,
+      "text": "8. Acceptance / demo",
+      "type": "heading"
+    },
+    {
+      "id": "b20",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Edit a canonical value in ONE place."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Every doc that inline-references it renders the new value."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The impact/used-by panel lists the N docs that depend on it."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "A pinned literal that drifted from canonical is flagged by the checker."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Expectation demo: a paper claim marked as an expectation drives a task."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Expectation demo: closing that task with evidence flips the claim to 'satisfied' in the paper's reverse view. Mechanism: close/3 writes only lifecycle_status/claim/close_reason (close.ex:103-146); setting met/evidence is a separate content mutation racing the close's rev CAS — scoped into lvw-t9 (agent/CLI mutates criteria at close time; the 'satisfied' flip is the t8 reverse view re-reading)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "(post-v1 — deferred: demos the reflag reactor §6 defers, and §2's seam claim does not hold for paper edits per amendment 2) Expectation demo: editing the paper claim re-flags the dependent task."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Precondition: task-side graph demo steps require the demo task docs to be PUBLISHED (projection is published-perspective only; all lvw docs are drafts; the live graph has 0 edges today)."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "All on top of existing graph/backlinks/lifecycle; only ONE new inline NODE TYPE + ONE drift comparison are net-new node/check primitives for Track A — plus the resolver extensions on each surface, the body-walk edge extractor with its reprojection wiring and backfill, the paper-editor converter mapping, and the server-pre-resolve plumbing (wire §5/§7). The expectation track adds no new store — it reads the acceptance_criteria and design_doc primitives that already ship."
+        }
+      ],
+      "id": "b21",
+      "type": "paragraph"
+    },
+    {
+      "id": "b22",
+      "level": 2,
+      "text": "9. Papers<->Tasks unification — the philosophy of expectation",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "acceptance_criteria = expectation: criterion = the claim that must become true, met = the observation, evidence = the provenance. It is already the shape; it is just inert."
+        }
+      ],
+      "id": "b23",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Values and Expectations are the SAME pattern at two grains: a canonical thing + an inline live reference + an impact graph + provenance + review-on-change."
+        }
+      ],
+      "id": "b24",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        "Grain",
+        "Canonical thing",
+        "Inline live reference",
+        "Impact graph",
+        "Provenance",
+        "Review on change"
+      ],
+      "id": "b25",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Value"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "doc/field datum"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "live-value ref"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "reverse_referencers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "source edge"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "writeback preview"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Expectation"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "acceptance criterion"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "task-ref chip in a paper"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "design_doc edge"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "evidence"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "reflag-on-edit"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "b26",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Paper drives Task: an unmet expectation IS the reason a task is open."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Task proves Paper: closing the task sets met=true + evidence = the observation."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Misalignment: paper edited → expectation unsatisfied → reflag the dependent tasks."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Net effect: Papers and Tasks are ONE PortableDoc fabric over ONE truth graph, not two systems."
+        }
+      ],
+      "id": "b27",
+      "type": "paragraph"
+    },
+    {
+      "id": "b28",
+      "level": 2,
+      "text": "10. Cross-type interlink via PortableDoc",
+      "type": "heading"
+    },
+    {
+      "id": "b29",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "wikilink (whole doc) + blockref (block-id anchor = block-grain range) already cross types; the resolver is type-agnostic. This is the reuse."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Inline task-reference CHIP: a type-aware resolver renders live task state (status / priority / criteria-progress) instead of a title, for a wikilink/blockref whose target is a task. This delivers 'reference tasks inside papers.' Three renderers in lockstep: Elixir inline.ex, Go inline.go, React portable-doc.tsx."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "'Tasks inside tasks' needs tasks to GAIN a PortableDoc body (today they have plain-text description/design) → schema + Studio editor change → DEFERRED. Deliver tasks-in-papers first (paper bodies already exist)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Rich chip state (status/priority/criteria) resolves for anonymous readers only when the target task doc is PUBLISHED; otherwise the chip degrades to title/alias — matching the published-perspective pin for anonymous callers (query_controller.ex:288)."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "b30",
+      "level": 2,
+      "text": "11. Writeback (v1.5) — the sharp knife",
+      "type": "heading"
+    },
+    {
+      "id": "b31",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Read-side live-render can't drift and is safe (v1). Write-through (edit a ref → mutate the canonical → propagate to every mention) is powerful and dangerous."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "It is this spec's own 'never silently overwrite prose' rule INVERTED: a prose edit silently rewriting shared truth that gates OTHER docs' tasks."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Don't skip it; GATE it: an explicit edit-through affordance (you KNOW you're editing the shared value) + an impact preview ('changes N docs') + provenance + review on high-impact change."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "(1) Edit-through authorization is evaluated against the TARGET canonical doc's write scope — write access to the hosting paper grants nothing; unauthorized/cross-scope target disables the affordance."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "(2) The 'changes N docs' impact preview MUST be produced by Content.Graph.reverse_referencers/2 called with the caller's scope opts, inheriting its existing MEDIUM-5 fail-closed posture: out-of-scope referencers are dropped entirely — no titles, no stub, and NO aggregate 'K you cannot see' count."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "b32",
+      "level": 2,
+      "text": "12. Honest Cody traps",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Do NOT merge the two edge tables. blocks-gating is correctness-critical (ready queue, cascading unblock, fencing). Expectations/values ride content_edges; the DAG stays in task_edges."
+        }
+      ],
+      "id": "b33",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Graduated enforcement, not a hard gate. Tasks close freely today; read & SURFACE unmet criteria (a warning, like the existing soft cross_validations schema.ex:106) before ever enforcing on close."
+        }
+      ],
+      "id": "b34",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Bound the reflag reactor. Reuse the graph engine's existing depth-clamp / node-budget; no unbounded cascade."
+        }
+      ],
+      "id": "b35",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Writeback must be gated: explicit edit-through affordance + impact preview ('changes N docs') + provenance + review on high-impact change. Edit-through authorization is evaluated against the TARGET canonical doc's write scope; the 'changes N docs' impact preview is produced by reverse_referencers with the caller's scope opts, fail-closed, with no aggregate 'you cannot see' count."
+        }
+      ],
+      "id": "b36",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Tasks lack bodies → deliver tasks-in-papers first, tasks-in-tasks later."
+        }
+      ],
+      "id": "b37",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "b-od-h",
+      "level": 2,
+      "text": "Decisions (ratified 2026-07-01)",
+      "type": "heading"
+    },
+    {
+      "id": "b-od-list",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "D1 — Body-walk edges are publish-gated in v1: the plugin-seam extractor feeds only the published materialised graph; a follow-up task (lvw-t12) folds Registry.collect_edge_extractors into build_drafts_indexes for the drafts graph. Rationale: keeps v1 off the drafts-fold complexity and the demo's critical path."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D2 — Public-reader freshness: inject the value/task resolvers into BulldocsLive's mount/refetch render, resolved as the anonymous principal — per-page-load freshness, no live push. Rationale: fresh without building a dependent-refresh reactor."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D3 — valueref target = doc_id slug, resolved via resolve_doc_pk with published-row preference (DraftId.published_id normalization). Rationale: matches every other body reference, survives export/import, and coalesces draft/published."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D4 — Drift-accept: a Studio 'accept new baseline' affordance issuing an ifRev-guarded fallback-only patch with provenance. Rationale: the CAS already ships (412 on rev mismatch); no parallel ack store."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D5 — Rich task-chip state resolves anonymously only for PUBLISHED task docs; otherwise degrade to title/alias. Rationale: matches the published-perspective pin and closes a token-gate bypass."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D6 — Authoring dual-writes the fallback as a {type:\"text\", value:<fallback>} child so old bp binaries degrade to visible text; new renderers ignore valueref children. Rationale: preserves the never-blank invariant retroactively at one dual-write cost."
+          }
+        ]
+      ],
+      "ordered": true,
+      "type": "list"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "b01",
+        "level": 1,
+        "text": "Next-Gen Wiki — Living Values v1 (pared-down spec)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "A wiki where canonical values live once, render live inside prose across many docs, and every doc that depends on a value shows up in an impact panel — source-of-truth-aware, impact-aware, AI-navigable. NOT pages-with-links: living documents over the graph Barkpark already has."
+          }
+        ],
+        "id": "b02",
+        "type": "ingress"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Amended 2026-07-01 after a 62-agent ground-truth review; 22 confirmed findings applied. Review synthesis drives the amendments."
+          }
+        ],
+        "id": "b-prov",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Audience: Barkpark maintainers. Scope: the lean cut of the next-generation semantic wiki vision — reuse the existing graph, build only ONE new primitive, defer the rest. This revision folds Tasks into the same fabric under a philosophy of expectation."
+          }
+        ],
+        "id": "b03",
+        "type": "paragraph"
+      },
+      {
+        "id": "b04",
+        "level": 2,
+        "text": "1. North star",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "One line: a wiki where canonical values live once, render live inside prose across many docs, and every doc that depends on a value shows up in an impact panel. Source-of-truth-aware, impact-aware, AI-navigable — living documents over the graph Barkpark already has, not pages with links."
+          }
+        ],
+        "id": "b05",
+        "type": "paragraph"
+      },
+      {
+        "id": "b06",
+        "level": 2,
+        "text": "2. What already exists (REUSE — do not rebuild)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Every capability below already ships. The v1 job is to compose them, not re-implement them."
+          }
+        ],
+        "id": "b07",
+        "type": "paragraph"
+      },
+      {
+        "head": [
+          "Node",
+          "What already ships",
+          "Reuse note"
+        ],
+        "id": "b08",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Node"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "documents rows are graph nodes (content/graph.ex:521)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Reuse"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Edge"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "content_edges table + Content.Edge + async EdgeProjector + BFS Content.Graph.traverse + backlinks reverse_referencers + /v1/graph/* + shipped blast-radius pane studio/graph_view.ex; kind is free-string so a new relation type needs ZERO migration"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Reuse — biggest 'don't duplicate'"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Impact / used-by / dangling / orphans"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "reverse_referencers + traverse + dangling/orphans, already shipped and consumed"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Reuse"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Truth-at-a-time (partial)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "revisions table snapshots the whole doc on every mutation; draft/published lifecycle"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Reuse"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Canonical value rendered from a resolver (block-level)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "field-reference + codelist already resolve a value from another doc at render via an injected resolver (render.ex:130-168, fields.go:108-131)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Reuse / extend"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "acceptance_criteria (the expectation primitive — already present, inert)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "already [{criterion, met, evidence}] on every task (tasks/schema.ex:224) — declared, stored, shape-validated"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100% ADVISORY: nothing reads met/evidence; a task closes with all criteria unmet (close.ex never references it; validation.ex:126 only shape-checks). THE expectation primitive exists as inert data."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "design_doc (task→paper reference field, schema.ex:204)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "auto-projects a content_edges edge of kind 'design_doc' via the generic reference-field extractor (content/edges.ex:221)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "The paper<->task graph link EXISTS; nobody has pointed impact traversal inward yet. Projects only when the task doc is PUBLISHED — which the bp task lifecycle never does (tasks stay status: draft by design). Any demo of this edge must publish the task docs first via the generic publish API."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "TWO edge tables (do NOT merge)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "task_edges = CLOSED allowlist {blocks, discovered-from}, task<->task only, drives ready-gating + cascading unblock (close.ex:152) + fencing-epoch close. content_edges = OPEN kinds; tasks + their design_doc/parent_id/attachments references participate"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Reuse both, separately — expectations/values ride content_edges; the gating DAG stays in task_edges."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Edge reprojection on paper edit"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "WriteScope.fire_after (write_scope.ex:338-361) enqueues reprojection on generic Content.Writer saves and publish/unpublish/delete — but NOT on the paper block-op writers (upsert_paper / apply_paper_block_op / apply_paper_block_ops, block_ops.ex:197-202, 334, 444), which do raw Repo writes. Those are exactly the paths the Studio canvas and Bulldocs ingest use. Wiring reprojection into those three writers is net-new (wire §7)."
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "The event seam for 'reflag on edit' EXISTS; the reaction does not."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Task bodies"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "tasks do NOT have PortableDoc block bodies today — description/design are plain-text fields (schema.ex:184,193); papers DO have PortableDoc bodies"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Gap — blocks tasks-in-tasks; deliver tasks-in-papers first."
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "b09",
+        "level": 2,
+        "text": "3. Track A — Values — the ONE loop (v1 scope)",
+        "type": "heading"
+      },
+      {
+        "id": "b10",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Canonical value = a document / typed field (EXISTS)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Inline live-reference = ONE new inline node type that renders the CURRENT value in running prose, reusing the existing field-reference/codelist resolver seam. A live-rendered value can't go stale on surfaces that resolve at request time; the public reader's write-time body_html cache and pre-rendered delta frames stay stale until the referencing paper is re-edited (see wire §Freshness)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Used-by / impact = reverse_referencers + traverse (read side SHIPPED; the edges themselves require the net-new body-walk extractor — wire §7)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Stale detection = ONE comparison (fallback literal vs resolved value) computed inside the render-time pre-resolve pass. The plugin checkers seam (Barkpark.Validation.Checker) is a pure value-validation behaviour with no Repo access and structurally cannot resolve target.field on another document — no standalone checker."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Who fills it = AI proposes marks/values as DRAFTS; human/authorized agent approves via the existing draft→publish gate (that IS 'Review' — no new state machine)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Provenance = every AI assertion carries a source edge; NEVER overwrite prose."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "b11",
+        "level": 2,
+        "text": "4. Key design decision (DECIDED)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Blocks have stable ids + id-addressed patch ops and survive edits; character offsets drift the instant prose is edited and would silently rot every claim built on them. Sub-block character ranges are deferred until a real use case proves block-grain too coarse. This is recorded as decided, not open."
+          }
+        ],
+        "id": "b12",
+        "type": "paragraph"
+      },
+      {
+        "id": "b13",
+        "level": 2,
+        "text": "5. Blind spots / risks (honest)",
+        "type": "heading"
+      },
+      {
+        "id": "b14",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Range is research-grade (collaborative-anchoring / drift). Block-anchoring sidesteps it for v1."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Who writes observations is the graveyard of semantic wikis; the AI-suggestion-with-provenance loop + human gate is the answer, not a schema."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Contradiction is only 'structural' if both sides are pre-structured; comparing free prose to a value is NLP-hard, not a graph query. The marking is the cost."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FOUR surfaces must land in lockstep: Elixir api/lib/barkpark/portable_doc/render/inline.ex (raises), Go internal/pdrender/inline.go (blanks childless unknowns), React web/components/portable-doc.tsx (vanishes), AND the Studio paper editor's TipTap converter api/assets/paper-editor/src/convert.js (drops childless unknown inline nodes on load and rewrites the block's whole content on save — one keystroke in a paragraph containing the node deletes it permanently, in both the per-block editor and the prod-enabled canvas). The TS kernel cited at render.ex:4-5 does not exist in this repo — record it as retired or locate it before counting surfaces. Repo-side owner for this contract: docs/contracts/portable-doc-inline.md."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Today's edges come from schema reference FIELDS, not marked prose. 'Marked text → edge' is a new extraction path; blockref (block-id anchor) is the existing sub-doc link and the hint to anchor at block grain."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "b15",
+        "level": 2,
+        "text": "6. YAGNI defer list (NOT in v1)",
+        "type": "heading"
+      },
+      {
+        "id": "b16",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Character-offset ranges + overlapping marks"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Observation table with confidence floats"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Review state machine"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Concept & Context node kinds"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Declaring 13 node kinds / 10 edge verbs up front (let kind accrete)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "All heatmaps / visualization"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Tasks get PortableDoc block bodies (prerequisite for tasks-in-tasks) — deferred"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reflag-on-paper-edit reactor — deferred until surfacing proves demand"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Hard close-enforcement of acceptance_criteria — deferred (surface first, enforce later)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "PERMANENTLY deferred: merging the two edge tables (task_edges stays separate from content_edges — never merge)"
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "b17",
+        "level": 2,
+        "text": "7. Keep sacred",
+        "type": "heading"
+      },
+      {
+        "id": "b18",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Marked text → semantic truth"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Source-of-truth-aware"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Never silently overwrite prose"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "AI suggestions are marked as suggestions"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Provenance on every machine assertion"
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "b19",
+        "level": 2,
+        "text": "8. Acceptance / demo",
+        "type": "heading"
+      },
+      {
+        "id": "b20",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Edit a canonical value in ONE place."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Every doc that inline-references it renders the new value."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The impact/used-by panel lists the N docs that depend on it."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A pinned literal that drifted from canonical is flagged by the checker."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Expectation demo: a paper claim marked as an expectation drives a task."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Expectation demo: closing that task with evidence flips the claim to 'satisfied' in the paper's reverse view. Mechanism: close/3 writes only lifecycle_status/claim/close_reason (close.ex:103-146); setting met/evidence is a separate content mutation racing the close's rev CAS — scoped into lvw-t9 (agent/CLI mutates criteria at close time; the 'satisfied' flip is the t8 reverse view re-reading)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(post-v1 — deferred: demos the reflag reactor §6 defers, and §2's seam claim does not hold for paper edits per amendment 2) Expectation demo: editing the paper claim re-flags the dependent task."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Precondition: task-side graph demo steps require the demo task docs to be PUBLISHED (projection is published-perspective only; all lvw docs are drafts; the live graph has 0 edges today)."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "All on top of existing graph/backlinks/lifecycle; only ONE new inline NODE TYPE + ONE drift comparison are net-new node/check primitives for Track A — plus the resolver extensions on each surface, the body-walk edge extractor with its reprojection wiring and backfill, the paper-editor converter mapping, and the server-pre-resolve plumbing (wire §5/§7). The expectation track adds no new store — it reads the acceptance_criteria and design_doc primitives that already ship."
+          }
+        ],
+        "id": "b21",
+        "type": "paragraph"
+      },
+      {
+        "id": "b22",
+        "level": 2,
+        "text": "9. Papers<->Tasks unification — the philosophy of expectation",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "acceptance_criteria = expectation: criterion = the claim that must become true, met = the observation, evidence = the provenance. It is already the shape; it is just inert."
+          }
+        ],
+        "id": "b23",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Values and Expectations are the SAME pattern at two grains: a canonical thing + an inline live reference + an impact graph + provenance + review-on-change."
+          }
+        ],
+        "id": "b24",
+        "type": "paragraph"
+      },
+      {
+        "head": [
+          "Grain",
+          "Canonical thing",
+          "Inline live reference",
+          "Impact graph",
+          "Provenance",
+          "Review on change"
+        ],
+        "id": "b25",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Value"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "doc/field datum"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "live-value ref"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "reverse_referencers"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "source edge"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "writeback preview"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Expectation"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "acceptance criterion"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "task-ref chip in a paper"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "design_doc edge"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "evidence"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "reflag-on-edit"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "b26",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Paper drives Task: an unmet expectation IS the reason a task is open."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Task proves Paper: closing the task sets met=true + evidence = the observation."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Misalignment: paper edited → expectation unsatisfied → reflag the dependent tasks."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Net effect: Papers and Tasks are ONE PortableDoc fabric over ONE truth graph, not two systems."
+          }
+        ],
+        "id": "b27",
+        "type": "paragraph"
+      },
+      {
+        "id": "b28",
+        "level": 2,
+        "text": "10. Cross-type interlink via PortableDoc",
+        "type": "heading"
+      },
+      {
+        "id": "b29",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "wikilink (whole doc) + blockref (block-id anchor = block-grain range) already cross types; the resolver is type-agnostic. This is the reuse."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Inline task-reference CHIP: a type-aware resolver renders live task state (status / priority / criteria-progress) instead of a title, for a wikilink/blockref whose target is a task. This delivers 'reference tasks inside papers.' Three renderers in lockstep: Elixir inline.ex, Go inline.go, React portable-doc.tsx."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "'Tasks inside tasks' needs tasks to GAIN a PortableDoc body (today they have plain-text description/design) → schema + Studio editor change → DEFERRED. Deliver tasks-in-papers first (paper bodies already exist)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Rich chip state (status/priority/criteria) resolves for anonymous readers only when the target task doc is PUBLISHED; otherwise the chip degrades to title/alias — matching the published-perspective pin for anonymous callers (query_controller.ex:288)."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "b30",
+        "level": 2,
+        "text": "11. Writeback (v1.5) — the sharp knife",
+        "type": "heading"
+      },
+      {
+        "id": "b31",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Read-side live-render can't drift and is safe (v1). Write-through (edit a ref → mutate the canonical → propagate to every mention) is powerful and dangerous."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "It is this spec's own 'never silently overwrite prose' rule INVERTED: a prose edit silently rewriting shared truth that gates OTHER docs' tasks."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Don't skip it; GATE it: an explicit edit-through affordance (you KNOW you're editing the shared value) + an impact preview ('changes N docs') + provenance + review on high-impact change."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(1) Edit-through authorization is evaluated against the TARGET canonical doc's write scope — write access to the hosting paper grants nothing; unauthorized/cross-scope target disables the affordance."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(2) The 'changes N docs' impact preview MUST be produced by Content.Graph.reverse_referencers/2 called with the caller's scope opts, inheriting its existing MEDIUM-5 fail-closed posture: out-of-scope referencers are dropped entirely — no titles, no stub, and NO aggregate 'K you cannot see' count."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "b32",
+        "level": 2,
+        "text": "12. Honest Cody traps",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Do NOT merge the two edge tables. blocks-gating is correctness-critical (ready queue, cascading unblock, fencing). Expectations/values ride content_edges; the DAG stays in task_edges."
+          }
+        ],
+        "id": "b33",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Graduated enforcement, not a hard gate. Tasks close freely today; read & SURFACE unmet criteria (a warning, like the existing soft cross_validations schema.ex:106) before ever enforcing on close."
+          }
+        ],
+        "id": "b34",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Bound the reflag reactor. Reuse the graph engine's existing depth-clamp / node-budget; no unbounded cascade."
+          }
+        ],
+        "id": "b35",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Writeback must be gated: explicit edit-through affordance + impact preview ('changes N docs') + provenance + review on high-impact change. Edit-through authorization is evaluated against the TARGET canonical doc's write scope; the 'changes N docs' impact preview is produced by reverse_referencers with the caller's scope opts, fail-closed, with no aggregate 'you cannot see' count."
+          }
+        ],
+        "id": "b36",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Tasks lack bodies → deliver tasks-in-papers first, tasks-in-tasks later."
+          }
+        ],
+        "id": "b37",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "b-od-h",
+        "level": 2,
+        "text": "Decisions (ratified 2026-07-01)",
+        "type": "heading"
+      },
+      {
+        "id": "b-od-list",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "D1 — Body-walk edges are publish-gated in v1: the plugin-seam extractor feeds only the published materialised graph; a follow-up task (lvw-t12) folds Registry.collect_edge_extractors into build_drafts_indexes for the drafts graph. Rationale: keeps v1 off the drafts-fold complexity and the demo's critical path."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D2 — Public-reader freshness: inject the value/task resolvers into BulldocsLive's mount/refetch render, resolved as the anonymous principal — per-page-load freshness, no live push. Rationale: fresh without building a dependent-refresh reactor."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D3 — valueref target = doc_id slug, resolved via resolve_doc_pk with published-row preference (DraftId.published_id normalization). Rationale: matches every other body reference, survives export/import, and coalesces draft/published."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D4 — Drift-accept: a Studio 'accept new baseline' affordance issuing an ifRev-guarded fallback-only patch with provenance. Rationale: the CAS already ships (412 on rev mismatch); no parallel ack store."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D5 — Rich task-chip state resolves anonymously only for PUBLISHED task docs; otherwise degrade to title/alias. Rationale: matches the published-perspective pin and closes a token-gate bypass."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D6 — Authoring dual-writes the fallback as a {type:\"text\", value:<fallback>} child so old bp binaries degrade to visible text; new renderers ignore valueref children. Rationale: preserves the never-blank invariant retroactively at one dual-write cost."
+            }
+          ]
+        ],
+        "ordered": true,
+        "type": "list"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Next-Gen Wiki — Living Values v1 (pared-down spec)</h1><p style=\"margin:0 0 10px;line-height:1.55;font-size:18px\">A wiki where canonical values live once, render live inside prose across many docs, and every doc that depends on a value shows up in an impact panel — source-of-truth-aware, impact-aware, AI-navigable. NOT pages-with-links: living documents over the graph Barkpark already has.</p><p>Amended 2026-07-01 after a 62-agent ground-truth review; 22 confirmed findings applied. Review synthesis drives the amendments.</p><p>Audience: Barkpark maintainers. Scope: the lean cut of the next-generation semantic wiki vision — reuse the existing graph, build only ONE new primitive, defer the rest. This revision folds Tasks into the same fabric under a philosophy of expectation.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">1. North star</h2><p>One line: a wiki where canonical values live once, render live inside prose across many docs, and every doc that depends on a value shows up in an impact panel. Source-of-truth-aware, impact-aware, AI-navigable — living documents over the graph Barkpark already has, not pages with links.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">2. What already exists (REUSE — do not rebuild)</h2><p>Every capability below already ships. The v1 job is to compose them, not re-implement them.</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Node</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>What already ships</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Reuse note</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Node</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>documents rows are graph nodes (content/graph.ex:521)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Reuse</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Edge</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>content_edges table + Content.Edge + async EdgeProjector + BFS Content.Graph.traverse + backlinks reverse_referencers + /v1/graph/* + shipped blast-radius pane studio/graph_view.ex; kind is free-string so a new relation type needs ZERO migration</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Reuse — biggest &#39;don&#39;t duplicate&#39;</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Impact / used-by / dangling / orphans</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>reverse_referencers + traverse + dangling/orphans, already shipped and consumed</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Reuse</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Truth-at-a-time (partial)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>revisions table snapshots the whole doc on every mutation; draft/published lifecycle</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Reuse</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Canonical value rendered from a resolver (block-level)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>field-reference + codelist already resolve a value from another doc at render via an injected resolver (render.ex:130-168, fields.go:108-131)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Reuse / extend</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>acceptance_criteria (the expectation primitive — already present, inert)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>already [{criterion, met, evidence}] on every task (tasks/schema.ex:224) — declared, stored, shape-validated</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100% ADVISORY: nothing reads met/evidence; a task closes with all criteria unmet (close.ex never references it; validation.ex:126 only shape-checks). THE expectation primitive exists as inert data.</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>design_doc (task→paper reference field, schema.ex:204)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>auto-projects a content_edges edge of kind &#39;design_doc&#39; via the generic reference-field extractor (content/edges.ex:221)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>The paper&lt;-&gt;task graph link EXISTS; nobody has pointed impact traversal inward yet. Projects only when the task doc is PUBLISHED — which the bp task lifecycle never does (tasks stay status: draft by design). Any demo of this edge must publish the task docs first via the generic publish API.</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>TWO edge tables (do NOT merge)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>task_edges = CLOSED allowlist {blocks, discovered-from}, task&lt;-&gt;task only, drives ready-gating + cascading unblock (close.ex:152) + fencing-epoch close. content_edges = OPEN kinds; tasks + their design_doc/parent_id/attachments references participate</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Reuse both, separately — expectations/values ride content_edges; the gating DAG stays in task_edges.</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Edge reprojection on paper edit</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>WriteScope.fire_after (write_scope.ex:338-361) enqueues reprojection on generic Content.Writer saves and publish/unpublish/delete — but NOT on the paper block-op writers (upsert_paper / apply_paper_block_op / apply_paper_block_ops, block_ops.ex:197-202, 334, 444), which do raw Repo writes. Those are exactly the paths the Studio canvas and Bulldocs ingest use. Wiring reprojection into those three writers is net-new (wire §7).</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>The event seam for &#39;reflag on edit&#39; EXISTS; the reaction does not.</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Task bodies</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>tasks do NOT have PortableDoc block bodies today — description/design are plain-text fields (schema.ex:184,193); papers DO have PortableDoc bodies</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Gap — blocks tasks-in-tasks; deliver tasks-in-papers first.</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">3. Track A — Values — the ONE loop (v1 scope)</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Canonical value = a document / typed field (EXISTS).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Inline live-reference = ONE new inline node type that renders the CURRENT value in running prose, reusing the existing field-reference/codelist resolver seam. A live-rendered value can&#39;t go stale on surfaces that resolve at request time; the public reader&#39;s write-time body_html cache and pre-rendered delta frames stay stale until the referencing paper is re-edited (see wire §Freshness).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Used-by / impact = reverse_referencers + traverse (read side SHIPPED; the edges themselves require the net-new body-walk extractor — wire §7).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Stale detection = ONE comparison (fallback literal vs resolved value) computed inside the render-time pre-resolve pass. The plugin checkers seam (Barkpark.Validation.Checker) is a pure value-validation behaviour with no Repo access and structurally cannot resolve target.field on another document — no standalone checker.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Who fills it = AI proposes marks/values as DRAFTS; human/authorized agent approves via the existing draft→publish gate (that IS &#39;Review&#39; — no new state machine).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Provenance = every AI assertion carries a source edge; NEVER overwrite prose.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">4. Key design decision (DECIDED)</h2><p>Blocks have stable ids + id-addressed patch ops and survive edits; character offsets drift the instant prose is edited and would silently rot every claim built on them. Sub-block character ranges are deferred until a real use case proves block-grain too coarse. This is recorded as decided, not open.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">5. Blind spots / risks (honest)</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Range is research-grade (collaborative-anchoring / drift). Block-anchoring sidesteps it for v1.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Who writes observations is the graveyard of semantic wikis; the AI-suggestion-with-provenance loop + human gate is the answer, not a schema.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Contradiction is only &#39;structural&#39; if both sides are pre-structured; comparing free prose to a value is NLP-hard, not a graph query. The marking is the cost.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>FOUR surfaces must land in lockstep: Elixir api/lib/barkpark/portable_doc/render/inline.ex (raises), Go internal/pdrender/inline.go (blanks childless unknowns), React web/components/portable-doc.tsx (vanishes), AND the Studio paper editor&#39;s TipTap converter api/assets/paper-editor/src/convert.js (drops childless unknown inline nodes on load and rewrites the block&#39;s whole content on save — one keystroke in a paragraph containing the node deletes it permanently, in both the per-block editor and the prod-enabled canvas). The TS kernel cited at render.ex:4-5 does not exist in this repo — record it as retired or locate it before counting surfaces. Repo-side owner for this contract: docs/contracts/portable-doc-inline.md.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Today&#39;s edges come from schema reference FIELDS, not marked prose. &#39;Marked text → edge&#39; is a new extraction path; blockref (block-id anchor) is the existing sub-doc link and the hint to anchor at block grain.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">6. YAGNI defer list (NOT in v1)</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Character-offset ranges + overlapping marks</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Observation table with confidence floats</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Review state machine</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Concept &amp; Context node kinds</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Declaring 13 node kinds / 10 edge verbs up front (let kind accrete)</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>All heatmaps / visualization</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Tasks get PortableDoc block bodies (prerequisite for tasks-in-tasks) — deferred</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Reflag-on-paper-edit reactor — deferred until surfacing proves demand</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Hard close-enforcement of acceptance_criteria — deferred (surface first, enforce later)</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>PERMANENTLY deferred: merging the two edge tables (task_edges stays separate from content_edges — never merge)</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">7. Keep sacred</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Marked text → semantic truth</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Source-of-truth-aware</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Never silently overwrite prose</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>AI suggestions are marked as suggestions</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Provenance on every machine assertion</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">8. Acceptance / demo</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Edit a canonical value in ONE place.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Every doc that inline-references it renders the new value.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>The impact/used-by panel lists the N docs that depend on it.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>A pinned literal that drifted from canonical is flagged by the checker.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Expectation demo: a paper claim marked as an expectation drives a task.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Expectation demo: closing that task with evidence flips the claim to &#39;satisfied&#39; in the paper&#39;s reverse view. Mechanism: close/3 writes only lifecycle_status/claim/close_reason (close.ex:103-146); setting met/evidence is a separate content mutation racing the close&#39;s rev CAS — scoped into lvw-t9 (agent/CLI mutates criteria at close time; the &#39;satisfied&#39; flip is the t8 reverse view re-reading).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>(post-v1 — deferred: demos the reflag reactor §6 defers, and §2&#39;s seam claim does not hold for paper edits per amendment 2) Expectation demo: editing the paper claim re-flags the dependent task.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Precondition: task-side graph demo steps require the demo task docs to be PUBLISHED (projection is published-perspective only; all lvw docs are drafts; the live graph has 0 edges today).</span></div></div><p>All on top of existing graph/backlinks/lifecycle; only ONE new inline NODE TYPE + ONE drift comparison are net-new node/check primitives for Track A — plus the resolver extensions on each surface, the body-walk edge extractor with its reprojection wiring and backfill, the paper-editor converter mapping, and the server-pre-resolve plumbing (wire §5/§7). The expectation track adds no new store — it reads the acceptance_criteria and design_doc primitives that already ship.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">9. Papers&lt;-&gt;Tasks unification — the philosophy of expectation</h2><p>acceptance_criteria = expectation: criterion = the claim that must become true, met = the observation, evidence = the provenance. It is already the shape; it is just inert.</p><p>Values and Expectations are the SAME pattern at two grains: a canonical thing + an inline live reference + an impact graph + provenance + review-on-change.</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Grain</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Canonical thing</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Inline live reference</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Impact graph</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Provenance</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Review on change</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Value</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>doc/field datum</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>live-value ref</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>reverse_referencers</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>source edge</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>writeback preview</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Expectation</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>acceptance criterion</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>task-ref chip in a paper</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>design_doc edge</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>evidence</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>reflag-on-edit</span></td></tr></tbody></table><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Paper drives Task: an unmet expectation IS the reason a task is open.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Task proves Paper: closing the task sets met=true + evidence = the observation.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Misalignment: paper edited → expectation unsatisfied → reflag the dependent tasks.</span></div></div><p>Net effect: Papers and Tasks are ONE PortableDoc fabric over ONE truth graph, not two systems.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">10. Cross-type interlink via PortableDoc</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>wikilink (whole doc) + blockref (block-id anchor = block-grain range) already cross types; the resolver is type-agnostic. This is the reuse.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Inline task-reference CHIP: a type-aware resolver renders live task state (status / priority / criteria-progress) instead of a title, for a wikilink/blockref whose target is a task. This delivers &#39;reference tasks inside papers.&#39; Three renderers in lockstep: Elixir inline.ex, Go inline.go, React portable-doc.tsx.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>&#39;Tasks inside tasks&#39; needs tasks to GAIN a PortableDoc body (today they have plain-text description/design) → schema + Studio editor change → DEFERRED. Deliver tasks-in-papers first (paper bodies already exist).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Rich chip state (status/priority/criteria) resolves for anonymous readers only when the target task doc is PUBLISHED; otherwise the chip degrades to title/alias — matching the published-perspective pin for anonymous callers (query_controller.ex:288).</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">11. Writeback (v1.5) — the sharp knife</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Read-side live-render can&#39;t drift and is safe (v1). Write-through (edit a ref → mutate the canonical → propagate to every mention) is powerful and dangerous.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>It is this spec&#39;s own &#39;never silently overwrite prose&#39; rule INVERTED: a prose edit silently rewriting shared truth that gates OTHER docs&#39; tasks.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Don&#39;t skip it; GATE it: an explicit edit-through affordance (you KNOW you&#39;re editing the shared value) + an impact preview (&#39;changes N docs&#39;) + provenance + review on high-impact change.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>(1) Edit-through authorization is evaluated against the TARGET canonical doc&#39;s write scope — write access to the hosting paper grants nothing; unauthorized/cross-scope target disables the affordance.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>(2) The &#39;changes N docs&#39; impact preview MUST be produced by Content.Graph.reverse_referencers/2 called with the caller&#39;s scope opts, inheriting its existing MEDIUM-5 fail-closed posture: out-of-scope referencers are dropped entirely — no titles, no stub, and NO aggregate &#39;K you cannot see&#39; count.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">12. Honest Cody traps</h2><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span>Do NOT merge the two edge tables. blocks-gating is correctness-critical (ready queue, cascading unblock, fencing). Expectations/values ride content_edges; the DAG stays in task_edges.</span></div><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span>Graduated enforcement, not a hard gate. Tasks close freely today; read &amp; SURFACE unmet criteria (a warning, like the existing soft cross_validations schema.ex:106) before ever enforcing on close.</span></div><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span>Bound the reflag reactor. Reuse the graph engine&#39;s existing depth-clamp / node-budget; no unbounded cascade.</span></div><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span>Writeback must be gated: explicit edit-through affordance + impact preview (&#39;changes N docs&#39;) + provenance + review on high-impact change. Edit-through authorization is evaluated against the TARGET canonical doc&#39;s write scope; the &#39;changes N docs&#39; impact preview is produced by reverse_referencers with the caller&#39;s scope opts, fail-closed, with no aggregate &#39;you cannot see&#39; count.</span></div><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span>Tasks lack bodies → deliver tasks-in-papers first, tasks-in-tasks later.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Decisions (ratified 2026-07-01)</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>1. </span><span>D1 — Body-walk edges are publish-gated in v1: the plugin-seam extractor feeds only the published materialised graph; a follow-up task (lvw-t12) folds Registry.collect_edge_extractors into build_drafts_indexes for the drafts graph. Rationale: keeps v1 off the drafts-fold complexity and the demo&#39;s critical path.</span></div><div style=\"display:flex;flex-direction:row\"><span>2. </span><span>D2 — Public-reader freshness: inject the value/task resolvers into BulldocsLive&#39;s mount/refetch render, resolved as the anonymous principal — per-page-load freshness, no live push. Rationale: fresh without building a dependent-refresh reactor.</span></div><div style=\"display:flex;flex-direction:row\"><span>3. </span><span>D3 — valueref target = doc_id slug, resolved via resolve_doc_pk with published-row preference (DraftId.published_id normalization). Rationale: matches every other body reference, survives export/import, and coalesces draft/published.</span></div><div style=\"display:flex;flex-direction:row\"><span>4. </span><span>D4 — Drift-accept: a Studio &#39;accept new baseline&#39; affordance issuing an ifRev-guarded fallback-only patch with provenance. Rationale: the CAS already ships (412 on rev mismatch); no parallel ack store.</span></div><div style=\"display:flex;flex-direction:row\"><span>5. </span><span>D5 — Rich task-chip state resolves anonymously only for PUBLISHED task docs; otherwise degrade to title/alias. Rationale: matches the published-perspective pin and closes a token-gate bypass.</span></div><div style=\"display:flex;flex-direction:row\"><span>6. </span><span>D6 — Authoring dual-writes the fallback as a {type:&quot;text&quot;, value:&lt;fallback&gt;} child so old bp binaries degrade to visible text; new renderers ignore valueref children. Rationale: preserves the never-blank invariant retroactively at one dual-write cost.</span></div></div>"
+  },
+  "body_html": "<h1>Next-Gen Wiki — Living Values v1 (pared-down spec)</h1><p class=\"bp-role-ingress\">A wiki where canonical values live once, render live inside prose across many docs, and every doc that depends on a value shows up in an impact panel — source-of-truth-aware, impact-aware, AI-navigable. NOT pages-with-links: living documents over the graph Barkpark already has.</p><p>Amended 2026-07-01 after a 62-agent ground-truth review; 22 confirmed findings applied. Review synthesis drives the amendments.</p><p>Audience: Barkpark maintainers. Scope: the lean cut of the next-generation semantic wiki vision — reuse the existing graph, build only ONE new primitive, defer the rest. This revision folds Tasks into the same fabric under a philosophy of expectation.</p><h2>1. North star</h2><p>One line: a wiki where canonical values live once, render live inside prose across many docs, and every doc that depends on a value shows up in an impact panel. Source-of-truth-aware, impact-aware, AI-navigable — living documents over the graph Barkpark already has, not pages with links.</p><h2>2. What already exists (REUSE — do not rebuild)</h2><p>Every capability below already ships. The v1 job is to compose them, not re-implement them.</p><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Node</span></th><th class=\"bp-table__th\"><span>What already ships</span></th><th class=\"bp-table__th\"><span>Reuse note</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>Node</span></td><td class=\"bp-table__td\"><span>documents rows are graph nodes (content/graph.ex:521)</span></td><td class=\"bp-table__td\"><span>Reuse</span></td></tr><tr><td class=\"bp-table__td\"><span>Edge</span></td><td class=\"bp-table__td\"><span>content_edges table + Content.Edge + async EdgeProjector + BFS Content.Graph.traverse + backlinks reverse_referencers + /v1/graph/* + shipped blast-radius pane studio/graph_view.ex; kind is free-string so a new relation type needs ZERO migration</span></td><td class=\"bp-table__td\"><span>Reuse — biggest &#39;don&#39;t duplicate&#39;</span></td></tr><tr><td class=\"bp-table__td\"><span>Impact / used-by / dangling / orphans</span></td><td class=\"bp-table__td\"><span>reverse_referencers + traverse + dangling/orphans, already shipped and consumed</span></td><td class=\"bp-table__td\"><span>Reuse</span></td></tr><tr><td class=\"bp-table__td\"><span>Truth-at-a-time (partial)</span></td><td class=\"bp-table__td\"><span>revisions table snapshots the whole doc on every mutation; draft/published lifecycle</span></td><td class=\"bp-table__td\"><span>Reuse</span></td></tr><tr><td class=\"bp-table__td\"><span>Canonical value rendered from a resolver (block-level)</span></td><td class=\"bp-table__td\"><span>field-reference + codelist already resolve a value from another doc at render via an injected resolver (render.ex:130-168, fields.go:108-131)</span></td><td class=\"bp-table__td\"><span>Reuse / extend</span></td></tr><tr><td class=\"bp-table__td\"><span>acceptance_criteria (the expectation primitive — already present, inert)</span></td><td class=\"bp-table__td\"><span>already [{criterion, met, evidence}] on every task (tasks/schema.ex:224) — declared, stored, shape-validated</span></td><td class=\"bp-table__td\"><span>100% ADVISORY: nothing reads met/evidence; a task closes with all criteria unmet (close.ex never references it; validation.ex:126 only shape-checks). THE expectation primitive exists as inert data.</span></td></tr><tr><td class=\"bp-table__td\"><span>design_doc (task→paper reference field, schema.ex:204)</span></td><td class=\"bp-table__td\"><span>auto-projects a content_edges edge of kind &#39;design_doc&#39; via the generic reference-field extractor (content/edges.ex:221)</span></td><td class=\"bp-table__td\"><span>The paper&lt;-&gt;task graph link EXISTS; nobody has pointed impact traversal inward yet. Projects only when the task doc is PUBLISHED — which the bp task lifecycle never does (tasks stay status: draft by design). Any demo of this edge must publish the task docs first via the generic publish API.</span></td></tr><tr><td class=\"bp-table__td\"><span>TWO edge tables (do NOT merge)</span></td><td class=\"bp-table__td\"><span>task_edges = CLOSED allowlist {blocks, discovered-from}, task&lt;-&gt;task only, drives ready-gating + cascading unblock (close.ex:152) + fencing-epoch close. content_edges = OPEN kinds; tasks + their design_doc/parent_id/attachments references participate</span></td><td class=\"bp-table__td\"><span>Reuse both, separately — expectations/values ride content_edges; the gating DAG stays in task_edges.</span></td></tr><tr><td class=\"bp-table__td\"><span>Edge reprojection on paper edit</span></td><td class=\"bp-table__td\"><span>WriteScope.fire_after (write_scope.ex:338-361) enqueues reprojection on generic Content.Writer saves and publish/unpublish/delete — but NOT on the paper block-op writers (upsert_paper / apply_paper_block_op / apply_paper_block_ops, block_ops.ex:197-202, 334, 444), which do raw Repo writes. Those are exactly the paths the Studio canvas and Bulldocs ingest use. Wiring reprojection into those three writers is net-new (wire §7).</span></td><td class=\"bp-table__td\"><span>The event seam for &#39;reflag on edit&#39; EXISTS; the reaction does not.</span></td></tr><tr><td class=\"bp-table__td\"><span>Task bodies</span></td><td class=\"bp-table__td\"><span>tasks do NOT have PortableDoc block bodies today — description/design are plain-text fields (schema.ex:184,193); papers DO have PortableDoc bodies</span></td><td class=\"bp-table__td\"><span>Gap — blocks tasks-in-tasks; deliver tasks-in-papers first.</span></td></tr></tbody></table><h2>3. Track A — Values — the ONE loop (v1 scope)</h2><ul><li><span>Canonical value = a document / typed field (EXISTS).</span></li><li><span>Inline live-reference = ONE new inline node type that renders the CURRENT value in running prose, reusing the existing field-reference/codelist resolver seam. A live-rendered value can&#39;t go stale on surfaces that resolve at request time; the public reader&#39;s write-time body_html cache and pre-rendered delta frames stay stale until the referencing paper is re-edited (see wire §Freshness).</span></li><li><span>Used-by / impact = reverse_referencers + traverse (read side SHIPPED; the edges themselves require the net-new body-walk extractor — wire §7).</span></li><li><span>Stale detection = ONE comparison (fallback literal vs resolved value) computed inside the render-time pre-resolve pass. The plugin checkers seam (Barkpark.Validation.Checker) is a pure value-validation behaviour with no Repo access and structurally cannot resolve target.field on another document — no standalone checker.</span></li><li><span>Who fills it = AI proposes marks/values as DRAFTS; human/authorized agent approves via the existing draft→publish gate (that IS &#39;Review&#39; — no new state machine).</span></li><li><span>Provenance = every AI assertion carries a source edge; NEVER overwrite prose.</span></li></ul><h2>4. Key design decision (DECIDED)</h2><p>Blocks have stable ids + id-addressed patch ops and survive edits; character offsets drift the instant prose is edited and would silently rot every claim built on them. Sub-block character ranges are deferred until a real use case proves block-grain too coarse. This is recorded as decided, not open.</p><h2>5. Blind spots / risks (honest)</h2><ul><li><span>Range is research-grade (collaborative-anchoring / drift). Block-anchoring sidesteps it for v1.</span></li><li><span>Who writes observations is the graveyard of semantic wikis; the AI-suggestion-with-provenance loop + human gate is the answer, not a schema.</span></li><li><span>Contradiction is only &#39;structural&#39; if both sides are pre-structured; comparing free prose to a value is NLP-hard, not a graph query. The marking is the cost.</span></li><li><span>FOUR surfaces must land in lockstep: Elixir api/lib/barkpark/portable_doc/render/inline.ex (raises), Go internal/pdrender/inline.go (blanks childless unknowns), React web/components/portable-doc.tsx (vanishes), AND the Studio paper editor&#39;s TipTap converter api/assets/paper-editor/src/convert.js (drops childless unknown inline nodes on load and rewrites the block&#39;s whole content on save — one keystroke in a paragraph containing the node deletes it permanently, in both the per-block editor and the prod-enabled canvas). The TS kernel cited at render.ex:4-5 does not exist in this repo — record it as retired or locate it before counting surfaces. Repo-side owner for this contract: docs/contracts/portable-doc-inline.md.</span></li><li><span>Today&#39;s edges come from schema reference FIELDS, not marked prose. &#39;Marked text → edge&#39; is a new extraction path; blockref (block-id anchor) is the existing sub-doc link and the hint to anchor at block grain.</span></li></ul><h2>6. YAGNI defer list (NOT in v1)</h2><ul><li><span>Character-offset ranges + overlapping marks</span></li><li><span>Observation table with confidence floats</span></li><li><span>Review state machine</span></li><li><span>Concept &amp; Context node kinds</span></li><li><span>Declaring 13 node kinds / 10 edge verbs up front (let kind accrete)</span></li><li><span>All heatmaps / visualization</span></li><li><span>Tasks get PortableDoc block bodies (prerequisite for tasks-in-tasks) — deferred</span></li><li><span>Reflag-on-paper-edit reactor — deferred until surfacing proves demand</span></li><li><span>Hard close-enforcement of acceptance_criteria — deferred (surface first, enforce later)</span></li><li><span>PERMANENTLY deferred: merging the two edge tables (task_edges stays separate from content_edges — never merge)</span></li></ul><h2>7. Keep sacred</h2><ul><li><span>Marked text → semantic truth</span></li><li><span>Source-of-truth-aware</span></li><li><span>Never silently overwrite prose</span></li><li><span>AI suggestions are marked as suggestions</span></li><li><span>Provenance on every machine assertion</span></li></ul><h2>8. Acceptance / demo</h2><ul><li><span>Edit a canonical value in ONE place.</span></li><li><span>Every doc that inline-references it renders the new value.</span></li><li><span>The impact/used-by panel lists the N docs that depend on it.</span></li><li><span>A pinned literal that drifted from canonical is flagged by the checker.</span></li><li><span>Expectation demo: a paper claim marked as an expectation drives a task.</span></li><li><span>Expectation demo: closing that task with evidence flips the claim to &#39;satisfied&#39; in the paper&#39;s reverse view. Mechanism: close/3 writes only lifecycle_status/claim/close_reason (close.ex:103-146); setting met/evidence is a separate content mutation racing the close&#39;s rev CAS — scoped into lvw-t9 (agent/CLI mutates criteria at close time; the &#39;satisfied&#39; flip is the t8 reverse view re-reading).</span></li><li><span>(post-v1 — deferred: demos the reflag reactor §6 defers, and §2&#39;s seam claim does not hold for paper edits per amendment 2) Expectation demo: editing the paper claim re-flags the dependent task.</span></li><li><span>Precondition: task-side graph demo steps require the demo task docs to be PUBLISHED (projection is published-perspective only; all lvw docs are drafts; the live graph has 0 edges today).</span></li></ul><p>All on top of existing graph/backlinks/lifecycle; only ONE new inline NODE TYPE + ONE drift comparison are net-new node/check primitives for Track A — plus the resolver extensions on each surface, the body-walk edge extractor with its reprojection wiring and backfill, the paper-editor converter mapping, and the server-pre-resolve plumbing (wire §5/§7). The expectation track adds no new store — it reads the acceptance_criteria and design_doc primitives that already ship.</p><h2>9. Papers&lt;-&gt;Tasks unification — the philosophy of expectation</h2><p>acceptance_criteria = expectation: criterion = the claim that must become true, met = the observation, evidence = the provenance. It is already the shape; it is just inert.</p><p>Values and Expectations are the SAME pattern at two grains: a canonical thing + an inline live reference + an impact graph + provenance + review-on-change.</p><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Grain</span></th><th class=\"bp-table__th\"><span>Canonical thing</span></th><th class=\"bp-table__th\"><span>Inline live reference</span></th><th class=\"bp-table__th\"><span>Impact graph</span></th><th class=\"bp-table__th\"><span>Provenance</span></th><th class=\"bp-table__th\"><span>Review on change</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>Value</span></td><td class=\"bp-table__td\"><span>doc/field datum</span></td><td class=\"bp-table__td\"><span>live-value ref</span></td><td class=\"bp-table__td\"><span>reverse_referencers</span></td><td class=\"bp-table__td\"><span>source edge</span></td><td class=\"bp-table__td\"><span>writeback preview</span></td></tr><tr><td class=\"bp-table__td\"><span>Expectation</span></td><td class=\"bp-table__td\"><span>acceptance criterion</span></td><td class=\"bp-table__td\"><span>task-ref chip in a paper</span></td><td class=\"bp-table__td\"><span>design_doc edge</span></td><td class=\"bp-table__td\"><span>evidence</span></td><td class=\"bp-table__td\"><span>reflag-on-edit</span></td></tr></tbody></table><ul><li><span>Paper drives Task: an unmet expectation IS the reason a task is open.</span></li><li><span>Task proves Paper: closing the task sets met=true + evidence = the observation.</span></li><li><span>Misalignment: paper edited → expectation unsatisfied → reflag the dependent tasks.</span></li></ul><p>Net effect: Papers and Tasks are ONE PortableDoc fabric over ONE truth graph, not two systems.</p><h2>10. Cross-type interlink via PortableDoc</h2><ul><li><span>wikilink (whole doc) + blockref (block-id anchor = block-grain range) already cross types; the resolver is type-agnostic. This is the reuse.</span></li><li><span>Inline task-reference CHIP: a type-aware resolver renders live task state (status / priority / criteria-progress) instead of a title, for a wikilink/blockref whose target is a task. This delivers &#39;reference tasks inside papers.&#39; Three renderers in lockstep: Elixir inline.ex, Go inline.go, React portable-doc.tsx.</span></li><li><span>&#39;Tasks inside tasks&#39; needs tasks to GAIN a PortableDoc body (today they have plain-text description/design) → schema + Studio editor change → DEFERRED. Deliver tasks-in-papers first (paper bodies already exist).</span></li><li><span>Rich chip state (status/priority/criteria) resolves for anonymous readers only when the target task doc is PUBLISHED; otherwise the chip degrades to title/alias — matching the published-perspective pin for anonymous callers (query_controller.ex:288).</span></li></ul><h2>11. Writeback (v1.5) — the sharp knife</h2><ul><li><span>Read-side live-render can&#39;t drift and is safe (v1). Write-through (edit a ref → mutate the canonical → propagate to every mention) is powerful and dangerous.</span></li><li><span>It is this spec&#39;s own &#39;never silently overwrite prose&#39; rule INVERTED: a prose edit silently rewriting shared truth that gates OTHER docs&#39; tasks.</span></li><li><span>Don&#39;t skip it; GATE it: an explicit edit-through affordance (you KNOW you&#39;re editing the shared value) + an impact preview (&#39;changes N docs&#39;) + provenance + review on high-impact change.</span></li><li><span>(1) Edit-through authorization is evaluated against the TARGET canonical doc&#39;s write scope — write access to the hosting paper grants nothing; unauthorized/cross-scope target disables the affordance.</span></li><li><span>(2) The &#39;changes N docs&#39; impact preview MUST be produced by Content.Graph.reverse_referencers/2 called with the caller&#39;s scope opts, inheriting its existing MEDIUM-5 fail-closed posture: out-of-scope referencers are dropped entirely — no titles, no stub, and NO aggregate &#39;K you cannot see&#39; count.</span></li></ul><h2>12. Honest Cody traps</h2><div class=\"bp-callout bp-callout--warning\"><span>Do NOT merge the two edge tables. blocks-gating is correctness-critical (ready queue, cascading unblock, fencing). Expectations/values ride content_edges; the DAG stays in task_edges.</span></div><div class=\"bp-callout bp-callout--info\"><span>Graduated enforcement, not a hard gate. Tasks close freely today; read &amp; SURFACE unmet criteria (a warning, like the existing soft cross_validations schema.ex:106) before ever enforcing on close.</span></div><div class=\"bp-callout bp-callout--info\"><span>Bound the reflag reactor. Reuse the graph engine&#39;s existing depth-clamp / node-budget; no unbounded cascade.</span></div><div class=\"bp-callout bp-callout--warning\"><span>Writeback must be gated: explicit edit-through affordance + impact preview (&#39;changes N docs&#39;) + provenance + review on high-impact change. Edit-through authorization is evaluated against the TARGET canonical doc&#39;s write scope; the &#39;changes N docs&#39; impact preview is produced by reverse_referencers with the caller&#39;s scope opts, fail-closed, with no aggregate &#39;you cannot see&#39; count.</span></div><div class=\"bp-callout bp-callout--info\"><span>Tasks lack bodies → deliver tasks-in-papers first, tasks-in-tasks later.</span></div><h2>Decisions (ratified 2026-07-01)</h2><ol><li><span>D1 — Body-walk edges are publish-gated in v1: the plugin-seam extractor feeds only the published materialised graph; a follow-up task (lvw-t12) folds Registry.collect_edge_extractors into build_drafts_indexes for the drafts graph. Rationale: keeps v1 off the drafts-fold complexity and the demo&#39;s critical path.</span></li><li><span>D2 — Public-reader freshness: inject the value/task resolvers into BulldocsLive&#39;s mount/refetch render, resolved as the anonymous principal — per-page-load freshness, no live push. Rationale: fresh without building a dependent-refresh reactor.</span></li><li><span>D3 — valueref target = doc_id slug, resolved via resolve_doc_pk with published-row preference (DraftId.published_id normalization). Rationale: matches every other body reference, survives export/import, and coalesces draft/published.</span></li><li><span>D4 — Drift-accept: a Studio &#39;accept new baseline&#39; affordance issuing an ifRev-guarded fallback-only patch with provenance. Rationale: the CAS already ships (412 on rev mismatch); no parallel ack store.</span></li><li><span>D5 — Rich task-chip state resolves anonymously only for PUBLISHED task docs; otherwise degrade to title/alias. Rationale: matches the published-perspective pin and closes a token-gate bypass.</span></li><li><span>D6 — Authoring dual-writes the fallback as a {type:&quot;text&quot;, value:&lt;fallback&gt;} child so old bp binaries degrade to visible text; new renderers ignore valueref children. Rationale: preserves the never-blank invariant retroactively at one dual-write cost.</span></li></ol>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": "A wiki where canonical values live once, render live inside prose across many docs, and every doc that…",
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/nextgen-wiki-living-values-v1"
+  },
+  "rev": 8,
+  "style": "article",
+  "title": "Next-Gen Wiki — Living Values v1 (pared-down spec)"
+}

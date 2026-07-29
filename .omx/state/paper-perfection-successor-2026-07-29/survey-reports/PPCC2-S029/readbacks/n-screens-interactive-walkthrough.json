@@ -1,0 +1,1158 @@
+{
+  "_createdAt": "2026-07-18T18:12:48.604899Z",
+  "_draft": false,
+  "_id": "n-screens-interactive-walkthrough",
+  "_publishedId": "n-screens-interactive-walkthrough",
+  "_rev": "171d4fe456266d44695822f54bccd5da",
+  "_type": "paper",
+  "_updatedAt": "2026-07-18T18:12:48.604899Z",
+  "blocks": [
+    {
+      "id": "r7-001",
+      "text": "Design feedback · round 7 · N-screens",
+      "type": "eyebrow"
+    },
+    {
+      "id": "r7-002",
+      "level": 1,
+      "text": "Five of the seven asks land — and the prototype went interactive",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Seventh package, reviewed by "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "clicking through it"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ": the v4 prototype is now a working clickable app with a context-morphing sidebar, and it delivers five of the seven screens requested in "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "the Netlify/Vercel asks"
+            }
+          ],
+          "href": "/papers/netlify-vercel-next-screen-asks",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": " — the logs viewer, the site-settings home, the honest cost dashboard, lock-production, and the import flow. DNS editor and redirects (N-06/N-07) are correctly absent, waiting on their seam tasks. Verdict: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "all five approved"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "; the cost dashboard and logs footer are the two best pieces of product copy in the whole remake."
+        }
+      ],
+      "id": "r7-003",
+      "type": "ingress"
+    },
+    {
+      "id": "r7-004",
+      "level": 2,
+      "text": "Verified interactively, screen by screen",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Ask"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "What the prototype does"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Assessment"
+          }
+        ]
+      ],
+      "id": "r7-005",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-03 · Usage & cost"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "New "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Usage"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " item in the workspace nav. \"Projected next invoice · 12 August — "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "€25.80"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — Supporter €12.00 + servers €13.80 — *no usage line items, ever*.\" Per-instance rows (€4.90, €8.90 /mo) with site attribution; footer: \"Prices are the provider's own — Hetzner's live EUR catalog, Azure's retail cache. Archived instances cost €0; the archive bundle is included in your plan.\""
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Approved — the identity flagship, worded better than the brief."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " Numbers are internally consistent. \"Your bill previewed, not estimated\" should become marketing copy."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-01 · Logs viewer"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Instance "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Logs"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " tab: source chips (all / journal / caddy per site), level + HTTP-status colors, "
+            },
+            {
+              "type": "code",
+              "value": "repeated 14× today"
+            },
+            {
+              "type": "text",
+              "value": " coalescing on a 404, a "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Following"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " live-tail toggle, and the footer: \"journalctl -n 200 + Caddy access log — streamed from your box on demand, "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "nothing stored on our side"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": ".\" A site-scoped Logs tab exists too."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Approved."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " The footer states the exact real mechanism (the agent's "
+            },
+            {
+              "type": "code",
+              "value": "logs"
+            },
+            {
+              "type": "text",
+              "value": " command) AND a privacy contract — the build must keep both true: on-demand relay, no control-plane log retention."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-04 · Lock production"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "\"Lock production\" on the Deployments card; locked state (clicked, works): amber banner \"Production is locked to deploy #42. Git pushes and Studio publishes are "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "recorded but held"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — nothing builds or switches until you unlock.\""
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Approved."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " Both loops held, target deploy named, reversal obvious. Stronger than Netlify's stop-auto-publishing, as intended."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-02 · Site settings home"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Site context now has its own sub-nav: Deployments · Git · Domains · Environment · "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Settings"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " · Logs. Delete-site confirm carries the content-first contract: \"Removes deploys, previews and domain routing. "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The dataset and all its content stay on <instance>"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": ".\""
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Approved."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " That deletion sentence is doctrine gold — a site dies, content survives, stated plainly."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-05 · Import front door"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "newSiteMode"
+            },
+            {
+              "type": "text",
+              "value": " flow in the prototype: framework \"detected from astro.config.mjs\", \"webhook registers automatically · main → production\", \"webhook registered, first build queued.\""
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Approved on copy"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " (flow not fully toured). Sequencing guard applies: auto-webhook language is true only post-gh-1."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "N-06 / N-07"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "DNS records editor and redirects — absent; Domains tab shows the rung checklist only."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Correctly sequenced"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — both wait on seam additions per the asks paper."
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "r7-006",
+      "level": 2,
+      "text": "Structural news",
+      "type": "heading"
+    },
+    {
+      "id": "r7-007",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The prototype is now interactive"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — nav, tabs, lock/unlock state flips all work. Future reviews are click-throughs, not render inspection; ask for exported renders only for the matrix."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Context-morphing sidebar"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ": entering an instance or site swaps the sidebar to that thing's sub-nav with a \"← Fleet / ← All sites\" exit. Good pattern — one obligation: "
+          },
+          {
+            "type": "code",
+            "value": "#instance/<id>"
+          },
+          {
+            "type": "text",
+            "value": " and "
+          },
+          {
+            "type": "code",
+            "value": "#site/<id>"
+          },
+          {
+            "type": "text",
+            "value": " anchors must deep-link into these contexts."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Server IPs joined the metadata line"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " (fsn1 · cx22 · 5.75.169.183 · …) — the named-box identity made concrete. Keep."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The instance Overview tab is now the composed D-03 (golden path with \"checks run from Falkenstein every 5 minutes\", updates card with pause/pin/rollback, sites, identity/runtime) — the outline's last big \"partial\" is effectively designed."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Of the 61-surface outline: N-01…N-05 move to "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Designed"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "; D-03 composes; N-06/N-07 stay queued on seams; concept trio (Forms, preview-feedback-to-tasks, analytics) still awaits the owner call on Forms. Designer throughput this cycle has been extraordinary — the constraint is now entirely on our side: gh-1 App registration, seam tasks, tokens emit, and the build epics."
+        }
+      ],
+      "id": "r7-008",
+      "title": "Ledger after round 7",
+      "tone": "ok",
+      "type": "callout"
+    },
+    {
+      "id": "r7-009",
+      "type": "divider"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Reviewed 2026-07-18 by interactive walkthrough of \"UI improvement discussion (7).zip\". Chain: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "ten-screen asks"
+            }
+          ],
+          "href": "/papers/netlify-vercel-next-screen-asks",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "auto-deploy target UI"
+            }
+          ],
+          "href": "/papers/autodeploy-target-ui-approved",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "build outline"
+            }
+          ],
+          "href": "/papers/console-gui-build-outline",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "r7-010",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "r7-001",
+        "text": "Design feedback · round 7 · N-screens",
+        "type": "eyebrow"
+      },
+      {
+        "id": "r7-002",
+        "level": 1,
+        "text": "Five of the seven asks land — and the prototype went interactive",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Seventh package, reviewed by "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "clicking through it"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ": the v4 prototype is now a working clickable app with a context-morphing sidebar, and it delivers five of the seven screens requested in "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "the Netlify/Vercel asks"
+              }
+            ],
+            "href": "/papers/netlify-vercel-next-screen-asks",
+            "type": "link"
+          },
+          {
+            "type": "text",
+            "value": " — the logs viewer, the site-settings home, the honest cost dashboard, lock-production, and the import flow. DNS editor and redirects (N-06/N-07) are correctly absent, waiting on their seam tasks. Verdict: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "all five approved"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "; the cost dashboard and logs footer are the two best pieces of product copy in the whole remake."
+          }
+        ],
+        "id": "r7-003",
+        "type": "ingress"
+      },
+      {
+        "id": "r7-004",
+        "level": 2,
+        "text": "Verified interactively, screen by screen",
+        "type": "heading"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "Ask"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "What the prototype does"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Assessment"
+            }
+          ]
+        ],
+        "id": "r7-005",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-03 · Usage & cost"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "New "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Usage"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " item in the workspace nav. \"Projected next invoice · 12 August — "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "€25.80"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — Supporter €12.00 + servers €13.80 — *no usage line items, ever*.\" Per-instance rows (€4.90, €8.90 /mo) with site attribution; footer: \"Prices are the provider's own — Hetzner's live EUR catalog, Azure's retail cache. Archived instances cost €0; the archive bundle is included in your plan.\""
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Approved — the identity flagship, worded better than the brief."
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " Numbers are internally consistent. \"Your bill previewed, not estimated\" should become marketing copy."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-01 · Logs viewer"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Instance "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Logs"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " tab: source chips (all / journal / caddy per site), level + HTTP-status colors, "
+              },
+              {
+                "type": "code",
+                "value": "repeated 14× today"
+              },
+              {
+                "type": "text",
+                "value": " coalescing on a 404, a "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Following"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " live-tail toggle, and the footer: \"journalctl -n 200 + Caddy access log — streamed from your box on demand, "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "nothing stored on our side"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": ".\" A site-scoped Logs tab exists too."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Approved."
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " The footer states the exact real mechanism (the agent's "
+              },
+              {
+                "type": "code",
+                "value": "logs"
+              },
+              {
+                "type": "text",
+                "value": " command) AND a privacy contract — the build must keep both true: on-demand relay, no control-plane log retention."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-04 · Lock production"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "\"Lock production\" on the Deployments card; locked state (clicked, works): amber banner \"Production is locked to deploy #42. Git pushes and Studio publishes are "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "recorded but held"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — nothing builds or switches until you unlock.\""
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Approved."
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " Both loops held, target deploy named, reversal obvious. Stronger than Netlify's stop-auto-publishing, as intended."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-02 · Site settings home"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Site context now has its own sub-nav: Deployments · Git · Domains · Environment · "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Settings"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " · Logs. Delete-site confirm carries the content-first contract: \"Removes deploys, previews and domain routing. "
+              },
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "The dataset and all its content stay on <instance>"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": ".\""
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Approved."
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " That deletion sentence is doctrine gold — a site dies, content survives, stated plainly."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-05 · Import front door"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "newSiteMode"
+              },
+              {
+                "type": "text",
+                "value": " flow in the prototype: framework \"detected from astro.config.mjs\", \"webhook registers automatically · main → production\", \"webhook registered, first build queued.\""
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Approved on copy"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " (flow not fully toured). Sequencing guard applies: auto-webhook language is true only post-gh-1."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "N-06 / N-07"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "DNS records editor and redirects — absent; Domains tab shows the rung checklist only."
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Correctly sequenced"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — both wait on seam additions per the asks paper."
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "r7-006",
+        "level": 2,
+        "text": "Structural news",
+        "type": "heading"
+      },
+      {
+        "id": "r7-007",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The prototype is now interactive"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — nav, tabs, lock/unlock state flips all work. Future reviews are click-throughs, not render inspection; ask for exported renders only for the matrix."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Context-morphing sidebar"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": ": entering an instance or site swaps the sidebar to that thing's sub-nav with a \"← Fleet / ← All sites\" exit. Good pattern — one obligation: "
+            },
+            {
+              "type": "code",
+              "value": "#instance/<id>"
+            },
+            {
+              "type": "text",
+              "value": " and "
+            },
+            {
+              "type": "code",
+              "value": "#site/<id>"
+            },
+            {
+              "type": "text",
+              "value": " anchors must deep-link into these contexts."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Server IPs joined the metadata line"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " (fsn1 · cx22 · 5.75.169.183 · …) — the named-box identity made concrete. Keep."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The instance Overview tab is now the composed D-03 (golden path with \"checks run from Falkenstein every 5 minutes\", updates card with pause/pin/rollback, sites, identity/runtime) — the outline's last big \"partial\" is effectively designed."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Of the 61-surface outline: N-01…N-05 move to "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Designed"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "; D-03 composes; N-06/N-07 stay queued on seams; concept trio (Forms, preview-feedback-to-tasks, analytics) still awaits the owner call on Forms. Designer throughput this cycle has been extraordinary — the constraint is now entirely on our side: gh-1 App registration, seam tasks, tokens emit, and the build epics."
+          }
+        ],
+        "id": "r7-008",
+        "title": "Ledger after round 7",
+        "tone": "ok",
+        "type": "callout"
+      },
+      {
+        "id": "r7-009",
+        "type": "divider"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Reviewed 2026-07-18 by interactive walkthrough of \"UI improvement discussion (7).zip\". Chain: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "ten-screen asks"
+              }
+            ],
+            "href": "/papers/netlify-vercel-next-screen-asks",
+            "type": "link"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "auto-deploy target UI"
+              }
+            ],
+            "href": "/papers/autodeploy-target-ui-approved",
+            "type": "link"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "build outline"
+              }
+            ],
+            "href": "/papers/console-gui-build-outline",
+            "type": "link"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "id": "r7-010",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">Design feedback · round 7 · N-screens</p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Five of the seven asks land — and the prototype went interactive</h1><p style=\"margin:0 0 10px;line-height:1.55;font-size:18px\">Seventh package, reviewed by <span style=\"font-weight:bold\">clicking through it</span>: the v4 prototype is now a working clickable app with a context-morphing sidebar, and it delivers five of the seven screens requested in <a href=\"/papers/netlify-vercel-next-screen-asks\" style=\"color:#1e5347;text-decoration:underline\">the Netlify/Vercel asks</a> — the logs viewer, the site-settings home, the honest cost dashboard, lock-production, and the import flow. DNS editor and redirects (N-06/N-07) are correctly absent, waiting on their seam tasks. Verdict: <span style=\"font-weight:bold\">all five approved</span>; the cost dashboard and logs footer are the two best pieces of product copy in the whole remake.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verified interactively, screen by screen</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Ask</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>What the prototype does</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Assessment</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-03 · Usage &amp; cost</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>New </span><span style=\"font-weight:bold\">Usage</span><span> item in the workspace nav. &quot;Projected next invoice · 12 August — </span><span style=\"font-weight:bold\">€25.80</span><span> — Supporter €12.00 + servers €13.80 — *no usage line items, ever*.&quot; Per-instance rows (€4.90, €8.90 /mo) with site attribution; footer: &quot;Prices are the provider&#39;s own — Hetzner&#39;s live EUR catalog, Azure&#39;s retail cache. Archived instances cost €0; the archive bundle is included in your plan.&quot;</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Approved — the identity flagship, worded better than the brief.</span><span> Numbers are internally consistent. &quot;Your bill previewed, not estimated&quot; should become marketing copy.</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-01 · Logs viewer</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Instance </span><span style=\"font-weight:bold\">Logs</span><span> tab: source chips (all / journal / caddy per site), level + HTTP-status colors, </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">repeated 14× today</code><span> coalescing on a 404, a </span><span style=\"font-weight:bold\">Following</span><span> live-tail toggle, and the footer: &quot;journalctl -n 200 + Caddy access log — streamed from your box on demand, </span><span style=\"font-weight:bold\">nothing stored on our side</span><span>.&quot; A site-scoped Logs tab exists too.</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Approved.</span><span> The footer states the exact real mechanism (the agent&#39;s </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">logs</code><span> command) AND a privacy contract — the build must keep both true: on-demand relay, no control-plane log retention.</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-04 · Lock production</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>&quot;Lock production&quot; on the Deployments card; locked state (clicked, works): amber banner &quot;Production is locked to deploy #42. Git pushes and Studio publishes are </span><span style=\"font-weight:bold\">recorded but held</span><span> — nothing builds or switches until you unlock.&quot;</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Approved.</span><span> Both loops held, target deploy named, reversal obvious. Stronger than Netlify&#39;s stop-auto-publishing, as intended.</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-02 · Site settings home</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Site context now has its own sub-nav: Deployments · Git · Domains · Environment · </span><span style=\"font-weight:bold\">Settings</span><span> · Logs. Delete-site confirm carries the content-first contract: &quot;Removes deploys, previews and domain routing. </span><span style=\"font-weight:bold\">The dataset and all its content stay on &lt;instance&gt;</span><span>.&quot;</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Approved.</span><span> That deletion sentence is doctrine gold — a site dies, content survives, stated plainly.</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-05 · Import front door</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">newSiteMode</code><span> flow in the prototype: framework &quot;detected from astro.config.mjs&quot;, &quot;webhook registers automatically · main → production&quot;, &quot;webhook registered, first build queued.&quot;</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Approved on copy</span><span> (flow not fully toured). Sequencing guard applies: auto-webhook language is true only post-gh-1.</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>N-06 / N-07</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>DNS records editor and redirects — absent; Domains tab shows the rung checklist only.</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Correctly sequenced</span><span> — both wait on seam additions per the asks paper.</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Structural news</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">The prototype is now interactive</span> — nav, tabs, lock/unlock state flips all work. Future reviews are click-throughs, not render inspection; ask for exported renders only for the matrix.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Context-morphing sidebar</span>: entering an instance or site swaps the sidebar to that thing&#39;s sub-nav with a &quot;← Fleet / ← All sites&quot; exit. Good pattern — one obligation: <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">#instance/&lt;id&gt;</code> and <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">#site/&lt;id&gt;</code> anchors must deep-link into these contexts.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Server IPs joined the metadata line</span> (fsn1 · cx22 · 5.75.169.183 · …) — the named-box identity made concrete. Keep.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>The instance Overview tab is now the composed D-03 (golden path with &quot;checks run from Falkenstein every 5 minutes&quot;, updates card with pause/pin/rollback, sites, identity/runtime) — the outline&#39;s last big &quot;partial&quot; is effectively designed.</span></div></div><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">Ledger after round 7</div><span>Of the 61-surface outline: N-01…N-05 move to <span style=\"font-weight:bold\">Designed</span>; D-03 composes; N-06/N-07 stay queued on seams; concept trio (Forms, preview-feedback-to-tasks, analytics) still awaits the owner call on Forms. Designer throughput this cycle has been extraordinary — the constraint is now entirely on our side: gh-1 App registration, seam tasks, tokens emit, and the build epics.</span></div><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><p>Reviewed 2026-07-18 by interactive walkthrough of &quot;UI improvement discussion (7).zip&quot;. Chain: <a href=\"/papers/netlify-vercel-next-screen-asks\" style=\"color:#1e5347;text-decoration:underline\">ten-screen asks</a> · <a href=\"/papers/autodeploy-target-ui-approved\" style=\"color:#1e5347;text-decoration:underline\">auto-deploy target UI</a> · <a href=\"/papers/console-gui-build-outline\" style=\"color:#1e5347;text-decoration:underline\">build outline</a>.</p>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\">Design feedback · round 7 · N-screens</p><h1>Five of the seven asks land — and the prototype went interactive</h1><p class=\"bp-role-ingress\">Seventh package, reviewed by <span style=\"font-weight:bold\">clicking through it</span>: the v4 prototype is now a working clickable app with a context-morphing sidebar, and it delivers five of the seven screens requested in <a href=\"/papers/netlify-vercel-next-screen-asks\" style=\"color:var(--paper-accent, #1e5347)\">the Netlify/Vercel asks</a> — the logs viewer, the site-settings home, the honest cost dashboard, lock-production, and the import flow. DNS editor and redirects (N-06/N-07) are correctly absent, waiting on their seam tasks. Verdict: <span style=\"font-weight:bold\">all five approved</span>; the cost dashboard and logs footer are the two best pieces of product copy in the whole remake.</p><h2>Verified interactively, screen by screen</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Ask</span></th><th class=\"bp-table__th\"><span>What the prototype does</span></th><th class=\"bp-table__th\"><span>Assessment</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>N-03 · Usage &amp; cost</span></td><td class=\"bp-table__td\"><span>New </span><span style=\"font-weight:bold\">Usage</span><span> item in the workspace nav. &quot;Projected next invoice · 12 August — </span><span style=\"font-weight:bold\">€25.80</span><span> — Supporter €12.00 + servers €13.80 — *no usage line items, ever*.&quot; Per-instance rows (€4.90, €8.90 /mo) with site attribution; footer: &quot;Prices are the provider&#39;s own — Hetzner&#39;s live EUR catalog, Azure&#39;s retail cache. Archived instances cost €0; the archive bundle is included in your plan.&quot;</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Approved — the identity flagship, worded better than the brief.</span><span> Numbers are internally consistent. &quot;Your bill previewed, not estimated&quot; should become marketing copy.</span></td></tr><tr><td class=\"bp-table__td\"><span>N-01 · Logs viewer</span></td><td class=\"bp-table__td\"><span>Instance </span><span style=\"font-weight:bold\">Logs</span><span> tab: source chips (all / journal / caddy per site), level + HTTP-status colors, </span><code>repeated 14× today</code><span> coalescing on a 404, a </span><span style=\"font-weight:bold\">Following</span><span> live-tail toggle, and the footer: &quot;journalctl -n 200 + Caddy access log — streamed from your box on demand, </span><span style=\"font-weight:bold\">nothing stored on our side</span><span>.&quot; A site-scoped Logs tab exists too.</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Approved.</span><span> The footer states the exact real mechanism (the agent&#39;s </span><code>logs</code><span> command) AND a privacy contract — the build must keep both true: on-demand relay, no control-plane log retention.</span></td></tr><tr><td class=\"bp-table__td\"><span>N-04 · Lock production</span></td><td class=\"bp-table__td\"><span>&quot;Lock production&quot; on the Deployments card; locked state (clicked, works): amber banner &quot;Production is locked to deploy #42. Git pushes and Studio publishes are </span><span style=\"font-weight:bold\">recorded but held</span><span> — nothing builds or switches until you unlock.&quot;</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Approved.</span><span> Both loops held, target deploy named, reversal obvious. Stronger than Netlify&#39;s stop-auto-publishing, as intended.</span></td></tr><tr><td class=\"bp-table__td\"><span>N-02 · Site settings home</span></td><td class=\"bp-table__td\"><span>Site context now has its own sub-nav: Deployments · Git · Domains · Environment · </span><span style=\"font-weight:bold\">Settings</span><span> · Logs. Delete-site confirm carries the content-first contract: &quot;Removes deploys, previews and domain routing. </span><span style=\"font-weight:bold\">The dataset and all its content stay on &lt;instance&gt;</span><span>.&quot;</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Approved.</span><span> That deletion sentence is doctrine gold — a site dies, content survives, stated plainly.</span></td></tr><tr><td class=\"bp-table__td\"><span>N-05 · Import front door</span></td><td class=\"bp-table__td\"><code>newSiteMode</code><span> flow in the prototype: framework &quot;detected from astro.config.mjs&quot;, &quot;webhook registers automatically · main → production&quot;, &quot;webhook registered, first build queued.&quot;</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Approved on copy</span><span> (flow not fully toured). Sequencing guard applies: auto-webhook language is true only post-gh-1.</span></td></tr><tr><td class=\"bp-table__td\"><span>N-06 / N-07</span></td><td class=\"bp-table__td\"><span>DNS records editor and redirects — absent; Domains tab shows the rung checklist only.</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Correctly sequenced</span><span> — both wait on seam additions per the asks paper.</span></td></tr></tbody></table><h2>Structural news</h2><ul><li><span><span style=\"font-weight:bold\">The prototype is now interactive</span> — nav, tabs, lock/unlock state flips all work. Future reviews are click-throughs, not render inspection; ask for exported renders only for the matrix.</span></li><li><span><span style=\"font-weight:bold\">Context-morphing sidebar</span>: entering an instance or site swaps the sidebar to that thing&#39;s sub-nav with a &quot;← Fleet / ← All sites&quot; exit. Good pattern — one obligation: <code>#instance/&lt;id&gt;</code> and <code>#site/&lt;id&gt;</code> anchors must deep-link into these contexts.</span></li><li><span><span style=\"font-weight:bold\">Server IPs joined the metadata line</span> (fsn1 · cx22 · 5.75.169.183 · …) — the named-box identity made concrete. Keep.</span></li><li><span>The instance Overview tab is now the composed D-03 (golden path with &quot;checks run from Falkenstein every 5 minutes&quot;, updates card with pause/pin/rollback, sites, identity/runtime) — the outline&#39;s last big &quot;partial&quot; is effectively designed.</span></li></ul><div class=\"bp-callout bp-callout--info\"><strong>Ledger after round 7</strong> <span>Of the 61-surface outline: N-01…N-05 move to <span style=\"font-weight:bold\">Designed</span>; D-03 composes; N-06/N-07 stay queued on seams; concept trio (Forms, preview-feedback-to-tasks, analytics) still awaits the owner call on Forms. Designer throughput this cycle has been extraordinary — the constraint is now entirely on our side: gh-1 App registration, seam tasks, tokens emit, and the build epics.</span></div><div style=\"position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)\"><span style=\"position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem\">§</span></div><p>Reviewed 2026-07-18 by interactive walkthrough of &quot;UI improvement discussion (7).zip&quot;. Chain: <a href=\"/papers/netlify-vercel-next-screen-asks\" style=\"color:var(--paper-accent, #1e5347)\">ten-screen asks</a> · <a href=\"/papers/autodeploy-target-ui-approved\" style=\"color:var(--paper-accent, #1e5347)\">auto-deploy target UI</a> · <a href=\"/papers/console-gui-build-outline\" style=\"color:var(--paper-accent, #1e5347)\">build outline</a>.</p>",
+  "body_html_sv": 3,
+  "description": "Round-7 walkthrough of the now-interactive prototype: five of seven requested screens delivered and approved (logs viewer with privacy footer, honest cost dashboard, lock-production holding both loops, site settings home, import flow); DNS/redirects correctly queued on seam work.",
+  "main_tag": "cloud-console",
+  "preview": {
+    "description": "Round-7 walkthrough of the now-interactive prototype: five of seven requested screens delivered and approved…",
+    "extensions": {
+      "tags": [
+        "cloud-console",
+        "pricing",
+        "cloud-strategy"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/n-screens-interactive-walkthrough"
+  },
+  "rev": 1,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "Interactive walkthrough review of the console prototype's newest screens.",
+      "strength": 84,
+      "tag": "cloud-console"
+    },
+    {
+      "rationale": "The usage-and-cost dashboard with true bill preview is this round's flagship.",
+      "strength": 62,
+      "tag": "pricing"
+    },
+    {
+      "rationale": "Closes five of the Netlify/Vercel competitive screen asks.",
+      "strength": 47,
+      "tag": "cloud-strategy"
+    }
+  ],
+  "title": "Five of the seven asks land — and the prototype went interactive"
+}

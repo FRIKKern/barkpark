@@ -1,0 +1,3129 @@
+{
+  "_createdAt": "2026-07-27T11:10:38.013950Z",
+  "_draft": false,
+  "_id": "mobile-epic-human-gates-guide",
+  "_publishedId": "mobile-epic-human-gates-guide",
+  "_rev": "5c542782a642391205fac4a056e5c3e1",
+  "_type": "paper",
+  "_updatedAt": "2026-07-28T16:32:49.849114Z",
+  "blocks": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "BARKPARK TASKS · MOBILE EPIC · WHAT IS LEFT FOR A HUMAN · 2026-07-27"
+        }
+      ],
+      "id": "b1",
+      "type": "eyebrow"
+    },
+    {
+      "id": "b2",
+      "level": 1,
+      "text": "Three gates, and then the mobile epic is done",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The rendering work is finished and merged — the app draws all 70 registered PortableDoc block types, and CI now reds if that regresses. Nothing below is about rendering. What is left is three things only a person with credentials and hardware can do. This is the whole list: if it is not here, it does not need you."
+        }
+      ],
+      "id": "b4",
+      "type": "ingress"
+    },
+    {
+      "anchor": "start-here",
+      "id": "b7",
+      "level": 2,
+      "text": "Start here",
+      "type": "heading"
+    },
+    {
+      "id": "b8",
+      "items": [
+        {
+          "label": "Gates left",
+          "value": "3"
+        },
+        {
+          "denom": "3",
+          "label": "Blocking v1 ship",
+          "value": "1"
+        },
+        {
+          "denom": "hour",
+          "label": "Hands-on time, all three",
+          "value": "~1"
+        },
+        {
+          "denom": "hours",
+          "label": "Plus unattended download",
+          "value": "2-4"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Do them in this order. Gate 1 is both the cheapest and the only one blocking ship sign-off. Gate 3 is mostly an unattended OS download, so start its download early and do Gate 1 while it runs. Gate 2 has a hard ceiling — its client half needs a "
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://developer.apple.com/programs/"
+              },
+              "type": "link"
+            }
+          ],
+          "type": "text",
+          "value": "paid Apple Developer membership"
+        },
+        {
+          "type": "text",
+          "value": ", because a free Personal Team cannot sign the push entitlement. If you do not hold one, do its server half and park the rest deliberately."
+        }
+      ],
+      "id": "b9",
+      "type": "paragraph"
+    },
+    {
+      "id": "b10",
+      "items": [
+        {
+          "anchor": "gate-1",
+          "level": 1,
+          "text": "Gate 1 — second member seat"
+        },
+        {
+          "anchor": "gate-2",
+          "level": 1,
+          "text": "Gate 2 — push credentials"
+        },
+        {
+          "anchor": "gate-3",
+          "level": 1,
+          "text": "Gate 3 — device boot"
+        },
+        {
+          "anchor": "already-done",
+          "level": 1,
+          "text": "Already done for you"
+        },
+        {
+          "anchor": "optional",
+          "level": 1,
+          "text": "Optional extras"
+        }
+      ],
+      "numbered": true,
+      "type": "toc"
+    },
+    {
+      "head": [
+        "#",
+        "Gate",
+        "Hands-on",
+        "Blocks",
+        "Hard prerequisite"
+      ],
+      "id": "b11",
+      "rows": [
+        [
+          "1",
+          "Second member seat",
+          "~30 min",
+          "v1 ship sign-off",
+          "A second real email account you control"
+        ],
+        [
+          "2",
+          "Push credentials",
+          "~30 min",
+          "v1.1 push only",
+          "Apple: PAID membership for the client half"
+        ],
+        [
+          "3",
+          "Device boot",
+          "~30 min + download",
+          "Root criteria 2, 5, 7",
+          "macOS Tahoe + Xcode 26.4; iPhone for Part B"
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "anchor": "gate-1",
+      "id": "b14",
+      "level": 2,
+      "text": "Gate 1 — second real member seat",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "type": "text",
+          "value": "Why it cannot be faked. "
+        },
+        {
+          "type": "text",
+          "value": "The Cloud team has exactly one seat (frikk, owner, undemotable). This gate exists to prove the app-token exchange mints for a "
+        },
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "type": "text",
+          "value": "non-admin"
+        },
+        {
+          "type": "text",
+          "value": " seat — so a DB-inserted or fabricated user proves nothing. There is a recorded incident where a fabricated user went stale and started returning 404. Use a real second account."
+        }
+      ],
+      "id": "b15",
+      "type": "paragraph"
+    },
+    {
+      "id": "b16",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Read it from "
+                },
+                {
+                  "marks": [
+                    {
+                      "attrs": {
+                        "href": "https://barkpark.cloud"
+                      },
+                      "type": "link"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "the Cloud console"
+                },
+                {
+                  "type": "text",
+                  "value": " or from the CLI. Never hardcode it."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "bp cloud teams ls"
+            }
+          ],
+          "title": "Find the team id — do not guess it"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The response carries an "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "code"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "accept_url"
+                },
+                {
+                  "type": "text",
+                  "value": " — you need it in step 3."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Invite the second account, as the owner"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Open the "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "code"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "accept_url"
+                },
+                {
+                  "type": "text",
+                  "value": " while signed in as the invitee, not as the owner. This is the step that most often goes wrong silently — an owner-session accept produces a seat that looks right and tests nothing."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Accept in a browser signed in as the SECOND account"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The new row must read "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "code"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "role=member"
+                },
+                {
+                  "type": "text",
+                  "value": " — not admin. If it reads admin, the RBAC leg is untested and the gate is not discharged."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Verify the role actually landed as member"
+        },
+        {
+          "blocks": [
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "bp login       # complete the device-link flow as the SECOND account"
+            }
+          ],
+          "title": "Log in as that member"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Expect "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "code"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "13 ok"
+                },
+                {
+                  "type": "text",
+                  "value": ". Keep the transcript — it is the evidence."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "tooling/mobile-smoke/smoke.sh"
+            }
+          ],
+          "title": "Re-run the smoke on the member's token"
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The two calls, exactly:"
+        }
+      ],
+      "id": "b17",
+      "type": "paragraph"
+    },
+    {
+      "id": "b18",
+      "method": "POST",
+      "params": [
+        {
+          "in": "path",
+          "name": "team_id",
+          "required": true,
+          "type": "uuid"
+        },
+        {
+          "in": "body",
+          "name": "email",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "path": "/v1/teams/:team_id/invitations",
+      "type": "api-endpoint"
+    },
+    {
+      "id": "b19",
+      "method": "GET",
+      "params": [
+        {
+          "in": "path",
+          "name": "team_id",
+          "required": true,
+          "type": "uuid"
+        }
+      ],
+      "path": "/v1/teams/:team_id/members",
+      "type": "api-endpoint"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "If the smoke passes as the owner but fails as the member, that is precisely the bug this gate was built to catch. Stop and report it — do not retry with an admin token, which would turn a real finding into a green tick."
+        }
+      ],
+      "id": "b20",
+      "title": "The failure that matters",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "anchor": "gate-2",
+      "id": "b23",
+      "level": 2,
+      "text": "Gate 2 — APNs and FCM credentials",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The relay is built right up to the credential wall. Six values go into "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "/opt/barkpark-cloud/.env"
+        },
+        {
+          "type": "text",
+          "value": " on the control plane. The two platforms are "
+        },
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "type": "text",
+          "value": "independent"
+        },
+        {
+          "type": "text",
+          "value": " — Android alone is a valid, useful state, so do not block on Apple if you only have Google."
+        }
+      ],
+      "id": "b24",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "type": "text",
+          "value": "Do the Google half FIRST — it needs no Apple involvement at all. "
+        },
+        {
+          "type": "text",
+          "value": "The platforms are independent and Android alone is a valid state, so while an Apple enrolment sits in verification you can complete FCM end to end: enable FCM API V1, take the service-account JSON, land it in the .env, restart, and register the relay. That satisfies criterion 1 (credential_status true for at least one platform) AND criterion 2 (the workspace-scoped webhook row) — this gate reaches 2 of 3 with zero Apple. Nothing is redone when APNs arrives; the two platforms sit side by side in the same .env."
+        }
+      ],
+      "id": "b25",
+      "title": "If you are waiting on Apple verification",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "blocks": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "There is no \"create an organization\" button in the portal. Teams are not created — they are the RESULT of enrolling. Invitations add your Apple ID to other people's teams; they never produce a team of your own. Your existing Apple ID can hold your own membership alongside every membership you already have."
+            }
+          ],
+          "id": "b26-0",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "marks": [
+                {
+                  "type": "strong"
+                }
+              ],
+              "type": "text",
+              "value": "Choose Individual / Sole Proprietor, not Organization."
+            },
+            {
+              "type": "text",
+              "value": " Both cost $99/year and both grant the identical technical capability — App IDs, APNs keys, the push entitlement. Organization only adds a company name and member roles, and it demands a "
+            },
+            {
+              "marks": [
+                {
+                  "attrs": {
+                    "href": "https://developer.apple.com/enroll/duns-lookup/"
+                  },
+                  "type": "link"
+                }
+              ],
+              "type": "text",
+              "value": "D-U-N-S number"
+            },
+            {
+              "type": "text",
+              "value": " (days to obtain), a public functional website on your own domain, a legal entity, and authority to bind it. Individual needs none of that."
+            }
+          ],
+          "id": "b26-1",
+          "type": "paragraph"
+        },
+        {
+          "head": [
+            "Requirement",
+            "Individual / Sole Proprietor",
+            "Organization"
+          ],
+          "id": "b26-2",
+          "rows": [
+            [
+              "D-U-N-S number",
+              "No",
+              "Required"
+            ],
+            [
+              "Public website on own domain",
+              "No",
+              "Required"
+            ],
+            [
+              "Legal entity + binding authority",
+              "No",
+              "Required"
+            ],
+            [
+              "Two-factor on the Apple Account",
+              "Required",
+              "Required"
+            ],
+            [
+              "Legal name, no nicknames",
+              "Required",
+              "Required"
+            ],
+            [
+              "Physical address (P.O. box rejected)",
+              "Required",
+              "Required"
+            ],
+            [
+              "Annual cost",
+              "$99",
+              "$99"
+            ]
+          ],
+          "type": "table"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Enrol at "
+            },
+            {
+              "marks": [
+                {
+                  "attrs": {
+                    "href": "https://developer.apple.com/programs/enroll/"
+                  },
+                  "type": "link"
+                }
+              ],
+              "type": "text",
+              "value": "developer.apple.com/programs/enroll"
+            },
+            {
+              "type": "text",
+              "value": " on the web, or through the Apple Developer app on an iPhone or iPad — the app route is usually smoother because it verifies your identity using the device. Fee waivers exist for nonprofits, accredited schools and government entities."
+            }
+          ],
+          "id": "b26-3",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "marks": [
+                {
+                  "type": "strong"
+                }
+              ],
+              "type": "text",
+              "value": "The trap once you have several teams: "
+            },
+            {
+              "type": "text",
+              "value": "APNs keys and App IDs belong to ONE specific team. The App ID for "
+            },
+            {
+              "marks": [
+                {
+                  "type": "code"
+                }
+              ],
+              "type": "text",
+              "value": "cloud.barkpark.mobile"
+            },
+            {
+              "type": "text",
+              "value": " and the APNs key must live in the SAME team — yours. A key from one team paired with an App ID from another fails authentication in a way that looks like a bad device token, which sends you hunting the wrong bug. Check the team selector on the account page before creating either one."
+            }
+          ],
+          "id": "b26-4",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "If you would rather not pay: should you hold Account Holder or Admin role in an org you are already a member of, you could create the App ID and key there instead — but that ties this app's identity to someone else's organization. Not recommended for your own product."
+            }
+          ],
+          "id": "b26-5",
+          "type": "paragraph"
+        }
+      ],
+      "id": "b26",
+      "open": false,
+      "summary": "You need your OWN Apple team. Being a member of other orgs does not give you one.",
+      "type": "expandable"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Where each value comes from: the APNs key, key id and team id from "
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://developer.apple.com/account/resources/authkeys/list"
+              },
+              "type": "link"
+            }
+          ],
+          "type": "text",
+          "value": "Apple's Keys page"
+        },
+        {
+          "type": "text",
+          "value": " (create a key with the Apple Push Notifications service enabled — "
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns"
+              },
+              "type": "link"
+            }
+          ],
+          "type": "text",
+          "value": "token-based APNs docs"
+        },
+        {
+          "type": "text",
+          "value": "); the bundle id must already exist with the Push capability on "
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://developer.apple.com/account/resources/identifiers/list"
+              },
+              "type": "link"
+            }
+          ],
+          "type": "text",
+          "value": "Apple's Identifiers page"
+        },
+        {
+          "type": "text",
+          "value": "; the FCM service-account JSON from "
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk"
+              },
+              "type": "link"
+            }
+          ],
+          "type": "text",
+          "value": "Firebase → Service accounts"
+        },
+        {
+          "type": "text",
+          "value": ", with "
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://console.cloud.google.com/apis/library/fcm.googleapis.com"
+              },
+              "type": "link"
+            }
+          ],
+          "type": "text",
+          "value": "FCM API V1 enabled"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "b27",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        "Env var",
+        "What it is",
+        "The trap that makes it silently useless"
+      ],
+      "id": "b28",
+      "rows": [
+        [
+          "APNS_KEY_P8",
+          "Full .p8 PEM contents",
+          "A single-line value with literal \\n works — runtime.exs expands it"
+        ],
+        [
+          "APNS_KEY_ID",
+          "10-character key id",
+          "—"
+        ],
+        [
+          "APNS_TEAM_ID",
+          "10-character team id",
+          "—"
+        ],
+        [
+          "APNS_BUNDLE_ID",
+          "cloud.barkpark.mobile",
+          "MUST equal ios.bundleIdentifier in apps/mobile/app.json, and that App ID must have Push registered"
+        ],
+        [
+          "APNS_ENV",
+          "sandbox or production",
+          "Wrong value = every send 400s with BadDeviceToken"
+        ],
+        [
+          "FCM_SERVICE_ACCOUNT_JSON",
+          "The whole service-account file, verbatim",
+          "FCM API V1 must be enabled on the project"
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "b29",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "sudo vi /opt/barkpark-cloud/.env      # add the six values\n# then restart the control plane"
+            }
+          ],
+          "title": "Write the six values and restart"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "It must report true for at least one platform before you go further."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "# in a remote console:\nBarkparkCloud.Push.credential_status()"
+            }
+          ],
+          "title": "Probe the credential status"
+        },
+        {
+          "blocks": [],
+          "title": "Register the relay once — it is idempotent, team-admin"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The created "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "code"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "chat_blocked"
+                },
+                {
+                  "type": "text",
+                  "value": " row must have a "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "strong"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "non-nil "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "code"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "workspace_id"
+                },
+                {
+                  "type": "text",
+                  "value": ". A flat-path row gets nil and can never fire — it looks installed and is inert."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Verify the webhook row is WORKSPACE-SCOPED"
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "id": "b30",
+      "method": "POST",
+      "params": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "type": "uuid (guerrilla)"
+        }
+      ],
+      "path": "/v1/barkparks/b2b81e69-c79c-4eff-b6d7-84507d15b925/push-relay",
+      "type": "api-endpoint"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Not in this packet by construction: the client half — expo-notifications, the "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "aps-environment"
+        },
+        {
+          "type": "text",
+          "value": " entitlement, "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "google-services.json"
+        },
+        {
+          "type": "text",
+          "value": ". That needs the entitlements wave and a paid Apple membership. This is why Gate 3 can never retire Gate 2. Without a paid membership, do the server half above and record \"client half parked — no paid Apple membership\" as the blocker. That is a clean outcome, not a failure."
+        }
+      ],
+      "id": "b31",
+      "title": "The ceiling, stated plainly",
+      "tone": "neutral",
+      "type": "callout"
+    },
+    {
+      "anchor": "gate-3",
+      "id": "b34",
+      "level": 2,
+      "text": "Gate 3 — device boot",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Honest sizing: not minutes. The OS upgrade comes first — roughly 2 to 4 hours, almost all unattended download. "
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://docs.expo.dev/develop/development-builds/introduction/"
+              },
+              "type": "link"
+            }
+          ],
+          "type": "text",
+          "value": "Expo Go"
+        },
+        {
+          "type": "text",
+          "value": " cannot work here, because MMKV v4 and react-native-nitro-modules are custom native modules; a dev build is mandatory."
+        }
+      ],
+      "id": "b35",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "type": "text",
+          "value": "Part A — toolchain only. No Apple account needed, and it discharges every layout clause on the Simulator."
+        }
+      ],
+      "id": "b36",
+      "type": "paragraph"
+    },
+    {
+      "id": "b37",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "About 9.4 GiB, one restart. "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "strong"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "Do not stop at Sequoia 15.7.7"
+                },
+                {
+                  "type": "text",
+                  "value": " — it reaches only Xcode 26.0–26.3, below Expo SDK 56's floor of 26.4."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "softwareupdate --list-full-installers   # then install Tahoe 26.5.2"
+            }
+          ],
+          "title": "Install macOS Tahoe 26.5.2"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "attrs": {
+                        "href": "https://apps.apple.com/app/xcode/id497799835"
+                      },
+                      "type": "link"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "Xcode on the App Store"
+                },
+                {
+                  "type": "text",
+                  "value": " (~10–17 GiB). Launch it once so it installs components, then point Command Line Tools at Xcode — today they are CLT 16.4."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer\nxcodebuild -version"
+            }
+          ],
+          "title": "Install Xcode 26.4 or newer"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "System Ruby is 2.6.10, below "
+                },
+                {
+                  "marks": [
+                    {
+                      "attrs": {
+                        "href": "https://guides.cocoapods.org/using/getting-started.html"
+                      },
+                      "type": "link"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "CocoaPods"
+                },
+                {
+                  "type": "text",
+                  "value": "' 2.7.4 floor. Homebrew ships its own Ruby."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "brew install cocoapods"
+            }
+          ],
+          "title": "Install CocoaPods via Homebrew — not gem"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "No "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "code"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "ios/"
+                },
+                {
+                  "type": "text",
+                  "value": " directory is committed — this project is managed / "
+                },
+                {
+                  "marks": [
+                    {
+                      "attrs": {
+                        "href": "https://docs.expo.dev/workflow/prebuild/"
+                      },
+                      "type": "link"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "CNG prebuild"
+                },
+                {
+                  "type": "text",
+                  "value": "."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "pnpm install\ncd apps/mobile\nnpx expo prebuild -p ios"
+            }
+          ],
+          "title": "Prebuild the iOS project"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Needs no Apple ID. This covers the Class-B reflow sites, token geometry, the recycleItems decision, the archived shelf, the picker sheet, and blocks-in-chat with Mermaid islands."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "npx expo run:ios"
+            }
+          ],
+          "title": "Boot it on the Simulator"
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "type": "text",
+          "value": "Part B — physical iPhone, on a free Personal Team. Only if you actually have one."
+        },
+        {
+          "type": "text",
+          "value": " No iPhone has ever been paired to this Mac, so this is a question, not an assumption."
+        }
+      ],
+      "id": "b38",
+      "type": "paragraph"
+    },
+    {
+      "id": "b39",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "attrs": {
+                        "href": "https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device"
+                      },
+                      "type": "link"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "Enable Developer Mode"
+                },
+                {
+                  "type": "text",
+                  "value": " (the device restarts), then trust this Mac over USB."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Prepare the device"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Xcode → Settings → Accounts → add your Apple ID → automatic signing. The bundle id "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "code"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "cloud.barkpark.mobile"
+                },
+                {
+                  "type": "text",
+                  "value": " works as-is."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Sign with a free Apple ID"
+        },
+        {
+          "blocks": [
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "npx expo run:ios --device"
+            }
+          ],
+          "title": "Run on hardware"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "type": "strong"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "Free Personal Team profiles expire after 7 days."
+                },
+                {
+                  "type": "text",
+                  "value": " Record: haptics feel across the registry including the needsYou warning; transcript scroll and fps plus follow mode; swipe-to-archive; and cascade auto-select with MRU across a relaunch."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "type": "strong"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "Before any MRU evidence counts"
+                },
+                {
+                  "type": "text",
+                  "value": ", assert that MMKV is the live backing store and not the silent in-memory fallback — otherwise the MRU proof is vacuous."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Capture everything in ONE sitting"
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "blocks": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Record \"no iPhone exists\" as an explicit ruling on the task. The Simulator dispositions from Part A then become the discharge surface — the task's own criterion allows exactly this — and I will re-scope the affected root criteria. Push stays out either way: a free Personal Team cannot sign the push entitlement."
+            }
+          ],
+          "id": "b40-0",
+          "type": "paragraph"
+        }
+      ],
+      "id": "b40",
+      "open": false,
+      "summary": "If there is no iPhone — what to do instead",
+      "type": "expandable"
+    },
+    {
+      "anchor": "already-done-for-you",
+      "id": "b43",
+      "level": 2,
+      "text": "Already done for you",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Two things that used to sit in Gate 3 are already discharged, so do not spend time on them. Tonight's crown slice built an 83.8 MB release APK and drove the Android emulator end to end: it paged 80 screens of a paper containing every block type, found "
+        },
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "type": "text",
+          "value": "zero unknown blocks"
+        },
+        {
+          "type": "text",
+          "value": ", and kept six screenshots as artifacts. Under charter D55 that discharges the Android-emulator render-fidelity clauses — the emulator half of the Mermaid ring-3 check and the blocks-in-chat visual eyeball."
+        }
+      ],
+      "id": "b44",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "An earlier version of the Gate 3 packet claimed this Mac has no Android SDK or Java. That was false — openjdk 17 and the Android command-line tools are installed and built this app twice. The packet now keeps only genuinely iOS and physical-hardware items."
+        }
+      ],
+      "id": "b45",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "It also removed a blocker you would have hit in Part A: the release APK built with no "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "NODE_PATH"
+        },
+        {
+          "type": "text",
+          "value": " workaround, because "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "babel-preset-expo"
+        },
+        {
+          "type": "text",
+          "value": " is now declared properly."
+        }
+      ],
+      "id": "b46",
+      "type": "paragraph"
+    },
+    {
+      "anchor": "optional-extras",
+      "id": "b49",
+      "level": 2,
+      "text": "Optional extras",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Neither blocks anything. The first is yours because it is outward-facing and I would not do it while you were away."
+        }
+      ],
+      "id": "b50",
+      "type": "paragraph"
+    },
+    {
+      "id": "b51",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Both are fully merged and byte-verified. I left them because these were "
+                },
+                {
+                  "marks": [
+                    {
+                      "type": "strong"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "squash"
+                },
+                {
+                  "type": "text",
+                  "value": " merges, so their individual commits exist only on those refs — deleting discards that granular history, and a remote ref delete is not recoverable from my side."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "git push origin --delete crown-seal-zero-unknown crown-seal-derive-polish"
+            }
+          ],
+          "title": "Prune two merged remote branches"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "type": "code"
+                    }
+                  ],
+                  "type": "text",
+                  "value": "task-79551ef7cdadfa21"
+                },
+                {
+                  "type": "text",
+                  "value": " — the chat degrade set is hand-maintained, so a future third degrade card would silently lose a turn's full markdown instead of failing a test. The fix is to derive the set from a marker on the renderers."
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "language": "bash",
+              "type": "code",
+              "value": "bp task get task-79551ef7cdadfa21"
+            }
+          ],
+          "title": "Pull the highest-value residual"
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Leave alone in this checkout: three commits authored by \"survey\" sitting unpushed on local main, and an uncommitted "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "architect_model"
+        },
+        {
+          "type": "text",
+          "value": " edit in "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": ".claude/workflows/bp-epic-cycle.workflow.js"
+        },
+        {
+          "type": "text",
+          "value": ". Both belong to a concurrent session. The second is restored byte-for-byte after I destroyed it with "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "git checkout --"
+        },
+        {
+          "type": "text",
+          "value": " and recovered it from that session's transcript — but it is not mine to commit."
+        }
+      ],
+      "id": "b52",
+      "title": "Do not touch",
+      "tone": "danger",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Close each gate on its own task as you finish it — "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "mob-hg-member-seat"
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "mob-hg-push-creds"
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "mob-hg-device-boot"
+        },
+        {
+          "type": "text",
+          "value": " — attaching the transcript or the recorded ruling as evidence. The epic GOAL closes last, in the same act as the epic root, per charter D35. If a gate turns out blocked rather than done, record the concrete blocker: a named blocker is a valid outcome, silence is not."
+        }
+      ],
+      "id": "b54",
+      "title": "How to finish",
+      "tone": "success",
+      "type": "callout"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "BARKPARK TASKS · MOBILE EPIC · WHAT IS LEFT FOR A HUMAN · 2026-07-27"
+          }
+        ],
+        "id": "b1",
+        "type": "eyebrow"
+      },
+      {
+        "id": "b2",
+        "level": 1,
+        "text": "Three gates, and then the mobile epic is done",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The rendering work is finished and merged — the app draws all 70 registered PortableDoc block types, and CI now reds if that regresses. Nothing below is about rendering. What is left is three things only a person with credentials and hardware can do. This is the whole list: if it is not here, it does not need you."
+          }
+        ],
+        "id": "b4",
+        "type": "ingress"
+      },
+      {
+        "anchor": "start-here",
+        "id": "b7",
+        "level": 2,
+        "text": "Start here",
+        "type": "heading"
+      },
+      {
+        "id": "b8",
+        "items": [
+          {
+            "label": "Gates left",
+            "value": "3"
+          },
+          {
+            "denom": "3",
+            "label": "Blocking v1 ship",
+            "value": "1"
+          },
+          {
+            "denom": "hour",
+            "label": "Hands-on time, all three",
+            "value": "~1"
+          },
+          {
+            "denom": "hours",
+            "label": "Plus unattended download",
+            "value": "2-4"
+          }
+        ],
+        "type": "stats"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Do them in this order. Gate 1 is both the cheapest and the only one blocking ship sign-off. Gate 3 is mostly an unattended OS download, so start its download early and do Gate 1 while it runs. Gate 2 has a hard ceiling — its client half needs a "
+          },
+          {
+            "marks": [
+              {
+                "attrs": {
+                  "href": "https://developer.apple.com/programs/"
+                },
+                "type": "link"
+              }
+            ],
+            "type": "text",
+            "value": "paid Apple Developer membership"
+          },
+          {
+            "type": "text",
+            "value": ", because a free Personal Team cannot sign the push entitlement. If you do not hold one, do its server half and park the rest deliberately."
+          }
+        ],
+        "id": "b9",
+        "type": "paragraph"
+      },
+      {
+        "id": "b10",
+        "items": [
+          {
+            "anchor": "gate-1",
+            "level": 1,
+            "text": "Gate 1 — second member seat"
+          },
+          {
+            "anchor": "gate-2",
+            "level": 1,
+            "text": "Gate 2 — push credentials"
+          },
+          {
+            "anchor": "gate-3",
+            "level": 1,
+            "text": "Gate 3 — device boot"
+          },
+          {
+            "anchor": "already-done",
+            "level": 1,
+            "text": "Already done for you"
+          },
+          {
+            "anchor": "optional",
+            "level": 1,
+            "text": "Optional extras"
+          }
+        ],
+        "numbered": true,
+        "type": "toc"
+      },
+      {
+        "head": [
+          "#",
+          "Gate",
+          "Hands-on",
+          "Blocks",
+          "Hard prerequisite"
+        ],
+        "id": "b11",
+        "rows": [
+          [
+            "1",
+            "Second member seat",
+            "~30 min",
+            "v1 ship sign-off",
+            "A second real email account you control"
+          ],
+          [
+            "2",
+            "Push credentials",
+            "~30 min",
+            "v1.1 push only",
+            "Apple: PAID membership for the client half"
+          ],
+          [
+            "3",
+            "Device boot",
+            "~30 min + download",
+            "Root criteria 2, 5, 7",
+            "macOS Tahoe + Xcode 26.4; iPhone for Part B"
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "anchor": "gate-1",
+        "id": "b14",
+        "level": 2,
+        "text": "Gate 1 — second real member seat",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "marks": [
+              {
+                "type": "strong"
+              }
+            ],
+            "type": "text",
+            "value": "Why it cannot be faked. "
+          },
+          {
+            "type": "text",
+            "value": "The Cloud team has exactly one seat (frikk, owner, undemotable). This gate exists to prove the app-token exchange mints for a "
+          },
+          {
+            "marks": [
+              {
+                "type": "strong"
+              }
+            ],
+            "type": "text",
+            "value": "non-admin"
+          },
+          {
+            "type": "text",
+            "value": " seat — so a DB-inserted or fabricated user proves nothing. There is a recorded incident where a fabricated user went stale and started returning 404. Use a real second account."
+          }
+        ],
+        "id": "b15",
+        "type": "paragraph"
+      },
+      {
+        "id": "b16",
+        "steps": [
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Read it from "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "attrs": {
+                          "href": "https://barkpark.cloud"
+                        },
+                        "type": "link"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "the Cloud console"
+                  },
+                  {
+                    "type": "text",
+                    "value": " or from the CLI. Never hardcode it."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "bp cloud teams ls"
+              }
+            ],
+            "title": "Find the team id — do not guess it"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "The response carries an "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "code"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "accept_url"
+                  },
+                  {
+                    "type": "text",
+                    "value": " — you need it in step 3."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Invite the second account, as the owner"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Open the "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "code"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "accept_url"
+                  },
+                  {
+                    "type": "text",
+                    "value": " while signed in as the invitee, not as the owner. This is the step that most often goes wrong silently — an owner-session accept produces a seat that looks right and tests nothing."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Accept in a browser signed in as the SECOND account"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "The new row must read "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "code"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "role=member"
+                  },
+                  {
+                    "type": "text",
+                    "value": " — not admin. If it reads admin, the RBAC leg is untested and the gate is not discharged."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Verify the role actually landed as member"
+          },
+          {
+            "blocks": [
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "bp login       # complete the device-link flow as the SECOND account"
+              }
+            ],
+            "title": "Log in as that member"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Expect "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "code"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "13 ok"
+                  },
+                  {
+                    "type": "text",
+                    "value": ". Keep the transcript — it is the evidence."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "tooling/mobile-smoke/smoke.sh"
+              }
+            ],
+            "title": "Re-run the smoke on the member's token"
+          }
+        ],
+        "type": "steps"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The two calls, exactly:"
+          }
+        ],
+        "id": "b17",
+        "type": "paragraph"
+      },
+      {
+        "id": "b18",
+        "method": "POST",
+        "params": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "type": "uuid"
+          },
+          {
+            "in": "body",
+            "name": "email",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "path": "/v1/teams/:team_id/invitations",
+        "type": "api-endpoint"
+      },
+      {
+        "id": "b19",
+        "method": "GET",
+        "params": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "type": "uuid"
+          }
+        ],
+        "path": "/v1/teams/:team_id/members",
+        "type": "api-endpoint"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "If the smoke passes as the owner but fails as the member, that is precisely the bug this gate was built to catch. Stop and report it — do not retry with an admin token, which would turn a real finding into a green tick."
+          }
+        ],
+        "id": "b20",
+        "title": "The failure that matters",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "anchor": "gate-2",
+        "id": "b23",
+        "level": 2,
+        "text": "Gate 2 — APNs and FCM credentials",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The relay is built right up to the credential wall. Six values go into "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": "/opt/barkpark-cloud/.env"
+          },
+          {
+            "type": "text",
+            "value": " on the control plane. The two platforms are "
+          },
+          {
+            "marks": [
+              {
+                "type": "strong"
+              }
+            ],
+            "type": "text",
+            "value": "independent"
+          },
+          {
+            "type": "text",
+            "value": " — Android alone is a valid, useful state, so do not block on Apple if you only have Google."
+          }
+        ],
+        "id": "b24",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "marks": [
+              {
+                "type": "strong"
+              }
+            ],
+            "type": "text",
+            "value": "Do the Google half FIRST — it needs no Apple involvement at all. "
+          },
+          {
+            "type": "text",
+            "value": "The platforms are independent and Android alone is a valid state, so while an Apple enrolment sits in verification you can complete FCM end to end: enable FCM API V1, take the service-account JSON, land it in the .env, restart, and register the relay. That satisfies criterion 1 (credential_status true for at least one platform) AND criterion 2 (the workspace-scoped webhook row) — this gate reaches 2 of 3 with zero Apple. Nothing is redone when APNs arrives; the two platforms sit side by side in the same .env."
+          }
+        ],
+        "id": "b25",
+        "title": "If you are waiting on Apple verification",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "There is no \"create an organization\" button in the portal. Teams are not created — they are the RESULT of enrolling. Invitations add your Apple ID to other people's teams; they never produce a team of your own. Your existing Apple ID can hold your own membership alongside every membership you already have."
+              }
+            ],
+            "id": "b26-0",
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "marks": [
+                  {
+                    "type": "strong"
+                  }
+                ],
+                "type": "text",
+                "value": "Choose Individual / Sole Proprietor, not Organization."
+              },
+              {
+                "type": "text",
+                "value": " Both cost $99/year and both grant the identical technical capability — App IDs, APNs keys, the push entitlement. Organization only adds a company name and member roles, and it demands a "
+              },
+              {
+                "marks": [
+                  {
+                    "attrs": {
+                      "href": "https://developer.apple.com/enroll/duns-lookup/"
+                    },
+                    "type": "link"
+                  }
+                ],
+                "type": "text",
+                "value": "D-U-N-S number"
+              },
+              {
+                "type": "text",
+                "value": " (days to obtain), a public functional website on your own domain, a legal entity, and authority to bind it. Individual needs none of that."
+              }
+            ],
+            "id": "b26-1",
+            "type": "paragraph"
+          },
+          {
+            "head": [
+              "Requirement",
+              "Individual / Sole Proprietor",
+              "Organization"
+            ],
+            "id": "b26-2",
+            "rows": [
+              [
+                "D-U-N-S number",
+                "No",
+                "Required"
+              ],
+              [
+                "Public website on own domain",
+                "No",
+                "Required"
+              ],
+              [
+                "Legal entity + binding authority",
+                "No",
+                "Required"
+              ],
+              [
+                "Two-factor on the Apple Account",
+                "Required",
+                "Required"
+              ],
+              [
+                "Legal name, no nicknames",
+                "Required",
+                "Required"
+              ],
+              [
+                "Physical address (P.O. box rejected)",
+                "Required",
+                "Required"
+              ],
+              [
+                "Annual cost",
+                "$99",
+                "$99"
+              ]
+            ],
+            "type": "table"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Enrol at "
+              },
+              {
+                "marks": [
+                  {
+                    "attrs": {
+                      "href": "https://developer.apple.com/programs/enroll/"
+                    },
+                    "type": "link"
+                  }
+                ],
+                "type": "text",
+                "value": "developer.apple.com/programs/enroll"
+              },
+              {
+                "type": "text",
+                "value": " on the web, or through the Apple Developer app on an iPhone or iPad — the app route is usually smoother because it verifies your identity using the device. Fee waivers exist for nonprofits, accredited schools and government entities."
+              }
+            ],
+            "id": "b26-3",
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "marks": [
+                  {
+                    "type": "strong"
+                  }
+                ],
+                "type": "text",
+                "value": "The trap once you have several teams: "
+              },
+              {
+                "type": "text",
+                "value": "APNs keys and App IDs belong to ONE specific team. The App ID for "
+              },
+              {
+                "marks": [
+                  {
+                    "type": "code"
+                  }
+                ],
+                "type": "text",
+                "value": "cloud.barkpark.mobile"
+              },
+              {
+                "type": "text",
+                "value": " and the APNs key must live in the SAME team — yours. A key from one team paired with an App ID from another fails authentication in a way that looks like a bad device token, which sends you hunting the wrong bug. Check the team selector on the account page before creating either one."
+              }
+            ],
+            "id": "b26-4",
+            "type": "paragraph"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "If you would rather not pay: should you hold Account Holder or Admin role in an org you are already a member of, you could create the App ID and key there instead — but that ties this app's identity to someone else's organization. Not recommended for your own product."
+              }
+            ],
+            "id": "b26-5",
+            "type": "paragraph"
+          }
+        ],
+        "id": "b26",
+        "open": false,
+        "summary": "You need your OWN Apple team. Being a member of other orgs does not give you one.",
+        "type": "expandable"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Where each value comes from: the APNs key, key id and team id from "
+          },
+          {
+            "marks": [
+              {
+                "attrs": {
+                  "href": "https://developer.apple.com/account/resources/authkeys/list"
+                },
+                "type": "link"
+              }
+            ],
+            "type": "text",
+            "value": "Apple's Keys page"
+          },
+          {
+            "type": "text",
+            "value": " (create a key with the Apple Push Notifications service enabled — "
+          },
+          {
+            "marks": [
+              {
+                "attrs": {
+                  "href": "https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns"
+                },
+                "type": "link"
+              }
+            ],
+            "type": "text",
+            "value": "token-based APNs docs"
+          },
+          {
+            "type": "text",
+            "value": "); the bundle id must already exist with the Push capability on "
+          },
+          {
+            "marks": [
+              {
+                "attrs": {
+                  "href": "https://developer.apple.com/account/resources/identifiers/list"
+                },
+                "type": "link"
+              }
+            ],
+            "type": "text",
+            "value": "Apple's Identifiers page"
+          },
+          {
+            "type": "text",
+            "value": "; the FCM service-account JSON from "
+          },
+          {
+            "marks": [
+              {
+                "attrs": {
+                  "href": "https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk"
+                },
+                "type": "link"
+              }
+            ],
+            "type": "text",
+            "value": "Firebase → Service accounts"
+          },
+          {
+            "type": "text",
+            "value": ", with "
+          },
+          {
+            "marks": [
+              {
+                "attrs": {
+                  "href": "https://console.cloud.google.com/apis/library/fcm.googleapis.com"
+                },
+                "type": "link"
+              }
+            ],
+            "type": "text",
+            "value": "FCM API V1 enabled"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "id": "b27",
+        "type": "paragraph"
+      },
+      {
+        "head": [
+          "Env var",
+          "What it is",
+          "The trap that makes it silently useless"
+        ],
+        "id": "b28",
+        "rows": [
+          [
+            "APNS_KEY_P8",
+            "Full .p8 PEM contents",
+            "A single-line value with literal \\n works — runtime.exs expands it"
+          ],
+          [
+            "APNS_KEY_ID",
+            "10-character key id",
+            "—"
+          ],
+          [
+            "APNS_TEAM_ID",
+            "10-character team id",
+            "—"
+          ],
+          [
+            "APNS_BUNDLE_ID",
+            "cloud.barkpark.mobile",
+            "MUST equal ios.bundleIdentifier in apps/mobile/app.json, and that App ID must have Push registered"
+          ],
+          [
+            "APNS_ENV",
+            "sandbox or production",
+            "Wrong value = every send 400s with BadDeviceToken"
+          ],
+          [
+            "FCM_SERVICE_ACCOUNT_JSON",
+            "The whole service-account file, verbatim",
+            "FCM API V1 must be enabled on the project"
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "b29",
+        "steps": [
+          {
+            "blocks": [
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "sudo vi /opt/barkpark-cloud/.env      # add the six values\n# then restart the control plane"
+              }
+            ],
+            "title": "Write the six values and restart"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "It must report true for at least one platform before you go further."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "# in a remote console:\nBarkparkCloud.Push.credential_status()"
+              }
+            ],
+            "title": "Probe the credential status"
+          },
+          {
+            "blocks": [],
+            "title": "Register the relay once — it is idempotent, team-admin"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "The created "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "code"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "chat_blocked"
+                  },
+                  {
+                    "type": "text",
+                    "value": " row must have a "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "strong"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "non-nil "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "code"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "workspace_id"
+                  },
+                  {
+                    "type": "text",
+                    "value": ". A flat-path row gets nil and can never fire — it looks installed and is inert."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Verify the webhook row is WORKSPACE-SCOPED"
+          }
+        ],
+        "type": "steps"
+      },
+      {
+        "id": "b30",
+        "method": "POST",
+        "params": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "type": "uuid (guerrilla)"
+          }
+        ],
+        "path": "/v1/barkparks/b2b81e69-c79c-4eff-b6d7-84507d15b925/push-relay",
+        "type": "api-endpoint"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Not in this packet by construction: the client half — expo-notifications, the "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": "aps-environment"
+          },
+          {
+            "type": "text",
+            "value": " entitlement, "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": "google-services.json"
+          },
+          {
+            "type": "text",
+            "value": ". That needs the entitlements wave and a paid Apple membership. This is why Gate 3 can never retire Gate 2. Without a paid membership, do the server half above and record \"client half parked — no paid Apple membership\" as the blocker. That is a clean outcome, not a failure."
+          }
+        ],
+        "id": "b31",
+        "title": "The ceiling, stated plainly",
+        "tone": "neutral",
+        "type": "callout"
+      },
+      {
+        "anchor": "gate-3",
+        "id": "b34",
+        "level": 2,
+        "text": "Gate 3 — device boot",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Honest sizing: not minutes. The OS upgrade comes first — roughly 2 to 4 hours, almost all unattended download. "
+          },
+          {
+            "marks": [
+              {
+                "attrs": {
+                  "href": "https://docs.expo.dev/develop/development-builds/introduction/"
+                },
+                "type": "link"
+              }
+            ],
+            "type": "text",
+            "value": "Expo Go"
+          },
+          {
+            "type": "text",
+            "value": " cannot work here, because MMKV v4 and react-native-nitro-modules are custom native modules; a dev build is mandatory."
+          }
+        ],
+        "id": "b35",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "marks": [
+              {
+                "type": "strong"
+              }
+            ],
+            "type": "text",
+            "value": "Part A — toolchain only. No Apple account needed, and it discharges every layout clause on the Simulator."
+          }
+        ],
+        "id": "b36",
+        "type": "paragraph"
+      },
+      {
+        "id": "b37",
+        "steps": [
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "About 9.4 GiB, one restart. "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "strong"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "Do not stop at Sequoia 15.7.7"
+                  },
+                  {
+                    "type": "text",
+                    "value": " — it reaches only Xcode 26.0–26.3, below Expo SDK 56's floor of 26.4."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "softwareupdate --list-full-installers   # then install Tahoe 26.5.2"
+              }
+            ],
+            "title": "Install macOS Tahoe 26.5.2"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "marks": [
+                      {
+                        "attrs": {
+                          "href": "https://apps.apple.com/app/xcode/id497799835"
+                        },
+                        "type": "link"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "Xcode on the App Store"
+                  },
+                  {
+                    "type": "text",
+                    "value": " (~10–17 GiB). Launch it once so it installs components, then point Command Line Tools at Xcode — today they are CLT 16.4."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer\nxcodebuild -version"
+              }
+            ],
+            "title": "Install Xcode 26.4 or newer"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "System Ruby is 2.6.10, below "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "attrs": {
+                          "href": "https://guides.cocoapods.org/using/getting-started.html"
+                        },
+                        "type": "link"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "CocoaPods"
+                  },
+                  {
+                    "type": "text",
+                    "value": "' 2.7.4 floor. Homebrew ships its own Ruby."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "brew install cocoapods"
+              }
+            ],
+            "title": "Install CocoaPods via Homebrew — not gem"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "No "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "code"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "ios/"
+                  },
+                  {
+                    "type": "text",
+                    "value": " directory is committed — this project is managed / "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "attrs": {
+                          "href": "https://docs.expo.dev/workflow/prebuild/"
+                        },
+                        "type": "link"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "CNG prebuild"
+                  },
+                  {
+                    "type": "text",
+                    "value": "."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "pnpm install\ncd apps/mobile\nnpx expo prebuild -p ios"
+              }
+            ],
+            "title": "Prebuild the iOS project"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Needs no Apple ID. This covers the Class-B reflow sites, token geometry, the recycleItems decision, the archived shelf, the picker sheet, and blocks-in-chat with Mermaid islands."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "npx expo run:ios"
+              }
+            ],
+            "title": "Boot it on the Simulator"
+          }
+        ],
+        "type": "steps"
+      },
+      {
+        "content": [
+          {
+            "marks": [
+              {
+                "type": "strong"
+              }
+            ],
+            "type": "text",
+            "value": "Part B — physical iPhone, on a free Personal Team. Only if you actually have one."
+          },
+          {
+            "type": "text",
+            "value": " No iPhone has ever been paired to this Mac, so this is a question, not an assumption."
+          }
+        ],
+        "id": "b38",
+        "type": "paragraph"
+      },
+      {
+        "id": "b39",
+        "steps": [
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "marks": [
+                      {
+                        "attrs": {
+                          "href": "https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device"
+                        },
+                        "type": "link"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "Enable Developer Mode"
+                  },
+                  {
+                    "type": "text",
+                    "value": " (the device restarts), then trust this Mac over USB."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Prepare the device"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Xcode → Settings → Accounts → add your Apple ID → automatic signing. The bundle id "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "code"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "cloud.barkpark.mobile"
+                  },
+                  {
+                    "type": "text",
+                    "value": " works as-is."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Sign with a free Apple ID"
+          },
+          {
+            "blocks": [
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "npx expo run:ios --device"
+              }
+            ],
+            "title": "Run on hardware"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "marks": [
+                      {
+                        "type": "strong"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "Free Personal Team profiles expire after 7 days."
+                  },
+                  {
+                    "type": "text",
+                    "value": " Record: haptics feel across the registry including the needsYou warning; transcript scroll and fps plus follow mode; swipe-to-archive; and cascade auto-select with MRU across a relaunch."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "content": [
+                  {
+                    "marks": [
+                      {
+                        "type": "strong"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "Before any MRU evidence counts"
+                  },
+                  {
+                    "type": "text",
+                    "value": ", assert that MMKV is the live backing store and not the silent in-memory fallback — otherwise the MRU proof is vacuous."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": "Capture everything in ONE sitting"
+          }
+        ],
+        "type": "steps"
+      },
+      {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Record \"no iPhone exists\" as an explicit ruling on the task. The Simulator dispositions from Part A then become the discharge surface — the task's own criterion allows exactly this — and I will re-scope the affected root criteria. Push stays out either way: a free Personal Team cannot sign the push entitlement."
+              }
+            ],
+            "id": "b40-0",
+            "type": "paragraph"
+          }
+        ],
+        "id": "b40",
+        "open": false,
+        "summary": "If there is no iPhone — what to do instead",
+        "type": "expandable"
+      },
+      {
+        "anchor": "already-done-for-you",
+        "id": "b43",
+        "level": 2,
+        "text": "Already done for you",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Two things that used to sit in Gate 3 are already discharged, so do not spend time on them. Tonight's crown slice built an 83.8 MB release APK and drove the Android emulator end to end: it paged 80 screens of a paper containing every block type, found "
+          },
+          {
+            "marks": [
+              {
+                "type": "strong"
+              }
+            ],
+            "type": "text",
+            "value": "zero unknown blocks"
+          },
+          {
+            "type": "text",
+            "value": ", and kept six screenshots as artifacts. Under charter D55 that discharges the Android-emulator render-fidelity clauses — the emulator half of the Mermaid ring-3 check and the blocks-in-chat visual eyeball."
+          }
+        ],
+        "id": "b44",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "An earlier version of the Gate 3 packet claimed this Mac has no Android SDK or Java. That was false — openjdk 17 and the Android command-line tools are installed and built this app twice. The packet now keeps only genuinely iOS and physical-hardware items."
+          }
+        ],
+        "id": "b45",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "It also removed a blocker you would have hit in Part A: the release APK built with no "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": "NODE_PATH"
+          },
+          {
+            "type": "text",
+            "value": " workaround, because "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": "babel-preset-expo"
+          },
+          {
+            "type": "text",
+            "value": " is now declared properly."
+          }
+        ],
+        "id": "b46",
+        "type": "paragraph"
+      },
+      {
+        "anchor": "optional-extras",
+        "id": "b49",
+        "level": 2,
+        "text": "Optional extras",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Neither blocks anything. The first is yours because it is outward-facing and I would not do it while you were away."
+          }
+        ],
+        "id": "b50",
+        "type": "paragraph"
+      },
+      {
+        "id": "b51",
+        "steps": [
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Both are fully merged and byte-verified. I left them because these were "
+                  },
+                  {
+                    "marks": [
+                      {
+                        "type": "strong"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "squash"
+                  },
+                  {
+                    "type": "text",
+                    "value": " merges, so their individual commits exist only on those refs — deleting discards that granular history, and a remote ref delete is not recoverable from my side."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "git push origin --delete crown-seal-zero-unknown crown-seal-derive-polish"
+              }
+            ],
+            "title": "Prune two merged remote branches"
+          },
+          {
+            "blocks": [
+              {
+                "content": [
+                  {
+                    "marks": [
+                      {
+                        "type": "code"
+                      }
+                    ],
+                    "type": "text",
+                    "value": "task-79551ef7cdadfa21"
+                  },
+                  {
+                    "type": "text",
+                    "value": " — the chat degrade set is hand-maintained, so a future third degrade card would silently lose a turn's full markdown instead of failing a test. The fix is to derive the set from a marker on the renderers."
+                  }
+                ],
+                "type": "paragraph"
+              },
+              {
+                "language": "bash",
+                "type": "code",
+                "value": "bp task get task-79551ef7cdadfa21"
+              }
+            ],
+            "title": "Pull the highest-value residual"
+          }
+        ],
+        "type": "steps"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Leave alone in this checkout: three commits authored by \"survey\" sitting unpushed on local main, and an uncommitted "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": "architect_model"
+          },
+          {
+            "type": "text",
+            "value": " edit in "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": ".claude/workflows/bp-epic-cycle.workflow.js"
+          },
+          {
+            "type": "text",
+            "value": ". Both belong to a concurrent session. The second is restored byte-for-byte after I destroyed it with "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": "git checkout --"
+          },
+          {
+            "type": "text",
+            "value": " and recovered it from that session's transcript — but it is not mine to commit."
+          }
+        ],
+        "id": "b52",
+        "title": "Do not touch",
+        "tone": "danger",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Close each gate on its own task as you finish it — "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": "mob-hg-member-seat"
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": "mob-hg-push-creds"
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "type": "text",
+            "value": "mob-hg-device-boot"
+          },
+          {
+            "type": "text",
+            "value": " — attaching the transcript or the recorded ruling as evidence. The epic GOAL closes last, in the same act as the epic root, per charter D35. If a gate turns out blocked rather than done, record the concrete blocker: a named blocker is a valid outcome, silence is not."
+          }
+        ],
+        "id": "b54",
+        "title": "How to finish",
+        "tone": "success",
+        "type": "callout"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\"></p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Three gates, and then the mobile epic is done</h1><p style=\"margin:0 0 10px;line-height:1.55;font-size:18px\">The rendering work is finished and merged — the app draws all 70 registered PortableDoc block types, and CI now reds if that regresses. Nothing below is about rendering. What is left is three things only a person with credentials and hardware can do. This is the whole list: if it is not here, it does not need you.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Start here</h2><div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">3</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Gates left</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">1</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Blocking v1 ship</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">~1</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Hands-on time, all three</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">2-4</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Plus unattended download</div></div></div><p>Do them in this order. Gate 1 is both the cheapest and the only one blocking ship sign-off. Gate 3 is mostly an unattended OS download, so start its download early and do Gate 1 while it runs. Gate 2 has a hard ceiling — its client half needs a <a href=\"https://developer.apple.com/programs/\" style=\"color:#1e5347;text-decoration:underline\">paid Apple Developer membership</a>, because a free Personal Team cannot sign the push entitlement. If you do not hold one, do its server half and park the rest deliberately.</p><nav class=\"bp-toc\"><ol class=\"bp-toc__list\"><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#gate-1\">1. Gate 1 — second member seat</a></li><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#gate-2\">2. Gate 2 — push credentials</a></li><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#gate-3\">3. Gate 3 — device boot</a></li><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#already-done\">4. Already done for you</a></li><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#optional\">5. Optional extras</a></li></ol></nav><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>#</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Gate</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Hands-on</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Blocks</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Hard prerequisite</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>1</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Second member seat</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>~30 min</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>v1 ship sign-off</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>A second real email account you control</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>2</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Push credentials</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>~30 min</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>v1.1 push only</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Apple: PAID membership for the client half</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>3</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Device boot</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>~30 min + download</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Root criteria 2, 5, 7</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>macOS Tahoe + Xcode 26.4; iPhone for Part B</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Gate 1 — second real member seat</h2><p><span style=\"font-weight:bold\">Why it cannot be faked. </span>The Cloud team has exactly one seat (frikk, owner, undemotable). This gate exists to prove the app-token exchange mints for a <span style=\"font-weight:bold\">non-admin</span> seat — so a DB-inserted or fabricated user proves nothing. There is a recorded incident where a fabricated user went stale and started returning 404. Use a real second account.</p><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Find the team id — do not guess it</div><div class=\"bp-steps__body\"><p>Read it from <a href=\"https://barkpark.cloud\" style=\"color:#1e5347;text-decoration:underline\">the Cloud console</a> or from the CLI. Never hardcode it.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bp cloud teams ls</code></span></div></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Invite the second account, as the owner</div><div class=\"bp-steps__body\"><p>The response carries an <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">accept_url</code> — you need it in step 3.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Accept in a browser signed in as the SECOND account</div><div class=\"bp-steps__body\"><p>Open the <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">accept_url</code> while signed in as the invitee, not as the owner. This is the step that most often goes wrong silently — an owner-session accept produces a seat that looks right and tests nothing.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Verify the role actually landed as member</div><div class=\"bp-steps__body\"><p>The new row must read <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">role=member</code> — not admin. If it reads admin, the RBAC leg is untested and the gate is not discharged.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Log in as that member</div><div class=\"bp-steps__body\"><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bp login       # complete the device-link flow as the SECOND account</code></span></div></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Re-run the smoke on the member&#39;s token</div><div class=\"bp-steps__body\"><p>Expect <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">13 ok</code>. Keep the transcript — it is the evidence.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">tooling/mobile-smoke/smoke.sh</code></span></div></div></li></ol><p>The two calls, exactly:</p><div class=\"bp-api-endpoint\"><div class=\"bp-api-endpoint__head\"><span class=\"bp-api-endpoint__method bp-api-endpoint__method--post\">POST</span><code class=\"bp-api-endpoint__path\">/v1/teams/:team_id/invitations</code></div><table class=\"bp-api-endpoint__params\"><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr></thead><tbody><tr><td>team_id</td><td>path</td><td>uuid</td><td>Yes</td></tr><tr><td>email</td><td>body</td><td>string</td><td>Yes</td></tr></tbody></table></div><div class=\"bp-api-endpoint\"><div class=\"bp-api-endpoint__head\"><span class=\"bp-api-endpoint__method bp-api-endpoint__method--get\">GET</span><code class=\"bp-api-endpoint__path\">/v1/teams/:team_id/members</code></div><table class=\"bp-api-endpoint__params\"><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr></thead><tbody><tr><td>team_id</td><td>path</td><td>uuid</td><td>Yes</td></tr></tbody></table></div><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#8a6420;font-weight:600;margin:0 0 6px\">The failure that matters</div><span>If the smoke passes as the owner but fails as the member, that is precisely the bug this gate was built to catch. Stop and report it — do not retry with an admin token, which would turn a real finding into a green tick.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Gate 2 — APNs and FCM credentials</h2><p>The relay is built right up to the credential wall. Six values go into <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">/opt/barkpark-cloud/.env</code> on the control plane. The two platforms are <span style=\"font-weight:bold\">independent</span> — Android alone is a valid, useful state, so do not block on Apple if you only have Google.</p><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">If you are waiting on Apple verification</div><span><span style=\"font-weight:bold\">Do the Google half FIRST — it needs no Apple involvement at all. </span>The platforms are independent and Android alone is a valid state, so while an Apple enrolment sits in verification you can complete FCM end to end: enable FCM API V1, take the service-account JSON, land it in the .env, restart, and register the relay. That satisfies criterion 1 (credential_status true for at least one platform) AND criterion 2 (the workspace-scoped webhook row) — this gate reaches 2 of 3 with zero Apple. Nothing is redone when APNs arrives; the two platforms sit side by side in the same .env.</span></div><details open class=\"bp-expandable\"><summary>You need your OWN Apple team. Being a member of other orgs does not give you one.</summary><div class=\"bp-expandable__body\"><p>There is no &quot;create an organization&quot; button in the portal. Teams are not created — they are the RESULT of enrolling. Invitations add your Apple ID to other people&#39;s teams; they never produce a team of your own. Your existing Apple ID can hold your own membership alongside every membership you already have.</p><p><span style=\"font-weight:bold\">Choose Individual / Sole Proprietor, not Organization.</span> Both cost $99/year and both grant the identical technical capability — App IDs, APNs keys, the push entitlement. Organization only adds a company name and member roles, and it demands a <a href=\"https://developer.apple.com/enroll/duns-lookup/\" style=\"color:#1e5347;text-decoration:underline\">D-U-N-S number</a> (days to obtain), a public functional website on your own domain, a legal entity, and authority to bind it. Individual needs none of that.</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Requirement</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Individual / Sole Proprietor</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Organization</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>D-U-N-S number</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>No</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Required</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Public website on own domain</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>No</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Required</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Legal entity + binding authority</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>No</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Required</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Two-factor on the Apple Account</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Required</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Required</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Legal name, no nicknames</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Required</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Required</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Physical address (P.O. box rejected)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Required</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Required</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Annual cost</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>$99</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>$99</span></td></tr></tbody></table><p>Enrol at <a href=\"https://developer.apple.com/programs/enroll/\" style=\"color:#1e5347;text-decoration:underline\">developer.apple.com/programs/enroll</a> on the web, or through the Apple Developer app on an iPhone or iPad — the app route is usually smoother because it verifies your identity using the device. Fee waivers exist for nonprofits, accredited schools and government entities.</p><p><span style=\"font-weight:bold\">The trap once you have several teams: </span>APNs keys and App IDs belong to ONE specific team. The App ID for <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">cloud.barkpark.mobile</code> and the APNs key must live in the SAME team — yours. A key from one team paired with an App ID from another fails authentication in a way that looks like a bad device token, which sends you hunting the wrong bug. Check the team selector on the account page before creating either one.</p><p>If you would rather not pay: should you hold Account Holder or Admin role in an org you are already a member of, you could create the App ID and key there instead — but that ties this app&#39;s identity to someone else&#39;s organization. Not recommended for your own product.</p></div></details><p>Where each value comes from: the APNs key, key id and team id from <a href=\"https://developer.apple.com/account/resources/authkeys/list\" style=\"color:#1e5347;text-decoration:underline\">Apple&#39;s Keys page</a> (create a key with the Apple Push Notifications service enabled — <a href=\"https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns\" style=\"color:#1e5347;text-decoration:underline\">token-based APNs docs</a>); the bundle id must already exist with the Push capability on <a href=\"https://developer.apple.com/account/resources/identifiers/list\" style=\"color:#1e5347;text-decoration:underline\">Apple&#39;s Identifiers page</a>; the FCM service-account JSON from <a href=\"https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk\" style=\"color:#1e5347;text-decoration:underline\">Firebase → Service accounts</a>, with <a href=\"https://console.cloud.google.com/apis/library/fcm.googleapis.com\" style=\"color:#1e5347;text-decoration:underline\">FCM API V1 enabled</a>.</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Env var</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>What it is</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>The trap that makes it silently useless</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>APNS_KEY_P8</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Full .p8 PEM contents</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>A single-line value with literal \\n works — runtime.exs expands it</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>APNS_KEY_ID</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>10-character key id</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>APNS_TEAM_ID</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>10-character team id</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>—</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>APNS_BUNDLE_ID</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>cloud.barkpark.mobile</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>MUST equal ios.bundleIdentifier in apps/mobile/app.json, and that App ID must have Push registered</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>APNS_ENV</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>sandbox or production</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Wrong value = every send 400s with BadDeviceToken</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>FCM_SERVICE_ACCOUNT_JSON</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>The whole service-account file, verbatim</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>FCM API V1 must be enabled on the project</span></td></tr></tbody></table><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Write the six values and restart</div><div class=\"bp-steps__body\"><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">sudo vi /opt/barkpark-cloud/.env      # add the six values</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># then restart the control plane</code></span></div></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Probe the credential status</div><div class=\"bp-steps__body\"><p>It must report true for at least one platform before you go further.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># in a remote console:</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">BarkparkCloud.Push.credential_status()</code></span></div></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Register the relay once — it is idempotent, team-admin</div><div class=\"bp-steps__body\"></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Verify the webhook row is WORKSPACE-SCOPED</div><div class=\"bp-steps__body\"><p>The created <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">chat_blocked</code> row must have a <span style=\"font-weight:bold\">non-nil </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">workspace_id</code>. A flat-path row gets nil and can never fire — it looks installed and is inert.</p></div></li></ol><div class=\"bp-api-endpoint\"><div class=\"bp-api-endpoint__head\"><span class=\"bp-api-endpoint__method bp-api-endpoint__method--post\">POST</span><code class=\"bp-api-endpoint__path\">/v1/barkparks/b2b81e69-c79c-4eff-b6d7-84507d15b925/push-relay</code></div><table class=\"bp-api-endpoint__params\"><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr></thead><tbody><tr><td>id</td><td>path</td><td>uuid (guerrilla)</td><td>Yes</td></tr></tbody></table></div><div style=\"border-left:3px solid #4a544f;background:#edf0ee;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#4a544f;font-weight:600;margin:0 0 6px\">The ceiling, stated plainly</div><span>Not in this packet by construction: the client half — expo-notifications, the <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">aps-environment</code> entitlement, <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">google-services.json</code>. That needs the entitlements wave and a paid Apple membership. This is why Gate 3 can never retire Gate 2. Without a paid membership, do the server half above and record &quot;client half parked — no paid Apple membership&quot; as the blocker. That is a clean outcome, not a failure.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Gate 3 — device boot</h2><p>Honest sizing: not minutes. The OS upgrade comes first — roughly 2 to 4 hours, almost all unattended download. <a href=\"https://docs.expo.dev/develop/development-builds/introduction/\" style=\"color:#1e5347;text-decoration:underline\">Expo Go</a> cannot work here, because MMKV v4 and react-native-nitro-modules are custom native modules; a dev build is mandatory.</p><p><span style=\"font-weight:bold\">Part A — toolchain only. No Apple account needed, and it discharges every layout clause on the Simulator.</span></p><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Install macOS Tahoe 26.5.2</div><div class=\"bp-steps__body\"><p>About 9.4 GiB, one restart. <span style=\"font-weight:bold\">Do not stop at Sequoia 15.7.7</span> — it reaches only Xcode 26.0–26.3, below Expo SDK 56&#39;s floor of 26.4.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">softwareupdate --list-full-installers   # then install Tahoe 26.5.2</code></span></div></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Install Xcode 26.4 or newer</div><div class=\"bp-steps__body\"><p><a href=\"https://apps.apple.com/app/xcode/id497799835\" style=\"color:#1e5347;text-decoration:underline\">Xcode on the App Store</a> (~10–17 GiB). Launch it once so it installs components, then point Command Line Tools at Xcode — today they are CLT 16.4.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">sudo xcode-select -s /Applications/Xcode.app/Contents/Developer</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">xcodebuild -version</code></span></div></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Install CocoaPods via Homebrew — not gem</div><div class=\"bp-steps__body\"><p>System Ruby is 2.6.10, below <a href=\"https://guides.cocoapods.org/using/getting-started.html\" style=\"color:#1e5347;text-decoration:underline\">CocoaPods</a>&#39; 2.7.4 floor. Homebrew ships its own Ruby.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">brew install cocoapods</code></span></div></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Prebuild the iOS project</div><div class=\"bp-steps__body\"><p>No <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">ios/</code> directory is committed — this project is managed / <a href=\"https://docs.expo.dev/workflow/prebuild/\" style=\"color:#1e5347;text-decoration:underline\">CNG prebuild</a>.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">pnpm install</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">cd apps/mobile</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">npx expo prebuild -p ios</code></span></div></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Boot it on the Simulator</div><div class=\"bp-steps__body\"><p>Needs no Apple ID. This covers the Class-B reflow sites, token geometry, the recycleItems decision, the archived shelf, the picker sheet, and blocks-in-chat with Mermaid islands.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">npx expo run:ios</code></span></div></div></li></ol><p><span style=\"font-weight:bold\">Part B — physical iPhone, on a free Personal Team. Only if you actually have one.</span> No iPhone has ever been paired to this Mac, so this is a question, not an assumption.</p><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Prepare the device</div><div class=\"bp-steps__body\"><p><a href=\"https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device\" style=\"color:#1e5347;text-decoration:underline\">Enable Developer Mode</a> (the device restarts), then trust this Mac over USB.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Sign with a free Apple ID</div><div class=\"bp-steps__body\"><p>Xcode → Settings → Accounts → add your Apple ID → automatic signing. The bundle id <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">cloud.barkpark.mobile</code> works as-is.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Run on hardware</div><div class=\"bp-steps__body\"><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">npx expo run:ios --device</code></span></div></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Capture everything in ONE sitting</div><div class=\"bp-steps__body\"><p><span style=\"font-weight:bold\">Free Personal Team profiles expire after 7 days.</span> Record: haptics feel across the registry including the needsYou warning; transcript scroll and fps plus follow mode; swipe-to-archive; and cascade auto-select with MRU across a relaunch.</p><p><span style=\"font-weight:bold\">Before any MRU evidence counts</span>, assert that MMKV is the live backing store and not the silent in-memory fallback — otherwise the MRU proof is vacuous.</p></div></li></ol><details open class=\"bp-expandable\"><summary>If there is no iPhone — what to do instead</summary><div class=\"bp-expandable__body\"><p>Record &quot;no iPhone exists&quot; as an explicit ruling on the task. The Simulator dispositions from Part A then become the discharge surface — the task&#39;s own criterion allows exactly this — and I will re-scope the affected root criteria. Push stays out either way: a free Personal Team cannot sign the push entitlement.</p></div></details><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Already done for you</h2><p>Two things that used to sit in Gate 3 are already discharged, so do not spend time on them. Tonight&#39;s crown slice built an 83.8 MB release APK and drove the Android emulator end to end: it paged 80 screens of a paper containing every block type, found <span style=\"font-weight:bold\">zero unknown blocks</span>, and kept six screenshots as artifacts. Under charter D55 that discharges the Android-emulator render-fidelity clauses — the emulator half of the Mermaid ring-3 check and the blocks-in-chat visual eyeball.</p><p>An earlier version of the Gate 3 packet claimed this Mac has no Android SDK or Java. That was false — openjdk 17 and the Android command-line tools are installed and built this app twice. The packet now keeps only genuinely iOS and physical-hardware items.</p><p>It also removed a blocker you would have hit in Part A: the release APK built with no <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">NODE_PATH</code> workaround, because <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">babel-preset-expo</code> is now declared properly.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Optional extras</h2><p>Neither blocks anything. The first is yours because it is outward-facing and I would not do it while you were away.</p><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Prune two merged remote branches</div><div class=\"bp-steps__body\"><p>Both are fully merged and byte-verified. I left them because these were <span style=\"font-weight:bold\">squash</span> merges, so their individual commits exist only on those refs — deleting discards that granular history, and a remote ref delete is not recoverable from my side.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">git push origin --delete crown-seal-zero-unknown crown-seal-derive-polish</code></span></div></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Pull the highest-value residual</div><div class=\"bp-steps__body\"><p><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-79551ef7cdadfa21</code> — the chat degrade set is hand-maintained, so a future third degrade card would silently lose a turn&#39;s full markdown instead of failing a test. The fix is to derive the set from a marker on the renderers.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bp task get task-79551ef7cdadfa21</code></span></div></div></li></ol><div style=\"border-left:3px solid #a63a2e;background:#f7e9e6;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#a63a2e;font-weight:600;margin:0 0 6px\">Do not touch</div><span>Leave alone in this checkout: three commits authored by &quot;survey&quot; sitting unpushed on local main, and an uncommitted <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">architect_model</code> edit in <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">.claude/workflows/bp-epic-cycle.workflow.js</code>. Both belong to a concurrent session. The second is restored byte-for-byte after I destroyed it with <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">git checkout --</code> and recovered it from that session&#39;s transcript — but it is not mine to commit.</span></div><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">How to finish</div><span>Close each gate on its own task as you finish it — <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">mob-hg-member-seat</code>, <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">mob-hg-push-creds</code>, <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">mob-hg-device-boot</code> — attaching the transcript or the recorded ruling as evidence. The epic GOAL closes last, in the same act as the epic root, per charter D35. If a gate turns out blocked rather than done, record the concrete blocker: a named blocker is a valid outcome, silence is not.</span></div>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\"></p><h1>Three gates, and then the mobile epic is done</h1><p class=\"bp-role-ingress\">The rendering work is finished and merged — the app draws all 70 registered PortableDoc block types, and CI now reds if that regresses. Nothing below is about rendering. What is left is three things only a person with credentials and hardware can do. This is the whole list: if it is not here, it does not need you.</p><h2>Start here</h2><div class=\"bp-stats\"><div class=\"bp-stat\"><div class=\"bp-stat__v\">3</div><div class=\"bp-stat__l\">Gates left</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">1<span class=\"bp-stat__denom\">/3</span></div><div class=\"bp-stat__l\">Blocking v1 ship</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">~1<span class=\"bp-stat__denom\">/hour</span></div><div class=\"bp-stat__l\">Hands-on time, all three</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">2-4<span class=\"bp-stat__denom\">/hours</span></div><div class=\"bp-stat__l\">Plus unattended download</div></div></div><p>Do them in this order. Gate 1 is both the cheapest and the only one blocking ship sign-off. Gate 3 is mostly an unattended OS download, so start its download early and do Gate 1 while it runs. Gate 2 has a hard ceiling — its client half needs a <a href=\"https://developer.apple.com/programs/\" style=\"color:var(--paper-accent, #1e5347)\">paid Apple Developer membership</a>, because a free Personal Team cannot sign the push entitlement. If you do not hold one, do its server half and park the rest deliberately.</p><nav class=\"bp-toc\"><ol class=\"bp-toc__list\"><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#gate-1\">1. Gate 1 — second member seat</a></li><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#gate-2\">2. Gate 2 — push credentials</a></li><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#gate-3\">3. Gate 3 — device boot</a></li><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#already-done\">4. Already done for you</a></li><li class=\"bp-toc__item\" data-level=\"1\"><a href=\"#optional\">5. Optional extras</a></li></ol></nav><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>#</span></th><th class=\"bp-table__th\"><span>Gate</span></th><th class=\"bp-table__th\"><span>Hands-on</span></th><th class=\"bp-table__th\"><span>Blocks</span></th><th class=\"bp-table__th\"><span>Hard prerequisite</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>1</span></td><td class=\"bp-table__td\"><span>Second member seat</span></td><td class=\"bp-table__td\"><span>~30 min</span></td><td class=\"bp-table__td\"><span>v1 ship sign-off</span></td><td class=\"bp-table__td\"><span>A second real email account you control</span></td></tr><tr><td class=\"bp-table__td\"><span>2</span></td><td class=\"bp-table__td\"><span>Push credentials</span></td><td class=\"bp-table__td\"><span>~30 min</span></td><td class=\"bp-table__td\"><span>v1.1 push only</span></td><td class=\"bp-table__td\"><span>Apple: PAID membership for the client half</span></td></tr><tr><td class=\"bp-table__td\"><span>3</span></td><td class=\"bp-table__td\"><span>Device boot</span></td><td class=\"bp-table__td\"><span>~30 min + download</span></td><td class=\"bp-table__td\"><span>Root criteria 2, 5, 7</span></td><td class=\"bp-table__td\"><span>macOS Tahoe + Xcode 26.4; iPhone for Part B</span></td></tr></tbody></table><h2>Gate 1 — second real member seat</h2><p><span style=\"font-weight:bold\">Why it cannot be faked. </span>The Cloud team has exactly one seat (frikk, owner, undemotable). This gate exists to prove the app-token exchange mints for a <span style=\"font-weight:bold\">non-admin</span> seat — so a DB-inserted or fabricated user proves nothing. There is a recorded incident where a fabricated user went stale and started returning 404. Use a real second account.</p><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Find the team id — do not guess it</div><div class=\"bp-steps__body\"><p>Read it from <a href=\"https://barkpark.cloud\" style=\"color:var(--paper-accent, #1e5347)\">the Cloud console</a> or from the CLI. Never hardcode it.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">bp cloud teams ls</pre></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Invite the second account, as the owner</div><div class=\"bp-steps__body\"><p>The response carries an <code>accept_url</code> — you need it in step 3.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Accept in a browser signed in as the SECOND account</div><div class=\"bp-steps__body\"><p>Open the <code>accept_url</code> while signed in as the invitee, not as the owner. This is the step that most often goes wrong silently — an owner-session accept produces a seat that looks right and tests nothing.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Verify the role actually landed as member</div><div class=\"bp-steps__body\"><p>The new row must read <code>role=member</code> — not admin. If it reads admin, the RBAC leg is untested and the gate is not discharged.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Log in as that member</div><div class=\"bp-steps__body\"><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">bp login       # complete the device-link flow as the SECOND account</pre></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Re-run the smoke on the member&#39;s token</div><div class=\"bp-steps__body\"><p>Expect <code>13 ok</code>. Keep the transcript — it is the evidence.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">tooling/mobile-smoke/smoke.sh</pre></div></li></ol><p>The two calls, exactly:</p><div class=\"bp-api-endpoint\"><div class=\"bp-api-endpoint__head\"><span class=\"bp-api-endpoint__method bp-api-endpoint__method--post\">POST</span><code class=\"bp-api-endpoint__path\">/v1/teams/:team_id/invitations</code></div><table class=\"bp-api-endpoint__params\"><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr></thead><tbody><tr><td>team_id</td><td>path</td><td>uuid</td><td>Yes</td></tr><tr><td>email</td><td>body</td><td>string</td><td>Yes</td></tr></tbody></table></div><div class=\"bp-api-endpoint\"><div class=\"bp-api-endpoint__head\"><span class=\"bp-api-endpoint__method bp-api-endpoint__method--get\">GET</span><code class=\"bp-api-endpoint__path\">/v1/teams/:team_id/members</code></div><table class=\"bp-api-endpoint__params\"><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr></thead><tbody><tr><td>team_id</td><td>path</td><td>uuid</td><td>Yes</td></tr></tbody></table></div><div class=\"bp-callout bp-callout--warning\"><strong>The failure that matters</strong> <span>If the smoke passes as the owner but fails as the member, that is precisely the bug this gate was built to catch. Stop and report it — do not retry with an admin token, which would turn a real finding into a green tick.</span></div><h2>Gate 2 — APNs and FCM credentials</h2><p>The relay is built right up to the credential wall. Six values go into <code>/opt/barkpark-cloud/.env</code> on the control plane. The two platforms are <span style=\"font-weight:bold\">independent</span> — Android alone is a valid, useful state, so do not block on Apple if you only have Google.</p><div class=\"bp-callout bp-callout--success\"><strong>If you are waiting on Apple verification</strong> <span><span style=\"font-weight:bold\">Do the Google half FIRST — it needs no Apple involvement at all. </span>The platforms are independent and Android alone is a valid state, so while an Apple enrolment sits in verification you can complete FCM end to end: enable FCM API V1, take the service-account JSON, land it in the .env, restart, and register the relay. That satisfies criterion 1 (credential_status true for at least one platform) AND criterion 2 (the workspace-scoped webhook row) — this gate reaches 2 of 3 with zero Apple. Nothing is redone when APNs arrives; the two platforms sit side by side in the same .env.</span></div><details class=\"bp-expandable\"><summary>You need your OWN Apple team. Being a member of other orgs does not give you one.</summary><div class=\"bp-expandable__body\"><p>There is no &quot;create an organization&quot; button in the portal. Teams are not created — they are the RESULT of enrolling. Invitations add your Apple ID to other people&#39;s teams; they never produce a team of your own. Your existing Apple ID can hold your own membership alongside every membership you already have.</p><p><span style=\"font-weight:bold\">Choose Individual / Sole Proprietor, not Organization.</span> Both cost $99/year and both grant the identical technical capability — App IDs, APNs keys, the push entitlement. Organization only adds a company name and member roles, and it demands a <a href=\"https://developer.apple.com/enroll/duns-lookup/\" style=\"color:var(--paper-accent, #1e5347)\">D-U-N-S number</a> (days to obtain), a public functional website on your own domain, a legal entity, and authority to bind it. Individual needs none of that.</p><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Requirement</span></th><th class=\"bp-table__th\"><span>Individual / Sole Proprietor</span></th><th class=\"bp-table__th\"><span>Organization</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>D-U-N-S number</span></td><td class=\"bp-table__td\"><span>No</span></td><td class=\"bp-table__td\"><span>Required</span></td></tr><tr><td class=\"bp-table__td\"><span>Public website on own domain</span></td><td class=\"bp-table__td\"><span>No</span></td><td class=\"bp-table__td\"><span>Required</span></td></tr><tr><td class=\"bp-table__td\"><span>Legal entity + binding authority</span></td><td class=\"bp-table__td\"><span>No</span></td><td class=\"bp-table__td\"><span>Required</span></td></tr><tr><td class=\"bp-table__td\"><span>Two-factor on the Apple Account</span></td><td class=\"bp-table__td\"><span>Required</span></td><td class=\"bp-table__td\"><span>Required</span></td></tr><tr><td class=\"bp-table__td\"><span>Legal name, no nicknames</span></td><td class=\"bp-table__td\"><span>Required</span></td><td class=\"bp-table__td\"><span>Required</span></td></tr><tr><td class=\"bp-table__td\"><span>Physical address (P.O. box rejected)</span></td><td class=\"bp-table__td\"><span>Required</span></td><td class=\"bp-table__td\"><span>Required</span></td></tr><tr><td class=\"bp-table__td\"><span>Annual cost</span></td><td class=\"bp-table__td\"><span>$99</span></td><td class=\"bp-table__td\"><span>$99</span></td></tr></tbody></table><p>Enrol at <a href=\"https://developer.apple.com/programs/enroll/\" style=\"color:var(--paper-accent, #1e5347)\">developer.apple.com/programs/enroll</a> on the web, or through the Apple Developer app on an iPhone or iPad — the app route is usually smoother because it verifies your identity using the device. Fee waivers exist for nonprofits, accredited schools and government entities.</p><p><span style=\"font-weight:bold\">The trap once you have several teams: </span>APNs keys and App IDs belong to ONE specific team. The App ID for <code>cloud.barkpark.mobile</code> and the APNs key must live in the SAME team — yours. A key from one team paired with an App ID from another fails authentication in a way that looks like a bad device token, which sends you hunting the wrong bug. Check the team selector on the account page before creating either one.</p><p>If you would rather not pay: should you hold Account Holder or Admin role in an org you are already a member of, you could create the App ID and key there instead — but that ties this app&#39;s identity to someone else&#39;s organization. Not recommended for your own product.</p></div></details><p>Where each value comes from: the APNs key, key id and team id from <a href=\"https://developer.apple.com/account/resources/authkeys/list\" style=\"color:var(--paper-accent, #1e5347)\">Apple&#39;s Keys page</a> (create a key with the Apple Push Notifications service enabled — <a href=\"https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns\" style=\"color:var(--paper-accent, #1e5347)\">token-based APNs docs</a>); the bundle id must already exist with the Push capability on <a href=\"https://developer.apple.com/account/resources/identifiers/list\" style=\"color:var(--paper-accent, #1e5347)\">Apple&#39;s Identifiers page</a>; the FCM service-account JSON from <a href=\"https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk\" style=\"color:var(--paper-accent, #1e5347)\">Firebase → Service accounts</a>, with <a href=\"https://console.cloud.google.com/apis/library/fcm.googleapis.com\" style=\"color:var(--paper-accent, #1e5347)\">FCM API V1 enabled</a>.</p><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Env var</span></th><th class=\"bp-table__th\"><span>What it is</span></th><th class=\"bp-table__th\"><span>The trap that makes it silently useless</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>APNS_KEY_P8</span></td><td class=\"bp-table__td\"><span>Full .p8 PEM contents</span></td><td class=\"bp-table__td\"><span>A single-line value with literal \\n works — runtime.exs expands it</span></td></tr><tr><td class=\"bp-table__td\"><span>APNS_KEY_ID</span></td><td class=\"bp-table__td\"><span>10-character key id</span></td><td class=\"bp-table__td\"><span>—</span></td></tr><tr><td class=\"bp-table__td\"><span>APNS_TEAM_ID</span></td><td class=\"bp-table__td\"><span>10-character team id</span></td><td class=\"bp-table__td\"><span>—</span></td></tr><tr><td class=\"bp-table__td\"><span>APNS_BUNDLE_ID</span></td><td class=\"bp-table__td\"><span>cloud.barkpark.mobile</span></td><td class=\"bp-table__td\"><span>MUST equal ios.bundleIdentifier in apps/mobile/app.json, and that App ID must have Push registered</span></td></tr><tr><td class=\"bp-table__td\"><span>APNS_ENV</span></td><td class=\"bp-table__td\"><span>sandbox or production</span></td><td class=\"bp-table__td\"><span>Wrong value = every send 400s with BadDeviceToken</span></td></tr><tr><td class=\"bp-table__td\"><span>FCM_SERVICE_ACCOUNT_JSON</span></td><td class=\"bp-table__td\"><span>The whole service-account file, verbatim</span></td><td class=\"bp-table__td\"><span>FCM API V1 must be enabled on the project</span></td></tr></tbody></table><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Write the six values and restart</div><div class=\"bp-steps__body\"><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">sudo vi /opt/barkpark-cloud/.env      # add the six values\n# then restart the control plane</pre></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Probe the credential status</div><div class=\"bp-steps__body\"><p>It must report true for at least one platform before you go further.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\"># in a remote console:\nBarkparkCloud.Push.credential_status()</pre></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Register the relay once — it is idempotent, team-admin</div><div class=\"bp-steps__body\"></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Verify the webhook row is WORKSPACE-SCOPED</div><div class=\"bp-steps__body\"><p>The created <code>chat_blocked</code> row must have a <span style=\"font-weight:bold\">non-nil </span><code>workspace_id</code>. A flat-path row gets nil and can never fire — it looks installed and is inert.</p></div></li></ol><div class=\"bp-api-endpoint\"><div class=\"bp-api-endpoint__head\"><span class=\"bp-api-endpoint__method bp-api-endpoint__method--post\">POST</span><code class=\"bp-api-endpoint__path\">/v1/barkparks/b2b81e69-c79c-4eff-b6d7-84507d15b925/push-relay</code></div><table class=\"bp-api-endpoint__params\"><thead><tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr></thead><tbody><tr><td>id</td><td>path</td><td>uuid (guerrilla)</td><td>Yes</td></tr></tbody></table></div><div class=\"bp-callout bp-callout--neutral\"><strong>The ceiling, stated plainly</strong> <span>Not in this packet by construction: the client half — expo-notifications, the <code>aps-environment</code> entitlement, <code>google-services.json</code>. That needs the entitlements wave and a paid Apple membership. This is why Gate 3 can never retire Gate 2. Without a paid membership, do the server half above and record &quot;client half parked — no paid Apple membership&quot; as the blocker. That is a clean outcome, not a failure.</span></div><h2>Gate 3 — device boot</h2><p>Honest sizing: not minutes. The OS upgrade comes first — roughly 2 to 4 hours, almost all unattended download. <a href=\"https://docs.expo.dev/develop/development-builds/introduction/\" style=\"color:var(--paper-accent, #1e5347)\">Expo Go</a> cannot work here, because MMKV v4 and react-native-nitro-modules are custom native modules; a dev build is mandatory.</p><p><span style=\"font-weight:bold\">Part A — toolchain only. No Apple account needed, and it discharges every layout clause on the Simulator.</span></p><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Install macOS Tahoe 26.5.2</div><div class=\"bp-steps__body\"><p>About 9.4 GiB, one restart. <span style=\"font-weight:bold\">Do not stop at Sequoia 15.7.7</span> — it reaches only Xcode 26.0–26.3, below Expo SDK 56&#39;s floor of 26.4.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">softwareupdate --list-full-installers   # then install Tahoe 26.5.2</pre></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Install Xcode 26.4 or newer</div><div class=\"bp-steps__body\"><p><a href=\"https://apps.apple.com/app/xcode/id497799835\" style=\"color:var(--paper-accent, #1e5347)\">Xcode on the App Store</a> (~10–17 GiB). Launch it once so it installs components, then point Command Line Tools at Xcode — today they are CLT 16.4.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">sudo xcode-select -s /Applications/Xcode.app/Contents/Developer\nxcodebuild -version</pre></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Install CocoaPods via Homebrew — not gem</div><div class=\"bp-steps__body\"><p>System Ruby is 2.6.10, below <a href=\"https://guides.cocoapods.org/using/getting-started.html\" style=\"color:var(--paper-accent, #1e5347)\">CocoaPods</a>&#39; 2.7.4 floor. Homebrew ships its own Ruby.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">brew install cocoapods</pre></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Prebuild the iOS project</div><div class=\"bp-steps__body\"><p>No <code>ios/</code> directory is committed — this project is managed / <a href=\"https://docs.expo.dev/workflow/prebuild/\" style=\"color:var(--paper-accent, #1e5347)\">CNG prebuild</a>.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">pnpm install\ncd apps/mobile\nnpx expo prebuild -p ios</pre></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Boot it on the Simulator</div><div class=\"bp-steps__body\"><p>Needs no Apple ID. This covers the Class-B reflow sites, token geometry, the recycleItems decision, the archived shelf, the picker sheet, and blocks-in-chat with Mermaid islands.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">npx expo run:ios</pre></div></li></ol><p><span style=\"font-weight:bold\">Part B — physical iPhone, on a free Personal Team. Only if you actually have one.</span> No iPhone has ever been paired to this Mac, so this is a question, not an assumption.</p><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Prepare the device</div><div class=\"bp-steps__body\"><p><a href=\"https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device\" style=\"color:var(--paper-accent, #1e5347)\">Enable Developer Mode</a> (the device restarts), then trust this Mac over USB.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Sign with a free Apple ID</div><div class=\"bp-steps__body\"><p>Xcode → Settings → Accounts → add your Apple ID → automatic signing. The bundle id <code>cloud.barkpark.mobile</code> works as-is.</p></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Run on hardware</div><div class=\"bp-steps__body\"><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">npx expo run:ios --device</pre></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Capture everything in ONE sitting</div><div class=\"bp-steps__body\"><p><span style=\"font-weight:bold\">Free Personal Team profiles expire after 7 days.</span> Record: haptics feel across the registry including the needsYou warning; transcript scroll and fps plus follow mode; swipe-to-archive; and cascade auto-select with MRU across a relaunch.</p><p><span style=\"font-weight:bold\">Before any MRU evidence counts</span>, assert that MMKV is the live backing store and not the silent in-memory fallback — otherwise the MRU proof is vacuous.</p></div></li></ol><details class=\"bp-expandable\"><summary>If there is no iPhone — what to do instead</summary><div class=\"bp-expandable__body\"><p>Record &quot;no iPhone exists&quot; as an explicit ruling on the task. The Simulator dispositions from Part A then become the discharge surface — the task&#39;s own criterion allows exactly this — and I will re-scope the affected root criteria. Push stays out either way: a free Personal Team cannot sign the push entitlement.</p></div></details><h2>Already done for you</h2><p>Two things that used to sit in Gate 3 are already discharged, so do not spend time on them. Tonight&#39;s crown slice built an 83.8 MB release APK and drove the Android emulator end to end: it paged 80 screens of a paper containing every block type, found <span style=\"font-weight:bold\">zero unknown blocks</span>, and kept six screenshots as artifacts. Under charter D55 that discharges the Android-emulator render-fidelity clauses — the emulator half of the Mermaid ring-3 check and the blocks-in-chat visual eyeball.</p><p>An earlier version of the Gate 3 packet claimed this Mac has no Android SDK or Java. That was false — openjdk 17 and the Android command-line tools are installed and built this app twice. The packet now keeps only genuinely iOS and physical-hardware items.</p><p>It also removed a blocker you would have hit in Part A: the release APK built with no <code>NODE_PATH</code> workaround, because <code>babel-preset-expo</code> is now declared properly.</p><h2>Optional extras</h2><p>Neither blocks anything. The first is yours because it is outward-facing and I would not do it while you were away.</p><ol class=\"bp-steps\"><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Prune two merged remote branches</div><div class=\"bp-steps__body\"><p>Both are fully merged and byte-verified. I left them because these were <span style=\"font-weight:bold\">squash</span> merges, so their individual commits exist only on those refs — deleting discards that granular history, and a remote ref delete is not recoverable from my side.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">git push origin --delete crown-seal-zero-unknown crown-seal-derive-polish</pre></div></li><li class=\"bp-steps__step\"><div class=\"bp-steps__title\">Pull the highest-value residual</div><div class=\"bp-steps__body\"><p><code>task-79551ef7cdadfa21</code> — the chat degrade set is hand-maintained, so a future third degrade card would silently lose a turn&#39;s full markdown instead of failing a test. The fix is to derive the set from a marker on the renderers.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">bp task get task-79551ef7cdadfa21</pre></div></li></ol><div class=\"bp-callout bp-callout--danger\"><strong>Do not touch</strong> <span>Leave alone in this checkout: three commits authored by &quot;survey&quot; sitting unpushed on local main, and an uncommitted <code>architect_model</code> edit in <code>.claude/workflows/bp-epic-cycle.workflow.js</code>. Both belong to a concurrent session. The second is restored byte-for-byte after I destroyed it with <code>git checkout --</code> and recovered it from that session&#39;s transcript — but it is not mine to commit.</span></div><div class=\"bp-callout bp-callout--success\"><strong>How to finish</strong> <span>Close each gate on its own task as you finish it — <code>mob-hg-member-seat</code>, <code>mob-hg-push-creds</code>, <code>mob-hg-device-boot</code> — attaching the transcript or the recorded ruling as evidence. The epic GOAL closes last, in the same act as the epic root, per charter D35. If a gate turns out blocked rather than done, record the concrete blocker: a named blocker is a valid outcome, silence is not.</span></div>",
+  "body_html_sv": "c18f53335d0cddd150ef2c1749afc3f83072e9160a011cac63d103bd03fdd308",
+  "description": "The complete human-only checklist that closes the Barkpark Tasks mobile epic now that PortableDoc rendering has landed: the second member seat, the APNs/FCM credential packet, and the iOS device boot — with exact commands, the external consoles each credential comes from, honest time costs, the traps that make a step silently useless, and what tonight's crown evidence already discharged.",
+  "main_tag": "mobile",
+  "preview": {
+    "description": "The complete human-only checklist that closes the Barkpark Tasks mobile epic now that PortableDoc rendering…",
+    "extensions": {
+      "tags": [
+        "mobile",
+        "task-lifecycle",
+        "portabledoc"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/mobile-epic-human-gates-guide"
+  },
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "The human-gate packets that close the Barkpark Tasks mobile epic.",
+      "strength": 90,
+      "tag": "mobile"
+    },
+    {
+      "rationale": "Each gate closes a specific bp task with recorded evidence or a named blocker.",
+      "strength": 60,
+      "tag": "task-lifecycle"
+    },
+    {
+      "rationale": "Follows the PortableDoc rendering completion that made these the only remaining work.",
+      "strength": 40,
+      "tag": "portabledoc"
+    }
+  ],
+  "title": "What you need to do: the three human gates that close the mobile epic"
+}

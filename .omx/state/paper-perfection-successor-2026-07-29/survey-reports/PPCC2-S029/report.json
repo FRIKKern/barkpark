@@ -1,0 +1,456 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S029",
+  "assignment_snapshot_sha256": "2876e4613692b3480656e1d750a6df8b1d419fd718979d892310cf77a691a745",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 10,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "710db7fc9dbc8e8c6eec7942bc36a8ec3f22666af10dcfcebaf58e1c9540db58"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read across 226 native top-level blocks plus four legacy HTML papers (156,737 characters). Keep 3 and repair 6. The renderer corpus, interactive walkthrough, and competitor-screen brief are purpose-aligned and concise. The human-gates guide and living-values spec need authority/scope repairs; all four wave histories preserve strong evidence but need stale-status correction, native-block conversion, and current-outcome compression.",
+  "verdict_counts": {
+    "keep": 3,
+    "repair": 6
+  },
+  "checked_unit_ids": [
+    "paper:mobile-crown-floor-pd-parity",
+    "paper:mobile-epic-human-gates-guide",
+    "paper:n-screens-interactive-walkthrough",
+    "paper:netlify-vercel-next-screen-asks",
+    "paper:nextgen-wiki-living-values-v1",
+    "paper:noo-noo-disk-guardian-wave-2026-07-15",
+    "paper:noo-noo-disk-guardian-wave2-2026-07-15",
+    "paper:onboarding-composition-wave-2026-07-14",
+    "paper:onboarding-composition-wave-2026-07-16"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 226,
+    "legacy_html_documents_read": 4,
+    "legacy_html_chars_read": 156737,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:mobile-crown-floor-pd-parity blocks[1]",
+      "evidence": "The fixture corpus avoids poisoning its own unknown-block grep oracle.",
+      "lesson": "Proof specimens must not satisfy their own detector."
+    },
+    {
+      "block_ref": "paper:n-screens-interactive-walkthrough blocks[2]",
+      "evidence": "The opening states method, five-of-seven result, and two honest omissions.",
+      "lesson": "Put review denominator and deferred scope at the top."
+    },
+    {
+      "block_ref": "paper:noo-noo-disk-guardian-wave2-2026-07-15 body_html[55]",
+      "evidence": "Verification explicitly separates proven, refuted, not-found, and misleading zero-match tests.",
+      "lesson": "Proof vocabulary should carry epistemic posture."
+    },
+    {
+      "block_ref": "paper:onboarding-composition-wave-2026-07-14 body_html[94]",
+      "evidence": "Source-control reachability proves “done” work was stranded and supports recovery over rewrite.",
+      "lesson": "Reconcile ledger claims against the real integration graph."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:mobile-epic-human-gates-guide blocks[2]",
+      "evidence": "The 70-type completion claim conflicts with the pinned crown oracle’s 66-renderer framing.",
+      "reader_impact": "Mobile completion authority is ambiguous."
+    },
+    {
+      "block_ref": "paper:nextgen-wiki-living-values-v1 blocks[21]",
+      "evidence": "A one-primitive slogan expands into several delivery obligations.",
+      "reader_impact": "Scope looks smaller than the implementation surface."
+    },
+    {
+      "block_ref": "paper:noo-noo-disk-guardian-wave2-2026-07-15 body_html[1]",
+      "evidence": "The first status says BUILDING although the later debrief says CLOSED.",
+      "reader_impact": "Current state is wrong at first glance."
+    },
+    {
+      "block_ref": "paper:onboarding-composition-wave-2026-07-14 body_html[1]",
+      "evidence": "The first status remains SURVEYING after a final merge-ready debrief.",
+      "reader_impact": "Constrained readers may never reach authoritative state."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "netlify-vercel-next-screen-asks",
+        "n-screens-interactive-walkthrough"
+      ],
+      "basis": "The first owns request rationale and anti-goals; the second owns dated interactive acceptance of five requests. They overlap screen names but not authority purpose.",
+      "disposition": "Keep separate with reciprocal links; never fold acceptance history back into the planning brief."
+    },
+    {
+      "candidate_set": [
+        "noo-noo-disk-guardian-wave-2026-07-15",
+        "noo-noo-disk-guardian-wave2-2026-07-15"
+      ],
+      "basis": "Two successive immutable waves share product facts while proving different capability sets and live incidents.",
+      "disposition": "Keep distinct histories, add a shared Noo-Noo wave index/current-state page, and convert each legacy body without merging evidence."
+    },
+    {
+      "candidate_set": [
+        "onboarding-composition-wave-2026-07-14",
+        "onboarding-composition-wave-2026-07-16"
+      ],
+      "basis": "Wave 2 is recovery/activation authority; Wave 3 is edge-hardening authority. Repeated receipt context supplies continuity rather than duplicate purpose.",
+      "disposition": "Keep separate, cross-link exact handoff, and place current epic state in a small successor index."
+    }
+  ],
+  "reader_risks": [
+    "Studio: lead with current authority and outcome; collapse fixture payloads, historical phase plans, branch names, and long verification ledgers.",
+    "TUI80: keep one decision per screen, wrap wide tables, preserve code separately, and give legacy HTML papers a native-block outline.",
+    "email: send outcome, material caveat, and next owner action; link the full fixtures, credentials, matrices, and phase chronology.",
+    "public: remove internal paths, UUIDs, credential locations, operator commands, account details, hardware facts, and mutable price/version claims.",
+    "CLI/API: preserve exact ids, revisions, hashes, test counts, phase boundaries, and distinctions among designed, built, reviewed, merged, deployed, and live-proven."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:mobile-crown-floor-pd-parity",
+      "document_id": "mobile-crown-floor-pd-parity",
+      "document_rev": "0b73f7e2d14fd73e0bedb807e4c97c52",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Mechanical native-reader oracle: exercise every generator-owned PortableDoc fixture and detect unknown-type degradation without contaminating the grep oracle.",
+      "opening_and_criteria": "blocks[0]-[1] state corpus provenance, execution surface, and the zero-hit mechanical criterion before any fixtures.",
+      "outline_and_hierarchy": "One type heading followed by one exact fixture is intentionally repetitive but perfectly aligned with an oracle corpus rather than prose.",
+      "human_voice_and_precision": "The introduction candidly explains the prior self-contaminating proof mistake; fixture copy is deliberately synthetic.",
+      "compression_and_restraint": "Keep the exhaustive payload. Add a persistent TEST FIXTURE banner on reader surfaces rather than compressing away coverage.",
+      "evidence_and_truth": "blocks[1] defines the actual on-device uiautomator proof; the remainder is exact test input, not evidence that the proof was run in this revision.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[1]",
+          "evidence": "The intro explicitly avoids quoting the unknown-type fallback string because that would make the proof grep match its own explanation.",
+          "lesson": "Design test evidence so the specimen cannot satisfy or poison its own oracle."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[23]",
+          "evidence": "The chat-approval fixture visibly contains `rm -rf api/_build/prod`; without an always-visible fixture label it can look like an executable recommendation.",
+          "lesson": "Hazardous fixture text needs unmistakable non-instruction framing on every reader."
+        }
+      ],
+      "duplicate_disposition": "Distinct from the human-gates guide: this is a renderer oracle, not an operator checklist; cross-link crown proof but do not merge.",
+      "reader_risks": [
+        "Studio: lead with current authority and outcome; collapse fixture payloads, historical phase plans, branch names, and long verification ledgers.",
+        "TUI80: keep one decision per screen, wrap wide tables, preserve code separately, and give legacy HTML papers a native-block outline.",
+        "email: send outcome, material caveat, and next owner action; link the full fixtures, credentials, matrices, and phase chronology.",
+        "public: remove internal paths, UUIDs, credential locations, operator commands, account details, hardware facts, and mutable price/version claims.",
+        "CLI/API: preserve exact ids, revisions, hashes, test counts, phase boundaries, and distinctions among designed, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Keep as a purpose-specific corpus; the non-editorial repetition is the required product."
+    },
+    {
+      "unit_id": "paper:mobile-epic-human-gates-guide",
+      "document_id": "mobile-epic-human-gates-guide",
+      "document_rev": "5c542782a642391205fac4a056e5c3e1",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Credential-and-hardware handoff for the three human-only gates remaining after the mobile renderer work.",
+      "opening_and_criteria": "blocks[2]-[7] front-load scope, order, time, prerequisites, and which gate blocks v1; this is excellent task orientation.",
+      "outline_and_hierarchy": "Three gate sections plus already-done and optional material are navigable, but Gate 2 and Gate 3 carry long mutable subprocedures that should be linked runbooks.",
+      "human_voice_and_precision": "Direct, humane, and unusually honest about paid membership, missing hardware, and valid blocked outcomes.",
+      "compression_and_restraint": "Split immutable acceptance logic from mutable Apple/Google/Xcode/host instructions; remove optional branch-cleanup and concurrent-checkout anecdotes from the main handoff.",
+      "evidence_and_truth": "Each gate names an observable result, but the opening claim of 70 registered block types is unqualified and disagrees with the assigned crown oracle description of 66 registered renderers.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[14]",
+          "evidence": "A member-only failure is explicitly treated as the point of the gate, with an instruction to stop rather than retry under admin credentials.",
+          "lesson": "Never launder a permission failure into a green result by changing the test principal."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The opening says all 70 registered PortableDoc block types render, while the pinned crown oracle describes 66 registered renderers and 60 generator-owned fixtures; no reconciliation is supplied.",
+          "lesson": "Cross-document completion numbers need one named inventory and receipt."
+        }
+      ],
+      "duplicate_disposition": "Distinct operator handoff from the renderer corpus; retain separately, link the authoritative renderer inventory, and move environment-specific procedures to owned runbooks.",
+      "reader_risks": [
+        "Studio: lead with current authority and outcome; collapse fixture payloads, historical phase plans, branch names, and long verification ledgers.",
+        "TUI80: keep one decision per screen, wrap wide tables, preserve code separately, and give legacy HTML papers a native-block outline.",
+        "email: send outcome, material caveat, and next owner action; link the full fixtures, credentials, matrices, and phase chronology.",
+        "public: remove internal paths, UUIDs, credential locations, operator commands, account details, hardware facts, and mutable price/version claims.",
+        "CLI/API: preserve exact ids, revisions, hashes, test counts, phase boundaries, and distinctions among designed, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: the checklist is strong, but count authority, sensitive internal coordinates, and rapidly aging vendor/toolchain steps must be separated and refreshed."
+    },
+    {
+      "unit_id": "paper:n-screens-interactive-walkthrough",
+      "document_id": "n-screens-interactive-walkthrough",
+      "document_rev": "171d4fe456266d44695822f54bccd5da",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Round-seven acceptance record for five delivered interactive console screens and the two intentionally deferred seam-dependent screens.",
+      "opening_and_criteria": "blocks[2]-[4] immediately state five-of-seven scope, review method, verdict, and a screen-by-screen assessment matrix.",
+      "outline_and_hierarchy": "Ten blocks form a tight outcome → evidence table → structural implications → ledger → provenance sequence.",
+      "human_voice_and_precision": "Confident but concrete; it praises particular copy while preserving missing N-06/N-07 and the unresolved Forms owner call.",
+      "compression_and_restraint": "Already compressed. Preserve the one-table review and dated chain rather than expanding it into implementation detail.",
+      "evidence_and_truth": "Claims are tied to an interactive walkthrough and named screens; pricing copy is review evidence, not durable provider pricing authority.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The ingress says the package was reviewed by clicking through it, identifies exactly five delivered asks, and keeps DNS/redirects absent pending seam work.",
+          "lesson": "Put review method, numerator/denominator, and honest omissions in the opening."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "The ledger says concept work and several seams await owner calls while also using superlative throughput language.",
+          "lesson": "Keep dynamic dependencies prominent and avoid praise becoming a substitute for closure evidence."
+        }
+      ],
+      "duplicate_disposition": "Companion to netlify-vercel-next-screen-asks: this is the dated acceptance result while that paper owns the request rationale; existing links are the right boundary.",
+      "reader_risks": [
+        "Studio: lead with current authority and outcome; collapse fixture payloads, historical phase plans, branch names, and long verification ledgers.",
+        "TUI80: keep one decision per screen, wrap wide tables, preserve code separately, and give legacy HTML papers a native-block outline.",
+        "email: send outcome, material caveat, and next owner action; link the full fixtures, credentials, matrices, and phase chronology.",
+        "public: remove internal paths, UUIDs, credential locations, operator commands, account details, hardware facts, and mutable price/version claims.",
+        "CLI/API: preserve exact ids, revisions, hashes, test counts, phase boundaries, and distinctions among designed, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Keep: concise, linked, honest acceptance evidence with an explicit partial result."
+    },
+    {
+      "unit_id": "paper:netlify-vercel-next-screen-asks",
+      "document_id": "netlify-vercel-next-screen-asks",
+      "document_rev": "5d5598549bfdde3c122e953d4b42e92e",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Competitor-informed but identity-filtered brief for seven immediate screen requests, three gated concepts, and explicit anti-goals.",
+      "opening_and_criteria": "blocks[2]-[4] establish the comparison source, decision filter, 7+3 scope, and backend reality for each immediate ask.",
+      "outline_and_hierarchy": "Request table, concept table, anti-goals, sequencing, and one-line strategy provide a clean decision hierarchy.",
+      "human_voice_and_precision": "Specific and opinionated without cosplay: every competitor pattern is accepted, inverted, or rejected against Barkpark identity.",
+      "compression_and_restraint": "Keep the tables; periodically refresh backend-reality cells and move implementation estimates out if they become operational commitments.",
+      "evidence_and_truth": "The document distinguishes request-able, seam-gated, and owner-gated work; some backend-effort claims remain design estimates rather than measured proofs.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "Six deliberate skips explain what Barkpark refuses and why, preventing competitor parity from becoming scope mimicry.",
+          "lesson": "A good comparison brief records anti-goals as explicitly as desired parity."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "The logs row says a streaming relay needs “no new infra” without treating authorization, retention, backpressure, or privacy as acceptance criteria.",
+          "lesson": "Backend-reality columns should distinguish a present primitive from production-ready delivery scope."
+        }
+      ],
+      "duplicate_disposition": "Parent rationale for n-screens-interactive-walkthrough; keep separate and preserve reciprocal links so asks do not absorb acceptance history.",
+      "reader_risks": [
+        "Studio: lead with current authority and outcome; collapse fixture payloads, historical phase plans, branch names, and long verification ledgers.",
+        "TUI80: keep one decision per screen, wrap wide tables, preserve code separately, and give legacy HTML papers a native-block outline.",
+        "email: send outcome, material caveat, and next owner action; link the full fixtures, credentials, matrices, and phase chronology.",
+        "public: remove internal paths, UUIDs, credential locations, operator commands, account details, hardware facts, and mutable price/version claims.",
+        "CLI/API: preserve exact ids, revisions, hashes, test counts, phase boundaries, and distinctions among designed, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Keep: unusually disciplined competitor analysis with identity filter, sequencing, and anti-goals."
+    },
+    {
+      "unit_id": "paper:nextgen-wiki-living-values-v1",
+      "document_id": "nextgen-wiki-living-values-v1",
+      "document_rev": "d0c5ef68af33d2c7888f1568eab154a9",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Lean semantic-wiki specification for live values, impact traversal, expectation/task integration, and provenance over existing Barkpark graph primitives.",
+      "opening_and_criteria": "blocks[1]-[3] clearly state north star, review provenance, audience, scope, and reuse-first constraint.",
+      "outline_and_hierarchy": "Twelve numbered sections are navigable, but blocks[8], [14], [20], and [39] concentrate too many contracts, exceptions, file pointers, and amendments into single blocks.",
+      "human_voice_and_precision": "Precise and self-critical; it names retired assumptions, security boundaries, inert primitives, and editor-loss traps rather than selling a clean fiction.",
+      "compression_and_restraint": "Create a short normative v1 contract and move ground-truth inventory, wiring map, and ratified decisions into appendices; add a one-line description.",
+      "evidence_and_truth": "Assertions often carry file:line anchors and explicit not-found statements, but the “ONE new primitive” headline is narrower than the several new extraction, resolver, editor, reprojection, and backfill obligations later admitted.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[14]",
+          "evidence": "The blind-spots section names four lockstep surfaces and the exact editor behavior that can silently delete a childless inline node.",
+          "lesson": "A spec should expose cross-surface data-loss traps before acceptance criteria."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[21]",
+          "evidence": "After promising only one new node/check primitive, the paragraph adds resolver extensions, body-walk extraction, reprojection wiring, backfill, editor conversion, and server pre-resolve plumbing.",
+          "lesson": "Separate conceptual primitives from implementation work so “lean” scope cannot hide delivery breadth."
+        }
+      ],
+      "duplicate_disposition": "Distinct product specification; no assigned duplicate. Cross-link task/graph contracts instead of copying their implementation inventories inline.",
+      "reader_risks": [
+        "Studio: lead with current authority and outcome; collapse fixture payloads, historical phase plans, branch names, and long verification ledgers.",
+        "TUI80: keep one decision per screen, wrap wide tables, preserve code separately, and give legacy HTML papers a native-block outline.",
+        "email: send outcome, material caveat, and next owner action; link the full fixtures, credentials, matrices, and phase chronology.",
+        "public: remove internal paths, UUIDs, credential locations, operator commands, account details, hardware facts, and mutable price/version claims.",
+        "CLI/API: preserve exact ids, revisions, hashes, test counts, phase boundaries, and distinctions among designed, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: technically rigorous, but the normative contract is buried inside a dense amended dossier and its scope slogan needs reconciliation."
+    },
+    {
+      "unit_id": "paper:noo-noo-disk-guardian-wave-2026-07-15",
+      "document_id": "noo-noo-disk-guardian-wave-2026-07-15",
+      "document_rev": "9d5db4d28038437527477a7e8a59775d",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Founding Noo-Noo disk-guardian wave: turn a one-machine storage incident into clone-aware sizing, leak detection, safe offload, and velocity policy.",
+      "opening_and_criteria": "body_html[0]-[17] front-load a corrected final status, verbatim wish, observed machine facts, and the product direction.",
+      "outline_and_hierarchy": "An append-only Strategize→Survey→Verify→Decide→Build→Review chronology is evidentially rich but 125 semantic HTML segments bury the final reusable authority.",
+      "human_voice_and_precision": "The voice is concrete and candid, especially where live probes refute destructive hypotheses and preserve user data.",
+      "compression_and_restraint": "Convert to native blocks; keep a one-screen current outcome and decision summary, then collapse historical plans/branches into a dated appendix.",
+      "evidence_and_truth": "Live APFS, store, safety, volume, and gate proofs are unusually specific; branch/host coordinates and mid-wave language are historical evidence, not current instructions.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[80]",
+          "evidence": "The APFS verifier reports exact file count, errors, elapsed time, clone savings, and a counterexample that limits extent-union to scoped use.",
+          "lesson": "Pair a bold architecture claim with live cost and counterexample evidence."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[101]",
+          "evidence": "The middle of a paper whose opening says WAVE COMPLETE still labels the wave plan “IN FLIGHT,” forcing readers to reconcile chronology by position.",
+          "lesson": "Append-only wave papers need explicit historical labels or collapsed sections after closure."
+        }
+      ],
+      "duplicate_disposition": "Founding chronology, not duplicate of Wave 2; keep separate as immutable history, add a shared Noo-Noo index, and do not merge evidence across revisions.",
+      "reader_risks": [
+        "Studio: lead with current authority and outcome; collapse fixture payloads, historical phase plans, branch names, and long verification ledgers.",
+        "TUI80: keep one decision per screen, wrap wide tables, preserve code separately, and give legacy HTML papers a native-block outline.",
+        "email: send outcome, material caveat, and next owner action; link the full fixtures, credentials, matrices, and phase chronology.",
+        "public: remove internal paths, UUIDs, credential locations, operator commands, account details, hardware facts, and mutable price/version claims.",
+        "CLI/API: preserve exact ids, revisions, hashes, test counts, phase boundaries, and distinctions among designed, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: excellent technical record, but legacy-only, host-specific, and too chronologically dense for five-reader current authority."
+    },
+    {
+      "unit_id": "paper:noo-noo-disk-guardian-wave2-2026-07-15",
+      "document_id": "noo-noo-disk-guardian-wave2-2026-07-15",
+      "document_rev": "dec5974f53d040c05f8cb5f3fa7c8daf",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Second Noo-Noo wave extending the guardian into posture, trends, recurrence, generalized playbooks, alerts, and deferred relocation.",
+      "opening_and_criteria": "body_html[0]-[14] state the wish and product direction well, but the first status line remains BUILDING despite a later closed review.",
+      "outline_and_hierarchy": "The verification table and eight-slice debrief are strong, yet 103 semantic HTML segments mix planning, disprovals, merge coordinates, and final product truth.",
+      "human_voice_and_precision": "Honest about corrected corruption framing, three reviewer-found cross-slice defects, and two surfaces still awaiting live history.",
+      "compression_and_restraint": "Front-load CLOSED plus shipped/stalled/next; convert to native blocks; archive builder branches, machine paths, and massive proof tables behind expanders or appendices.",
+      "evidence_and_truth": "Actually-run outputs and final integrated/live-smoke proofs are strong, but mutable branch/daemon/host statements need dated historical framing.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[55]",
+          "evidence": "The verification table distinguishes proven, refuted, not-found, live-smoked, and zero-match test-filter evidence before decisions are made.",
+          "lesson": "Use proof posture vocabulary explicitly and record when a plausible test command proves nothing."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[1]",
+          "evidence": "The opening still says BUILDING and “builders dispatch next,” while body_html[76] later declares CLOSED with all eight slices built.",
+          "lesson": "The first status a reader sees must be the final authority after an append-only wave closes."
+        }
+      ],
+      "duplicate_disposition": "Separate successor to the founding wave; preserve distinct revision evidence and add a shared chronology/index rather than merging.",
+      "reader_risks": [
+        "Studio: lead with current authority and outcome; collapse fixture payloads, historical phase plans, branch names, and long verification ledgers.",
+        "TUI80: keep one decision per screen, wrap wide tables, preserve code separately, and give legacy HTML papers a native-block outline.",
+        "email: send outcome, material caveat, and next owner action; link the full fixtures, credentials, matrices, and phase chronology.",
+        "public: remove internal paths, UUIDs, credential locations, operator commands, account details, hardware facts, and mutable price/version claims.",
+        "CLI/API: preserve exact ids, revisions, hashes, test counts, phase boundaries, and distinctions among designed, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: strong proof and debrief, but a stale opening status and legacy chronology make current state unreliable at a glance."
+    },
+    {
+      "unit_id": "paper:onboarding-composition-wave-2026-07-14",
+      "document_id": "onboarding-composition-wave-2026-07-14",
+      "document_rev": "f8567decc0615663bf13a3da09f86556",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-2 recovery record for re-landing stranded onboarding identity work, activating instance identity, and composing the whoami/doctor receipt.",
+      "opening_and_criteria": "body_html[0]-[20] explain the wish and correctly treat earlier “done” claims as unverified, but the top phase remains SURVEYING after final review.",
+      "outline_and_hierarchy": "Full phase chronology provides forensic value; 125 semantic HTML segments make the final three-slice authority hard to reach on constrained readers.",
+      "human_voice_and_precision": "Excellent epistemic discipline: it predicts and then proves the stranded-branch failure, changes from build-fresh to recover, and names the activation gap.",
+      "compression_and_restraint": "Convert to native blocks, replace the stale phase line, lead with recovery outcome/integration proof, and move branch hashes plus survey roster into history.",
+      "evidence_and_truth": "The revision differentiates origin-main facts, located commits, test proof, merge gating, and known limits; current branch details remain historical.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[94]",
+          "evidence": "The verifier proves the supposedly completed Wave-1 work is stranded with merge-base and remote-containment evidence, then locates the three exact commits.",
+          "lesson": "When ledger state conflicts with source control, prove reachability before choosing rebuild versus recover."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[1]",
+          "evidence": "The first metadata line still says Phase: SURVEYING although body_html[112] says final, merge-ready review.",
+          "lesson": "Closed living documents must rewrite or supersede their opening status."
+        }
+      ],
+      "duplicate_disposition": "Distinct Wave-2 recovery authority from Wave 3 edge-hardening; retain separately and link the wave chain.",
+      "reader_risks": [
+        "Studio: lead with current authority and outcome; collapse fixture payloads, historical phase plans, branch names, and long verification ledgers.",
+        "TUI80: keep one decision per screen, wrap wide tables, preserve code separately, and give legacy HTML papers a native-block outline.",
+        "email: send outcome, material caveat, and next owner action; link the full fixtures, credentials, matrices, and phase chronology.",
+        "public: remove internal paths, UUIDs, credential locations, operator commands, account details, hardware facts, and mutable price/version claims.",
+        "CLI/API: preserve exact ids, revisions, hashes, test counts, phase boundaries, and distinctions among designed, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: valuable and honest recovery evidence, but stale status plus legacy-only bulk undermines current five-reader use."
+    },
+    {
+      "unit_id": "paper:onboarding-composition-wave-2026-07-16",
+      "document_id": "onboarding-composition-wave-2026-07-16",
+      "document_rev": "bba86d898e44f8e2c9510a29e1dc9c7d",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-3 edge-hardening record for offline, non-interactive, custom-host, persistence, and clean-install onboarding truthfulness.",
+      "opening_and_criteria": "body_html[2]-[19] correctly front-load final A- status, five slices, remaining merge gates, and the single through-line.",
+      "outline_and_hierarchy": "The current header is better than the other legacy waves, but 114 semantic HTML segments still combine survey inventory, proofs, decisions, branch train, and debrief in one long body.",
+      "human_voice_and_precision": "Precise, restrained, and candid about PowerShell not being runtime-tested and stale-alias risk.",
+      "compression_and_restraint": "Preserve the current-status opening; convert to native blocks and collapse the survey/branch chronology while retaining decision and final-proof appendices.",
+      "evidence_and_truth": "Per-slice gates and cross-slice coherence are explicit; it carefully distinguishes gate-green/reviewed from merged and deployed.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[111]",
+          "evidence": "The A- rationale names two exact limits—PowerShell only structurally checked and stale aliases not reconciled—without misclassifying them as shipped defects.",
+          "lesson": "A grade is useful when it names the withheld evidence and residual consumer risk."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[103]",
+          "evidence": "The final-state table embeds branch names, test totals, migration coordinates, and detailed implementation verdicts in one legacy HTML table.",
+          "lesson": "Keep final outcomes scannable and move integration coordinates to a machine-oriented appendix."
+        }
+      ],
+      "duplicate_disposition": "Distinct successor to Wave 2: one recovers identity plumbing, the other hardens edge behavior; link, do not merge.",
+      "reader_risks": [
+        "Studio: lead with current authority and outcome; collapse fixture payloads, historical phase plans, branch names, and long verification ledgers.",
+        "TUI80: keep one decision per screen, wrap wide tables, preserve code separately, and give legacy HTML papers a native-block outline.",
+        "email: send outcome, material caveat, and next owner action; link the full fixtures, credentials, matrices, and phase chronology.",
+        "public: remove internal paths, UUIDs, credential locations, operator commands, account details, hardware facts, and mutable price/version claims.",
+        "CLI/API: preserve exact ids, revisions, hashes, test counts, phase boundaries, and distinctions among designed, built, reviewed, merged, deployed, and live-proven."
+      ],
+      "rationale": "Repair: current status and evidence are strong, but legacy presentation and oversized execution detail limit Studio/TUI/email fitness."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}
