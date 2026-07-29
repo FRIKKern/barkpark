@@ -1,0 +1,457 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S053",
+  "assignment_snapshot_sha256": "345913a49fee23be08596eb57dd21a1c3c2dd47df830cfeab611ae7c0f6ce819",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 18,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "eebdd4c5b7008ea5df69783f84048ee51c4f4efc6e65d6c79ad85e2983b26986"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read: 123 native top-level blocks and no legacy documents. Keep 5, repair 1, and mark 3 superseded. Review Wave 05 is terminal 503-unit release authority; Review 04 is predecessor evidence. Wave 3 is explicitly superseded, Wave 1 is founding history, and Wave 4 needs its self-revision repaired. Wave 5 is a distinct 2,991-physical-record audit charter. Survey Waves 01/02 remain non-overlapping raw evidence linked through the canonical digest.",
+  "verdict_counts": {
+    "keep": 5,
+    "repair": 1,
+    "superseded": 3
+  },
+  "checked_unit_ids": [
+    "paper:task-quality-review-wave-04-2026-07-18",
+    "paper:task-quality-review-wave-05-2026-07-18",
+    "paper:task-quality-standard-chrono-wave-1-2026-07-18",
+    "paper:task-quality-standard-chrono-wave-3-2026-07-18",
+    "paper:task-quality-standard-chrono-wave-4-2026-07-19",
+    "paper:task-quality-standard-chrono-wave-5-2026-07-22",
+    "paper:task-quality-survey-digest-verify-plan-2026-07-18",
+    "paper:task-quality-survey-wave-01-2026-07-18",
+    "paper:task-quality-survey-wave-02-2026-07-18"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 123,
+    "legacy_html_documents_read": 0,
+    "legacy_html_semantic_units_read": 0,
+    "legacy_html_chars_read": 0,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:task-quality-review-wave-05-2026-07-18 blocks[7]",
+      "evidence": "Terminal review separates reader health from semantic truth and issues an F/no-go."
+    },
+    {
+      "block_ref": "paper:task-quality-standard-chrono-wave-5-2026-07-22 blocks[7]",
+      "evidence": "The Why contract rejects criteria echoes and names contribution and omission consequence."
+    },
+    {
+      "block_ref": "paper:task-quality-survey-digest-verify-plan-2026-07-18 blocks[4]",
+      "evidence": "Aggregate findings are correctly labeled report-presence indicators."
+    },
+    {
+      "block_ref": "paper:task-quality-survey-wave-01-2026-07-18 blocks[8]",
+      "evidence": "Survey records keep facts, inference, and unvisited proof separate."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:task-quality-review-wave-04-2026-07-18 blocks[13]",
+      "evidence": "The review fleet is still three reports short.",
+      "lesson": "Use Review 05 for terminal status."
+    },
+    {
+      "block_ref": "paper:task-quality-standard-chrono-wave-4-2026-07-19 blocks[1]",
+      "evidence": "The embedded current-authority revision differs from the pinned revision.",
+      "lesson": "Self-authority pointers must track live immutable identity."
+    },
+    {
+      "block_ref": "paper:task-quality-survey-wave-01-2026-07-18 blocks[6]",
+      "evidence": "Exact rank evidence is compressed into a giant callout.",
+      "lesson": "Structure raw evidence for constrained readers."
+    },
+    {
+      "block_ref": "paper:task-quality-standard-chrono-wave-1-2026-07-18 blocks[24]",
+      "evidence": "Transport passes while semantic and reader gates fail.",
+      "lesson": "Mechanical exactness is not release truth."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "task-quality-review-wave-04-2026-07-18",
+        "task-quality-review-wave-05-2026-07-18"
+      ],
+      "basis": "They are consecutive immutable review packets: Reviews 10–12 and terminal Reviews 13–15.",
+      "disposition": "Do not merge receipts; mark Review 04 superseded for current status and use Review 05 as terminal release authority."
+    },
+    {
+      "candidate_set": [
+        "task-quality-standard-chrono-wave-1-2026-07-18",
+        "task-quality-standard-chrono-wave-3-2026-07-18",
+        "task-quality-standard-chrono-wave-4-2026-07-19",
+        "task-quality-standard-chrono-wave-5-2026-07-22"
+      ],
+      "basis": "They are campaign authority layers: founding 503 charter, Wave-3 superseded stub, Wave-4 correction, and a new 2,991-record full-corpus charter.",
+      "disposition": "Preserve history; supersede Wave 1/3 for current status, repair Wave 4 self-revision, and keep Wave 5 separate because its physical-record inventory and contract differ."
+    },
+    {
+      "candidate_set": [
+        "task-quality-survey-wave-01-2026-07-18",
+        "task-quality-survey-wave-02-2026-07-18",
+        "task-quality-survey-digest-verify-plan-2026-07-18"
+      ],
+      "basis": "Wave 01/02 own non-overlapping raw rank ranges; the digest folds all 60 reports and owns Verify planning.",
+      "disposition": "Do not merge raw shards. Link both evidence ledgers through the digest and offer structured projections."
+    }
+  ],
+  "reader_risks": [
+    "Studio: show campaign/corpus size, wave role, current-versus-superseded state, and release verdict before hashes and fleet arithmetic; collapse raw shard evidence.",
+    "TUI80: wrap queue laws and long evidence callouts, paginate exact IDs, and keep counts/revisions aligned in a stable key-value layout.",
+    "email: send the release/no-go verdict, honest outcome totals, one blocker, and a link; omit manifests, report hashes, and shard-level evidence.",
+    "public: remove internal task IDs, repository HEADs, hosts, orchestration incidents, and sensitive mutation contracts; preserve honest shipped/stalled/excluded totals.",
+    "CLI/API: preserve physical versus logical identity, exact revisions/digests, fleet counts, lifecycle semantics, correction ancestry, and mechanical-versus-semantic truth."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:task-quality-review-wave-04-2026-07-18",
+      "document_id": "task-quality-review-wave-04-2026-07-18",
+      "document_rev": "2bb35e2476442703012ea23ffdda1b21",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Reviews 10–12 of the 503-unit task-quality campaign, approving reader repair while rejecting semantic release and specifying successor contracts.",
+      "opening_and_criteria": "The opening immediately separates unchanged mechanical 53/280/170 from honest semantic 42/291/170 and names why release still fails.",
+      "outline_and_hierarchy": "Three numbered reviews, report hashes, orchestration containment, and the next three-review gate form a compact evidence packet.",
+      "human_voice_and_precision": "The prose refuses dummy blockers and refuses opening a successor from reconstructable evidence alone.",
+      "compression_and_restraint": "Preserve as Reviews 10–12 evidence; route current release status through Review Wave 05, which completes Reviews 13–15.",
+      "evidence_and_truth": "blocks[3]-[13] prove reader repair, queue/semantic gaps, correction-contract requirements, exact receipts, and the remaining review gate.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "Review 12 turns a vague correction need into named semantic receipts, ancestry, scope fencing, append-only promotion, negative tests, and reader parity.",
+          "lesson": "A correction wave needs executable ancestry and semantic contracts before it opens."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[13]",
+          "evidence": "The paper ends at Review 12/15 with three reviews still missing and explicitly forbids successor opening.",
+          "lesson": "Intermediate review waves should point prominently to their terminal successor."
+        }
+      ],
+      "duplicate_disposition": "Superseded for current release status by task-quality-review-wave-05-2026-07-18; retain as immutable Reviews 10–12 receipts.",
+      "reader_risks": [
+        "Studio: show campaign/corpus size, wave role, current-versus-superseded state, and release verdict before hashes and fleet arithmetic; collapse raw shard evidence.",
+        "TUI80: wrap queue laws and long evidence callouts, paginate exact IDs, and keep counts/revisions aligned in a stable key-value layout.",
+        "email: send the release/no-go verdict, honest outcome totals, one blocker, and a link; omit manifests, report hashes, and shard-level evidence.",
+        "public: remove internal task IDs, repository HEADs, hosts, orchestration incidents, and sensitive mutation contracts; preserve honest shipped/stalled/excluded totals.",
+        "CLI/API: preserve physical versus logical identity, exact revisions/digests, fleet counts, lifecycle semantics, correction ancestry, and mechanical-versus-semantic truth."
+      ],
+      "rationale": "Superseded because Review 05 completes the review fleet and owns the final F/no-go judgment."
+    },
+    {
+      "unit_id": "paper:task-quality-review-wave-05-2026-07-18",
+      "document_id": "task-quality-review-wave-05-2026-07-18",
+      "document_rev": "14bf87653114255df248aebe39e34ac3",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Terminal Reviews 13–15 establishing mechanical fleet exactness, minimum executable repair order, and a semantic release F/no-go.",
+      "opening_and_criteria": "The headline cleanly states that 148/148 mechanical completion does not make 53/280/170 semantically true.",
+      "outline_and_hierarchy": "Inventory coherence, implementation map, final release judgment, receipts, orchestration containment, and next gate are complete.",
+      "human_voice_and_precision": "The paper is direct enough to grade release F while still saying reader projections are healthy enough to disclose the failure.",
+      "compression_and_restraint": "Keep as terminal 503-unit review authority; surface 42/291/170 and the no-go before the repair inventory and hashes.",
+      "evidence_and_truth": "blocks[2]-[13] prove exact inventory/fleet completion, bounded implementation surfaces, immutable blockers, report evidence, and next actions.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "Review 15 separates meaningful reader presentation from false Task semantics and keeps the root in progress with 0/3 criteria.",
+          "lesson": "Reader health cannot compensate for false underlying state."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[11]",
+          "evidence": "Three synthesized bootstrap artifacts had to be quarantined before the canonical reviews completed.",
+          "lesson": "Mechanical fleet accounting must exclude orchestration artifacts from logical work."
+        }
+      ],
+      "duplicate_disposition": "Keep as the final review verdict; Review 04 remains linked predecessor evidence, not a competing current authority.",
+      "reader_risks": [
+        "Studio: show campaign/corpus size, wave role, current-versus-superseded state, and release verdict before hashes and fleet arithmetic; collapse raw shard evidence.",
+        "TUI80: wrap queue laws and long evidence callouts, paginate exact IDs, and keep counts/revisions aligned in a stable key-value layout.",
+        "email: send the release/no-go verdict, honest outcome totals, one blocker, and a link; omit manifests, report hashes, and shard-level evidence.",
+        "public: remove internal task IDs, repository HEADs, hosts, orchestration incidents, and sensitive mutation contracts; preserve honest shipped/stalled/excluded totals.",
+        "CLI/API: preserve physical versus logical identity, exact revisions/digests, fleet counts, lifecycle semantics, correction ancestry, and mechanical-versus-semantic truth."
+      ],
+      "rationale": "Keep because it completes the review fleet, gives a falsifiable no-go, and specifies the executable repair boundary."
+    },
+    {
+      "unit_id": "paper:task-quality-standard-chrono-wave-1-2026-07-18",
+      "document_id": "task-quality-standard-chrono-wave-1-2026-07-18",
+      "document_rev": "baf1a33c19ff7e5ad49892c7516f7f62",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Founding charter for a 503-task closure-first chronological quality campaign with queue law, general standard, typed fleets, and stop condition.",
+      "opening_and_criteria": "The user wish and queue law appear before machinery, making closure-nearest prioritization explicit.",
+      "outline_and_hierarchy": "Direction, scale, queue law, quality bar, fleet status, stop gate, survey plan, digest, verification, and experiment status are coherent.",
+      "human_voice_and_precision": "The paper is unusually honest that report signals are presence indicators and that exact transport can pass while semantics fail.",
+      "compression_and_restraint": "Preserve as founding campaign charter; route current 503-unit authority to Wave 4 and terminal release status to Review 05.",
+      "evidence_and_truth": "blocks[7]-[24] define the queue/quality contract and show Survey/Verify completion while Experiment round 1 fails the semantic hard gate.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "The ordered queue law combines effective unmet criteria, gate penalties, foreign-claim protection, chronological ties, and named skips.",
+          "lesson": "Priority laws should be executable and make every skip auditable."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[24]",
+          "evidence": "The experiment proves exact transport but fails dossier semantics and cross-reader projection, so the founding wave is not a release result.",
+          "lesson": "Transport exactness must not be mistaken for semantic quality."
+        }
+      ],
+      "duplicate_disposition": "Superseded for current status by the later correction authority and terminal review papers; retain as founding law.",
+      "reader_risks": [
+        "Studio: show campaign/corpus size, wave role, current-versus-superseded state, and release verdict before hashes and fleet arithmetic; collapse raw shard evidence.",
+        "TUI80: wrap queue laws and long evidence callouts, paginate exact IDs, and keep counts/revisions aligned in a stable key-value layout.",
+        "email: send the release/no-go verdict, honest outcome totals, one blocker, and a link; omit manifests, report hashes, and shard-level evidence.",
+        "public: remove internal task IDs, repository HEADs, hosts, orchestration incidents, and sensitive mutation contracts; preserve honest shipped/stalled/excluded totals.",
+        "CLI/API: preserve physical versus logical identity, exact revisions/digests, fleet counts, lifecycle semantics, correction ancestry, and mechanical-versus-semantic truth."
+      ],
+      "rationale": "Superseded because it is a charter/in-progress snapshot, not the corrected final authority."
+    },
+    {
+      "unit_id": "paper:task-quality-standard-chrono-wave-3-2026-07-18",
+      "document_id": "task-quality-standard-chrono-wave-3-2026-07-18",
+      "document_rev": "0950e7b3-2d68-4dd7-98bd-5cd4396a6c81",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Seven-block pointer preserving Wave 3’s 53/280/170 history while directing readers to the Wave 4 correction.",
+      "opening_and_criteria": "The first paragraph names Wave 4 as current authority and the exact corrected 42/291/170 totals.",
+      "outline_and_hierarchy": "Current pointer, correction rationale, and reader parity contract are concise and sufficient for a superseded stub.",
+      "human_voice_and_precision": "It explicitly preserves immutable history rather than silently rewriting eleven false shipped outcomes.",
+      "compression_and_restraint": "Keep only as the Wave-3 superseded stub; avoid duplicating it into current authority navigation.",
+      "evidence_and_truth": "blocks[1]-[6] state the successor, old/new totals, non-rewrite principle, activation gates, and cross-reader contract.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "The correction changes -11 shipped/+11 stalled while preserving all 503 identities and refusing activation until every authority agrees.",
+          "lesson": "Supersession should correct totals without erasing the prior record."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The paper itself says Wave 3 is superseded evidence and Wave 4 is current.",
+          "lesson": "Honor explicit authority state instead of treating identical-looking summaries as peers."
+        }
+      ],
+      "duplicate_disposition": "Superseded by task-quality-standard-chrono-wave-4-2026-07-19 by explicit content contract.",
+      "reader_risks": [
+        "Studio: show campaign/corpus size, wave role, current-versus-superseded state, and release verdict before hashes and fleet arithmetic; collapse raw shard evidence.",
+        "TUI80: wrap queue laws and long evidence callouts, paginate exact IDs, and keep counts/revisions aligned in a stable key-value layout.",
+        "email: send the release/no-go verdict, honest outcome totals, one blocker, and a link; omit manifests, report hashes, and shard-level evidence.",
+        "public: remove internal task IDs, repository HEADs, hosts, orchestration incidents, and sensitive mutation contracts; preserve honest shipped/stalled/excluded totals.",
+        "CLI/API: preserve physical versus logical identity, exact revisions/digests, fleet counts, lifecycle semantics, correction ancestry, and mechanical-versus-semantic truth."
+      ],
+      "rationale": "Superseded because it is intentionally a pointer to the Wave-4 correction authority."
+    },
+    {
+      "unit_id": "paper:task-quality-standard-chrono-wave-4-2026-07-19",
+      "document_id": "task-quality-standard-chrono-wave-4-2026-07-19",
+      "document_rev": "467b0c3d-72b9-481a-8b06-802060b11951",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Compact Wave-4 release-authority page correcting eleven 503-unit outcomes from shipped to stalled without rewriting Wave 3.",
+      "opening_and_criteria": "The opening declares current authority, corrected totals, and the predecessor/successor relationship.",
+      "outline_and_hierarchy": "Correction statement, safety rationale, and reader parity contract fit in seven native blocks.",
+      "human_voice_and_precision": "The page is admirably strict that authority activation fails closed on any reader/source mismatch.",
+      "compression_and_restraint": "Repair the self-authority revision and add relationship to the newer 2,991-record Wave 5 audit while preserving this 503-unit correction role.",
+      "evidence_and_truth": "blocks[1]-[6] state exact totals, immutable predecessor history, promotion gates, and reader consistency requirements.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "The paper preserves 53/280/170 as immutable Wave-3 history while making 42/291/170 the correction and gating promotion on all authorities.",
+          "lesson": "Correct authority by append-only supersession, not history edits."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[1]",
+          "evidence": "The body names revision c1d0fee1-ac02-4042-bd95-5062ec64ad7d as current, but this pinned document revision is 467b0c3d-72b9-481a-8b06-802060b11951.",
+          "lesson": "A release-authority page must not contain a stale or unexplained self-revision pointer."
+        }
+      ],
+      "duplicate_disposition": "Current authority for the older 503-unit corpus; Wave 5 is a larger new freeze, not a text merge, but should be linked as the newer campaign.",
+      "reader_risks": [
+        "Studio: show campaign/corpus size, wave role, current-versus-superseded state, and release verdict before hashes and fleet arithmetic; collapse raw shard evidence.",
+        "TUI80: wrap queue laws and long evidence callouts, paginate exact IDs, and keep counts/revisions aligned in a stable key-value layout.",
+        "email: send the release/no-go verdict, honest outcome totals, one blocker, and a link; omit manifests, report hashes, and shard-level evidence.",
+        "public: remove internal task IDs, repository HEADs, hosts, orchestration incidents, and sensitive mutation contracts; preserve honest shipped/stalled/excluded totals.",
+        "CLI/API: preserve physical versus logical identity, exact revisions/digests, fleet counts, lifecycle semantics, correction ancestry, and mechanical-versus-semantic truth."
+      ],
+      "rationale": "Repair because the authority design is strong but its self-revision no longer matches the pinned live revision."
+    },
+    {
+      "unit_id": "paper:task-quality-standard-chrono-wave-5-2026-07-22",
+      "document_id": "task-quality-standard-chrono-wave-5-2026-07-22",
+      "document_rev": "7acb827e214d414f8958408ec95cce08",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "New full-corpus 2,991-physical-record Task quality audit charter centered on useful Why, verified done state, and explicit duplicate verdicts.",
+      "opening_and_criteria": "The corpus identity and user’s critique of useless rationale appear before the contract, making the larger goal human and measurable.",
+      "outline_and_hierarchy": "Why contract, truth/duplicate gates, frozen baseline, deterministic Survey-60 map, and terminal stop condition are compact and complete for a charter.",
+      "human_voice_and_precision": "It distinguishes candidate metrics from automatic defects and physical records from logical-id shortcuts.",
+      "compression_and_restraint": "Keep as the 2,991-record campaign charter; add ongoing fleet status only when typed evidence begins and link the older 503-unit authority as prior scope.",
+      "evidence_and_truth": "blocks[6]-[15] define useful rationale, done/duplicate proof, baseline candidates, exact assignment map, and no-shortcut stop condition.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "The Why contract names ultimate goal, parent contribution, chosen intervention, and omission consequence while rejecting criterion echoes.",
+          "lesson": "Purpose is not a restatement of acceptance criteria."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[13]",
+          "evidence": "The Survey-60 map is ready but explicitly does not count as fleet work until typed agents return evidence.",
+          "lesson": "Prepared assignments must not be counted as completed investigation."
+        }
+      ],
+      "duplicate_disposition": "Keep distinct from the 503-unit campaign because it freezes 2,991 physical records under a stronger identity and Why contract.",
+      "reader_risks": [
+        "Studio: show campaign/corpus size, wave role, current-versus-superseded state, and release verdict before hashes and fleet arithmetic; collapse raw shard evidence.",
+        "TUI80: wrap queue laws and long evidence callouts, paginate exact IDs, and keep counts/revisions aligned in a stable key-value layout.",
+        "email: send the release/no-go verdict, honest outcome totals, one blocker, and a link; omit manifests, report hashes, and shard-level evidence.",
+        "public: remove internal task IDs, repository HEADs, hosts, orchestration incidents, and sensitive mutation contracts; preserve honest shipped/stalled/excluded totals.",
+        "CLI/API: preserve physical versus logical identity, exact revisions/digests, fleet counts, lifecycle semantics, correction ancestry, and mechanical-versus-semantic truth."
+      ],
+      "rationale": "Keep because it is concise, native, deterministic, and honest about prepared versus executed work."
+    },
+    {
+      "unit_id": "paper:task-quality-survey-digest-verify-plan-2026-07-18",
+      "document_id": "task-quality-survey-digest-verify-plan-2026-07-18",
+      "document_rev": "f2edf5b4204e5678c08bc6f67811d58d",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Canonical digest of all 60 survey reports and exact 30-shard verification plan for the frozen 503-task campaign.",
+      "opening_and_criteria": "The opening gives the corpus hash and proves exhaustive 60/60 coverage rather than a sample.",
+      "outline_and_hierarchy": "Recurring signals, critical unknowns, verifier contract, ownership/order, exact manifest, exit gate, and security boundary are complete.",
+      "human_voice_and_precision": "The paper repeatedly refuses to convert report-presence counts into invented per-task frequencies.",
+      "compression_and_restraint": "Keep as Survey→Verify bridge authority; collapse the 30-shard manifest for ordinary readers while preserving it exactly for CLI/API.",
+      "evidence_and_truth": "blocks[2]-[16] cover exhaustive corpus identity, honest signal counts, proof requirements, non-overlap, exact exit conditions, and fenced edges.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "Recurring debts are labeled report-presence indicators rather than per-Task totals.",
+          "lesson": "Aggregation must not claim a denominator its evidence does not support."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[16]",
+          "evidence": "Provider credentials, destructive operations, human sign-off, and reader mutations remain explicitly unvisited.",
+          "lesson": "Verification plans should disclose security and authority boundaries before execution."
+        }
+      ],
+      "duplicate_disposition": "Distinct from Survey Waves 01/02: this folds all 60 reports and owns the Verify manifest, while they preserve raw rank evidence.",
+      "reader_risks": [
+        "Studio: show campaign/corpus size, wave role, current-versus-superseded state, and release verdict before hashes and fleet arithmetic; collapse raw shard evidence.",
+        "TUI80: wrap queue laws and long evidence callouts, paginate exact IDs, and keep counts/revisions aligned in a stable key-value layout.",
+        "email: send the release/no-go verdict, honest outcome totals, one blocker, and a link; omit manifests, report hashes, and shard-level evidence.",
+        "public: remove internal task IDs, repository HEADs, hosts, orchestration incidents, and sensitive mutation contracts; preserve honest shipped/stalled/excluded totals.",
+        "CLI/API: preserve physical versus logical identity, exact revisions/digests, fleet counts, lifecycle semantics, correction ancestry, and mechanical-versus-semantic truth."
+      ],
+      "rationale": "Keep because it is exact, restrained, and clear about coverage versus inference."
+    },
+    {
+      "unit_id": "paper:task-quality-survey-wave-01-2026-07-18",
+      "document_id": "task-quality-survey-wave-01-2026-07-18",
+      "document_rev": "de80e2a8b8139f4e35f5bc39fd0b0e6a",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Raw Survey 01–03 evidence ledger for closure-first ranks 1–27, including live identities, rubric verdicts, reader risks, and preservation boundaries.",
+      "opening_and_criteria": "The summary names dominant defects, then authority/digests bind the three exact reports.",
+      "outline_and_hierarchy": "A compact frame surrounds three very large exact evidence callouts and an explicit coverage boundary.",
+      "human_voice_and_precision": "Individual records separate facts from inference and avoid closing tasks from boolean criteria alone.",
+      "compression_and_restraint": "Keep as immutable raw evidence; provide structured tables/downloads and short per-rank summaries because giant callouts are difficult in every reader.",
+      "evidence_and_truth": "blocks[6]-[9] preserve exact IDs/revisions and per-record rubric outcomes; block[11] states what survey did not prove.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "Rank-one evidence distinguishes reproducible-form evidence from rerun proof and makes closure conditional on authority recheck.",
+          "lesson": "Survey verdicts should not silently upgrade cited receipts into executed verification."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[6]",
+          "evidence": "Nine rank records are compressed into one enormous callout, impairing navigation, comparison, TUI wrapping, and email projection.",
+          "lesson": "Exact evidence needs structured rows or attachments, not monolithic prose blocks."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from Survey Wave 02 because ownership is non-overlapping ranks 1–27; link both through the canonical digest.",
+      "reader_risks": [
+        "Studio: show campaign/corpus size, wave role, current-versus-superseded state, and release verdict before hashes and fleet arithmetic; collapse raw shard evidence.",
+        "TUI80: wrap queue laws and long evidence callouts, paginate exact IDs, and keep counts/revisions aligned in a stable key-value layout.",
+        "email: send the release/no-go verdict, honest outcome totals, one blocker, and a link; omit manifests, report hashes, and shard-level evidence.",
+        "public: remove internal task IDs, repository HEADs, hosts, orchestration incidents, and sensitive mutation contracts; preserve honest shipped/stalled/excluded totals.",
+        "CLI/API: preserve physical versus logical identity, exact revisions/digests, fleet counts, lifecycle semantics, correction ancestry, and mechanical-versus-semantic truth."
+      ],
+      "rationale": "Keep because it is exact, bounded, and honest, though its presentation should be structured downstream."
+    },
+    {
+      "unit_id": "paper:task-quality-survey-wave-02-2026-07-18",
+      "document_id": "task-quality-survey-wave-02-2026-07-18",
+      "document_rev": "576443ae6290c83980fd34d9ffe0cfd8",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Raw Survey 04–06 evidence ledger for closure-first ranks 28–54 with stable rereads and targeted repository provenance.",
+      "opening_and_criteria": "The opening states the exact rank range and recurring contract, lifecycle, routing, and reader findings.",
+      "outline_and_hierarchy": "Authority, three exact report callouts, and a clear coverage boundary form a consistent continuation of Wave 01.",
+      "human_voice_and_precision": "Reports distinguish live envelope facts from inference, read parents when needed, and preserve blocker/repair risk.",
+      "compression_and_restraint": "Keep as immutable rank evidence; convert monolithic callouts into structured per-task rows or downloadable receipts without changing content.",
+      "evidence_and_truth": "blocks[6]-[10] preserve exact identities, rubric results, provenance checks, and explicit unvisited reader/external edges.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "Survey 06 separates current-code absence and done-parent contradiction from the inference that routing/labels need repair.",
+          "lesson": "Keep observed state and proposed repair in separate fields."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[6]",
+          "evidence": "The first nine-rank report is a single extremely dense callout with IDs, revisions, and prose findings intermixed.",
+          "lesson": "Machine-exact evidence still needs a navigable representation for humans and constrained readers."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from Survey Wave 01 because it owns ranks 28–54; both feed the digest rather than merge their immutable shard receipts.",
+      "reader_risks": [
+        "Studio: show campaign/corpus size, wave role, current-versus-superseded state, and release verdict before hashes and fleet arithmetic; collapse raw shard evidence.",
+        "TUI80: wrap queue laws and long evidence callouts, paginate exact IDs, and keep counts/revisions aligned in a stable key-value layout.",
+        "email: send the release/no-go verdict, honest outcome totals, one blocker, and a link; omit manifests, report hashes, and shard-level evidence.",
+        "public: remove internal task IDs, repository HEADs, hosts, orchestration incidents, and sensitive mutation contracts; preserve honest shipped/stalled/excluded totals.",
+        "CLI/API: preserve physical versus logical identity, exact revisions/digests, fleet counts, lifecycle semantics, correction ancestry, and mechanical-versus-semantic truth."
+      ],
+      "rationale": "Keep because it extends exact non-overlapping evidence with honest provenance and coverage boundaries."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}
