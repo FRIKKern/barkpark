@@ -1,0 +1,471 @@
+{
+  "actual_command_output": {
+    "go_pdrender_tests": {
+      "command": "go test ./internal/pdrender/...",
+      "exit_code": 0,
+      "stderr": {
+        "bytes": 0,
+        "output_excerpt": "",
+        "path": "logs/go-pdrender-tests.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stdout": {
+        "bytes": 369,
+        "output_excerpt": "ok  \tgithub.com/FRIKKern/barkpark/internal/pdrender\t1.029s\n?   \tgithub.com/FRIKKern/barkpark/internal/pdrender/cmd/demo\t[no test files]\n?   \tgithub.com/FRIKKern/barkpark/internal/pdrender/cmd/dump\t[no test files]\nok  \tgithub.com/FRIKKern/barkpark/internal/pdrender/cmd/htmlcheck\t0.319s\n?   \tgithub.com/FRIKKern/barkpark/internal/pdrender/cmd/widthcheck\t[no test files]\n",
+        "path": "logs/go-pdrender-tests.stdout",
+        "sha256": "4114415669d44c2ea19c99239b2f135138ed045e4160cf8e46439cecb310c6a2"
+      }
+    },
+    "migration_run": {
+      "command": "python3 migration_gate.py --fixtures inputs/fixtures --output artifacts",
+      "exit_code": 0,
+      "stderr": {
+        "bytes": 0,
+        "output_excerpt": "",
+        "path": "logs/migration-run.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stdout": {
+        "bytes": 198,
+        "output_excerpt": "{\"assignment_id\": \"PPCC2-E012\", \"fixture_count\": 9, \"hard_checks\": 63, \"hard_failures\": 0, \"hostile_quarantined\": 6, \"status\": \"PASS\", \"strict_json_rejections\": 3, \"tui40_max\": 40, \"tui80_max\": 80}\n",
+        "path": "logs/migration-run.stdout",
+        "sha256": "8e28c6fa3c8c7792db76324a9b9721385dd0abf1eb97faf772b47d8f43d21641"
+      }
+    },
+    "paper_reader_regression": {
+      "command": "bash scripts/audit-paper-readers-test.sh",
+      "exit_code": 0,
+      "stderr": {
+        "bytes": 0,
+        "output_excerpt": "",
+        "path": "logs/paper-reader-regression.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stdout": {
+        "bytes": 33,
+        "output_excerpt": "paper reader audit fixture: PASS\n",
+        "path": "logs/paper-reader-regression.stdout",
+        "sha256": "445622f62e694309b12b4731c143a28207d0aea58dd17a11a9603b02dc84bd65"
+      }
+    },
+    "python_compile": {
+      "command": "python3 -m py_compile migration_gate.py test_migration_gate.py assemble_report.py validate_report.py",
+      "exit_code": 0,
+      "stderr": {
+        "bytes": 0,
+        "output_excerpt": "",
+        "path": "logs/python-compile.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stdout": {
+        "bytes": 0,
+        "output_excerpt": "",
+        "path": "logs/python-compile.stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "python_tabnanny": {
+      "command": "python3 -m tabnanny migration_gate.py test_migration_gate.py assemble_report.py validate_report.py",
+      "exit_code": 0,
+      "stderr": {
+        "bytes": 0,
+        "output_excerpt": "",
+        "path": "logs/python-tabnanny.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stdout": {
+        "bytes": 0,
+        "output_excerpt": "",
+        "path": "logs/python-tabnanny.stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "unit_tests": {
+      "command": "python3 -m unittest -v test_migration_gate.py",
+      "exit_code": 0,
+      "stderr": {
+        "bytes": 557,
+        "output_excerpt": "test_hostile_shapes_quarantine_with_rollback (test_migration_gate.MigrationGateTest) ... ok\ntest_migration_is_idempotent_and_preserves_authored_blocks (test_migration_gate.MigrationGateTest) ... ok\ntest_safe_href_remains_reader_visible (test_migration_gate.MigrationGateTest) ... ok\ntest_semantic_headings_and_width (test_migration_gate.MigrationGateTest) ... ok\ntest_strict_json_rejects_duplicate_and_nonfinite (test_migration_gate.MigrationGateTest) ... ok\n\n----------------------------------------------------------------------\nRan 5 tests in 0.711s\n\nOK\n",
+        "path": "logs/unit-tests.stderr",
+        "sha256": "e7818e43b718e3fa2508c4ee005d6bfe6e00042b80bf3323f7ee6161f51a3999"
+      },
+      "stdout": {
+        "bytes": 0,
+        "output_excerpt": "",
+        "path": "logs/unit-tests.stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  },
+  "agent_type": "legendary-experimenter",
+  "assignment_id": "PPCC2-E012",
+  "coverage_matrix": {
+    "expected_fixture_count": 9,
+    "fixture_surface_cells": 45,
+    "hard_gate_cells": 63,
+    "observed_fixture_count": 9
+  },
+  "cycle_assignment_id": "51d48d9d-f661-4e0e-88dc-351e19eb04d5",
+  "delegation_compliance": {
+    "child_task": "e012_review_probe",
+    "child_thread_id": "/root/e012_review_probe",
+    "findings_integrated": [
+      "reconciled E008's E005 email recommendation against E009's E006 migration recommendation without declaring a winner",
+      "made every hard gate conjunctive and preserved exact 9-fixture/5-surface counts",
+      "added safe-link visibility and unsafe-link inert projection controls",
+      "kept capacity provisional and exact production renderer scope explicit"
+    ],
+    "personal_execution_boundary": "Read-only probe supplied risk review only; worker-3 personally implemented and executed every counted artifact and check.",
+    "serial_searches_before_spawn": 2,
+    "subagent_model": "gpt-5.6-terra",
+    "subagents_spawned": 1
+  },
+  "direct_answer": "The isolated E012 migration gate repairs E006's lossless base with strict RFC JSON, recursive typed validation, duplicate-ID rejection, deterministic machine-readable quarantine, exact source snapshots, semantic heading projection, safe-href visibility, and byte-identical reruns. All nine frozen fixtures passed all seven hard cross-surface gates; all six structured hostile inputs quarantined losslessly and all three malformed raw-JSON inputs were rejected. This is convergence evidence only, not a Round-5 pilot or production winner declaration.",
+  "effort": "medium",
+  "failures_and_rejected_candidates": [
+    {
+      "candidate": "PPCC2-E004",
+      "decision": "rejected",
+      "reasons": [
+        "irreversible normalization",
+        "Unicode and authored-content attack failures",
+        "no explicit quarantine"
+      ]
+    },
+    {
+      "candidate": "PPCC2-E005",
+      "decision": "rejected",
+      "reasons": [
+        "flattens authored structure",
+        "exact email preserves interactive details",
+        "unstructured malformed-input failures"
+      ]
+    },
+    {
+      "candidate": "PPCC2-E006 as-is",
+      "decision": "rejected_but_used_as_lossless_base",
+      "reasons": [
+        "permissive non-finite JSON",
+        "unknown/null/duplicate shapes accepted",
+        "no machine-readable quarantine",
+        "semantic heading and safe-href projection gaps"
+      ]
+    },
+    {
+      "attempt": "worktree-relative immutable assignment lookup",
+      "failure": "experiment-assignments.json absent from partial worker state",
+      "replacement": "read immutable source from leader checkout; copied only frozen E006 source fixtures into E012 isolated inputs"
+    }
+  ],
+  "fixture_ids": [
+    "paper:choosing-your-site-framework",
+    "paper:component-reference",
+    "paper:wave-deck",
+    "paper:cloud-console-hardening-wave-2026-07-21",
+    "paper:cloud-console-hardening-wave-3-2026-07-21",
+    "paper:spd-inspector-successor-wave-2026-07-20",
+    "paper:block-wishlist-100",
+    "paper:honest-gates-wave-4-2026-07-28",
+    "paper:task-tui-wave-2026-07-23b"
+  ],
+  "focus": "migration refinement",
+  "hostile_case_evidence": {
+    "raw_json_cases": {
+      "duplicate_keys": {
+        "error": "duplicate_json_key:type",
+        "rejected": true
+      },
+      "infinity": {
+        "error": "non_finite_json_constant:Infinity",
+        "rejected": true
+      },
+      "nan": {
+        "error": "non_finite_json_constant:NaN",
+        "rejected": true
+      }
+    },
+    "structured_cases": [
+      {
+        "case": "unknown_type",
+        "deterministic": true,
+        "raw_payload_preserved": true,
+        "reason_codes": [
+          "unknown_top_level_type:$.source.blocks[440]:legacyMystery",
+          "unknown_typed_node:$.source.blocks[440]:legacyMystery"
+        ],
+        "rollback_byte_exact": true,
+        "status": "quarantined"
+      },
+      {
+        "case": "duplicate_ids",
+        "deterministic": true,
+        "raw_payload_preserved": true,
+        "reason_codes": [
+          "duplicate_block_id:$.source.blocks[440]:bw-eyebrow"
+        ],
+        "rollback_byte_exact": true,
+        "status": "quarantined"
+      },
+      {
+        "case": "nested_null",
+        "deterministic": true,
+        "raw_payload_preserved": true,
+        "reason_codes": [
+          "null_not_allowed:$.source.blocks[0].content"
+        ],
+        "rollback_byte_exact": true,
+        "status": "quarantined"
+      },
+      {
+        "case": "missing_id",
+        "deterministic": true,
+        "raw_payload_preserved": true,
+        "reason_codes": [
+          "missing_block_id:$.source.blocks[0]"
+        ],
+        "rollback_byte_exact": true,
+        "status": "quarantined"
+      },
+      {
+        "case": "unknown_wrapper",
+        "deterministic": true,
+        "raw_payload_preserved": true,
+        "reason_codes": [
+          "source_kind_not_blocks:$.source"
+        ],
+        "rollback_byte_exact": true,
+        "status": "quarantined"
+      },
+      {
+        "case": "excessive_depth",
+        "deterministic": true,
+        "raw_payload_preserved": true,
+        "reason_codes": [
+          "max_depth_exceeded:$.source.blocks[0].content[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0]"
+        ],
+        "rollback_byte_exact": true,
+        "status": "quarantined"
+      }
+    ]
+  },
+  "link_control_evidence": {
+    "safe": {
+      "expected_marker": "https://example.invalid/safe",
+      "expected_marker_visible_on_all_human_surfaces": true,
+      "migration_status": "accepted",
+      "source_snapshot_exact": true,
+      "surface_gate_pass": true,
+      "unsafe_scheme_absent_from_all_human_surfaces": true
+    },
+    "unsafe": {
+      "expected_marker": "[blocked unsafe URL]",
+      "expected_marker_visible_on_all_human_surfaces": true,
+      "migration_status": "accepted",
+      "source_snapshot_exact": true,
+      "surface_gate_pass": true,
+      "unsafe_scheme_absent_from_all_human_surfaces": true
+    }
+  },
+  "metrics": {
+    "accessibility": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "batch_capacity": {
+      "largest_isolated_convergence_batch_passing": 9,
+      "provisional_only": true,
+      "reason": "Round 5 pilot alone may seal builder batch capacity.",
+      "units_attempted": 9,
+      "wall_seconds": 3.127441
+    },
+    "cli_api_round_trip": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "content_preservation": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "email_safety": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "observed_failure_rate": {
+      "hard_checks": 63,
+      "hard_failures": 0,
+      "rate": 0.0
+    },
+    "pilot_gate_pass_rate": {
+      "applicable": false,
+      "reason": "Round 4 convergence does not execute or claim Round 5 pilot evidence.",
+      "value": null
+    },
+    "portable_doc_schema_validity": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "rollback": {
+      "attempted": 15,
+      "pass": true,
+      "passed": 15,
+      "production_mutations": 0,
+      "rule": "restore source_snapshot byte-for-byte for accepted or quarantined inputs"
+    },
+    "studio_structural_completeness": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "tui_width": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80
+    }
+  },
+  "next_round_decision": {
+    "decision": "ELIGIBLE_FOR_ROUND5_PILOT_ONLY_AFTER_LEADER_INTEGRATES_ALL_ROUND4_REPORTS",
+    "reason": "E012 clears its migration/idempotence convergence rubric, but Round 5 requires three disjoint pilot assignments and leader-owned format selection.",
+    "round_5_started": false,
+    "winner_declared": false
+  },
+  "objective": "Independently refine migration/idempotence, authored-content preservation, rollback/quarantine, deterministic reruns, and freeze the scoring rubric.",
+  "personal_attestation": "worker-3 personally implemented and executed the PPCC2-E012 migration gate, hostile cases, cross-surface projections, tests, and report assembly. The read-only probe generated no counted result or artifact.",
+  "phase": "experiment",
+  "production_mutation_attestation": {
+    "cyclefleet_mutated": false,
+    "production_papers_mutated": false,
+    "repository_source_mutated": false,
+    "root_task_mutated": false,
+    "round_5_started": false,
+    "wave_paper_mutated": false,
+    "writes_limited_to": ".omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E012"
+  },
+  "receipts_sha256": "7bad1c6d43d6804498a980da6461b3d2ac926897fcb442c8e9bb13980235c09f",
+  "required_surfaces": [
+    "studio",
+    "tui80",
+    "tui40",
+    "email",
+    "cli_api"
+  ],
+  "round": 4,
+  "round3_reconciliation": {
+    "conflict_preserved": "E008 recommended repaired E005 for its email lane; E009 recommended repaired E006 for legacy/migration. E012 resolves only the migration focus and does not declare a global winner.",
+    "controlling_assignment_snapshot": "PPCC2-E012 / b7067c8d2bb2fe74ac22c09841f075965c56d4e73d19744f5251f0e9b89fcceb",
+    "decision": "Use E006 only as the migration/idempotence base because E009 proves it alone preserves the exact source tree; incorporate E008's noninteractive-email lesson without adopting E005's flattening chronology."
+  },
+  "round_key": "converge",
+  "runnable_artifact": {
+    "command": "python3 migration_gate.py --fixtures inputs/fixtures --output artifacts",
+    "path": "migration_gate.py",
+    "sha256": "a247785a33cffde7d4543e1b8fb76bd369a920352d7a21fa6392436442a1e970"
+  },
+  "schema_version": "ppcc2-experiment-report/v1",
+  "scoring_rubric_frozen": {
+    "accessibility": "9/9; deterministic reading order, one H1, authored heading hierarchy represented semantically",
+    "batch_capacity": "provisional 9 only; Round 5 alone may seal capacity",
+    "cli_api_round_trip": "9/9; strict decode and canonical re-encode are byte-identical",
+    "content_preservation": "9/9; exact authored block tree and source snapshot preserved; safe href visible on all human readers; unsafe href rendered as inert marker while raw source remains rollback-exact",
+    "email_safety": "9/9 isolated candidate projections; script-free, details-free linear HTML, one H1, semantic headings preserved, authored strings present; exact production renderer remains a Round-5 gate",
+    "observed_failure_rate": "0.0 across 63 convergence hard checks; Round 5 must independently remain 0.0",
+    "pilot_gate_pass_rate": "not applicable until Round 5; must be 1.0 on disjoint pilot batches before winner/seal",
+    "portable_doc_schema_validity": "9/9 accepted fixtures recursively valid; unknown/null/depth/duplicate shapes quarantine; strict JSON rejects duplicate keys and non-finite constants",
+    "rollback": "15/15 accepted+quarantined structured inputs restore source_snapshot exactly; zero production mutations",
+    "studio_structural_completeness": "9/9; one H1 plus one semantic h2-h6 per authored heading; every reader-visible authored string present",
+    "tui_width": "9/9; maximum display width <=80 and <=40 with no authored-string loss"
+  },
+  "slot": 3,
+  "snapshot_digest": "b7067c8d2bb2fe74ac22c09841f075965c56d4e73d19744f5251f0e9b89fcceb",
+  "status": "completed",
+  "unit_count": 9,
+  "unvisited_scope": [
+    "Authenticated hydrated Studio editing and assistive-technology clients",
+    "Exact production Studio/email renderer execution; E012 measures its isolated convergence projection only",
+    "Real Gmail, Outlook, Apple Mail, VoiceOver, NVDA, and terminal profiles",
+    "Live API writes, production migration, publication, and rollback",
+    "Papers outside the nine immutable fixtures",
+    "Round 5 pilot, winner selection, capacity seal, CycleFleet append, root/Wave mutation, and Build"
+  ],
+  "upstream_evidence": {
+    "PPCC2-E007": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E007/report.json",
+      "sha256": "0866d8920afa6d05c504da51572b5380963c849857af95326dc5679adae3cf7e"
+    },
+    "PPCC2-E008": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E008/report.json",
+      "sha256": "c63c4ff2d9859db2f8e6a2e2f2c4d32d18dc48b77f6368d862d817b705077166"
+    },
+    "PPCC2-E009": {
+      "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E009/report.json",
+      "sha256": "9b3c87232d6577ec668a124a96298fb4fd03524ee49f41e0beb724dd4623d14d"
+    }
+  },
+  "verification": {
+    "checks": [
+      {
+        "command": "python3 -m py_compile migration_gate.py test_migration_gate.py assemble_report.py validate_report.py",
+        "name": "python_typecheck_equivalent",
+        "status": "PASS"
+      },
+      {
+        "command": "python3 -m tabnanny migration_gate.py test_migration_gate.py assemble_report.py validate_report.py",
+        "name": "python_lint",
+        "status": "PASS"
+      },
+      {
+        "command": "python3 -m unittest -v test_migration_gate.py",
+        "name": "targeted_unit_tests",
+        "result": "5 tests, 0 failures",
+        "status": "PASS"
+      },
+      {
+        "command": "python3 migration_gate.py --fixtures inputs/fixtures --output artifacts",
+        "name": "isolated_end_to_end",
+        "result": "9 fixtures, 63 hard checks, 0 failures; 6 structured quarantines; 3 strict JSON rejections",
+        "status": "PASS"
+      },
+      {
+        "command": "bash scripts/audit-paper-readers-test.sh",
+        "name": "paper_reader_regression",
+        "status": "PASS"
+      },
+      {
+        "command": "go test ./internal/pdrender/...",
+        "name": "pdrender_regression",
+        "status": "PASS"
+      },
+      {
+        "command": "python3 validate_report.py",
+        "name": "report_schema",
+        "status": "PASS"
+      },
+      {
+        "command": "git diff --check -- .omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E012",
+        "name": "whitespace",
+        "status": "PASS"
+      }
+    ],
+    "status": "PASS"
+  }
+}

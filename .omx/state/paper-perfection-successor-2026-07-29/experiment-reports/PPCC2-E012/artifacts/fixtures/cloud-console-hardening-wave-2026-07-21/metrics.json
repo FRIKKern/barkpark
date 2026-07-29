@@ -1,0 +1,34 @@
+{
+  "authored_blocks_exactly_preserved": true,
+  "email_semantic_heading_count": 32,
+  "hard_gate_pass": true,
+  "hard_gates": {
+    "accessibility": true,
+    "cli_api_round_trip": true,
+    "content_preservation": true,
+    "email_safety": true,
+    "portable_doc_schema_validity": true,
+    "studio_structural_completeness": true,
+    "tui_width": true
+  },
+  "heading_blocks": 32,
+  "migration_idempotence": true,
+  "missing_authored_strings": {
+    "email": [],
+    "studio": [],
+    "tui40": [],
+    "tui80": []
+  },
+  "output_sha256": {
+    "cli_api": "af85ea2df21d4071c7a159a2a127b6ab6b222682ed0c091a2a9de40e5e09e1d5",
+    "email": "547395959d78562ae4df990ea96275918b36e131e2508d112d191413218b6663",
+    "studio": "45a46d34cc281f8635bc373e33aa6c0c444971212f3d0c0b3d8575466e63ad10",
+    "tui40": "734cfe7d21a43727cd2e1a2539ba0d78abda10cabe90b5086968bb71baffab14",
+    "tui80": "58a164777a558a4063134dee002b6f6f1061cb2242dd8656cf2e0f420b5e91ec"
+  },
+  "rollback_byte_exact": true,
+  "studio_semantic_heading_count": 32,
+  "tui40_max_display_width": 40,
+  "tui80_max_display_width": 80,
+  "unit_id": "paper:cloud-console-hardening-wave-2026-07-21"
+}

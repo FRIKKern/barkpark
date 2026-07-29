@@ -1,0 +1,546 @@
+{
+  "assignment_id": "PPCC2-E012",
+  "fixture_count": 9,
+  "fixture_results": [
+    {
+      "authored_blocks_exactly_preserved": true,
+      "email_semantic_heading_count": 113,
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "heading_blocks": 113,
+      "migration_idempotence": true,
+      "missing_authored_strings": {
+        "email": [],
+        "studio": [],
+        "tui40": [],
+        "tui80": []
+      },
+      "output_sha256": {
+        "cli_api": "3d10b0b752e1d913a55918cd64d44497aa3f42a179668f62df6dcac6281a227e",
+        "email": "660190f2af1d109da2942bc1c98b908a08f0509c287de47b7e4821f94b9ddec3",
+        "studio": "3675296d75b8716c5dc1edf7ed6c4a8d9bc8eb6b0432ea4a53f37fa2403ed1a3",
+        "tui40": "9fa50dd677e1674ed62b47b53c127616fe2d32b2eb13af0251f67efdae723c12",
+        "tui80": "b98e3c5b9d400a03f5720d3e272fb7ef379e48e34583cff66790a4d3014c230a"
+      },
+      "rollback_byte_exact": true,
+      "studio_semantic_heading_count": 113,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80,
+      "unit_id": "paper:block-wishlist-100"
+    },
+    {
+      "authored_blocks_exactly_preserved": true,
+      "email_semantic_heading_count": 16,
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "heading_blocks": 16,
+      "migration_idempotence": true,
+      "missing_authored_strings": {
+        "email": [],
+        "studio": [],
+        "tui40": [],
+        "tui80": []
+      },
+      "output_sha256": {
+        "cli_api": "e54c6e1320965f110a9c27d9038aada50cf8b5087002d4ac5b223ece6b71700d",
+        "email": "bc5e460f4e0ff662c36ad6e8abcd29988a30d6902ba16f40fa4af720fa32773d",
+        "studio": "822b5a236995851843d886e520f6d0701d734f22ebc1f5a1b5d5525955e22f39",
+        "tui40": "d42a4490635d54016e3c78eaaedfea68c9578a0fd8f2d78d436b2cc6cf1f0599",
+        "tui80": "6eb57768a40ed47fd29022eed7e9cb2e8bc9df0e58592d19781559e32d676cd9"
+      },
+      "rollback_byte_exact": true,
+      "studio_semantic_heading_count": 16,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80,
+      "unit_id": "paper:choosing-your-site-framework"
+    },
+    {
+      "authored_blocks_exactly_preserved": true,
+      "email_semantic_heading_count": 32,
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "heading_blocks": 32,
+      "migration_idempotence": true,
+      "missing_authored_strings": {
+        "email": [],
+        "studio": [],
+        "tui40": [],
+        "tui80": []
+      },
+      "output_sha256": {
+        "cli_api": "af85ea2df21d4071c7a159a2a127b6ab6b222682ed0c091a2a9de40e5e09e1d5",
+        "email": "547395959d78562ae4df990ea96275918b36e131e2508d112d191413218b6663",
+        "studio": "45a46d34cc281f8635bc373e33aa6c0c444971212f3d0c0b3d8575466e63ad10",
+        "tui40": "734cfe7d21a43727cd2e1a2539ba0d78abda10cabe90b5086968bb71baffab14",
+        "tui80": "58a164777a558a4063134dee002b6f6f1061cb2242dd8656cf2e0f420b5e91ec"
+      },
+      "rollback_byte_exact": true,
+      "studio_semantic_heading_count": 32,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80,
+      "unit_id": "paper:cloud-console-hardening-wave-2026-07-21"
+    },
+    {
+      "authored_blocks_exactly_preserved": true,
+      "email_semantic_heading_count": 56,
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "heading_blocks": 56,
+      "migration_idempotence": true,
+      "missing_authored_strings": {
+        "email": [],
+        "studio": [],
+        "tui40": [],
+        "tui80": []
+      },
+      "output_sha256": {
+        "cli_api": "0500e555ba53ff90726e5eb5be6d7e8370733cf7757e96a3ff7bdfe48db0a5a6",
+        "email": "4b39520f04bf755ffdfe86a0576cb1b1a16a6a3cf8ee50705b28e4a6560a97a2",
+        "studio": "46fa13d0653a4a11638a5c5bc6101acd5e2b21bff1c5f4a840b22584b758fe6e",
+        "tui40": "e7c8458b4983c2c59bc2bdbbbeb45f697417294288ac5361832efada8e4249e4",
+        "tui80": "86b9ce032efaa5317978176b50217de5d75a58680094feb208a71fb8ec73e1fa"
+      },
+      "rollback_byte_exact": true,
+      "studio_semantic_heading_count": 56,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80,
+      "unit_id": "paper:cloud-console-hardening-wave-3-2026-07-21"
+    },
+    {
+      "authored_blocks_exactly_preserved": true,
+      "email_semantic_heading_count": 28,
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "heading_blocks": 28,
+      "migration_idempotence": true,
+      "missing_authored_strings": {
+        "email": [],
+        "studio": [],
+        "tui40": [],
+        "tui80": []
+      },
+      "output_sha256": {
+        "cli_api": "e4b7c817dc3238287b42fb8e512d2ceb0f41bd2842014daf4ae9f40b003665b0",
+        "email": "e953d3a241e29c99b1c0ef962df1b02a53baa429181dc521101b23d46e45467f",
+        "studio": "351b181f00277d189da287366b7b81f115ffaa744924bd93bba8402bcc8e761b",
+        "tui40": "09fe61d38a00328471b4c0eefeeba0d6cfdb8c8aa61158bb406aea79f85470b9",
+        "tui80": "f7ac0c6eaca3a705ba2e5f9ac18f182121e30e92ee644c58afcd7366cee097e3"
+      },
+      "rollback_byte_exact": true,
+      "studio_semantic_heading_count": 28,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80,
+      "unit_id": "paper:component-reference"
+    },
+    {
+      "authored_blocks_exactly_preserved": true,
+      "email_semantic_heading_count": 35,
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "heading_blocks": 35,
+      "migration_idempotence": true,
+      "missing_authored_strings": {
+        "email": [],
+        "studio": [],
+        "tui40": [],
+        "tui80": []
+      },
+      "output_sha256": {
+        "cli_api": "265c6272c6bc3acf60deadb4cfb47886a3fb90be75ed5cbb19033d695ddd3545",
+        "email": "6bd85ff099512eca92d64676e48371066af7ffb3558179dbba05aa1f41324a7a",
+        "studio": "ad673f39c91c3f035c77c254ec26962c4603965463d822296efe66f3eba455f9",
+        "tui40": "fe2216b08feda229f57a06011ef85779aa3b769081843216021e89c673211d6f",
+        "tui80": "5d71537053a21df4aa2d6a05c3747c93f8d83fa9d12b3f62ae9c8a0d67c6040c"
+      },
+      "rollback_byte_exact": true,
+      "studio_semantic_heading_count": 35,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80,
+      "unit_id": "paper:honest-gates-wave-4-2026-07-28"
+    },
+    {
+      "authored_blocks_exactly_preserved": true,
+      "email_semantic_heading_count": 61,
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "heading_blocks": 61,
+      "migration_idempotence": true,
+      "missing_authored_strings": {
+        "email": [],
+        "studio": [],
+        "tui40": [],
+        "tui80": []
+      },
+      "output_sha256": {
+        "cli_api": "1ca46e56bca1166005600c81dcd8cf14686e942a5926d1e32ea3dd490137a254",
+        "email": "e82b62eaca737687351551e081071b0d255dabdbef5a5b780d167f21756992c0",
+        "studio": "69cf2e358f28c72414a5a6d0436a9b651310cf7d1076c0b53732bf103fce90f1",
+        "tui40": "0aa3d4e2dba0f089aad4c358c220ba4a497ad0ba1a7dc91501b75f6920c2dc40",
+        "tui80": "d4369a45bb66986211feb7cb3e68a752f03141734bc700fb0e821c9caff1539d"
+      },
+      "rollback_byte_exact": true,
+      "studio_semantic_heading_count": 61,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80,
+      "unit_id": "paper:spd-inspector-successor-wave-2026-07-20"
+    },
+    {
+      "authored_blocks_exactly_preserved": true,
+      "email_semantic_heading_count": 12,
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "heading_blocks": 12,
+      "migration_idempotence": true,
+      "missing_authored_strings": {
+        "email": [],
+        "studio": [],
+        "tui40": [],
+        "tui80": []
+      },
+      "output_sha256": {
+        "cli_api": "1bd491ec974cd403d576ccd1ca4fc02ffafb548d900282937defa390d48155fc",
+        "email": "d78ff1563483c7b2ba7cbc43e0b6109a0a99fec9df12319ef7a3ad1b2a0f83fe",
+        "studio": "5d6349ae486e24b230f1ed31ebdcf97eca18a0eeca19049d1bc0d8c8f35df016",
+        "tui40": "c831bfd632676c7269f01042c7e069e6f8730e11c3b99d5763af98c6c4bbc208",
+        "tui80": "4f37c0440d7ee46d8ec1a86023b726f987329ca92f94ab683ef1cdc5a41a7fe4"
+      },
+      "rollback_byte_exact": true,
+      "studio_semantic_heading_count": 12,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80,
+      "unit_id": "paper:task-tui-wave-2026-07-23b"
+    },
+    {
+      "authored_blocks_exactly_preserved": true,
+      "email_semantic_heading_count": 19,
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "heading_blocks": 19,
+      "migration_idempotence": true,
+      "missing_authored_strings": {
+        "email": [],
+        "studio": [],
+        "tui40": [],
+        "tui80": []
+      },
+      "output_sha256": {
+        "cli_api": "3582c008e63a5782697381385d6e7eb3490fec46b8b7066909f8433f3fb8db7e",
+        "email": "ff466ea029479cb5876767dc8135e0be7c0b8f778fcc1fb37f22592c1ff5ce02",
+        "studio": "bc9b5d60d455fd343720e6c91d55c913994519facb767b1a99f8dab3b8981cd8",
+        "tui40": "e926a949e97ff5ac4e62bdaa2d35357d18b2bf53ac8be182609d2a027634661a",
+        "tui80": "3e1ca2434d67a34f00977aabb7cf29fd8ba9449dd1fc486a2ace2c38c6c828da"
+      },
+      "rollback_byte_exact": true,
+      "studio_semantic_heading_count": 19,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80,
+      "unit_id": "paper:wave-deck"
+    }
+  ],
+  "hostile_cases": [
+    {
+      "case": "unknown_type",
+      "deterministic": true,
+      "raw_payload_preserved": true,
+      "reason_codes": [
+        "unknown_top_level_type:$.source.blocks[440]:legacyMystery",
+        "unknown_typed_node:$.source.blocks[440]:legacyMystery"
+      ],
+      "rollback_byte_exact": true,
+      "status": "quarantined"
+    },
+    {
+      "case": "duplicate_ids",
+      "deterministic": true,
+      "raw_payload_preserved": true,
+      "reason_codes": [
+        "duplicate_block_id:$.source.blocks[440]:bw-eyebrow"
+      ],
+      "rollback_byte_exact": true,
+      "status": "quarantined"
+    },
+    {
+      "case": "nested_null",
+      "deterministic": true,
+      "raw_payload_preserved": true,
+      "reason_codes": [
+        "null_not_allowed:$.source.blocks[0].content"
+      ],
+      "rollback_byte_exact": true,
+      "status": "quarantined"
+    },
+    {
+      "case": "missing_id",
+      "deterministic": true,
+      "raw_payload_preserved": true,
+      "reason_codes": [
+        "missing_block_id:$.source.blocks[0]"
+      ],
+      "rollback_byte_exact": true,
+      "status": "quarantined"
+    },
+    {
+      "case": "unknown_wrapper",
+      "deterministic": true,
+      "raw_payload_preserved": true,
+      "reason_codes": [
+        "source_kind_not_blocks:$.source"
+      ],
+      "rollback_byte_exact": true,
+      "status": "quarantined"
+    },
+    {
+      "case": "excessive_depth",
+      "deterministic": true,
+      "raw_payload_preserved": true,
+      "reason_codes": [
+        "max_depth_exceeded:$.source.blocks[0].content[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0]"
+      ],
+      "rollback_byte_exact": true,
+      "status": "quarantined"
+    }
+  ],
+  "link_controls": {
+    "safe": {
+      "expected_marker": "https://example.invalid/safe",
+      "expected_marker_visible_on_all_human_surfaces": true,
+      "migration_status": "accepted",
+      "source_snapshot_exact": true,
+      "surface_gate_pass": true,
+      "unsafe_scheme_absent_from_all_human_surfaces": true
+    },
+    "unsafe": {
+      "expected_marker": "[blocked unsafe URL]",
+      "expected_marker_visible_on_all_human_surfaces": true,
+      "migration_status": "accepted",
+      "source_snapshot_exact": true,
+      "surface_gate_pass": true,
+      "unsafe_scheme_absent_from_all_human_surfaces": true
+    }
+  },
+  "manifest": [
+    {
+      "envelope_sha256": "3d10b0b752e1d913a55918cd64d44497aa3f42a179668f62df6dcac6281a227e",
+      "source_sha256": "3314d53d76344bd28cadb0d4435c0c40874cf1c548225a36b8d28f4b1fe5dbdc",
+      "unit_id": "paper:block-wishlist-100"
+    },
+    {
+      "envelope_sha256": "e54c6e1320965f110a9c27d9038aada50cf8b5087002d4ac5b223ece6b71700d",
+      "source_sha256": "c104900fb5d2a91251252ee706d00a2e36a6f73eb832a068983499632995d0e8",
+      "unit_id": "paper:choosing-your-site-framework"
+    },
+    {
+      "envelope_sha256": "af85ea2df21d4071c7a159a2a127b6ab6b222682ed0c091a2a9de40e5e09e1d5",
+      "source_sha256": "721fa2a58101b6677c5b33e053eb49442a5a50ce8620b1fe0841d915c2beb0bc",
+      "unit_id": "paper:cloud-console-hardening-wave-2026-07-21"
+    },
+    {
+      "envelope_sha256": "0500e555ba53ff90726e5eb5be6d7e8370733cf7757e96a3ff7bdfe48db0a5a6",
+      "source_sha256": "9c5dea310f8668d93b92f8e82c8c0e195e5a4f7b6ce5f54c3ea3ec1540419f1b",
+      "unit_id": "paper:cloud-console-hardening-wave-3-2026-07-21"
+    },
+    {
+      "envelope_sha256": "e4b7c817dc3238287b42fb8e512d2ceb0f41bd2842014daf4ae9f40b003665b0",
+      "source_sha256": "7c1feabb23362a96597646144ee066bd6514e77c1cd4883ba005f900ef75dd0a",
+      "unit_id": "paper:component-reference"
+    },
+    {
+      "envelope_sha256": "265c6272c6bc3acf60deadb4cfb47886a3fb90be75ed5cbb19033d695ddd3545",
+      "source_sha256": "cd97b99f380835ad671ce50949ed0e56689134c25f1ef8415475a6313801a793",
+      "unit_id": "paper:honest-gates-wave-4-2026-07-28"
+    },
+    {
+      "envelope_sha256": "1ca46e56bca1166005600c81dcd8cf14686e942a5926d1e32ea3dd490137a254",
+      "source_sha256": "9ce2d1862078be36caaa746ee87788cb4e6a366566c1737b8e377e271a267ce0",
+      "unit_id": "paper:spd-inspector-successor-wave-2026-07-20"
+    },
+    {
+      "envelope_sha256": "1bd491ec974cd403d576ccd1ca4fc02ffafb548d900282937defa390d48155fc",
+      "source_sha256": "cb591a7abe936f11862973a57f39340d0fb7ae033a9894be2c74da87acdaad40",
+      "unit_id": "paper:task-tui-wave-2026-07-23b"
+    },
+    {
+      "envelope_sha256": "3582c008e63a5782697381385d6e7eb3490fec46b8b7066909f8433f3fb8db7e",
+      "source_sha256": "5cb03c654fee0eb654c802c5d801f8b4a9eb8c9c5b7fbc9d3eed9ef2d97e2771",
+      "unit_id": "paper:wave-deck"
+    }
+  ],
+  "matrix": {
+    "expected_fixture_count": 9,
+    "fixture_surface_cells": 45,
+    "hard_gate_cells": 63,
+    "observed_fixture_count": 9
+  },
+  "metrics": {
+    "accessibility": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "batch_capacity": {
+      "largest_isolated_convergence_batch_passing": 9,
+      "provisional_only": true,
+      "reason": "Round 5 pilot alone may seal builder batch capacity.",
+      "units_attempted": 9,
+      "wall_seconds": 3.127441
+    },
+    "cli_api_round_trip": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "content_preservation": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "email_safety": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "observed_failure_rate": {
+      "hard_checks": 63,
+      "hard_failures": 0,
+      "rate": 0.0
+    },
+    "pilot_gate_pass_rate": {
+      "applicable": false,
+      "reason": "Round 4 convergence does not execute or claim Round 5 pilot evidence.",
+      "value": null
+    },
+    "portable_doc_schema_validity": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "rollback": {
+      "attempted": 15,
+      "pass": true,
+      "passed": 15,
+      "production_mutations": 0,
+      "rule": "restore source_snapshot byte-for-byte for accepted or quarantined inputs"
+    },
+    "studio_structural_completeness": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "tui_width": {
+      "attempted": 9,
+      "failed": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80
+    }
+  },
+  "required_surfaces": [
+    "studio",
+    "tui80",
+    "tui40",
+    "email",
+    "cli_api"
+  ],
+  "schema_version": "ppcc2-e012-run/v1",
+  "status": "PASS",
+  "strict_raw_json_cases": {
+    "duplicate_keys": {
+      "error": "duplicate_json_key:type",
+      "rejected": true
+    },
+    "infinity": {
+      "error": "non_finite_json_constant:Infinity",
+      "rejected": true
+    },
+    "nan": {
+      "error": "non_finite_json_constant:NaN",
+      "rejected": true
+    }
+  }
+}

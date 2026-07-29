@@ -1,0 +1,34 @@
+{
+  "authored_blocks_exactly_preserved": true,
+  "email_semantic_heading_count": 35,
+  "hard_gate_pass": true,
+  "hard_gates": {
+    "accessibility": true,
+    "cli_api_round_trip": true,
+    "content_preservation": true,
+    "email_safety": true,
+    "portable_doc_schema_validity": true,
+    "studio_structural_completeness": true,
+    "tui_width": true
+  },
+  "heading_blocks": 35,
+  "migration_idempotence": true,
+  "missing_authored_strings": {
+    "email": [],
+    "studio": [],
+    "tui40": [],
+    "tui80": []
+  },
+  "output_sha256": {
+    "cli_api": "265c6272c6bc3acf60deadb4cfb47886a3fb90be75ed5cbb19033d695ddd3545",
+    "email": "6bd85ff099512eca92d64676e48371066af7ffb3558179dbba05aa1f41324a7a",
+    "studio": "ad673f39c91c3f035c77c254ec26962c4603965463d822296efe66f3eba455f9",
+    "tui40": "fe2216b08feda229f57a06011ef85779aa3b769081843216021e89c673211d6f",
+    "tui80": "5d71537053a21df4aa2d6a05c3747c93f8d83fa9d12b3f62ae9c8a0d67c6040c"
+  },
+  "rollback_byte_exact": true,
+  "studio_semantic_heading_count": 35,
+  "tui40_max_display_width": 40,
+  "tui80_max_display_width": 80,
+  "unit_id": "paper:honest-gates-wave-4-2026-07-28"
+}
