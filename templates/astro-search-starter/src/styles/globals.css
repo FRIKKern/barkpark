@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* Chrome background/foreground now BRIDGE to the emitted design tokens (the
-   GENERATED block below): --color-bg / --color-text carry the light values and
+/* Chrome background/foreground BRIDGE to the theme tokens (the SNAPSHOT block
+   below): --color-bg / --color-text carry the light values and
    flip under [data-theme="dark"]. --font-sans is self-hosted Inter (next/font);
    Geist Mono stays for code spans (no mono token exists yet). */
 @theme inline {
@@ -11,7 +11,29 @@
   --font-mono: var(--font-geist-mono);
 }
 
-/* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
+/* ── theme tokens: a HAND-MAINTAINED snapshot, not a generated file ─────────
+   This block used to be marked "BEGIN GENERATED: tokens (design/tokens.json —
+   regenerate: node design/emit.mjs --write; do not hand-edit)". That header was
+   false in both directions, and a stranger who believed it would either refuse
+   to touch the file or run a regenerate that does nothing:
+
+   • design/emit.mjs's ARTIFACTS list (emit.mjs:1979) has 19 entries and NOT ONE
+     is under templates/. `node design/emit.mjs --write` has never written this
+     file and cannot. design/check.mjs contains zero occurrences of "templates".
+   • The values have since diverged on their own: 77 of the 151 (selector, var)
+     pairs below differ from web/app/globals.css, which IS an emitted artifact.
+
+   So: these values ORIGINATED in design/tokens.json and are now a hand-kept
+   copy. Editing them here is legitimate — nothing regenerates over you.
+   RE-SYNCING them to design/tokens.json is a deliberate, reviewed change, not a
+   refresh: it would move --color-primary from hsl(163 46% 22%) to
+   hsl(151.96 71.81% 29.22%), a different green on the flagship's primary
+   button. That re-sync is deliberately NOT part of stw11-a11y-invariants.
+
+   The BEGIN/END markers are kept because scripts/templates-literal-check.sh
+   reads them to exempt this block from the raw-palette-literal ban.
+   ───────────────────────────────────────────────────────────────────────── */
+/* BEGIN SNAPSHOT: tokens (hand-maintained; originated in design/tokens.json — see the note above) */
 @theme {
   --color-primary: hsl(163 46% 22%);
   --color-primary-hover: hsl(163 46% 16%);
@@ -184,7 +206,7 @@
   --color-danger: hsl(5.83 69.33% 69.33%);
   --color-info: hsl(220.37 70.04% 71.14%);
 }
-/* END GENERATED: tokens */
+/* END SNAPSHOT: tokens */
 
 /* --background / --foreground are thin aliases onto the emitted tokens so the
    body + ::selection consumers keep their names but track design/tokens.json
