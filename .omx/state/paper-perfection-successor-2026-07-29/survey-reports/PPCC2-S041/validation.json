@@ -1,0 +1,264 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report-validation/v1",
+  "assignment_id": "PPCC2-S041",
+  "valid": true,
+  "checks": [
+    {
+      "name": "bound-snapshot-sha",
+      "status": "PASS",
+      "evidence": "b426b73f27afa0c45f887013d173af0e57fc907f7c82d4c5252ada3f97487876"
+    },
+    {
+      "name": "source-snapshot-sha",
+      "status": "PASS",
+      "evidence": "92f518982ee234992b00d8c97f880a87770f7759ec3393b1829a1f11faaf8cce"
+    },
+    {
+      "name": "bound-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S041",
+        "status": "cyclefleet_bound",
+        "unit_count": 9
+      }
+    },
+    {
+      "name": "immutable-wave-binding",
+      "status": "PASS",
+      "evidence": {
+        "status": "cyclefleet_bound",
+        "wave_id": "paper-perfection-successor-wave-2026-07-29",
+        "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+        "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+        "source_snapshot_sha256": "92f518982ee234992b00d8c97f880a87770f7759ec3393b1829a1f11faaf8cce"
+      }
+    },
+    {
+      "name": "report-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S041",
+        "worker": "worker-2"
+      }
+    },
+    {
+      "name": "ordered-checked-unit-ids",
+      "status": "PASS",
+      "evidence": [
+        "paper:portabledoc-render-unification-w5-2026-07-16",
+        "paper:portabledoc-render-unification-w6-2026-07-16",
+        "paper:portabledoc-render-unification-w7-2026-07-16",
+        "paper:portabledoc-render-unification-wave-2026-07-16",
+        "paper:portabledoc-showcase",
+        "paper:preview-contract",
+        "paper:production-truth-wave-2026-07-20",
+        "paper:provider-horizon",
+        "paper:query-blocks-cookbook"
+      ]
+    },
+    {
+      "name": "one-verdict-per-unit",
+      "status": "PASS",
+      "evidence": 9
+    },
+    {
+      "name": "verdict-metadata-pinned",
+      "status": "PASS",
+      "evidence": "all document ids and immutable revisions match"
+    },
+    {
+      "name": "allowed-verdicts-and-counts",
+      "status": "PASS",
+      "evidence": {
+        "keep": 4,
+        "repair": 3,
+        "superseded": 2
+      }
+    },
+    {
+      "name": "editorial-dimensions-complete",
+      "status": "PASS",
+      "evidence": [
+        "compression_and_restraint",
+        "duplicate_disposition",
+        "evidence_and_truth",
+        "human_voice_and_precision",
+        "opening_and_criteria",
+        "outline_and_hierarchy",
+        "purpose_and_larger_goal",
+        "rationale"
+      ]
+    },
+    {
+      "name": "specific-existing-evidence-refs",
+      "status": "PASS",
+      "evidence": [
+        {
+          "document_id": "portabledoc-render-unification-w5-2026-07-16",
+          "ref": "body_html[77]",
+          "exists": true
+        },
+        {
+          "document_id": "portabledoc-render-unification-w5-2026-07-16",
+          "ref": "body_html[81]",
+          "exists": true
+        },
+        {
+          "document_id": "portabledoc-render-unification-w6-2026-07-16",
+          "ref": "body_html[75]",
+          "exists": true
+        },
+        {
+          "document_id": "portabledoc-render-unification-w6-2026-07-16",
+          "ref": "body_html[88]",
+          "exists": true
+        },
+        {
+          "document_id": "portabledoc-render-unification-w7-2026-07-16",
+          "ref": "body_html[98]",
+          "exists": true
+        },
+        {
+          "document_id": "portabledoc-render-unification-w7-2026-07-16",
+          "ref": "body_html[110]",
+          "exists": true
+        },
+        {
+          "document_id": "portabledoc-render-unification-wave-2026-07-16",
+          "ref": "body_html[119]",
+          "exists": true
+        },
+        {
+          "document_id": "portabledoc-render-unification-wave-2026-07-16",
+          "ref": "body_html[131]",
+          "exists": true
+        },
+        {
+          "document_id": "portabledoc-showcase",
+          "ref": "blocks[4]",
+          "exists": true
+        },
+        {
+          "document_id": "portabledoc-showcase",
+          "ref": "blocks[70]",
+          "exists": true
+        },
+        {
+          "document_id": "preview-contract",
+          "ref": "blocks[14]",
+          "exists": true
+        },
+        {
+          "document_id": "preview-contract",
+          "ref": "blocks[23]",
+          "exists": true
+        },
+        {
+          "document_id": "production-truth-wave-2026-07-20",
+          "ref": "blocks[116]",
+          "exists": true
+        },
+        {
+          "document_id": "production-truth-wave-2026-07-20",
+          "ref": "blocks[133]",
+          "exists": true
+        },
+        {
+          "document_id": "provider-horizon",
+          "ref": "blocks[34]",
+          "exists": true
+        },
+        {
+          "document_id": "provider-horizon",
+          "ref": "blocks[48]",
+          "exists": true
+        },
+        {
+          "document_id": "query-blocks-cookbook",
+          "ref": "blocks[11]",
+          "exists": true
+        },
+        {
+          "document_id": "query-blocks-cookbook",
+          "ref": "blocks[21]",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "five-reader-risks",
+      "status": "PASS",
+      "evidence": [
+        "CLI/API",
+        "Studio",
+        "TUI80",
+        "email",
+        "public"
+      ]
+    },
+    {
+      "name": "read-only-mutation-attestation",
+      "status": "PASS",
+      "evidence": {
+        "production_papers_mutated": false,
+        "cyclefleet_mutated": false,
+        "bp_cycle_assign_called": false,
+        "bp_cycle_result_called": false
+      }
+    },
+    {
+      "name": "unvisited-scope-empty",
+      "status": "PASS",
+      "evidence": []
+    },
+    {
+      "name": "readbacks-exact-and-hashed",
+      "status": "PASS",
+      "evidence": "all 9 raw ids/revisions and SHA-256 receipts match"
+    },
+    {
+      "name": "native-and-legacy-representation",
+      "status": "PASS",
+      "evidence": {
+        "native_block_total": 343,
+        "legacy_html_chars": 146392
+      }
+    },
+    {
+      "name": "purpose-based-duplicate-analysis",
+      "status": "PASS",
+      "evidence": [
+        {
+          "candidate_set": [
+            "portabledoc-render-unification-w5-2026-07-16",
+            "portabledoc-render-unification-w6-2026-07-16",
+            "portabledoc-render-unification-w7-2026-07-16"
+          ],
+          "basis": "They form one chronological renderer-unification sequence: fork retirement, hardening, then final parity closure.",
+          "disposition": "Make W7 current authority; mark W5/W6 superseded for status but preserve all three immutable ledgers with predecessor/successor links."
+        },
+        {
+          "candidate_set": [
+            "portabledoc-render-unification-wave-2026-07-16",
+            "portabledoc-render-unification-w7-2026-07-16"
+          ],
+          "basis": "Both prove canonical React rendering but answer different questions: Astro zero-JS consumption versus renderer type completeness.",
+          "disposition": "Do not merge; cross-link purpose boundaries and preserve separate proof denominators."
+        },
+        {
+          "candidate_set": [
+            "portabledoc-showcase",
+            "query-blocks-cookbook",
+            "preview-contract"
+          ],
+          "basis": "They overlap on cross-surface content, but own demonstration, query authorship, and preview projection/emission respectively.",
+          "disposition": "Keep distinct; link from the showcase rather than copying normative syntax or contract text."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  }
+}

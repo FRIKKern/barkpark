@@ -1,0 +1,89 @@
+{
+  "schema_version": "paper-perfection-successor-readback-index/v1",
+  "assignment_id": "PPCC2-S041",
+  "count": 9,
+  "all_pinned_revisions_read": true,
+  "reads": [
+    {
+      "unit_id": "paper:portabledoc-render-unification-w5-2026-07-16",
+      "document_id": "portabledoc-render-unification-w5-2026-07-16",
+      "document_rev": "0dc674684e341a36290e813a67d167f9",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/readbacks/portabledoc-render-unification-w5-2026-07-16.json",
+      "readback_sha256": "7942a7b611c0b8f2b67b252026a89adea54b0b0aa2c4c7895d6b540a5d64539d",
+      "block_count": 0,
+      "body_html_chars": 27595
+    },
+    {
+      "unit_id": "paper:portabledoc-render-unification-w6-2026-07-16",
+      "document_id": "portabledoc-render-unification-w6-2026-07-16",
+      "document_rev": "4e20996ae73f35e640d8fa2923a02849",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/readbacks/portabledoc-render-unification-w6-2026-07-16.json",
+      "readback_sha256": "a814e3bf05b21128bcfe9d69bde7fd3aff70fa9cb5dedf5794739803c2ef36eb",
+      "block_count": 0,
+      "body_html_chars": 43523
+    },
+    {
+      "unit_id": "paper:portabledoc-render-unification-w7-2026-07-16",
+      "document_id": "portabledoc-render-unification-w7-2026-07-16",
+      "document_rev": "d74a1db4b9b07e757c3433456a121665",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/readbacks/portabledoc-render-unification-w7-2026-07-16.json",
+      "readback_sha256": "313e2bb13572c64bbe92e7659c4c2192d88b77b7eff0b2a14247703622c8083f",
+      "block_count": 0,
+      "body_html_chars": 34211
+    },
+    {
+      "unit_id": "paper:portabledoc-render-unification-wave-2026-07-16",
+      "document_id": "portabledoc-render-unification-wave-2026-07-16",
+      "document_rev": "e9e6903f21aaa687198eb58a3d4fbdbb",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/readbacks/portabledoc-render-unification-wave-2026-07-16.json",
+      "readback_sha256": "42e62b7e8039db1aa67a675cce2e8e1e074159681d5ff3412a7152a334c5b2d9",
+      "block_count": 0,
+      "body_html_chars": 41063
+    },
+    {
+      "unit_id": "paper:portabledoc-showcase",
+      "document_id": "portabledoc-showcase",
+      "document_rev": "a6dc36546ca61cedc49077f3e67750f7",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/readbacks/portabledoc-showcase.json",
+      "readback_sha256": "c9ff71aeea055c59d29acf8879170d9ae766e96e8493194c45af5a48a0367d1c",
+      "block_count": 106,
+      "body_html_chars": 53077
+    },
+    {
+      "unit_id": "paper:preview-contract",
+      "document_id": "preview-contract",
+      "document_rev": "7555cec699b51cf98f39746517069b82",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/readbacks/preview-contract.json",
+      "readback_sha256": "d250e5636de74d71969f4532e60307deadd3eacac4d4c57f1eb36ebc8311ab39",
+      "block_count": 32,
+      "body_html_chars": 11169
+    },
+    {
+      "unit_id": "paper:production-truth-wave-2026-07-20",
+      "document_id": "production-truth-wave-2026-07-20",
+      "document_rev": "2c26416ccffd98018850928ff92e1e34",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/readbacks/production-truth-wave-2026-07-20.json",
+      "readback_sha256": "70e6406f5263b7c79d091fb873bc3c291c56dc5871a895eeb56b847dfa5e5b7f",
+      "block_count": 134,
+      "body_html_chars": 53424
+    },
+    {
+      "unit_id": "paper:provider-horizon",
+      "document_id": "provider-horizon",
+      "document_rev": "f8de7acedb8a6219954695eefcfb6ec4",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/readbacks/provider-horizon.json",
+      "readback_sha256": "a603affedb5c099f042bc8783811d913a43f6592feb7df664c3933c9bd006dff",
+      "block_count": 49,
+      "body_html_chars": 30053
+    },
+    {
+      "unit_id": "paper:query-blocks-cookbook",
+      "document_id": "query-blocks-cookbook",
+      "document_rev": "bc12a2d3b1bd1cc70d8a46aadbace786",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S041/readbacks/query-blocks-cookbook.json",
+      "readback_sha256": "aa1daa442392d913a14debcdf82b6c8c10430f421fa376ab02ff98c4407da90e",
+      "block_count": 22,
+      "body_html_chars": 6489
+    }
+  ]
+}

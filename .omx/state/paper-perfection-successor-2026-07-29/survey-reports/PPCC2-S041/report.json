@@ -1,0 +1,456 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S041",
+  "assignment_snapshot_sha256": "b426b73f27afa0c45f887013d173af0e57fc907f7c82d4c5252ada3f97487876",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 14,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "92f518982ee234992b00d8c97f880a87770f7759ec3393b1829a1f11faaf8cce"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read: 343 native top-level blocks plus four legacy-HTML papers totaling 146,392 characters. Keep 4, repair 3, and mark 2 superseded. W7 should become the native current renderer authority; W5/W6 remain predecessor ledgers. The Astro proof, showcase, preview contract, and query cookbook retain distinct purposes. Production Truth lacks its promised terminal debrief, and Provider Horizon needs dated revalidation.",
+  "verdict_counts": {
+    "keep": 4,
+    "repair": 3,
+    "superseded": 2
+  },
+  "checked_unit_ids": [
+    "paper:portabledoc-render-unification-w5-2026-07-16",
+    "paper:portabledoc-render-unification-w6-2026-07-16",
+    "paper:portabledoc-render-unification-w7-2026-07-16",
+    "paper:portabledoc-render-unification-wave-2026-07-16",
+    "paper:portabledoc-showcase",
+    "paper:preview-contract",
+    "paper:production-truth-wave-2026-07-20",
+    "paper:provider-horizon",
+    "paper:query-blocks-cookbook"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 343,
+    "legacy_html_documents_read": 4,
+    "legacy_html_semantic_units_read": 429,
+    "legacy_html_chars_read": 146392,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:portabledoc-render-unification-wave-2026-07-16 body_html[119]",
+      "evidence": "The Astro proof checks built output for zero JavaScript and keeps a hydrating decoy that reverses the gate."
+    },
+    {
+      "block_ref": "paper:portabledoc-showcase blocks[4]",
+      "evidence": "The showcase explicitly defines honest degradation across media before demonstrating components."
+    },
+    {
+      "block_ref": "paper:production-truth-wave-2026-07-20 blocks[116]",
+      "evidence": "A production-shaped probe proves the proposed alert files an invisible draft while reporting success."
+    },
+    {
+      "block_ref": "paper:query-blocks-cookbook blocks[11]",
+      "evidence": "The aggregate recipe embeds closed vocabulary, k-anonymity, whitelisting, and fail-closed tenancy."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:portabledoc-render-unification-w5-2026-07-16 body_html[81]",
+      "evidence": "A load-bearing grep was falsely stamped green and external scaffold users still depended on a human-gated publish.",
+      "lesson": "Preserve verification and distribution caveats."
+    },
+    {
+      "block_ref": "paper:portabledoc-render-unification-w7-2026-07-16 body_html[110]",
+      "evidence": "Gauge-list count/epic branches are reviewed but not golden-exercised.",
+      "lesson": "Do not flatten proof levels."
+    },
+    {
+      "block_ref": "paper:production-truth-wave-2026-07-20 blocks[133]",
+      "evidence": "The paper ends building and promises a review that is absent.",
+      "lesson": "Non-terminal wave papers need repair."
+    },
+    {
+      "block_ref": "paper:provider-horizon blocks[48]",
+      "evidence": "Fast-moving provider claims rest on sources and probes dated 2026-07-08→10.",
+      "lesson": "Revalidate volatile external facts."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "portabledoc-render-unification-w5-2026-07-16",
+        "portabledoc-render-unification-w6-2026-07-16",
+        "portabledoc-render-unification-w7-2026-07-16"
+      ],
+      "basis": "They form one chronological renderer-unification sequence: fork retirement, hardening, then final parity closure.",
+      "disposition": "Make W7 current authority; mark W5/W6 superseded for status but preserve all three immutable ledgers with predecessor/successor links."
+    },
+    {
+      "candidate_set": [
+        "portabledoc-render-unification-wave-2026-07-16",
+        "portabledoc-render-unification-w7-2026-07-16"
+      ],
+      "basis": "Both prove canonical React rendering but answer different questions: Astro zero-JS consumption versus renderer type completeness.",
+      "disposition": "Do not merge; cross-link purpose boundaries and preserve separate proof denominators."
+    },
+    {
+      "candidate_set": [
+        "portabledoc-showcase",
+        "query-blocks-cookbook",
+        "preview-contract"
+      ],
+      "basis": "They overlap on cross-surface content, but own demonstration, query authorship, and preview projection/emission respectively.",
+      "disposition": "Keep distinct; link from the showcase rather than copying normative syntax or contract text."
+    }
+  ],
+  "reader_risks": [
+    "Studio: show purpose, current/superseded status, and representation type before long proof ledgers; collapse branch ids, tables, and raw transcripts.",
+    "TUI80: wrap prose and paginate large tables/heatmaps; legacy HTML tables and long branch-ledger rows must not become unbroken terminal lines.",
+    "email: send the outcome, one material caveat, and a link; omit fixture matrices, task ledgers, embedded live queries, and implementation transcripts.",
+    "public: remove internal hosts, task/branch ids, operational commands, mutable vendor claims, and security-sensitive implementation details; preserve dated provenance.",
+    "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:portabledoc-render-unification-w5-2026-07-16",
+      "document_id": "portabledoc-render-unification-w5-2026-07-16",
+      "document_rev": "0dc674684e341a36290e813a67d167f9",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-5 finale retiring the web PortableDoc fork and moving the create-barkpark-app blog onto the canonical @barkpark/react renderer.",
+      "opening_and_criteria": "The late verdict states the intended end condition concretely: one canonical JS renderer, parity twins in Elixir and Go, and the 1,435-line fork deleted.",
+      "outline_and_hierarchy": "Survey, decisions, execution ledger, review, grade, and handoff form a complete historical wave record, but it is stored only as legacy HTML and later waves own the current renderer state.",
+      "human_voice_and_precision": "The review voice is unusually candid: it records a false-green grep assertion, the one-line reviewer correction, and the still-human-gated npm publish rather than laundering them into a perfect score.",
+      "compression_and_restraint": "Preserve as immutable Wave-5 evidence; current readers should enter through W7, while email/TUI views should collapse the long branch-and-gate ledger.",
+      "evidence_and_truth": "body_html[77] gives exact Track-A gates and reviewer repair; body_html[81] admits the publish-dependent real-user gap and false-green proof claim.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[77]",
+          "evidence": "The reviewer re-ran build, typecheck, 258 tests, lint, and the corrected zero-importer grep after deleting the web fork.",
+          "lesson": "A deletion claim should include a discriminating zero-reference gate and reviewer readback."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[81]",
+          "evidence": "The builder had stamped the grep green when a comment still matched, and the scaffold remained broken for external users until a human-gated npm publish.",
+          "lesson": "Historical wave grades must preserve false-green and distribution-boundary caveats."
+        }
+      ],
+      "duplicate_disposition": "Superseded for current renderer authority by W6 hardening and W7 final parity closure; keep the immutable W5 ledger linked as predecessor evidence.",
+      "reader_risks": [
+        "Studio: show purpose, current/superseded status, and representation type before long proof ledgers; collapse branch ids, tables, and raw transcripts.",
+        "TUI80: wrap prose and paginate large tables/heatmaps; legacy HTML tables and long branch-ledger rows must not become unbroken terminal lines.",
+        "email: send the outcome, one material caveat, and a link; omit fixture matrices, task ledgers, embedded live queries, and implementation transcripts.",
+        "public: remove internal hosts, task/branch ids, operational commands, mutable vendor claims, and security-sensitive implementation details; preserve dated provenance.",
+        "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics."
+      ],
+      "rationale": "Superseded because the wave is historically sound but later assigned documents harden and complete the same renderer-unification storyline."
+    },
+    {
+      "unit_id": "paper:portabledoc-render-unification-w6-2026-07-16",
+      "document_id": "portabledoc-render-unification-w6-2026-07-16",
+      "document_rev": "4e20996ae73f35e640d8fa2923a02849",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Post-finale hardening wave proving asciicast frame advance, type-keyed plain text, and real blog-island hydration without widening the renderer surface.",
+      "opening_and_criteria": "The review headline and outcome make the bar explicit: all three admitted slices green, protective negative controls, grade A.",
+      "outline_and_hierarchy": "The survey-to-review arc is complete, but two very large proof tables dominate legacy HTML and W7 later closes the remaining chat/gauge-list parity gap.",
+      "human_voice_and_precision": "The paper distinguishes confirmed, refuted, deferred, and not-found evidence precisely, including why field/embed coverage was out of scope.",
+      "compression_and_restraint": "Retain the three proof receipts, but route current parity questions to W7 and collapse body_html[56]/[61]/[75] tables on constrained surfaces.",
+      "evidence_and_truth": "body_html[75] records 6/6 media, 242/242 renderer, and 2/2 hydration gates with explicit neuters; body_html[88] still names the human-gated npm publish as the sole user-facing gap.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[75]",
+          "evidence": "Each of the three slices includes a protective re-verification that turns red when its load-bearing behavior is removed.",
+          "lesson": "Pair green gates with a faithful negative control so the receipt is non-vacuous."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[88]",
+          "evidence": "The document calls build work done while acknowledging publication is still required for scaffold users and field/embed coverage remains deferred.",
+          "lesson": "Build completion is not distribution completion, and deferred coverage must remain visible."
+        }
+      ],
+      "duplicate_disposition": "Superseded as current status by W7, not merged: W6 owns distinct hardening evidence that W7 should link rather than duplicate.",
+      "reader_risks": [
+        "Studio: show purpose, current/superseded status, and representation type before long proof ledgers; collapse branch ids, tables, and raw transcripts.",
+        "TUI80: wrap prose and paginate large tables/heatmaps; legacy HTML tables and long branch-ledger rows must not become unbroken terminal lines.",
+        "email: send the outcome, one material caveat, and a link; omit fixture matrices, task ledgers, embedded live queries, and implementation transcripts.",
+        "public: remove internal hosts, task/branch ids, operational commands, mutable vendor claims, and security-sensitive implementation details; preserve dated provenance.",
+        "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics."
+      ],
+      "rationale": "Superseded because its hardening work remains valuable evidence but its claim to be the last wave is overtaken by W7."
+    },
+    {
+      "unit_id": "paper:portabledoc-render-unification-w7-2026-07-16",
+      "document_id": "portabledoc-render-unification-w7-2026-07-16",
+      "document_rev": "d74a1db4b9b07e757c3433456a121665",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Final parity-closure wave adding chat approval/question/plan and escalated gauge-list support to the canonical JS renderer, with a CI-wired completeness guard.",
+      "opening_and_criteria": "The review states the result before detail: the last in-scope parity hole is closed and the completeness script is green at 46 types.",
+      "outline_and_hierarchy": "Strategize, survey, decisions, build, review, grade, and handoff are complete, but the document is legacy HTML and its largest tables are difficult outside the browser reader.",
+      "human_voice_and_precision": "It preserves a real escalation from 45 to 46 types and docks the grade because a stalled downstream slice required reviewer completion.",
+      "compression_and_restraint": "Convert the authoritative outcome and evidence to native blocks, compress probe matrices, and fixture-pin gauge-list count/epic paths before treating all branches as equally proven.",
+      "evidence_and_truth": "body_html[98] records exact implementation, Elixir-derived mirrored goldens, CI wiring, and the count escalation; body_html[110] identifies unexercised gauge-list modes and invalid-status divergence.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[98]",
+          "evidence": "The builder detects a changed in-scope count, adds the missing gauge-list twin, regenerates both mirrors, and wires the completeness guard into CI.",
+          "lesson": "A parity campaign should absorb live inventory drift rather than satisfy the stale brief."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[110]",
+          "evidence": "Only gauge-list share mode is golden-exercised; count/epic modes are code-review-only, and invalid status diverges between Elixir and JS.",
+          "lesson": "Final parity claims should distinguish fixture-proven branches from reviewed-only branches."
+        }
+      ],
+      "duplicate_disposition": "Make W7 the current render-unification authority; keep W5/W6 as linked predecessor ledgers and keep the Astro wave separate by consumer purpose.",
+      "reader_risks": [
+        "Studio: show purpose, current/superseded status, and representation type before long proof ledgers; collapse branch ids, tables, and raw transcripts.",
+        "TUI80: wrap prose and paginate large tables/heatmaps; legacy HTML tables and long branch-ledger rows must not become unbroken terminal lines.",
+        "email: send the outcome, one material caveat, and a link; omit fixture matrices, task ledgers, embedded live queries, and implementation transcripts.",
+        "public: remove internal hosts, task/branch ids, operational commands, mutable vendor claims, and security-sensitive implementation details; preserve dated provenance.",
+        "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics."
+      ],
+      "rationale": "Repair because it is the best current authority but needs native conversion and closure of explicitly unpinned branches."
+    },
+    {
+      "unit_id": "paper:portabledoc-render-unification-wave-2026-07-16",
+      "document_id": "portabledoc-render-unification-wave-2026-07-16",
+      "document_rev": "e9e6903f21aaa687198eb58a3d4fbdbb",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-2 proof that the canonical React renderer survives a real Astro static build with DOM-shape parity and zero shipped JavaScript.",
+      "opening_and_criteria": "The debrief announces shipped grade A and then supplies independent clean-install reruns, exact test totals, and a hydrating decoy.",
+      "outline_and_hierarchy": "The legacy-HTML wave ledger is long but purpose-specific: it owns Astro SSR consumption rather than generic renderer parity, so it remains distinct from W5-W7.",
+      "human_voice_and_precision": "The writing separates early unknowns from later measured proof and explicitly says which claims were unproven before the build existed.",
+      "compression_and_restraint": "Keep the outcome; provide a compact native summary for TUI/email and annotate later block-count drift without rewriting the immutable 42-fixture receipt.",
+      "evidence_and_truth": "body_html[115]-[119] show clean Node-20 gates, 47+4+185 tests, unchanged comparator reuse, a red decoy, and an on-disk zero-JS check.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[119]",
+          "evidence": "A fresh build contains zero .js files, zero astro-island markers, 42 data-pd-type instances, and only a hashed CSS asset.",
+          "lesson": "Validate shipping-budget claims against built output, not source intent."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[131]",
+          "evidence": "The next-wave paragraph still describes later work and flags then-current chat-type drift, so it must not be read as present status.",
+          "lesson": "Immutable debriefs need clear dated framing when their next-step advice ages."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from W5-W7: this is the Astro consumer proof, while those documents own renderer implementation and parity closure.",
+      "reader_risks": [
+        "Studio: show purpose, current/superseded status, and representation type before long proof ledgers; collapse branch ids, tables, and raw transcripts.",
+        "TUI80: wrap prose and paginate large tables/heatmaps; legacy HTML tables and long branch-ledger rows must not become unbroken terminal lines.",
+        "email: send the outcome, one material caveat, and a link; omit fixture matrices, task ledgers, embedded live queries, and implementation transcripts.",
+        "public: remove internal hosts, task/branch ids, operational commands, mutable vendor claims, and security-sensitive implementation details; preserve dated provenance.",
+        "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics."
+      ],
+      "rationale": "Keep because the distinct Astro proof is complete, non-vacuous, dated, and independently rerun."
+    },
+    {
+      "unit_id": "paper:portabledoc-showcase",
+      "document_id": "portabledoc-showcase",
+      "document_rev": "a6dc36546ca61cedc49077f3e67750f7",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Living executable inventory demonstrating PortableDoc components and compositions across reader, Studio, and terminal renderers.",
+      "opening_and_criteria": "The ingress teaches the three surfaces and the callout states the honesty rule: live components, with labeled degradation rather than screenshots or fake parity.",
+      "outline_and_hierarchy": "Nine numbered sections move from prose and rich blocks through widgets, layouts, live task data, data visualization, compositions, fidelity, and newborn blocks.",
+      "human_voice_and_precision": "Short explanations make the fixture useful to humans rather than a raw schema dump, and the closing returns to the one-document/three-renderers thesis.",
+      "compression_and_restraint": "Keep as the canonical showcase; label demo metrics and task queries as illustrative/live, and avoid reproducing the 365-cell heatmap in email or narrow terminals.",
+      "evidence_and_truth": "blocks[3]-[4] define the cross-surface contract; blocks[91]-[97] exercise accessibility-conscious heatmaps, marginals, denominators, and compact-axis charts.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "The showcase declares that each exhibit is a live component and lower-ceiling surfaces must degrade into an honest labeled box.",
+          "lesson": "A component showcase should state its degradation contract up front."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[70]",
+          "evidence": "The stat claims 14/14 renderers at parity while later sections add diff/filetree and the W7 authority reports 46 in-scope types; this is demonstrative data, not current inventory truth.",
+          "lesson": "Fixture metrics need explicit demo labels or automated derivation to avoid being mistaken for status."
+        }
+      ],
+      "duplicate_disposition": "Distinct from the component reference and wave ledgers: this document owns live demonstration, not normative schema or historical proof.",
+      "reader_risks": [
+        "Studio: show purpose, current/superseded status, and representation type before long proof ledgers; collapse branch ids, tables, and raw transcripts.",
+        "TUI80: wrap prose and paginate large tables/heatmaps; legacy HTML tables and long branch-ledger rows must not become unbroken terminal lines.",
+        "email: send the outcome, one material caveat, and a link; omit fixture matrices, task ledgers, embedded live queries, and implementation transcripts.",
+        "public: remove internal hosts, task/branch ids, operational commands, mutable vendor claims, and security-sensitive implementation details; preserve dated provenance.",
+        "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics."
+      ],
+      "rationale": "Keep because it is a coherent, native, cross-surface executable showcase; the main risk is mutable demo data being read as status."
+    },
+    {
+      "unit_id": "paper:preview-contract",
+      "document_id": "preview-contract",
+      "document_rev": "7555cec699b51cf98f39746517069b82",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Design contract for one write-time preview manifest reused by Papers, Sheets, Studio, Desk, web finder, task surfaces, TUI, and outward share metadata.",
+      "opening_and_criteria": "The opening identifies the present duplication and zero-metadata gap, then states a testable north star: core-only graceful degradation and emission from one manifest.",
+      "outline_and_hierarchy": "Current-state audit, three-ring contract, compute seam, outward emission, consumer collapse, waves, and definition of done create a clean decision sequence.",
+      "human_voice_and_precision": "The document borrows the useful part of Open Graph without cargo-culting it and repeatedly rejects per-surface hand construction and a preview god-object.",
+      "compression_and_restraint": "Keep as design authority, but add implementation/as-of state and verify volatile platform heuristics before presenting sizes, crawler limits, or consumer behavior as current fact.",
+      "evidence_and_truth": "blocks[14]-[19] establish namespaced extensions, typed image fallback, and the write-time projection seam; block[31] provides an end-user and cross-surface definition of done.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[14]",
+          "evidence": "Namespaced extensions let a new document type add one schema without changing the core or existing consumers.",
+          "lesson": "Keep a preview core small and extend by discriminator instead of accumulating a universal object."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[23]",
+          "evidence": "Platform behavior and limits are asserted for Slack, X, messaging apps, search, oEmbed, and the first 32 KB without an as-of citation layer in the paper.",
+          "lesson": "Externally controlled metadata behavior needs dated sources or a verification note."
+        }
+      ],
+      "duplicate_disposition": "Keep distinct from the showcase and renderer waves: this owns the projection/emission contract, not component rendering.",
+      "reader_risks": [
+        "Studio: show purpose, current/superseded status, and representation type before long proof ledgers; collapse branch ids, tables, and raw transcripts.",
+        "TUI80: wrap prose and paginate large tables/heatmaps; legacy HTML tables and long branch-ledger rows must not become unbroken terminal lines.",
+        "email: send the outcome, one material caveat, and a link; omit fixture matrices, task ledgers, embedded live queries, and implementation transcripts.",
+        "public: remove internal hosts, task/branch ids, operational commands, mutable vendor claims, and security-sensitive implementation details; preserve dated provenance.",
+        "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics."
+      ],
+      "rationale": "Keep because its architecture, fallback order, consumer boundary, and success criteria remain precise; only volatile external facts need dated maintenance."
+    },
+    {
+      "unit_id": "paper:production-truth-wave-2026-07-20",
+      "document_id": "production-truth-wave-2026-07-20",
+      "document_rev": "2c26416ccffd98018850928ff92e1e34",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Evidence-heavy production-truth wave diagnosing stale Paper HTML/version provenance, false 422 classifications, unsafe write stamps, dead validation seams, and broken CI alerting.",
+      "opening_and_criteria": "The paper grounds the problem in production corpus counts and explicitly distinguishes proven, overturned, not-found, and not-reached claims.",
+      "outline_and_hierarchy": "The analysis and decision record are unusually thorough, but the 134-block document ends at a round plan with “Wave status: building” and contains no final review/debrief.",
+      "human_voice_and_precision": "It is strongest when it corrects its own premises and demonstrates that seemingly safe remedies reproduce the same defect class.",
+      "compression_and_restraint": "Add the missing outcome/debrief or link a verified successor, collapse long measurement ledgers, and separate durable decisions from in-flight dispatch state.",
+      "evidence_and_truth": "blocks[108]-[117] prove sentinel fail-open behavior, a dead validation seam, real corpus incidence, missing token, draft-only task filing, and a non-vacuous audit gate.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[116]",
+          "evidence": "The exact createIfNotExists request returns a draft while automation prints success, proving the proposed alert would be invisible.",
+          "lesson": "Probe remedies end-to-end; a successful HTTP response can still encode the wrong lifecycle state."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[133]",
+          "evidence": "The final block says the wave is building and promises that review will close the paper, but no review or debrief follows.",
+          "lesson": "A wave paper cannot serve as completion authority without a terminal outcome."
+        }
+      ],
+      "duplicate_disposition": "Keep distinct as production-truth investigation evidence, but repair its terminal state or point to the final wave record rather than letting readers infer completion.",
+      "reader_risks": [
+        "Studio: show purpose, current/superseded status, and representation type before long proof ledgers; collapse branch ids, tables, and raw transcripts.",
+        "TUI80: wrap prose and paginate large tables/heatmaps; legacy HTML tables and long branch-ledger rows must not become unbroken terminal lines.",
+        "email: send the outcome, one material caveat, and a link; omit fixture matrices, task ledgers, embedded live queries, and implementation transcripts.",
+        "public: remove internal hosts, task/branch ids, operational commands, mutable vendor claims, and security-sensitive implementation details; preserve dated provenance.",
+        "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics."
+      ],
+      "rationale": "Repair because the evidence is decision-critical and excellent, while the document remains explicitly non-terminal."
+    },
+    {
+      "unit_id": "paper:provider-horizon",
+      "document_id": "provider-horizon",
+      "document_rev": "f8de7acedb8a6219954695eefcfb6ec4",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Provider strategy that separates Barkpark’s shared product moat from universal session heuristics and four external wire families, then trigger-gates the second runtime.",
+      "opening_and_criteria": "The ingress and three-altitude diagram make the central choice legible: deepen Claude, protect a provider-blind seam, and buy protocol families rather than bespoke vendors.",
+      "outline_and_hierarchy": "Heuristics, wire families, edge matrix, vendor placements, five-agent amendments, trigger criteria, roadmap, and sources form a coherent strategy document.",
+      "human_voice_and_precision": "The paper is candid that plan mode can be simulated, workflow trees are Claude-only, and a second wire lacks a current demand signal.",
+      "compression_and_restraint": "Refresh all provider/protocol capability claims against pinned upstream versions; keep the durable seam rules and trigger logic while moving volatile vendor counts to a dated appendix.",
+      "evidence_and_truth": "blocks[7]-[18] derive the family-level architecture from a pinned t3code source; blocks[34] and [39] add harness, demand, cost, and kill-signal safeguards.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[34]",
+          "evidence": "A wire-contract harness, Claude-only behavior freeze, demand trigger, Barkpark-coupled roadmap rule, and frame-survival gate constrain expansion.",
+          "lesson": "Provider abstraction should follow executable contract evidence and a trigger, not speculative parity."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[48]",
+          "evidence": "The sources are dated 2026-07-08→10 and include a pinned clone plus live CLI probes, while the prose makes fast-changing provider and protocol claims.",
+          "lesson": "External ecosystem strategy needs explicit expiry/revalidation metadata."
+        }
+      ],
+      "duplicate_disposition": "Distinct strategic horizon document; do not merge with implementation waves, but repair its dated source envelope and current-capability assertions.",
+      "reader_risks": [
+        "Studio: show purpose, current/superseded status, and representation type before long proof ledgers; collapse branch ids, tables, and raw transcripts.",
+        "TUI80: wrap prose and paginate large tables/heatmaps; legacy HTML tables and long branch-ledger rows must not become unbroken terminal lines.",
+        "email: send the outcome, one material caveat, and a link; omit fixture matrices, task ledgers, embedded live queries, and implementation transcripts.",
+        "public: remove internal hosts, task/branch ids, operational commands, mutable vendor claims, and security-sensitive implementation details; preserve dated provenance.",
+        "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics."
+      ],
+      "rationale": "Repair because the architectural reasoning is durable but its market/protocol facts are inherently volatile and already dated."
+    },
+    {
+      "unit_id": "paper:query-blocks-cookbook",
+      "document_id": "query-blocks-cookbook",
+      "document_rev": "bc12a2d3b1bd1cc70d8a46aadbace786",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Concise author cookbook for live task-backed row and aggregate PortableDoc blocks, including shaping, tenancy, liveness, offline degradation, and Studio byte stability.",
+      "opening_and_criteria": "The ingress promises seven copy-paste recipes and immediately explains query-versus-snapshot behavior and live re-rendering.",
+      "outline_and_hierarchy": "Four short numbered sections progress from row queries to aggregates, resolver shaping, and three runtime environments; every concept is adjacent to executable JSON.",
+      "human_voice_and_precision": "The tone is direct and operational without losing safety rules such as fail-closed tenancy and k-anonymity suppression.",
+      "compression_and_restraint": "Keep; add an as-of/schema-version marker if the query vocabulary changes, and ensure the live-demo child count is derived rather than frozen prose.",
+      "evidence_and_truth": "blocks[6], [11], [17], and [20] specify vocabulary, privacy, exact injected attributes, and persistence/degradation behavior.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[11]",
+          "evidence": "The aggregate vocabulary is closed, fields are whitelisted, low-cardinality measures are suppressed, and foreign workspaces resolve empty.",
+          "lesson": "Cookbooks should teach safety and tenancy in the same examples as convenience."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[21]",
+          "evidence": "The start-here callout hard-codes “124 children” for a live dashboard even though the rest of the cookbook teaches live resolution.",
+          "lesson": "Do not freeze mutable live-demo counts in explanatory prose."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from preview and showcase documents because it owns author-facing query syntax and resolver semantics.",
+      "reader_risks": [
+        "Studio: show purpose, current/superseded status, and representation type before long proof ledgers; collapse branch ids, tables, and raw transcripts.",
+        "TUI80: wrap prose and paginate large tables/heatmaps; legacy HTML tables and long branch-ledger rows must not become unbroken terminal lines.",
+        "email: send the outcome, one material caveat, and a link; omit fixture matrices, task ledgers, embedded live queries, and implementation transcripts.",
+        "public: remove internal hosts, task/branch ids, operational commands, mutable vendor claims, and security-sensitive implementation details; preserve dated provenance.",
+        "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics."
+      ],
+      "rationale": "Keep because it is compact, native, precise, executable, and explicit about online/offline/editor behavior."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}
