@@ -1,0 +1,98 @@
+{
+  "schema_version": "paper-perfection-successor-readback-index/v1",
+  "assignment_id": "PPCC2-S014",
+  "reads": [
+    {
+      "document_id": "connectors-wave-17-2026-07-16",
+      "document_rev": "08b7074a22dcdb866b55260ee795f99a",
+      "readback_sha256": "95595d3a181043ea320725fa10f13295ad5dfb05c4a70f7809e195846d3518e2",
+      "block_count": 125,
+      "body_html_chars": 0,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:58:04Z"
+    },
+    {
+      "document_id": "connectors-wave-18-2026-07-16",
+      "document_rev": "65d033c2713378de727647d493bbe925",
+      "readback_sha256": "24496116591211024e2b04712a8122fc7db32ab0b7639b5cafe417da9c27ff72",
+      "block_count": 76,
+      "body_html_chars": 45177,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:58:05Z"
+    },
+    {
+      "document_id": "connectors-wave-19-2026-07-16",
+      "document_rev": "667b9a5ee42b5177e5308ae0d5f7c44d",
+      "readback_sha256": "acf651ee706a0a85813349a591265c1ae9697909dafc71c40ae40fd451e52f8d",
+      "block_count": 84,
+      "body_html_chars": 26341,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:58:07Z"
+    },
+    {
+      "document_id": "connectors-wave-2-2026-07-13",
+      "document_rev": "82a344781e3eeac47263044672ceaf76",
+      "readback_sha256": "d5ab3f7561f83ddeca50be4521b3ca89d940492a35739477bc4d43e262371e80",
+      "block_count": 56,
+      "body_html_chars": 0,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:58:08Z"
+    },
+    {
+      "document_id": "connectors-wave-20-2026-07-16",
+      "document_rev": "abd16ba286588e48a0c0f547fb954e0f",
+      "readback_sha256": "5709bb648e8118bbc1a64220ae102d7487803c6c13bc415c309a0d88dd14440c",
+      "block_count": 53,
+      "body_html_chars": 47353,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:58:11Z"
+    },
+    {
+      "document_id": "connectors-wave-2026-07-13",
+      "document_rev": "48ecf11d98f96af6ad7148bbfd53dd79",
+      "readback_sha256": "908fe68e5cab50707a4e1841dfe6425d1cfcd4384fdb8f39525cebcc1feb1c6c",
+      "block_count": 0,
+      "body_html_chars": 42273,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:58:14Z"
+    },
+    {
+      "document_id": "connectors-wave-2026-07-22",
+      "document_rev": "d65103ec18f51fa76be26928023d2046",
+      "readback_sha256": "0b78ea381a459734a4fd1e43abaa4f88cdd1769cc5b5a1c1964d6e188b3ead7a",
+      "block_count": 56,
+      "body_html_chars": 32467,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:58:15Z"
+    },
+    {
+      "document_id": "connectors-wave-21-2026-07-17",
+      "document_rev": "4821f92e0c021ad3da0bac2ccdf53c88",
+      "readback_sha256": "6fa11e095790a013b54b9d9b7f80888ed2797791a0884bd71e62aee17bd33e0f",
+      "block_count": 46,
+      "body_html_chars": 35982,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:58:16Z"
+    },
+    {
+      "document_id": "connectors-wave-22-2026-07-17",
+      "document_rev": "90fb621d0da61ace70c3625b73d09dab",
+      "readback_sha256": "2f24a5d8ab98f40e6b87c9950faf644fd6ca9afde376b4918ce69cee2781ca09",
+      "block_count": 36,
+      "body_html_chars": 40406,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:58:17Z"
+    },
+    {
+      "document_id": "connectors-wave-23-2026-07-17",
+      "document_rev": "bb1d85660c44ad2631d588db5b1f92a9",
+      "readback_sha256": "c0f170a8b44f5e3bf3cf3df695d606ba809115e1ea95f6081f8f0d4bf07356b9",
+      "block_count": 37,
+      "body_html_chars": 30225,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:58:19Z"
+    }
+  ],
+  "all_pinned_revisions_read": true,
+  "count": 10
+}

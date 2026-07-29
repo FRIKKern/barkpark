@@ -1,0 +1,507 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S014",
+  "assignment_snapshot_sha256": "9d4a103b9e0294cab448f64aabdde4da6983442938dc916b42df8f72075ba54b",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 5,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "87346b213456128b52318d0185c2c193107e3d6a0ab7ccbeff7b034fbe42b20e"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All ten pinned revisions were read: 569 native top-level blocks plus the complete 42,273-character legacy HTML first-wave Paper. Keep 4 and repair 6. The strongest transferable patterns are real-sibling integration, mutation/non-vacuity proof, and bounded security claims; the recurring failure is stale BUILDING/SURVEYING front matter or absent terminal evidence burying what actually shipped.",
+  "verdict_counts": {
+    "repair": 6,
+    "keep": 4
+  },
+  "checked_unit_ids": [
+    "paper:connectors-wave-17-2026-07-16",
+    "paper:connectors-wave-18-2026-07-16",
+    "paper:connectors-wave-19-2026-07-16",
+    "paper:connectors-wave-2-2026-07-13",
+    "paper:connectors-wave-20-2026-07-16",
+    "paper:connectors-wave-2026-07-13",
+    "paper:connectors-wave-2026-07-22",
+    "paper:connectors-wave-21-2026-07-17",
+    "paper:connectors-wave-22-2026-07-17",
+    "paper:connectors-wave-23-2026-07-17"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 10,
+    "native_top_level_blocks_read": 569,
+    "legacy_html_documents_read": 1,
+    "legacy_html_chars_read": 42273,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:connectors-wave-17-2026-07-16 blocks[116]",
+      "evidence": "Two shared index.ts slices are integrated together rather than accepted from isolated greens.",
+      "lesson": "Prove shared-file composition."
+    },
+    {
+      "block_ref": "paper:connectors-wave-20-2026-07-16 blocks[44]",
+      "evidence": "The gate turns red when the protected wiring is removed.",
+      "lesson": "Mutation-test non-vacuity."
+    },
+    {
+      "block_ref": "paper:connectors-wave-21-2026-07-17 blocks[37]",
+      "evidence": "The security outcome states the proven SQL wall and the remaining cryptographic boundary.",
+      "lesson": "Bound security claims precisely."
+    },
+    {
+      "block_ref": "paper:connectors-wave-2026-07-13 body_html[109]",
+      "evidence": "A positive-owner integration defect appears only when real siblings meet.",
+      "lesson": "Require real-peer integration evidence."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:connectors-wave-17-2026-07-16 blocks[118]",
+      "evidence": "One claimed slice produced no branch, commit, or evidence and had to be reopened.",
+      "reader_impact": "Claim state can masquerade as delivery."
+    },
+    {
+      "block_ref": "paper:connectors-wave-2-2026-07-13 blocks[51]",
+      "evidence": "The primary first-token measure never ran because the required key was unavailable.",
+      "reader_impact": "The title or criteria can overstate experimental proof."
+    },
+    {
+      "block_ref": "paper:connectors-wave-2026-07-13 body_html[111]",
+      "evidence": "Review reverses an off-by-one false-done ledger stamp.",
+      "reader_impact": "Later planning can inherit false completion."
+    },
+    {
+      "block_ref": "paper:connectors-wave-23-2026-07-17 blocks[36]",
+      "evidence": "The Paper ends with a plan/backlog and no build or terminal review.",
+      "reader_impact": "Delivery status is unknowable."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "connectors-wave-17-2026-07-16",
+        "connectors-wave-18-2026-07-16",
+        "connectors-wave-19-2026-07-16",
+        "connectors-wave-20-2026-07-16"
+      ],
+      "basis": "Sequential connector-hardening series with repeated operating form but distinct slice evidence; Wave 20 explicitly closes the buildable-offline vein.",
+      "disposition": "Keep separate evidence records, add a four-wave series index, and label Wave 20 the close-out rather than merging receipts."
+    },
+    {
+      "candidate_set": [
+        "connectors-wave-2026-07-13",
+        "connectors-wave-2-2026-07-13",
+        "connectors-wave-21-2026-07-17",
+        "connectors-wave-22-2026-07-17",
+        "connectors-wave-23-2026-07-17"
+      ],
+      "basis": "Capability progression from tenant execution seam and runner measurement through SQL secret isolation, HTTP/AAD binding, and per-workspace execution profile. The papers share a domain but own different boundaries.",
+      "disposition": "Keep separate and add a capability/proof timeline; do not collapse distinct storage, transport, cryptographic, and execution-profile authorities."
+    },
+    {
+      "candidate_set": [
+        "connectors-wave-21-2026-07-17",
+        "connectors-wave-22-2026-07-17"
+      ],
+      "basis": "Both address run-secrets security, but Wave 21 proves the SQL/storage wall while Wave 22 proves HTTP and authenticated-encryption enforcement.",
+      "disposition": "Cross-link as layered security companions; do not merge."
+    },
+    {
+      "candidate_set": [
+        "connectors-wave-2026-07-22",
+        "connectors-wave-17-2026-07-16",
+        "connectors-wave-20-2026-07-16"
+      ],
+      "basis": "All resemble connector backlog sweeps, but Wave 32 studies evidence freshness and disposition method while Waves 17/20 own build hardening outcomes.",
+      "disposition": "Keep Wave 32 separate; share only the evidence-doctrine link."
+    }
+  ],
+  "reader_risks": [
+    "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+    "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+    "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+    "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+    "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:connectors-wave-17-2026-07-16",
+      "document_id": "connectors-wave-17-2026-07-16",
+      "document_rev": "08b7074a22dcdb866b55260ee795f99a",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Connector Wave 17 hardens seven adapter/install slices so provider integrations fail honestly and real sibling contracts survive integration.",
+      "opening_and_criteria": "blocks[0]-[6] introduce the connector-hardening wish, but blocks[6] still says WAVE STATUS: BUILDING. The terminal A- result appears only in blocks[106]-[124]: six of seven slices shipped and one unexecuted slice returned to open.",
+      "outline_and_hierarchy": "125 native blocks preserve strategy, a large survey, decisions, seven assignments, and the review/debrief. Evidence is substantial, but the current outcome is buried behind the longest paper in this set.",
+      "human_voice_and_precision": "The review is candid about a dead builder, distinguishes claimed work from evidence, and records shared-file integration rather than smoothing the miss away. Dense task ids and adapter names assume an expert reader.",
+      "compression_and_restraint": "Compress the front door to shipped 6/7, grade A-, shared-index integration result, and the reopened slice; retain the full receipts below. Add a semantic H1 and replace stale BUILDING status.",
+      "evidence_and_truth": "blocks[116]-[118] distinguish a real three-way integration merge from an evidence-free claimed slice, preventing the roster from overstating delivery.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[116]",
+          "evidence": "Review integrates both independently edited shared index.ts slices and verifies that the three-way result remains coherent.",
+          "lesson": "When slices share a registry, prove the combined artifact rather than accepting isolated greens."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[118]",
+          "evidence": "W17-5 was claimed, but no branch, commit, or evidence ever appeared; review resets it to open.",
+          "lesson": "A stale claimed state can be mistaken for shipped capability unless the terminal summary names the missing evidence."
+        }
+      ],
+      "duplicate_disposition": "Part of the Wave 17-20 connector-hardening sequence. Keep its slice-specific failure evidence separate, but add a series index and point readers to Wave 20 as the close-out for the buildable-offline vein.",
+      "reader_risks": [
+        "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+        "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+        "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+        "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+      ],
+      "rationale": "Repair: the technical record is trustworthy, but a stale BUILDING front state, absent H1, and 125-block chronology hide the honest 6/7 A- terminal result."
+    },
+    {
+      "unit_id": "paper:connectors-wave-18-2026-07-16",
+      "document_id": "connectors-wave-18-2026-07-16",
+      "document_rev": "65d033c2713378de727647d493bbe925",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Connector Wave 18 supplies reusable harness and adapter infrastructure for reliable install, mount, auth, and error-path testing across connectors.",
+      "opening_and_criteria": "The opening describes the next hardening wave and seven slices but lacks a durable terminal status card. blocks[63]-[75] eventually record all seven green, grade A, and no review fixes.",
+      "outline_and_hierarchy": "76 native blocks and a long rendered body cover survey, decisions, execution, and debrief. The structure is coherent, but the terminal all-green scope is placed after extensive process detail.",
+      "human_voice_and_precision": "The paper is concrete about what the harness exercises and explicitly says some value is infrastructure awaiting future wiring. That restraint is strong; reader entry cost remains high because the current state is not front-loaded.",
+      "compression_and_restraint": "Preserve the detailed harness contracts, but prepend a one-screen A-grade outcome and distinguish immediately available behavior from infrastructure-only value. Add a semantic H1.",
+      "evidence_and_truth": "blocks[67]-[74] tie green status to the real mountInstall seam and disclose that part of the outcome is enabling infrastructure rather than already user-visible behavior.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[67]",
+          "evidence": "The ACK-first harness drives the real mountInstall path, spies the actual adapter, and pins ordering plus rejection handling.",
+          "lesson": "Test the actual orchestration seam and observable ordering, not only a helper-shaped fake."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[74]",
+          "evidence": "The debrief notes that some shipped value is infrastructure awaiting later product wiring.",
+          "lesson": "Without a front scope boundary, readers may infer immediate connector behavior from foundations that only enable later work."
+        }
+      ],
+      "duplicate_disposition": "Shares the repeated hardening-wave form with Waves 17-20 but owns reusable test infrastructure. Keep separate and cross-link the series; do not merge its harness authority into later slice outcomes.",
+      "reader_risks": [
+        "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+        "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+        "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+        "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+      ],
+      "rationale": "Repair: excellent A-grade evidence, but no semantic H1 or front terminal card leaves the all-seven-green result and infrastructure boundary buried in a long paper."
+    },
+    {
+      "unit_id": "paper:connectors-wave-19-2026-07-16",
+      "document_id": "connectors-wave-19-2026-07-16",
+      "document_rev": "667b9a5ee42b5177e5308ae0d5f7c44d",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Connector Wave 19 targets three connector integrations, using integration and pinning proof to ship the feasible slices without inventing evidence for the stalled WhatsApp lane.",
+      "opening_and_criteria": "blocks[0] immediately states COMPLETE, grade B+, two of three shipped, and WhatsApp stalled. The opening therefore resolves status and scope before the historical derivation.",
+      "outline_and_hierarchy": "84 blocks proceed from the compact current card through survey, execution, review, and limitations. It is long, but the hierarchy protects skimmers from reading planning language as current truth.",
+      "human_voice_and_precision": "The paper is unusually honest about the unrun substantive slice and explains the exact evidence behind the two shipped lanes. Domain vocabulary is dense but not promotional.",
+      "compression_and_restraint": "Keep the front card and evidence-rich body. A small series navigation block would improve discoverability, but compression is not required for truthfulness.",
+      "evidence_and_truth": "blocks[74]-[81] pair pin/integration proof for the shipped slices with explicit disclosure that W19-1 never ran and was not counted.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[75]",
+          "evidence": "The review records the exact pin proof and verifies the intended dependency path rather than relying on a green label.",
+          "lesson": "Name the mechanism proven by a pin or integration gate."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[81]",
+          "evidence": "The most substantive WhatsApp slice never ran, so the paper closes at two of three and grade B+.",
+          "lesson": "The larger product goal remains incomplete even though the executed slices are well evidenced."
+        }
+      ],
+      "duplicate_disposition": "Sequentially related to Waves 17-20, but its three connector outcomes and explicit WhatsApp non-delivery are distinct authority. Cross-link rather than merge.",
+      "reader_risks": [
+        "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+        "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+        "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+        "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+      ],
+      "rationale": "Keep: current status is front-loaded, the 2/3 boundary is honest, and shipped claims are tied to specific integration and pinning evidence."
+    },
+    {
+      "unit_id": "paper:connectors-wave-2-2026-07-13",
+      "document_id": "connectors-wave-2-2026-07-13",
+      "document_rev": "82a344781e3eeac47263044672ceaf76",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "The second connector wave evaluates runner and transport behavior, especially snapshot/install timing and the path toward measuring first useful response.",
+      "opening_and_criteria": "blocks[0]-[3] frame the wave but leave the front state at SURVEYING. blocks[45]-[55] later close A- while admitting that the load-bearing in-sandbox first-token measure was not obtained.",
+      "outline_and_hierarchy": "56 native blocks provide a manageable progression from goal through experiments and review. The main defect is semantic: the opening wish can be read as achieved unless the reader reaches the terminal caveat.",
+      "human_voice_and_precision": "The experimental voice is strong and self-correcting: it detects a cmux shim confound rather than laundering it into a result. The title and criteria should more precisely distinguish snapshot/install timing from first-response timing.",
+      "compression_and_restraint": "No major body compression is needed. Replace stale status and prepend the precise measured/unmeasured boundary so the strongest caveat is visible at first read.",
+      "evidence_and_truth": "blocks[39] and [51] separate the timing actually observed from the unavailable first-token experiment and record the environmental reason.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[39]",
+          "evidence": "The experiment measures snapshot versus install timing and identifies a cmux shim as a confound instead of treating the number as clean.",
+          "lesson": "Record environmental confounds alongside timing results."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[51]",
+          "evidence": "The load-bearing in-sandbox model first-token timing was not measured because the required key was unavailable.",
+          "lesson": "The opening ambition can overstate latency proof unless the missing primary measure is surfaced immediately."
+        }
+      ],
+      "duplicate_disposition": "Predecessor in the connector capability progression, not a duplicate of the later run-secrets or execution-profile waves. Cross-link its runner evidence forward.",
+      "reader_risks": [
+        "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+        "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+        "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+        "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+      ],
+      "rationale": "Repair: retain the honest experiment, but correct stale SURVEYING status and narrow the front criteria to what was actually measured."
+    },
+    {
+      "unit_id": "paper:connectors-wave-20-2026-07-16",
+      "document_id": "connectors-wave-20-2026-07-16",
+      "document_rev": "abd16ba286588e48a0c0f547fb954e0f",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Connector Wave 20 closes the buildable-offline hardening vein with adapter correctness, negative-path behavior, and mutation-backed wiring proof.",
+      "opening_and_criteria": "blocks[0] still presents BUILDING. blocks[39]-[52] later record the A- close, including what mutation tests prove and one latent WhatsApp-specific persistence concern.",
+      "outline_and_hierarchy": "53 blocks are relatively compact, moving through targeted slices and a concise review. The terminal information is good but should replace, not merely coexist with, the stale front state.",
+      "human_voice_and_precision": "The review uses precise non-vacuity language and distinguishes an inert latent defect from an active failure. That nuance is valuable and should be promoted into the summary.",
+      "compression_and_restraint": "Body length is restrained. Repair only the front card, semantic H1, and explicit cross-wave close-out link; keep the mutation receipt intact.",
+      "evidence_and_truth": "blocks[44]-[46] demonstrate that the gate fails when the intended wiring is removed and disclose the remaining unconditional cross-channel write.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[44]",
+          "evidence": "Mutation proof turns the gate red when wiring is removed, and the rejecting-write case still posts as intended.",
+          "lesson": "Show a green is non-vacuous by breaking the exact mechanism it claims to protect."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[46]",
+          "evidence": "Cross-channel writes still target a WhatsApp-specific table unconditionally; it is inert today but a latent boundary defect.",
+          "lesson": "Readers need the residual risk so A- is not mistaken for a universal storage contract."
+        }
+      ],
+      "duplicate_disposition": "Close-out authority for the Wave 17-20 buildable-offline hardening series. Keep each wave for slice evidence, but use this paper as the series endpoint and add backward links.",
+      "reader_risks": [
+        "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+        "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+        "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+        "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+      ],
+      "rationale": "Repair: concise, strong evidence merits retention, but stale BUILDING status and absent H1 obscure its role as the A- close-out authority."
+    },
+    {
+      "unit_id": "paper:connectors-wave-2026-07-13",
+      "document_id": "connectors-wave-2026-07-13",
+      "document_rev": "48ecf11d98f96af6ad7148bbfd53dd79",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "The first connector wave establishes the tenant-aware execution seam and proves how separately green slices behave when integrated.",
+      "opening_and_criteria": "body_html[1] remains BUILDING in the legacy HTML representation. body_html[103]-[117] later record COMPLETE, grade A-, three slices shipped, an integration defect, and a corrected false ledger stamp.",
+      "outline_and_hierarchy": "The Paper has no native blocks but contains a complete 42,273-character legacy HTML narrative with strategy, execution, review, and debrief. Its content is substantive, yet native readers can misclassify it as empty.",
+      "human_voice_and_precision": "The review is exact about why isolated tests missed an owner-contract bug and why a criteria stamp was off by one. The legacy representation and stale status weaken otherwise strong forensic voice.",
+      "compression_and_restraint": "Migrate the full record to native blocks, add an H1 and terminal A- card, and retain the integration and ledger corrections as named evidence sections.",
+      "evidence_and_truth": "body_html[108]-[111] record a real integration failure after individual greens and reverse a false-done criteria stamp.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[109]",
+          "evidence": "The integrated path exposes a positive-owner contract bug even though the individual slices were green.",
+          "lesson": "Require a real sibling integration check before accepting isolated slice evidence."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[111]",
+          "evidence": "Review finds an off-by-one criteria stamp that marked more complete than the evidence supported.",
+          "lesson": "A false-done ledger corrupts later planning even when the underlying code is sound."
+        }
+      ],
+      "duplicate_disposition": "Foundation of the connector capability sequence. Keep separate from Wave 2 and Waves 21-23; add a capability timeline from tenant seam through secrets, HTTP/AAD, and execution profile.",
+      "reader_risks": [
+        "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+        "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+        "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+        "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+      ],
+      "rationale": "Repair: the full legacy Paper is valuable, but zero native blocks, stale BUILDING status, and buried terminal truth create severe reader and extraction risk."
+    },
+    {
+      "unit_id": "paper:connectors-wave-2026-07-22",
+      "document_id": "connectors-wave-2026-07-22",
+      "document_rev": "d65103ec18f51fa76be26928023d2046",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Connector Wave 32 is a research-method and disposition sweep that tests evidence freshness, kill signals, and how to close modest connector backlog safely.",
+      "opening_and_criteria": "blocks[0] leads with REVIEWED, both slices shipped, and grade A. The terminal state and limited scope are therefore available before the experiment history.",
+      "outline_and_hierarchy": "56 blocks move through the research framing, two controlled slices, and a concise review. The hierarchy is navigable and the current status is not contradicted by later material.",
+      "human_voice_and_precision": "The paper is restrained about its modest value and clearly separates git-derived freshness from wish labels. It avoids inflating a disposition sweep into broad product proof.",
+      "compression_and_restraint": "Keep as written; optional series links are sufficient. The body is moderate and the front REVIEWED card carries the terminal truth.",
+      "evidence_and_truth": "blocks[51]-[55] assess the E3 kill signal, require git-derived freshness, and disclose that live/human risk remained outside scope.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[54]",
+          "evidence": "The E3 kill signal is evaluated explicitly, and freshness must be derived from git evidence rather than a declarative wish label.",
+          "lesson": "Make freshness an independently derived property, not an author assertion."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[55]",
+          "evidence": "The outcome is a modest disposition improvement; live and human risk were not exercised.",
+          "lesson": "Readers must not generalize a research-method green into production connector readiness."
+        }
+      ],
+      "duplicate_disposition": "It resembles Waves 17-20 as a backlog sweep, but its purpose is research-method validation and disposition discipline. Keep separate; cross-link only the shared evidence doctrine.",
+      "reader_risks": [
+        "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+        "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+        "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+        "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+      ],
+      "rationale": "Keep: reviewed status, modest claims, explicit freshness doctrine, and clear limits make it a trustworthy current historical record."
+    },
+    {
+      "unit_id": "paper:connectors-wave-21-2026-07-17",
+      "document_id": "connectors-wave-21-2026-07-17",
+      "document_rev": "4821f92e0c021ad3da0bac2ccdf53c88",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Connector Wave 21 creates the tenant-scoped SQL wall for run secrets, protecting isolation while documenting migration and type-boundary risks.",
+      "opening_and_criteria": "The front includes a semantic H1 and names the run-secrets objective; blocks[2] says VERIFYING, while blocks[34]-[45] give the terminal shipped A result and precise remaining hazards.",
+      "outline_and_hierarchy": "46 blocks form a compact design/build/review record. Although the phase marker is historical, the named final review is easy to reach and the hierarchy remains usable.",
+      "human_voice_and_precision": "The paper states the exact security property and openly names what is not proven: destructive down migration behavior and a future raw-binary CastError boundary.",
+      "compression_and_restraint": "Keep the compact record. A small dated terminal badge could replace VERIFYING, but the current hierarchy and H1 already make the authority legible.",
+      "evidence_and_truth": "blocks[37]-[43] pair the two-tier SQL isolation proof with explicit migration and type-system limitations.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[37]",
+          "evidence": "The outcome states the two-tier SQL wall, confirms no cross-scope leak, and names the remaining cryptographic boundary.",
+          "lesson": "Describe security proof as a bounded property with a named residual, not a blanket safe claim."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[43]",
+          "evidence": "The down migration is not proven safe for scoped rows, and raw binary scope can trigger a future CastError.",
+          "lesson": "Operators need these boundaries before treating the schema change as reversible or the API as type-closed."
+        }
+      ],
+      "duplicate_disposition": "Closely related to Wave 22 run-secrets work, but this is SQL/storage isolation while Wave 22 owns HTTP/AAD enforcement. Keep separate and cross-link the layered security model.",
+      "reader_risks": [
+        "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+        "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+        "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+        "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+      ],
+      "rationale": "Keep: proper hierarchy, strong bounded security evidence, and explicit residual risks outweigh the minor stale VERIFYING phase marker."
+    },
+    {
+      "unit_id": "paper:connectors-wave-22-2026-07-17",
+      "document_id": "connectors-wave-22-2026-07-17",
+      "document_rev": "90fb621d0da61ace70c3625b73d09dab",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Connector Wave 22 extends run-secrets protection through HTTP and authenticated-encryption boundaries, including forged-scope rejection and merged integration gates.",
+      "opening_and_criteria": "A proper H1 and compact setup establish the HTTP/AAD security goal. blocks[29]-[35] close the two slices at grade A and qualify the still-unproven manifest-only CLI consumer path.",
+      "outline_and_hierarchy": "Only 36 native blocks; survey, build, and debrief are proportionate. The terminal review is concise and the security layers remain distinguishable.",
+      "human_voice_and_precision": "Mechanisms are named precisely—scope guard, AAD, forged-scope behavior—without claiming complete end-to-end consumer proof. The prose is technical but appropriately bounded.",
+      "compression_and_restraint": "Keep. An outcome card could help email projection, but the Paper is already short enough for Studio and CLI readers.",
+      "evidence_and_truth": "blocks[32]-[34] specify the shipped guard/AAD mechanisms, merged integration gates, and the deferred manifest-only CLI consumer.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[32]",
+          "evidence": "The debrief names the exact forged-scope guard and AAD mechanisms and ties both to shipped integration evidence.",
+          "lesson": "State the attack and the enforcing mechanism together."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[34]",
+          "evidence": "The manifest-only CLI path is not proven end to end; one forged guard is defense in depth and the consumer is deferred.",
+          "lesson": "A reader could otherwise overgeneralize server-side security proof to an unexercised client workflow."
+        }
+      ],
+      "duplicate_disposition": "Companion to Wave 21 but not duplicate: storage isolation and HTTP/cryptographic binding are separate authority layers. Cross-link and preserve both.",
+      "reader_risks": [
+        "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+        "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+        "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+        "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+      ],
+      "rationale": "Keep: compact hierarchy, specific attack-mechanism evidence, merged gates, and explicit deferred consumer scope make the record reliable."
+    },
+    {
+      "unit_id": "paper:connectors-wave-23-2026-07-17",
+      "document_id": "connectors-wave-23-2026-07-17",
+      "document_rev": "bb1d85660c44ad2631d588db5b1f92a9",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Connector Wave 23 designs a per-workspace execution profile and attempts to eliminate ambient current_workspace leakage from the primary execution surface.",
+      "opening_and_criteria": "blocks[0] says STATUS: BUILDING and lays out the wish. The Paper ends at blocks[36] with a wave plan/backlog rather than a review, shipped outcome, grade, or explicit abandoned state.",
+      "outline_and_hierarchy": "37 blocks are readable and the survey identifies a real boundary defect, but the narrative stops at planning. There is no terminal section that converts design findings into authority about delivery.",
+      "human_voice_and_precision": "The verifier is precise about ambient workspace leakage, and the plan is concrete. Future-tense language dominates because execution evidence is absent.",
+      "compression_and_restraint": "Do not compress away the design. Add the actual execution/review outcome if available, or relabel this explicitly as a design-only predecessor with owner and next action.",
+      "evidence_and_truth": "blocks[25] demonstrates the primary-surface ambient workspace leak; blocks[36] confirms the paper terminates with backlog planning rather than build proof.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[25]",
+          "evidence": "Verification catches ambient current_workspace leakage on the primary execution surface.",
+          "lesson": "Test the primary caller for hidden ambient context, not only the new explicit interface."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[36]",
+          "evidence": "The final block is a plan/backlog; no build, integration review, terminal grade, or abandoned-state receipt follows.",
+          "lesson": "Readers cannot tell whether the execution-profile design shipped, stalled, or was superseded elsewhere."
+        }
+      ],
+      "duplicate_disposition": "A later step in the connector capability sequence, not proven superseded by any same-purpose pinned authority here. Repair as design-only unless a later execution-profile outcome can be linked.",
+      "reader_risks": [
+        "Studio: prepend a dated terminal-status card, then collapse the living-wave chronology behind evidence and decision headings.",
+        "TUI80: summarize long rosters, wide tables, and multi-slice receipts before exact raw detail; keep status, grade, shipped scope, and residual risk visible within 80 columns.",
+        "email: extract outcome, failed or deferred slice, residual risk, and next owner action; link the durable Paper instead of inlining the process diary.",
+        "public: remove credentials, internal topology, branch/task identifiers, and security exploit detail, or mark them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, revisions, test counts, exit behavior, and the distinctions among planned, isolated-green, integrated, merged, and live-proven states."
+      ],
+      "rationale": "Repair: the design finding is valuable, but BUILDING status and absence of terminal execution evidence leave the authority materially incomplete."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}

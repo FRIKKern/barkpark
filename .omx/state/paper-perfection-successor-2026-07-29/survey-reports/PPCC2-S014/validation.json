@@ -1,0 +1,285 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report-validation/v1",
+  "assignment_id": "PPCC2-S014",
+  "valid": true,
+  "checks": [
+    {
+      "name": "bound-snapshot-sha",
+      "status": "PASS",
+      "evidence": "9d4a103b9e0294cab448f64aabdde4da6983442938dc916b42df8f72075ba54b"
+    },
+    {
+      "name": "source-snapshot-sha",
+      "status": "PASS",
+      "evidence": "87346b213456128b52318d0185c2c193107e3d6a0ab7ccbeff7b034fbe42b20e"
+    },
+    {
+      "name": "bound-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S014",
+        "status": "cyclefleet_bound",
+        "unit_count": 10
+      }
+    },
+    {
+      "name": "immutable-wave-binding",
+      "status": "PASS",
+      "evidence": {
+        "status": "cyclefleet_bound",
+        "wave_id": "paper-perfection-successor-wave-2026-07-29",
+        "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+        "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+        "source_snapshot_sha256": "87346b213456128b52318d0185c2c193107e3d6a0ab7ccbeff7b034fbe42b20e"
+      }
+    },
+    {
+      "name": "report-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S014",
+        "worker": "worker-2"
+      }
+    },
+    {
+      "name": "ordered-checked-unit-ids",
+      "status": "PASS",
+      "evidence": [
+        "paper:connectors-wave-17-2026-07-16",
+        "paper:connectors-wave-18-2026-07-16",
+        "paper:connectors-wave-19-2026-07-16",
+        "paper:connectors-wave-2-2026-07-13",
+        "paper:connectors-wave-20-2026-07-16",
+        "paper:connectors-wave-2026-07-13",
+        "paper:connectors-wave-2026-07-22",
+        "paper:connectors-wave-21-2026-07-17",
+        "paper:connectors-wave-22-2026-07-17",
+        "paper:connectors-wave-23-2026-07-17"
+      ]
+    },
+    {
+      "name": "one-verdict-per-unit",
+      "status": "PASS",
+      "evidence": 10
+    },
+    {
+      "name": "verdict-metadata-pinned",
+      "status": "PASS",
+      "evidence": "all document ids and immutable revisions match"
+    },
+    {
+      "name": "allowed-verdicts-and-counts",
+      "status": "PASS",
+      "evidence": {
+        "repair": 6,
+        "keep": 4
+      }
+    },
+    {
+      "name": "editorial-dimensions-complete",
+      "status": "PASS",
+      "evidence": [
+        "compression_and_restraint",
+        "duplicate_disposition",
+        "evidence_and_truth",
+        "human_voice_and_precision",
+        "opening_and_criteria",
+        "outline_and_hierarchy",
+        "purpose_and_larger_goal",
+        "rationale"
+      ]
+    },
+    {
+      "name": "specific-existing-evidence-refs",
+      "status": "PASS",
+      "evidence": [
+        {
+          "document_id": "connectors-wave-17-2026-07-16",
+          "ref": "blocks[116]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-17-2026-07-16",
+          "ref": "blocks[118]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-18-2026-07-16",
+          "ref": "blocks[67]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-18-2026-07-16",
+          "ref": "blocks[74]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-19-2026-07-16",
+          "ref": "blocks[75]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-19-2026-07-16",
+          "ref": "blocks[81]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-2-2026-07-13",
+          "ref": "blocks[39]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-2-2026-07-13",
+          "ref": "blocks[51]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-20-2026-07-16",
+          "ref": "blocks[44]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-20-2026-07-16",
+          "ref": "blocks[46]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-2026-07-13",
+          "ref": "body_html[109]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-2026-07-13",
+          "ref": "body_html[111]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-2026-07-22",
+          "ref": "blocks[54]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-2026-07-22",
+          "ref": "blocks[55]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-21-2026-07-17",
+          "ref": "blocks[37]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-21-2026-07-17",
+          "ref": "blocks[43]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-22-2026-07-17",
+          "ref": "blocks[32]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-22-2026-07-17",
+          "ref": "blocks[34]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-23-2026-07-17",
+          "ref": "blocks[25]",
+          "exists": true
+        },
+        {
+          "document_id": "connectors-wave-23-2026-07-17",
+          "ref": "blocks[36]",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "five-reader-risks",
+      "status": "PASS",
+      "evidence": [
+        "CLI/API",
+        "Studio",
+        "TUI80",
+        "email",
+        "public"
+      ]
+    },
+    {
+      "name": "read-only-mutation-attestation",
+      "status": "PASS",
+      "evidence": {
+        "production_papers_mutated": false,
+        "cyclefleet_mutated": false,
+        "bp_cycle_assign_called": false,
+        "bp_cycle_result_called": false
+      }
+    },
+    {
+      "name": "unvisited-scope-empty",
+      "status": "PASS",
+      "evidence": []
+    },
+    {
+      "name": "readbacks-exact-and-hashed",
+      "status": "PASS",
+      "evidence": "all 10 raw ids/revisions and SHA-256 receipts match"
+    },
+    {
+      "name": "native-and-legacy-representation",
+      "status": "PASS",
+      "evidence": {
+        "native_block_total": 569
+      }
+    },
+    {
+      "name": "purpose-based-duplicate-analysis",
+      "status": "PASS",
+      "evidence": [
+        {
+          "candidate_set": [
+            "connectors-wave-17-2026-07-16",
+            "connectors-wave-18-2026-07-16",
+            "connectors-wave-19-2026-07-16",
+            "connectors-wave-20-2026-07-16"
+          ],
+          "basis": "Sequential connector-hardening series with repeated operating form but distinct slice evidence; Wave 20 explicitly closes the buildable-offline vein.",
+          "disposition": "Keep separate evidence records, add a four-wave series index, and label Wave 20 the close-out rather than merging receipts."
+        },
+        {
+          "candidate_set": [
+            "connectors-wave-2026-07-13",
+            "connectors-wave-2-2026-07-13",
+            "connectors-wave-21-2026-07-17",
+            "connectors-wave-22-2026-07-17",
+            "connectors-wave-23-2026-07-17"
+          ],
+          "basis": "Capability progression from tenant execution seam and runner measurement through SQL secret isolation, HTTP/AAD binding, and per-workspace execution profile. The papers share a domain but own different boundaries.",
+          "disposition": "Keep separate and add a capability/proof timeline; do not collapse distinct storage, transport, cryptographic, and execution-profile authorities."
+        },
+        {
+          "candidate_set": [
+            "connectors-wave-21-2026-07-17",
+            "connectors-wave-22-2026-07-17"
+          ],
+          "basis": "Both address run-secrets security, but Wave 21 proves the SQL/storage wall while Wave 22 proves HTTP and authenticated-encryption enforcement.",
+          "disposition": "Cross-link as layered security companions; do not merge."
+        },
+        {
+          "candidate_set": [
+            "connectors-wave-2026-07-22",
+            "connectors-wave-17-2026-07-16",
+            "connectors-wave-20-2026-07-16"
+          ],
+          "basis": "All resemble connector backlog sweeps, but Wave 32 studies evidence freshness and disposition method while Waves 17/20 own build hardening outcomes.",
+          "disposition": "Keep Wave 32 separate; share only the evidence-doctrine link."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  }
+}
