@@ -1,0 +1,58 @@
+{
+  "assignment_id": "PPCC2-E004",
+  "checks": [
+    {
+      "check": "typecheck_equivalent",
+      "command": "python3 -m py_compile run_candidate.py",
+      "status": "PASS",
+      "output": "exit 0"
+    },
+    {
+      "check": "python_lint",
+      "command": "python3 -m tabnanny run_candidate.py",
+      "status": "PASS",
+      "output": "exit 0"
+    },
+    {
+      "check": "elixir_syntax_and_format",
+      "command": "Code.format_string!(render_candidates.exs) byte comparison",
+      "status": "PASS",
+      "output": "PASS elixir format"
+    },
+    {
+      "check": "json_integrity",
+      "command": "jq -e . over all durable PPCC2-E004 JSON artifacts",
+      "status": "PASS",
+      "output": "candidate_count=9 fixture_count=9"
+    },
+    {
+      "check": "end_to_end_candidate_gate",
+      "command": "python3 run_candidate.py",
+      "status": "PASS",
+      "output": "fixtures_passed=9/9; hard_cells_passed=63/63; observed_failure_rate=0; TUI overflow_lines_total=0"
+    },
+    {
+      "check": "focused_regression",
+      "command": "go test ./internal/pdrender/...",
+      "status": "PASS",
+      "output": "internal/pdrender ok; cmd/htmlcheck ok; remaining command packages had no test files"
+    },
+    {
+      "check": "artifact_hashes",
+      "command": "recompute SHA-256 for all manifest candidate paths",
+      "status": "PASS",
+      "output": "9/9 candidate hashes match candidate-manifest.json"
+    },
+    {
+      "check": "mutation_boundary",
+      "command": "git status --porcelain --untracked-files=all scope audit",
+      "status": "PASS",
+      "output": "no visible changes outside the isolated PPCC2-E004 assignment directory"
+    }
+  ],
+  "limitations": [
+    "No TypeScript files changed, so tsc --noEmit is not applicable; Python bytecode compilation and direct Elixir execution are the language-appropriate type/syntax checks.",
+    "The isolated worktree has no Hex dependency tree. The experiment refused dependency fetch/compile outside its allowed write surface and loaded the existing read-only precompiled Barkpark BEAM tree for actual renderer execution.",
+    "Hydrated Studio interaction, real mail clients, assistive technology, production write round-trip, and Round 3 hostile trials remain explicitly unvisited."
+  ]
+}
