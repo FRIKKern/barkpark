@@ -127,8 +127,41 @@ export function headerStatus(
 export const TRANSCRIPT_FOLLOW: { animated: boolean } = { animated: true }
 
 /** Row height hint for the boot frame only — the measured heights replace it.
- * Sized for a short assistant paragraph, the transcript's commonest row. */
+ * Sized for a short assistant paragraph, the transcript's commonest row.
+ *
+ * RE-DERIVED when the rhythm moved off contentContainerStyle and onto the rows
+ * (TRANSCRIPT_ROW_GAP). The number an estimate has to describe is the ITEM
+ * CONTAINER's height, and under the old gap that container was the row plus a
+ * list-injected 18px of paddingBottom; under the new one it is the row plus its
+ * own 18px lead. For every row the BOOT frame can contain those are the same
+ * number, because the boot frame is settled message rows and a settled row
+ * always opens a turn — so 180 still describes exactly what it described, and
+ * changing it would be the drift, not keeping it. */
 export const ESTIMATED_ROW_HEIGHT = 180
+
+/** THE ONE PIECE OF GEOMETRY THE LIST NO LONGER OWNS.
+ *
+ * `contentContainerStyle: { gap }` is not a gap legend-list forwards. 3.3.3
+ * STRIPS gap/rowGap/columnGap out of the container style (the ScrollView
+ * provably receives no gap key) and re-emits the value as a border-box
+ * `paddingBottom` on EVERY absolutely-positioned item container, then folds it
+ * into its scroll-axis geometry. It is therefore UNIFORM BY CONSTRUCTION: every
+ * row boundary pays it, including the boundaries INSIDE a single answering
+ * turn — and there is no listContent edit that can tighten those alone.
+ *
+ * That mattered because a live turn arrives as one segment row per committed
+ * segment (D59/D65) while the SAME turn cold is one row holding every block. So
+ * the list-owned gap was pure ADDITION on the live side: the same turn read
+ * 18px airier at every intra-turn boundary while it streamed, and snapped
+ * tighter at settle — 30 live against 12 cold for two paragraphs, not a
+ * replacement for the block rhythm but a second helping of it.
+ *
+ * So the gap comes off listContent and the rhythm is applied per row, under one
+ * rule: an intra-turn boundary contributes EXACTLY ZERO extra. Never "18 less"
+ * — block margins in the chat register span 2/4/6/8/10/14, so a subtraction
+ * would be a different lie at every pair. Zero is the only value that makes the
+ * live turn and the cold turn the same document. */
+export const TRANSCRIPT_ROW_GAP = 18
 
 export type Row =
   | { key: string; kind: 'message'; message: ChatMessage }
@@ -275,6 +308,40 @@ export function groupSegmentRows(rows: readonly Row[]): Map<number, Row[]> {
     else bucket.push(row)
   }
   return out
+}
+
+/** The answering turn a row belongs to, or undefined for a row that is not part
+ * of one. Only committed SEGMENT rows can pair up INSIDE a turn: the tail and
+ * the skeleton are the uncommitted edge, and the cold rendering of the turn has
+ * no counterpart for them to be geometrically identical to. The turn is read
+ * back out of the row key exactly as groupSegmentRows reads it, so the two
+ * cannot disagree about where a turn begins. */
+export function rowTurn(row: Row): number | undefined {
+  if (row.kind !== 'segment') return undefined
+  return Number(row.key.split('-')[1])
+}
+
+/** How much bare space precedes the row at `index` — the transcript's rhythm,
+ * moved off the (uniform, and therefore wrong) contentContainerStyle gap.
+ *
+ * Zero at the head of the transcript, zero across an intra-turn boundary, and
+ * the full TRANSCRIPT_ROW_GAP everywhere else — which is what keeps turn-to-turn
+ * rhythm exactly what it has always been while the inside of a turn becomes the
+ * document it is when it settles.
+ *
+ * Derived from the LIST, not from the row: "does this row continue the previous
+ * one" is a fact about the ordering, and a segment cannot answer it alone (a
+ * resumed stream's first held segment does not start at byte 0, so `from === 0`
+ * would silently jam a turn against the one above it). Tolerant of a caller
+ * that hands over neither — the hook-free row seam is called from jest with the
+ * row alone, and a missing ordering means no claim about neighbours. */
+export function rowLead(rows?: readonly Row[], index?: number): number {
+  if (rows === undefined || index === undefined || index <= 0) return 0
+  const row = rows[index]
+  const prev = rows[index - 1]
+  if (row === undefined || prev === undefined) return 0
+  const turn = rowTurn(row)
+  return turn !== undefined && turn === rowTurn(prev) ? 0 : TRANSCRIPT_ROW_GAP
 }
 
 /** Concatenate the pre-built halves with the live tail. The message and local
@@ -757,8 +824,12 @@ export function ChatSessionScreen({
     [theme, blockCtx, state.answerInFlight, answer, toggleLog],
   )
 
+  // `data` and `index` come from the list, not from a closure, so the callback
+  // stays identity-stable across a tail tick exactly as it did — and the lead is
+  // a fact about the ORDERING, which is the only place it can honestly be read.
   const renderItem = useCallback(
-    ({ item }: { item: Row }) => transcriptItem(item, rowCtx),
+    ({ item, index, data }: { item: Row; index: number; data: readonly Row[] }) =>
+      transcriptItem(item, rowCtx, rowLead(data, index)),
     [rowCtx],
   )
 
@@ -1133,9 +1204,22 @@ export const MemoTranscriptRow = memo(TranscriptRow, transcriptRowPropsEqual)
 /** One list item. The screen's renderItem is a useCallback around THIS, so the
  * "settled rows do not re-render on tail ticks" law has a reachable name: an
  * edit that drops the memo (rendering TranscriptRow directly) changes what
- * this returns, and the pin reds. */
-export function transcriptItem(row: Row, ctx: RowCtx): ReactElement {
-  return <MemoTranscriptRow row={row} {...ctx} />
+ * this returns, and the pin reds.
+ *
+ * The lead lives on a WRAPPER rather than on the row's own arms, for two
+ * reasons. A row leaves TranscriptRow through ten different arms — a Pressable,
+ * two bubbles, three bare Texts, two document Views, a StreamSkeleton and a
+ * CardRow — and two of those are components that take no style at all, so
+ * "apply the margin to whatever it returned" is the only rule that holds for
+ * all ten. And it must sit INSIDE the item container legend-list measures, so
+ * the height the list learns for a row includes its lead and the scroll anchor
+ * cannot drift; a wrapper is inside, the container's own style is not ours. */
+export function transcriptItem(row: Row, ctx: RowCtx, lead = 0): ReactElement {
+  return (
+    <View style={lead === 0 ? undefined : styles.rowLead}>
+      <MemoTranscriptRow row={row} {...ctx} />
+    </View>
+  )
 }
 
 /** An approval / question / plan row. Hook-free like TranscriptRow so jest can
@@ -1234,7 +1318,11 @@ const styles = StyleSheet.create({
   transcript: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
   // Generous vertical rhythm between turns — whitespace is the hierarchy.
-  listContent: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 20, gap: 18, flexGrow: 1 },
+  // NO `gap` — see TRANSCRIPT_ROW_GAP. A gap here is stripped by legend-list and
+  // re-emitted onto every item container uniformly, which is precisely what a
+  // transcript whose turns arrive in pieces cannot use.
+  listContent: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 20, flexGrow: 1 },
+  rowLead: { marginTop: TRANSCRIPT_ROW_GAP },
   // User turns: a soft rounded neutral bubble, right-aligned.
   userBubble: {
     alignSelf: 'flex-end',
