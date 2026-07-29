@@ -220,6 +220,12 @@ function installedEntry(templateDir) {
 // Only PLAIN `>=X` ranges are compared: evaluating `^20.19.0 || >=22.12.0`
 // needs a semver resolver this zero-dependency gate does not have, and a gate
 // that guesses is worse than one that says what it measured.
+//
+// Optional and platform-scoped lock entries (os/cpu-restricted binaries) ARE
+// counted, deliberately: package.json `engines` is one declaration for every
+// platform, so the floor must cover the platform whose binary demands the most.
+// Measured today, neither template's floor comes from such an entry — both are
+// driven by an unconditional dependency (undici; @astrojs/compiler-rs).
 // ---------------------------------------------------------------------------
 
 const PLAIN_FLOOR = /^>=\s*(\d+(?:\.\d+){0,2})$/
@@ -526,7 +532,12 @@ async function main() {
   process.exit((await gate(templates)) ? 0 : 1)
 }
 
-main().catch((err) => {
-  console.error(`check-vendor-blocks: ${err && err.stack ? err.stack : err}`)
-  process.exit(1)
-})
+// Run the gate only when this file IS the entry point. Without this guard the
+// exported helpers above cannot be imported — importing them would run the gate
+// and call process.exit, which is how a "reusable" module quietly becomes one.
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  main().catch((err) => {
+    console.error(`check-vendor-blocks: ${err && err.stack ? err.stack : err}`)
+    process.exit(1)
+  })
+}
