@@ -1,0 +1,458 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S050",
+  "assignment_snapshot_sha256": "cd63c81e44e2a570ef0cff78630641df06f197ad00c58e3965eb1bfdef5a4681",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 17,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "0cfda9f65aa644a86f58bdada0ad62d36315501b1944f14388e10507de58ac72"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read: 345 native top-level blocks plus one 7,822-character legacy-HTML paper (43 semantic units). Keep 5, repair 1, mark 1 merge-candidate, and mark 2 superseded. The fresh correctness wave supersedes the Wave-2 investigation that died at Decide; later reviewed waves remain distinct receipts. Merge the editable component demo into or tightly pair it with the reader showcase. Task Obsession needs native representation, explicit implementation status, and acceptance evidence.",
+  "verdict_counts": {
+    "keep": 5,
+    "repair": 1,
+    "merge-candidate": 1,
+    "superseded": 2
+  },
+  "checked_unit_ids": [
+    "paper:t3code-upgrade-transcript-premium",
+    "paper:task-components",
+    "paper:task-components-editable-demo",
+    "paper:task-lifecycle-visibility-wave-2026-07-19",
+    "paper:task-lifecycle-visibility-wave-2026-07-21",
+    "paper:task-lifecycle-visibility-wave-2026-07-21-correctness",
+    "paper:task-lifecycle-visibility-wave-2026-07-22-backlog-finish",
+    "paper:task-lifecycle-visibility-wave-2026-07-22-finishing",
+    "paper:task-obsession"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 345,
+    "legacy_html_documents_read": 1,
+    "legacy_html_semantic_units_read": 43,
+    "legacy_html_chars_read": 7822,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:t3code-upgrade-transcript-premium blocks[4]",
+      "evidence": "A zero-dependency house path wins from an already-carried block representation."
+    },
+    {
+      "block_ref": "paper:task-lifecycle-visibility-wave-2026-07-21-correctness blocks[59]",
+      "evidence": "Review checks cross-slice engagement and transition contracts, not just isolated gates."
+    },
+    {
+      "block_ref": "paper:task-lifecycle-visibility-wave-2026-07-22-finishing blocks[43]",
+      "evidence": "A throwaway integration merge proves four branches are actually conflict-free."
+    },
+    {
+      "block_ref": "paper:task-obsession body_html[42]",
+      "evidence": "The design distinguishes exception decay in gates from noise decay in advisories."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:task-lifecycle-visibility-wave-2026-07-19 blocks[57]",
+      "evidence": "The founding paper stops at initial dispatch.",
+      "lesson": "Use reviewed successors for current status."
+    },
+    {
+      "block_ref": "paper:task-lifecycle-visibility-wave-2026-07-21 blocks[40]",
+      "evidence": "Wave 2 ends with verification in flight and never reaches Decide.",
+      "lesson": "Mark abandoned living papers superseded."
+    },
+    {
+      "block_ref": "paper:task-lifecycle-visibility-wave-2026-07-22-backlog-finish blocks[56]",
+      "evidence": "A slice cited a charter decision that did not exist.",
+      "lesson": "Verify authority references before direct-to-build dispatch."
+    },
+    {
+      "block_ref": "paper:task-obsession body_html[35]",
+      "evidence": "The proposal ends at build order without implementation status or receipts.",
+      "lesson": "Separate ratified design from shipped enforcement."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "task-components",
+        "task-components-editable-demo"
+      ],
+      "basis": "They are complementary halves of one task-component showcase: live reader resolution and in-canvas authoring.",
+      "disposition": "Keep task-components as the base page and merge the editable examples as an Editor section/tab, or cross-link them as one canonical showcase family."
+    },
+    {
+      "candidate_set": [
+        "task-lifecycle-visibility-wave-2026-07-19",
+        "task-lifecycle-visibility-wave-2026-07-21",
+        "task-lifecycle-visibility-wave-2026-07-21-correctness",
+        "task-lifecycle-visibility-wave-2026-07-22-finishing",
+        "task-lifecycle-visibility-wave-2026-07-22-backlog-finish"
+      ],
+      "basis": "They form a chronological epic chain: founding visibility, abandoned correctness investigation, fresh correctness build, finishing reconciliation, and Arm-D backlog truth fixes.",
+      "disposition": "Do not merge immutable wave ledgers. Supersede the founding/incomplete entries for current status, retain reviewed wave receipts, and add explicit predecessor/successor navigation."
+    },
+    {
+      "candidate_set": [
+        "task-obsession",
+        "task-lifecycle-visibility-wave-2026-07-22-finishing"
+      ],
+      "basis": "Both enforce task discipline but at different layers: change/task dedup and CI attribution versus lifecycle transition legality.",
+      "disposition": "Do not merge; cross-link the writer/merge-gate boundaries and keep separate authorities."
+    }
+  ],
+  "reader_risks": [
+    "Studio: show document role, as-of date, current/terminal status, and predecessor/successor links before dense wave logs; preserve editable-versus-live-bound distinctions.",
+    "TUI80: wrap tables and long decision ledgers, paginate task widgets, and turn legacy HTML into bounded semantic units rather than raw markup.",
+    "email: send the current verdict, one proof, one unresolved gate, and a link; omit branch names, task ids, full transition matrices, and embedded live widgets.",
+    "public: remove internal hosts, commits/PR/task identifiers, provider/model operational detail, and security-sensitive mutation seams; label proposed versus shipped behavior.",
+    "CLI/API: preserve exact ids/revisions, lifecycle vocabulary, transition legality, claimability rules, mutation routes, gate counts, and built/merged/live distinctions."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:t3code-upgrade-transcript-premium",
+      "document_id": "t3code-upgrade-transcript-premium",
+      "document_rev": "94944e882b336c75d925aab5e7709a15",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Lane-one investigation and decision handoff for bringing the existing PortableDoc chat rendering law to mobile without a second markdown pipeline.",
+      "opening_and_criteria": "The opening states the missing last hop, gives a zero-dependency verdict, and makes clear this is one of five lanes feeding a crown paper.",
+      "outline_and_hierarchy": "Rival analysis, three slices, amended acceptance criteria, system anchors, block/role tables, risks, and coverage appendix form a complete decision artifact.",
+      "human_voice_and_precision": "The paper directly overturns weaker upstream lessons, distinguishes static counts from executed proof, and leaves taste and streaming forks to the crown rather than pretending certainty.",
+      "compression_and_restraint": "Keep as the transcript lane authority; put the adopted path, three-slice order, and crown dependency first and collapse the detailed parity tables on constrained surfaces.",
+      "evidence_and_truth": "blocks[24]-[40] anchor the current system, six block types, role census, file blast radius, risks, and checked/not-found boundary as of 2026-07-25.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "The verdict derives zero-dependency tri-surface parity from a block field mobile already receives instead of adding a second renderer.",
+          "lesson": "Prefer extending a shared representation law over adopting a surface-specific parser."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[34]",
+          "evidence": "The risk register says the mobile test total is static-derived, four Studio bodies were inferred, and the streaming/taste decisions remain open.",
+          "lesson": "Decision papers should keep unrun proof and cross-lane choices visibly non-terminal."
+        }
+      ],
+      "duplicate_disposition": "Distinct from task lifecycle and task-component papers; keep linked to the t3code crown rather than merging into general mobile or PortableDoc documentation.",
+      "reader_risks": [
+        "Studio: show document role, as-of date, current/terminal status, and predecessor/successor links before dense wave logs; preserve editable-versus-live-bound distinctions.",
+        "TUI80: wrap tables and long decision ledgers, paginate task widgets, and turn legacy HTML into bounded semantic units rather than raw markup.",
+        "email: send the current verdict, one proof, one unresolved gate, and a link; omit branch names, task ids, full transition matrices, and embedded live widgets.",
+        "public: remove internal hosts, commits/PR/task identifiers, provider/model operational detail, and security-sensitive mutation seams; label proposed versus shipped behavior.",
+        "CLI/API: preserve exact ids/revisions, lifecycle vocabulary, transition legality, claimability rules, mutation routes, gate counts, and built/merged/live distinctions."
+      ],
+      "rationale": "Keep because it is a bounded, evidence-rich investigation with an explicit verdict, acceptance shape, risks, and feed-forward owner."
+    },
+    {
+      "unit_id": "paper:task-components",
+      "document_id": "task-components",
+      "document_rev": "66b58a2591df2d92d7a29f6b2669ca7c",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Reader-side showcase of task-list, task-board, task-detail, roadmap, and status-legend blocks resolved from live Barkpark task queries.",
+      "opening_and_criteria": "The ingress states that components bind live real-task queries and shows how they appear in the reader.",
+      "outline_and_hierarchy": "Five compact sections use a consistent heading, one-line purpose, and component pattern without implementation noise.",
+      "human_voice_and_precision": "The prose is minimal and lets the rendered components carry the demonstration.",
+      "compression_and_restraint": "Keep as the reader showcase; add an as-of/live-data notice and cross-link the editable companion so readers understand why rows can change.",
+      "evidence_and_truth": "blocks[3]-[16] enumerate five distinct reader components and preserve the exact query-bearing blocks used by four of them.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[5]",
+          "evidence": "The task-list exposes its real parent query directly, making the live-data claim inspectable.",
+          "lesson": "Show the binding, not only a screenshot of resolved output."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "Because every component resolves live at read time, the page has no stable snapshot or as-of value and may display different evidence later.",
+          "lesson": "Live showcases need an explicit mutability/freshness notice."
+        }
+      ],
+      "duplicate_disposition": "Keep as the read/resolution showcase; treat task-components-editable-demo as a merge candidate section or tightly linked authoring companion.",
+      "reader_risks": [
+        "Studio: show document role, as-of date, current/terminal status, and predecessor/successor links before dense wave logs; preserve editable-versus-live-bound distinctions.",
+        "TUI80: wrap tables and long decision ledgers, paginate task widgets, and turn legacy HTML into bounded semantic units rather than raw markup.",
+        "email: send the current verdict, one proof, one unresolved gate, and a link; omit branch names, task ids, full transition matrices, and embedded live widgets.",
+        "public: remove internal hosts, commits/PR/task identifiers, provider/model operational detail, and security-sensitive mutation seams; label proposed versus shipped behavior.",
+        "CLI/API: preserve exact ids/revisions, lifecycle vocabulary, transition legality, claimability rules, mutation routes, gate counts, and built/merged/live distinctions."
+      ],
+      "rationale": "Keep because it is native, concise, purpose-specific, and uses real query-bearing components."
+    },
+    {
+      "unit_id": "paper:task-components-editable-demo",
+      "document_id": "task-components-editable-demo",
+      "document_rev": "703c14f9d729b5deb4455e60b588243e",
+      "verdict": "merge-candidate",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Authoring-side proof that note, card, stage, section, and query-backed task-list widgets are editable in the canvas.",
+      "opening_and_criteria": "The ingress sharply separates directly authored element editing from editable queries whose resolved rows remain live-bound.",
+      "outline_and_hierarchy": "Four small demonstrations cover notes, cards, pipeline stages, and a task-list query with almost no redundant prose.",
+      "human_voice_and_precision": "Concrete authored examples make the composition/editing claim legible without a long design explanation.",
+      "compression_and_restraint": "Merge into or pair directly with task-components as an Editor tab/section; retain exact authored examples and the query-versus-row distinction.",
+      "evidence_and_truth": "blocks[2]-[10] contain the full editing claim and representative nested section/widget structures.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The ingress precisely distinguishes editable authored elements from an editable query whose rows are live-bound.",
+          "lesson": "Editable composition and live data binding are different contracts and should be named separately."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The claim that every widget is editable has no as-of build, gate, or interaction receipt in this short proof page.",
+          "lesson": "Interactive demos need a build/test stamp if they are used as durable evidence."
+        }
+      ],
+      "duplicate_disposition": "Merge candidate with task-components because both are one task-component showcase family: reader resolution versus editor authoring are complementary modes, not separate long-term authorities.",
+      "reader_risks": [
+        "Studio: show document role, as-of date, current/terminal status, and predecessor/successor links before dense wave logs; preserve editable-versus-live-bound distinctions.",
+        "TUI80: wrap tables and long decision ledgers, paginate task widgets, and turn legacy HTML into bounded semantic units rather than raw markup.",
+        "email: send the current verdict, one proof, one unresolved gate, and a link; omit branch names, task ids, full transition matrices, and embedded live widgets.",
+        "public: remove internal hosts, commits/PR/task identifiers, provider/model operational detail, and security-sensitive mutation seams; label proposed versus shipped behavior.",
+        "CLI/API: preserve exact ids/revisions, lifecycle vocabulary, transition legality, claimability rules, mutation routes, gate counts, and built/merged/live distinctions."
+      ],
+      "rationale": "Merge-candidate because a single component showcase with Reader and Editor sections would reduce duplication and preserve the useful mode distinction."
+    },
+    {
+      "unit_id": "paper:task-lifecycle-visibility-wave-2026-07-19",
+      "document_id": "task-lifecycle-visibility-wave-2026-07-19",
+      "document_rev": "58f1b955fe8e5d88438cef9309d4ed44",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Founding strategy/Decide ledger that expands the task graph with considering and researching states and one visibility language across task surfaces.",
+      "opening_and_criteria": "The opening preserves the user’s non-funnel state-graph intent and defines open as ready/claimable rather than merely unfinished.",
+      "outline_and_hierarchy": "Wish, direction debate, broad survey, verification, D1-D18, and an eight-slice plan are complete, but the record ends at initial dispatch.",
+      "human_voice_and_precision": "It corrects production-size fears, finds fail-open rendering, and distinguishes rendering visibility from enforced transition legality.",
+      "compression_and_restraint": "Preserve as founding doctrine and D1-D18 history; route current status through the correctness, finishing, and backlog-finish wave papers.",
+      "evidence_and_truth": "blocks[40]-[57] provide executed verification, decisions, the sequenced roster, and an explicit building-state endpoint.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[45]",
+          "evidence": "The verifier maps how unknown new states falsely render as bright open across surfaces, converting an abstract vocabulary risk into a precise user lie.",
+          "lesson": "New lifecycle vocabulary must fail neutral, not impersonate ready work."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[57]",
+          "evidence": "The paper ends with round one only dispatching and later rounds still future work.",
+          "lesson": "A founding in-flight ledger should not remain the current-status authority after reviewed successor waves exist."
+        }
+      ],
+      "duplicate_disposition": "Superseded for current status by the later correctness and finishing papers; retain as the founding wish and D1-D18 source.",
+      "reader_risks": [
+        "Studio: show document role, as-of date, current/terminal status, and predecessor/successor links before dense wave logs; preserve editable-versus-live-bound distinctions.",
+        "TUI80: wrap tables and long decision ledgers, paginate task widgets, and turn legacy HTML into bounded semantic units rather than raw markup.",
+        "email: send the current verdict, one proof, one unresolved gate, and a link; omit branch names, task ids, full transition matrices, and embedded live widgets.",
+        "public: remove internal hosts, commits/PR/task identifiers, provider/model operational detail, and security-sensitive mutation seams; label proposed versus shipped behavior.",
+        "CLI/API: preserve exact ids/revisions, lifecycle vocabulary, transition legality, claimability rules, mutation routes, gate counts, and built/merged/live distinctions."
+      ],
+      "rationale": "Superseded because it is a complete founding plan but not a terminal execution record."
+    },
+    {
+      "unit_id": "paper:task-lifecycle-visibility-wave-2026-07-21",
+      "document_id": "task-lifecycle-visibility-wave-2026-07-21",
+      "document_rev": "656e1bb30ccf4f7284a78d698297b06d",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-two investigation intended to turn the visible seven-state graph into enforced transition and engagement correctness.",
+      "opening_and_criteria": "The opening reconciles Wave 1 and bluntly states that rendering shipped while enforcement did not.",
+      "outline_and_hierarchy": "Direction, hazards, thirteen-scout digest, coverage gaps, contradictions, and six-verifier plan are present, but Decide/build/review never land.",
+      "human_voice_and_precision": "The paper is candid about static-only claims and unresolved writer-seam ordering rather than dispatching on assumptions.",
+      "compression_and_restraint": "Preserve as the abandoned Wave-2 investigation; use the fresh correctness wave for the re-proved decisions and actual builds.",
+      "evidence_and_truth": "blocks[29]-[40] capture the survey digest, explicit not-found seams, contradictions, and still-flying verifier fleet.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[35]",
+          "evidence": "The digest isolates the unproven prev_doc ordering question that could make writer-seam enforcement vacuous.",
+          "lesson": "A load-bearing enforcement seam must be executed, not inferred from nearby code."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[40]",
+          "evidence": "The terminal callout says verifiers are flying and promises Decide/Review sections that do not exist.",
+          "lesson": "An abandoned wave needs a superseded banner and successor link."
+        }
+      ],
+      "duplicate_disposition": "Superseded by task-lifecycle-visibility-wave-2026-07-21-correctness, which explicitly identifies this wave as dead at Decide and re-proves its findings.",
+      "reader_risks": [
+        "Studio: show document role, as-of date, current/terminal status, and predecessor/successor links before dense wave logs; preserve editable-versus-live-bound distinctions.",
+        "TUI80: wrap tables and long decision ledgers, paginate task widgets, and turn legacy HTML into bounded semantic units rather than raw markup.",
+        "email: send the current verdict, one proof, one unresolved gate, and a link; omit branch names, task ids, full transition matrices, and embedded live widgets.",
+        "public: remove internal hosts, commits/PR/task identifiers, provider/model operational detail, and security-sensitive mutation seams; label proposed versus shipped behavior.",
+        "CLI/API: preserve exact ids/revisions, lifecycle vocabulary, transition legality, claimability rules, mutation routes, gate counts, and built/merged/live distinctions."
+      ],
+      "rationale": "Superseded because it never reached Decide or built a slice, while the fresh successor completed the work."
+    },
+    {
+      "unit_id": "paper:task-lifecycle-visibility-wave-2026-07-21-correctness",
+      "document_id": "task-lifecycle-visibility-wave-2026-07-21-correctness",
+      "document_rev": "224a517e167326724c03344bfe215be2",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Fresh Wave-3 execution ledger building the task-graph correctness spine: shared claimability, sanctioned transitions/stage, release ruling, engagement lapse, and axis-2 tests.",
+      "opening_and_criteria": "The opening explicitly refuses to masquerade as a resume, states what the dead predecessor proved, and scopes this as correctness rather than rendering.",
+      "outline_and_hierarchy": "Re-proof, decisions, eight-slice plan, five-slice review, cross-slice coherence, ledger audit, grade, and dependency-ordered next work are complete.",
+      "human_voice_and_precision": "The debrief preserves a raw-patch enforcement gap, a platform-specific test hang, and honest merge-gated criteria.",
+      "compression_and_restraint": "Keep as Wave-3 authority; surface its five shipped slices and remaining Writer seam/round-two backlog before the inherited investigation.",
+      "evidence_and_truth": "blocks[49]-[63] give per-slice branches and gates, cross-slice contract checks, ledger truth, grade, and exact remaining seal order.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[59]",
+          "evidence": "Review checks that stage writes the engagement shape the sweeper parses and that cancelled/done reopen edges are both legal and reachable.",
+          "lesson": "Cross-slice coherence must be tested at shared data and transition contracts."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[63]",
+          "evidence": "The grade says the transition table is enforced at only one of two charter-mandated points; raw patch enforcement remains open.",
+          "lesson": "A sanctioned verb does not seal legality while a generic writer door bypasses it."
+        }
+      ],
+      "duplicate_disposition": "Keep as the reviewed Wave-3 ledger; later finishing/backlog papers continue distinct residual scopes rather than replacing its receipts.",
+      "reader_risks": [
+        "Studio: show document role, as-of date, current/terminal status, and predecessor/successor links before dense wave logs; preserve editable-versus-live-bound distinctions.",
+        "TUI80: wrap tables and long decision ledgers, paginate task widgets, and turn legacy HTML into bounded semantic units rather than raw markup.",
+        "email: send the current verdict, one proof, one unresolved gate, and a link; omit branch names, task ids, full transition matrices, and embedded live widgets.",
+        "public: remove internal hosts, commits/PR/task identifiers, provider/model operational detail, and security-sensitive mutation seams; label proposed versus shipped behavior.",
+        "CLI/API: preserve exact ids/revisions, lifecycle vocabulary, transition legality, claimability rules, mutation routes, gate counts, and built/merged/live distinctions."
+      ],
+      "rationale": "Keep because it is a complete, adversarially reviewed execution record with an explicit incomplete seal."
+    },
+    {
+      "unit_id": "paper:task-lifecycle-visibility-wave-2026-07-22-backlog-finish",
+      "document_id": "task-lifecycle-visibility-wave-2026-07-22-backlog-finish",
+      "document_rev": "dc38b55b30af63b7a5541220afa90504",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Arm-D backlog wave fixing four word-versus-code lies in stage help, close-drift recovery, JS vocabulary drift, and true-blocking doctrine.",
+      "opening_and_criteria": "The opening discloses the no-survey/no-verifier experiment and makes builder premise re-derivation plus two independent post-wave audits the quality substitute.",
+      "outline_and_hierarchy": "Candidate slate, direct Decide proofs, four slices, full review, stalled-then-ruled S3, grade, ledger audit, and next order are complete.",
+      "human_voice_and_precision": "The paper honestly records a real doc-budget CI red and refuses to fabricate a nonexistent D32 citation.",
+      "compression_and_restraint": "Keep as the Arm-D experiment/receipt; foreground the unusual evidence model and the D25 correction so it cannot be mistaken for a normal researched wave.",
+      "evidence_and_truth": "blocks[49]-[63] document final rerun gates, three pushed fixes, the D32→D25 ruling, grade, ledger state, and lead merge actions.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[54]",
+          "evidence": "The JS gate fails closed and is mutation-re-proved against both a changed label and an extra role.",
+          "lesson": "Vocabulary tripwires should detect both missing and unauthorized additions."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[56]",
+          "evidence": "S3 was cut against a charter D32 that never existed, forcing a mid-review ruling and citation repair.",
+          "lesson": "Direct-to-build experiments amplify sourcing errors; authority references still need pre-dispatch verification."
+        }
+      ],
+      "duplicate_disposition": "Distinct from the general finishing wave: this paper owns a deliberate Arm-D experiment over four documentation/vocabulary residue rows.",
+      "reader_risks": [
+        "Studio: show document role, as-of date, current/terminal status, and predecessor/successor links before dense wave logs; preserve editable-versus-live-bound distinctions.",
+        "TUI80: wrap tables and long decision ledgers, paginate task widgets, and turn legacy HTML into bounded semantic units rather than raw markup.",
+        "email: send the current verdict, one proof, one unresolved gate, and a link; omit branch names, task ids, full transition matrices, and embedded live widgets.",
+        "public: remove internal hosts, commits/PR/task identifiers, provider/model operational detail, and security-sensitive mutation seams; label proposed versus shipped behavior.",
+        "CLI/API: preserve exact ids/revisions, lifecycle vocabulary, transition legality, claimability rules, mutation routes, gate counts, and built/merged/live distinctions."
+      ],
+      "rationale": "Keep because it is self-aware, reviewed, mutation-proven, and preserves both the experiment method and its sourcing failure."
+    },
+    {
+      "unit_id": "paper:task-lifecycle-visibility-wave-2026-07-22-finishing",
+      "document_id": "task-lifecycle-visibility-wave-2026-07-22-finishing",
+      "document_rev": "0994b71c204d75c98c189ddd5d1e24b6",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave-4 finishing ledger reconciling stale backlog, building four remaining read/invariant fixes, and specifying the writer-seam crown contract.",
+      "opening_and_criteria": "The opening makes premise re-verification mandatory and immediately reports four of seven requested rows already landed, preventing duplicate builds.",
+      "outline_and_hierarchy": "Ground truth, survey/verification, D19-D24/D7b, four-slice plan, integration review, ledger audit, grade, and crown handoff form a complete story.",
+      "human_voice_and_precision": "It refuses to call the epic sealed: the actual writer-seam crown remains blocked on a lead merge action and the main gate has an identified 429 flake.",
+      "compression_and_restraint": "Keep as Wave-4 authority; lead with deduplicated outcomes, four reviewed PRs, and the unbuilt crown rather than the full investigation.",
+      "evidence_and_truth": "blocks[42]-[47] close four slices, prove conflict-free integration, audit the ledger, grade the wave, and name the exact lead-first/crown order.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[43]",
+          "evidence": "The reviewer merges all four final branches in a throwaway integration branch, proving file-disjointness in practice.",
+          "lesson": "Parallel slice claims should be verified by an integration merge, not only path inspection."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[46]",
+          "evidence": "The grade states the epic’s core “graph is law at every writer seam” crown remains unbuilt across two waves.",
+          "lesson": "A finishing label must not erase an unbuilt keystone."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from correctness and backlog-finish: it owns Wave-4 reconciliation and crown preconditions, not their earlier/later slice receipts.",
+      "reader_risks": [
+        "Studio: show document role, as-of date, current/terminal status, and predecessor/successor links before dense wave logs; preserve editable-versus-live-bound distinctions.",
+        "TUI80: wrap tables and long decision ledgers, paginate task widgets, and turn legacy HTML into bounded semantic units rather than raw markup.",
+        "email: send the current verdict, one proof, one unresolved gate, and a link; omit branch names, task ids, full transition matrices, and embedded live widgets.",
+        "public: remove internal hosts, commits/PR/task identifiers, provider/model operational detail, and security-sensitive mutation seams; label proposed versus shipped behavior.",
+        "CLI/API: preserve exact ids/revisions, lifecycle vocabulary, transition legality, claimability rules, mutation routes, gate counts, and built/merged/live distinctions."
+      ],
+      "rationale": "Keep because it is a terminal wave debrief that prevents duplicate work and states the remaining keystone without euphemism."
+    },
+    {
+      "unit_id": "paper:task-obsession",
+      "document_id": "task-obsession",
+      "document_rev": "00b8544019713e7c5512ddda2fa778f3",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Design proposal making every change task-backed through find-or-create, land digests, overlap notices, and required CI merge gates.",
+      "opening_and_criteria": "The wish establishes a strong invariant and explicitly rejects agent discipline as enforcement.",
+      "outline_and_hierarchy": "Grounding, four layers, four decisions, ten footguns, build order, and a final gate/advisory principle are coherent in 43 legacy semantic units.",
+      "human_voice_and_precision": "The prose anticipates exception-path ritual, stale silence, hot-file noise, emergency work, and centralized ledger authority.",
+      "compression_and_restraint": "Convert to native blocks, add approved/proposed/implemented status and dated evidence, replace mutable provider/model specifics with a capability contract, and attach test-shaped acceptance criteria per build step.",
+      "evidence_and_truth": "body_html[7]-[42] define the architecture, failure register, rollout order, and governing principle, but do not record execution outcomes.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[42]",
+          "evidence": "The closing principle pairs satisfiable emergency gates with rare, timestamped advisories and tripwires both.",
+          "lesson": "Hard gates and advisory signals fail in different ways and need different anti-decay mechanisms."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[35]",
+          "evidence": "The document ends with a six-step build order and no implementation, validation, ownership, or current-status section.",
+          "lesson": "A ratified-looking design must distinguish proposed sequencing from shipped enforcement."
+        }
+      ],
+      "duplicate_disposition": "Distinct from the lifecycle wave chain: task-obsession governs task dedup/change attribution/merge policy, not lifecycle state legality.",
+      "reader_risks": [
+        "Studio: show document role, as-of date, current/terminal status, and predecessor/successor links before dense wave logs; preserve editable-versus-live-bound distinctions.",
+        "TUI80: wrap tables and long decision ledgers, paginate task widgets, and turn legacy HTML into bounded semantic units rather than raw markup.",
+        "email: send the current verdict, one proof, one unresolved gate, and a link; omit branch names, task ids, full transition matrices, and embedded live widgets.",
+        "public: remove internal hosts, commits/PR/task identifiers, provider/model operational detail, and security-sensitive mutation seams; label proposed versus shipped behavior.",
+        "CLI/API: preserve exact ids/revisions, lifecycle vocabulary, transition legality, claimability rules, mutation routes, gate counts, and built/merged/live distinctions."
+      ],
+      "rationale": "Repair because the design is thoughtful but legacy, status-ambiguous, provider-specific, and not yet backed by execution receipts."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}

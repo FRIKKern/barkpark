@@ -1,0 +1,89 @@
+{
+  "schema_version": "paper-perfection-successor-readback-index/v1",
+  "assignment_id": "PPCC2-S050",
+  "count": 9,
+  "all_pinned_revisions_read": true,
+  "reads": [
+    {
+      "unit_id": "paper:t3code-upgrade-transcript-premium",
+      "document_id": "t3code-upgrade-transcript-premium",
+      "document_rev": "94944e882b336c75d925aab5e7709a15",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S050/readbacks/t3code-upgrade-transcript-premium.json",
+      "readback_sha256": "21bc1c970c24f2dc5a914d325d39462f553de954aadd56860e7961566a10654c",
+      "block_count": 42,
+      "body_html_chars": 32843
+    },
+    {
+      "unit_id": "paper:task-components",
+      "document_id": "task-components",
+      "document_rev": "66b58a2591df2d92d7a29f6b2669ca7c",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S050/readbacks/task-components.json",
+      "readback_sha256": "af1e2a8db78b15db571dac184f3ecdbb43fa7422c605f93ef290109e58afeba6",
+      "block_count": 17,
+      "body_html_chars": 0
+    },
+    {
+      "unit_id": "paper:task-components-editable-demo",
+      "document_id": "task-components-editable-demo",
+      "document_rev": "703c14f9d729b5deb4455e60b588243e",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S050/readbacks/task-components-editable-demo.json",
+      "readback_sha256": "6495f3e6f19c597d0b9efb5a738558ded6badd55e196a95c3b76f188fcceeb4b",
+      "block_count": 11,
+      "body_html_chars": 2478
+    },
+    {
+      "unit_id": "paper:task-lifecycle-visibility-wave-2026-07-19",
+      "document_id": "task-lifecycle-visibility-wave-2026-07-19",
+      "document_rev": "58f1b955fe8e5d88438cef9309d4ed44",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S050/readbacks/task-lifecycle-visibility-wave-2026-07-19.json",
+      "readback_sha256": "61eac5dd5301bd17f2d427075f5c4340be360531d65b0dbfe63ab0eb12f83451",
+      "block_count": 58,
+      "body_html_chars": 35305
+    },
+    {
+      "unit_id": "paper:task-lifecycle-visibility-wave-2026-07-21",
+      "document_id": "task-lifecycle-visibility-wave-2026-07-21",
+      "document_rev": "656e1bb30ccf4f7284a78d698297b06d",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S050/readbacks/task-lifecycle-visibility-wave-2026-07-21.json",
+      "readback_sha256": "0201d5ad670dbbb8ceed4f81669614a48b3765ab105d40e038d86576445942e5",
+      "block_count": 41,
+      "body_html_chars": 24120
+    },
+    {
+      "unit_id": "paper:task-lifecycle-visibility-wave-2026-07-21-correctness",
+      "document_id": "task-lifecycle-visibility-wave-2026-07-21-correctness",
+      "document_rev": "224a517e167326724c03344bfe215be2",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S050/readbacks/task-lifecycle-visibility-wave-2026-07-21-correctness.json",
+      "readback_sha256": "81b0e026dd6fb038ad673e03a56a32139b75c8d2166612009996c0c7538ec041",
+      "block_count": 64,
+      "body_html_chars": 27056
+    },
+    {
+      "unit_id": "paper:task-lifecycle-visibility-wave-2026-07-22-backlog-finish",
+      "document_id": "task-lifecycle-visibility-wave-2026-07-22-backlog-finish",
+      "document_rev": "dc38b55b30af63b7a5541220afa90504",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S050/readbacks/task-lifecycle-visibility-wave-2026-07-22-backlog-finish.json",
+      "readback_sha256": "62555f9c306826aad0a36ec9ca7345fa1b083a93b87b55d7fd7ec0d72e90e3da",
+      "block_count": 64,
+      "body_html_chars": 28677
+    },
+    {
+      "unit_id": "paper:task-lifecycle-visibility-wave-2026-07-22-finishing",
+      "document_id": "task-lifecycle-visibility-wave-2026-07-22-finishing",
+      "document_rev": "0994b71c204d75c98c189ddd5d1e24b6",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S050/readbacks/task-lifecycle-visibility-wave-2026-07-22-finishing.json",
+      "readback_sha256": "3d46b910709f06871b5f8d7b4cb5a5bd9a6e0906320b3f5c8b9439f97cc8b11f",
+      "block_count": 48,
+      "body_html_chars": 35119
+    },
+    {
+      "unit_id": "paper:task-obsession",
+      "document_id": "task-obsession",
+      "document_rev": "00b8544019713e7c5512ddda2fa778f3",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S050/readbacks/task-obsession.json",
+      "readback_sha256": "2b41d8b47080e7aac31389fb60819d01b54fca6a103984c41fbad53df6149d2f",
+      "block_count": 0,
+      "body_html_chars": 7822
+    }
+  ]
+}
