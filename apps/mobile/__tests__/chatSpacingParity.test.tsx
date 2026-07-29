@@ -347,6 +347,48 @@ describe('1. what legend-list does with a contentContainerStyle gap', () => {
       act(() => t.unmount())
     }
   })
+
+  // THE ASSUMPTION THE WHOLE FIX RESTS ON, pinned rather than assumed.
+  //
+  // §2 below calls the screen's renderItem with `{item, index, data}` by hand,
+  // which proves what the seam DOES with an ordering but not that the list ever
+  // hands it one. If legend-list stopped passing `data`, `rowLead` would answer
+  // 0 for every row and the transcript would silently lose ALL of its rhythm —
+  // turn to turn as well as inside a turn — with every other probe in this file
+  // still green. So the list itself is asked.
+  it('HANDS renderItem the ordering — `data` and `index`, not just the item', () => {
+    const seen: { keys: string[]; index: unknown; data: unknown }[] = []
+    let t!: ReactTestRenderer
+    act(() => {
+      t = create(
+        <LegendList
+          data={['a', 'b', 'c']}
+          keyExtractor={(n: string) => n}
+          estimatedItemSize={40}
+          recycleItems={false}
+          renderItem={(args: { item: string; index?: number; data?: readonly string[] }) => {
+            seen.push({ keys: Object.keys(args), index: args.index, data: args.data })
+            return <View />
+          }}
+        />,
+      )
+    })
+    try {
+      act(() => {
+        t.root
+          .findByType(ScrollView)
+          .props.onLayout?.({ nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 800 } } })
+      })
+      expect(seen.length).toBeGreaterThan(1)
+      seen.forEach((call, i) => {
+        expect(call.keys).toEqual(expect.arrayContaining(['item', 'index', 'data']))
+        expect(call.index).toBe(i)
+        expect(call.data).toEqual(['a', 'b', 'c'])
+      })
+    } finally {
+      act(() => t.unmount())
+    }
+  })
 })
 
 /* ══ 2. PARITY — the same turn, live and cold ══════════════════════════════════ */
