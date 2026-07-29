@@ -1,0 +1,549 @@
+{
+  "schema_version": "paper-perfection-successor-verify-probe/v1",
+  "assignment_id": "PPCC2-V016",
+  "worker": "worker-2",
+  "claim_id": "public-reader",
+  "command_or_probe": "Audit representative pinned evidence for audience boundaries, title clarity, sensitive detail, and public-reader context.",
+  "actual_command": "python3 .omx/state/paper-perfection-successor-2026-07-29/verify-reports/run_worker2_probes.py --authority-root /Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29 --snapshot /tmp/ppcc2-worker2-papers-full-20260729.ndjson --output-root .omx/state/paper-perfection-successor-2026-07-29/verify-reports",
+  "input_seals": {
+    "verify_assignment_map_sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76",
+    "verify_lanes_sha256": "4cfc5040fa9b8ea8006527a58b7238fc81ad96e2ab71b7349365cf14ce275379",
+    "production_snapshot_sha256": "a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786",
+    "production_snapshot_document_count": 588,
+    "production_query": "GET https://guerrilla.barkpark.cloud/v1/data/query/production/paper?limit=100&offset={0,100,200,300,400,500}"
+  },
+  "unit_count": 19,
+  "outcome_counts": {
+    "carried_risk": 16,
+    "refuted": 3
+  },
+  "unit_results": [
+    {
+      "unit_id": "paper:console-gui-build-outline",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=12096 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "dd6da2daa6e45a81231e494473de438a1506fcab35403ae0da05dde7849e97cf",
+        "document_revision": "5fcf9d18be6979fd9fae38e68e619082",
+        "blocks_sha256": "72d2ea333d36541b495d051e27e44936ad94e824b87977dafbdfb4b46adc28c2",
+        "survey_report_sha256": "7c1664fdd128c02ddb19c6a104f0b7fcafae3aa7f098da1f575c61f279471438",
+        "survey_disposition": "repair",
+        "text_chars": 12096,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: internal design status, operator screens, and implementation phases require product/audience review.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:context-compression-benchmark",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=7646 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "a4095830725bdfec826365f99fb12be448249917b6f2a70647f3d9fc6351d154",
+        "document_revision": "92fc8945a2e24e2787abf75c01551a41",
+        "blocks_sha256": "b518b018c5788b9606aaa996148b310f342b15703451268949ae609501f61a40",
+        "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "survey_disposition": "repair",
+        "text_chars": 7646,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:criminality-constraint-frontiers-draft",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=18011 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "143c162743efd25551e453919c7e588045bc70d82ea8a14d2c46c3a6b729e3b9",
+        "document_revision": "aff12235cd69f94c0336d6f69d30e843",
+        "blocks_sha256": "b4dbe6b3c897d59e61de5a43a49fc1077e06b35c9a43bfc07c643f916439627e",
+        "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "survey_disposition": "repair",
+        "text_chars": 18011,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:ctx-compression-capstone",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=52581 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "9ed8f4f8922e8238728a37f0807d77c9d8dea6edfe5693f7f10b1935e839f74f",
+        "document_revision": "aa9506bd1d165273e9648140d5d44bd3",
+        "blocks_sha256": "208c33104019a910e8d9308ed35eb465b0af3f404ab76b537cff5e863711710f",
+        "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "survey_disposition": "repair",
+        "text_chars": 52581,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:ctx-compression-handle-doctrine",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=30171 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "4f12bba70d03a537da0ac911bc016132fcd7bbb78bc4969ecaa2f4d9b6f47db2",
+        "document_revision": "876141f25e33c7762ea615af5cd7b537",
+        "blocks_sha256": "3d09d3c9d37e06b55fb17818d76bfe5548d4f693144e0ff09e179dd29e6d6e04",
+        "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "survey_disposition": "repair",
+        "text_chars": 30171,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:ctx-compression-taskboard-flagship",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=35389 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "133d33cd7784360c994c29b4bec600b370e7b6d80619f76fbf594e213394f799",
+        "document_revision": "ace7021a9cfe9799edc3e38958e4052b",
+        "blocks_sha256": "2cc9890094c716888d23391694f5239939913ec857a882f2637222ca65dcb353",
+        "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "survey_disposition": "repair",
+        "text_chars": 35389,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:ctx-compression-view-tiers-seam",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=31715 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "70bf045538a4d39fe19454ac61c6131b0e271aa2c3bb703b39b2ee6fda29a4dd",
+        "document_revision": "0d1dafe21a10db854bdad2ca612bbeb4",
+        "blocks_sha256": "f7529097e87dbf4aa334eabfb54a9123764719536d70eaa9c4b72586f237270f",
+        "survey_report_sha256": "c4def075661ae8419eaea2e03f9756a060550a6cbef01540a9c36945798fc806",
+        "survey_disposition": "repair",
+        "text_chars": 31715,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: redact live credentials, internal tokens, host/topology details, branch/task identifiers, and exploit recipes; retain aggregate evidence and caveats.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:deploy-with-barkpark",
+      "outcome": "refuted",
+      "observed_output": "public content audit: chars=10761 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "The pinned content contains operational, path, private-network, or credential-like material that requires redaction or an explicit internal-only audience boundary.",
+      "metrics": {
+        "document_sha256": "6437247ad259a86e35963c694f67acbcd421e77551b62f987de5fd43a4de44fe",
+        "document_revision": "cc6914e4c58b586928d68449a2321560",
+        "blocks_sha256": "347c09aee804f3a47d7b20085ca0d91e168e08ad36720bcff8fe237ccbf5f7e9",
+        "survey_report_sha256": "878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+        "survey_disposition": "repair",
+        "text_chars": 10761,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 1,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [
+            " .env"
+          ],
+          "private_ip": []
+        },
+        "public_boundary": "public: Credential/config details need review.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:desktop-fleets-masterplan",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=22482 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "56a9bb3bf2b843fc995aaa756d417ed6a48a5f6fddde106cc7efa1b9969697fc",
+        "document_revision": "449bfdf95fff7ffeff5e918028b7220e",
+        "blocks_sha256": "6d97230993e89c68130bcfbb66fe01d5c365af01e06bc38329dc9a70903bb4bc",
+        "survey_report_sha256": "878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+        "survey_disposition": "repair",
+        "text_chars": 22482,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: Platform/security assumptions require currentness review.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:dispatch-frontier-wave-2026-07-10",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=27526 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "1721d423b1bc9e8250a84f3faefc9076181b27f860dfc9a28bac48a09941052b",
+        "document_revision": "201735ea4880bfd5fbf4198f346dac42",
+        "blocks_sha256": "80eb95964aa452c9ddb3dbeeb0596d88b47c1297b4a2ac9b25ecf51c6490cbe5",
+        "survey_report_sha256": "878bb89ef0e377777ff4ce22f3d0c4ffe47dbe07dfad20716b2fe30de471d8b8",
+        "survey_disposition": "repair",
+        "text_chars": 27526,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: Internal performance/ledger details need review.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:enterprise-auth-gates-debrief",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=62 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "c50ba3d04844ba88f209ec0ff2f07b5987d3395e0bc79ca1887a3fe44f8ceff9",
+        "document_revision": "4658dbabff060853b4bc4a939ce38584",
+        "blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "survey_report_sha256": "0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+        "survey_disposition": "repair",
+        "text_chars": 62,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: appears abandoned, corrupted, or accidentally published.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:enterprise-ready-barkpark",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=53 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "40d4516fb7698bc0db0e012befbf2a63d6753049c8748ddb1fb94f1db3ddebdd",
+        "document_revision": "cdfc06cc8ce59d48555d923d6b2644be",
+        "blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "survey_report_sha256": "0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+        "survey_disposition": "repair",
+        "text_chars": 53,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: appears abandoned, corrupted, or accidentally published.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:epic-cycle-session-card",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=17033 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "49c2915ea5ae8713cb6aa613523c36730282ef03d41ae107286b2caeddf54e27",
+        "document_revision": "9a74b57dcbf8f94b8463dcb7be37f263",
+        "blocks_sha256": "8b6652a9a429eb9b9638655936d712c97cb54b51575802804eaa48944944915b",
+        "survey_report_sha256": "0527e38428367e48da0aecc81e1dd88f4afa2dc1da63bf9ce08127f0d4f87ce9",
+        "survey_disposition": "repair",
+        "text_chars": 17033,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: internal session/task telemetry and workflow controls require audience review.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:expressive-agent-loops-wave-2026-07-11",
+      "outcome": "refuted",
+      "observed_output": "public content audit: chars=29270 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "The pinned content contains operational, path, private-network, or credential-like material that requires redaction or an explicit internal-only audience boundary.",
+      "metrics": {
+        "document_sha256": "3cc7d5894d191c0360e0703885579b34d8285314176c42f67aa9a960a841873a",
+        "document_revision": "fdb8655adfa9d64d7a893cdb94dabd3f",
+        "blocks_sha256": "77e5051aa5ef53ea3fa4500491202c4514320485980c5c123638f63269fa9cdb",
+        "survey_report_sha256": "3c533d19b1b1f975518abdf83f2121c0d36bdf894e25ae91f502ec000c5716a5",
+        "survey_disposition": "repair",
+        "text_chars": 29270,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 1,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [
+            "api/_build/"
+          ],
+          "private_ip": []
+        },
+        "public_boundary": "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:felix-pristine-charter",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=9768 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "ed7b37cab11cc196545c22d489db302fc7faff7b1972658c093959f4737a187f",
+        "document_revision": "fc2ee8727a453f573358e4aedbb0ef98",
+        "blocks_sha256": "6b31f394c2f5c306cef0964ab35cfe111e530de3739de46412d0dae139f6f52b",
+        "survey_report_sha256": "fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+        "survey_disposition": "repair",
+        "text_chars": 9768,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: Internal task ids and baseline counts need freshness/disclosure review.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:felix-pristine-wave-10-2026-07-13",
+      "outcome": "refuted",
+      "observed_output": "public content audit: chars=38763 title_present=true credential_hits=0 internal_path_hits=1 private_ip_hits=1 public_boundary_present=true",
+      "residual_risk": "The pinned content contains operational, path, private-network, or credential-like material that requires redaction or an explicit internal-only audience boundary.",
+      "metrics": {
+        "document_sha256": "8ac278be7a0f6dc632dbd26fc0ef974cfcae6741fa952722a439a8a67ea52cbb",
+        "document_revision": "99be49e593d1c5843335e098e29a2bbd",
+        "blocks_sha256": "d2e8e70ffe5a6ed678d9f43ff00fcac514ed53234e02124c4d7c79b10b3cede5",
+        "survey_report_sha256": "fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+        "survey_disposition": "repair",
+        "text_chars": 38763,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 1,
+          "private_ip": 1
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [
+            "api/_build/"
+          ],
+          "private_ip": [
+            "10.255.255.1"
+          ]
+        },
+        "public_boundary": "public: Branches, hosts, task ids, and security details need review.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:felix-pristine-wave-12-2026-07-16",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=36395 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "917f6a7ef1cbfb803362aa819515ad1ae5fdb3b083a50481f90ba21b62599977",
+        "document_revision": "15597e02418722fc81389b9133ecde5f",
+        "blocks_sha256": "07c749b80ed239234168067a3ec5fa398e7b30239b2d0d1c24854a083bd3b333",
+        "survey_report_sha256": "fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+        "survey_disposition": "repair",
+        "text_chars": 36395,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: Security-header internals and branch/task details need review.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:felix-pristine-wave-13-2026-07-21",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=32629 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "e22efab50f1dd91eba9c2aed9c59d0b87cc16421134109984cafb5adf42c975e",
+        "document_revision": "c21c3699fc37297e0801d04e3b4cc246",
+        "blocks_sha256": "fb1af06b74a1765c377dad99c376410777366cbd74e6e98c1e14bf0eff03ccb7",
+        "survey_report_sha256": "fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+        "survey_disposition": "repair",
+        "text_chars": 32629,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: Security findings, PRs, and task internals require disclosure review.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:felix-pristine-wave-14-2026-07-22",
+      "outcome": "carried_risk",
+      "observed_output": "public content audit: chars=33074 title_present=true credential_hits=0 internal_path_hits=0 private_ip_hits=0 public_boundary_present=true",
+      "residual_risk": "Static content is clear and no sensitive pattern was found; anonymous runtime authorization and generated public-reader chrome remain outside this read-only probe.",
+      "metrics": {
+        "document_sha256": "a6b8087a43225321dcacb8b32b4d896b76f75d7e3a8a234259f0b165bc9660c6",
+        "document_revision": "97ac414889044da4134f330f5ba3a14c",
+        "blocks_sha256": "1dd829c5cc3deba98491d3329a3ee6e907459d88735286364053a40267bbc3e0",
+        "survey_report_sha256": "fb4584615b41815ee2a4199b953d4f4484617365f51abf805a09f7771b71c2a5",
+        "survey_disposition": "repair",
+        "text_chars": 33074,
+        "title_present": true,
+        "pattern_counts": {
+          "credential": 0,
+          "internal_path": 0,
+          "private_ip": 0
+        },
+        "pattern_samples": {
+          "credential": [],
+          "internal_path": [],
+          "private_ip": []
+        },
+        "public_boundary": "public: Attack sizes, routes, and internal task/PR references need review.",
+        "blocks_hash_match": true
+      }
+    }
+  ],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "root_task_mutated": false,
+    "source_mutated": false
+  }
+}

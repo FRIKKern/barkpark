@@ -1,0 +1,1033 @@
+{
+  "schema_version": "paper-perfection-successor-verify-probe/v1",
+  "assignment_id": "PPCC2-V020",
+  "worker": "worker-2",
+  "claim_id": "cli-api",
+  "command_or_probe": "Inspect representative raw JSON and identify the exact fields required for status, provenance, disposition, and risk.",
+  "actual_command": "python3 .omx/state/paper-perfection-successor-2026-07-29/verify-reports/run_worker2_probes.py --authority-root /Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29 --snapshot /tmp/ppcc2-worker2-papers-full-20260729.ndjson --output-root .omx/state/paper-perfection-successor-2026-07-29/verify-reports",
+  "input_seals": {
+    "verify_assignment_map_sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76",
+    "verify_lanes_sha256": "4cfc5040fa9b8ea8006527a58b7238fc81ad96e2ab71b7349365cf14ce275379",
+    "production_snapshot_sha256": "a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786",
+    "production_snapshot_document_count": 588,
+    "production_query": "GET https://guerrilla.barkpark.cloud/v1/data/query/production/paper?limit=100&offset={0,100,200,300,400,500}"
+  },
+  "unit_count": 19,
+  "outcome_counts": {
+    "refuted": 19
+  },
+  "unit_results": [
+    {
+      "unit_id": "paper:pds-wave-9-verdict-2026-07-20",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "2716b3a7699aab423efd3f9f0356c1df00bc71ffe8b7995ff7f572e631758c9a",
+        "document_revision": "943d7b2c72864c0485927ca52371f01b",
+        "blocks_sha256": "b93ff8732f0eeae72362724abecb68f4da18d4b64fb0e1a0f028a5eb94b98c26",
+        "survey_report_sha256": "15bac9f4ccd32b647e1eae53210ecb32fb80719fff0cbcb310e1f6fad2ca952f",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: Emit structured paid/refused/open predicates and one authoritative terminal state.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:perfect-portabledoc-blog-next-astro-phoenix",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "957fd6d3524dd2df54c7f0b29f101ac333303609eeb955bcc278efabe4963842",
+        "document_revision": "012e5850524a137bca90a3cae1bc8bf0",
+        "blocks_sha256": "48c271f6bb16c22b29aefdc2cd165f1022812cd27831a3a05e91cfa742a05a8d",
+        "survey_report_sha256": "8ea4048483a34492257e3f851e2726d29f737ea4f8cbe49eddb5501f7f4cbbfa",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "rev",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: encode phase, evidence tier, revision, merge/deploy state, lead-gated criteria, supersession edges, mutation status, and residual risks as machine fields rather than inferred prose.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-agent-provider-bridge",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "c172dd70dde4e4a5f8e31941f365723d84019469e56be7b575959e7536cc75a0",
+        "document_revision": "39bc36cf7512809911d630da635ffc0d",
+        "blocks_sha256": "f4e00d26b4ed41b9b59f7006ade69b4d017e03280e36cfe96a251344832f7544",
+        "survey_report_sha256": "8ea4048483a34492257e3f851e2726d29f737ea4f8cbe49eddb5501f7f4cbbfa",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "rev",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: encode phase, evidence tier, revision, merge/deploy state, lead-gated criteria, supersession edges, mutation status, and residual risks as machine fields rather than inferred prose.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-build-plan",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "8e32d8650b643b10cd5a2befe6659586cadb6afbb9d151738b860f0a6e5eae0a",
+        "document_revision": "adfead63388219643be7f6143a686c34",
+        "blocks_sha256": "52f1182d2d298a1a76af998887f0dff67413938da309af6e0b4df3b0f0cd4fee",
+        "survey_report_sha256": "20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "rev",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-field-guide",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "f93513e18df54eda5c1ba4d456a146c7a46585e2ac075251918f293e9bb3feb5",
+        "document_revision": "ff28581c07b0118676642579ab0d6933",
+        "blocks_sha256": "bdaeccbc66076312d57223c0ec6dae3c7675408d962ea3ce568150f3370b9ec4",
+        "survey_report_sha256": "20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "rev",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-gui-plan",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "ce9772fdfe4e51b5186af839ee68501b8b20171488dd7a6bd6c6cd85cba4029e",
+        "document_revision": "1eac07057b43366a3f1340dda51c6bbd",
+        "blocks_sha256": "fdd3aa7c0f0c6c60b86a757331d3aa6d62f9083355aae18c78b8a56fa3775b9c",
+        "survey_report_sha256": "20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "rev",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-mvp",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "5a73aee65e74446a85a80b4e3193de748fa818447caafda673319c82269ee014",
+        "document_revision": "81208ed236ee68d2e302c2b01b64e280",
+        "blocks_sha256": "7ad84c6a949b2a4f5021636400e7adc87ecde34575abf1ab3108c118cc6d995a",
+        "survey_report_sha256": "20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "rev",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-wave-b-2026-07-22",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "c371d99fcf1b9542ca811aca2657792b7fad52ad27a7400437fabd2bc3297edb",
+        "document_revision": "a2187aa63cd2be3ecb857aed605250c0",
+        "blocks_sha256": "f695e696c50f7f08de5c407b398b5f3397a7ca9b05fc85faa0f5afe956f9d97a",
+        "survey_report_sha256": "20ac7a64fe624bb1276975562dd8bb6b3743bd568838b9fa95635fe644f3bb67",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: preserve exact verbs, argument dialects, ids/revisions, TTL semantics, status vocabularies, gate denominators, and distinctions among planned, shipped, merged, live-proven, and sealed.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-wave-b-2026-07-22-r2",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "22ba55f11723d91ee24b1bcd252ee4dadfd2d64e5b0235aa5133cda8ec6718b4",
+        "document_revision": "bd4ed9f1ae231e13eb7caafd1a04a270",
+        "blocks_sha256": "8324b2d46477a11451ae9d5db02c635d63a7cd5f3d8ef63db09f40aa9f7fc7a8",
+        "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: Separate phase snapshots, reviewed state, merged state, and sealed epic criteria.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-wave-c-2026-07-23",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "b58a91e34a98e13e71622e4d71fd59148f178f693f5dd77535bba86b60ffffdc",
+        "document_revision": "eda6ecc1ff5c3cd275b377c17404ad6e",
+        "blocks_sha256": "2d1c3cdd9f4d1485f16ab6e9e13ba6e4c7cefec324484e72844c355885ecdd91",
+        "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: Type slice-green, round-reviewed, end-to-end-broken, and successor-round states separately.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-wave-c-2026-07-23-r2",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "ad86215ebea8ad81984088a6d58e2717b7a469bac684f7ee65fa12b11c956470",
+        "document_revision": "43e442f37602c467feee03debe2eb42d",
+        "blocks_sha256": "f010bfc0ea298377f685318cf6fb5fd3c7c02d460523eaf18987b8755605788e",
+        "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: Separate round terminal status from overall wave seal and provide superseded_by for the deferred proof.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-wave-mvp0-2026-07-24",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "3b96bed038accab52fa6024dbce7c04b3f0616d3695af2dce6a35498f4fbee19",
+        "document_revision": "581e22e50e7c1af28eec35458dfcdd5c",
+        "blocks_sha256": "f83b25d706a3508bef02bab7bf449b0f29d698733910c87eadd8bdcc5cd7bb53",
+        "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: Encode backend-built, UI-built, deployed, journey-proven, and epic-criterion states independently.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-dev-fleet-worker-protocol",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "ae10b1385b702e1a8e10ac54742687849701f6fbe2cc58d4fea4e42fee1dbe40",
+        "document_revision": "390e4bd4059a5f484731f73121285897",
+        "blocks_sha256": "217a392ba2e22295b0ca044196a69613d4d58e110521299befe1b162b13bb681",
+        "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "rev",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: Version the envelope schema and mark each mechanism shipped/planned/superseded.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:personal-development-server-plan",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "b29c81e969217d382ded4198a1398cd6bc3d931a6ebba8cfb3335e9f350bf2ab",
+        "document_revision": "b2cd2b2cfb5c86e0821145d0515301e0",
+        "blocks_sha256": "11f8360973a1a8ba70fbd9702b8426fd25ba41a4a5522ae1ab4b23b77128f018",
+        "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "rev",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: Type promise, current capability, gap, evidence date, and superseding wave authority.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:phoenix-mastery-corpus",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"preview\", \"rev\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "ef170ce1bd71258893fb31393d146a381225a51b06fd529d031d80b96a1568fa",
+        "document_revision": "5621918e9341d07aa6846fb3acb38952",
+        "blocks_sha256": "02b5a57aea53212bd4840451ef0b046fed355ff5fb15187784e856d029f86789",
+        "survey_report_sha256": "8b90941050205267cf64ce095a1c88a85f7196f12fd5f63314896ba34584cff0",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "preview",
+          "rev",
+          "style",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: Expose chapter id, part, status, case anchors, observed_at, and audit task.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:portabledoc-doctrine",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"preview\", \"slug\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "d242092d92c18190a135ca6935b706c18334d6c0256f735ba99cdb96f68aeb79",
+        "document_revision": "3cf9bb1ba031cd02378bb10e9699b571",
+        "blocks_sha256": "29a821f448ff196180af5fda2544e90edf77b2eec4f2addd16e89a9ea0772aa8",
+        "survey_report_sha256": "02174247a6008aa4e9b1f5eca76df6a9d5a2463c6d1ec0128ea7fa7dd0b9c38d",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "preview",
+          "slug",
+          "style",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: expose revision, evidence class, disposition, authority relationship, status date, proof commands, unresolved gates, and mutation attestation as typed fields; consumers must not infer terminal state from prose order or titles.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:portabledoc-render-unification-w7-2026-07-16",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"body_html\", \"description\", \"main_tag\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "a60aac6c5c36e41ef2d70c6ade57e54c752b0ee872e0390a4506475e3768fd21",
+        "document_revision": "d74a1db4b9b07e757c3433456a121665",
+        "blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "survey_report_sha256": "a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "body_html",
+          "description",
+          "main_tag",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:production-truth-wave-2026-07-20",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"description\", \"main_tag\", \"preview\", \"rev\", \"slug\", \"style\", \"tags\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true",
+      "residual_risk": "The raw Paper JSON cannot let machines distinguish current truth from checkpoint history without inference; missing typed groups: status, disposition, risk, checkpoint_history.",
+      "metrics": {
+        "document_sha256": "e76301fa5565878dd4b0b978df4fd724a595f09e0ef9ed9dd1bf1c34a582f468",
+        "document_revision": "2c26416ccffd98018850928ff92e1e34",
+        "blocks_sha256": "66d536abcb78eb8ce673975ca221e42308a93ad77ae575f436b944eab36fcf53",
+        "survey_report_sha256": "a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "description",
+          "main_tag",
+          "preview",
+          "rev",
+          "slug",
+          "style",
+          "tags",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics.",
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:provider-horizon",
+      "outcome": "refuted",
+      "observed_output": "raw CLI/API JSON inspection: keys=[\"_createdAt\", \"_draft\", \"_id\", \"_publishedId\", \"_rev\", \"_type\", \"_updatedAt\", \"blocks\", \"body\", \"body_html\", \"body_html_sv\", \"preview\", \"rev\", \"style\", \"title\"] groups_present={\"checkpoint_history\": false, \"disposition\": false, \"provenance\": true, \"risk\": false, \"status\": false} survey_cli_boundary_present=true blocks_hash_match=false expected_blocks_sha256=0895e0f12aff1af6e3c83c0a699a7a3c36ed15ff06d263d59a1a8977c7e78761 observed_blocks_sha256=7abb563f871f0fde95e250b7d2d2239e6d5d91d416b210e6f87860086ff7973e",
+      "residual_risk": "The read-only production query returned the pinned revision with a different normalized blocks digest, so the frozen reader/source boundary is not replay-stable.",
+      "metrics": {
+        "document_sha256": "c8f20302d6cc95b8784c47b10cb6f571e8882cf41f5305822595edcf2f67636b",
+        "document_revision": "f8de7acedb8a6219954695eefcfb6ec4",
+        "blocks_sha256": "7abb563f871f0fde95e250b7d2d2239e6d5d91d416b210e6f87860086ff7973e",
+        "survey_report_sha256": "a97a6f3358e423ecc9e79fe1b2b4280c6f7019a8c5ae74b8b0c6f05bef3e959a",
+        "survey_disposition": "repair",
+        "raw_keys": [
+          "_createdAt",
+          "_draft",
+          "_id",
+          "_publishedId",
+          "_rev",
+          "_type",
+          "_updatedAt",
+          "blocks",
+          "body",
+          "body_html",
+          "body_html_sv",
+          "preview",
+          "rev",
+          "style",
+          "title"
+        ],
+        "required_fields": {
+          "status": [],
+          "provenance": [
+            "_createdAt",
+            "_publishedId",
+            "_rev",
+            "_updatedAt"
+          ],
+          "disposition": [],
+          "risk": [],
+          "checkpoint_history": []
+        },
+        "groups_present": {
+          "status": false,
+          "provenance": true,
+          "disposition": false,
+          "risk": false,
+          "checkpoint_history": false
+        },
+        "survey_cli_boundary": "CLI/API: preserve exact document ids/revisions, block/query vocabularies, fallback order, status distinctions, test denominators, and native-vs-legacy representation semantics.",
+        "blocks_hash_match": false,
+        "expected_blocks_sha256": "0895e0f12aff1af6e3c83c0a699a7a3c36ed15ff06d263d59a1a8977c7e78761",
+        "observed_blocks_sha256": "7abb563f871f0fde95e250b7d2d2239e6d5d91d416b210e6f87860086ff7973e"
+      }
+    }
+  ],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "root_task_mutated": false,
+    "source_mutated": false
+  }
+}

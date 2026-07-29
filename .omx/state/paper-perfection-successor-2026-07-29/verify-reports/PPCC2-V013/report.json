@@ -1,0 +1,805 @@
+{
+  "schema_version": "paper-perfection-successor-verify-report/v1",
+  "assignment_id": "PPCC2-V013",
+  "agent_type": "epic-verifier",
+  "effort": "medium",
+  "phase": "verify",
+  "worker": "worker-2",
+  "mutation_policy": "read_only",
+  "claim_id": "email-reader",
+  "claim": "The proposed disposition supports a truthful concise email projection without hiding decisive status or risk.",
+  "command_or_probe": "Derive representative email summaries from pinned evidence and compare retained facts, criteria, and unresolved risks.",
+  "verify_assignment_map_sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76",
+  "assignment_sha256": "7dde40accf2293d4d7cd90495660b0c6cd78adf83e85dbf19e80503a65f29c26",
+  "direct_answer": "PROVEN: Personally checked 19/19 ordered pinned units; outcomes={'proven': 19}; production snapshot sha256=a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786; probe artifact=.omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json.",
+  "checked_unit_ids": [
+    "paper:bp-scaffy-wave2-2026-07-16",
+    "paper:bp-scaffy-wave3-2026-07-16",
+    "paper:bp-scaffy-wave5-2026-07-17",
+    "paper:bp-scaffy-wave6-2026-07-17",
+    "paper:chat-herd-layer",
+    "paper:chat-herd-wave-2026-07-18",
+    "paper:chat-herd-wave2-2026-07-18",
+    "paper:chat-local-cloud-context-wave-3-2026-07-15",
+    "paper:chat-plan-050c647a4c8c",
+    "paper:chat-plan-1caa96602607",
+    "paper:chat-plan-651c5eb5b064",
+    "paper:chat-provider-runtime-parity-wave-2-2026-07-14",
+    "paper:choosing-your-site-framework",
+    "paper:claude-ready-servers-capstone",
+    "paper:claude-ready-servers-product-strategy",
+    "paper:claude-ready-servers-wave-2026-07-28",
+    "paper:cloud-console-epic-wish",
+    "paper:cloud-console-hardening-wave-2-2026-07-21",
+    "paper:cloud-console-hardening-wave-2026-07-21"
+  ],
+  "verification_result": {
+    "claim": "The proposed disposition supports a truthful concise email projection without hiding decisive status or risk.",
+    "command_or_probe": "Derive representative email summaries from pinned evidence and compare retained facts, criteria, and unresolved risks.",
+    "fixture_ids": [
+      "https://guerrilla.barkpark.cloud/v1/data/query/production/paper",
+      ".omx/state/paper-perfection-successor-2026-07-29/survey-reports",
+      ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json"
+    ],
+    "observed_output": "Personally checked 19/19 ordered pinned units; outcomes={'proven': 19}; production snapshot sha256=a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786; probe artifact=.omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json.",
+    "verdict": "proven",
+    "affected_unit_ids": [],
+    "residual_risk": "No owned scope was unvisited. Only unit-specific residual notes remain."
+  },
+  "unit_results": [
+    {
+      "class": "paper",
+      "document_id": "bp-scaffy-wave2-2026-07-16",
+      "document_rev": "1c12245644cb00253ef6d182bc3f7a7a",
+      "unit_id": "paper:bp-scaffy-wave2-2026-07-16",
+      "survey_assignment_id": "PPCC2-S005",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+      "live_projection_sha256": "42cf2e68c568a01b0d03e147331c6ef5b31b93fa9bb22d203b782265b7dea497",
+      "live_blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:bp-scaffy-wave2-2026-07-16@1c12245644cb00253ef6d182bc3f7a7a",
+        "survey-report:PPCC2-S005@3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=854 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=b7bd7f74e526e2d812fd8d1b967984b7811c99d8811b1dde5fa8909519c97187",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against bp-scaffy-wave2-2026-07-16 at immutable revision 1c12245644cb00253ef6d182bc3f7a7a and its hash-pinned Survey row; concise email derivation: chars=854 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=b7bd7f74e526e2d812fd8d1b967984b7811c99d8811b1dde5fa8909519c97187.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:bp-scaffy-wave2-2026-07-16@1c12245644cb00253ef6d182bc3f7a7a",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=bp-scaffy-wave2-2026-07-16]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b observed_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b; concise email derivation: chars=854 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=b7bd7f74e526e2d812fd8d1b967984b7811c99d8811b1dde5fa8909519c97187"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S005@3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S005/report.json#unit_verdicts[unit_id=paper:bp-scaffy-wave2-2026-07-16]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:bp-scaffy-wave2-2026-07-16]",
+          "observed_output": "concise email derivation: chars=854 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=b7bd7f74e526e2d812fd8d1b967984b7811c99d8811b1dde5fa8909519c97187"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "bp-scaffy-wave3-2026-07-16",
+      "document_rev": "966feaaa5f37c8bcdb4d0dc15630746f",
+      "unit_id": "paper:bp-scaffy-wave3-2026-07-16",
+      "survey_assignment_id": "PPCC2-S005",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+      "live_projection_sha256": "8d6234692ad27e2de8b52da4f36c4a20bf9342baf37da85173e157bbcc9cf147",
+      "live_blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:bp-scaffy-wave3-2026-07-16@966feaaa5f37c8bcdb4d0dc15630746f",
+        "survey-report:PPCC2-S005@3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=897 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=c2f00592223e5fa27411182671c9b51de2c9db8e2c67e2f9b461972a370dd043",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against bp-scaffy-wave3-2026-07-16 at immutable revision 966feaaa5f37c8bcdb4d0dc15630746f and its hash-pinned Survey row; concise email derivation: chars=897 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=c2f00592223e5fa27411182671c9b51de2c9db8e2c67e2f9b461972a370dd043.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:bp-scaffy-wave3-2026-07-16@966feaaa5f37c8bcdb4d0dc15630746f",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=bp-scaffy-wave3-2026-07-16]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b observed_blocks_sha256=74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b; concise email derivation: chars=897 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=c2f00592223e5fa27411182671c9b51de2c9db8e2c67e2f9b461972a370dd043"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S005@3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S005/report.json#unit_verdicts[unit_id=paper:bp-scaffy-wave3-2026-07-16]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:bp-scaffy-wave3-2026-07-16]",
+          "observed_output": "concise email derivation: chars=897 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=c2f00592223e5fa27411182671c9b51de2c9db8e2c67e2f9b461972a370dd043"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "bp-scaffy-wave5-2026-07-17",
+      "document_rev": "60e898270f884c91c7c403cd141cabe8",
+      "unit_id": "paper:bp-scaffy-wave5-2026-07-17",
+      "survey_assignment_id": "PPCC2-S005",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+      "live_projection_sha256": "a344917fa156190d38bf5f6c4859fb3896a6cfc499122d0e68bbcc8d1a0b553d",
+      "live_blocks_sha256": "0b3bbca4f58de582b830fa5208fac4bdc5099644d9811ae0ff0f23ddfcc4c4e5",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:bp-scaffy-wave5-2026-07-17@60e898270f884c91c7c403cd141cabe8",
+        "survey-report:PPCC2-S005@3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=898 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=f96159ceeb57d1861ba1f25cfdcd22783c8b9b389c76ce075514cb225eba8eff",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against bp-scaffy-wave5-2026-07-17 at immutable revision 60e898270f884c91c7c403cd141cabe8 and its hash-pinned Survey row; concise email derivation: chars=898 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=f96159ceeb57d1861ba1f25cfdcd22783c8b9b389c76ce075514cb225eba8eff.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:bp-scaffy-wave5-2026-07-17@60e898270f884c91c7c403cd141cabe8",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=bp-scaffy-wave5-2026-07-17]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=0b3bbca4f58de582b830fa5208fac4bdc5099644d9811ae0ff0f23ddfcc4c4e5 observed_blocks_sha256=0b3bbca4f58de582b830fa5208fac4bdc5099644d9811ae0ff0f23ddfcc4c4e5; concise email derivation: chars=898 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=f96159ceeb57d1861ba1f25cfdcd22783c8b9b389c76ce075514cb225eba8eff"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S005@3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S005/report.json#unit_verdicts[unit_id=paper:bp-scaffy-wave5-2026-07-17]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:bp-scaffy-wave5-2026-07-17]",
+          "observed_output": "concise email derivation: chars=898 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=f96159ceeb57d1861ba1f25cfdcd22783c8b9b389c76ce075514cb225eba8eff"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "bp-scaffy-wave6-2026-07-17",
+      "document_rev": "e6a067fe4f4e10a744b7c5185efb842f",
+      "unit_id": "paper:bp-scaffy-wave6-2026-07-17",
+      "survey_assignment_id": "PPCC2-S005",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+      "live_projection_sha256": "c177f0d97a1abd81ce43f3edab600e505e3580f724eeb2ed6839667b7f0029c8",
+      "live_blocks_sha256": "566206f8ee0d5ee08e66d0403b8531e426a87ea596acb94382c3c29db8a5e7cf",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:bp-scaffy-wave6-2026-07-17@e6a067fe4f4e10a744b7c5185efb842f",
+        "survey-report:PPCC2-S005@3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=864 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a7c68e4482fb5b0b5bb167d4283f0684091b0592ee35a028189ed7e448d7c4b8",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against bp-scaffy-wave6-2026-07-17 at immutable revision e6a067fe4f4e10a744b7c5185efb842f and its hash-pinned Survey row; concise email derivation: chars=864 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a7c68e4482fb5b0b5bb167d4283f0684091b0592ee35a028189ed7e448d7c4b8.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:bp-scaffy-wave6-2026-07-17@e6a067fe4f4e10a744b7c5185efb842f",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=bp-scaffy-wave6-2026-07-17]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=566206f8ee0d5ee08e66d0403b8531e426a87ea596acb94382c3c29db8a5e7cf observed_blocks_sha256=566206f8ee0d5ee08e66d0403b8531e426a87ea596acb94382c3c29db8a5e7cf; concise email derivation: chars=864 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a7c68e4482fb5b0b5bb167d4283f0684091b0592ee35a028189ed7e448d7c4b8"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S005@3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S005/report.json#unit_verdicts[unit_id=paper:bp-scaffy-wave6-2026-07-17]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:bp-scaffy-wave6-2026-07-17]",
+          "observed_output": "concise email derivation: chars=864 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a7c68e4482fb5b0b5bb167d4283f0684091b0592ee35a028189ed7e448d7c4b8"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "chat-herd-layer",
+      "document_rev": "3f531a0ca367799f8794e312ce34b8cc",
+      "unit_id": "paper:chat-herd-layer",
+      "survey_assignment_id": "PPCC2-S005",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+      "live_projection_sha256": "f6631e839a098c7e9f00a8f66120bb2dfe69b72431bfef6b2229a650f915fa33",
+      "live_blocks_sha256": "acbad5a83825a85df19946a889e154aa8ff62975b1e8de2b9f4a6874e48d328c",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:chat-herd-layer@3f531a0ca367799f8794e312ce34b8cc",
+        "survey-report:PPCC2-S005@3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=854 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=1197a8872562d4acd56849a4b9f47239baa8a6f8e94f9684563285fd494afa9f",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against chat-herd-layer at immutable revision 3f531a0ca367799f8794e312ce34b8cc and its hash-pinned Survey row; concise email derivation: chars=854 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=1197a8872562d4acd56849a4b9f47239baa8a6f8e94f9684563285fd494afa9f.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:chat-herd-layer@3f531a0ca367799f8794e312ce34b8cc",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=chat-herd-layer]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=acbad5a83825a85df19946a889e154aa8ff62975b1e8de2b9f4a6874e48d328c observed_blocks_sha256=acbad5a83825a85df19946a889e154aa8ff62975b1e8de2b9f4a6874e48d328c; concise email derivation: chars=854 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=1197a8872562d4acd56849a4b9f47239baa8a6f8e94f9684563285fd494afa9f"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S005@3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S005/report.json#unit_verdicts[unit_id=paper:chat-herd-layer]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:chat-herd-layer]",
+          "observed_output": "concise email derivation: chars=854 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=1197a8872562d4acd56849a4b9f47239baa8a6f8e94f9684563285fd494afa9f"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "chat-herd-wave-2026-07-18",
+      "document_rev": "9ee3f8a3efb4b735df3e83defbde55a3",
+      "unit_id": "paper:chat-herd-wave-2026-07-18",
+      "survey_assignment_id": "PPCC2-S006",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+      "live_projection_sha256": "422bd9aec1e787191c25a88a44ded79b68b37704d4a1d81d17900bc3262809b4",
+      "live_blocks_sha256": "5f7fd74d7a710493d73ac03c42b36afb56a1d15d150a3d800dbd4f74e6f9d5a4",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:chat-herd-wave-2026-07-18@9ee3f8a3efb4b735df3e83defbde55a3",
+        "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=925 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=685cdb61c11549a104289152b6dd611d5f95dad74e0271ce94f44f1ae4d9efca",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against chat-herd-wave-2026-07-18 at immutable revision 9ee3f8a3efb4b735df3e83defbde55a3 and its hash-pinned Survey row; concise email derivation: chars=925 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=685cdb61c11549a104289152b6dd611d5f95dad74e0271ce94f44f1ae4d9efca.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:chat-herd-wave-2026-07-18@9ee3f8a3efb4b735df3e83defbde55a3",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=chat-herd-wave-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=5f7fd74d7a710493d73ac03c42b36afb56a1d15d150a3d800dbd4f74e6f9d5a4 observed_blocks_sha256=5f7fd74d7a710493d73ac03c42b36afb56a1d15d150a3d800dbd4f74e6f9d5a4; concise email derivation: chars=925 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=685cdb61c11549a104289152b6dd611d5f95dad74e0271ce94f44f1ae4d9efca"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S006/report.json#unit_verdicts[unit_id=paper:chat-herd-wave-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:chat-herd-wave-2026-07-18]",
+          "observed_output": "concise email derivation: chars=925 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=685cdb61c11549a104289152b6dd611d5f95dad74e0271ce94f44f1ae4d9efca"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "chat-herd-wave2-2026-07-18",
+      "document_rev": "dc1a0193a30b21db707e41c6d6b9a82c",
+      "unit_id": "paper:chat-herd-wave2-2026-07-18",
+      "survey_assignment_id": "PPCC2-S006",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+      "live_projection_sha256": "8c8998223685dabdea6f9ced06af2639170d86d54b7c36ca5aaf962e518c075e",
+      "live_blocks_sha256": "503a655f9aa6b7a38b2da974d80199ea56dd82510f93b1a7c515cf5dd3a1083e",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:chat-herd-wave2-2026-07-18@dc1a0193a30b21db707e41c6d6b9a82c",
+        "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=919 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=bd952e7624664aac34e4a81caf470e39f180326196e4f85cfc2220b6210d10c6",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against chat-herd-wave2-2026-07-18 at immutable revision dc1a0193a30b21db707e41c6d6b9a82c and its hash-pinned Survey row; concise email derivation: chars=919 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=bd952e7624664aac34e4a81caf470e39f180326196e4f85cfc2220b6210d10c6.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:chat-herd-wave2-2026-07-18@dc1a0193a30b21db707e41c6d6b9a82c",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=chat-herd-wave2-2026-07-18]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=503a655f9aa6b7a38b2da974d80199ea56dd82510f93b1a7c515cf5dd3a1083e observed_blocks_sha256=503a655f9aa6b7a38b2da974d80199ea56dd82510f93b1a7c515cf5dd3a1083e; concise email derivation: chars=919 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=bd952e7624664aac34e4a81caf470e39f180326196e4f85cfc2220b6210d10c6"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S006/report.json#unit_verdicts[unit_id=paper:chat-herd-wave2-2026-07-18]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:chat-herd-wave2-2026-07-18]",
+          "observed_output": "concise email derivation: chars=919 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=bd952e7624664aac34e4a81caf470e39f180326196e4f85cfc2220b6210d10c6"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "chat-local-cloud-context-wave-3-2026-07-15",
+      "document_rev": "bb93734ff0ffaa06129b5b6f67a1cec7",
+      "unit_id": "paper:chat-local-cloud-context-wave-3-2026-07-15",
+      "survey_assignment_id": "PPCC2-S006",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+      "live_projection_sha256": "caf74d6b6964b182466a8bb2a64772f0daee6dc1e6c003058c2c8a424f0aa030",
+      "live_blocks_sha256": "0f700dc7b8ce96ac8e2212939878e1a6cc59bfef6a76da79ce853adb73a63343",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:chat-local-cloud-context-wave-3-2026-07-15@bb93734ff0ffaa06129b5b6f67a1cec7",
+        "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=881 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=03a02394d400602a282562232746790e75cb936fb0f21beea89ca015bb609da9",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against chat-local-cloud-context-wave-3-2026-07-15 at immutable revision bb93734ff0ffaa06129b5b6f67a1cec7 and its hash-pinned Survey row; concise email derivation: chars=881 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=03a02394d400602a282562232746790e75cb936fb0f21beea89ca015bb609da9.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:chat-local-cloud-context-wave-3-2026-07-15@bb93734ff0ffaa06129b5b6f67a1cec7",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=chat-local-cloud-context-wave-3-2026-07-15]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=0f700dc7b8ce96ac8e2212939878e1a6cc59bfef6a76da79ce853adb73a63343 observed_blocks_sha256=0f700dc7b8ce96ac8e2212939878e1a6cc59bfef6a76da79ce853adb73a63343; concise email derivation: chars=881 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=03a02394d400602a282562232746790e75cb936fb0f21beea89ca015bb609da9"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S006/report.json#unit_verdicts[unit_id=paper:chat-local-cloud-context-wave-3-2026-07-15]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:chat-local-cloud-context-wave-3-2026-07-15]",
+          "observed_output": "concise email derivation: chars=881 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=03a02394d400602a282562232746790e75cb936fb0f21beea89ca015bb609da9"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "chat-plan-050c647a4c8c",
+      "document_rev": "25478bcc6dad7f9920b004a37b4d5fad",
+      "unit_id": "paper:chat-plan-050c647a4c8c",
+      "survey_assignment_id": "PPCC2-S006",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+      "live_projection_sha256": "8299f5d32f763132cd90e035743f0ee6cdc844b5dc5f173a27b7b0ad372bbc68",
+      "live_blocks_sha256": "f16179d7f28baa20894666f07f21ee22e7c179f342b947424880899fb7cc3e3c",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:chat-plan-050c647a4c8c@25478bcc6dad7f9920b004a37b4d5fad",
+        "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=598 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a8dbc51553c98a69d28eff32f095274b971b78604ea4d47854c72e2c7c4a69cf",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against chat-plan-050c647a4c8c at immutable revision 25478bcc6dad7f9920b004a37b4d5fad and its hash-pinned Survey row; concise email derivation: chars=598 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a8dbc51553c98a69d28eff32f095274b971b78604ea4d47854c72e2c7c4a69cf.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:chat-plan-050c647a4c8c@25478bcc6dad7f9920b004a37b4d5fad",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=chat-plan-050c647a4c8c]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=f16179d7f28baa20894666f07f21ee22e7c179f342b947424880899fb7cc3e3c observed_blocks_sha256=f16179d7f28baa20894666f07f21ee22e7c179f342b947424880899fb7cc3e3c; concise email derivation: chars=598 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a8dbc51553c98a69d28eff32f095274b971b78604ea4d47854c72e2c7c4a69cf"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S006/report.json#unit_verdicts[unit_id=paper:chat-plan-050c647a4c8c]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:chat-plan-050c647a4c8c]",
+          "observed_output": "concise email derivation: chars=598 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a8dbc51553c98a69d28eff32f095274b971b78604ea4d47854c72e2c7c4a69cf"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "chat-plan-1caa96602607",
+      "document_rev": "c8514f7be7827f684dad017924589da5",
+      "unit_id": "paper:chat-plan-1caa96602607",
+      "survey_assignment_id": "PPCC2-S006",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+      "live_projection_sha256": "f59dbcbdadbc620896deb177e9fb5da000bfdf4b963c553a5fd3d45be424224e",
+      "live_blocks_sha256": "afc02fc2bc396c17d7ac1a5c1049f84e885691acdb310a6f47be65c73d14e086",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:chat-plan-1caa96602607@c8514f7be7827f684dad017924589da5",
+        "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=886 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a3e557c94c7c86d028ad95bfc053dc6d0122f98ed962e32969a2965cee711ce1",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against chat-plan-1caa96602607 at immutable revision c8514f7be7827f684dad017924589da5 and its hash-pinned Survey row; concise email derivation: chars=886 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a3e557c94c7c86d028ad95bfc053dc6d0122f98ed962e32969a2965cee711ce1.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:chat-plan-1caa96602607@c8514f7be7827f684dad017924589da5",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=chat-plan-1caa96602607]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=afc02fc2bc396c17d7ac1a5c1049f84e885691acdb310a6f47be65c73d14e086 observed_blocks_sha256=afc02fc2bc396c17d7ac1a5c1049f84e885691acdb310a6f47be65c73d14e086; concise email derivation: chars=886 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a3e557c94c7c86d028ad95bfc053dc6d0122f98ed962e32969a2965cee711ce1"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S006/report.json#unit_verdicts[unit_id=paper:chat-plan-1caa96602607]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:chat-plan-1caa96602607]",
+          "observed_output": "concise email derivation: chars=886 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a3e557c94c7c86d028ad95bfc053dc6d0122f98ed962e32969a2965cee711ce1"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "chat-plan-651c5eb5b064",
+      "document_rev": "ebaf2252f29c57ccbb7948a36ed6d778",
+      "unit_id": "paper:chat-plan-651c5eb5b064",
+      "survey_assignment_id": "PPCC2-S006",
+      "survey_worker": "worker-3",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+      "live_projection_sha256": "02faef830001d8c8fd13662eb6d2bde7608cfd29777f3061fc824c0ead289a64",
+      "live_blocks_sha256": "f17f2e8dd8038ae4b65ce1f76b8a473e1080ebce6d94f5f26311127ed48a21fa",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:chat-plan-651c5eb5b064@ebaf2252f29c57ccbb7948a36ed6d778",
+        "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=906 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=0b36b0ff8fe01f8ecc06b4fe491acb6f00de4a8459167a64c4069bd84dd4701e",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against chat-plan-651c5eb5b064 at immutable revision ebaf2252f29c57ccbb7948a36ed6d778 and its hash-pinned Survey row; concise email derivation: chars=906 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=0b36b0ff8fe01f8ecc06b4fe491acb6f00de4a8459167a64c4069bd84dd4701e.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:chat-plan-651c5eb5b064@ebaf2252f29c57ccbb7948a36ed6d778",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=chat-plan-651c5eb5b064]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=f17f2e8dd8038ae4b65ce1f76b8a473e1080ebce6d94f5f26311127ed48a21fa observed_blocks_sha256=f17f2e8dd8038ae4b65ce1f76b8a473e1080ebce6d94f5f26311127ed48a21fa; concise email derivation: chars=906 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=0b36b0ff8fe01f8ecc06b4fe491acb6f00de4a8459167a64c4069bd84dd4701e"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S006@f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S006/report.json#unit_verdicts[unit_id=paper:chat-plan-651c5eb5b064]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:chat-plan-651c5eb5b064]",
+          "observed_output": "concise email derivation: chars=906 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=0b36b0ff8fe01f8ecc06b4fe491acb6f00de4a8459167a64c4069bd84dd4701e"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "chat-provider-runtime-parity-wave-2-2026-07-14",
+      "document_rev": "4ded747a0ac52d3435f6552a1aa21907",
+      "unit_id": "paper:chat-provider-runtime-parity-wave-2-2026-07-14",
+      "survey_assignment_id": "PPCC2-S007",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+      "live_projection_sha256": "66232081d30c774298d414ba0a693a3d4ade3973653af5f3e9d0afef34fb4d73",
+      "live_blocks_sha256": "00494019ef36e44ae12e082a183f81e7e15932ee6f2f28ac073bdf93d9b81387",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:chat-provider-runtime-parity-wave-2-2026-07-14@4ded747a0ac52d3435f6552a1aa21907",
+        "survey-report:PPCC2-S007@5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=834 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=aae58145a0b68e4c3986115bc89a72a71dbd21d40614c6c642591390d75b3df4",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against chat-provider-runtime-parity-wave-2-2026-07-14 at immutable revision 4ded747a0ac52d3435f6552a1aa21907 and its hash-pinned Survey row; concise email derivation: chars=834 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=aae58145a0b68e4c3986115bc89a72a71dbd21d40614c6c642591390d75b3df4.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:chat-provider-runtime-parity-wave-2-2026-07-14@4ded747a0ac52d3435f6552a1aa21907",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=chat-provider-runtime-parity-wave-2-2026-07-14]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=00494019ef36e44ae12e082a183f81e7e15932ee6f2f28ac073bdf93d9b81387 observed_blocks_sha256=00494019ef36e44ae12e082a183f81e7e15932ee6f2f28ac073bdf93d9b81387; concise email derivation: chars=834 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=aae58145a0b68e4c3986115bc89a72a71dbd21d40614c6c642591390d75b3df4"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S007@5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S007/report.json#unit_verdicts[unit_id=paper:chat-provider-runtime-parity-wave-2-2026-07-14]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:chat-provider-runtime-parity-wave-2-2026-07-14]",
+          "observed_output": "concise email derivation: chars=834 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=aae58145a0b68e4c3986115bc89a72a71dbd21d40614c6c642591390d75b3df4"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "choosing-your-site-framework",
+      "document_rev": "5e12190e742c0888ad78babdc5c6b93c",
+      "unit_id": "paper:choosing-your-site-framework",
+      "survey_assignment_id": "PPCC2-S007",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+      "live_projection_sha256": "730f888db19af9afd66fafab7570a0f7419a832b7c5c13283ea2d37683edd3e9",
+      "live_blocks_sha256": "8dda53e1baa15737c2dc9214c70e7540b74f8e09de4ebb677fbb4d1fa65409d0",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:choosing-your-site-framework@5e12190e742c0888ad78babdc5c6b93c",
+        "survey-report:PPCC2-S007@5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=817 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=3b5565991643abc8fb7337e85f02d6799ad00844b1aaa59808ff1f96fb256154",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against choosing-your-site-framework at immutable revision 5e12190e742c0888ad78babdc5c6b93c and its hash-pinned Survey row; concise email derivation: chars=817 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=3b5565991643abc8fb7337e85f02d6799ad00844b1aaa59808ff1f96fb256154.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:choosing-your-site-framework@5e12190e742c0888ad78babdc5c6b93c",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=choosing-your-site-framework]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=8dda53e1baa15737c2dc9214c70e7540b74f8e09de4ebb677fbb4d1fa65409d0 observed_blocks_sha256=8dda53e1baa15737c2dc9214c70e7540b74f8e09de4ebb677fbb4d1fa65409d0; concise email derivation: chars=817 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=3b5565991643abc8fb7337e85f02d6799ad00844b1aaa59808ff1f96fb256154"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S007@5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S007/report.json#unit_verdicts[unit_id=paper:choosing-your-site-framework]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:choosing-your-site-framework]",
+          "observed_output": "concise email derivation: chars=817 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=3b5565991643abc8fb7337e85f02d6799ad00844b1aaa59808ff1f96fb256154"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "claude-ready-servers-capstone",
+      "document_rev": "cd393e59e72f33653711a08a3ac7bf15",
+      "unit_id": "paper:claude-ready-servers-capstone",
+      "survey_assignment_id": "PPCC2-S007",
+      "survey_worker": "worker-1",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+      "live_projection_sha256": "d58390fb0122fa0864cd150687cf6efa20c66eca909c74456d73b3ce9768b8a7",
+      "live_blocks_sha256": "fa85d79c28021efbac41f485fdfea15bfedc8bb4b009d7f18a79bfdc07d8139d",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:claude-ready-servers-capstone@cd393e59e72f33653711a08a3ac7bf15",
+        "survey-report:PPCC2-S007@5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=775 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=b55fdb163326306c723fd7f09941385c40067c57ce9cb11e802b70a7a80dc866",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against claude-ready-servers-capstone at immutable revision cd393e59e72f33653711a08a3ac7bf15 and its hash-pinned Survey row; concise email derivation: chars=775 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=b55fdb163326306c723fd7f09941385c40067c57ce9cb11e802b70a7a80dc866.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:claude-ready-servers-capstone@cd393e59e72f33653711a08a3ac7bf15",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=claude-ready-servers-capstone]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=fa85d79c28021efbac41f485fdfea15bfedc8bb4b009d7f18a79bfdc07d8139d observed_blocks_sha256=fa85d79c28021efbac41f485fdfea15bfedc8bb4b009d7f18a79bfdc07d8139d; concise email derivation: chars=775 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=b55fdb163326306c723fd7f09941385c40067c57ce9cb11e802b70a7a80dc866"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S007@5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S007/report.json#unit_verdicts[unit_id=paper:claude-ready-servers-capstone]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:claude-ready-servers-capstone]",
+          "observed_output": "concise email derivation: chars=775 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=b55fdb163326306c723fd7f09941385c40067c57ce9cb11e802b70a7a80dc866"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "claude-ready-servers-product-strategy",
+      "document_rev": "6b6c12592f9eb0a144c9fc66952e2f71",
+      "unit_id": "paper:claude-ready-servers-product-strategy",
+      "survey_assignment_id": "PPCC2-S008",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+      "live_projection_sha256": "ca9e6d2c0ac9afdf075cff26558ce37af84d7a6517be90458ab1f73350b950b5",
+      "live_blocks_sha256": "8227341e825602fde3aaa5ccb6da0907cb19c4c8a66912e040c5870dd456f206",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:claude-ready-servers-product-strategy@6b6c12592f9eb0a144c9fc66952e2f71",
+        "survey-report:PPCC2-S008@5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=886 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=dc38290f3f51805d765610f5e3d103cdbdc7c497294c0439d9a6c032ef94bc48",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against claude-ready-servers-product-strategy at immutable revision 6b6c12592f9eb0a144c9fc66952e2f71 and its hash-pinned Survey row; concise email derivation: chars=886 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=dc38290f3f51805d765610f5e3d103cdbdc7c497294c0439d9a6c032ef94bc48.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:claude-ready-servers-product-strategy@6b6c12592f9eb0a144c9fc66952e2f71",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=claude-ready-servers-product-strategy]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=8227341e825602fde3aaa5ccb6da0907cb19c4c8a66912e040c5870dd456f206 observed_blocks_sha256=8227341e825602fde3aaa5ccb6da0907cb19c4c8a66912e040c5870dd456f206; concise email derivation: chars=886 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=dc38290f3f51805d765610f5e3d103cdbdc7c497294c0439d9a6c032ef94bc48"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S008@5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S008/report.json#unit_verdicts[unit_id=paper:claude-ready-servers-product-strategy]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:claude-ready-servers-product-strategy]",
+          "observed_output": "concise email derivation: chars=886 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=dc38290f3f51805d765610f5e3d103cdbdc7c497294c0439d9a6c032ef94bc48"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "claude-ready-servers-wave-2026-07-28",
+      "document_rev": "456822e61b26d0f86a225b53c1abdbf2",
+      "unit_id": "paper:claude-ready-servers-wave-2026-07-28",
+      "survey_assignment_id": "PPCC2-S008",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+      "live_projection_sha256": "b090d13589d327107b0470c90541c2756bfd7661dcd3467895c6df82a82a85f4",
+      "live_blocks_sha256": "ea85be52b12304de90766a283295fd809a0036b18ccb539251d8ebddbe4eb1e1",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:claude-ready-servers-wave-2026-07-28@456822e61b26d0f86a225b53c1abdbf2",
+        "survey-report:PPCC2-S008@5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=858 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=ddfd3a40ef43cdd8efcdfc5abe4a78aa75046741567a1f59b92cd8a48a4dcab3",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against claude-ready-servers-wave-2026-07-28 at immutable revision 456822e61b26d0f86a225b53c1abdbf2 and its hash-pinned Survey row; concise email derivation: chars=858 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=ddfd3a40ef43cdd8efcdfc5abe4a78aa75046741567a1f59b92cd8a48a4dcab3.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:claude-ready-servers-wave-2026-07-28@456822e61b26d0f86a225b53c1abdbf2",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=claude-ready-servers-wave-2026-07-28]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=ea85be52b12304de90766a283295fd809a0036b18ccb539251d8ebddbe4eb1e1 observed_blocks_sha256=ea85be52b12304de90766a283295fd809a0036b18ccb539251d8ebddbe4eb1e1; concise email derivation: chars=858 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=ddfd3a40ef43cdd8efcdfc5abe4a78aa75046741567a1f59b92cd8a48a4dcab3"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S008@5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S008/report.json#unit_verdicts[unit_id=paper:claude-ready-servers-wave-2026-07-28]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:claude-ready-servers-wave-2026-07-28]",
+          "observed_output": "concise email derivation: chars=858 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=ddfd3a40ef43cdd8efcdfc5abe4a78aa75046741567a1f59b92cd8a48a4dcab3"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "cloud-console-epic-wish",
+      "document_rev": "256efaded2fc2394ebde93874b13a875",
+      "unit_id": "paper:cloud-console-epic-wish",
+      "survey_assignment_id": "PPCC2-S008",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+      "live_projection_sha256": "c662ffb92ef0bc2537ab592444deeaa2f0b5248c8b2d75493081f757fac597c2",
+      "live_blocks_sha256": "129b27bd1f7e50bfc118227fb8546fa9a6ba32313556fb6867d345ee6e45a427",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:cloud-console-epic-wish@256efaded2fc2394ebde93874b13a875",
+        "survey-report:PPCC2-S008@5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=877 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=1bac4983f9973096b40ed8866df1b5f09806ec64d9ddb076763cf451ee5dbb47",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against cloud-console-epic-wish at immutable revision 256efaded2fc2394ebde93874b13a875 and its hash-pinned Survey row; concise email derivation: chars=877 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=1bac4983f9973096b40ed8866df1b5f09806ec64d9ddb076763cf451ee5dbb47.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:cloud-console-epic-wish@256efaded2fc2394ebde93874b13a875",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=cloud-console-epic-wish]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=129b27bd1f7e50bfc118227fb8546fa9a6ba32313556fb6867d345ee6e45a427 observed_blocks_sha256=129b27bd1f7e50bfc118227fb8546fa9a6ba32313556fb6867d345ee6e45a427; concise email derivation: chars=877 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=1bac4983f9973096b40ed8866df1b5f09806ec64d9ddb076763cf451ee5dbb47"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S008@5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S008/report.json#unit_verdicts[unit_id=paper:cloud-console-epic-wish]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:cloud-console-epic-wish]",
+          "observed_output": "concise email derivation: chars=877 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=1bac4983f9973096b40ed8866df1b5f09806ec64d9ddb076763cf451ee5dbb47"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "cloud-console-hardening-wave-2-2026-07-21",
+      "document_rev": "173d6ad783eb2dae65fc57b6b3e51da5",
+      "unit_id": "paper:cloud-console-hardening-wave-2-2026-07-21",
+      "survey_assignment_id": "PPCC2-S008",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+      "live_projection_sha256": "6ab31fa4b743fd99a693244547678eed6cb41fd29bbfaf1ce63b02e8bfbbbed1",
+      "live_blocks_sha256": "1f66603541a5ebcbeaa870e72d1dc8c79b39783cb3461ab8f845f119e64925de",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:cloud-console-hardening-wave-2-2026-07-21@173d6ad783eb2dae65fc57b6b3e51da5",
+        "survey-report:PPCC2-S008@5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=842 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=d420b66369ef2b37a9fac4cffcdb44ce9ea2f0bfcd76c045d0586c71f62cbecb",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against cloud-console-hardening-wave-2-2026-07-21 at immutable revision 173d6ad783eb2dae65fc57b6b3e51da5 and its hash-pinned Survey row; concise email derivation: chars=842 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=d420b66369ef2b37a9fac4cffcdb44ce9ea2f0bfcd76c045d0586c71f62cbecb.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:cloud-console-hardening-wave-2-2026-07-21@173d6ad783eb2dae65fc57b6b3e51da5",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=cloud-console-hardening-wave-2-2026-07-21]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=1f66603541a5ebcbeaa870e72d1dc8c79b39783cb3461ab8f845f119e64925de observed_blocks_sha256=1f66603541a5ebcbeaa870e72d1dc8c79b39783cb3461ab8f845f119e64925de; concise email derivation: chars=842 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=d420b66369ef2b37a9fac4cffcdb44ce9ea2f0bfcd76c045d0586c71f62cbecb"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S008@5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S008/report.json#unit_verdicts[unit_id=paper:cloud-console-hardening-wave-2-2026-07-21]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:cloud-console-hardening-wave-2-2026-07-21]",
+          "observed_output": "concise email derivation: chars=842 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=d420b66369ef2b37a9fac4cffcdb44ce9ea2f0bfcd76c045d0586c71f62cbecb"
+        }
+      ]
+    },
+    {
+      "class": "paper",
+      "document_id": "cloud-console-hardening-wave-2026-07-21",
+      "document_rev": "16a3141be0bb985742e2b016254bba82",
+      "unit_id": "paper:cloud-console-hardening-wave-2026-07-21",
+      "survey_assignment_id": "PPCC2-S008",
+      "survey_worker": "worker-2",
+      "survey_verdict": "repair",
+      "survey_report_sha256": "5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+      "live_projection_sha256": "7aa52b5ba72997abd5dedae3c335fe39cd02dd4d53cee4e7d9cd50300925d32a",
+      "live_blocks_sha256": "08e03b1fbb7ed97a9023242ab1a320a1649bdf2e76fac5a9c1cee2a506b23923",
+      "outcome": "proven",
+      "fixture_ids": [
+        "live-paper:cloud-console-hardening-wave-2026-07-21@16a3141be0bb985742e2b016254bba82",
+        "survey-report:PPCC2-S008@5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+        "probe-output:PPCC2-V013"
+      ],
+      "observed_output": "concise email derivation: chars=847 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=eed3809f4ab92b29c315ee0c8681a67f5a83e0d02e78d6793f8d3820cde88be9",
+      "survey_outcome_assessment": "The pinned Survey disposition repair survives this reader claim; the exact revision, source blocks, and disposition row remained consistent.",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "rationale": "Personally executed the email-reader read-only probe against cloud-console-hardening-wave-2026-07-21 at immutable revision 16a3141be0bb985742e2b016254bba82 and its hash-pinned Survey row; concise email derivation: chars=847 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=eed3809f4ab92b29c315ee0c8681a67f5a83e0d02e78d6793f8d3820cde88be9.",
+      "evidence": [
+        {
+          "fixture_id": "live-paper:cloud-console-hardening-wave-2026-07-21@16a3141be0bb985742e2b016254bba82",
+          "source_ref": "https://guerrilla.barkpark.cloud/v1/data/query/production/paper#documents[_id=cloud-console-hardening-wave-2026-07-21]",
+          "observed_output": "Read-only API snapshot matched pinned id/revision; blocks_hash_match=true expected_blocks_sha256=08e03b1fbb7ed97a9023242ab1a320a1649bdf2e76fac5a9c1cee2a506b23923 observed_blocks_sha256=08e03b1fbb7ed97a9023242ab1a320a1649bdf2e76fac5a9c1cee2a506b23923; concise email derivation: chars=847 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=eed3809f4ab92b29c315ee0c8681a67f5a83e0d02e78d6793f8d3820cde88be9"
+        },
+        {
+          "fixture_id": "survey-report:PPCC2-S008@5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S008/report.json#unit_verdicts[unit_id=paper:cloud-console-hardening-wave-2026-07-21]",
+          "observed_output": "Survey report SHA-256 and unit row matched; disposition=repair."
+        },
+        {
+          "fixture_id": "probe-output:PPCC2-V013",
+          "source_ref": ".omx/state/paper-perfection-successor-2026-07-29/verify-reports/PPCC2-V013/probe-output.json#unit_results[unit_id=paper:cloud-console-hardening-wave-2026-07-21]",
+          "observed_output": "concise email derivation: chars=847 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=eed3809f4ab92b29c315ee0c8681a67f5a83e0d02e78d6793f8d3820cde88be9"
+        }
+      ]
+    }
+  ],
+  "personal_verification_attestation": {
+    "worker": "worker-2",
+    "agent_type": "epic-verifier",
+    "personally_verified_all_final_rows": true,
+    "helpers_used_only_for_non_counting_preparation": true
+  },
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "root_task_mutated": false,
+    "source_mutated": false
+  }
+}

@@ -1,0 +1,510 @@
+{
+  "schema_version": "paper-perfection-successor-verify-probe/v1",
+  "assignment_id": "PPCC2-V011",
+  "worker": "worker-2",
+  "claim_id": "tui-80",
+  "command_or_probe": "Render or simulate representative pinned content at 80 columns and record wrapping, hierarchy, and scan-path failures.",
+  "actual_command": "python3 .omx/state/paper-perfection-successor-2026-07-29/verify-reports/run_worker2_probes.py --authority-root /Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29 --snapshot /tmp/ppcc2-worker2-papers-full-20260729.ndjson --output-root .omx/state/paper-perfection-successor-2026-07-29/verify-reports",
+  "input_seals": {
+    "verify_assignment_map_sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76",
+    "verify_lanes_sha256": "4cfc5040fa9b8ea8006527a58b7238fc81ad96e2ab71b7349365cf14ce275379",
+    "production_snapshot_sha256": "a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786",
+    "production_snapshot_document_count": 588,
+    "production_query": "GET https://guerrilla.barkpark.cloud/v1/data/query/production/paper?limit=100&offset={0,100,200,300,400,500}"
+  },
+  "unit_count": 19,
+  "outcome_counts": {
+    "proven": 18,
+    "refuted": 1
+  },
+  "unit_results": [
+    {
+      "unit_id": "paper:scaffy-command-showcase",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=150 headings=22 rendered_lines=3960 max_line_width=80 max_source_block_chars=28324 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "1b631db09cb82468f83fc4f35a566c60b46724183e4620c885f006c7ce6a5eca",
+        "document_revision": "f391a01acf2fab4bb87d5c67d70c3b2d",
+        "blocks_sha256": "fd36ff9b3cd257c30c86d1a100c2359e23f6742bfd040ae466a31334a25f1dbc",
+        "survey_report_sha256": "6e15ba20c10936a6aa8710b661289c9b7b6319e1ad51662084de86816af59c25",
+        "survey_disposition": "merge-candidate",
+        "block_count": 150,
+        "block_types": {
+          "eyebrow": 1,
+          "heading": 22,
+          "ingress": 1,
+          "stats": 1,
+          "diagram": 1,
+          "paragraph": 22,
+          "callout": 7,
+          "table": 2,
+          "divider": 21,
+          "code": 36,
+          "terminal": 35,
+          "filetree": 1
+        },
+        "heading_count": 22,
+        "rendered_line_count": 3960,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 28324,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-components-editable-demo",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=18 max_line_width=80 max_source_block_chars=232 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "57b3b467e530cb5094514b623c7fb70306d24272f3093d3785cbb8e77fcd46bb",
+        "document_revision": "703c14f9d729b5deb4455e60b588243e",
+        "blocks_sha256": "aed7f17e50df937f1ec6e702f7f425de9343c3d193d46f159bac392fda79739f",
+        "survey_report_sha256": "58553b14c3a71f5812c2d418ec1734efe6bae87ee3fcca315e6148edaa1cb019",
+        "survey_disposition": "merge-candidate",
+        "block_count": 11,
+        "block_types": {
+          "eyebrow": 1,
+          "heading": 5,
+          "ingress": 1,
+          "section": 3,
+          "task-list": 1
+        },
+        "heading_count": 5,
+        "rendered_line_count": 18,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 232,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-build-wave-01-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=15 headings=6 rendered_lines=64 max_line_width=80 max_source_block_chars=682 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "94df00fea950c84e8f642b07b218094de48e1ef09dab496e938f46162ad791a0",
+        "document_revision": "b228613707bdbe1f65faf31eae40b3bf",
+        "blocks_sha256": "87866fd5609073879362b7b80bdef02027743cceab07e2d20d1b2b4767858755",
+        "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "survey_disposition": "merge-candidate",
+        "block_count": 15,
+        "block_types": {
+          "heading": 6,
+          "callout": 7,
+          "paragraph": 2
+        },
+        "heading_count": 6,
+        "rendered_line_count": 64,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 682,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-build-wave-02-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=16 headings=6 rendered_lines=79 max_line_width=80 max_source_block_chars=930 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "11af096c261c3e272730340b481e5e0de820e8f511a9c1004dd63dc56c71620d",
+        "document_revision": "7a748c513af7464b33d3c99ba65fe378",
+        "blocks_sha256": "bc4d518b2543911ff9429aba037ec02f160dff0bfe8b164e6fa1620821413fe2",
+        "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "survey_disposition": "merge-candidate",
+        "block_count": 16,
+        "block_types": {
+          "heading": 6,
+          "callout": 8,
+          "paragraph": 2
+        },
+        "heading_count": 6,
+        "rendered_line_count": 79,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 930,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-build-wave-03-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=16 headings=7 rendered_lines=62 max_line_width=80 max_source_block_chars=562 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "968ab33a775cf4a7b4b94d6110221d883b2e3ef3225df931593f2162a87c43a0",
+        "document_revision": "8a17e6074dfdb28b2c8c6c540f75c372",
+        "blocks_sha256": "48cda5d8a911696ea052b949c616d4e975429aa655fb293c909098e01e221d7c",
+        "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "survey_disposition": "merge-candidate",
+        "block_count": 16,
+        "block_types": {
+          "heading": 7,
+          "callout": 8,
+          "paragraph": 1
+        },
+        "heading_count": 7,
+        "rendered_line_count": 62,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 562,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-build-wave-04-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=52 max_line_width=80 max_source_block_chars=463 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "c5955a2c062c292a367877fd66e4a6152454bcb860d775166e9a97cad4dd958a",
+        "document_revision": "d45f8eb91c1156d439c99558572a9f06",
+        "blocks_sha256": "41d74de5decff55e966fe839a7a3ef4634579cf19a6d39b84b9db79d2ea9c78f",
+        "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "survey_disposition": "merge-candidate",
+        "block_count": 16,
+        "block_types": {
+          "heading": 8,
+          "callout": 7,
+          "paragraph": 1
+        },
+        "heading_count": 8,
+        "rendered_line_count": 52,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 463,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-build-wave-05-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=52 max_line_width=80 max_source_block_chars=455 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "37f5ec338fa090db038547baa2482c63f537f1488ee383479e931ded9e2dba2f",
+        "document_revision": "46cbf46f82ad875e45bd85736852b4a3",
+        "blocks_sha256": "537d44930bc64ac918e4f725b8f81891a0212071729219fd97abca43a2dcf959",
+        "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "survey_disposition": "merge-candidate",
+        "block_count": 16,
+        "block_types": {
+          "heading": 8,
+          "callout": 7,
+          "paragraph": 1
+        },
+        "heading_count": 8,
+        "rendered_line_count": 52,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 455,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-build-wave-06-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=51 max_line_width=80 max_source_block_chars=453 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "05b899f04c697c07360cf876aa4c029e5ad7f94e4167463a9966833f80dced85",
+        "document_revision": "74b31e7f0b3f82a9cc888a7bb648873b",
+        "blocks_sha256": "064e577c2871f4c80cc4d34da54da5dac60a9d93e69435d5c75a34e440725d26",
+        "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "survey_disposition": "merge-candidate",
+        "block_count": 16,
+        "block_types": {
+          "heading": 8,
+          "callout": 7,
+          "paragraph": 1
+        },
+        "heading_count": 8,
+        "rendered_line_count": 51,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 453,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-build-wave-07-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=51 max_line_width=80 max_source_block_chars=528 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "545006a5279bcc883df786de82567c416a5d8508b0fa8342cfb1df6ca27bf42a",
+        "document_revision": "91b8d71839716d204f308370b4679b1f",
+        "blocks_sha256": "68cdb3ab450142247c51d9cdb33cef65de50cb08ea9905c8b81bba818ac0fd15",
+        "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "survey_disposition": "merge-candidate",
+        "block_count": 16,
+        "block_types": {
+          "heading": 8,
+          "callout": 7,
+          "paragraph": 1
+        },
+        "heading_count": 8,
+        "rendered_line_count": 51,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 528,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-build-wave-08-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=50 max_line_width=80 max_source_block_chars=536 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "a9167b2b53f577d6e4188bd58403273e3d5ae7653d637822d01c6a54a711af29",
+        "document_revision": "b2637f9474a2d27ae4d1a0ff921c0d73",
+        "blocks_sha256": "8bb6fbe844a5cc7d0d3abd09195793bc91962bb1c95fed88737bd331f8fdc049",
+        "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "survey_disposition": "merge-candidate",
+        "block_count": 16,
+        "block_types": {
+          "heading": 8,
+          "callout": 7,
+          "paragraph": 1
+        },
+        "heading_count": 8,
+        "rendered_line_count": 50,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 536,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-build-wave-09-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=16 headings=8 rendered_lines=49 max_line_width=80 max_source_block_chars=513 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "cd6b344c01bf5daf22afae091ec8712a562059eb56944d699554e79b796d97d5",
+        "document_revision": "32b26e70e53ba133459f79f40d35e66c",
+        "blocks_sha256": "eebaa18e8a3629e29cc400bf3755b5f8adf1a300ea7d65e74153e67f0a3c8e27",
+        "survey_report_sha256": "2c631da9de4751342274d7d3c7eb95ea640d61fa21908338aac5f40125ba09a4",
+        "survey_disposition": "merge-candidate",
+        "block_count": 16,
+        "block_types": {
+          "heading": 8,
+          "callout": 7,
+          "paragraph": 1
+        },
+        "heading_count": 8,
+        "rendered_line_count": 49,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 513,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-survey-wave-12-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=380 max_line_width=80 max_source_block_chars=10284 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "00945598d96ed9ba2e9613d554e321c703974cf4f4f0c8e095f2fbbeb36f6b22",
+        "document_revision": "0451f00640f302a7df09f35284d3efee",
+        "blocks_sha256": "57fb5c024319f17cce520c4b53740c200773cb1d75a9de1a230d1b57f86d5e1c",
+        "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "survey_disposition": "merge-candidate",
+        "block_count": 11,
+        "block_types": {
+          "heading": 5,
+          "callout": 5,
+          "paragraph": 1
+        },
+        "heading_count": 5,
+        "rendered_line_count": 380,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 10284,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-survey-wave-13-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=368 max_line_width=80 max_source_block_chars=9676 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "ca972d47b6bf68f62009137c100c1435dc0e83f90649943823d04094a1214118",
+        "document_revision": "8b39d127e8e58df2a4513af384df76af",
+        "blocks_sha256": "efe83706113f408522cd81dc96a3e6c2acd0cb65afcd2f215a161622482c9e8a",
+        "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "survey_disposition": "merge-candidate",
+        "block_count": 11,
+        "block_types": {
+          "heading": 5,
+          "callout": 5,
+          "paragraph": 1
+        },
+        "heading_count": 5,
+        "rendered_line_count": 368,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 9676,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-survey-wave-14-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=279 max_line_width=80 max_source_block_chars=7822 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "8308fc5c5c826e287e66e7eb4fe7441222cb0d89aa1b4d67bc1db0b5783bb4a6",
+        "document_revision": "fe8df68e85bfae0d33bc466c7a5d5f74",
+        "blocks_sha256": "003d1451ad872a41c99104f561e8152468195c6e61cedbd1f8e7415ba719df62",
+        "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "survey_disposition": "merge-candidate",
+        "block_count": 11,
+        "block_types": {
+          "heading": 5,
+          "callout": 5,
+          "paragraph": 1
+        },
+        "heading_count": 5,
+        "rendered_line_count": 279,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 7822,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-survey-wave-15-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=297 max_line_width=80 max_source_block_chars=9045 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "5e9e745374d5f9e15be44f0b167c0d604330e66f6e9a3127cd620290e52a007e",
+        "document_revision": "b8c3ed359dd1e9be431ab9052673f41d",
+        "blocks_sha256": "700d71c2b9d08f6abcfd8707fb2d47fc5105970f64f68ae13cc38bfee5173bce",
+        "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "survey_disposition": "merge-candidate",
+        "block_count": 11,
+        "block_types": {
+          "heading": 5,
+          "callout": 5,
+          "paragraph": 1
+        },
+        "heading_count": 5,
+        "rendered_line_count": 297,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 9045,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-survey-wave-17-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=261 max_line_width=80 max_source_block_chars=6609 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "e3c6d2c63a3cdafd2fa9731ff0bcdb9321218861d71f005ff2992f75fa6afab6",
+        "document_revision": "b359cc0e8bfda3ad258e12daa231d97f",
+        "blocks_sha256": "a27fd56e7efcb8f734b8f41bf6e76edf045bc9a7f02a3282997b696faab4afba",
+        "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "survey_disposition": "merge-candidate",
+        "block_count": 11,
+        "block_types": {
+          "heading": 5,
+          "callout": 5,
+          "paragraph": 1
+        },
+        "heading_count": 5,
+        "rendered_line_count": 261,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 6609,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-survey-wave-18-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=254 max_line_width=80 max_source_block_chars=6418 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "aeb7ceb53b0c828654e6a4de42b02305516b5fb966d756f7d0ec11e504c8ab74",
+        "document_revision": "0856b30df73a9d030d91c2ef84041b2b",
+        "blocks_sha256": "9c4ab2f91ab9c899843694dbba6315fa7689d487cb70e72b47942ce4ff8f83a1",
+        "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "survey_disposition": "merge-candidate",
+        "block_count": 11,
+        "block_types": {
+          "heading": 5,
+          "callout": 5,
+          "paragraph": 1
+        },
+        "heading_count": 5,
+        "rendered_line_count": 254,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 6418,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:task-quality-survey-wave-19-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "80-column structural replay: blocks=11 headings=5 rendered_lines=306 max_line_width=80 max_source_block_chars=10559 evidence_capsule=true",
+      "residual_risk": "The allowed structural simulation is width-safe and preserves headings plus evidence; interactive terminal navigation was not separately exercised.",
+      "metrics": {
+        "document_sha256": "0c7329b7dc4757c47b7569b06a1abdff52718455d2717a4e6e1e0f691df8d63c",
+        "document_revision": "4e645d8a38fbc10b0306211364403d40",
+        "blocks_sha256": "14fa53889e66cc0e04a0006971aa020ede054f4fed0a2116d959cc8e7252c584",
+        "survey_report_sha256": "c8d4cbc260176aa0e80a665d48b758939560141a58d331803d502f2a1a65e128",
+        "survey_disposition": "merge-candidate",
+        "block_count": 11,
+        "block_types": {
+          "heading": 5,
+          "callout": 5,
+          "paragraph": 1
+        },
+        "heading_count": 5,
+        "rendered_line_count": 306,
+        "max_rendered_line_width": 80,
+        "max_source_block_chars": 10559,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:agent-epistemics-portabledoc-2026-07",
+      "outcome": "refuted",
+      "observed_output": "80-column structural replay: blocks=0 headings=0 rendered_lines=0 max_line_width=0 max_source_block_chars=0 evidence_capsule=true",
+      "residual_risk": "Pinned Paper has no PortableDoc blocks, so an 80-column hierarchy or evidence capsule cannot be rendered.",
+      "metrics": {
+        "document_sha256": "e0d409987a2b5e1a7957952c443a4b1b1d788c4b1a039e9dbaa22684ad7a4a8c",
+        "document_revision": "ae3b4c3019040ea11f38a323dcf69527",
+        "blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "survey_report_sha256": "1d7c3b14e8175f5a1271af9c7bcf31f0b4dcddc1aa3d4ea4410512e317310cec",
+        "survey_disposition": "repair",
+        "block_count": 0,
+        "block_types": {},
+        "heading_count": 0,
+        "rendered_line_count": 0,
+        "max_rendered_line_width": 0,
+        "max_source_block_chars": 0,
+        "evidence_capsule_present": true,
+        "blocks_hash_match": true
+      }
+    }
+  ],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "root_task_mutated": false,
+    "source_mutated": false
+  }
+}

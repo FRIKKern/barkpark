@@ -1,0 +1,502 @@
+{
+  "schema_version": "paper-perfection-successor-verify-probe/v1",
+  "assignment_id": "PPCC2-V013",
+  "worker": "worker-2",
+  "claim_id": "email-reader",
+  "command_or_probe": "Derive representative email summaries from pinned evidence and compare retained facts, criteria, and unresolved risks.",
+  "actual_command": "python3 .omx/state/paper-perfection-successor-2026-07-29/verify-reports/run_worker2_probes.py --authority-root /Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29 --snapshot /tmp/ppcc2-worker2-papers-full-20260729.ndjson --output-root .omx/state/paper-perfection-successor-2026-07-29/verify-reports",
+  "input_seals": {
+    "verify_assignment_map_sha256": "17b16888adf60d83ff2fed8569cbd763ead2ecfc14c2358466927da2f2f14b76",
+    "verify_lanes_sha256": "4cfc5040fa9b8ea8006527a58b7238fc81ad96e2ab71b7349365cf14ce275379",
+    "production_snapshot_sha256": "a19218015ff54c90630cfdb8cd32f58c47c8268db66ba0dad46802b8e6ad1786",
+    "production_snapshot_document_count": 588,
+    "production_query": "GET https://guerrilla.barkpark.cloud/v1/data/query/production/paper?limit=100&offset={0,100,200,300,400,500}"
+  },
+  "unit_count": 19,
+  "outcome_counts": {
+    "proven": 19
+  },
+  "unit_results": [
+    {
+      "unit_id": "paper:bp-scaffy-wave2-2026-07-16",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=854 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=b7bd7f74e526e2d812fd8d1b967984b7811c99d8811b1dde5fa8909519c97187",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "f5a7dc61b286c554ff1b61d8d6cfb9b06294186bf92f11bf3f026e6ee2d5af7c",
+        "document_revision": "1c12245644cb00253ef6d182bc3f7a7a",
+        "blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "survey_disposition": "repair",
+        "summary": "bp-scaffy-wave2-2026-07-16\nDisposition: repair.\nCriteria: body_html[0]–body_html[1] now correct the status to CLOSED and explain the former VERIFYING label. The wish is clear, but success is split across two shipped slices and two structurally blocked slices.\nEvidence: body_html[99] CLI wiring and corpus conformance were never built because same-round dispatch violated their AFTER dependency. Name structural orchestration failure precisely instead of blaming workers or elapsed time.\nFailure/risk: body_html[97] The core-package outcome is a roughly 1,100-character paragraph containing architecture, defects, fixes, tests, and merge guidance. Too many distinct judgments in one paragraph make the result hard to scan or quote safely.\nEmail boundary: email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "summary_chars": 854,
+        "summary_sha256": "b7bd7f74e526e2d812fd8d1b967984b7811c99d8811b1dde5fa8909519c97187",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave3-2026-07-16",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=897 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=c2f00592223e5fa27411182671c9b51de2c9db8e2c67e2f9b461972a370dd043",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "8b2c58f903a1c2eca1f285660bfbc40a50d2e75b9fbedb6c4cbcedf6b848c332",
+        "document_revision": "966feaaa5f37c8bcdb4d0dc15630746f",
+        "blocks_sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "survey_disposition": "repair",
+        "summary": "Scaffy W3 — the apply engine: run, receipts, REANCHOR accretion, byte-clean remove\nDisposition: repair.\nCriteria: body_html[0] honestly says COMPLETE, grade B-, engine core landed and four slices blocked. That is an exemplary front door; the initial wish remains much broader than what shipped.\nEvidence: body_html[97] The wave grades against the wish: 1 of 5 slices landed, so excellent engine-core construction still yields B-. Grade the outcome against the promised user-visible boundary, not merely the quality of the part that shipped.\nFailure/risk: body_html[91] A 1,264-character shipped-slice paragraph compresses nearly every engine semantic, test, and merge instruction into one item. The main result becomes difficult to scan and risks losing constraints when excerpted.\nEmail boundary: email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "summary_chars": 897,
+        "summary_sha256": "c2f00592223e5fa27411182671c9b51de2c9db8e2c67e2f9b461972a370dd043",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave5-2026-07-17",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=898 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=f96159ceeb57d1861ba1f25cfdcd22783c8b9b389c76ce075514cb225eba8eff",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "6454fdbaa0cd7c21fec871c1b5aca7f169012e69e5aa15a5872e3827fb5d0a97",
+        "document_revision": "60e898270f884c91c7c403cd141cabe8",
+        "blocks_sha256": "0b3bbca4f58de582b830fa5208fac4bdc5099644d9811ae0ff0f23ddfcc4c4e5",
+        "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "survey_disposition": "repair",
+        "summary": "Scaffy W5 — Expand the Catalog + Stress the Grammar: the wave story\nDisposition: repair.\nCriteria: blocks[2] still says IN FLIGHT: DIGEST despite blocks[75]–blocks[79] closing round 1 at Grade A. The wish also promises served-at-14, which the debrief correctly says remains deferred.\nEvidence: blocks[34] Direct module reading overturns the assumed controller duplication and narrows add-error-shape to the real four-site change. Let primary-source inspection kill an attractive but false motivating story before design hardens aroun…\nFailure/risk: blocks[2] The front-door callout remains IN FLIGHT: DIGEST while the paper later contains a Grade A round-one debrief. Status consumers can miss the terminal result, and “wave closes” can be mistaken for the still-deferred full wish.\nEmail boundary: email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "summary_chars": 898,
+        "summary_sha256": "f96159ceeb57d1861ba1f25cfdcd22783c8b9b389c76ce075514cb225eba8eff",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:bp-scaffy-wave6-2026-07-17",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=864 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a7c68e4482fb5b0b5bb167d4283f0684091b0592ee35a028189ed7e448d7c4b8",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "2c787791fcc7447809d708f83fc61388f2d975388edb67762523acb4e8d0283e",
+        "document_revision": "e6a067fe4f4e10a744b7c5185efb842f",
+        "blocks_sha256": "566206f8ee0d5ee08e66d0403b8531e426a87ea596acb94382c3c29db8a5e7cf",
+        "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "survey_disposition": "repair",
+        "summary": "Scaffy W6 — The Benchmark: duels, the use-case atlas, and the ascension leaps\nDisposition: repair.\nCriteria: blocks[6] promises two papers and a verdict; blocks[54]–blocks[58] close only round 1, explicitly leaving duel execution and the flagship deferred.\nEvidence: blocks[47] The miner reproduces supported counts and explicitly drops the 739 partner figure as irreproducible and structurally incompatible. A benchmark paper should delete flattering numbers that cannot be reconstructed, even when they m…\nFailure/risk: blocks[55] A 2,752-character “What shipped” paragraph combines preregistration, harness, miner, review fixes, tags, and branches. The most important round-one result is not independently scannable across Studio, TUI, or email.\nEmail boundary: email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "summary_chars": 864,
+        "summary_sha256": "a7c68e4482fb5b0b5bb167d4283f0684091b0592ee35a028189ed7e448d7c4b8",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:chat-herd-layer",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=854 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=1197a8872562d4acd56849a4b9f47239baa8a6f8e94f9684563285fd494afa9f",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "c6563aa017ab6f785fd20882bba575b6893936afe2508f5011a4f43519a0e144",
+        "document_revision": "3f531a0ca367799f8794e312ce34b8cc",
+        "blocks_sha256": "acbad5a83825a85df19946a889e154aa8ff62975b1e8de2b9f4a6874e48d328c",
+        "survey_report_sha256": "3927622017993d339233e7d1d77ff3ac3775479ac835f033f3de914df0e824d9",
+        "survey_disposition": "repair",
+        "summary": "The herd is the unit, not the chat.\nDisposition: repair.\nCriteria: blocks[1] gives a memorable thesis and blocks[6] defines the four-state contract. The paper does not declare a terminal design status or collected acceptance criteria; blocks[29] leaves open questions.\nEvidence: blocks[6] Four states—blocked, working, idle, unknown—plus stalled as a view-side badge, with explicit rollup precedence. Keep the data model smaller than the UI vocabulary and make derived attention states explicit.\nFailure/risk: blocks[29] The paper ends in open questions without a dated decision status or a single acceptance-criteria summary. Builders cannot tell which parts are authoritative design, unresolved choice, or already implemented elsewhere.\nEmail boundary: email: send a dated outcome extract and durable link rather than inlining the full wave chronology.",
+        "summary_chars": 854,
+        "summary_sha256": "1197a8872562d4acd56849a4b9f47239baa8a6f8e94f9684563285fd494afa9f",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:chat-herd-wave-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=925 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=685cdb61c11549a104289152b6dd611d5f95dad74e0271ce94f44f1ae4d9efca",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "fff4881464db52dc11d5285db73bdfdc87bed04690e039ae1a494024c81f698c",
+        "document_revision": "9ee3f8a3efb4b735df3e83defbde55a3",
+        "blocks_sha256": "5f7fd74d7a710493d73ac03c42b36afb56a1d15d150a3d800dbd4f74e6f9d5a4",
+        "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "survey_disposition": "repair",
+        "summary": "Herd Layer wave 1 — cold truth in one column, hot truth on one wire\nDisposition: repair.\nCriteria: blocks[4] states the wish and two-slice boundary early; blocks[6] turns it into an observable curl/bp-chat finish line. The terminal result, however, does not become authoritative until blocks[56]–[60].\nEvidence: blocks[57] Round 1 (herd-s1, PR #4185) and round 2 (herd-s2, PR #4191) are squash-merged ... both bp tasks closed 7/7 ... Round 2 shipped FleetHub + GET /v1/chat/events ... gates ... green. A wave close should pair each shipped slice with …\nFailure/risk: blocks[44] Round 1 (herd-s1) was the only slice dispatched this run — herd-s2 is round 2 BY DESIGN ... and does not dispatch until s1 MERGES. This was true at Review but is obsolete beside the later debrief. A reader landing here can wrong…\nEmail boundary: email: Send the merged slices, green gates, residuals, and wave-2 pointer—not the full survey ledger.",
+        "summary_chars": 925,
+        "summary_sha256": "685cdb61c11549a104289152b6dd611d5f95dad74e0271ce94f44f1ae4d9efca",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:chat-herd-wave2-2026-07-18",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=919 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=bd952e7624664aac34e4a81caf470e39f180326196e4f85cfc2220b6210d10c6",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "0ff89cc4437a1f7bf7862c904922da33ed8c08058a4830610bece864d94d00d2",
+        "document_revision": "dc1a0193a30b21db707e41c6d6b9a82c",
+        "blocks_sha256": "503a655f9aa6b7a38b2da974d80199ea56dd82510f93b1a7c515cf5dd3a1083e",
+        "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "survey_disposition": "repair",
+        "summary": "Herd Layer wave 2 — the herd becomes the product\nDisposition: repair.\nCriteria: The opening establishes wave-1 as live and states the product-level wish, while later decision and slice sections make the three build boundaries explicit. The final merged/live state arrives only in post-close addenda.\nEvidence: blocks[40] herd-s3 ... VERDICT: excellent ... contextual Esc proven IDENTICAL to Ctrl+B ... Gates: Go build/vet/test all green + Elixir 76/0 ... herd-s3f ... mutation-probed non-vacuous by the reviewer. Review evidence is strongest when it…\nFailure/risk: blocks[47] STATUS: WAVE CLOSED at Review 2026-07-18 ... all three slices shipped on the decided shapes. At this point blocks[44] still says the double guerrilla smoke had not run, while blocks[49] later records the merges. “Closed at Revie…\nEmail boundary: email: Email should contain three slice outcomes, smoke status, merge status, and residuals only.",
+        "summary_chars": 919,
+        "summary_sha256": "bd952e7624664aac34e4a81caf470e39f180326196e4f85cfc2220b6210d10c6",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:chat-local-cloud-context-wave-3-2026-07-15",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=881 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=03a02394d400602a282562232746790e75cb936fb0f21beea89ca015bb609da9",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "49e64e0065530d9c17b5b4296f655ea365cb9778f6edee00d95ebd5bfaf51c75",
+        "document_revision": "bb93734ff0ffaa06129b5b6f67a1cec7",
+        "blocks_sha256": "0f700dc7b8ce96ac8e2212939878e1a6cc59bfef6a76da79ce853adb73a63343",
+        "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "survey_disposition": "repair",
+        "summary": "Wave 3: local-first Chat with visible cloud and project identity\nDisposition: repair.\nCriteria: blocks[6] states the product direction crisply and blocks[7] gives an exact stop condition, including an honest warning that this surface cannot pass Survey.\nEvidence: blocks[6] Make local compute the ordinary, installable path and managed cloud compute an explicit alternative. Treat four identities as independent and always visible: the interface in use, the provider, the execution host, and the Barkpar…\nFailure/risk: blocks[23] Strategize handoff only. Grade and shipping claims are intentionally absent until the fleet, Build, and Review gates complete. The honesty is excellent, but the wave-like title and full phase scaffold can still be mistaken for a…\nEmail boundary: email: Email should carry only the four-identity direction, stop condition, and “Strategize only” status.",
+        "summary_chars": 881,
+        "summary_sha256": "03a02394d400602a282562232746790e75cb936fb0f21beea89ca015bb609da9",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:chat-plan-050c647a4c8c",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=598 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a8dbc51553c98a69d28eff32f095274b971b78604ea4d47854c72e2c7c4a69cf",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "362842000029816054d27d580dc0f8afc8642355f9a859265ba7102f3e1f195e",
+        "document_revision": "25478bcc6dad7f9920b004a37b4d5fad",
+        "blocks_sha256": "f16179d7f28baa20894666f07f21ee22e7c179f342b947424880899fb7cc3e3c",
+        "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "survey_disposition": "repair",
+        "summary": "chat-plan-050c647a4c8c\nDisposition: repair.\nCriteria: blocks[0] repeats the opaque document slug and blocks[1] immediately admits that no plan content has been authored.\nEvidence: blocks[1] No plan content has been authored yet. If an artifact is empty, say so plainly rather than inventing progress; status honesty is the only transferable pattern here.\nFailure/risk: blocks[1] No plan content has been authored yet. There is no purpose, outcome, acceptance criterion, scope, or verification plan for any reader to act on.\nEmail boundary: email: An empty Paper creates noise if shared or notified.",
+        "summary_chars": 598,
+        "summary_sha256": "a8dbc51553c98a69d28eff32f095274b971b78604ea4d47854c72e2c7c4a69cf",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:chat-plan-1caa96602607",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=886 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=a3e557c94c7c86d028ad95bfc053dc6d0122f98ed962e32969a2965cee711ce1",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "275fa0f5df8a67205191fde07673d56be5f45efd8ba04a6b07eeb417327030e4",
+        "document_revision": "c8514f7be7827f684dad017924589da5",
+        "blocks_sha256": "afc02fc2bc396c17d7ac1a5c1049f84e885691acdb310a6f47be65c73d14e086",
+        "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "survey_disposition": "repair",
+        "summary": "Live Linux-host vitals in the Studio bottom bar\nDisposition: repair.\nCriteria: The problem and desired live-cockpit outcome appear before the three-part approach; locked decisions distinguish host metrics from plugin data and preserve the existing build-version seam.\nEvidence: blocks[10] Honest-meters law ... any metric that can't be read degrades to nil, never a fabricated 0. Wrap each probe so one failing source ... never crashes the tick. Pin failure semantics and snapshot shape before UI work; honest unknown…\nFailure/risk: blocks[21] cd /opt/barkpark/api && mix compile — clean compile with :os_mon added. The current canonical guide forbids raw mix compile on the server and requires make rebuild or make deploy followed by service restart. Reusing this plan co…\nEmail boundary: email: Email should contain the data contract and safety correction, not tick-by-tick UI detail.",
+        "summary_chars": 886,
+        "summary_sha256": "a3e557c94c7c86d028ad95bfc053dc6d0122f98ed962e32969a2965cee711ce1",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:chat-plan-651c5eb5b064",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=906 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=0b36b0ff8fe01f8ecc06b4fe491acb6f00de4a8459167a64c4069bd84dd4701e",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "42a9e1fbdccebe316603da51e8e180c13e888acd47751678d5e063989dff39d0",
+        "document_revision": "ebaf2252f29c57ccbb7948a36ed6d778",
+        "blocks_sha256": "f17f2e8dd8038ae4b65ce1f76b8a473e1080ebce6d94f5f26311127ed48a21fa",
+        "survey_report_sha256": "f0aab5e8c6c7aefb54f313be3e374d8065093f10456adc17647975754612d6a1",
+        "survey_disposition": "repair",
+        "summary": "Plan — progressive block rendering in the bp chat TUI streaming tail\nDisposition: repair.\nCriteria: blocks[2] names the raw-markdown reader problem; blocks[3] explains why current behavior is deliberate; blocks[4] states the desired progressive upgrade and correctness anchor.\nEvidence: blocks[4] Key correctness anchor. The turn-boundary server reconcile stays ... the durable, golden-parity-covered row ... is unchanged and authoritative; the new client-side segmentation is a live preview. When adding progressive rendering…\nFailure/risk: blocks[5] A 7,132-character code block contains segmentation laws, reuse choices, reducer/render changes, charter updates, critical files, and verification. Studio/TUI/email/API readers lose semantic headings and stable anchors; code rende…\nEmail boundary: email: Email will quote a monolith; send the correctness anchor, algorithm boundary, and test plan instead.",
+        "summary_chars": 906,
+        "summary_sha256": "0b36b0ff8fe01f8ecc06b4fe491acb6f00de4a8459167a64c4069bd84dd4701e",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:chat-provider-runtime-parity-wave-2-2026-07-14",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=834 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=aae58145a0b68e4c3986115bc89a72a71dbd21d40614c6c642591390d75b3df4",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "26b9ec56e975d49d7a08eec4da00250211944917edbf3f833a58aa6bf37e75a9",
+        "document_revision": "4ded747a0ac52d3435f6552a1aa21907",
+        "blocks_sha256": "00494019ef36e44ae12e082a183f81e7e15932ee6f2f28ac073bdf93d9b81387",
+        "survey_report_sha256": "5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+        "survey_disposition": "repair",
+        "summary": "Wave 2: one Barkpark Chat, two providers, selectable compute\nDisposition: repair.\nCriteria: The wish and strategic direction are strong, but the top status says BUILDING with 3/3 builders active and the document ends at the build-ownership plan without a Review or terminal outcome.\nEvidence: decide-contract D1–D4 separate immutable provider/target identity, a lossless adapter envelope, a pinned Codex protocol, and outbound registered-host fencing. Freeze compatibility and trust contracts before splitting shared-runtime work.\nFailure/risk: status “BUILDING … Build 3/3 started … Review 0/3” is the latest lifecycle evidence and no debrief follows. The Paper cannot support a shipped/failed conclusion and may strand active-work claims indefinitely.\nEmail boundary: email: send only frozen contracts and current incomplete status.",
+        "summary_chars": 834,
+        "summary_sha256": "aae58145a0b68e4c3986115bc89a72a71dbd21d40614c6c642591390d75b3df4",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:choosing-your-site-framework",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=817 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=3b5565991643abc8fb7337e85f02d6799ad00844b1aaa59808ff1f96fb256154",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "394d391ab6bfc28ca1573ded6928c82f9eda06964cf756d678728f29cfa9eedd",
+        "document_revision": "5e12190e742c0888ad78babdc5c6b93c",
+        "blocks_sha256": "8dda53e1baa15737c2dc9214c70e7540b74f8e09de4ebb677fbb4d1fa65409d0",
+        "survey_report_sha256": "5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+        "survey_disposition": "repair",
+        "summary": "Choosing Your Site Framework\nDisposition: repair.\nCriteria: blocks 1–5 establish the project-first decision and static-versus-SSR axis well; the short-version callout gives a useful default without pretending one framework fits all.\nEvidence: blocks[1-2] The opening gives a project-conditioned recommendation—Astro for most content sites, SSR frameworks for heavily interactive apps. A comparison guide should give a useful default while naming the condition that changes it.\nFailure/risk: blocks[78-81] The deploy section promises automatic rebuilds, zero downtime, health-gated rollout, and one-click instant rollback as universal behavior. Public operational guarantees need current product evidence and availability scope, no…\nEmail boundary: email: send the decision axis and use-case matrix, not every profile.",
+        "summary_chars": 817,
+        "summary_sha256": "3b5565991643abc8fb7337e85f02d6799ad00844b1aaa59808ff1f96fb256154",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:claude-ready-servers-capstone",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=775 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=b55fdb163326306c723fd7f09941385c40067c57ce9cb11e802b70a7a80dc866",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "30eca567f059bcee94c14f3efe2787a17ce0636d5e0e91dcb471187469933ab4",
+        "document_revision": "cd393e59e72f33653711a08a3ac7bf15",
+        "blocks_sha256": "fa85d79c28021efbac41f485fdfea15bfedc8bb4b009d7f18a79bfdc07d8139d",
+        "survey_report_sha256": "5087674a213827239a406eebf5c5e940c7ba88cf21800b0c0fba97a39fbb09cc",
+        "survey_disposition": "repair",
+        "summary": "Claude-Ready Servers — The Crown Report\nDisposition: repair.\nCriteria: The ingress and one-screen verdict are excellent: they declare nothing was built, say GO only as a staged epic, and surface zero proven Claude turns plus the unproven provisioning chain.\nEvidence: cs-012 The GO recommendation is staged across four layers and explicitly begins with proofs, not builds. A capstone verdict should state both direction and the gating order in one screen.\nFailure/risk: cs-097 The 3,375-character consolidated file table repeats detailed blast-radius content already owned by lane Papers. A synthesis should route to evidence authorities rather than duplicate their full implementation maps.\nEmail boundary: email: send one-screen verdict, proof wave, owner calls, and links.",
+        "summary_chars": 775,
+        "summary_sha256": "b55fdb163326306c723fd7f09941385c40067c57ce9cb11e802b70a7a80dc866",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:claude-ready-servers-product-strategy",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=886 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=dc38290f3f51805d765610f5e3d103cdbdc7c497294c0439d9a6c032ef94bc48",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "0aa8ab561615e1da65b11b0a13da73341c0490e0f2f3f65535c415ccd6f35672",
+        "document_revision": "6b6c12592f9eb0a144c9fc66952e2f71",
+        "blocks_sha256": "8227341e825602fde3aaa5ccb6da0907cb19c4c8a66912e040c5870dd456f206",
+        "survey_report_sha256": "5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+        "survey_disposition": "repair",
+        "summary": "First Bet: Our Fleet or Their Servers\nDisposition: repair.\nCriteria: blocks[3] states the requested sequencing verdict and blocks[5] gives it immediately; blocks[11] converts it into a falsifiable trigger: two fleet criteria sealed plus willingness-to-pay at the $29-plus-support ladder.\nEvidence: blocks[11] TRIGGER := durability + unattended mixed-agent seal AND pilot willingness-to-pay at the $29-plus-support ladder. Turn “internal first” into an evidence-gated transition rather than indefinite dogfooding.\nFailure/risk: blocks[37] The rent-a-box BYO-login legal reading is explicitly an inference and no primary source blesses it. The product recommendation depends on a legal interpretation that can change and must not read as durable authorization.\nEmail boundary: email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "summary_chars": 886,
+        "summary_sha256": "dc38290f3f51805d765610f5e3d103cdbdc7c497294c0439d9a6c032ef94bc48",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:claude-ready-servers-wave-2026-07-28",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=858 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=ddfd3a40ef43cdd8efcdfc5abe4a78aa75046741567a1f59b92cd8a48a4dcab3",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "9c80be085fc51b86e2921684ea46a68ad196e4a3584c00d450f7670e62f5af63",
+        "document_revision": "456822e61b26d0f86a225b53c1abdbf2",
+        "blocks_sha256": "ea85be52b12304de90766a283295fd809a0036b18ccb539251d8ebddbe4eb1e1",
+        "survey_report_sha256": "5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+        "survey_disposition": "repair",
+        "summary": "Claude-Ready Servers — Wave 1: Proof Before Build\nDisposition: repair.\nCriteria: blocks[4] is an excellent corrected front door: complete/reviewed A-, four round-one slices green, but P1/P2/P3 live fires and round two still unrun. The wish’s visible success remains explicitly open.\nEvidence: blocks[4] COMPLETE: REVIEWED, grade A−; four slices built, while P1/P2/P3 live fires are explicitly unrun and owner-gated. Put “instrument built” and “real-world proof still owed” in the same terminal status block.\nFailure/risk: blocks[72] Twelve verification assignments and their mechanics occupy a single 1,873-character block. The operational dispatch receipt overwhelms TUI/email readers and competes with the live-fire obligations.\nEmail boundary: email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "summary_chars": 858,
+        "summary_sha256": "ddfd3a40ef43cdd8efcdfc5abe4a78aa75046741567a1f59b92cd8a48a4dcab3",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:cloud-console-epic-wish",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=877 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=1bac4983f9973096b40ed8866df1b5f09806ec64d9ddb076763cf451ee5dbb47",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "d8c91904d2605694a902f7833ba699a1af1a41b76ca70e9ecd88823adfb592d1",
+        "document_revision": "256efaded2fc2394ebde93874b13a875",
+        "blocks_sha256": "129b27bd1f7e50bfc118227fb8546fa9a6ba32313556fb6867d345ee6e45a427",
+        "survey_report_sha256": "5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+        "survey_disposition": "repair",
+        "summary": "Barkpark Cloud — Production Operator Console (epic wish)\nDisposition: repair.\nCriteria: blocks[1] states the emotional goal—control and everything working. blocks[19] later supplies the real acceptance boundary: live backends only, truthful toggles, quotas/states, security, audit, and no decorative UI.\nEvidence: blocks[19] A panel ships only with its live backend wired and tested; toggles round-trip real state and errors honestly. State a non-negotiable truth contract that prevents decorative console work.\nFailure/risk: blocks[16] Members, Studios, API, Datasets, Activity, and Plan/Settings are each compressed into one undifferentiated backlog list. The epic has breadth but no reader-visible sequencing or minimum coherent release boundary.\nEmail boundary: email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "summary_chars": 877,
+        "summary_sha256": "1bac4983f9973096b40ed8866df1b5f09806ec64d9ddb076763cf451ee5dbb47",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:cloud-console-hardening-wave-2-2026-07-21",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=842 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=d420b66369ef2b37a9fac4cffcdb44ce9ea2f0bfcd76c045d0586c71f62cbecb",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "e351ead3855e5bfdfe03908cea61de94c404a0654655a035112e3793e2ebde82",
+        "document_revision": "173d6ad783eb2dae65fc57b6b3e51da5",
+        "blocks_sha256": "1f66603541a5ebcbeaa870e72d1dc8c79b39783cb3461ab8f845f119e64925de",
+        "survey_report_sha256": "5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+        "survey_disposition": "repair",
+        "summary": "Cloud Console Hardening wave 2 — ship the train: the four lies leave the wire, and the ledger stops lying about wave 1\nDisposition: repair.\nCriteria: blocks[2] still says SURVEYING, while blocks[91] closes round one at four green, reviewed, merge-ready slices and blocks[103] grades A-.\nEvidence: blocks[95] All four slices were green alone; only the integrated gate exposed the missing SSE-ticket fixture and false toast. Run a union gate over interacting slices before merge; per-slice green cannot certify composition.\nFailure/risk: blocks[2] The front door remains STATUS: SURVEYING although the paper later closes round one at A-. Search, email, and API summaries can report historical state as current truth.\nEmail boundary: email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "summary_chars": 842,
+        "summary_sha256": "d420b66369ef2b37a9fac4cffcdb44ce9ea2f0bfcd76c045d0586c71f62cbecb",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    },
+    {
+      "unit_id": "paper:cloud-console-hardening-wave-2026-07-21",
+      "outcome": "proven",
+      "observed_output": "concise email derivation: chars=847 retained={\"criteria\": true, \"disposition\": true, \"email_boundary\": true, \"evidence\": true, \"failure_or_risk\": true, \"title\": true} summary_sha256=eed3809f4ab92b29c315ee0c8681a67f5a83e0d02e78d6793f8d3820cde88be9",
+      "residual_risk": "The deterministic concise projection retains title, disposition, criteria, evidence, failure/risk, and the email boundary; delivery-client HTML was not needed.",
+      "metrics": {
+        "document_sha256": "f04d64883f26cd227178140cfa6418d75c87037971f63e4f5fd1ad6438723cb4",
+        "document_revision": "16a3141be0bb985742e2b016254bba82",
+        "blocks_sha256": "08e03b1fbb7ed97a9023242ab1a320a1649bdf2e76fac5a9c1cee2a506b23923",
+        "survey_report_sha256": "5db5e529ea7cab51bd06f874f23c6bbc2952f9bf9d04d8b56849437afb21c663",
+        "survey_disposition": "repair",
+        "summary": "Cloud Console hardening — wave 1: the console stops lying\nDisposition: repair.\nCriteria: blocks[1] clearly names the founding role. blocks[125] later corrects stale building status and falsifies the wave’s own Law 3; blocks[127] closes six green round-one slices at A-.\nEvidence: blocks[125] Review falsifies the wave’s own “staleness is always safe-direction” law and preserves the earlier claim only as historical record. Correct the governing law in the same artifact instead of hiding a premise failure.\nFailure/risk: blocks[73] A 3,309-character NOT FOUND inventory mixes many separate risks and decisions-in-waiting. The terminal six-slice result and remaining live hazards are hard to retrieve in narrow readers.\nEmail boundary: email: send a concise outcome and residual-risk extract with a durable link; do not inline the full wave diary.",
+        "summary_chars": 847,
+        "summary_sha256": "eed3809f4ab92b29c315ee0c8681a67f5a83e0d02e78d6793f8d3820cde88be9",
+        "retained": {
+          "title": true,
+          "disposition": true,
+          "criteria": true,
+          "evidence": true,
+          "failure_or_risk": true,
+          "email_boundary": true
+        },
+        "blocks_hash_match": true
+      }
+    }
+  ],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "root_task_mutated": false,
+    "source_mutated": false
+  }
+}
