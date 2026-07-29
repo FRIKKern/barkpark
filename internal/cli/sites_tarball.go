@@ -18,6 +18,8 @@ import (
 	"archive/tar"
 	"bufio"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -63,6 +65,173 @@ var defaultTarballIgnores = []string{
 	".env.production.local",
 	".env.development.local",
 	".env.test.local",
+}
+
+// prebuiltTarballIgnores is the ignore list for `bp cloud site deploy --prebuilt
+// <dir>` — and it is EXPLICIT on purpose (charter D93). The prebuilt payload IS
+// the build output, so the project defaults above are exactly wrong here: they
+// carry `dist`, `build`, `out`, `.next`, `.astro` and `_build`, isIgnored matches
+// ANY path segment, and a real Astro `dist/` packs down to a hollow shell that
+// uploads, deploys and 404s.
+//
+// `tarballOptions.Ignores` is NIL-SENSITIVE IN BOTH DIRECTIONS and neither
+// default is safe for this lane: nil falls through to loadGitignore + the
+// payload-deleting defaults, while an empty slice ignores NOTHING — including a
+// `.env` a framework wrote next to the built assets. So this list is neither: it
+// keeps the dotenv family (a secret that must never leave the laptop) plus the
+// two things that are never build output, and nothing else.
+var prebuiltTarballIgnores = []string{
+	".git",
+	".DS_Store",
+	".env",
+	".env.local",
+	".env.production",
+	".env.development",
+	".env.test",
+	".env.production.local",
+	".env.development.local",
+	".env.test.local",
+}
+
+// prebuiltMaxWireBytes is the client-side cap on a prebuilt artifact, expressed
+// in the SERVER's units: WIRE bytes (the gzip'd bytes that cross the socket),
+// not the uncompressed payload the project-tarball cap counts. The box's
+// Plug.Parsers length is 100 MB of body, and the two units are ~960x apart for
+// text — so a cap stated in uncompressed bytes never fires before the server's
+// does. A built `dist/` is kilobytes; anything near this number is a mistake we
+// would rather name locally than discover as a 413 after a full upload. A var so
+// the tests can shrink it rather than generate 100 MB to reach it.
+var prebuiltMaxWireBytes int64 = 100 << 20
+
+// prebuiltMaxUncompressedBytes is the belt to the wire cap's braces: a runaway
+// walk (a `dist/` someone pointed at `/`) is stopped mid-copy by streamTarball's
+// own budget instead of compressing for minutes first.
+const prebuiltMaxUncompressedBytes int64 = 1 << 30
+
+// prebuiltArtifact is a packed, on-disk artifact ready to upload: the temp file
+// holding the exact bytes that will cross the wire, that byte count, and the
+// sha256 OVER THOSE BYTES. All three exist before the connection is opened —
+// which is the whole reason this path buffers instead of streaming from a pipe
+// (charter D93): a piped upload is chunked (Content-Length -1), so the size can
+// only be known after the last byte, the server cannot reject early, and the
+// digest the box re-verifies could not be sent in the request that carries it.
+type prebuiltArtifact struct {
+	Path      string
+	WireBytes int64
+	SHA256    string
+	// Cleanup removes the temp file. Always non-nil on success; call it deferred.
+	Cleanup func()
+}
+
+// packPrebuiltDir validates a build-output directory and packs it into a temp
+// tar.gz whose ROOT is that directory (so `index.html` lands at the archive root
+// with no `dist/` prefix — the box extracts it straight into the release dir).
+//
+// The four guards are here because the packer gives none of them: an empty
+// directory packs SILENTLY into a valid, zero-entry archive that uploads and
+// deploys to a 404; a project directory handed to --prebuilt by mistake packs
+// the source instead of the output; and the wire cap is the server's, in the
+// server's units. Escaping symlinks are emitted verbatim by design — the box's
+// extraction refuses them, and that refusal is the load-bearing one; refusing
+// them here too would only make the honest error arrive earlier.
+func packPrebuiltDir(dir string) (prebuiltArtifact, error) {
+	abs, err := validatePrebuiltDir(dir)
+	if err != nil {
+		return prebuiltArtifact{}, err
+	}
+	root := strings.TrimSpace(dir)
+
+	art, err := bufferTarball(tarballOptions{
+		Root:     abs,
+		Ignores:  prebuiltTarballIgnores,
+		MaxBytes: prebuiltMaxUncompressedBytes,
+	})
+	if err != nil {
+		return prebuiltArtifact{}, err
+	}
+	if art.WireBytes > prebuiltMaxWireBytes {
+		art.Cleanup()
+		return prebuiltArtifact{}, fmt.Errorf("packed artifact is %d bytes on the wire, over the %d-byte upload cap — a built dist/ is normally kilobytes, so check that --prebuilt %s points at the build output", art.WireBytes, prebuiltMaxWireBytes, root)
+	}
+	return art, nil
+}
+
+// validatePrebuiltDir is the network-free half of packPrebuiltDir: the three
+// refusals that must happen BEFORE the CLI mints a deployment, let alone opens
+// an upload. It returns the absolute path on success.
+func validatePrebuiltDir(dir string) (string, error) {
+	root := strings.TrimSpace(dir)
+	if root == "" {
+		return "", fmt.Errorf("--prebuilt needs a directory (e.g. --prebuilt ./dist)")
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("abs %q: %w", root, err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("--prebuilt %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("--prebuilt %s is not a directory — pass the build OUTPUT directory (e.g. ./dist)", root)
+	}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return "", fmt.Errorf("read %q: %w", root, err)
+	}
+	if len(entries) == 0 {
+		return "", fmt.Errorf("--prebuilt %s is empty — nothing to deploy (did the build run, and did it write here?)", root)
+	}
+	// A root index.html is what the static runtime serves and what HEALTH reads
+	// its markers out of. Without it the deploy would go green on bytes that 404.
+	idx, err := os.Stat(filepath.Join(abs, "index.html"))
+	if err != nil || !idx.Mode().IsRegular() {
+		return "", fmt.Errorf("--prebuilt %s has no index.html at its root — that is the build OUTPUT directory (e.g. ./dist), not the project directory", root)
+	}
+	return abs, nil
+}
+
+// bufferTarball packs opts into a temp file and returns the wire byte count plus
+// the sha256 over those exact bytes.
+//
+// A NIL Ignores list is REFUSED rather than defaulted: nil is the one value that
+// silently reaches loadGitignore and the payload-deleting project defaults, and
+// this helper exists precisely for the payload those defaults delete. The empty
+// slice is a different hazard (it ignores nothing, `.env` included), so the
+// caller must state its list either way.
+func bufferTarball(opts tarballOptions) (prebuiltArtifact, error) {
+	if opts.Ignores == nil {
+		return prebuiltArtifact{}, fmt.Errorf("refusing to pack with a nil ignore list: nil means the project defaults (dist, build, out, .next, .astro, _build — the payload itself), and an empty list means nothing is ignored at all, including .env; pass an explicit list")
+	}
+	body, err := streamTarball(opts)
+	if err != nil {
+		return prebuiltArtifact{}, err
+	}
+	defer body.Close()
+
+	f, err := os.CreateTemp("", "bp-prebuilt-*.tar.gz")
+	if err != nil {
+		return prebuiltArtifact{}, fmt.Errorf("create temp artifact: %w", err)
+	}
+	cleanup := func() { _ = os.Remove(f.Name()) }
+
+	h := sha256.New()
+	n, cerr := io.Copy(io.MultiWriter(f, h), body)
+	closeErr := f.Close()
+	if cerr != nil {
+		cleanup()
+		return prebuiltArtifact{}, cerr
+	}
+	if closeErr != nil {
+		cleanup()
+		return prebuiltArtifact{}, fmt.Errorf("write temp artifact: %w", closeErr)
+	}
+	return prebuiltArtifact{
+		Path:      f.Name(),
+		WireBytes: n,
+		SHA256:    hex.EncodeToString(h.Sum(nil)),
+		Cleanup:   cleanup,
+	}, nil
 }
 
 // tarballOptions tunes the tar+gzip helper. `Root` is the directory to archive

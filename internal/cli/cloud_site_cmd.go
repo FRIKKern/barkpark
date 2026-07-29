@@ -37,6 +37,9 @@ package cli
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -366,8 +369,8 @@ func siteInstanceNotLive(err error) bool {
 // runCloudSiteDeploy is `bp cloud site deploy <site>` (alias `build`) — enqueue a
 // build, then stream the six visible stages until the deploy lands or fails.
 func runCloudSiteDeploy(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site deploy <site> [--no-follow] [--force] [--via cloudflare --domain <host>]"
-	a, err := parseHzArgs(args, []string{"via", "domain"}, []string{"no-follow", "force"}, usage)
+	const usage = "bp cloud site deploy <site> [--prebuilt <dir>] [--no-follow] [--force] [--via cloudflare --domain <host>]"
+	a, err := parseHzArgs(args, []string{"via", "domain", "prebuilt"}, []string{"no-follow", "force"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -387,6 +390,21 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 		return useError(out, "usage", "--domain needs --via cloudflare (usage: "+usage+")", exitUsage)
 	}
 
+	// --prebuilt <dir> is the lane where the build already happened somewhere
+	// else (charter D85): the bytes ship, the serving box runs no npm. It is a
+	// different two-call flow, so it branches before the one-call deploy — and
+	// the dir is validated here, with no network touched, so a mistyped path can
+	// never mint a deployment.
+	prebuilt := strings.TrimSpace(a.val("prebuilt"))
+	if prebuilt != "" {
+		if via != "" || domain != "" {
+			return useError(out, "usage", "--prebuilt does not take --via/--domain: bind the domain with a plain deploy (or `bp cloud site settings`) and ship the bytes separately (usage: "+usage+")", exitUsage)
+		}
+		if _, verr := validatePrebuiltDir(prebuilt); verr != nil {
+			return useError(out, "usage", verr.Error(), exitUsage)
+		}
+	}
+
 	cfg, ok := siteCloudConfig(out, "deploy a site")
 	if !ok {
 		return exitAuth
@@ -395,11 +413,142 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 	if rerr != nil {
 		return openResolveFail(out, rerr)
 	}
+	if prebuilt != "" {
+		return runCloudSitePrebuiltDeploy(out, cfg, ref, id, prebuilt, a.bools["force"], !a.bools["no-follow"])
+	}
 	dep, derr := cfg.CloudClient().DeploySpawnSite(cloudCtx(), id, a.bools["force"], via, domain)
 	if derr != nil {
 		return cloudFail(out, "deploy site", derr)
 	}
 	return streamSiteDeploy(out, cfg, ref, id, dep, !a.bools["no-follow"])
+}
+
+// runCloudSitePrebuiltDeploy is `bp cloud site deploy <site> --prebuilt <dir>` —
+// the lane where the build ALREADY HAPPENED off the serving box (charter D85)
+// and only the output travels. It is two calls, and the order is forced:
+//
+//  1. MINT — POST /deploy {"source":"prebuilt"} creates the deployment row
+//     WITHOUT starting a build and answers with the build_id the bytes must
+//     carry (HEALTH asserts that marker by value) and the content_rev only the
+//     box can compute.
+//  2. UPLOAD — the packed tar.gz goes to the deployment-scoped artifact route
+//     with a real Content-Length and its sha256, and only then does the box
+//     stage, health-gate and switch.
+//
+// Between the two the CLI REFUSES bytes that do not carry the minted build_id.
+// That refusal is the honest one: such an upload is not a coin flip, it is a
+// deploy that will fail at HEALTH after burning the round trip. Re-minting is
+// safe — an unforced mint for the same content is idempotent, so the loop
+// "run → build with these exports → run again" reuses the same deployment.
+func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir string, force, follow bool) int {
+	dep, derr := cfg.CloudClient().MintPrebuiltDeployment(cloudCtx(), id, force)
+	if derr != nil {
+		return cloudFail(out, "mint prebuilt deployment", derr)
+	}
+	buildID := strings.TrimSpace(dep.BuildID)
+	if buildID == "" {
+		return useError(out, "failed", "the control plane minted a prebuilt deployment with no build_id — nothing to stamp the bytes with, so the upload would fail at HEALTH; re-run without --prebuilt to build on the box, or upgrade the control plane", exitGeneric)
+	}
+	out.progressf("→ minted prebuilt deployment %s (build %s) — no build started on the box", sanitizeCell(dep.ID), sanitizeCell(buildID))
+
+	marker, merr := prebuiltBuildMarker(dir)
+	if merr != nil {
+		return useError(out, "failed", merr.Error(), exitGeneric)
+	}
+	if marker != buildID {
+		out.progressf("  export BARKPARK_BUILD_ID=%s", buildID)
+		if cr := strings.TrimSpace(dep.ContentRev); cr != "" {
+			out.progressf("  export BARKPARK_CONTENT_REV=%s", cr)
+		}
+		if u := strings.TrimSpace(dep.URL); u != "" {
+			out.progressf("  export BARKPARK_SITE_BASE=%s", u)
+		}
+		have := marker
+		if have == "" {
+			have = "(none)"
+		}
+		return useError(out, "failed", fmt.Sprintf(
+			"%s/index.html carries build id %s, not the %s this deployment minted — HEALTH asserts that marker by value, so these bytes would be rejected on the box. Re-run your build with the exports above, then run this same command again (the deployment is reused, not duplicated).",
+			dir, have, buildID), exitGeneric)
+	}
+
+	art, perr := packPrebuiltDir(dir)
+	if perr != nil {
+		return useError(out, "failed", perr.Error(), exitGeneric)
+	}
+	defer art.Cleanup()
+	out.progressf("→ packed %s — %d bytes on the wire, sha256 %s", dir, art.WireBytes, art.SHA256)
+
+	f, oerr := os.Open(art.Path)
+	if oerr != nil {
+		return useError(out, "failed", "read packed artifact: "+oerr.Error(), exitGeneric)
+	}
+	defer f.Close()
+	up, uerr := cfg.CloudClient().UploadDeploymentArtifact(cloudCtx(), id, dep.ID, f, art.WireBytes, art.SHA256)
+	if uerr != nil {
+		return cloudFail(out, "upload artifact", uerr)
+	}
+	if n := up.Bytes; n > 0 && n != art.WireBytes {
+		out.progressf("  control plane recorded %d bytes (client sent %d)", n, art.WireBytes)
+	}
+	out.progressf("→ uploaded — the box verifies the digest, then stages these bytes (BUILD is skipped: no npm runs there)")
+
+	return streamSiteDeploy(out, cfg, ref, id, dep, follow)
+}
+
+// prebuiltBuildMarker reads the `bp-build-id` meta marker out of a built
+// directory's root index.html — the same HTML-naive first-occurrence read the
+// box's HEALTH gate does, deliberately, so the CLI and the gate agree about what
+// a page claims. An unreadable index.html is an error; a page with no marker
+// returns "" so the caller can say "(none)" rather than guess.
+func prebuiltBuildMarker(dir string) (string, error) {
+	path := filepath.Join(dir, "index.html")
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	defer f.Close()
+	// The marker lives in <head>; a couple of MB is far past any real one and
+	// keeps a stray huge index.html from being slurped whole.
+	raw, err := io.ReadAll(io.LimitReader(f, 2<<20))
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	return metaMarkerValue(string(raw), "bp-build-id"), nil
+}
+
+// metaMarkerValue pulls `content="…"` out of the FIRST `<meta name="<name>">`
+// tag in the document. Single and double quotes are both accepted (frameworks
+// emit either); anything more structural than that belongs to a parser, and the
+// gate this mirrors does not use one.
+func metaMarkerValue(html, name string) string {
+	lower := strings.ToLower(html)
+	for _, q := range []string{`"`, `'`} {
+		needle := `name=` + q + strings.ToLower(name) + q
+		i := strings.Index(lower, needle)
+		if i < 0 {
+			continue
+		}
+		rest := html[i+len(needle):]
+		ci := strings.Index(strings.ToLower(rest), "content=")
+		if ci < 0 {
+			continue
+		}
+		rest = rest[ci+len("content="):]
+		if rest == "" {
+			continue
+		}
+		quote := rest[:1]
+		if quote != `"` && quote != `'` {
+			continue
+		}
+		end := strings.Index(rest[1:], quote)
+		if end < 0 {
+			continue
+		}
+		return strings.TrimSpace(rest[1 : 1+end])
+	}
+	return ""
 }
 
 // streamSiteDeploy renders the deploy as a stage-aware progress stream: each
@@ -1169,7 +1318,7 @@ func printCloudSiteHelp(out *writer) {
 
 USAGE
   bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--deploy]
-  bp cloud site deploy    <site> [--no-follow] [--force]      (alias: build)
+  bp cloud site deploy    <site> [--prebuilt <dir>] [--no-follow] [--force]  (alias: build)
   bp cloud site rollback  <site>
   bp cloud site status    <site>
   bp cloud site open       <site> [--print-only]
@@ -1184,6 +1333,15 @@ USAGE
   SSR process on its own slot port, health-gated behind Caddy.
   --doc-type binds the content type the build reads (default 'post'); pass it
   when your dataset serves another type (e.g. 'paper').
+  --prebuilt <dir> ships a build you already made — the OUTPUT directory (./dist),
+  not the project. The serving box runs NO npm for that deploy: it verifies the
+  upload's sha256, stages those exact bytes, and BUILD reports skipped. It is two
+  calls: bp mints the deployment first and prints the BARKPARK_BUILD_ID /
+  BARKPARK_CONTENT_REV / BARKPARK_SITE_BASE your build must be stamped with, then
+  uploads. Bytes carrying a different build id are refused BEFORE the upload —
+  HEALTH asserts that marker by value — so build with those exports and re-run the
+  same command; the deployment is reused, not duplicated. Secrets (.env*) and .git
+  are never packed.
   --force re-runs a build even when content and config are unchanged — it folds a
   fresh nonce so a new release is minted instead of the cached deployment.
   --deploy on create is the one-motion: it chains straight into the deploy stream

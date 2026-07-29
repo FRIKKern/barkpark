@@ -12,13 +12,18 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
 
 // testSiteID is a valid UUID so resolveOpenSiteID passes it through without a
@@ -49,6 +54,16 @@ type siteCP struct {
 	// PATCH /v1/sites/:id — `bp cloud site settings` (search-template W8/W10).
 	patchResp fakeResp
 	patchBody []byte
+	// POST /v1/sites/:id/deployments/:dep/artifact — the prebuilt lane's second
+	// call. The recorded Content-Length is the point of the test: a piped upload
+	// arrives chunked (-1) and the server cannot reject it early.
+	artifactResp   fakeResp
+	artifactHits   int
+	artifactBody   []byte
+	artifactLen    int64
+	artifactSha    string
+	artifactPath   string
+	artifactChunks bool
 }
 
 type fakeResp struct {
@@ -74,6 +89,14 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.deployHits++
 			cp.deployBody, _ = io.ReadAll(r.Body)
 			cp.write(w, cp.deployResp)
+		case r.Method == "POST" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/") && strings.HasSuffix(path, "/artifact"):
+			cp.artifactHits++
+			cp.artifactPath = path
+			cp.artifactLen = r.ContentLength
+			cp.artifactChunks = len(r.TransferEncoding) > 0
+			cp.artifactSha = r.Header.Get("X-Artifact-Sha256")
+			cp.artifactBody, _ = io.ReadAll(r.Body)
+			cp.write(w, cp.artifactResp)
 		case r.Method == "GET" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/"):
 			cp.pollHits++
 			cp.write(w, cp.pollResp)
@@ -1239,6 +1262,16 @@ func TestRunCloudSiteHelp(t *testing.T) {
 	if !strings.Contains(stdout, "bp cloud deploy") || !strings.Contains(stdout, "bp sites") {
 		t.Fatalf("help must distinguish from instance + container deploy:\n%s", stdout)
 	}
+	// The prebuilt lane is advertised BY VALUE: there is no manifest and no
+	// completion to find it in (bp capabilities describes an instance's content
+	// API, not the control plane), so this help text IS the discoverability
+	// surface — delete the line and this assertion is what reds.
+	if !strings.Contains(stdout, "--prebuilt") {
+		t.Fatalf("help must advertise --prebuilt — it is the only place a stranger can find the lane:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "runs NO npm") {
+		t.Fatalf("help must say what --prebuilt buys (the box runs no npm):\n%s", stdout)
+	}
 }
 
 // TestRunCloudSiteDispatchedFromRunCloud proves the new `site` case is wired into
@@ -1438,5 +1471,213 @@ func TestSiteCreateLabelsAnUnechoedDatasetBinding(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "as requested") {
 		t.Fatalf("an un-echoed dataset must be labelled as the request:\n%s", stdout)
+	}
+}
+
+// --- the prebuilt lane (charter D85/D87/D93/D94) ------------------------------
+
+// writeDistFixture is a minimal build OUTPUT dir: a root index.html carrying the
+// bp-build-id marker HEALTH asserts by value, one asset, and a .env that must
+// never leave the machine.
+func writeDistFixture(t *testing.T, buildID string) string {
+	t.Helper()
+	dir := t.TempDir()
+	html := `<html><head><meta name="bp-build-id" content="` + buildID + `"></head><body>hi</body></html>`
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(html), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "_astro"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "_astro", "app.css"), []byte("body{}"), 0o644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("SECRET=hunter2\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	return dir
+}
+
+// TestCloudSitePrebuiltDeployMintsThenUploadsSizedBytes is the wire proof of the
+// two-call flow: /deploy carries source=prebuilt, and the artifact goes to the
+// DEPLOYMENT-scoped route with a REAL Content-Length (not the chunked -1 a piped
+// upload sends, which is why the client buffers) and the sha256 taken over
+// exactly those wire bytes. The archive itself is decoded so "it uploaded
+// something" can never pass for "it uploaded the build".
+func TestCloudSitePrebuiltDeployMintsThenUploadsSizedBytes(t *testing.T) {
+	const buildID = "b0b0b0b0b0b0b0b0"
+	dir := writeDistFixture(t, buildID)
+
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"queued","stage":"PLAN","build_id":"` + buildID + `","content_rev":"cr-42","source":"prebuilt"}}`}
+	cp.artifactResp = fakeResp{201, `{"artifact_url":"db://artifact/dep-1","filename":"dep-1.tar.gz"}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"live","stage":"RETIRE","build_id":"` + buildID + `","source":"prebuilt","url":"https://box.example/sites/blog/","stages":[{"name":"BUILD","status":"skipped","detail":"prebuilt bytes — no build ran on this box"},{"name":"SWITCH","status":"ok"}]}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if cp.deployHits != 1 {
+		t.Fatalf("deploy hits=%d want 1 (the mint)", cp.deployHits)
+	}
+	var mint map[string]any
+	if err := json.Unmarshal(cp.deployBody, &mint); err != nil {
+		t.Fatalf("decode mint body %q: %v", cp.deployBody, err)
+	}
+	if mint["source"] != "prebuilt" {
+		t.Fatalf("the mint must declare source=prebuilt, got %v", mint)
+	}
+	if cp.artifactHits != 1 {
+		t.Fatalf("artifact hits=%d want 1", cp.artifactHits)
+	}
+	if cp.artifactPath != "/v1/sites/"+testSiteID+"/deployments/dep-1/artifact" {
+		t.Fatalf("artifact went to %q — it must be scoped to the minted deployment", cp.artifactPath)
+	}
+
+	// The size is declared BEFORE the bytes move: a chunked body (-1) is exactly
+	// what the buffer-to-temp-file design exists to avoid.
+	if cp.artifactChunks {
+		t.Fatalf("artifact was sent chunked (%v) — the server cannot reject it early", cp.artifactChunks)
+	}
+	if cp.artifactLen <= 0 {
+		t.Fatalf("Content-Length=%d — the upload must declare a real length", cp.artifactLen)
+	}
+	if int(cp.artifactLen) != len(cp.artifactBody) {
+		t.Fatalf("Content-Length=%d but %d bytes arrived", cp.artifactLen, len(cp.artifactBody))
+	}
+
+	// The digest is over the WIRE bytes, and it is on the request that carries them.
+	sum := sha256.Sum256(cp.artifactBody)
+	if want := hex.EncodeToString(sum[:]); cp.artifactSha != want {
+		t.Fatalf("X-Artifact-Sha256=%q, but the received bytes hash to %q", cp.artifactSha, want)
+	}
+
+	// And the bytes are the BUILD: index.html at the archive root, the asset with
+	// it, and no .env.
+	names := tarEntryNames(t, bytes.NewReader(cp.artifactBody))
+	for _, want := range []string{"index.html", "_astro/app.css"} {
+		if _, ok := names[want]; !ok {
+			t.Fatalf("uploaded archive is missing %s (a hollow shell would still upload and deploy)", want)
+		}
+	}
+	if _, ok := names[".env"]; ok {
+		t.Fatalf(".env was uploaded — the prebuilt ignore list must keep secrets off the wire")
+	}
+
+	if !strings.Contains(stdout, "no build started on the box") {
+		t.Fatalf("the receipt must say the mint started no build:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "sha256 "+cp.artifactSha) {
+		t.Fatalf("the receipt must name the digest it sent:\n%s", stdout)
+	}
+}
+
+// TestCloudSitePrebuiltRefusesBytesWithTheWrongBuildID: HEALTH asserts the
+// bp-build-id marker BY VALUE, so bytes stamped with anything else are a deploy
+// that fails one round trip later. The CLI refuses BEFORE the upload and prints
+// the exports the rebuild needs — the honest state, not a hopeful one.
+func TestCloudSitePrebuiltRefusesBytesWithTheWrongBuildID(t *testing.T) {
+	dir := writeDistFixture(t, "STALE-BUILD-ID")
+
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"freshbuildid00","content_rev":"cr-42","source":"prebuilt"}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	if code == exitOK {
+		t.Fatalf("a build-id mismatch must not exit 0\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	if cp.artifactHits != 0 {
+		t.Fatalf("artifact hits=%d — nothing may be uploaded after a marker mismatch", cp.artifactHits)
+	}
+	all := stdout + stderr
+	for _, want := range []string{"STALE-BUILD-ID", "freshbuildid00", "BARKPARK_BUILD_ID=freshbuildid00", "BARKPARK_CONTENT_REV=cr-42"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("the refusal must carry %q:\n%s", want, all)
+		}
+	}
+}
+
+// TestCloudSitePrebuiltRefusesABadDirBeforeAnyCall: an empty dir and a project
+// dir are refused with NO network call at all — a mistyped path must never mint
+// a deployment row.
+func TestCloudSitePrebuiltRefusesABadDirBeforeAnyCall(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.serve()
+
+	empty := t.TempDir()
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", empty)
+	if code != exitUsage {
+		t.Fatalf("empty dir exit=%d want %d\n%s%s", code, exitUsage, stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "is empty") {
+		t.Fatalf("the refusal must say the dir is empty:\n%s%s", stdout, stderr)
+	}
+
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "package.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	stdout, stderr, code = runSite(t, "table", "deploy", testSiteID, "--prebuilt", project)
+	if code != exitUsage {
+		t.Fatalf("project dir exit=%d want %d\n%s%s", code, exitUsage, stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "no index.html") {
+		t.Fatalf("the refusal must name the missing root index.html:\n%s%s", stdout, stderr)
+	}
+
+	if cp.deployHits != 0 || cp.artifactHits != 0 {
+		t.Fatalf("a bad --prebuilt dir must touch no route (deploy=%d artifact=%d)", cp.deployHits, cp.artifactHits)
+	}
+}
+
+// TestSiteDeploymentDecodesPrebuiltFields: json.Unmarshal DROPS keys the struct
+// does not model — the repo already learned this on Trigger — and content_rev is
+// unrecoverable elsewhere (only the box computes it). This pins all three
+// prebuilt fields by decoding a payload that carries them.
+func TestSiteDeploymentDecodesPrebuiltFields(t *testing.T) {
+	const payload = `{"id":"dep-1","status":"live","build_id":"b1","content_rev":"cr-42","source":"prebuilt","source_digest":"deadbeef","trigger":"manual"}`
+	var d cloudclient.SiteDeployment
+	if err := json.Unmarshal([]byte(payload), &d); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if d.ContentRev != "cr-42" {
+		t.Fatalf("content_rev dropped: %+v", d)
+	}
+	if d.Source != "prebuilt" {
+		t.Fatalf("source dropped: %+v", d)
+	}
+	if d.SourceDigest != "deadbeef" {
+		t.Fatalf("source_digest dropped: %+v", d)
+	}
+	if d.BuildID != "b1" || d.Trigger != "manual" {
+		t.Fatalf("existing fields regressed: %+v", d)
+	}
+}
+
+// TestRunCloudHelpListsSiteVerb: `bp cloud -h` did not mention the `site` verb AT
+// ALL — eleven fleet verbs and `site` only as an ARGUMENT of `open` — so the only
+// way to find the spawner was to already know it existed. `bp capabilities` can
+// never fix this (it describes one instance's content API, not the control
+// plane), so this seam is the discoverability path and this is its first test.
+func TestRunCloudHelpListsSiteVerb(t *testing.T) {
+	withTempConfigHome(t)
+	g, rest, err := parseGlobals([]string{"cloud", "-h"})
+	if err != nil {
+		t.Fatalf("parseGlobals: %v", err)
+	}
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.output = "table"
+	if code := runCloud(w, g, rest[1:]); code != exitOK {
+		t.Fatalf("bp cloud -h exit=%d want 0\n%s%s", code, sout.String(), serr.String())
+	}
+	out := sout.String()
+	if !strings.Contains(out, "bp cloud site") {
+		t.Fatalf("bp cloud -h must list the `site` verb:\n%s", out)
+	}
+	if !strings.Contains(out, "--prebuilt") {
+		t.Fatalf("bp cloud -h must point at the prebuilt lane:\n%s", out)
 	}
 }

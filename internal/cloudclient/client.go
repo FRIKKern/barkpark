@@ -1406,6 +1406,16 @@ type SiteStage struct {
 // omitempty because the control plane only started emitting it in wave 5 and Go's
 // json.Unmarshal would otherwise silently drop the unknown key.
 //
+// ContentRev / Source / SourceDigest are the prebuilt lane's fields (charter
+// D87/D88) and are threaded EXPLICITLY for the json.Unmarshal reason stated on
+// Trigger above — an un-modelled key is dropped in silence, and ContentRev in
+// particular is not knowable any other way: it is computed on the BOX by the
+// content_rev probe, so the mint response is the only place a client can read it
+// before building. Source is the deployment's build provenance ("prebuilt" when
+// the bytes were built off the serving box, absent/"" for the on-box default
+// path) and SourceDigest is the sha256 of the uploaded artifact, which the box
+// re-verifies before it stages anything.
+//
 // RuntimeTarget / Port mirror the SpawnSite node-slot fields at the deployment
 // grain (charter D62): a node deployment carries the runtime_target it ran on and
 // the slot Port its process bound — omitempty and threaded explicitly for the same
@@ -1418,6 +1428,9 @@ type SiteDeployment struct {
 	Stage         string      `json:"stage"`
 	Stages        []SiteStage `json:"stages"`
 	BuildID       string      `json:"build_id"`
+	ContentRev    string      `json:"content_rev,omitempty"`
+	Source        string      `json:"source,omitempty"`
+	SourceDigest  string      `json:"source_digest,omitempty"`
 	URL           string      `json:"url"`
 	Trigger       string      `json:"trigger,omitempty"`
 	RuntimeTarget string      `json:"runtime_target,omitempty"`
@@ -1556,6 +1569,29 @@ func (c *Client) DeploySpawnSite(ctx context.Context, id string, force bool, via
 	if domain != "" {
 		req["domain"] = domain
 	}
+	return c.postSiteDeploy(ctx, id, req)
+}
+
+// MintPrebuiltDeployment is the FIRST of the prebuilt lane's two calls (charter
+// D87): POST /v1/sites/:id/deploy with {"source":"prebuilt"} mints the
+// deployment row WITHOUT starting a build, and the 201 already carries the
+// build_id and content_rev the caller's own build must be stamped with.
+//
+// The order is forced, not chosen: build_id is derived from content_rev + config
+// and is exported INTO the build so the adapter can bake the marker HEALTH later
+// asserts by value — so it must exist BEFORE the bytes do, which rules out
+// content-addressing the deployment by the artifact's digest.
+func (c *Client) MintPrebuiltDeployment(ctx context.Context, id string, force bool) (SiteDeployment, error) {
+	req := map[string]any{"source": "prebuilt"}
+	if force {
+		req["force"] = true
+	}
+	return c.postSiteDeploy(ctx, id, req)
+}
+
+// postSiteDeploy is the shared POST /v1/sites/:id/deploy body-and-decode both
+// deploy lanes ride.
+func (c *Client) postSiteDeploy(ctx context.Context, id string, req map[string]any) (SiteDeployment, error) {
 	status, body, err := c.do(ctx, "POST", "/v1/sites/"+esc(id)+"/deploy", true, req)
 	if err != nil {
 		return SiteDeployment{}, err
@@ -1570,6 +1606,66 @@ func (c *Client) DeploySpawnSite(ctx context.Context, id string, force bool, via
 		return SiteDeployment{}, fmt.Errorf("decode deployment response: %w", err)
 	}
 	return out.Deployment, nil
+}
+
+// UploadDeploymentArtifact is the SECOND prebuilt call: POST
+// /v1/sites/:id/deployments/:dep_id/artifact with the packed tar.gz as
+// application/octet-stream, the sha256 the client computed over exactly these
+// bytes in X-Artifact-Sha256, and a REAL Content-Length.
+//
+// The declared size is the point. UploadArtifact (the container-model sibling)
+// hands http.Client an opaque io.Reader, which sends the body chunked with
+// Content-Length -1: the server cannot reject an oversized upload until it has
+// read it, and the client learns the true size only after the last byte. Here
+// the caller has already buffered the artifact to a temp file, so the size and
+// the digest are both known up front — the server can 413 on the headers, and
+// the digest travels WITH the bytes it describes so the box can re-verify before
+// it stages anything.
+//
+// Like UploadArtifact this deliberately uses a client with no wall-clock cap:
+// an upload's deadline is the caller's ctx, not the shared 30s DefaultTimeout.
+func (c *Client) UploadDeploymentArtifact(ctx context.Context, siteID, deploymentID string, body io.Reader, size int64, sha256hex string) (ArtifactUpload, error) {
+	if body == nil {
+		return ArtifactUpload{}, fmt.Errorf("upload artifact: nil body")
+	}
+	if size <= 0 {
+		return ArtifactUpload{}, fmt.Errorf("upload artifact: refusing to send an unsized body (%d bytes) — the prebuilt lane declares its length", size)
+	}
+	path := "/v1/sites/" + esc(siteID) + "/deployments/" + esc(deploymentID) + "/artifact"
+	req, err := http.NewRequestWithContext(ctx, "POST", c.url(path), body)
+	if err != nil {
+		return ArtifactUpload{}, err
+	}
+	req.ContentLength = size
+	req.Header.Set("Content-Type", "application/octet-stream")
+	if sha256hex != "" {
+		req.Header.Set("X-Artifact-Sha256", sha256hex)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+
+	client := c.HTTP
+	if client == nil {
+		client = &http.Client{}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ArtifactUpload{}, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return ArtifactUpload{}, fmt.Errorf("read upload response: %w", err)
+	}
+	if !ok(resp.StatusCode) {
+		return ArtifactUpload{}, cloudError(resp.StatusCode, raw)
+	}
+	var out ArtifactUpload
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return ArtifactUpload{}, fmt.Errorf("decode upload response: %w", err)
+	}
+	return out, nil
 }
 
 // SpawnSiteDeployment fetches one deployment's current stage-aware state via

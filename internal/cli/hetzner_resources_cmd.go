@@ -573,6 +573,8 @@ USAGE
   bp cloud support add <name>           grow your Personal Dev Fleet: provision +
                                         bind + scrubbed pull + supervised listener
   bp cloud workspace <export|import>    per-workspace bundle over the content API
+  bp cloud site <verb>                  spawn a website next to a Barkpark box
+                                        (create · deploy · rollback · status)
   bp cloud open <target>                open a dashboard deep link
   bp cloud verify <instance>            re-run the golden-path probe suite
   bp cloud deploy <target>              push any git ref to an instance over SSH
@@ -601,6 +603,9 @@ FLEET (control plane — needs 'bp login')
                                                         (bp cloud rollout -h)
   rollback  roll ONE instance back to its previous blue/green code slot; pins it
             at that version, health-gated flip           (bp cloud rollback -h)
+  site      spawn a website that builds and serves next to a Barkpark box:
+            create · deploy (--prebuilt ./dist ships a build made elsewhere) ·
+            rollback · status · open · settings              (bp cloud site -h)
 
 PROVIDERS (the provider's own API, YOUR credentials — no control plane)
   providers registered + planned providers and the capabilities each honours
