@@ -1,0 +1,447 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S059",
+  "assignment_snapshot_sha256": "ed5de775f57d8d079eb649796dba6679b4902171ddcbc2584b93de2a353739ef",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 20,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "87a354628f62fb3429553b99e0e6398896c03d836fe91e63ab2ee813c1983cf4"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read: 312 native blocks plus one legacy HTML policy with 16 semantic units. Keep View vs Edit Parity, Wave Deck Strategy, Welcome, and Whole-Corpus Oracle Verdict. Repair Viable Everywhere for its self-declared stale vendor matrix; Vulnerability Disclosure Policy for placeholder security contacts and legacy representation; Wave Deck and Zen Handoff for dated/conflicting gate mechanics and status; and Weaving Claude/Codex for perishable Codex and repo-local implementation claims. The three Wave Deck papers have distinct information-spec, strategy, and implementation-handoff roles and should be linked, not merged.",
+  "verdict_counts": {
+    "keep": 4,
+    "repair": 5
+  },
+  "checked_unit_ids": [
+    "paper:viable-everywhere-strategy",
+    "paper:view-vs-edit-parity",
+    "paper:vulnerability-disclosure-policy",
+    "paper:wave-deck",
+    "paper:wave-deck-strategy",
+    "paper:wave-deck-zen-handoff",
+    "paper:weaving-claude-codex",
+    "paper:welcome",
+    "paper:whole-corpus-oracle-verdict"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 312,
+    "legacy_html_documents_read": 1,
+    "legacy_html_semantic_units_read": 16,
+    "legacy_html_chars_read": 2006,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:view-vs-edit-parity blocks[37]",
+      "evidence": "The conclusion distinguishes editability, visual parity, confirmed gaps, and a harness-limited unknown."
+    },
+    {
+      "block_ref": "paper:wave-deck-strategy blocks[31]",
+      "evidence": "Seven non-backfillable governance fields preserve decision provenance before implementation."
+    },
+    {
+      "block_ref": "paper:weaving-claude-codex blocks[19]",
+      "evidence": "The research separates peer-reviewed motivation from absent direct comparative proof."
+    },
+    {
+      "block_ref": "paper:whole-corpus-oracle-verdict blocks[9]",
+      "evidence": "The experiment ends in a bounded grep-versus-pack operating rule with safety caveats."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:viable-everywhere-strategy blocks[42]",
+      "evidence": "The paper declares its own vendor cells stale after one wave; the latest noted checks are 2026-07-11.",
+      "lesson": "Honor embedded freshness contracts."
+    },
+    {
+      "block_ref": "paper:vulnerability-disclosure-policy body_html[5]",
+      "evidence": "The security email and PGP fingerprint remain bracketed placeholders.",
+      "lesson": "Never publish a security policy without a working private report channel."
+    },
+    {
+      "block_ref": "paper:wave-deck blocks[83]",
+      "evidence": "The gate implementation branch conflicts with the later strategy early-return design.",
+      "lesson": "Separate enduring information requirements from current architecture authority."
+    },
+    {
+      "block_ref": "paper:weaving-claude-codex blocks[17]",
+      "evidence": "Implementation sizing depends on rapidly changing Codex CLI, SDK, event, version, and model facts.",
+      "lesson": "Revalidate perishable external interfaces before building."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "wave-deck",
+        "wave-deck-strategy",
+        "wave-deck-zen-handoff"
+      ],
+      "basis": "They share the Wave Deck concept but own different roles: detailed slide information contract, adversarially reviewed strategy, and Studio-chat implementation handoff.",
+      "disposition": "Do not merge. Add explicit role/current-authority links; repair dated mechanics in the information spec and handoff, and keep strategy as decision authority."
+    },
+    {
+      "candidate_set": [
+        "viable-everywhere-strategy",
+        "weaving-claude-codex"
+      ],
+      "basis": "Both discuss MCP and agent ecosystems, but one owns distribution reach while the other owns cross-provider execution and handoff.",
+      "disposition": "Do not merge; centralize or cross-link shared MCP facts so each perishable claim has one freshness owner."
+    }
+  ],
+  "reader_risks": [
+    "Studio: lead with current status, owner, decision, and dated freshness; collapse long matrices/specs behind anchored sections and preserve screenshot captions beside images.",
+    "TUI80: wrap tables to four columns or fewer, paginate large specifications, render legacy HTML semantically, and keep evidence/status labels visible without horizontal scrolling.",
+    "email: send the decision, current blocker or next action, date/freshness warning, and one canonical link; omit long matrices, internal paths, and implementation inventories.",
+    "public: remove internal task IDs, repository paths, private operational topology, agent/provider credentials, and unreleased roadmap detail; never publish placeholder security contacts.",
+    "CLI/API: preserve immutable revision, document role, provenance/date, status, explicit unknowns, exact enum/schema contracts, and whether a statement is historical, proposed, or current."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:viable-everywhere-strategy",
+      "document_id": "viable-everywhere-strategy",
+      "document_rev": "6c12264bbeb55265c64492618150b307",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Dated market-and-implementation strategy for making Barkpark reachable from coding agents and chat assistants through four reusable mechanism classes.",
+      "opening_and_criteria": "The ingress states the two-minute reachability goal, the mechanism-class doctrine, and that the matrix is perishable; the honesty schema defines citation and estimate rules early.",
+      "outline_and_hierarchy": "Doctrine, two capability matrices, tier decisions, a three-wave roadmap, and consolidated citations form a strong decision path, though the tables are dense.",
+      "human_voice_and_precision": "The paper consistently refuses to confuse audience reach with installability and labels estimates and structurally closed surfaces.",
+      "compression_and_restraint": "Preserve the mechanism-class doctrine, but re-check every current vendor cell and move dated implementation coordinates into a revisioned appendix or machine-readable matrix.",
+      "evidence_and_truth": "blocks[2], blocks[39]-[42] expose citation dates and perishability; the document itself says any cell older than one wave is stale until rechecked.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "Every matrix cell must carry a vendor citation and check date, with soft user numbers explicitly marked estimate or unverified.",
+          "lesson": "Freshness and installability are part of the evidence, not editorial footnotes."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[42]",
+          "evidence": "The paper declares cells older than one wave stale; its latest recorded re-check is 2026-07-11, well before this 2026-07-29 survey.",
+          "lesson": "A self-declared perishable matrix must be refreshed before its build tiers are treated as current authority."
+        }
+      ],
+      "duplicate_disposition": "Not a duplicate of weaving-claude-codex: this is distribution reach strategy, while the latter is provider-runtime choreography. Cross-link shared MCP claims rather than merge.",
+      "reader_risks": [
+        "Studio: lead with current status, owner, decision, and dated freshness; collapse long matrices/specs behind anchored sections and preserve screenshot captions beside images.",
+        "TUI80: wrap tables to four columns or fewer, paginate large specifications, render legacy HTML semantically, and keep evidence/status labels visible without horizontal scrolling.",
+        "email: send the decision, current blocker or next action, date/freshness warning, and one canonical link; omit long matrices, internal paths, and implementation inventories.",
+        "public: remove internal task IDs, repository paths, private operational topology, agent/provider credentials, and unreleased roadmap detail; never publish placeholder security contacts.",
+        "CLI/API: preserve immutable revision, document role, provenance/date, status, explicit unknowns, exact enum/schema contracts, and whether a statement is historical, proposed, or current."
+      ],
+      "rationale": "Repair because the durable doctrine remains useful but the paper's own freshness contract invalidates its current vendor and roadmap cells until reverified."
+    },
+    {
+      "unit_id": "paper:view-vs-edit-parity",
+      "document_id": "view-vs-edit-parity",
+      "document_rev": "b235e3efb43c91a5cb5720a883859b2d",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Visual evidence paper testing whether the real PortableDoc edit canvas matches the published reader for representative block types.",
+      "opening_and_criteria": "The opening defines the same-paper, real-editor comparison and explains exactly how to read each paired image before giving verdicts.",
+      "outline_and_hierarchy": "The paper cleanly separates parity wins, real failures, partial differences, and one harness-limited unknown, ending with an honest synthesis.",
+      "human_voice_and_precision": "Verdicts use plain, specific language such as editable not being equivalent to visually identical, and distinguish genuine gaps from a likely harness artifact.",
+      "compression_and_restraint": "Keep as a focused evidence artifact; retain image/verdict adjacency and add capture date/build revision if refreshed rather than expanding the prose.",
+      "evidence_and_truth": "blocks[6]-[35] pair concrete images with typed verdicts; blocks[20], [23], [26], [29], and [32] name distinct failure mechanisms.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[37]",
+          "evidence": "The bottom line separates editability from visual parity and names both proven 1:1 blocks and fixable node-view gaps.",
+          "lesson": "A parity claim should end in a falsifiable inventory, not a broad product slogan."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[35]",
+          "evidence": "The task-list comparison cannot be judged in this harness because live server-painted rows are absent.",
+          "lesson": "Harness limitations must stay visibly separate from confirmed product defects."
+        }
+      ],
+      "duplicate_disposition": "No purpose duplicate in this assignment. Link future parity runs by capture/build identity rather than merging away their visual evidence.",
+      "reader_risks": [
+        "Studio: lead with current status, owner, decision, and dated freshness; collapse long matrices/specs behind anchored sections and preserve screenshot captions beside images.",
+        "TUI80: wrap tables to four columns or fewer, paginate large specifications, render legacy HTML semantically, and keep evidence/status labels visible without horizontal scrolling.",
+        "email: send the decision, current blocker or next action, date/freshness warning, and one canonical link; omit long matrices, internal paths, and implementation inventories.",
+        "public: remove internal task IDs, repository paths, private operational topology, agent/provider credentials, and unreleased roadmap detail; never publish placeholder security contacts.",
+        "CLI/API: preserve immutable revision, document role, provenance/date, status, explicit unknowns, exact enum/schema contracts, and whether a statement is historical, proposed, or current."
+      ],
+      "rationale": "Keep because it has a clear method, concrete screenshot evidence, calibrated verdicts, and an explicit unknown instead of overclaiming."
+    },
+    {
+      "unit_id": "paper:vulnerability-disclosure-policy",
+      "document_id": "vulnerability-disclosure-policy",
+      "document_rev": "170dadd78f7c4271f1844a563813f1c5",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Public-facing vulnerability disclosure policy draft covering scope, reporting, safe harbor, exclusions, response timelines, and disclosure credit.",
+      "opening_and_criteria": "The opening is direct and the scope appears before process; reporting instructions and timelines are easy to locate.",
+      "outline_and_hierarchy": "The legacy HTML has a conventional policy hierarchy and compact commitments table, but it has not been migrated to native blocks.",
+      "human_voice_and_precision": "Safe-harbor language is humane and specific about good-faith conduct, privacy, service degradation, and limited proof access.",
+      "compression_and_restraint": "Keep the policy short, but replace both bracketed contact fields, verify the security.txt/status-page promises, and convert the legacy HTML to native blocks before external publication.",
+      "evidence_and_truth": "body_html[3]-[14] define scope, report path, safe harbor, exclusions, and commitments; body_html[15] explicitly says publication is not ready.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[9]",
+          "evidence": "The safe-harbor paragraph clearly protects good-faith researchers while setting concrete boundaries on privacy, degradation, and access.",
+          "lesson": "Security policy voice should be welcoming while remaining operationally precise."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[5]",
+          "evidence": "The reporting path still contains [security@your-domain] and [fingerprint] placeholders.",
+          "lesson": "A disclosure policy without a working secure contact channel is unsafe to publish and unusable in an incident."
+        }
+      ],
+      "duplicate_disposition": "No duplicate policy in this assignment; keep one canonical public security policy and redirect any future variants to it.",
+      "reader_risks": [
+        "Studio: lead with current status, owner, decision, and dated freshness; collapse long matrices/specs behind anchored sections and preserve screenshot captions beside images.",
+        "TUI80: wrap tables to four columns or fewer, paginate large specifications, render legacy HTML semantically, and keep evidence/status labels visible without horizontal scrolling.",
+        "email: send the decision, current blocker or next action, date/freshness warning, and one canonical link; omit long matrices, internal paths, and implementation inventories.",
+        "public: remove internal task IDs, repository paths, private operational topology, agent/provider credentials, and unreleased roadmap detail; never publish placeholder security contacts.",
+        "CLI/API: preserve immutable revision, document role, provenance/date, status, explicit unknowns, exact enum/schema contracts, and whether a statement is historical, proposed, or current."
+      ],
+      "rationale": "Repair because the policy structure is sound but its critical contact path is deliberately unfinished and the legacy representation needs migration."
+    },
+    {
+      "unit_id": "paper:wave-deck",
+      "document_id": "wave-deck",
+      "document_rev": "e86c9ab685223febc97b25cc2c0e3b6e",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Detailed information specification for an interactive Wave Deck, mapping every epic-cycle phase and five human gates to live data and evidence.",
+      "opening_and_criteria": "The ingress and what-this-is callout establish a precise scope: information, sources, decisions, and liveness rather than visual design.",
+      "outline_and_hierarchy": "A slide-by-slide sequence is thorough and auditable, but 98 blocks plus repeated Job/Data patterns create substantial reader load.",
+      "human_voice_and_precision": "The strongest voice is epistemically strict: not-found, refuted, died, stale, and unproven states must be as visible as positive outcomes.",
+      "compression_and_restraint": "Preserve the slide information contract, compress repeated mechanics into one schema table, and repair the pause architecture to match the later strategy before treating it as build authority.",
+      "evidence_and_truth": "blocks[31]-[34], [39], [50], [82], and [89] define coverage, proof, provenance, and drill-down contracts; block[83] gives an older gate implementation fork.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[31]",
+          "evidence": "The Coverage Map centers checked-and-found, checked-and-not-found, partial, and unreached space rather than only positive findings.",
+          "lesson": "A decision surface earns trust by making the edges of knowledge navigable."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[83]",
+          "evidence": "The engineering note proposes phase segmentation or a future pause primitive, while the later strategy uses single-script early return and resume; current implementation authority is ambiguous.",
+          "lesson": "A long information spec must not carry a stale architectural branch as if it were the current build plan."
+        }
+      ],
+      "duplicate_disposition": "Part of a three-paper Wave Deck family: keep this as the detailed information spec, strategy as decision authority, and Zen as implementation handoff; repair cross-links and current-mechanics labels instead of merging.",
+      "reader_risks": [
+        "Studio: lead with current status, owner, decision, and dated freshness; collapse long matrices/specs behind anchored sections and preserve screenshot captions beside images.",
+        "TUI80: wrap tables to four columns or fewer, paginate large specifications, render legacy HTML semantically, and keep evidence/status labels visible without horizontal scrolling.",
+        "email: send the decision, current blocker or next action, date/freshness warning, and one canonical link; omit long matrices, internal paths, and implementation inventories.",
+        "public: remove internal task IDs, repository paths, private operational topology, agent/provider credentials, and unreleased roadmap detail; never publish placeholder security contacts.",
+        "CLI/API: preserve immutable revision, document role, provenance/date, status, explicit unknowns, exact enum/schema contracts, and whether a statement is historical, proposed, or current."
+      ],
+      "rationale": "Repair because the information design is strong but its gate implementation note conflicts with the later strategy and the document needs role/freshness labeling."
+    },
+    {
+      "unit_id": "paper:wave-deck-strategy",
+      "document_id": "wave-deck-strategy",
+      "document_rev": "bdcd49441118c9153d090c460b66c427",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Adversarially reviewed Wave Deck strategy defining attended autonomy, evidence-bearing gates, immutable provenance, staged implementation, and kill signals.",
+      "opening_and_criteria": "The ingress states that this is the strategy that survived challenge and names its promise: one real judgment seam before cinematic surface investment.",
+      "outline_and_hierarchy": "Vision, five gates, contrarian attack, data spine, horizon, staged plan, governance, and ratification decisions form a disciplined argument.",
+      "human_voice_and_precision": "The prose is vivid without hiding constraints; it names what nearly killed the idea and records what evidence changed the design.",
+      "compression_and_restraint": "Keep as the canonical strategic rationale; surface the seven irreversible fields and stage gates before the richer narrative on constrained readers.",
+      "evidence_and_truth": "blocks[16]-[19] preserve adversarial findings, blocks[21]-[31] define the provenance spine, and blocks[33]-[41] price the plan and kill signals.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[31]",
+          "evidence": "Seven non-backfillable governance fields make provenance, policy snapshots, join keys, and correction history explicit before implementation.",
+          "lesson": "Strategic documents should identify irreversible decisions early enough to preserve future auditability."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[36]",
+          "evidence": "Sequencing is tied to wave-13 and a near-term estimate, which is temporal context rather than enduring product law.",
+          "lesson": "Keep roadmap timestamps labeled as historical so they do not silently become current queue authority."
+        }
+      ],
+      "duplicate_disposition": "Keep distinct from wave-deck (information spec) and wave-deck-zen-handoff (implementation mapping); add explicit role links rather than merge.",
+      "reader_risks": [
+        "Studio: lead with current status, owner, decision, and dated freshness; collapse long matrices/specs behind anchored sections and preserve screenshot captions beside images.",
+        "TUI80: wrap tables to four columns or fewer, paginate large specifications, render legacy HTML semantically, and keep evidence/status labels visible without horizontal scrolling.",
+        "email: send the decision, current blocker or next action, date/freshness warning, and one canonical link; omit long matrices, internal paths, and implementation inventories.",
+        "public: remove internal task IDs, repository paths, private operational topology, agent/provider credentials, and unreleased roadmap detail; never publish placeholder security contacts.",
+        "CLI/API: preserve immutable revision, document role, provenance/date, status, explicit unknowns, exact enum/schema contracts, and whether a statement is historical, proposed, or current."
+      ],
+      "rationale": "Keep because it is the clearest current decision authority, incorporates adversarial review, and gates expensive surface work on evidence."
+    },
+    {
+      "unit_id": "paper:wave-deck-zen-handoff",
+      "document_id": "wave-deck-zen-handoff",
+      "document_rev": "a855cf174e58d8f1395ab338ea194070",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Implementation handoff connecting the scripted Zen Wave Deck to the Studio chat, task ledger, wave Paper, notification, and replay substrates.",
+      "opening_and_criteria": "The ingress states the thin-projection intent, while the status callout records the ratified no-fork direction and historical landing evidence.",
+      "outline_and_hierarchy": "Artifact location, honest fiction/real/gap split, chat mapping, one-substrate law, task-side capabilities, and pragmatic stages are coherent.",
+      "human_voice_and_precision": "The handoff is unusually candid that the demo's narrative, timing, proofs, and grade are scripted constants rather than live truth.",
+      "compression_and_restraint": "Retain as implementation handoff, but refresh status, reconcile gate execution with the later early-return strategy, and separate shipped capability from proposed task-side pushes.",
+      "evidence_and_truth": "blocks[15]-[25] distinguish fiction, existing substrate, and projection law; blocks[31]-[38] map filed capabilities, stages, costs, and open decisions.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[25]",
+          "evidence": "The one-substrate law forbids a parallel store, event stream, or run loop and makes the deck a projection of existing session and ledger truth.",
+          "lesson": "A visualization should not become a second source of operational truth."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[5]",
+          "evidence": "The status remains stamped 2026-07-11 with 'EPIC NOT YET FILED,' so readers cannot tell whether the handoff still describes current execution state.",
+          "lesson": "Handoffs need a current status pointer or a prominent historical-as-of label."
+        }
+      ],
+      "duplicate_disposition": "Keep distinct within the Wave Deck family as the implementation mapping; repair status and mechanics rather than merging it into the strategy or 98-block information spec.",
+      "reader_risks": [
+        "Studio: lead with current status, owner, decision, and dated freshness; collapse long matrices/specs behind anchored sections and preserve screenshot captions beside images.",
+        "TUI80: wrap tables to four columns or fewer, paginate large specifications, render legacy HTML semantically, and keep evidence/status labels visible without horizontal scrolling.",
+        "email: send the decision, current blocker or next action, date/freshness warning, and one canonical link; omit long matrices, internal paths, and implementation inventories.",
+        "public: remove internal task IDs, repository paths, private operational topology, agent/provider credentials, and unreleased roadmap detail; never publish placeholder security contacts.",
+        "CLI/API: preserve immutable revision, document role, provenance/date, status, explicit unknowns, exact enum/schema contracts, and whether a statement is historical, proposed, or current."
+      ],
+      "rationale": "Repair because its substrate law and mapping are valuable, but dated status and gate-mechanics assertions cannot serve as current handoff authority without reconciliation."
+    },
+    {
+      "unit_id": "paper:weaving-claude-codex",
+      "document_id": "weaving-claude-codex",
+      "document_rev": "65c7c92fa0c62bf760d81a19015c3186",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Research-and-plan paper for routing and handing work between Claude and Codex through a shared ledger, then adding an optional provider-aware conductor.",
+      "opening_and_criteria": "The executive summary gives two independently valuable routes and clearly gates the riskier driver behind a spike.",
+      "outline_and_hierarchy": "Goal, routes, existing substrate, four findings, local feasibility, phased plan, risks, criteria, sources, and reviewer questions are well ordered.",
+      "human_voice_and_precision": "The paper carefully distinguishes strong indirect motivation for provider-diverse judging from absent head-to-head proof.",
+      "compression_and_restraint": "Keep the two-route architecture, but revalidate every Codex CLI/SDK/model/version and repo-line assertion against current installed surfaces before implementation.",
+      "evidence_and_truth": "blocks[7]-[19] separate choreography, conductor translation, ledger research, tool-format divergence, and judgment evidence; blocks[21]-[28] turn them into gates.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[19]",
+          "evidence": "The verification section states both the peer-reviewed motivations and the honest caveat that no fetched paper directly proves different-provider critique superior head-to-head.",
+          "lesson": "Research plans should separate motivation, inference, and demonstrated comparative evidence."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[17]",
+          "evidence": "The driver estimate depends on rapidly changing Codex commands, event names, SDK packaging, CLI version 0.144.2, and example model gpt-5.5.",
+          "lesson": "Version-specific external interfaces need a check-date and a fresh spike before they price implementation work."
+        }
+      ],
+      "duplicate_disposition": "Not a duplicate of viable-everywhere: this paper owns cross-provider execution and handoff, not distribution reach. Link shared MCP primitives only.",
+      "reader_risks": [
+        "Studio: lead with current status, owner, decision, and dated freshness; collapse long matrices/specs behind anchored sections and preserve screenshot captions beside images.",
+        "TUI80: wrap tables to four columns or fewer, paginate large specifications, render legacy HTML semantically, and keep evidence/status labels visible without horizontal scrolling.",
+        "email: send the decision, current blocker or next action, date/freshness warning, and one canonical link; omit long matrices, internal paths, and implementation inventories.",
+        "public: remove internal task IDs, repository paths, private operational topology, agent/provider credentials, and unreleased roadmap detail; never publish placeholder security contacts.",
+        "CLI/API: preserve immutable revision, document role, provenance/date, status, explicit unknowns, exact enum/schema contracts, and whether a statement is historical, proposed, or current."
+      ],
+      "rationale": "Repair because the route architecture remains coherent but current implementation sizing rests on perishable external and repo-local details."
+    },
+    {
+      "unit_id": "paper:welcome",
+      "document_id": "welcome",
+      "document_rev": "b4d6344aab50dd1442471325648c94bc",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Minimal first-run orientation explaining what a Paper is, where Media lives, and the four primary CLI discovery commands.",
+      "opening_and_criteria": "The opening immediately names the document type and its three reader surfaces without marketing detour.",
+      "outline_and_hierarchy": "Four blocks move from concept to Studio location to commands; the hierarchy is intentionally sparse.",
+      "human_voice_and_precision": "The voice is friendly, concrete, and restrained enough for an empty installation.",
+      "compression_and_restraint": "Keep minimal; if expanded, add only one next-step example and preserve the four-command scan path.",
+      "evidence_and_truth": "blocks[0]-[3] provide a complete compact onboarding path from Paper identity to Studio Media and terminal discovery.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[1]",
+          "evidence": "The first paragraph identifies Papers, their plugin home, and their Studio/TUI/public routes in two sentences.",
+          "lesson": "First-run content should orient across surfaces before teaching details."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "'Everything else starts empty on purpose' gives no next action or reason beyond the Media location.",
+          "lesson": "Minimal onboarding still benefits from one outcome-oriented next step, but should not become a manual."
+        }
+      ],
+      "duplicate_disposition": "No purpose duplicate in this assignment; keep as the single minimal welcome surface and link deeper guides rather than copying them here.",
+      "reader_risks": [
+        "Studio: lead with current status, owner, decision, and dated freshness; collapse long matrices/specs behind anchored sections and preserve screenshot captions beside images.",
+        "TUI80: wrap tables to four columns or fewer, paginate large specifications, render legacy HTML semantically, and keep evidence/status labels visible without horizontal scrolling.",
+        "email: send the decision, current blocker or next action, date/freshness warning, and one canonical link; omit long matrices, internal paths, and implementation inventories.",
+        "public: remove internal task IDs, repository paths, private operational topology, agent/provider credentials, and unreleased roadmap detail; never publish placeholder security contacts.",
+        "CLI/API: preserve immutable revision, document role, provenance/date, status, explicit unknowns, exact enum/schema contracts, and whether a statement is historical, proposed, or current."
+      ],
+      "rationale": "Keep because its brevity, command selection, and cross-surface orientation match the job of an installation welcome paper."
+    },
+    {
+      "unit_id": "paper:whole-corpus-oracle-verdict",
+      "document_id": "whole-corpus-oracle-verdict",
+      "document_rev": "aa442142ba30b68fba58d7e63b1cc8a6",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Two-round experiment verdict comparing whole-corpus optical packing with model-guided Grep navigation across retrieval question shapes.",
+      "opening_and_criteria": "The headline and opening callout state the falsified hypothesis, corpus size, both rounds, score, and the narrower surviving use case.",
+      "outline_and_hierarchy": "Mechanism explanation, combined scoreboard, operational rule, and linked series create a compact research conclusion.",
+      "human_voice_and_precision": "The paper is decisive without hiding ambiguity: it reports sibling misattribution, both-arm failure, negative knowledge, and calibration value.",
+      "compression_and_restraint": "Keep as an experiment verdict; label corpus/model figures as this run's historical conditions and require fresh validation before extrapolating to new models or corpora.",
+      "evidence_and_truth": "blocks[3], [5], and [7] report the comparative results and failure mechanisms; blocks[9]-[11] bound the operational rule and experiment lineage.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[9]",
+          "evidence": "The final rule cleanly separates few-paper retrieval from genuinely corpus-wide synthesis and adds verify-before-acting and never-pack-editable-content caveats.",
+          "lesson": "Experiment verdicts should end in a bounded operational decision rule."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "One semantic-needle question was ambiguous enough that both arms failed, and all numbers are tied to one 238-paper corpus and model setup.",
+          "lesson": "A strong result should preserve question ambiguity and experiment conditions rather than universalize beyond them."
+        }
+      ],
+      "duplicate_disposition": "No direct duplicate here; keep linked to the named optical duel/result series rather than merging away the final ruling and scoreboard.",
+      "reader_risks": [
+        "Studio: lead with current status, owner, decision, and dated freshness; collapse long matrices/specs behind anchored sections and preserve screenshot captions beside images.",
+        "TUI80: wrap tables to four columns or fewer, paginate large specifications, render legacy HTML semantically, and keep evidence/status labels visible without horizontal scrolling.",
+        "email: send the decision, current blocker or next action, date/freshness warning, and one canonical link; omit long matrices, internal paths, and implementation inventories.",
+        "public: remove internal task IDs, repository paths, private operational topology, agent/provider credentials, and unreleased roadmap detail; never publish placeholder security contacts.",
+        "CLI/API: preserve immutable revision, document role, provenance/date, status, explicit unknowns, exact enum/schema contracts, and whether a statement is historical, proposed, or current."
+      ],
+      "rationale": "Keep because the result is compact, falsifiable, honest about failures, and directly converts evidence into a bounded practice rule."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false,
+    "local_report_artifacts_only": true
+  }
+}

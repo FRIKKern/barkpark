@@ -1,0 +1,89 @@
+{
+  "schema_version": "paper-perfection-successor-readback-index/v1",
+  "assignment_id": "PPCC2-S059",
+  "count": 9,
+  "all_pinned_revisions_read": true,
+  "reads": [
+    {
+      "unit_id": "paper:viable-everywhere-strategy",
+      "document_id": "viable-everywhere-strategy",
+      "document_rev": "6c12264bbeb55265c64492618150b307",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S059/readbacks/viable-everywhere-strategy.json",
+      "readback_sha256": "8f207a0d80774b78467756c89410f7b62def40dc2f411316660ddb4fbf4499f4",
+      "block_count": 43,
+      "body_html_chars": 28785
+    },
+    {
+      "unit_id": "paper:view-vs-edit-parity",
+      "document_id": "view-vs-edit-parity",
+      "document_rev": "b235e3efb43c91a5cb5720a883859b2d",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S059/readbacks/view-vs-edit-parity.json",
+      "readback_sha256": "8594a28609bc2481ecb0aa9e4f0df931238d1a7e1feb1f7dbeeb3386de8467a5",
+      "block_count": 38,
+      "body_html_chars": 0
+    },
+    {
+      "unit_id": "paper:vulnerability-disclosure-policy",
+      "document_id": "vulnerability-disclosure-policy",
+      "document_rev": "170dadd78f7c4271f1844a563813f1c5",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S059/readbacks/vulnerability-disclosure-policy.json",
+      "readback_sha256": "896e15f132b11dec981f121a55affe40c1af9f34a18fac3d8902f52ae15b621d",
+      "block_count": 0,
+      "body_html_chars": 2006
+    },
+    {
+      "unit_id": "paper:wave-deck",
+      "document_id": "wave-deck",
+      "document_rev": "e86c9ab685223febc97b25cc2c0e3b6e",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S059/readbacks/wave-deck.json",
+      "readback_sha256": "cbbf21e428dfac22c6e8b42857601f8aa83547188ef50b3822ced47e4eb61c80",
+      "block_count": 98,
+      "body_html_chars": 0
+    },
+    {
+      "unit_id": "paper:wave-deck-strategy",
+      "document_id": "wave-deck-strategy",
+      "document_rev": "bdcd49441118c9153d090c460b66c427",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S059/readbacks/wave-deck-strategy.json",
+      "readback_sha256": "0f86c2319c1a8f0dc5567497b9c57ca327b77c4ce6cb30245801e7e0c6347dc1",
+      "block_count": 43,
+      "body_html_chars": 24493
+    },
+    {
+      "unit_id": "paper:wave-deck-zen-handoff",
+      "document_id": "wave-deck-zen-handoff",
+      "document_rev": "a855cf174e58d8f1395ab338ea194070",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S059/readbacks/wave-deck-zen-handoff.json",
+      "readback_sha256": "ea6e51450f5f7a8fbc09bcddc98a2857aadb5b82e0a7007ff7e20191e17c38eb",
+      "block_count": 41,
+      "body_html_chars": 0
+    },
+    {
+      "unit_id": "paper:weaving-claude-codex",
+      "document_id": "weaving-claude-codex",
+      "document_rev": "65c7c92fa0c62bf760d81a19015c3186",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S059/readbacks/weaving-claude-codex.json",
+      "readback_sha256": "1a4f40cd5620201149e68085ae30ac531a728bc5b418d6947db2b5b51afad642",
+      "block_count": 33,
+      "body_html_chars": 0
+    },
+    {
+      "unit_id": "paper:welcome",
+      "document_id": "welcome",
+      "document_rev": "b4d6344aab50dd1442471325648c94bc",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S059/readbacks/welcome.json",
+      "readback_sha256": "67580c9f7beb025ea86746b821dc0b44510afa7fcb1a4a598a9efc68dd18e6c9",
+      "block_count": 4,
+      "body_html_chars": 927
+    },
+    {
+      "unit_id": "paper:whole-corpus-oracle-verdict",
+      "document_id": "whole-corpus-oracle-verdict",
+      "document_rev": "aa442142ba30b68fba58d7e63b1cc8a6",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S059/readbacks/whole-corpus-oracle-verdict.json",
+      "readback_sha256": "2b9f6619695bc7f4f9f6aabb3656a02c79428fb9312eae999782180b69798f6d",
+      "block_count": 12,
+      "body_html_chars": 6478
+    }
+  ]
+}
