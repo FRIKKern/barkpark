@@ -65,7 +65,51 @@ defmodule Barkpark.Media.Blobstore.S3 do
 
   require Logger
 
+  # ── PATH PROVENANCE ────────────────────────────────────────────────────────
+  #
+  # The TWO-CLAUSE reachability verdict behind every
+  # `sobelow_skip ["Traversal.FileModule"]` in this module. Both clauses hold
+  # and neither alone is the answer, so neither may be dropped: clause (1)
+  # says the upload path cannot traverse, clause (2) says the import path CAN
+  # and names what actually stops it. Shortening this to "server-generated,
+  # safe" would be false. The File calls here act on the local write-through
+  # CACHE (`Media.file_path/1`), not on the bucket — the bucket key is derived
+  # from the same `relative_path` by `key_for/1`.
+  #
+  # (1) Every UPLOAD path is server-generated. `Media.upload/3` is the ONLY
+  #     changeset writer of `media_files.path` in `lib/` — `MediaFile.changeset/2`
+  #     has exactly one call site, media.ex:110, fed the attrs built at
+  #     media.ex:101 — and the value it writes is
+  #     `"<yyyy>/<mm>/" <> unique_filename(original_name)`. `unique_filename/1`
+  #     (media.ex:654) runs the client filename through `Path.basename/2`, which
+  #     discards every directory component, then slugs the base with
+  #     `~r/[^a-z0-9-]/`, so no separator and no `.` survives:
+  #     `"../../../etc/passwd"` becomes `"passwd-<hex>"` and `".."` becomes
+  #     `"-<hex>."`. A client-supplied filename cannot steer these calls out of
+  #     `Media.upload_dir/0`.
+  #
+  # (2) The IMPORT path is admin-gated, and clause (1) does NOT cover it.
+  #     `import_member/3` (workspace_bundle.ex:1013) COPYs the manifest-named
+  #     tables verbatim — `media_files` is a copy-strategy bundle member
+  #     (workspace_bundle/catalog.ex:98) — straight into the real table with
+  #     `COPY … FROM STDIN`, past `MediaFile.changeset/2` entirely. So an admin
+  #     bundle CAN plant `../../..` in `media_files.path`, and that value reaches
+  #     `Media.file_path/1` and the calls below. What bounds it is
+  #     AUTHORIZATION, not sanitisation: the sole route is router.ex:2544-2548,
+  #     behind `pipe_through([:api, :require_admin])`, and no HTTP token mint
+  #     issues the `admin` permission — the mint allowlists cap at
+  #     `public-read`/`read`/`write`/`chat` (token_controller.ex:30,
+  #     app_token_controller.ex:48, playground_controller.ex:134,
+  #     fleet_support_token_controller.ex:33, auth.ex:325) and the one
+  #     HTTP-reachable personal-access-token mint (auth_controller.ex:238)
+  #     hardcodes `["read"]`. A caller who can plant that path already holds
+  #     admin and can already restore an arbitrary workspace.
+
   @impl true
+  # `source_path` is the `%Plug.Upload{path: …}` temp file chosen by Plug
+  # (media.ex:91, the only caller of this verb), never client text — so this
+  # `File.read` is bounded independently of both clauses above.
+  # sobelow_skip ["Traversal.FileModule"]
   def put_file(relative_path, source_path, opts) do
     case File.read(source_path) do
       {:ok, body} ->
@@ -138,6 +182,11 @@ defmodule Barkpark.Media.Blobstore.S3 do
   end
 
   @impl true
+  # The `File.rm` drops the local CACHE copy at `Media.file_path/1` — see PATH
+  # PROVENANCE above. Like the local backend's `delete/1` this verb is reached
+  # with a path read BACK off a `media_files` row (media.ex:436, `file.path`),
+  # so clause (2) is the operative clause here, not clause (1).
+  # sobelow_skip ["Traversal.FileModule"]
   def delete(relative_path) do
     url =
       Presign.url("DELETE", key_for(relative_path), presign_config(), expires_in: presign_ttl())
@@ -206,6 +255,13 @@ defmodule Barkpark.Media.Blobstore.S3 do
 
   # ── internals ──────────────────────────────────────────────────────────────
 
+  # `full_path` is `ensure_local/1`'s `Media.file_path/1` — see PATH PROVENANCE
+  # above; both callers (processing.ex:47, renditions.ex:120) pass `file.path`
+  # read back off a `media_files` row, so clause (2) is the operative clause.
+  # `tmp_path` only ever appends a server-generated
+  # `".part-<System.unique_integer>"` suffix to that same `full_path`, so it
+  # cannot reach a directory `full_path` could not.
+  # sobelow_skip ["Traversal.FileModule"]
   defp download(relative_path, full_path) do
     url = Presign.url("GET", key_for(relative_path), presign_config(), expires_in: presign_ttl())
     tmp_path = full_path <> ".part-#{System.unique_integer([:positive])}"
@@ -229,6 +285,10 @@ defmodule Barkpark.Media.Blobstore.S3 do
     end
   end
 
+  # `full_path` is `Media.file_path/1` — see PATH PROVENANCE above. `source_path`
+  # is threaded straight through from `put_file/3`, i.e. the `%Plug.Upload{}`
+  # temp file, never client text.
+  # sobelow_skip ["Traversal.FileModule"]
   defp warm_cache(relative_path, source_path) do
     full_path = Media.file_path(relative_path)
 
