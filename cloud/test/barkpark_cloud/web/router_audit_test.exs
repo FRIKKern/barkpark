@@ -1263,7 +1263,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       assert ev.metadata["has_artifact"] == true
     end
 
-    test "POST /v1/sites/:id/artifact writes site.artifact_uploaded (filename + bytes)" do
+    test "POST /v1/sites/:id/artifact writes site.artifact_uploaded (digest + bytes)" do
       {user, team, token} = logged_in()
       site = site_fixture(team)
 
@@ -1278,7 +1278,12 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       assert [ev] = events(team, "site.artifact_uploaded")
       assert ev.actor_user_id == user.id
       assert ev.metadata["bytes"] > 0
-      assert is_binary(ev.metadata["filename"])
+      # site-spawner W9: the sink is Postgres, so the audit names the DIGEST of
+      # the bytes rather than a filename on a disk nothing could ever read.
+      assert ev.metadata["sha256"] ==
+               :sha256 |> :crypto.hash("tarball-bytes") |> Base.encode16(case: :lower)
+
+      refute Map.has_key?(ev.metadata, "filename")
     end
 
     test "POST /v1/sites/:id/env writes site.env_changed — key names only, NEVER the values" do

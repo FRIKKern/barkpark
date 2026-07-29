@@ -965,4 +965,139 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert is_binary(detail)
     end
   end
+
+  ## ---------------------------------------------------------------------------
+  ## site-spawner W9 — PREBUILT: the build leaves the serving box (charter D86/D91)
+  ## ---------------------------------------------------------------------------
+
+  describe "prebuilt deploys" do
+    # The bytes ride the EXISTING transport: Registry.relay_admin already
+    # Jason.encode!s whatever map it is handed, so this is zero new transport
+    # code. What it is NOT free of is a handshake — see the echo tests below.
+    defp prebuilt_deployment(site, bytes) do
+      bp = Registry.get_barkpark(site.barkpark_id)
+      {:ok, d} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+      sha = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+      {:ok, stamped} = Deploy.store_artifact(d, bytes, sha)
+      {stamped, sha}
+    end
+
+    defp echoing_start(sha),
+      do: {:ok, 202, %{"status" => "started", "prebuilt" => true, "artifact_sha256" => sha}}
+
+    test "the box payload carries artifact_b64 + artifact_sha256, and a box build carries neither" do
+      {_bp, site} = setup_site()
+      bytes = :crypto.strong_rand_bytes(512)
+      {d, sha} = prebuilt_deployment(site, bytes)
+
+      FakeBoxRelay.program(start: echoing_start(sha), polls: [FakeBoxRelay.walk(all_stages())])
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      assert [{:start_deploy, payload} | _] = FakeBoxRelay.calls()
+      assert payload.source == "prebuilt"
+      assert payload.artifact_sha256 == sha
+      # The bytes themselves, intact — base64 because the payload is JSON.
+      assert Base.decode64!(payload.artifact_b64) == bytes
+    end
+
+    test "a BOX build's payload is byte-identical to pre-W9 — no artifact keys at all" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(all_stages())])
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      assert [{:start_deploy, payload} | _] = FakeBoxRelay.calls()
+      refute Map.has_key?(payload, :artifact_b64)
+      refute Map.has_key?(payload, :artifact_sha256)
+      refute Map.has_key?(payload, :source)
+    end
+
+    test "a 202 WITHOUT the prebuilt echo FAILS the deployment — it never polls the box" do
+      {_bp, site} = setup_site()
+      {d, _sha} = prebuilt_deployment(site, "dist-bytes")
+
+      # An UN-UPGRADED box: its deploy-request decoder silently drops unknown
+      # top-level params, so it accepts the run, ignores the artifact, and builds
+      # from source on the very cores this wave exists to free — while the ledger
+      # says "prebuilt". Without this check that deploy goes GREEN.
+      FakeBoxRelay.program(
+        start: {:ok, 202, %{"status" => "started"}},
+        polls: [FakeBoxRelay.walk(all_stages())]
+      )
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      failed = Registry.get_deployment(d.id)
+      assert failed.status == "failed"
+      assert failed.failure_reason =~ "did not confirm the prebuilt artifact"
+
+      # And the box was never polled: the run stopped at the handshake.
+      refute Enum.any?(FakeBoxRelay.calls(), &match?({:poll_deploy, _}, &1))
+    end
+
+    test "a 202 echoing a DIFFERENT digest fails too, naming both digests" do
+      {_bp, site} = setup_site()
+      {d, sha} = prebuilt_deployment(site, "dist-bytes")
+
+      FakeBoxRelay.program(
+        start: echoing_start("0000000000000000000000000000000000000000000000000000000000000000"),
+        polls: [FakeBoxRelay.walk(all_stages())]
+      )
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      failed = Registry.get_deployment(d.id)
+      assert failed.failure_reason =~ sha
+      assert failed.failure_reason =~ "0000000000"
+    end
+
+    test "the stored bytes are DROPPED once the deployment settles live" do
+      {_bp, site} = setup_site()
+      {d, sha} = prebuilt_deployment(site, "dist-bytes")
+
+      assert Deploy.artifact_for(d.id)
+
+      FakeBoxRelay.program(start: echoing_start(sha), polls: [FakeBoxRelay.walk(all_stages())])
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      # The box has them; a terminal deployment is never re-driven. Keeping them
+      # would leak up to 32 MB per build onto the control plane's only volume.
+      assert Deploy.artifact_for(d.id) == nil
+      # The digest STAYS on the row — that is the record of what was served.
+      assert Registry.get_deployment(d.id).artifact_sha256 == sha
+    end
+
+    test "the stored bytes are dropped on a FAILED deploy too" do
+      {_bp, site} = setup_site()
+      {d, sha} = prebuilt_deployment(site, "dist-bytes")
+
+      FakeBoxRelay.program(
+        start: echoing_start(sha),
+        polls: [FakeBoxRelay.failed_at("HEALTH", "the build marker was missing")]
+      )
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+      assert Deploy.artifact_for(d.id) == nil
+    end
+
+    test "a prebuilt mint is non-idempotent; a box-build mint is not" do
+      {bp, site} = setup_site()
+
+      {:ok, p1} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+      {:ok, p2} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+
+      refute p1.build_id == p2.build_id
+      assert p1.source == "prebuilt"
+      assert p2.source == "prebuilt"
+
+      # The pre-W9 no-op is untouched — the two nonces are separate keys because
+      # they mean different things (force = "re-run this exact content";
+      # prebuilt = "the content is not knowable from here").
+      {:ok, b1} = Deploy.enqueue(site, bp)
+      assert {:duplicate, dup} = Deploy.enqueue(site, bp)
+      assert dup.id == b1.id
+    end
+  end
 end

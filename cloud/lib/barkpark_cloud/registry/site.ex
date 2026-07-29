@@ -135,6 +135,15 @@ defmodule BarkparkCloud.Registry.Site do
     # branch_mismatch no-op).
     field :previews_enabled, :boolean, default: true
 
+    # site-spawner W9 (charter D87): the per-site opt-in for PREBUILT deploys —
+    # bytes built somewhere other than the serving box and uploaded as a tarball.
+    # Default FALSE, and deliberately per-site rather than fleet-wide: accepting
+    # output the control plane did not produce is a different trust statement
+    # from building it on the box, so it is always an explicit choice for THIS
+    # site. With it off, `{"source":"prebuilt"}` is refused and the deploy path is
+    # byte-identical to today.
+    field :prebuilt_enabled, :boolean, default: false
+
     # site-spawner W6 (charter D51): CLOUDFLARE-IN-FRONT edge binding. The user's
     # OWN domain (blog.example.com), bound to THIS deployed site through the user's
     # CF account — the OPPOSITE of `Barkpark.custom_host` (platform own-zone, box
@@ -222,6 +231,9 @@ defmodule BarkparkCloud.Registry.Site do
       :github_webhook_secret_encrypted,
       :content_webhook_secret_encrypted,
       :previews_enabled,
+      # site-spawner W9 (charter D87): settable at create so a site can be
+      # spawned prebuilt-first (a CI runner never has to make a second call).
+      :prebuilt_enabled,
       :barkpark_id,
       :team_id
     ])
@@ -308,10 +320,16 @@ defmodule BarkparkCloud.Registry.Site do
   @doc """
   The operator-settings changeset (search-template W8): ONLY the fields safe to
   change between deploys. Same closed-set validations as create.
+
+  site-spawner W9 (charter D87) adds `prebuilt_enabled` — WHERE this site's next
+  build runs is exactly a between-deploys operator decision, and the only way to
+  flip it without a re-spawn. Note the router's PATCH route keeps its OWN
+  hard-coded `Map.take/2` allow-list: casting a field here and forgetting it
+  there is a green-looking no-op (200, an unchanged row, and no error anywhere).
   """
   def settings_changeset(site, attrs) do
     site
-    |> cast(attrs, [:theme, :doc_type])
+    |> cast(attrs, [:theme, :doc_type, :prebuilt_enabled])
     |> validate_theme()
     |> validate_length(:doc_type, min: 1, max: 100)
   end

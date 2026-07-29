@@ -47,6 +47,19 @@ defmodule BarkparkCloud.Registry.Deployment do
   # insert without this entry.
   @triggers ~w(manual content-auto template-auto)
 
+  # site-spawner W9 (charter D86): WHERE this build's bytes came from.
+  # "box-build" (the pre-W9 default — `npm ci && npm run build` on the serving
+  # box, so every existing row backfills to it) or "prebuilt" (the bytes were
+  # built elsewhere and streamed up as a tarball; the box only stages,
+  # health-gates and switches them).
+  #
+  # It is a THIRD provenance axis, orthogonal to `trigger`: trigger says WHO
+  # asked, source says WHO BUILT. Collapsing them would make an unlabelled
+  # deploy stream claim the control plane knows something it does not — and the
+  # honest-gates half of this wave turns on being able to say, per row, whether
+  # HEALTH certified bytes this fleet produced.
+  @sources ~w(box-build prebuilt)
+
   # The legal from → to status graph the moduledoc promises. `live`, `failed`,
   # and `cancelled` are terminal (no outgoing edges). A same-status write is
   # always legal (see `legal_transition?/2`) so field-only updates — image_tag,
@@ -110,6 +123,17 @@ defmodule BarkparkCloud.Registry.Deployment do
     # default ("manual"), so a container/pre-W5 row reads as manual.
     field :trigger, :string, default: "manual"
 
+    # site-spawner W9 (charter D86): "box-build" | "prebuilt" — WHERE the bytes
+    # came from. Set at create; never mutated by a transition (a build cannot
+    # change where it was built). Null-safe by column default, so every
+    # pre-W9 row reads as box-build.
+    field :source, :string, default: "box-build"
+
+    # The sha256 of the uploaded tarball, recorded by the artifact route BEFORE
+    # the driver is started — so a prebuilt deployment that reached the box can
+    # always name the exact bytes it was asked to serve. Nil on a box-build.
+    field :artifact_sha256, :string
+
     field :claim_worker, :string
     field :claimed_at, :utc_datetime_usec
     field :claim_epoch, :integer, default: 0
@@ -146,6 +170,19 @@ defmodule BarkparkCloud.Registry.Deployment do
 
   @doc "The valid deploy triggers (provenance): manual | content-auto (charter D49)."
   def triggers, do: @triggers
+
+  @doc "The valid deploy sources (where the bytes were built): box-build | prebuilt (charter D86)."
+  def sources, do: @sources
+
+  @doc """
+  Was this deployment's output built OFF the serving box (charter D86)?
+
+  A SEAM, not a copy: `@sources` stays the single owner of the vocabulary, so a
+  caller asking "do I need artifact bytes for this row?" never re-spells the
+  literal. The payload builder and the artifact route both ask here.
+  """
+  @spec prebuilt?(t()) :: boolean()
+  def prebuilt?(%__MODULE__{source: source}), do: source == "prebuilt"
 
   @doc "The legal from → to status transition graph."
   def transitions, do: @transitions
@@ -202,11 +239,19 @@ defmodule BarkparkCloud.Registry.Deployment do
       # site-spawner W5 (charter D49): provenance is set at create (manual by
       # default; the content-publish receiver stamps "content-auto"). Not a
       # transition field — a build never changes WHY it was created.
-      :trigger
+      :trigger,
+      # site-spawner W9 (charter D86): WHERE the bytes come from, and the digest
+      # of the uploaded ones. `source` is create-time provenance like `trigger`;
+      # `artifact_sha256` is written by the artifact route on the already-minted
+      # row (this changeset, never `transition_changeset/2` — a builder must not
+      # be able to restate which bytes it was handed).
+      :source,
+      :artifact_sha256
     ])
     |> validate_required([:site_id])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:trigger, @triggers)
+    |> validate_inclusion(:source, @sources)
     |> assoc_constraint(:site)
     # site-spawner W1: PLAN idempotency backstop. A repeat build_id for the same
     # site surfaces as a changeset error (the router can turn it into a 200
@@ -246,11 +291,19 @@ defmodule BarkparkCloud.Registry.Deployment do
       :environment,
       :branch,
       :preview_slug,
-      :preview_host
+      :preview_host,
+      # site-spawner W9 (charter D86): the preview path is an INDEPENDENT FORK of
+      # `changeset/2`, not a delegation — a field added only there is silently
+      # dropped on every preview deploy, which would answer 201 and then build
+      # from the box. Both provenance fields are cast here for exactly that
+      # reason.
+      :source,
+      :artifact_sha256
     ])
     |> validate_required([:site_id, :branch, :preview_slug, :preview_host])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:environment, @environments)
+    |> validate_inclusion(:source, @sources)
     |> assoc_constraint(:site)
     # dwb-18 twins for the preview path: the same globally-unique delivery_id
     # index, plus at most one ACTIVE preview build per (site, branch) — the DB
@@ -272,6 +325,11 @@ defmodule BarkparkCloud.Registry.Deployment do
   Narrow changeset for the builder's status transitions (image_tag, log url,
   failure reason, became_live_at) plus the gh-5 live-console append. Cannot move
   the deployment between sites.
+
+  `source` and `artifact_sha256` are deliberately NOT castable here (charter
+  D86): provenance is create-time. A builder that could restate WHERE its bytes
+  came from — or WHICH bytes it was handed — could relabel an off-box artifact as
+  a box build after the fact, and the ledger would agree with it.
   """
   def transition_changeset(deployment, attrs) do
     deployment

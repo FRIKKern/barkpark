@@ -179,7 +179,8 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/:id/rollback user    roll a site back to a prior deployment (write ability)
       POST    /v1/sites/:id/deployments/:dep_id/promote user rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
-      POST    /v1/sites/:id/artifact user    upload tarball (octet-stream) → file:// URL
+      POST    /v1/sites/:id/artifact user    upload tarball (octet-stream) → artifact id + sha256 (write ability)
+      POST    /v1/sites/:id/deployments/:dep_id/artifact user  upload a PREBUILT dist for a minted deployment, then start it (write ability)
       POST    /v1/sites/:id/env    user      replace the encrypted env blob
       POST    /v1/sites/:id/domains user     add a domain to a site
       POST    /v1/sites/:id/github  user     link a GitHub repo + branch + webhook secret (manual)
@@ -5900,13 +5901,18 @@ defmodule BarkparkCloud.Web.Router do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
       attrs =
         conn.body_params
-        |> Map.take(["theme", "doc_type"])
+        # site-spawner W9 (charter D87): this allow-list is INDEPENDENT of
+        # `Site.settings_changeset/2`'s cast list — widening only the changeset
+        # would make a PATCH of prebuilt_enabled a green-looking no-op (200, an
+        # unchanged row, no error anywhere). Both, or neither.
+        |> Map.take(["theme", "doc_type", "prebuilt_enabled"])
         |> Map.new(fn {k, v} -> {String.to_existing_atom(k), v} end)
 
       if attrs == %{} do
         json(conn, 422, %{
           error: "nothing_to_update",
-          detail: "mutable fields: theme (palette), doc_type (featured content type)"
+          detail:
+            "mutable fields: theme (palette), doc_type (featured content type), prebuilt_enabled (accept off-box builds)"
         })
       else
         case Registry.update_site_settings(site, attrs) do
@@ -6242,34 +6248,39 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # POST /v1/sites/:id/artifact (application/octet-stream body) → 201
-  # {artifact_url}. The CLI's `bp deploy` streams a tar.gz of the project dir
-  # here; the control plane writes it to a configured artifact dir and returns
-  # a `file://` URL the builder can read. This is the MVP of off-box artifact
-  # storage — no S3, no signed URLs, just a host-local path the builder
-  # process shares with the control plane.
+  # {artifact_id, sha256, bytes}.
   #
-  # Size cap: 100 MB by default (configurable via :max_artifact_bytes). A
-  # larger payload is refused with 413 and the partial file is removed.
+  # site-spawner W9 (charter D91): the sink is POSTGRES, not the filesystem. This
+  # route used to write the tarball to a host-local dir and hand back a `file://`
+  # URL "the builder process shares" — it shared nothing. The control-plane
+  # container declares no volume for that path, and the box that would read it
+  # runs on a DIFFERENT HOST, so the URL named a file nothing could ever open
+  # (and runtime.exs claimed it survived restarts, which the compose file
+  # refutes). `cloud_pgdata` is the control plane's only durable volume.
+  #
+  # AUTH (charter D97): `{:ability, "write"}`, not the `:session` default. The old
+  # gate 401'd every PAT — including a root one — so a CI runner could START a
+  # deploy but could not UPLOAD to it. That is not "uploading is more sensitive",
+  # it is gating on the wrong AXIS. Both artifact routes now take the same
+  # credential the deploy route does.
+  #
+  # Size cap: 32 MB (`@max_artifact_bytes`), refused with 413. A build OUTPUT is
+  # 12-16 KB for an Astro `dist/` and ~18 MB for a Next standalone; the 100 MB of
+  # the file:// era was sized for uploading a whole project dir, node_modules and
+  # all, which is exactly the shape this wave stops shipping.
   #
   # Ownership: a site in another team returns 404 (existence-leak protection),
   # same shape as a nonexistent id — never 403.
   post "/v1/sites/:id/artifact" do
-    with_team_site(conn, fn conn, site ->
-      cfg = artifact_config()
-      max = cfg[:max_artifact_bytes]
-      dir = cfg[:artifact_dir]
-      :ok = File.mkdir_p!(dir)
-
-      filename = artifact_filename(site.slug)
-      path = Path.join(dir, filename)
-
-      case stream_body_to_file(conn, path, max) do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      case read_artifact_body(conn, max_artifact_bytes()) do
         {:ok, conn, bytes} ->
-          url = "file://" <> path
+          sha = sha256_hex(bytes)
+          {:ok, artifact} = Sites.Deploy.store_site_artifact(site, bytes, sha)
 
-          # activity-audit-log: the upload writes a host-local file (not a DB
-          # transaction), so the audit is a post-commit best-effort record_audit/1.
-          # Detail carries the filename + byte count — never the artifact bytes.
+          # activity-audit-log: the upload is its own transaction, so the audit is
+          # a post-commit best-effort record_audit/1. Detail carries the digest +
+          # byte count — never the artifact bytes.
           _ =
             Accounts.record_audit(%{
               team_id: site.team_id,
@@ -6277,24 +6288,54 @@ defmodule BarkparkCloud.Web.Router do
               action: "site.artifact_uploaded",
               target_type: "site",
               target_id: site.id,
-              metadata: %{filename: filename, bytes: bytes}
+              metadata: %{sha256: sha, bytes: byte_size(bytes)}
             })
 
           push_event(site.team_id, "audit")
 
           json(conn, 201, %{
-            artifact_url: url,
-            bytes: bytes,
-            filename: filename
+            artifact_id: artifact.id,
+            sha256: sha,
+            bytes: byte_size(bytes)
           })
 
         {:error, :too_large, conn} ->
-          _ = File.rm(path)
-          json(conn, 413, %{error: "artifact_too_large", max_bytes: max})
+          json(conn, 413, %{error: "artifact_too_large", max_bytes: max_artifact_bytes()})
 
         {:error, reason, conn} ->
-          _ = File.rm(path)
           json(conn, 500, %{error: "upload_failed", reason: inspect(reason)})
+      end
+    end)
+  end
+
+  # POST /v1/sites/:id/deployments/:dep_id/artifact (application/octet-stream)
+  # → 201 {deployment, artifact_sha256, bytes} — the UPLOAD half of
+  # mint-then-upload (charter D86/D91).
+  #
+  # The prebuilt deploy route minted this row and deliberately did NOT start it:
+  # the caller needed `build_id` (baked into the bytes) and `content_rev` before
+  # it could build. This route takes the resulting tarball, records its digest,
+  # and only THEN hands the row to the driver — so a deployment can never be in
+  # flight while the control plane cannot say which bytes it is serving.
+  #
+  # Honest states, each its own answer:
+  #
+  #   * a box-build row → 422 not_prebuilt (nothing would ever read the bytes)
+  #   * a row that already left `queued` → 409 (the build is gone; mint another)
+  #   * the SAME digest again → 200 no-op, driver NOT restarted (a client retry
+  #     after a dropped response must not run the deploy twice)
+  #   * a DIFFERENT digest → 409 artifact_conflict (silently swapping the bytes
+  #     under a build_id that is already baked would be a lie about what is live)
+  post "/v1/sites/:id/deployments/:dep_id/artifact" do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      case Registry.get_deployment(conn.path_params["dep_id"]) do
+        %Registry.Deployment{site_id: sid} = deployment when sid == site.id ->
+          upload_deployment_artifact(conn, site, deployment)
+
+        # Wrong-site / nonexistent / non-UUID — the same 404 a wrong-team site
+        # gets (existence-leak protection).
+        _ ->
+          json(conn, 404, %{error: "not_found"})
       end
     end)
   end
@@ -9749,6 +9790,11 @@ defmodule BarkparkCloud.Web.Router do
       github_branch: s.github_branch,
       github_webhook_configured: not is_nil(s.github_webhook_secret_encrypted),
       previews_enabled: s.previews_enabled,
+      # site-spawner W9 (charter D87): does this site accept builds produced
+      # somewhere other than its box? Serialized so a PATCH of it is READABLE
+      # back — a settings flip nothing can observe is indistinguishable from one
+      # that never landed.
+      prebuilt_enabled: s.prebuilt_enabled,
       inserted_at: s.inserted_at,
       updated_at: s.updated_at
     }
@@ -9798,6 +9844,13 @@ defmodule BarkparkCloud.Web.Router do
       # emitted from the SOLE base serializer so list/get/deploy-response/agent-claim
       # all carry it.
       trigger: d.trigger,
+      # site-spawner W9 (charter D86): WHERE the bytes were built —
+      # "box-build" | "prebuilt" — plus the digest of the uploaded ones. Emitted
+      # from the SOLE base serializer, because a deploy stream that cannot say
+      # whether the control plane produced what it health-gated is claiming a
+      # provenance it does not have. Null digest on every box build.
+      source: d.source,
+      artifact_sha256: d.artifact_sha256,
       # gh-5: the live build-console lines ride along so the site-detail deploy
       # row renders them and a refresh recovers mid-build console state.
       console: d.console || [],
@@ -10138,8 +10191,30 @@ defmodule BarkparkCloud.Web.Router do
 
   defp deploy_static_site(conn, site) do
     bp = Registry.get_barkpark(site.barkpark_id)
+    source = conn.body_params["source"] || "box-build"
+    prebuilt = source == "prebuilt"
 
     cond do
+      # A `source` the control plane does not implement must be REFUSED, never
+      # silently treated as a box build: a CI runner that typed "prebuilt-v2"
+      # would otherwise get a 201 for a deploy that ignored its artifact and
+      # rebuilt on the box.
+      source not in Registry.Deployment.sources() ->
+        json(conn, 422, %{
+          error: "unknown_source",
+          detail: "source must be one of: #{Enum.join(Registry.Deployment.sources(), ", ")}"
+        })
+
+      # site-spawner W9 (charter D87): prebuilt is per-site opt-in. Accepting
+      # bytes the control plane did not produce is a different trust statement
+      # from building them here, so a site must say so first.
+      prebuilt and not site.prebuilt_enabled ->
+        json(conn, 422, %{
+          error: "prebuilt_not_enabled",
+          detail:
+            "this site builds on its box — enable off-box builds first (PATCH /v1/sites/#{site.id} {\"prebuilt_enabled\": true})"
+        })
+
       is_nil(site.bootstrap_dataset) ->
         json(conn, 422, %{
           error: "no_content_binding",
@@ -10161,7 +10236,7 @@ defmodule BarkparkCloud.Web.Router do
         # but a literal `true` keeps the idempotent default.
         force = conn.body_params["force"] == true
 
-        case Sites.Deploy.enqueue(site, bp, force) do
+        case Sites.Deploy.enqueue(site, bp, force, "manual", nil, source) do
           {:ok, deployment} ->
             _ =
               Accounts.record_audit(%{
@@ -10173,18 +10248,36 @@ defmodule BarkparkCloud.Web.Router do
                 metadata: %{
                   site_id: site.id,
                   kind: site.kind,
-                  build_id: deployment.build_id
+                  build_id: deployment.build_id,
+                  source: deployment.source
                 }
               })
 
-            # Hand the row to the driver AFTER it is committed and audited, so the
-            # deploy the box is asked to run is one the control plane can already
-            # see, reap, and report on.
-            :ok = Sites.Deploy.start(deployment)
+            # MINT-THEN-UPLOAD (charter D86), and the order is FORCED, not
+            # preferred: `build_id` is baked INTO the bytes at build time
+            # (site-deploy.sh exports BARKPARK_BUILD_ID and HEALTH asserts the
+            # served marker BY VALUE), and `content_rev` is computed by relaying
+            # to the box with the instance admin token — neither is knowable to
+            # an uploader. So a prebuilt deploy mints FIRST, hands both values
+            # back in this 201, and the caller uploads the resulting dist to the
+            # deployment-scoped artifact route, which starts the driver.
+            #
+            # A box build is unchanged: the row is handed to the driver AFTER it
+            # is committed and audited, so the deploy the box is asked to run is
+            # one the control plane can already see, reap, and report on.
+            if not prebuilt do
+              :ok = Sites.Deploy.start(deployment)
+            end
 
             push_event(site.team_id, "deployments")
             push_event(site.team_id, "audit")
-            json(conn, 201, %{deployment: site_deployment_json(deployment, site, bp)})
+
+            json(
+              conn,
+              201,
+              %{deployment: site_deployment_json(deployment, site, bp)}
+              |> maybe_put_upload_instruction(prebuilt, site, deployment)
+            )
 
           # Same code + same content + same config = the same build. The box's PLAN
           # stage would no-op on it anyway (build_id is already live), so answer
@@ -11568,87 +11661,166 @@ defmodule BarkparkCloud.Web.Router do
     :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
   end
 
-  ## Artifact upload helpers
+  ## Artifact upload helpers (site-spawner W9, charter D91)
 
-  # Reads the runtime artifact-upload config: the on-disk dir and the max
-  # body size. The dir falls through Application env → BARKPARK_CLOUD_ARTIFACT_DIR
-  # env var → /tmp/barkpark-cloud-artifacts dev default. Size cap default: 100 MB.
-  defp artifact_config do
-    cfg = Application.get_env(:barkpark_cloud, __MODULE__, [])
+  # The prebuilt upload cap. A build OUTPUT, not a project dir: 12-16 KB for an
+  # Astro `dist/`, ~18 MB for a Next standalone — against the 137-148 MB of
+  # node_modules the box no longer has to install. 32 MB leaves real headroom
+  # and still bounds one row on `cloud_pgdata`.
+  #
+  # Overridable through the same `config :barkpark_cloud, BarkparkCloud.Web.Router`
+  # key the test env already sets, so the too-large test ships kilobytes instead
+  # of megabytes. The `artifact_dir` half of that config is GONE — see the
+  # upload route for why the file:// plane never worked.
+  @max_artifact_bytes 32 * 1024 * 1024
 
-    dir =
-      Keyword.get(cfg, :artifact_dir) ||
-        System.get_env("BARKPARK_CLOUD_ARTIFACT_DIR") ||
-        "/tmp/barkpark-cloud-artifacts"
-
-    max = Keyword.get(cfg, :max_artifact_bytes, 100 * 1024 * 1024)
-
-    [artifact_dir: dir, max_artifact_bytes: max]
+  defp max_artifact_bytes do
+    :barkpark_cloud
+    |> Application.get_env(__MODULE__, [])
+    |> Keyword.get(:max_artifact_bytes, @max_artifact_bytes)
   end
 
-  # Filename: <slug>-<8-byte-random>.tar.gz. The random suffix lets repeated
-  # uploads for the same site coexist; the builder reads via file:// URL so
-  # the path is the contract — no DB row for the artifact itself.
-  defp artifact_filename(slug) do
-    rand =
-      :crypto.strong_rand_bytes(8)
-      |> Base.url_encode64(padding: false)
-      |> String.downcase()
+  defp sha256_hex(bytes) when is_binary(bytes),
+    do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
 
-    safe_slug = if is_binary(slug) and slug != "", do: slug, else: "site"
-    "#{safe_slug}-#{rand}.tar.gz"
-  end
+  # The upload half of mint-then-upload. Runs INSIDE `with_team_site`, so the
+  # site is already team-scoped and the caller already carries write ability.
+  defp upload_deployment_artifact(conn, site, deployment) do
+    cond do
+      not Registry.Deployment.prebuilt?(deployment) ->
+        json(conn, 422, %{
+          error: "not_prebuilt",
+          detail:
+            "this deployment builds on its box — mint a prebuilt one with POST /v1/sites/#{site.id}/deploy {\"source\":\"prebuilt\"}"
+        })
 
-  # Streams the request body to `path`, abandoning early when `max_bytes` is
-  # exceeded. Returns `{:ok, conn, bytes}` on success, `{:error, :too_large,
-  # conn}` when the body crosses the cap, `{:error, reason, conn}` on any I/O
-  # failure. The file is opened once, written incrementally, and closed by
-  # this function — partial files are caller's responsibility to remove on
-  # error (since the path is known there).
-  defp stream_body_to_file(conn, path, max_bytes) do
-    case File.open(path, [:write, :binary]) do
-      {:ok, file} ->
-        try do
-          do_stream(conn, file, 0, max_bytes)
-        after
-          File.close(file)
-        end
+      deployment.status != "queued" ->
+        json(conn, 409, %{
+          error: "deployment_not_queued",
+          detail:
+            "this deployment is already #{deployment.status} — mint a new prebuilt deployment for a new artifact"
+        })
 
-      {:error, reason} ->
-        {:error, {:open, reason}, conn}
+      true ->
+        receive_deployment_artifact(conn, site, deployment)
     end
   end
 
-  defp do_stream(conn, file, written, max_bytes) do
-    # 8 MiB chunk window — large enough that the per-call overhead is amortized
-    # against the 100 MB cap; small enough that a refused upload stops early.
+  defp receive_deployment_artifact(conn, site, deployment) do
+    case read_artifact_body(conn, max_artifact_bytes()) do
+      {:ok, conn, bytes} ->
+        settle_deployment_artifact(conn, site, deployment, bytes, sha256_hex(bytes))
+
+      {:error, :too_large, conn} ->
+        json(conn, 413, %{error: "artifact_too_large", max_bytes: max_artifact_bytes()})
+
+      {:error, reason, conn} ->
+        json(conn, 500, %{error: "upload_failed", reason: inspect(reason)})
+    end
+  end
+
+  defp settle_deployment_artifact(conn, site, deployment, bytes, sha) do
+    case Sites.Deploy.artifact_for(deployment.id) do
+      # A client retry after a dropped response. Answer the same success WITHOUT
+      # re-starting the driver: the deploy is already in flight.
+      %{sha256: ^sha} ->
+        json(conn, 200, %{
+          deployment: site_deployment_json(deployment, site, nil),
+          artifact_sha256: sha,
+          bytes: byte_size(bytes),
+          status: "already_uploaded"
+        })
+
+      %{sha256: other} ->
+        json(conn, 409, %{
+          error: "artifact_conflict",
+          detail:
+            "this deployment already carries a different artifact (#{other}) — mint a new prebuilt deployment for new bytes"
+        })
+
+      nil ->
+        start_prebuilt_deploy(conn, site, deployment, bytes, sha)
+    end
+  end
+
+  defp start_prebuilt_deploy(conn, site, deployment, bytes, sha) do
+    case Sites.Deploy.store_artifact(deployment, bytes, sha) do
+      {:ok, stamped} ->
+        _ =
+          Accounts.record_audit(%{
+            team_id: site.team_id,
+            actor_user_id: conn.assigns.current_user.id,
+            action: "site.artifact_uploaded",
+            target_type: "deployment",
+            target_id: deployment.id,
+            metadata: %{site_id: site.id, sha256: sha, bytes: byte_size(bytes)}
+          })
+
+        # ONLY NOW. The digest is committed, so the row can already name the
+        # bytes it is about to serve; a driver started before this could reach
+        # the box with a deployment the control plane could not describe.
+        :ok = Sites.Deploy.start(stamped)
+
+        push_event(site.team_id, "deployments")
+        push_event(site.team_id, "audit")
+
+        bp = Registry.get_barkpark(site.barkpark_id)
+
+        json(conn, 201, %{
+          deployment: site_deployment_json(stamped, site, bp),
+          artifact_sha256: sha,
+          bytes: byte_size(bytes)
+        })
+
+      {:error, cs} ->
+        json(conn, 422, %{error: "invalid", details: errors(cs)})
+    end
+  end
+
+  # The prebuilt 201 tells the caller what to do NEXT — the verb is otherwise
+  # discoverable only by reading source, which is how this whole gap survived.
+  defp maybe_put_upload_instruction(body, false, _site, _deployment), do: body
+
+  defp maybe_put_upload_instruction(body, true, site, deployment) do
+    Map.put(body, :upload, %{
+      method: "POST",
+      path: "/v1/sites/#{site.id}/deployments/#{deployment.id}/artifact",
+      content_type: "application/octet-stream",
+      max_bytes: max_artifact_bytes(),
+      detail:
+        "build with BARKPARK_BUILD_ID=#{deployment.build_id}, then upload the tar.gz of dist/ — the deploy starts on upload"
+    })
+  end
+
+  # Reads the whole request body into memory, abandoning early when `max_bytes`
+  # is exceeded. Returns `{:ok, conn, bytes}`, `{:error, :too_large, conn}`, or
+  # `{:error, reason, conn}`.
+  #
+  # In memory rather than to a temp file because the bytes are bound for a
+  # Postgres column and a base64 field on the box payload — a spool file would
+  # be a third copy with nothing to gain. The cap is what bounds it.
+  defp read_artifact_body(conn, max_bytes), do: read_artifact_body(conn, max_bytes, [], 0)
+
+  defp read_artifact_body(conn, max_bytes, acc, read) do
+    # 8 MiB window: large enough that the per-call overhead is amortized against
+    # the cap, small enough that a refused upload stops early.
     case Plug.Conn.read_body(conn, length: 8 * 1024 * 1024, read_length: 1024 * 1024) do
       {:ok, chunk, conn} ->
-        new_written = written + byte_size(chunk)
+        total = read + byte_size(chunk)
 
-        cond do
-          new_written > max_bytes ->
-            {:error, :too_large, conn}
-
-          true ->
-            case IO.binwrite(file, chunk) do
-              :ok -> {:ok, conn, new_written}
-              {:error, reason} -> {:error, {:write, reason}, conn}
-            end
+        if total > max_bytes do
+          {:error, :too_large, conn}
+        else
+          {:ok, conn, IO.iodata_to_binary(Enum.reverse([chunk | acc]))}
         end
 
       {:more, chunk, conn} ->
-        new_written = written + byte_size(chunk)
+        total = read + byte_size(chunk)
 
-        cond do
-          new_written > max_bytes ->
-            {:error, :too_large, conn}
-
-          true ->
-            case IO.binwrite(file, chunk) do
-              :ok -> do_stream(conn, file, new_written, max_bytes)
-              {:error, reason} -> {:error, {:write, reason}, conn}
-            end
+        if total > max_bytes do
+          {:error, :too_large, conn}
+        else
+          read_artifact_body(conn, max_bytes, [chunk | acc], total)
         end
 
       {:error, reason} ->

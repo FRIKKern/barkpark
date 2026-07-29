@@ -53,8 +53,11 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   require Logger
 
+  import Ecto.Query, only: [from: 2]
+
   alias BarkparkCloud.Registry
-  alias BarkparkCloud.Registry.{Barkpark, Deployment, Site}
+  alias BarkparkCloud.Registry.{Barkpark, Deployment, Site, SiteArtifact}
+  alias BarkparkCloud.Repo
   alias BarkparkCloud.Sites.BoxRelay
   alias BarkparkCloud.Sites.NodePortAllocator
 
@@ -119,14 +122,19 @@ defmodule BarkparkCloud.Sites.Deploy do
   # keeps the pre-existing behaviour EXACTLY: read it here, fail-open included.
   # A handed-in rev is by construction the honest `{:ok, rev}` value, so the
   # fail-open is not bypassed — it simply already happened, or didn't need to.
-  @spec enqueue(Site.t(), Barkpark.t(), boolean(), String.t(), String.t() | nil) ::
+  #
+  # `source` (charter D86) is WHERE the bytes will come from: "box-build" (the
+  # default and every pre-W9 call) or "prebuilt". A prebuilt mint is
+  # NON-IDEMPOTENT BY CONSTRUCTION — see `maybe_prebuilt_nonce/2`.
+  @spec enqueue(Site.t(), Barkpark.t(), boolean(), String.t(), String.t() | nil, String.t()) ::
           {:ok, Deployment.t()} | {:duplicate, Deployment.t()} | {:error, Ecto.Changeset.t()}
   def enqueue(
         %Site{} = site,
         %Barkpark{} = bp,
         force \\ false,
         trigger \\ "manual",
-        probed_rev \\ nil
+        probed_rev \\ nil,
+        source \\ "box-build"
       ) do
     content_rev = probed_rev || content_rev(site, bp)
     # An UNKNOWN revision must never dedupe (ssw8). The empty rev is a CONSTANT,
@@ -135,12 +143,14 @@ defmodule BarkparkCloud.Sites.Deploy do
     # failure the old random `"u…"` marker existed to prevent. So the nonce that
     # `force` folds in is applied here too: the build is genuinely new, and the
     # revision shipped to the box stays honestly empty.
-    build_id = build_id(site, bp, content_rev, force || content_rev == @unknown_content_rev)
+    build_id =
+      build_id(site, bp, content_rev, force || content_rev == @unknown_content_rev, source)
 
     case Registry.create_deployment(site, %{
            build_id: build_id,
            content_rev: content_rev,
-           trigger: trigger
+           trigger: trigger,
+           source: source
          }) do
       {:ok, deployment} ->
         {:ok, deployment}
@@ -173,9 +183,18 @@ defmodule BarkparkCloud.Sites.Deploy do
   cached duplicate, and a real `releases/<build_id>/` is cut on the box. With
   `force` false the config map is EXACTLY the pre-D36 shape, so the default
   build_id is unchanged and the idempotent no-op still fires.
+
+  When `source` is `"prebuilt"` (charter D86) a SECOND, distinct nonce is folded
+  in — see `maybe_prebuilt_nonce/2` for why it cannot share `force`'s key.
   """
-  @spec build_id(Site.t(), Barkpark.t(), String.t(), boolean()) :: String.t()
-  def build_id(%Site{} = site, %Barkpark{} = bp, content_rev, force \\ false)
+  @spec build_id(Site.t(), Barkpark.t(), String.t(), boolean(), String.t()) :: String.t()
+  def build_id(
+        %Site{} = site,
+        %Barkpark{} = bp,
+        content_rev,
+        force \\ false,
+        source \\ "box-build"
+      )
       when is_binary(content_rev) do
     config =
       %{
@@ -187,6 +206,7 @@ defmodule BarkparkCloud.Sites.Deploy do
         dataset: site.bootstrap_dataset
       }
       |> maybe_force_nonce(force)
+      |> maybe_prebuilt_nonce(source)
       |> Jason.encode!()
 
     :sha256
@@ -202,6 +222,108 @@ defmodule BarkparkCloud.Sites.Deploy do
   # byte-identical to the pre-D36 default path.
   defp maybe_force_nonce(config, true), do: Map.put(config, :force_nonce, System.system_time())
   defp maybe_force_nonce(config, false), do: config
+
+  # The PREBUILT nonce (charter D86) — and it is a SEPARATE key from `force`'s on
+  # purpose, not a tidy-up candidate.
+  #
+  # A prebuilt mint MUST be non-idempotent, because the thing that varies is not
+  # code, content, or config: it is the uploaded `dist/`, which does not exist
+  # yet when the row is minted (site-deploy.sh bakes BARKPARK_BUILD_ID INTO the
+  # bytes, so the id has to be handed to the builder BEFORE the build). Two
+  # genuinely different dists of the same site therefore hash to the SAME
+  # build_id under the pre-W9 config, trip the (site_id, build_id) partial unique
+  # index, and are answered HTTP 200 with the OLD row — no build, no start, and
+  # no audit row either (the audit lives only in the `{:ok, _}` arm), so a
+  # swallowed upload leaves ZERO trace.
+  #
+  # Sharing `force`'s key would collapse two different meanings into one word:
+  # force means "re-run this EXACT content" (D36), a deliberate override of a
+  # correct no-op. Prebuilt means "the content is not knowable from here" — the
+  # no-op was never correct in the first place. A future change that made `force`
+  # idempotent again would silently take prebuilt with it.
+  defp maybe_prebuilt_nonce(config, "prebuilt"),
+    do: Map.put(config, :prebuilt_nonce, System.unique_integer([:positive, :monotonic]))
+
+  defp maybe_prebuilt_nonce(config, _source), do: config
+
+  ## ---------------------------------------------------------------------------
+  ## Prebuilt artifacts (charter D91)
+  ## ---------------------------------------------------------------------------
+
+  @doc """
+  Store an uploaded tarball for `deployment` and record its digest ON the row,
+  in ONE transaction.
+
+  The ordering is the contract: the digest is committed BEFORE the caller may
+  start the driver, so a deployment that reached the box can always name the
+  exact bytes it was asked to serve. A crash between the two would otherwise
+  leave a row that deploys artifact bytes while claiming it has none.
+
+  `sha256` is computed from the bytes the control plane actually received —
+  never taken from the client.
+
+  Returns `{:ok, deployment}` with the digest stamped, or `{:error, changeset}`.
+  """
+  @spec store_artifact(Deployment.t(), binary(), String.t()) ::
+          {:ok, Deployment.t()} | {:error, Ecto.Changeset.t()}
+  def store_artifact(%Deployment{} = deployment, bytes, sha256)
+      when is_binary(bytes) and is_binary(sha256) do
+    artifact =
+      SiteArtifact.changeset(%SiteArtifact{}, %{
+        bytes: bytes,
+        sha256: sha256,
+        byte_size: byte_size(bytes),
+        site_id: deployment.site_id,
+        deployment_id: deployment.id
+      })
+
+    stamped = Deployment.changeset(deployment, %{artifact_sha256: sha256})
+
+    Ecto.Multi.new()
+    |> Ecto.Multi.insert(:artifact, artifact)
+    |> Ecto.Multi.update(:deployment, stamped)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{deployment: updated}} -> {:ok, updated}
+      {:error, _step, %Ecto.Changeset{} = cs, _changes} -> {:error, cs}
+    end
+  end
+
+  @doc """
+  Store an uploaded tarball that is not (yet) bound to any deployment — the
+  site-scoped upload route's sink. Returns `{:ok, artifact}`.
+  """
+  @spec store_site_artifact(Site.t(), binary(), String.t()) ::
+          {:ok, SiteArtifact.t()} | {:error, Ecto.Changeset.t()}
+  def store_site_artifact(%Site{} = site, bytes, sha256)
+      when is_binary(bytes) and is_binary(sha256) do
+    %SiteArtifact{}
+    |> SiteArtifact.changeset(%{
+      bytes: bytes,
+      sha256: sha256,
+      byte_size: byte_size(bytes),
+      site_id: site.id
+    })
+    |> Repo.insert()
+  end
+
+  @doc "The stored artifact for `deployment_id`, or nil."
+  @spec artifact_for(binary()) :: SiteArtifact.t() | nil
+  def artifact_for(deployment_id) when is_binary(deployment_id) do
+    Repo.one(from a in SiteArtifact, where: a.deployment_id == ^deployment_id)
+  end
+
+  @doc """
+  Drop a deployment's stored bytes. Called once the deployment is TERMINAL: the
+  box has them by then, and a terminal Deployment is never re-driven, so keeping
+  up to 32 MB per build would be a pure leak on the control plane's only durable
+  volume. Best-effort — a failed delete never fails a deploy.
+  """
+  @spec drop_artifact(binary()) :: :ok
+  def drop_artifact(deployment_id) when is_binary(deployment_id) do
+    Repo.delete_all(from a in SiteArtifact, where: a.deployment_id == ^deployment_id)
+    :ok
+  end
 
   # The box's code revision. `git_commit` is the truth when the instance reports
   # it; `version` is the fallback; "unknown" only when the box has reported
@@ -419,14 +541,46 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   defp start_on_box(ctx, %Deployment{} = deployment, %Site{} = site, %Barkpark{} = bp, read_token) do
     case BoxRelay.start_deploy(bp, deploy_payload(deployment, site, bp, read_token)) do
-      {:ok, status, _body} when status in 200..299 ->
-        poll(ctx, deployment.build_id, poll_max(), poll_grace())
+      {:ok, status, body} when status in 200..299 ->
+        case prebuilt_echo(deployment, body) do
+          :ok -> poll(ctx, deployment.build_id, poll_max(), poll_grace())
+          {:error, reason} -> fail(ctx, reason)
+        end
 
       {:ok, status, body} ->
         fail(ctx, box_refusal(status, body))
 
       {:error, reason} ->
         fail(ctx, unreachable(bp, reason))
+    end
+  end
+
+  # THE PREBUILT HANDSHAKE (charter D91). The box's deploy-request decoder
+  # silently DROPS unknown top-level params, so a control plane that speaks
+  # prebuilt against an un-upgraded box would hand over the artifact, watch the
+  # box ignore it, build from source on the very cores this wave exists to free,
+  # and go green — a deploy labelled "prebuilt" in the ledger that was nothing of
+  # the kind.
+  #
+  # So a prebuilt run is only allowed to proceed when the box ECHOES back that it
+  # understood: `prebuilt: true` AND the digest it verified, matching the one the
+  # control plane recorded. Anything else fails the deployment with the reason
+  # stated plainly. A box-build never inspects the echo — its 202 is unchanged.
+  defp prebuilt_echo(%Deployment{} = deployment, body) do
+    cond do
+      not Deployment.prebuilt?(deployment) ->
+        :ok
+
+      not is_map(body) or body["prebuilt"] != true ->
+        {:error,
+         "the box accepted the deploy but did not confirm the prebuilt artifact — it is running an older site-deploy that would build from source instead"}
+
+      body["artifact_sha256"] != deployment.artifact_sha256 ->
+        {:error,
+         "the box confirmed a different artifact than the one uploaded (expected #{deployment.artifact_sha256 || "none"}, box reported #{body["artifact_sha256"] || "none"})"}
+
+      true ->
+        :ok
     end
   end
 
@@ -462,6 +616,39 @@ defmodule BarkparkCloud.Sites.Deploy do
     |> maybe_put_target_port(site)
     |> maybe_put_template(site)
     |> maybe_put_theme(site)
+    |> maybe_put_artifact(deployment)
+  end
+
+  # site-spawner W9 (charter D91): a PREBUILT deploy ships the already-built
+  # `dist/` down with the argv. `Registry.relay_admin/4` already `Jason.encode!`s
+  # whatever map it is handed, so this is ZERO transport code — the binding
+  # constraint is the relay's 15s timeout, not the box's 100 MB body parser.
+  #
+  # Base64 because the payload is JSON. It costs 33% on the wire against an
+  # `dist/` measured at 12-16 KB (Astro) to 18 MB (Next standalone) — set against
+  # the 137-148 MB of node_modules the box no longer installs, and the two
+  # concurrent `astro build`s that put a 2-core box at load 9.65.
+  #
+  # A box-build carries NO artifact keys, so its payload is byte-identical to
+  # pre-W9. A prebuilt row whose bytes are missing carries the digest alone: the
+  # box then refuses the run rather than quietly building from source, and the
+  # 202-echo check below turns that refusal into an honest failed deployment.
+  defp maybe_put_artifact(payload, %Deployment{} = deployment) do
+    if Deployment.prebuilt?(deployment) do
+      payload
+      |> Map.put(:source, "prebuilt")
+      |> Map.put(:artifact_sha256, deployment.artifact_sha256)
+      |> maybe_put_artifact_bytes(deployment)
+    else
+      payload
+    end
+  end
+
+  defp maybe_put_artifact_bytes(payload, %Deployment{id: id}) do
+    case artifact_for(id) do
+      %SiteArtifact{bytes: bytes} -> Map.put(payload, :artifact_b64, Base.encode64(bytes))
+      nil -> payload
+    end
   end
 
   # search-template W6: the deploy-pinned palette rides the env ONLY when the
@@ -722,6 +909,10 @@ defmodule BarkparkCloud.Sites.Deploy do
            current_deployment_id: ctx.id
          }) do
       {:ok, _d} ->
+        # The box is serving these bytes now; the control plane's copy has done
+        # its job (charter D91). A terminal Deployment is never re-driven, so
+        # keeping it would leak up to 32 MB per build onto cloud_pgdata.
+        :ok = drop_artifact(ctx.id)
         BarkparkCloud.Events.broadcast(ctx.site.team_id, "deployments")
         {:ok, :live}
 
@@ -737,6 +928,12 @@ defmodule BarkparkCloud.Sites.Deploy do
         failure_reason: reason,
         detail: reason
       })
+
+    # `failed` is terminal too — the row is never re-driven (the reaper only
+    # requeues rows that are still `queued`), so its bytes are equally dead
+    # weight. Dropping them here as well as on the happy path is why a run of
+    # failed prebuilt deploys cannot fill the control plane's disk.
+    :ok = drop_artifact(ctx.id)
 
     BarkparkCloud.Events.broadcast(ctx.site.team_id, "deployments")
     {:ok, :failed}
@@ -1268,12 +1465,34 @@ end
 
 defmodule BarkparkCloud.Sites.Deploy.NoopStarter do
   @moduledoc """
-  The test starter: records nothing, spawns nothing. Route tests assert the 201 +
-  the minted row deterministically; the driver itself is proven by calling
-  `Deploy.run/1` directly against the in-memory fake box.
+  The test starter: spawns nothing. Route tests assert the 201 + the minted row
+  deterministically; the driver itself is proven by calling `Deploy.run/1`
+  directly against the in-memory fake box.
+
+  site-spawner W9: it also leaves a PROCESS-LOCAL trace of WHAT THE ROW LOOKED
+  LIKE at the instant the driver would have started — `Process.get({:deploy_started,
+  id})` in the calling process. The prebuilt upload route must commit the
+  artifact digest BEFORE handing the row over (otherwise a build can be in
+  flight while the control plane cannot say which bytes it is serving), and that
+  ordering is invisible to an after-the-fact read: both writes are done by then.
+
+  Recorded in the CALLER's process dictionary rather than behind an
+  `Application.put_env` swap, deliberately — app env is node-global, so an
+  `async: true` module swapping it also swaps it for every test running at that
+  instant. `start/1` is a plain synchronous call from the route, so the trace
+  lands in the test's own process and nothing bleeds.
   """
   @behaviour BarkparkCloud.Sites.Deploy.Starter
 
   @impl true
-  def start(_deployment_id), do: :ok
+  def start(deployment_id) do
+    deployment = BarkparkCloud.Registry.get_deployment(deployment_id)
+
+    Process.put({:deploy_started, deployment_id}, %{
+      artifact_sha256: deployment && deployment.artifact_sha256,
+      artifact_present: not is_nil(BarkparkCloud.Sites.Deploy.artifact_for(deployment_id))
+    })
+
+    :ok
+  end
 end
