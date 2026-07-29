@@ -2311,6 +2311,88 @@ waits on the arithmetic reaching zero — and if it has not, S7 publishes the re
 
 ## Wave log
 
+### Wave 2026-07-29 — Wave 24 BUILT + REVIEWED, grade A. "The Arithmetic Held."
+
+All five round-1 slices built, reviewed, gate-re-run on the reviewer's final state, and **pushed with
+PRs open** — #7553 S1, #7554 S2, #7555 S3, #7556 S4, #7557 S5. Round-2 `felix-w24-s6-fenced-sixteen`
+and `felix-w24-s7-continue-on-error-flip` are unbuilt BY DESIGN (sequenced-rounds law).
+
+**The headline number, proven by execution on the merged tree rather than by addition.** The reviewer
+octopus-merged all five slices onto `origin/main` @ `606fefd15` — they merge clean, no conflicts — and
+re-ran the whole battery with a standalone sobelow 0.14.1 escript (the version pinned in `api/mix.lock`;
+this worktree has no deps and a local app compile OOMs):
+
+| measure | before | after |
+|---|---|---|
+| `sobelow --skip` total | 32 | **16** |
+| blobstore `Traversal.FileModule` | 15 | 0 |
+| `router.ex Config.Headers` | 1 | 0 |
+| `.sobelow-skips` rows | 89 | 57 |
+| baseline-staleness ratchet | exit 1 (50 stale) | **exit 0, blocking** |
+| annotation-binding ratchet | did not exist | **exit 0, blocking, 66 annotations** |
+| unannotatable floor | 10 | 9 |
+
+The residue of 16 is exactly `workspace_bundle.ex` 10 + `janitor.ex` 6 — precisely what S6 is scoped to
+clear, after which S7's verify-then-flip has a real chance of reaching a green Sobelow job. **Wave 24 did
+not reach green** and does not claim to; it cut the residue in half, made two ratchets blocking, and left
+one slice of arithmetic between here and the epic's own bar.
+
+**Both fail-before proofs were reproduced by the reviewer, not quoted.** Staleness against the 89-row
+baseline exits 1 (`STALE lib/barkpark/media.ex:61`), so the blocking flip genuinely required the prune.
+Deleting one row proven live (`DOS.StringToAtom, content/validation.ex:109`) raises `--skip` from 32 to 33,
+so "unchanged at 32 after deleting 32 rows" is a proof and not a tautology.
+
+**The flip-risk judgment was independently re-derived and CONFIRMED.** S1's blobstore waiver rests on an
+admin-only reachability verdict. Re-derived from source rather than re-read: `MediaFile.changeset/2` has
+exactly one call site; `unique_filename/1` executed against 7 adversarial names lets a separator survive in
+zero; `media_files` **is** a copy-strategy bundle member at `catalog.ex:98`; `import_bundle/2`'s sole HTTP
+route sits behind `pipe_through([:api, :require_admin])`; no HTTP mint issues `admin`. Every line-number
+citation in the two PATH PROVENANCE blocks checks out. **A genuinely independent second reviewer is still
+owed before merge** — this is a security waiver, and it asserts the traversal is admin-only, not impossible.
+
+**Three refutations, in the wave-23 spirit.** (1) The wave-23 row `felix-w23-s5-blobstore-migration` asserts
+`media_files` is "never bundle-imported" — FALSE, and a waiver built on it would have been wrong; that row
+is superseded and its brief now carries a dated correction. (2) The gate's own step comment claimed "15 of
+the 31 are the blobstore rows" — `grep -c blobstore api/.sobelow-skips` is **0**, so completing that
+migration would have moved the residue by exactly zero. (3) `archive.ex:36 File.read!` was dead by content,
+not by annotation — a 33rd finding the brief never named.
+
+**Two deliberate deviations, both measured before deviating and both disclosed.** S4 rebuilt predicate 4:
+the briefed literal rule ("every sibling clause needs its own annotation") was *built and run first*, found
+8 rows, all 8 read in source, all 8 trivial `, do: :ok` fallbacks — shipping it would have ordered 8 new
+blanket waivers onto code with nothing to waive AND left the gate red on arrival. The two-half replacement
+is zero on `api/lib` and catches a displacement direction the literal rule misses entirely. S5 widened past
+its `files:` list because the dead premise it was sent to kill appeared **three times in the same file**;
+fixing §9 alone would have shipped a half-corrected doc a cold agent hits top-down.
+
+**Reviewer fixes, all in place, none a redesign.** S3's `-r` branch: the workflow said the blocking job
+carries "BOTH" ratchets when S4 makes it three, so a CI reader hitting `MISSPELL` under a step named *"No
+baseline entry duplicates an inline waiver"* had nothing to explain it — both step names corrected (job
+`name:` untouched, it is the check context); and `sobelow-baseline-staleness-check.sh`'s header still called
+its own run "REPORTING-ONLY", which this slice made false. S5's `-r` branch: one sentence recording that S3
+takes the baseline 89 → 57, so the dated reading is not stale the day it merges. S1, S2 and S4 needed
+nothing.
+
+**The ledger, honestly.** `guerrilla` was 500ing for much of the build window. S2 and S5 shipped code with
+**zero** claims, pulses or stamps — the board read untouched while commits existed; the reviewer claimed
+both after recovery and stamped every buildable criterion from re-verified evidence. S4's task did not exist
+at all; the builder re-filed it from the dispatch brief and wrote its criteria himself, flagging that
+everywhere — the reviewer confirmed post-recovery that no competing Decide row landed. S1 had lapsed back to
+`lifecycle=open` with 5/6 stamped and was re-claimed so the board tells the truth. Two wave-23 rows carry
+dated corrections: `felix-w23-s5-blobstore-migration` (superseded, refuted claim) and
+`felix-w23-bl-staleness-blocking-flip` (paid by S3, but its criterion 2 *contradicts* the measurement —
+adjudicate, do not rebuild). `felix-w24-bl-staleness-script-header-stale` was **paid inside PR #7555** and
+stamped rather than deferred.
+
+**What the next wave takes, in dispatch order.** Merge round 1 — S4 with or before S3 (the S3 comment
+describes S4's ratchet), then S1, S2, S5 in any order. Then `felix-w24-s6-fenced-sixteen` (16 → 0), then
+`felix-w24-s7-continue-on-error-flip`, which must **verify before it flips** and publish the remainder if
+the exit code is not 0. Then the epic's only P0, `felix-w23-bl-bundle-member-guard` — S1's waiver is a
+judgment, not a fix, and nothing today pins the two facts it rests on. Standing risk the fleet must not
+learn to shrug at: the staleness flip makes a **line-anchored** check load-bearing, so an inserted comment
+above a covered call site reds a blocking job for a non-security reason (`felix-w24-bl-staleness-line-anchor`,
+MEASURE-first).
+
 ### Wave 2026-07-28 — Wave 23 BUILT + REVIEWED, grade A−. "The Blind Gate."
 
 All four round-1 slices built green, reviewed, gate-re-run on the reviewer's final state, and
