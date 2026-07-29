@@ -200,18 +200,21 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   def walk_path(["open", type, id | _], _depth, _current, panes, _editor, dataset, opts) do
     editor =
       if Content.blocks_type?(type) do
-        case Content.get_blocks_doc(id, type, dataset, scope(opts)) do
-          nil ->
+        # Same draft-first fix as `build_editor`'s blocks branch (spd-w17 D220).
+        # A backlink to a never-published paper is the SAME silent blank screen,
+        # reached by a different door — fixing only one leaves the other.
+        case Content.fetch_doc_with_draft(type, id, dataset, scope(opts)) do
+          {nil, _is_draft, _has_pub} ->
             nil
 
-          paper_doc ->
+          {paper_doc, is_draft, has_pub} ->
             %{
               view: :paper,
               doc: paper_doc,
               schema: nil,
               type: type,
-              is_draft: false,
-              has_published: false,
+              is_draft: is_draft,
+              has_published: has_pub,
               form: %{}
             }
         end
@@ -419,18 +422,26 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       Content.blocks_type?(type_name) ->
         case rest do
           [slug | _] ->
-            case Content.get_blocks_doc(slug, type_name, dataset, scope_kw) do
-              nil ->
+            # DRAFT-FIRST, like every other editor branch. `create_document`
+            # ALWAYS writes `drafts.<id>` (writer.ex) and the desk navigates to
+            # the PUBLISHED id, so a published-only lookup here resolved to
+            # nothing for every never-published paper — a brand-new one most of
+            # all. That is the owner's blank screen (spd-w17): a doc was
+            # created, the URL moved, and the pane still read "Select a document
+            # to edit". The flags were hardcoded `false`, so a draft paper that
+            # did open claimed to be published; thread the real ones.
+            case Content.fetch_doc_with_draft(type_name, slug, dataset, scope_kw) do
+              {nil, _is_draft, _has_pub} ->
                 nil
 
-              paper_doc ->
+              {paper_doc, is_draft, has_pub} ->
                 %{
                   view: :paper,
                   doc: paper_doc,
                   schema: schema,
                   type: type_name,
-                  is_draft: false,
-                  has_published: false,
+                  is_draft: is_draft,
+                  has_published: has_pub,
                   form: %{}
                 }
             end
