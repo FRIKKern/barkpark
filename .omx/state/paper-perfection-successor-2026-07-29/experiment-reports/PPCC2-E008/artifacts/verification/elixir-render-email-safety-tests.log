@@ -1,0 +1,78 @@
+Unchecked dependencies for environment test:
+* telemetry_metrics (Hex package)
+  the dependency is not available, run "mix deps.get"
+* earmark_parser (Hex package)
+  the dependency is not available, run "mix deps.get"
+* argon2_elixir (Hex package)
+  the dependency is not available, run "mix deps.get"
+* xlsx_reader (Hex package)
+  the dependency is not available, run "mix deps.get"
+* x509 (Hex package)
+  the dependency is not available, run "mix deps.get"
+* esaml (Hex package)
+  the dependency is not available, run "mix deps.get"
+* jason (Hex package)
+  the dependency is not available, run "mix deps.get"
+* gen_smtp (Hex package)
+  the dependency is not available, run "mix deps.get"
+* oban (Hex package)
+  the dependency is not available, run "mix deps.get"
+* xml_builder (Hex package)
+  the dependency is not available, run "mix deps.get"
+* gettext (Hex package)
+  the dependency is not available, run "mix deps.get"
+* jose (Hex package)
+  the dependency is not available, run "mix deps.get"
+* swoosh (Hex package)
+  the dependency is not available, run "mix deps.get"
+* bypass (Hex package)
+  the dependency is not available, run "mix deps.get"
+* req (Hex package)
+  the dependency is not available, run "mix deps.get"
+* ecto_sql (Hex package)
+  the dependency is not available, run "mix deps.get"
+* wax_ (Hex package)
+  the dependency is not available, run "mix deps.get"
+* phoenix_ecto (Hex package)
+  the dependency is not available, run "mix deps.get"
+* bandit (Hex package)
+  the dependency is not available, run "mix deps.get"
+* mix_audit (Hex package)
+  the dependency is not available, run "mix deps.get"
+* phoenix_live_view (Hex package)
+  the dependency is not available, run "mix deps.get"
+* telemetry_poller (Hex package)
+  the dependency is not available, run "mix deps.get"
+* sobelow (Hex package)
+  the dependency is not available, run "mix deps.get"
+* nimble_totp (Hex package)
+  the dependency is not available, run "mix deps.get"
+* telemetry_metrics_prometheus_core (Hex package)
+  the dependency is not available, run "mix deps.get"
+* ex_json_schema (Hex package)
+  the dependency is not available, run "mix deps.get"
+* phoenix (Hex package)
+  the dependency is not available, run "mix deps.get"
+* phoenix_live_dashboard (Hex package)
+  the dependency is not available, run "mix deps.get"
+* dns_cluster (Hex package)
+  the dependency is not available, run "mix deps.get"
+* lazy_html (Hex package)
+  the dependency is not available, run "mix deps.get"
+* postgrex (Hex package)
+  the dependency is not available, run "mix deps.get"
+* expty (Hex package)
+  the dependency is not available, run "mix deps.get"
+* eqrcode (Hex package)
+  the dependency is not available, run "mix deps.get"
+* elixlsx (Hex package)
+  the dependency is not available, run "mix deps.get"
+* image (Hex package)
+  the dependency is not available, run "mix deps.get"
+* sweet_xml (Hex package)
+  the dependency is not available, run "mix deps.get"
+* corsica (Hex package)
+  the dependency is not available, run "mix deps.get"
+* cloak_ecto (Hex package)
+  the dependency is not available, run "mix deps.get"
+** (Mix) Can't continue due to errors on dependencies

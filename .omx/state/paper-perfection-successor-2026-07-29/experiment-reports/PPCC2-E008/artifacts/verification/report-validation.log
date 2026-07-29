@@ -1,0 +1,18 @@
+{
+  "checks": {
+    "assignment": true,
+    "candidate_ids": true,
+    "cases": true,
+    "commands": true,
+    "delegation": true,
+    "failures_recorded": true,
+    "metrics": true,
+    "next_round": true,
+    "no_production_mutation": true,
+    "receipt": true,
+    "surfaces": true,
+    "unvisited_scope": true
+  },
+  "report_sha256": "c63c4ff2d9859db2f8e6a2e2f2c4d32d18dc48b77f6368d862d817b705077166",
+  "status": "PASS"
+}

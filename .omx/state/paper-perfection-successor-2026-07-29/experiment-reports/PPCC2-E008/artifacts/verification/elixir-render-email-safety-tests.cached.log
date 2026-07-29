@@ -1,0 +1,6 @@
+Running ExUnit with seed: 994797, max_cases: 20
+Excluding tags: [:bokbasen_integration, :phase8_demo, :requires_wi3, :requires_wi4, :flaky, :boot_test, :plugin_routes, :requires_vips, :idp_interop, :real_binary]
+
+...................................................................................................................
+Finished in 0.2 seconds (0.2s async, 0.00s sync)
+115 tests, 0 failures
