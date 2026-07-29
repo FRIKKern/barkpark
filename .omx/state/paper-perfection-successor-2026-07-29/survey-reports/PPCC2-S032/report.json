@@ -1,0 +1,460 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S032",
+  "assignment_snapshot_sha256": "a3ecfefb6576297f38d42dda344db275cf0a6aeddfe6a299c9ea05fdca764854",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 11,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "2937789e47780a1cf974e0e1e3d7f299570a766370c15465b2dac8be5fb09c09"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned revisions were read across 596 native top-level blocks. Keep 4, repair 1, and mark 4 historical papers superseded. The toolkit stack is purpose-distinct and evidence-rich. The 2026-07-28 reader-harness paper is current Paper-perfection authority but needs a human-first opening and extraction of a 113,781-character machine projection; earlier waves remain valuable immutable provenance with explicit successor links.",
+  "verdict_counts": {
+    "keep": 4,
+    "repair": 1,
+    "superseded": 4
+  },
+  "checked_unit_ids": [
+    "paper:paper-perfection-reader-harness-wave-2026-07-28",
+    "paper:paper-perfection-recovery-wave-2026-07-27",
+    "paper:paper-perfection-wave-2026-07-23",
+    "paper:paper-perfection-wave-2026-07-26",
+    "paper:paper-perfection-work-so-far-2026-07-27",
+    "paper:papers-pro-toolkit-capstone",
+    "paper:papers-pro-toolkit-crown-and-toolkit",
+    "paper:papers-pro-toolkit-evidence-record",
+    "paper:papers-pro-toolkit-living-data-forms"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 596,
+    "legacy_html_documents_read": 0,
+    "legacy_html_chars_read": 0,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:paper-perfection-reader-harness-wave-2026-07-28 blocks[51]",
+      "evidence": "The final reconciliation states 312/312 exact checks, 546 shipped candidates, and 28 stalled candidates.",
+      "lesson": "Report throughput with exact denominators and residual backlog."
+    },
+    {
+      "block_ref": "paper:paper-perfection-recovery-wave-2026-07-27 blocks[38]",
+      "evidence": "The recovery verdict refuses to equate modeled projections with installed-reader parity.",
+      "lesson": "A gate is valuable when it can stop a wave."
+    },
+    {
+      "block_ref": "paper:papers-pro-toolkit-crown-and-toolkit blocks[31]",
+      "evidence": "The survey explicitly records which starting premises fell after inspection.",
+      "lesson": "Corrected assumptions are first-class research output."
+    },
+    {
+      "block_ref": "paper:papers-pro-toolkit-living-data-forms blocks[28]",
+      "evidence": "The paper reconciles counts and separates insertion, parity, provenance, and delivery evidence.",
+      "lesson": "Resolve apparent contradictions by naming capability layers."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:paper-perfection-reader-harness-wave-2026-07-28 blocks[18]",
+      "evidence": "A roughly 113,781-character CycleFleet projection occupies one primary-reading callout.",
+      "lesson": "Studio, TUI, and email readers lose the human result inside machine evidence."
+    },
+    {
+      "block_ref": "paper:paper-perfection-wave-2026-07-23 blocks[1]",
+      "evidence": "The opening runtime payload is roughly 44,251 characters and shows zero assigned with reconciliation false.",
+      "lesson": "The paper initially reads as telemetry rather than a decision record."
+    },
+    {
+      "block_ref": "paper:paper-perfection-wave-2026-07-26 blocks[4]",
+      "evidence": "An early projection is roughly 83,220 characters before the no-mutation result.",
+      "lesson": "Critical outcome is buried behind operational bulk."
+    },
+    {
+      "block_ref": "paper:papers-pro-toolkit-capstone blocks[97]",
+      "evidence": "The final callout bundles seven decisions.",
+      "lesson": "The reader has no explicit priority or stopping rule."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "paper-perfection-wave-2026-07-23",
+        "paper-perfection-wave-2026-07-26",
+        "paper-perfection-work-so-far-2026-07-27",
+        "paper-perfection-recovery-wave-2026-07-27",
+        "paper-perfection-reader-harness-wave-2026-07-28"
+      ],
+      "basis": "These are successive immutable stages of one Paper-perfection program: initial doctrine/capacity failure, expanded survey, interim synthesis, recovery gate, and installed-reader harness authority.",
+      "disposition": "Do not merge ledgers. Mark the first four superseded for current status, preserve their distinct failed-gate evidence, and make the 2026-07-28 harness paper the repaired current authority with reciprocal successor links."
+    },
+    {
+      "candidate_set": [
+        "papers-pro-toolkit-capstone",
+        "papers-pro-toolkit-crown-and-toolkit"
+      ],
+      "basis": "Both use the engine-versus-door thesis, but the capstone owns cross-lane product synthesis while crown/toolkit owns the exhaustive renderer and insertion census.",
+      "disposition": "Keep separate, deduplicate repeated thesis prose, and cross-link synthesis to census evidence."
+    },
+    {
+      "candidate_set": [
+        "papers-pro-toolkit-evidence-record",
+        "papers-pro-toolkit-living-data-forms"
+      ],
+      "basis": "Both discuss source blocks and resolved values, but one owns editor/integration seams while the other owns living-data/form lifecycle and provenance.",
+      "disposition": "Keep separate and cross-link the shared resolution doctrine; do not merge distinct evidence boundaries."
+    }
+  ],
+  "reader_risks": [
+    "Studio: lead with the current outcome and authority; collapse machine projections, raw ledgers, and giant ground-truth tables behind summaries.",
+    "TUI80: keep one decision per screen, preserve exact receipts in drill-down views, and avoid six-figure callout payloads or wide census tables.",
+    "email: send outcome, material caveat, and next action; link immutable ledgers and long capability matrices rather than inlining them.",
+    "public: remove internal task ids, branches, runtime paths, UUIDs, operator commands, and mutable deployment facts while retaining method and limitations.",
+    "CLI/API: preserve ids, revisions, hashes, denominators, gate states, and distinctions among modeled, rendered, accepted, deployed, and live-proven."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:paper-perfection-reader-harness-wave-2026-07-28",
+      "document_id": "paper-perfection-reader-harness-wave-2026-07-28",
+      "document_rev": "b823eaf84dde8319690ac56f0be51719",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Current reader-harness authority: prove that accepted editorial repairs survive exact revision fencing and remain legible across installed readers.",
+      "opening_and_criteria": "The paper progresses from scope and harness method to candidate execution and a final verdict; blocks[47]-[52] contain the decisive current outcome, but that result arrives after a large operational ledger.",
+      "outline_and_hierarchy": "The phase sequence is auditable and the terminal verdict is strong, yet empty separator paragraphs and the enormous CycleFleet projection interrupt navigation.",
+      "human_voice_and_precision": "The closing language is candid about both the 51 repaired candidates and the 28 stalled cases; it avoids turning partial throughput into a universal quality claim.",
+      "compression_and_restraint": "Promote blocks[47]-[52] into a short executive opening, delete empty paragraphs, and move the 113,781-character machine projection in blocks[18] to a linked immutable artifact.",
+      "evidence_and_truth": "blocks[47]-[51] distinguish 516 fit, 51 repaired, 30 accepted, 21 reader-stalled, 150/150 reader cells, 312/312 exact checks, 546 shipped, and 28 stalled; those denominators support the conclusion.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[51]",
+          "evidence": "The final reconciliation states 312/312 exact checks, 546 shipped candidates, and 28 stalled candidates.",
+          "lesson": "End with explicit denominators and unresolved scope rather than a victory slogan."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[18]",
+          "evidence": "A single CycleFleet callout embeds roughly 113,781 characters of machine projection.",
+          "lesson": "Keep machine evidence immutable but outside the human reading path."
+        }
+      ],
+      "duplicate_disposition": "This is the current authority in the paper-perfection lineage; retain it, repair its reading surface, and link earlier waves as historical predecessors rather than merging ledgers.",
+      "reader_risks": [
+        "Studio: lead with the current outcome and authority; collapse machine projections, raw ledgers, and giant ground-truth tables behind summaries.",
+        "TUI80: keep one decision per screen, preserve exact receipts in drill-down views, and avoid six-figure callout payloads or wide census tables.",
+        "email: send outcome, material caveat, and next action; link immutable ledgers and long capability matrices rather than inlining them.",
+        "public: remove internal task ids, branches, runtime paths, UUIDs, operator commands, and mutable deployment facts while retaining method and limitations.",
+        "CLI/API: preserve ids, revisions, hashes, denominators, gate states, and distinctions among modeled, rendered, accepted, deployed, and live-proven."
+      ],
+      "rationale": "Repair because the proof is authoritative and unusually honest, while the primary reading surface is dominated by a machine artifact that belongs in an appendix or external receipt."
+    },
+    {
+      "unit_id": "paper:paper-perfection-recovery-wave-2026-07-27",
+      "document_id": "paper-perfection-recovery-wave-2026-07-27",
+      "document_rev": "c2c8cac6a7762206a50f680d03c0b8cb",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Recovery-wave record that tested whether modeled fit and local recovery could justify production-scale Paper repair.",
+      "opening_and_criteria": "The opening establishes recovery intent and staged gates, while blocks[37]-[38] deliver the authoritative negative finding and next step.",
+      "outline_and_hierarchy": "The experiment narrative is coherent and appropriately culminates in a decision; its current-status role has now been taken over by the successor reader-harness wave.",
+      "human_voice_and_precision": "The refusal to seal capacity is precise and restrained: it names the missing installed-reader route instead of disguising projections as observed parity.",
+      "compression_and_restraint": "Preserve the full record as historical evidence, but front-load a superseded banner and a short link to the 2026-07-28 reader-harness outcome.",
+      "evidence_and_truth": "blocks[37]-[38] explicitly separate modeled projections from installed-reader parity and decide not to seal the wave until a candidate-scoped route exists.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[38]",
+          "evidence": "The final decision says not to seal: modeled projections are not installed-reader parity, and a harness or new wave is required.",
+          "lesson": "A failed gate should produce a bounded next experiment, not optimistic capacity."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[37]",
+          "evidence": "Pilot A records hard failures because no candidate-scoped installed-reader injection route was available.",
+          "lesson": "State missing capabilities as hard evidence, not editorial weakness."
+        }
+      ],
+      "duplicate_disposition": "Superseded by paper-perfection-reader-harness-wave-2026-07-28 for current authority; keep immutable as the predecessor that explains why the harness was necessary.",
+      "reader_risks": [
+        "Studio: lead with the current outcome and authority; collapse machine projections, raw ledgers, and giant ground-truth tables behind summaries.",
+        "TUI80: keep one decision per screen, preserve exact receipts in drill-down views, and avoid six-figure callout payloads or wide census tables.",
+        "email: send outcome, material caveat, and next action; link immutable ledgers and long capability matrices rather than inlining them.",
+        "public: remove internal task ids, branches, runtime paths, UUIDs, operator commands, and mutable deployment facts while retaining method and limitations.",
+        "CLI/API: preserve ids, revisions, hashes, denominators, gate states, and distinctions among modeled, rendered, accepted, deployed, and live-proven."
+      ],
+      "rationale": "Superseded, not deleted: its negative result is valuable provenance, but its proposed next step has already been executed by the newer authority."
+    },
+    {
+      "unit_id": "paper:paper-perfection-wave-2026-07-23",
+      "document_id": "paper-perfection-wave-2026-07-23",
+      "document_rev": "99816b97a2eb2900afb10bc147b912ff",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Initial Paper-perfection wave design and execution ledger for quality criteria, five-reader fitness, idempotence, and typed survey capacity.",
+      "opening_and_criteria": "blocks[6] states the durable editorial doctrine well, but the opening machine projection overwhelms the human criteria and presents zero-assignment state before the result is known.",
+      "outline_and_hierarchy": "Conceptual principles and runtime projection coexist without enough separation; the historical sequence is useful but no longer the current authority.",
+      "human_voice_and_precision": "The prose rejects score-only quality and insists on clarity, restraint, reader parity, and idempotence, a strong human standard.",
+      "compression_and_restraint": "Retain the doctrine and historical receipts; replace the first-view projection with a compact outcome banner and link the 2026-07-26 successor.",
+      "evidence_and_truth": "blocks[19] reports the typed survey capability gate at 0/60, while blocks[1] exposes exact reconciliation false and zero assigned; those facts bound the wave's result.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[6]",
+          "evidence": "The paper says no score certifies quality and requires clarity, restraint, idempotence, and fitness across five readers.",
+          "lesson": "Quality criteria should define human outcomes before numeric automation."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[1]",
+          "evidence": "The opening contains a roughly 44,251-character machine projection whose state includes zero assigned and exact reconciliation false.",
+          "lesson": "Do not let a pre-outcome runtime dump masquerade as an executive status."
+        }
+      ],
+      "duplicate_disposition": "Superseded by paper-perfection-wave-2026-07-26 and later recovery/harness waves; preserve as the origin of the doctrine and failed capacity premise.",
+      "reader_risks": [
+        "Studio: lead with the current outcome and authority; collapse machine projections, raw ledgers, and giant ground-truth tables behind summaries.",
+        "TUI80: keep one decision per screen, preserve exact receipts in drill-down views, and avoid six-figure callout payloads or wide census tables.",
+        "email: send outcome, material caveat, and next action; link immutable ledgers and long capability matrices rather than inlining them.",
+        "public: remove internal task ids, branches, runtime paths, UUIDs, operator commands, and mutable deployment facts while retaining method and limitations.",
+        "CLI/API: preserve ids, revisions, hashes, denominators, gate states, and distinctions among modeled, rendered, accepted, deployed, and live-proven."
+      ],
+      "rationale": "Superseded because its current-state function and next actions were overtaken, although its editorial doctrine remains transferable."
+    },
+    {
+      "unit_id": "paper:paper-perfection-wave-2026-07-26",
+      "document_id": "paper-perfection-wave-2026-07-26",
+      "document_rev": "4217d90edcb6d4bbcceaf9a8a64d4dcf",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Large successor wave that surveyed the corpus, attempted candidate repair, and documented why production mutation and capacity remained zero.",
+      "opening_and_criteria": "A comprehensive survey digest appears later, but the first reading path is dominated by a massive machine projection before the decisive no-mutation conclusion in blocks[181]-[184].",
+      "outline_and_hierarchy": "The 185-block chronology is rigorous as an immutable ledger but too large to serve simultaneously as current brief, experiment report, and machine receipt.",
+      "human_voice_and_precision": "The closing is admirably explicit that local work was not production proof and that no production mutation occurred.",
+      "compression_and_restraint": "Add a top superseded/current-outcome notice, extract machine receipts, and preserve the full chronology as drill-down evidence rather than primary narrative.",
+      "evidence_and_truth": "blocks[181]-[184] state capacity zero, failed pilot, unchanged production, and the need for a recovery wave; the evidence does not overclaim deployment.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[182]",
+          "evidence": "The experiment is complete but the pilot failed, so the document calls for a new recovery wave rather than claiming capacity.",
+          "lesson": "Close a failed experiment with its exact operational consequence."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "An early machine projection is roughly 83,220 characters and precedes the human conclusion.",
+          "lesson": "Large receipts need a summary boundary and stable external artifact."
+        }
+      ],
+      "duplicate_disposition": "Superseded by paper-perfection-recovery-wave-2026-07-27 and the reader-harness successor; do not merge immutable execution histories.",
+      "reader_risks": [
+        "Studio: lead with the current outcome and authority; collapse machine projections, raw ledgers, and giant ground-truth tables behind summaries.",
+        "TUI80: keep one decision per screen, preserve exact receipts in drill-down views, and avoid six-figure callout payloads or wide census tables.",
+        "email: send outcome, material caveat, and next action; link immutable ledgers and long capability matrices rather than inlining them.",
+        "public: remove internal task ids, branches, runtime paths, UUIDs, operator commands, and mutable deployment facts while retaining method and limitations.",
+        "CLI/API: preserve ids, revisions, hashes, denominators, gate states, and distinctions among modeled, rendered, accepted, deployed, and live-proven."
+      ],
+      "rationale": "Superseded as current authority because later waves executed its next step, while retained as the detailed proof that production remained unchanged."
+    },
+    {
+      "unit_id": "paper:paper-perfection-work-so-far-2026-07-27",
+      "document_id": "paper-perfection-work-so-far-2026-07-27",
+      "document_rev": "280c030d2b9c0517babb822ae476fe7b",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Compact interim synthesis of what the Paper-perfection program had proved, failed to prove, and needed to do next as of 2026-07-27.",
+      "opening_and_criteria": "It opens and moves quickly through lessons, candidate compression, safe capacity, and the next move; it is the most readable historical bridge in the lineage.",
+      "outline_and_hierarchy": "The short hierarchy works, but the title and final next-step wording can be mistaken for present authority after later recovery and harness work.",
+      "human_voice_and_precision": "The voice is direct about failed gates, local-only recovery, and safe capacity zero; it distinguishes good prose from deployable proof.",
+      "compression_and_restraint": "Preserve unchanged as a dated checkpoint, add a superseded banner, and link the completed recovery/harness successors.",
+      "evidence_and_truth": "blocks[10]-[12] say candidates 92-95 were compressed but the gate failed and local recovery was not production proof; block[14] names the then-next move.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[10]",
+          "evidence": "Candidates 92-95 improved editorially, yet the gate still failed and safe capacity remained zero.",
+          "lesson": "Separate content quality from the delivery proof required to ship it."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[14]",
+          "evidence": "The prescribed next move is to deploy recovery and open a correction wave, work now represented by later papers.",
+          "lesson": "Dated plans need explicit successor links once executed."
+        }
+      ],
+      "duplicate_disposition": "Superseded by the recovery and reader-harness wave papers; keep as the concise dated bridge, not as a live status page.",
+      "reader_risks": [
+        "Studio: lead with the current outcome and authority; collapse machine projections, raw ledgers, and giant ground-truth tables behind summaries.",
+        "TUI80: keep one decision per screen, preserve exact receipts in drill-down views, and avoid six-figure callout payloads or wide census tables.",
+        "email: send outcome, material caveat, and next action; link immutable ledgers and long capability matrices rather than inlining them.",
+        "public: remove internal task ids, branches, runtime paths, UUIDs, operator commands, and mutable deployment facts while retaining method and limitations.",
+        "CLI/API: preserve ids, revisions, hashes, denominators, gate states, and distinctions among modeled, rendered, accepted, deployed, and live-proven."
+      ],
+      "rationale": "Superseded because its next move is now historical, despite being an exemplary concise summary of the program at that time."
+    },
+    {
+      "unit_id": "paper:papers-pro-toolkit-capstone",
+      "document_id": "papers-pro-toolkit-capstone",
+      "document_rev": "7e45b9a48b74a878798ddaae712bc7bf",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Capstone synthesis that turns several Papers Pro evidence lanes into a product strategy: reduce the gap between powerful engine capabilities and user entry.",
+      "opening_and_criteria": "The thesis is memorable and early, and later sections translate it into a phased, falsifiable program with explicit open decisions.",
+      "outline_and_hierarchy": "The document successfully reconciles sibling evidence into one decision narrative, though the final callout asks readers to resolve too many decisions at once.",
+      "human_voice_and_precision": "The recurring 'engine/door' metaphor gives the technical census a human product voice without hiding evidence limits.",
+      "compression_and_restraint": "Keep the synthesis; split the seven-decision callout into prioritized now/next/later choices and link deep evidence instead of repeating it.",
+      "evidence_and_truth": "blocks[79] gives a precise one-resolver/three-source-twins doctrine; blocks[93]-[95] admit demand is inferred and frame the program as a test rather than certainty.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[14]",
+          "evidence": "The thesis says the engine kept growing while the door never did.",
+          "lesson": "A technical strategy becomes legible when one concrete metaphor expresses the user gap."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[97]",
+          "evidence": "One closing callout asks the reader to resolve seven separate product and architecture decisions.",
+          "lesson": "Decision requests should be ranked and staged rather than bundled."
+        }
+      ],
+      "duplicate_disposition": "Keep as the synthesis authority; keep crown/toolkit, evidence-record, and living-data papers as purpose-specific deep lanes with reciprocal links.",
+      "reader_risks": [
+        "Studio: lead with the current outcome and authority; collapse machine projections, raw ledgers, and giant ground-truth tables behind summaries.",
+        "TUI80: keep one decision per screen, preserve exact receipts in drill-down views, and avoid six-figure callout payloads or wide census tables.",
+        "email: send outcome, material caveat, and next action; link immutable ledgers and long capability matrices rather than inlining them.",
+        "public: remove internal task ids, branches, runtime paths, UUIDs, operator commands, and mutable deployment facts while retaining method and limitations.",
+        "CLI/API: preserve ids, revisions, hashes, denominators, gate states, and distinctions among modeled, rendered, accepted, deployed, and live-proven."
+      ],
+      "rationale": "Keep because it resolves contradictions, preserves uncertainty, and produces a coherent decision program without replacing the underlying evidence records."
+    },
+    {
+      "unit_id": "paper:papers-pro-toolkit-crown-and-toolkit",
+      "document_id": "papers-pro-toolkit-crown-and-toolkit",
+      "document_rev": "387bb7f277bb33331a3c360b4d125aba",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Deep census and sequencing lane for the Papers Pro crown/toolkit surface, including renderer counts, insertion scope, and product premise correction.",
+      "opening_and_criteria": "The paper establishes the gap and then reconciles disputed counts and premises before proposing a bounded toolkit sequence.",
+      "outline_and_hierarchy": "The census-to-decision hierarchy is sound; some dense matrices and mutable risk details belong in appendices for constrained readers.",
+      "human_voice_and_precision": "It is unusually willing to say which starting premises fell after inspection, increasing trust in the recommendations.",
+      "compression_and_restraint": "Retain exact census evidence and a short human synthesis; deduplicate the door thesis with the capstone through cross-links rather than merging purposes.",
+      "evidence_and_truth": "blocks[29]-[31] reconcile 70/75/60/66 scopes, isolate 33 insertable types, and record that CSS debt, S-tier completion, and TUI weakness premises changed under evidence.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[31]",
+          "evidence": "The paper explicitly names premises that fell: CSS debt was paid, the S-tier was complete, and the TUI was not the weak reader assumed.",
+          "lesson": "A survey should publish corrected premises, not just its preferred roadmap."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[51]",
+          "evidence": "The risk section mixes enduring architecture risks with mutable product facts and dense sequencing detail.",
+          "lesson": "Separate durable doctrine from facts likely to expire."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from the capstone: this paper owns the full census and sequencing proof, while the capstone owns cross-lane synthesis.",
+      "reader_risks": [
+        "Studio: lead with the current outcome and authority; collapse machine projections, raw ledgers, and giant ground-truth tables behind summaries.",
+        "TUI80: keep one decision per screen, preserve exact receipts in drill-down views, and avoid six-figure callout payloads or wide census tables.",
+        "email: send outcome, material caveat, and next action; link immutable ledgers and long capability matrices rather than inlining them.",
+        "public: remove internal task ids, branches, runtime paths, UUIDs, operator commands, and mutable deployment facts while retaining method and limitations.",
+        "CLI/API: preserve ids, revisions, hashes, denominators, gate states, and distinctions among modeled, rendered, accepted, deployed, and live-proven."
+      ],
+      "rationale": "Keep because the reconciled census and premise corrections are durable evidence that the capstone should cite, not absorb."
+    },
+    {
+      "unit_id": "paper:papers-pro-toolkit-evidence-record",
+      "document_id": "papers-pro-toolkit-evidence-record",
+      "document_rev": "40017490212dc4e36ea416fac73b5d4d",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Evidence record for toolkit/editor integration seams, cross-references, footnotes, export boundaries, and decisions that remain open.",
+      "opening_and_criteria": "The paper defines scope and method before presenting findings, decisions, corrections, and reader implications.",
+      "outline_and_hierarchy": "Its evidence-record structure is appropriate and traceable; the capability details should remain subordinate to the capstone's decision view.",
+      "human_voice_and_precision": "The prose repeatedly distinguishes observed implementation from inferred completion and documents corrections without defensiveness.",
+      "compression_and_restraint": "Keep the detailed record; soften the 'completion, not invention' slogan and surface the expensive multi-reader/editor seams as explicit caveats.",
+      "evidence_and_truth": "blocks[33] proves cross-references are broken at both ends, describes the half-feature footnote state, and corrects database-trigger and export assumptions.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[33]",
+          "evidence": "The findings distinguish broken cross-reference creation and resolution, half-built footnotes, database-trigger limits, and the export wall.",
+          "lesson": "Evidence records should correct each premise at the exact capability boundary."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "The framing 'completion, not invention' is broader than the later record, which identifies several new seams and reader/editor obligations.",
+          "lesson": "A memorable slogan must not compress away real implementation surfaces."
+        }
+      ],
+      "duplicate_disposition": "Keep as the integration-evidence lane feeding the capstone; cross-link living-data forms where source-block and resolved-value doctrine intersects.",
+      "reader_risks": [
+        "Studio: lead with the current outcome and authority; collapse machine projections, raw ledgers, and giant ground-truth tables behind summaries.",
+        "TUI80: keep one decision per screen, preserve exact receipts in drill-down views, and avoid six-figure callout payloads or wide census tables.",
+        "email: send outcome, material caveat, and next action; link immutable ledgers and long capability matrices rather than inlining them.",
+        "public: remove internal task ids, branches, runtime paths, UUIDs, operator commands, and mutable deployment facts while retaining method and limitations.",
+        "CLI/API: preserve ids, revisions, hashes, denominators, gate states, and distinctions among modeled, rendered, accepted, deployed, and live-proven."
+      ],
+      "rationale": "Keep because it is the strongest source of boundary-specific evidence and self-correction, with only a framing slogan needing caution."
+    },
+    {
+      "unit_id": "paper:papers-pro-toolkit-living-data-forms",
+      "document_id": "papers-pro-toolkit-living-data-forms",
+      "document_rev": "3e87cc35c3b2ba80c93604014a8680d4",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Capability audit and product doctrine for living-data sources, form submission, resolved values, provenance, and multi-reader behavior.",
+      "opening_and_criteria": "The paper moves from the 'mostly built, not delivered' thesis through lifecycle evidence, corrected framing, ground truth, risks, and method.",
+      "outline_and_hierarchy": "The six-stage lifecycle is an effective organizing model; the giant central table is too dense for TUI and email but appropriate as linked evidence.",
+      "human_voice_and_precision": "It names unsupported assumptions and avoids equating a live endpoint with a usable submit flow.",
+      "compression_and_restraint": "Keep the lifecycle and doctrine; replace the 3,887-character central table in the primary narrative with a summary plus reader-specific drill-down.",
+      "evidence_and_truth": "blocks[19] says the endpoint is live but no submit button exists; blocks[28] reconciles counts, insertion gaps, parity, provenance, and corrections.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[28]",
+          "evidence": "The paper corrects its own framing, reconciles counts, and separates insertion, feature parity, and provenance evidence.",
+          "lesson": "Correction tables are strongest when they bind each claim to a distinct capability layer."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[33]",
+          "evidence": "The central ground-truth table is roughly 3,887 characters and concentrates many capability states into one constrained-reader obstacle.",
+          "lesson": "Keep the evidence table, but lead constrained readers with the lifecycle decision summary."
+        }
+      ],
+      "duplicate_disposition": "Keep as the living-data/forms lane; link the evidence record for editor seams and the capstone for cross-lane priority, but do not merge distinct capability purposes.",
+      "reader_risks": [
+        "Studio: lead with the current outcome and authority; collapse machine projections, raw ledgers, and giant ground-truth tables behind summaries.",
+        "TUI80: keep one decision per screen, preserve exact receipts in drill-down views, and avoid six-figure callout payloads or wide census tables.",
+        "email: send outcome, material caveat, and next action; link immutable ledgers and long capability matrices rather than inlining them.",
+        "public: remove internal task ids, branches, runtime paths, UUIDs, operator commands, and mutable deployment facts while retaining method and limitations.",
+        "CLI/API: preserve ids, revisions, hashes, denominators, gate states, and distinctions among modeled, rendered, accepted, deployed, and live-proven."
+      ],
+      "rationale": "Keep because the lifecycle model and corrected capability boundaries are durable, and the main weakness is presentation density rather than authority."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}

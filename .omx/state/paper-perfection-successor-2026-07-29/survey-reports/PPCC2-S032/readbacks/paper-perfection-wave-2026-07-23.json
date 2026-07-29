@@ -1,0 +1,3844 @@
+{
+  "_createdAt": "2026-07-23T15:11:22.275323Z",
+  "_draft": false,
+  "_id": "paper-perfection-wave-2026-07-23",
+  "_publishedId": "paper-perfection-wave-2026-07-23",
+  "_rev": "99816b97a2eb2900afb10bc147b912ff",
+  "_type": "paper",
+  "_updatedAt": "2026-07-23T15:16:46.773811Z",
+  "blocks": [
+    {
+      "id": "title",
+      "level": 1,
+      "text": "Paper Perfection — learn from the best, then repair every Paper",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Legendary CycleFleet 4ec4bf5a-0236-489d-ac4b-c226d46355ea: 526 inventoried, 0 assigned, 0 shipped, 0 stalled, 0 excluded; exact reconciliation false. The corpus is frozen by document revision. Automated measurements prioritize attention; human editorial judgment and five-reader proof decide what is actually excellent."
+        }
+      ],
+      "cycle_ledger": {
+        "assigned_count": 0,
+        "assigned_occurrences": 0,
+        "capacity": {
+          "chosen_format": null,
+          "failure_rate": null,
+          "failure_threshold": null,
+          "golden_fixtures": null,
+          "proven_batch_capacity": null,
+          "quality_rubric": null,
+          "sealed": false
+        },
+        "correction_ancestry": [],
+        "correction_of": null,
+        "correction_of_digest": null,
+        "correction_of_wave_revision": null,
+        "correction_receipt": null,
+        "correction_receipt_digest": null,
+        "duplicate_assignment_unit_ids": [],
+        "exact": false,
+        "excluded_count": 0,
+        "experiment": {
+          "complete?": false,
+          "missing_rounds": [
+            "baseline",
+            "diverge",
+            "attack",
+            "converge",
+            "pilot"
+          ],
+          "required?": true,
+          "round_counts": {
+            "attack": 0,
+            "baseline": 0,
+            "converge": 0,
+            "diverge": 0,
+            "pilot": 0
+          }
+        },
+        "fleet_complete": false,
+        "fleet_counts": {
+          "completed": 0,
+          "failed": 0,
+          "invalid_assignments": 0,
+          "invalid_results": 0,
+          "missing": 135,
+          "planned": 135,
+          "started": 0
+        },
+        "invalid_build_assignment_ids": [],
+        "invalid_build_result_assignment_ids": [],
+        "inventory_count": 526,
+        "inventory_digest": "0b21e73da210e1b2ce7be49eeb010fcb5cc1665d0e6a2276f6ecf3532c463702",
+        "live_authority_digest": "8f79e317aef819bca5d18da4e062a4186866ca0383121dedf6f3fe2a7e2aae7c",
+        "outcome_overlap_unit_ids": [],
+        "outcome_ownership_violation_unit_ids": [],
+        "plan_digest": "9997fc50db5f1b83f1f53e33bd45dd111b2b06402b07a78b0673d2048f299e45",
+        "planned_builders": 15,
+        "profile": "legendary",
+        "reconciliation_digest": "203977572e186ccd21da4807d762a78461de775303908b0ed4dae53ab75cc41d",
+        "scale_contract": {
+          "build_formula": "max(15, ceil(unit_count / proven_batch_capacity))",
+          "concurrency_width": 3,
+          "excluded_inventory": [],
+          "failure_threshold": 0,
+          "inventory_evidence": "Published production Paper census frozen from guerrilla; 526 unique revision-pinned units; canonical inventory SHA-256 5a9d723b3237745b8e870dd19d0f0fdf6d0f0071e6bc363b2ff88237aaa3cb83.",
+          "minimum_multiplier": 5,
+          "quality_rubric": {
+            "block_fitness_and_accessibility": "Every block earns its role and remains usable nonvisually.",
+            "compression_and_restraint": "No empty, duplicate, throat-clearing, or ornamental scaffolding.",
+            "evidence_and_truth": "Facts, provenance, decisions, uncertainty, and authored meaning survive.",
+            "hard_gate": "Any truth, preservation, accessibility, schema, reader, or idempotence failure caps the verdict at repair or quarantine.",
+            "human_voice_and_precision": "Concrete, natural prose without generic AI cadence or inflated claims.",
+            "idempotence_and_revision_proof": "Preimage, mutation, postimage, revision, and no-op rerun are recorded.",
+            "narrative_and_hierarchy": "Sections form an argument; heading order is valid.",
+            "purpose_and_opening": "Reader, problem, and promise are clear immediately.",
+            "reader_fidelity": "Studio, TUI, email, public, and CLI/API are non-empty and semantically equivalent."
+          },
+          "target_surfaces": [
+            "Studio",
+            "TUI at 80 columns",
+            "email",
+            "public reader",
+            "CLI/API"
+          ],
+          "unit_count": 526,
+          "unit_definition": "One published Barkpark Paper identified by paper:<document_id> and pinned to document_rev."
+        },
+        "scope": {
+          "epic_id": "task-f5cbd8be8f278caf",
+          "project_id": "e5153f64-fd55-4bfa-89fe-b8046886463b",
+          "wave_id": "paper-perfection-wave-2026-07-23",
+          "workspace_id": "03e3d6d9-d123-4557-9c06-ae4382a20626"
+        },
+        "shipped_count": 0,
+        "stalled_count": 0,
+        "unaccounted_unit_ids": [
+          "paper:2026-06-29-concepts-and-details-truth-fabric",
+          "paper:2026-07-10-barkpark-greatest-weaknesses",
+          "paper:aesthetic-unification-epic-wave-2026-07-11",
+          "paper:agency-closeout-work-order",
+          "paper:agent-epistemics-portabledoc-2026-07",
+          "paper:agent-flight-recorder-charter",
+          "paper:agent-onramps-epic-wave-2026-07-11",
+          "paper:agent-onramps-epic-wave-2026-07-13",
+          "paper:agent-onramps-epic-wave-2026-07-16",
+          "paper:airdrop-grants-wave-2026-07-10-close",
+          "paper:authoring-excellence",
+          "paper:authoring-excellence-d10-reconcile-2026-07-14",
+          "paper:authoring-excellence-wave-2026-07-10",
+          "paper:authoring-excellence-wave-2026-07-12",
+          "paper:authoring-excellence-wave-2026-07-12b",
+          "paper:authoring-excellence-wave-2026-07-13",
+          "paper:authoring-excellence-wave-2026-07-13b",
+          "paper:authoring-excellence-wave-2026-07-13c",
+          "paper:authoring-excellence-wave-2026-07-13d",
+          "paper:authoring-excellence-wave-2026-07-14",
+          "paper:authoring-excellence-wave-2026-07-15",
+          "paper:authoring-excellence-wave-2026-07-16",
+          "paper:authoring-excellence-wave-2026-07-22",
+          "paper:authoring-excellence-wave-2026-07-23",
+          "paper:autodeploy-target-ui-approved",
+          "paper:autorebuild-proof-164347",
+          "paper:axi-agent-ergonomics-review",
+          "paper:axi-brief-views-wave-2026-07-18",
+          "paper:axi-brief-views-wave-2026-07-19",
+          "paper:azure-hetzner-hosting-epic-wave-2026-07-11",
+          "paper:barkpark-chat-tui",
+          "paper:barkpark-chat-tui-wave-2026-07-12",
+          "paper:barkpark-cli-reliability-wave-2026-07-22",
+          "paper:barkpark-efficiency-ledger",
+          "paper:barkpark-estate",
+          "paper:barkpark-onboarding-painpoint-audit-2026-07-13",
+          "paper:barkpark-tasks-mobile-capstone",
+          "paper:barkpark-tasks-mobile-chat-third-client",
+          "paper:barkpark-tasks-mobile-identity-cascade",
+          "paper:barkpark-tasks-mobile-product-shapes",
+          "paper:barkpark-tasks-mobile-shell-and-cache",
+          "paper:barkpark-tasks-mobile-tasks-papers-reading",
+          "paper:barkpark-tasks-mobile-wave-2026-07-23",
+          "paper:block-wishlist-100",
+          "paper:block-wishlist-100-review",
+          "paper:block-wishlist-wave-2026-07-17",
+          "paper:block-wishlist-wave-2026-07-18",
+          "paper:bp-chat-tui-wave-2026-07-13",
+          "paper:bp-chat-tui-wave-2026-07-16",
+          "paper:bp-chat-tui-wave-2026-07-23-r2",
+          "paper:bp-chat-tui-wave-2026-07-23-r3",
+          "paper:bp-cloud-build-wave-2026-07-13",
+          "paper:bp-cloud-build-wave-2026-07-15",
+          "paper:bp-cloud-build-wave-6-2026-07-14",
+          "paper:bp-mcp-serve-epic-wave-2026-07-11",
+          "paper:bp-onboarding-composition-wave-2026-07-13",
+          "paper:bp-scaffy-wave-2026-07-16",
+          "paper:bp-scaffy-wave-2026-07-23",
+          "paper:bp-scaffy-wave-2026-07-23-d58",
+          "paper:bp-scaffy-wave2-2026-07-16",
+          "paper:bp-scaffy-wave3-2026-07-16",
+          "paper:bp-scaffy-wave4-2026-07-16",
+          "paper:bp-scaffy-wave5-2026-07-17",
+          "paper:bp-scaffy-wave6-2026-07-17",
+          "paper:bp-scaffy-wave7-2026-07-17",
+          "paper:chat-herd-layer",
+          "paper:chat-herd-wave-2026-07-18",
+          "paper:chat-herd-wave2-2026-07-18",
+          "paper:chat-local-cloud-context-wave-3-2026-07-15",
+          "paper:chat-plan-050c647a4c8c",
+          "paper:chat-plan-091648d6fc0e",
+          "paper:chat-plan-1caa96602607",
+          "paper:chat-plan-40bf61f3ace0",
+          "paper:chat-plan-651c5eb5b064",
+          "paper:chat-plan-83959fbd5740",
+          "paper:chat-plan-841f9346140d",
+          "paper:chat-plan-8576b1edc5a7",
+          "paper:chat-provider-runtime-parity-wave-2-2026-07-14",
+          "paper:chat-task-hands-wave-2026-07-11",
+          "paper:choosing-your-site-framework",
+          "paper:cli-reliability-wave-2026-07-23",
+          "paper:cloud-console-epic-wish",
+          "paper:cloud-console-hardening-dashboard",
+          "paper:cloud-console-hardening-wave-2-2026-07-21",
+          "paper:cloud-console-hardening-wave-2026-07-21",
+          "paper:cloud-console-hardening-wave-3-2026-07-21",
+          "paper:cloud-console-hardening-wave-4-2026-07-21",
+          "paper:cloud-console-hardening-wave-5-2026-07-21",
+          "paper:cloud-console-wave-2026-07-11",
+          "paper:cloud-gui-remake-designer-handover",
+          "paper:cloud-gui-remake-feedback-round-1",
+          "paper:cloud-gui-remake-feedback-round-2",
+          "paper:cloud-gui-remake-feedback-round-3",
+          "paper:cloud-gui-remake-wave-2026-07-18",
+          "paper:cloud-gui-remake-wave-2026-07-19",
+          "paper:cloud-gui-remake-wave-2026-07-19-p3",
+          "paper:cloud-gui-remake-wave-2026-07-19-p4",
+          "paper:cloud-gui-remake-wave-2026-07-19-p5",
+          "paper:cloud-gui-remake-wave-2026-07-19-p5r2",
+          "paper:cloud-gui-remake-wave-2026-07-19-p5r3",
+          "paper:cloud-gui-remake-wave-2026-07-19-p5r4",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal-r10",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal-r2",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal-r3",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal-r4",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal-r5",
+          "paper:cloud-gui-remake-wave-2026-07-21-r12",
+          "paper:cloud-gui-remake-wave-2026-07-21-seal",
+          "paper:cloud-site-spawner-cf-wave-2026-07-14",
+          "paper:cloud-site-spawner-node-wave-2026-07-15",
+          "paper:cloud-site-spawner-wave-2026-07-14",
+          "paper:cloud-site-spawner-wave-3-2026-07-14",
+          "paper:cloud-site-spawner-wave-4-2026-07-14",
+          "paper:cloud-site-spawner-wave-5-2026-07-14",
+          "paper:cmux-bridge",
+          "paper:codex-epic-cycle-wave-1-2026-07-14",
+          "paper:codex-epic-cycle-wave-2-2026-07-15",
+          "paper:codex-epic-cycle-wave-3-real-corpus-usage-join-2026-07-15",
+          "paper:codex-epic-cycle-wave-3-takeover-2026-07-15",
+          "paper:compact-grep-vs-optical-archive",
+          "paper:compact-vs-image-blur-budget",
+          "paper:component-reference",
+          "paper:composition-doctrine-plan",
+          "paper:composition-doctrine-wave-2026-07-10",
+          "paper:composition-doctrine-wave-2026-07-13",
+          "paper:composition-showcase",
+          "paper:confusion-pattern-sweep-2026-07",
+          "paper:connectors-wave-10-2026-07-15",
+          "paper:connectors-wave-11-2026-07-16",
+          "paper:connectors-wave-12-2026-07-16",
+          "paper:connectors-wave-13-2026-07-16",
+          "paper:connectors-wave-14-2026-07-16",
+          "paper:connectors-wave-15-2026-07-16",
+          "paper:connectors-wave-16-2026-07-16",
+          "paper:connectors-wave-17-2026-07-16",
+          "paper:connectors-wave-18-2026-07-16",
+          "paper:connectors-wave-19-2026-07-16",
+          "paper:connectors-wave-2-2026-07-13",
+          "paper:connectors-wave-20-2026-07-16",
+          "paper:connectors-wave-2026-07-13",
+          "paper:connectors-wave-2026-07-22",
+          "paper:connectors-wave-21-2026-07-17",
+          "paper:connectors-wave-22-2026-07-17",
+          "paper:connectors-wave-23-2026-07-17",
+          "paper:connectors-wave-24-2026-07-17",
+          "paper:connectors-wave-25-2026-07-17",
+          "paper:connectors-wave-26-2026-07-18",
+          "paper:connectors-wave-27-2026-07-18",
+          "paper:connectors-wave-28-2026-07-18",
+          "paper:connectors-wave-29-2026-07-18",
+          "paper:connectors-wave-3-2026-07-14",
+          "paper:connectors-wave-30-2026-07-21",
+          "paper:connectors-wave-31-2026-07-22",
+          "paper:connectors-wave-33-2026-07-23",
+          "paper:connectors-wave-34-2026-07-23",
+          "paper:connectors-wave-4-2026-07-14",
+          "paper:connectors-wave-5-2026-07-14",
+          "paper:connectors-wave-6-2026-07-14",
+          "paper:connectors-wave-7-2026-07-14",
+          "paper:connectors-wave-8-2026-07-15",
+          "paper:connectors-wave-9-2026-07-15",
+          "paper:console-gui-build-outline",
+          "paper:console-remake-design-phase-closed-2026-07-18",
+          "paper:console-stress-screens-review-2026-07-18",
+          "paper:context-compression-benchmark",
+          "paper:context-compression-benchmark-gen1",
+          "paper:criminality-constraint-frontiers-draft",
+          "paper:deploy-with-barkpark",
+          "paper:design-engagement-accepted",
+          "paper:desk-structure-bp-tui",
+          "paper:desktop-fleets-brainstorm",
+          "paper:desktop-fleets-masterplan",
+          "paper:dispatch-frontier",
+          "paper:dispatch-frontier-wave-2026-07-10",
+          "paper:dpa-template",
+          "paper:edge-cache-share",
+          "paper:enterprise-auth-build-retro",
+          "paper:enterprise-auth-gates-debrief",
+          "paper:enterprise-ready-auth-wave-2026-07-10",
+          "paper:enterprise-ready-auth-wave-2026-07-10-w9",
+          "paper:enterprise-ready-auth-wave-2026-07-11",
+          "paper:enterprise-ready-barkpark",
+          "paper:epic-cycle-docs-index-wave-2026-07-11",
+          "paper:epic-cycle-research-graduation-wave-2026-07-22",
+          "paper:epic-cycle-research-program-abcde",
+          "paper:epic-cycle-session-card",
+          "paper:expressive-agent-loops-wave-2026-07-11",
+          "paper:felix-findings-boundaries-plugins",
+          "paper:felix-findings-liveview-collections",
+          "paper:felix-findings-liveview-tracking",
+          "paper:felix-findings-otp-supervision",
+          "paper:felix-findings-plug-router",
+          "paper:felix-findings-queries-indexes",
+          "paper:felix-findings-realtime",
+          "paper:felix-findings-schemas-changesets",
+          "paper:felix-findings-security-tenancy",
+          "paper:felix-findings-telemetry",
+          "paper:felix-findings-test-doctrine",
+          "paper:felix-findings-transactions",
+          "paper:felix-pristine-charter",
+          "paper:felix-pristine-part-xi-verdict-table",
+          "paper:felix-pristine-wave-10-2026-07-13",
+          "paper:felix-pristine-wave-12-2026-07-16",
+          "paper:felix-pristine-wave-13-2026-07-21",
+          "paper:felix-pristine-wave-14-2026-07-22",
+          "paper:felix-pristine-wave-15-2026-07-22",
+          "paper:felix-pristine-wave-16-2026-07-22",
+          "paper:felix-pristine-wave-17-2026-07-22",
+          "paper:felix-pristine-wave-18-2026-07-22",
+          "paper:felix-pristine-wave-18-2026-07-23",
+          "paper:felix-pristine-wave-19-2026-07-23",
+          "paper:felix-pristine-wave-20-2026-07-23",
+          "paper:felix-pristine-wave-2026-07-13",
+          "paper:felix-pristine-wave-2026-07-16",
+          "paper:felix-pristine-wave-21-2026-07-23",
+          "paper:felix-pristine-wave-22-2026-07-23",
+          "paper:felix-pristine-wave-5-2026-07-13",
+          "paper:felix-pristine-wave-6-2026-07-13",
+          "paper:felix-pristine-wave-7-2026-07-13",
+          "paper:felix-pristine-wave-8-2026-07-13",
+          "paper:felix-pristine-wave-9-2026-07-13",
+          "paper:fleet-audit",
+          "paper:fleet-primer-proof",
+          "paper:gates-tell-the-truth-wave-2026-07-20",
+          "paper:github-bridge",
+          "paper:github-bridge-wave-2026-07-13",
+          "paper:grill-truth-fabric-masterplan",
+          "paper:gui-premium-w5-wave-2026-07-10",
+          "paper:gui-premium-wave-2026-07-10",
+          "paper:gui-tui-parity-page",
+          "paper:headroom-context-compression-study",
+          "paper:herd-layer-wave-2026-07-21",
+          "paper:herd-layer-wave4-2026-07-22",
+          "paper:host-tenancy-caddy-probe",
+          "paper:hyperquiz-architecture",
+          "paper:hyperquiz-content-model",
+          "paper:hyperquiz-decisions",
+          "paper:hyperquiz-epic-wave-2026-07-12",
+          "paper:hyperquiz-epic-wave-3-2026-07-12",
+          "paper:hyperquiz-realtime-protocol",
+          "paper:hyperquiz-risks",
+          "paper:hyperquiz-scaling",
+          "paper:hyperquiz-vision",
+          "paper:intuition-atlas-verdict",
+          "paper:legendary-paper-task-quality-takeover-2026-07-15",
+          "paper:legendary-paper-task-quality-takeover-wave-2-2026-07-16",
+          "paper:legendary-quality-remediation-wave-1-2026-07-16",
+          "paper:lets-play-in-the-barkpark",
+          "paper:live-migrate-cutover-timing",
+          "paper:living-values-demo",
+          "paper:living-values-demo-2",
+          "paper:living-values-demo-script",
+          "paper:lvd-demo-1782953634-paper-a",
+          "paper:lvd-demo-1782953634-paper-b",
+          "paper:lvd-demo-1782953683-paper-a",
+          "paper:lvd-demo-1782953683-paper-b",
+          "paper:lvd-demo-1782953727-paper-a",
+          "paper:lvd-demo-1782953727-paper-b",
+          "paper:lvd-demo-1782953763-paper-a",
+          "paper:lvd-demo-1782953763-paper-b",
+          "paper:lvd-t5-paper-a",
+          "paper:lvd-t5-paper-b",
+          "paper:main-frame-constellation-plan",
+          "paper:mechanical-spacing-doctrine",
+          "paper:media-webhook-retry-durable-vs-pool",
+          "paper:n-screens-interactive-walkthrough",
+          "paper:netlify-vercel-next-screen-asks",
+          "paper:nextgen-wiki-living-values-v1",
+          "paper:noo-noo-disk-guardian-wave-2026-07-15",
+          "paper:noo-noo-disk-guardian-wave2-2026-07-15",
+          "paper:onboarding-composition-wave-2026-07-14",
+          "paper:onboarding-composition-wave-2026-07-16",
+          "paper:onboarding-wallclock",
+          "paper:one-shot-onboarding",
+          "paper:optical-bundles-across-models",
+          "paper:optical-bundles-task-ab-prereg",
+          "paper:optical-bundles-task-ab-results",
+          "paper:optical-compression-at-scale",
+          "paper:optical-compression-experiment-protocol",
+          "paper:optical-compression-findings-illustrated",
+          "paper:optical-compression-in-graphs",
+          "paper:optical-compression-novelty-audit",
+          "paper:optical-compression-research-report",
+          "paper:optical-compression-text-as-image-tokens",
+          "paper:optical-duels-prereg",
+          "paper:optical-duels-results",
+          "paper:p-quality-gate-wave1-debrief",
+          "paper:paper-cross-reader-reliability-wave-1-2026-07-17",
+          "paper:paper-cross-reader-reliability-wave-2-2026-07-17",
+          "paper:papers-pro-toolkit-capstone",
+          "paper:papers-pro-toolkit-crown-and-toolkit",
+          "paper:papers-pro-toolkit-evidence-record",
+          "paper:papers-pro-toolkit-living-data-forms",
+          "paper:papers-pro-toolkit-notation-typesetting",
+          "paper:papers-pro-toolkit-profession-atlas",
+          "paper:parity-page-wave-2026-07-11",
+          "paper:parity-state",
+          "paper:pbp-tui-creative-slate",
+          "paper:pd-everything-editable-wave-2026-07-11",
+          "paper:pd-feedback-demo",
+          "paper:pd-layout-engine-wave-2026-07-11",
+          "paper:pdd-t11-mainline-gap-audit",
+          "paper:pdrender-block-parity-plan",
+          "paper:pds-crown-transcript-cold-beam-2026-07-20",
+          "paper:pds-wave-10-2026-07-20",
+          "paper:pds-wave-11-2026-07-20",
+          "paper:pds-wave-12-2026-07-21",
+          "paper:pds-wave-13-2026-07-21",
+          "paper:pds-wave-14-2026-07-21",
+          "paper:pds-wave-15-2026-07-21",
+          "paper:pds-wave-16-2026-07-21",
+          "paper:pds-wave-17-2026-07-21",
+          "paper:pds-wave-18-2026-07-21",
+          "paper:pds-wave-19-2026-07-21",
+          "paper:pds-wave-2-2026-07-19",
+          "paper:pds-wave-20-2026-07-21",
+          "paper:pds-wave-2026-07-19",
+          "paper:pds-wave-21-2026-07-21",
+          "paper:pds-wave-3-2026-07-19",
+          "paper:pds-wave-4-2026-07-19",
+          "paper:pds-wave-5-2026-07-20",
+          "paper:pds-wave-6-2026-07-20",
+          "paper:pds-wave-7-2026-07-20",
+          "paper:pds-wave-8-2026-07-20",
+          "paper:pds-wave-9-2026-07-20",
+          "paper:pds-wave-9-verdict-2026-07-20",
+          "paper:pds-wave-9r-2026-07-20",
+          "paper:perfect-plan-build-w2-2026-07-13",
+          "paper:perfect-plan-build-wave-2026-07-13",
+          "paper:perfect-plan-build-wave-3-2026-07-13",
+          "paper:perfect-plan-build-wave-4-2026-07-13",
+          "paper:perfect-plan-build-wave-5-2026-07-14",
+          "paper:perfect-plan-readiness-ledger",
+          "paper:perfect-plan-research-wave-2026-07-12",
+          "paper:perfect-portabledoc-blog-next-astro-phoenix",
+          "paper:personal-agent-provider-bridge",
+          "paper:personal-dev-fleet-build-plan",
+          "paper:personal-dev-fleet-field-guide",
+          "paper:personal-dev-fleet-gui-plan",
+          "paper:personal-dev-fleet-mvp",
+          "paper:personal-dev-fleet-status-2026-07-23",
+          "paper:personal-dev-fleet-strategy",
+          "paper:personal-dev-fleet-wave-2026-07-22",
+          "paper:personal-dev-fleet-wave-2026-07-22-r2",
+          "paper:personal-dev-fleet-wave-b-2026-07-22",
+          "paper:personal-dev-fleet-wave-b-2026-07-22-r2",
+          "paper:personal-dev-fleet-wave-b-r2-2026-07-22",
+          "paper:personal-dev-fleet-wave-c-2026-07-23",
+          "paper:personal-dev-fleet-wave-c-2026-07-23-r2",
+          "paper:personal-dev-fleet-wave-c-2026-07-23-r3",
+          "paper:personal-dev-fleet-worker-protocol",
+          "paper:personal-development-server-plan",
+          "paper:phoenix-mastery-corpus",
+          "paper:playground-tenancy-cost",
+          "paper:portabledoc-blog-wave-1-2026-07-15",
+          "paper:portabledoc-code-story",
+          "paper:portabledoc-critique-verified-2026-07",
+          "paper:portabledoc-doctrine",
+          "paper:portabledoc-inline-liveref-taskchip-wire",
+          "paper:portabledoc-potential-study",
+          "paper:portabledoc-render-unification-w3-2026-07-16",
+          "paper:portabledoc-render-unification-w4-2026-07-16",
+          "paper:portabledoc-render-unification-w5-2026-07-16",
+          "paper:portabledoc-render-unification-w6-2026-07-16",
+          "paper:portabledoc-render-unification-w7-2026-07-16",
+          "paper:portabledoc-render-unification-wave-2026-07-16",
+          "paper:portabledoc-showcase",
+          "paper:preview-contract",
+          "paper:production-truth-wave-2026-07-20",
+          "paper:provider-horizon",
+          "paper:query-blocks-cookbook",
+          "paper:quota-suspend-seams",
+          "paper:rail-awareness",
+          "paper:ratify-workflow-capability-tier",
+          "paper:scaffy-benchmark",
+          "paper:scaffy-command-footprints",
+          "paper:scaffy-command-showcase",
+          "paper:scaffy-commands-as-content",
+          "paper:scaffy-duels-prereg",
+          "paper:scaffy-loop-bench-status",
+          "paper:scaffy-reversibility-proof",
+          "paper:search-template-wave-2-2026-07-16",
+          "paper:search-template-wave-2026-07-16",
+          "paper:search-template-wave-4-2026-07-16",
+          "paper:search-template-wave-5-2026-07-16",
+          "paper:search-template-wave-6-2026-07-17",
+          "paper:search-template-wave-7-2026-07-17",
+          "paper:section-presets",
+          "paper:self-update-epic-wave-2026-07-11",
+          "paper:self-update-epic-wave-2026-07-11-reconcile",
+          "paper:self-update-from-nag-to-product",
+          "paper:shared-cells",
+          "paper:shared-storm",
+          "paper:site-autodeploy-vercel-gap-analysis",
+          "paper:site-spawner-wave-2026-07-13",
+          "paper:sobelow-baseline-drift",
+          "paper:soc2-controls-mapping",
+          "paper:source-of-truth-grip-wave-2-2026-07-20",
+          "paper:source-of-truth-grip-wave-2026-07-20",
+          "paper:source-of-truth-grip-wave-3-2026-07-21",
+          "paper:source-of-truth-grip-wave-4-2026-07-21",
+          "paper:source-of-truth-grip-wave-5-2026-07-21",
+          "paper:source-of-truth-grip-wave-6-2026-07-21",
+          "paper:source-of-truth-grip-wave-7-2026-07-21",
+          "paper:source-of-truth-grip-wave-8-2026-07-21",
+          "paper:sp-cond-format",
+          "paper:sp-sort-filter",
+          "paper:spd-b39-residue-wave-2026-07-22",
+          "paper:spd-inspector-exemption-paid-wave-12-2026-07-20",
+          "paper:spd-inspector-shape-harden-wave-2026-07-21",
+          "paper:spd-inspector-shape-wave-11-2026-07-20",
+          "paper:spd-inspector-successor-wave-2026-07-20",
+          "paper:spd-round-trip-fidelity-wave-2026-07-21",
+          "paper:spd-standard-scrim-crush-wave-2026-07-21",
+          "paper:ssp-visual-addendum",
+          "paper:ssp-w2-visual-addendum-evidence",
+          "paper:studio-chat-w12-wave-2026-07-10",
+          "paper:studio-premium-wave-2026-07-14",
+          "paper:studio-responsive-desk-wave-2026-07-19",
+          "paper:studio-space-priority-desk-advance-2026-07-19",
+          "paper:studio-space-priority-desk-browser-2026-07-19",
+          "paper:studio-space-priority-desk-land-2026-07-19",
+          "paper:studio-space-priority-desk-prove-2026-07-19",
+          "paper:studio-space-priority-desk-ruling-2026-07-20",
+          "paper:studio-space-priority-desk-seal-2026-07-20",
+          "paper:studio-space-priority-desk-visible-2026-07-20",
+          "paper:studio-space-priority-desk-wave2-2026-07-19",
+          "paper:studio-structure-polish-wave-2026-07-16",
+          "paper:superfile-lessons-bp-tui",
+          "paper:support-tiers",
+          "paper:survey-once-build-forever",
+          "paper:task-components",
+          "paper:task-components-editable-demo",
+          "paper:task-lifecycle-visibility-wave-2026-07-19",
+          "paper:task-lifecycle-visibility-wave-2026-07-21",
+          "paper:task-lifecycle-visibility-wave-2026-07-21-correctness",
+          "paper:task-lifecycle-visibility-wave-2026-07-22-backlog-finish",
+          "paper:task-lifecycle-visibility-wave-2026-07-22-finishing",
+          "paper:task-obsession",
+          "paper:task-quality-build-wave-01-2026-07-18",
+          "paper:task-quality-build-wave-02-2026-07-18",
+          "paper:task-quality-build-wave-03-2026-07-18",
+          "paper:task-quality-build-wave-04-2026-07-18",
+          "paper:task-quality-build-wave-05-2026-07-18",
+          "paper:task-quality-build-wave-06-2026-07-18",
+          "paper:task-quality-build-wave-07-2026-07-18",
+          "paper:task-quality-build-wave-08-2026-07-18",
+          "paper:task-quality-build-wave-09-2026-07-18",
+          "paper:task-quality-build-wave-10-2026-07-18",
+          "paper:task-quality-experiment-round-01-baseline-2026-07-18",
+          "paper:task-quality-experiment-round-02-diverge-2026-07-18",
+          "paper:task-quality-experiment-round-03-attack-2026-07-18",
+          "paper:task-quality-experiment-round-04-converge-2026-07-18",
+          "paper:task-quality-experiment-round-05-pilot-2026-07-18",
+          "paper:task-quality-review-wave-01-2026-07-18",
+          "paper:task-quality-review-wave-02-2026-07-18",
+          "paper:task-quality-review-wave-03-2026-07-18",
+          "paper:task-quality-review-wave-04-2026-07-18",
+          "paper:task-quality-review-wave-05-2026-07-18",
+          "paper:task-quality-standard-chrono-wave-1-2026-07-18",
+          "paper:task-quality-standard-chrono-wave-3-2026-07-18",
+          "paper:task-quality-standard-chrono-wave-4-2026-07-19",
+          "paper:task-quality-standard-chrono-wave-5-2026-07-22",
+          "paper:task-quality-survey-digest-verify-plan-2026-07-18",
+          "paper:task-quality-survey-wave-01-2026-07-18",
+          "paper:task-quality-survey-wave-02-2026-07-18",
+          "paper:task-quality-survey-wave-03-2026-07-18",
+          "paper:task-quality-survey-wave-04-2026-07-18",
+          "paper:task-quality-survey-wave-05-2026-07-18",
+          "paper:task-quality-survey-wave-06-2026-07-18",
+          "paper:task-quality-survey-wave-07-2026-07-18",
+          "paper:task-quality-survey-wave-08-2026-07-18",
+          "paper:task-quality-survey-wave-09-2026-07-18",
+          "paper:task-quality-survey-wave-10-2026-07-18",
+          "paper:task-quality-survey-wave-11-2026-07-18",
+          "paper:task-quality-survey-wave-12-2026-07-18",
+          "paper:task-quality-survey-wave-13-2026-07-18",
+          "paper:task-quality-survey-wave-14-2026-07-18",
+          "paper:task-quality-survey-wave-15-2026-07-18",
+          "paper:task-quality-survey-wave-16-2026-07-18",
+          "paper:task-quality-survey-wave-17-2026-07-18",
+          "paper:task-quality-survey-wave-18-2026-07-18",
+          "paper:task-quality-survey-wave-19-2026-07-18",
+          "paper:task-quality-survey-wave-20-2026-07-18",
+          "paper:task-quality-verify-wave-01-2026-07-18",
+          "paper:task-quality-verify-wave-02-2026-07-18",
+          "paper:task-quality-verify-wave-03-2026-07-18",
+          "paper:task-quality-verify-wave-04-2026-07-18",
+          "paper:task-quality-verify-wave-05-2026-07-18",
+          "paper:task-quality-verify-wave-06-2026-07-18",
+          "paper:task-quality-verify-wave-07-2026-07-18",
+          "paper:task-quality-verify-wave-08-2026-07-18",
+          "paper:task-quality-verify-wave-09-2026-07-18",
+          "paper:task-quality-verify-wave-10-2026-07-18",
+          "paper:task-tui-glyph-unify-wave-2026-07-16",
+          "paper:task-tui-wave-2026-07-23",
+          "paper:task-tui-wave-2026-07-23b",
+          "paper:telemetry-inventory",
+          "paper:terminal-layout-engine",
+          "paper:terminal-mermaid-diagrams",
+          "paper:the-80-column-standard",
+          "paper:the-picture-trick-plain-story",
+          "paper:theme-system",
+          "paper:tickets-epic-wish",
+          "paper:time-boxed-airdrop-grants",
+          "paper:ultragoal-queue-drain-progress-2026-07-13",
+          "paper:viable-everywhere-epic-wave-2026-07-11",
+          "paper:viable-everywhere-strategy",
+          "paper:view-vs-edit-parity",
+          "paper:vulnerability-disclosure-policy",
+          "paper:wave-deck",
+          "paper:wave-deck-strategy",
+          "paper:wave-deck-zen-handoff",
+          "paper:weaving-claude-codex",
+          "paper:welcome",
+          "paper:whole-corpus-oracle-verdict",
+          "paper:wild-bulk-quality-sweep-2026-07-16",
+          "paper:workspace-bundle-keystone",
+          "paper:wsc-steer-fleet-design",
+          "paper:wsc-wave-2026-07-16",
+          "paper:wsc-wave-2026-07-17",
+          "paper:wsc-wave-2026-07-17-ad",
+          "paper:wsc-wave-2026-07-17-ad-tui",
+          "paper:wsc-wave-2026-07-17-r2",
+          "paper:wsc-wave-2026-07-18"
+        ],
+        "unassigned_unit_ids": [
+          "paper:2026-06-29-concepts-and-details-truth-fabric",
+          "paper:2026-07-10-barkpark-greatest-weaknesses",
+          "paper:aesthetic-unification-epic-wave-2026-07-11",
+          "paper:agency-closeout-work-order",
+          "paper:agent-epistemics-portabledoc-2026-07",
+          "paper:agent-flight-recorder-charter",
+          "paper:agent-onramps-epic-wave-2026-07-11",
+          "paper:agent-onramps-epic-wave-2026-07-13",
+          "paper:agent-onramps-epic-wave-2026-07-16",
+          "paper:airdrop-grants-wave-2026-07-10-close",
+          "paper:authoring-excellence",
+          "paper:authoring-excellence-d10-reconcile-2026-07-14",
+          "paper:authoring-excellence-wave-2026-07-10",
+          "paper:authoring-excellence-wave-2026-07-12",
+          "paper:authoring-excellence-wave-2026-07-12b",
+          "paper:authoring-excellence-wave-2026-07-13",
+          "paper:authoring-excellence-wave-2026-07-13b",
+          "paper:authoring-excellence-wave-2026-07-13c",
+          "paper:authoring-excellence-wave-2026-07-13d",
+          "paper:authoring-excellence-wave-2026-07-14",
+          "paper:authoring-excellence-wave-2026-07-15",
+          "paper:authoring-excellence-wave-2026-07-16",
+          "paper:authoring-excellence-wave-2026-07-22",
+          "paper:authoring-excellence-wave-2026-07-23",
+          "paper:autodeploy-target-ui-approved",
+          "paper:autorebuild-proof-164347",
+          "paper:axi-agent-ergonomics-review",
+          "paper:axi-brief-views-wave-2026-07-18",
+          "paper:axi-brief-views-wave-2026-07-19",
+          "paper:azure-hetzner-hosting-epic-wave-2026-07-11",
+          "paper:barkpark-chat-tui",
+          "paper:barkpark-chat-tui-wave-2026-07-12",
+          "paper:barkpark-cli-reliability-wave-2026-07-22",
+          "paper:barkpark-efficiency-ledger",
+          "paper:barkpark-estate",
+          "paper:barkpark-onboarding-painpoint-audit-2026-07-13",
+          "paper:barkpark-tasks-mobile-capstone",
+          "paper:barkpark-tasks-mobile-chat-third-client",
+          "paper:barkpark-tasks-mobile-identity-cascade",
+          "paper:barkpark-tasks-mobile-product-shapes",
+          "paper:barkpark-tasks-mobile-shell-and-cache",
+          "paper:barkpark-tasks-mobile-tasks-papers-reading",
+          "paper:barkpark-tasks-mobile-wave-2026-07-23",
+          "paper:block-wishlist-100",
+          "paper:block-wishlist-100-review",
+          "paper:block-wishlist-wave-2026-07-17",
+          "paper:block-wishlist-wave-2026-07-18",
+          "paper:bp-chat-tui-wave-2026-07-13",
+          "paper:bp-chat-tui-wave-2026-07-16",
+          "paper:bp-chat-tui-wave-2026-07-23-r2",
+          "paper:bp-chat-tui-wave-2026-07-23-r3",
+          "paper:bp-cloud-build-wave-2026-07-13",
+          "paper:bp-cloud-build-wave-2026-07-15",
+          "paper:bp-cloud-build-wave-6-2026-07-14",
+          "paper:bp-mcp-serve-epic-wave-2026-07-11",
+          "paper:bp-onboarding-composition-wave-2026-07-13",
+          "paper:bp-scaffy-wave-2026-07-16",
+          "paper:bp-scaffy-wave-2026-07-23",
+          "paper:bp-scaffy-wave-2026-07-23-d58",
+          "paper:bp-scaffy-wave2-2026-07-16",
+          "paper:bp-scaffy-wave3-2026-07-16",
+          "paper:bp-scaffy-wave4-2026-07-16",
+          "paper:bp-scaffy-wave5-2026-07-17",
+          "paper:bp-scaffy-wave6-2026-07-17",
+          "paper:bp-scaffy-wave7-2026-07-17",
+          "paper:chat-herd-layer",
+          "paper:chat-herd-wave-2026-07-18",
+          "paper:chat-herd-wave2-2026-07-18",
+          "paper:chat-local-cloud-context-wave-3-2026-07-15",
+          "paper:chat-plan-050c647a4c8c",
+          "paper:chat-plan-091648d6fc0e",
+          "paper:chat-plan-1caa96602607",
+          "paper:chat-plan-40bf61f3ace0",
+          "paper:chat-plan-651c5eb5b064",
+          "paper:chat-plan-83959fbd5740",
+          "paper:chat-plan-841f9346140d",
+          "paper:chat-plan-8576b1edc5a7",
+          "paper:chat-provider-runtime-parity-wave-2-2026-07-14",
+          "paper:chat-task-hands-wave-2026-07-11",
+          "paper:choosing-your-site-framework",
+          "paper:cli-reliability-wave-2026-07-23",
+          "paper:cloud-console-epic-wish",
+          "paper:cloud-console-hardening-dashboard",
+          "paper:cloud-console-hardening-wave-2-2026-07-21",
+          "paper:cloud-console-hardening-wave-2026-07-21",
+          "paper:cloud-console-hardening-wave-3-2026-07-21",
+          "paper:cloud-console-hardening-wave-4-2026-07-21",
+          "paper:cloud-console-hardening-wave-5-2026-07-21",
+          "paper:cloud-console-wave-2026-07-11",
+          "paper:cloud-gui-remake-designer-handover",
+          "paper:cloud-gui-remake-feedback-round-1",
+          "paper:cloud-gui-remake-feedback-round-2",
+          "paper:cloud-gui-remake-feedback-round-3",
+          "paper:cloud-gui-remake-wave-2026-07-18",
+          "paper:cloud-gui-remake-wave-2026-07-19",
+          "paper:cloud-gui-remake-wave-2026-07-19-p3",
+          "paper:cloud-gui-remake-wave-2026-07-19-p4",
+          "paper:cloud-gui-remake-wave-2026-07-19-p5",
+          "paper:cloud-gui-remake-wave-2026-07-19-p5r2",
+          "paper:cloud-gui-remake-wave-2026-07-19-p5r3",
+          "paper:cloud-gui-remake-wave-2026-07-19-p5r4",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal-r10",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal-r2",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal-r3",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal-r4",
+          "paper:cloud-gui-remake-wave-2026-07-20-seal-r5",
+          "paper:cloud-gui-remake-wave-2026-07-21-r12",
+          "paper:cloud-gui-remake-wave-2026-07-21-seal",
+          "paper:cloud-site-spawner-cf-wave-2026-07-14",
+          "paper:cloud-site-spawner-node-wave-2026-07-15",
+          "paper:cloud-site-spawner-wave-2026-07-14",
+          "paper:cloud-site-spawner-wave-3-2026-07-14",
+          "paper:cloud-site-spawner-wave-4-2026-07-14",
+          "paper:cloud-site-spawner-wave-5-2026-07-14",
+          "paper:cmux-bridge",
+          "paper:codex-epic-cycle-wave-1-2026-07-14",
+          "paper:codex-epic-cycle-wave-2-2026-07-15",
+          "paper:codex-epic-cycle-wave-3-real-corpus-usage-join-2026-07-15",
+          "paper:codex-epic-cycle-wave-3-takeover-2026-07-15",
+          "paper:compact-grep-vs-optical-archive",
+          "paper:compact-vs-image-blur-budget",
+          "paper:component-reference",
+          "paper:composition-doctrine-plan",
+          "paper:composition-doctrine-wave-2026-07-10",
+          "paper:composition-doctrine-wave-2026-07-13",
+          "paper:composition-showcase",
+          "paper:confusion-pattern-sweep-2026-07",
+          "paper:connectors-wave-10-2026-07-15",
+          "paper:connectors-wave-11-2026-07-16",
+          "paper:connectors-wave-12-2026-07-16",
+          "paper:connectors-wave-13-2026-07-16",
+          "paper:connectors-wave-14-2026-07-16",
+          "paper:connectors-wave-15-2026-07-16",
+          "paper:connectors-wave-16-2026-07-16",
+          "paper:connectors-wave-17-2026-07-16",
+          "paper:connectors-wave-18-2026-07-16",
+          "paper:connectors-wave-19-2026-07-16",
+          "paper:connectors-wave-2-2026-07-13",
+          "paper:connectors-wave-20-2026-07-16",
+          "paper:connectors-wave-2026-07-13",
+          "paper:connectors-wave-2026-07-22",
+          "paper:connectors-wave-21-2026-07-17",
+          "paper:connectors-wave-22-2026-07-17",
+          "paper:connectors-wave-23-2026-07-17",
+          "paper:connectors-wave-24-2026-07-17",
+          "paper:connectors-wave-25-2026-07-17",
+          "paper:connectors-wave-26-2026-07-18",
+          "paper:connectors-wave-27-2026-07-18",
+          "paper:connectors-wave-28-2026-07-18",
+          "paper:connectors-wave-29-2026-07-18",
+          "paper:connectors-wave-3-2026-07-14",
+          "paper:connectors-wave-30-2026-07-21",
+          "paper:connectors-wave-31-2026-07-22",
+          "paper:connectors-wave-33-2026-07-23",
+          "paper:connectors-wave-34-2026-07-23",
+          "paper:connectors-wave-4-2026-07-14",
+          "paper:connectors-wave-5-2026-07-14",
+          "paper:connectors-wave-6-2026-07-14",
+          "paper:connectors-wave-7-2026-07-14",
+          "paper:connectors-wave-8-2026-07-15",
+          "paper:connectors-wave-9-2026-07-15",
+          "paper:console-gui-build-outline",
+          "paper:console-remake-design-phase-closed-2026-07-18",
+          "paper:console-stress-screens-review-2026-07-18",
+          "paper:context-compression-benchmark",
+          "paper:context-compression-benchmark-gen1",
+          "paper:criminality-constraint-frontiers-draft",
+          "paper:deploy-with-barkpark",
+          "paper:design-engagement-accepted",
+          "paper:desk-structure-bp-tui",
+          "paper:desktop-fleets-brainstorm",
+          "paper:desktop-fleets-masterplan",
+          "paper:dispatch-frontier",
+          "paper:dispatch-frontier-wave-2026-07-10",
+          "paper:dpa-template",
+          "paper:edge-cache-share",
+          "paper:enterprise-auth-build-retro",
+          "paper:enterprise-auth-gates-debrief",
+          "paper:enterprise-ready-auth-wave-2026-07-10",
+          "paper:enterprise-ready-auth-wave-2026-07-10-w9",
+          "paper:enterprise-ready-auth-wave-2026-07-11",
+          "paper:enterprise-ready-barkpark",
+          "paper:epic-cycle-docs-index-wave-2026-07-11",
+          "paper:epic-cycle-research-graduation-wave-2026-07-22",
+          "paper:epic-cycle-research-program-abcde",
+          "paper:epic-cycle-session-card",
+          "paper:expressive-agent-loops-wave-2026-07-11",
+          "paper:felix-findings-boundaries-plugins",
+          "paper:felix-findings-liveview-collections",
+          "paper:felix-findings-liveview-tracking",
+          "paper:felix-findings-otp-supervision",
+          "paper:felix-findings-plug-router",
+          "paper:felix-findings-queries-indexes",
+          "paper:felix-findings-realtime",
+          "paper:felix-findings-schemas-changesets",
+          "paper:felix-findings-security-tenancy",
+          "paper:felix-findings-telemetry",
+          "paper:felix-findings-test-doctrine",
+          "paper:felix-findings-transactions",
+          "paper:felix-pristine-charter",
+          "paper:felix-pristine-part-xi-verdict-table",
+          "paper:felix-pristine-wave-10-2026-07-13",
+          "paper:felix-pristine-wave-12-2026-07-16",
+          "paper:felix-pristine-wave-13-2026-07-21",
+          "paper:felix-pristine-wave-14-2026-07-22",
+          "paper:felix-pristine-wave-15-2026-07-22",
+          "paper:felix-pristine-wave-16-2026-07-22",
+          "paper:felix-pristine-wave-17-2026-07-22",
+          "paper:felix-pristine-wave-18-2026-07-22",
+          "paper:felix-pristine-wave-18-2026-07-23",
+          "paper:felix-pristine-wave-19-2026-07-23",
+          "paper:felix-pristine-wave-20-2026-07-23",
+          "paper:felix-pristine-wave-2026-07-13",
+          "paper:felix-pristine-wave-2026-07-16",
+          "paper:felix-pristine-wave-21-2026-07-23",
+          "paper:felix-pristine-wave-22-2026-07-23",
+          "paper:felix-pristine-wave-5-2026-07-13",
+          "paper:felix-pristine-wave-6-2026-07-13",
+          "paper:felix-pristine-wave-7-2026-07-13",
+          "paper:felix-pristine-wave-8-2026-07-13",
+          "paper:felix-pristine-wave-9-2026-07-13",
+          "paper:fleet-audit",
+          "paper:fleet-primer-proof",
+          "paper:gates-tell-the-truth-wave-2026-07-20",
+          "paper:github-bridge",
+          "paper:github-bridge-wave-2026-07-13",
+          "paper:grill-truth-fabric-masterplan",
+          "paper:gui-premium-w5-wave-2026-07-10",
+          "paper:gui-premium-wave-2026-07-10",
+          "paper:gui-tui-parity-page",
+          "paper:headroom-context-compression-study",
+          "paper:herd-layer-wave-2026-07-21",
+          "paper:herd-layer-wave4-2026-07-22",
+          "paper:host-tenancy-caddy-probe",
+          "paper:hyperquiz-architecture",
+          "paper:hyperquiz-content-model",
+          "paper:hyperquiz-decisions",
+          "paper:hyperquiz-epic-wave-2026-07-12",
+          "paper:hyperquiz-epic-wave-3-2026-07-12",
+          "paper:hyperquiz-realtime-protocol",
+          "paper:hyperquiz-risks",
+          "paper:hyperquiz-scaling",
+          "paper:hyperquiz-vision",
+          "paper:intuition-atlas-verdict",
+          "paper:legendary-paper-task-quality-takeover-2026-07-15",
+          "paper:legendary-paper-task-quality-takeover-wave-2-2026-07-16",
+          "paper:legendary-quality-remediation-wave-1-2026-07-16",
+          "paper:lets-play-in-the-barkpark",
+          "paper:live-migrate-cutover-timing",
+          "paper:living-values-demo",
+          "paper:living-values-demo-2",
+          "paper:living-values-demo-script",
+          "paper:lvd-demo-1782953634-paper-a",
+          "paper:lvd-demo-1782953634-paper-b",
+          "paper:lvd-demo-1782953683-paper-a",
+          "paper:lvd-demo-1782953683-paper-b",
+          "paper:lvd-demo-1782953727-paper-a",
+          "paper:lvd-demo-1782953727-paper-b",
+          "paper:lvd-demo-1782953763-paper-a",
+          "paper:lvd-demo-1782953763-paper-b",
+          "paper:lvd-t5-paper-a",
+          "paper:lvd-t5-paper-b",
+          "paper:main-frame-constellation-plan",
+          "paper:mechanical-spacing-doctrine",
+          "paper:media-webhook-retry-durable-vs-pool",
+          "paper:n-screens-interactive-walkthrough",
+          "paper:netlify-vercel-next-screen-asks",
+          "paper:nextgen-wiki-living-values-v1",
+          "paper:noo-noo-disk-guardian-wave-2026-07-15",
+          "paper:noo-noo-disk-guardian-wave2-2026-07-15",
+          "paper:onboarding-composition-wave-2026-07-14",
+          "paper:onboarding-composition-wave-2026-07-16",
+          "paper:onboarding-wallclock",
+          "paper:one-shot-onboarding",
+          "paper:optical-bundles-across-models",
+          "paper:optical-bundles-task-ab-prereg",
+          "paper:optical-bundles-task-ab-results",
+          "paper:optical-compression-at-scale",
+          "paper:optical-compression-experiment-protocol",
+          "paper:optical-compression-findings-illustrated",
+          "paper:optical-compression-in-graphs",
+          "paper:optical-compression-novelty-audit",
+          "paper:optical-compression-research-report",
+          "paper:optical-compression-text-as-image-tokens",
+          "paper:optical-duels-prereg",
+          "paper:optical-duels-results",
+          "paper:p-quality-gate-wave1-debrief",
+          "paper:paper-cross-reader-reliability-wave-1-2026-07-17",
+          "paper:paper-cross-reader-reliability-wave-2-2026-07-17",
+          "paper:papers-pro-toolkit-capstone",
+          "paper:papers-pro-toolkit-crown-and-toolkit",
+          "paper:papers-pro-toolkit-evidence-record",
+          "paper:papers-pro-toolkit-living-data-forms",
+          "paper:papers-pro-toolkit-notation-typesetting",
+          "paper:papers-pro-toolkit-profession-atlas",
+          "paper:parity-page-wave-2026-07-11",
+          "paper:parity-state",
+          "paper:pbp-tui-creative-slate",
+          "paper:pd-everything-editable-wave-2026-07-11",
+          "paper:pd-feedback-demo",
+          "paper:pd-layout-engine-wave-2026-07-11",
+          "paper:pdd-t11-mainline-gap-audit",
+          "paper:pdrender-block-parity-plan",
+          "paper:pds-crown-transcript-cold-beam-2026-07-20",
+          "paper:pds-wave-10-2026-07-20",
+          "paper:pds-wave-11-2026-07-20",
+          "paper:pds-wave-12-2026-07-21",
+          "paper:pds-wave-13-2026-07-21",
+          "paper:pds-wave-14-2026-07-21",
+          "paper:pds-wave-15-2026-07-21",
+          "paper:pds-wave-16-2026-07-21",
+          "paper:pds-wave-17-2026-07-21",
+          "paper:pds-wave-18-2026-07-21",
+          "paper:pds-wave-19-2026-07-21",
+          "paper:pds-wave-2-2026-07-19",
+          "paper:pds-wave-20-2026-07-21",
+          "paper:pds-wave-2026-07-19",
+          "paper:pds-wave-21-2026-07-21",
+          "paper:pds-wave-3-2026-07-19",
+          "paper:pds-wave-4-2026-07-19",
+          "paper:pds-wave-5-2026-07-20",
+          "paper:pds-wave-6-2026-07-20",
+          "paper:pds-wave-7-2026-07-20",
+          "paper:pds-wave-8-2026-07-20",
+          "paper:pds-wave-9-2026-07-20",
+          "paper:pds-wave-9-verdict-2026-07-20",
+          "paper:pds-wave-9r-2026-07-20",
+          "paper:perfect-plan-build-w2-2026-07-13",
+          "paper:perfect-plan-build-wave-2026-07-13",
+          "paper:perfect-plan-build-wave-3-2026-07-13",
+          "paper:perfect-plan-build-wave-4-2026-07-13",
+          "paper:perfect-plan-build-wave-5-2026-07-14",
+          "paper:perfect-plan-readiness-ledger",
+          "paper:perfect-plan-research-wave-2026-07-12",
+          "paper:perfect-portabledoc-blog-next-astro-phoenix",
+          "paper:personal-agent-provider-bridge",
+          "paper:personal-dev-fleet-build-plan",
+          "paper:personal-dev-fleet-field-guide",
+          "paper:personal-dev-fleet-gui-plan",
+          "paper:personal-dev-fleet-mvp",
+          "paper:personal-dev-fleet-status-2026-07-23",
+          "paper:personal-dev-fleet-strategy",
+          "paper:personal-dev-fleet-wave-2026-07-22",
+          "paper:personal-dev-fleet-wave-2026-07-22-r2",
+          "paper:personal-dev-fleet-wave-b-2026-07-22",
+          "paper:personal-dev-fleet-wave-b-2026-07-22-r2",
+          "paper:personal-dev-fleet-wave-b-r2-2026-07-22",
+          "paper:personal-dev-fleet-wave-c-2026-07-23",
+          "paper:personal-dev-fleet-wave-c-2026-07-23-r2",
+          "paper:personal-dev-fleet-wave-c-2026-07-23-r3",
+          "paper:personal-dev-fleet-worker-protocol",
+          "paper:personal-development-server-plan",
+          "paper:phoenix-mastery-corpus",
+          "paper:playground-tenancy-cost",
+          "paper:portabledoc-blog-wave-1-2026-07-15",
+          "paper:portabledoc-code-story",
+          "paper:portabledoc-critique-verified-2026-07",
+          "paper:portabledoc-doctrine",
+          "paper:portabledoc-inline-liveref-taskchip-wire",
+          "paper:portabledoc-potential-study",
+          "paper:portabledoc-render-unification-w3-2026-07-16",
+          "paper:portabledoc-render-unification-w4-2026-07-16",
+          "paper:portabledoc-render-unification-w5-2026-07-16",
+          "paper:portabledoc-render-unification-w6-2026-07-16",
+          "paper:portabledoc-render-unification-w7-2026-07-16",
+          "paper:portabledoc-render-unification-wave-2026-07-16",
+          "paper:portabledoc-showcase",
+          "paper:preview-contract",
+          "paper:production-truth-wave-2026-07-20",
+          "paper:provider-horizon",
+          "paper:query-blocks-cookbook",
+          "paper:quota-suspend-seams",
+          "paper:rail-awareness",
+          "paper:ratify-workflow-capability-tier",
+          "paper:scaffy-benchmark",
+          "paper:scaffy-command-footprints",
+          "paper:scaffy-command-showcase",
+          "paper:scaffy-commands-as-content",
+          "paper:scaffy-duels-prereg",
+          "paper:scaffy-loop-bench-status",
+          "paper:scaffy-reversibility-proof",
+          "paper:search-template-wave-2-2026-07-16",
+          "paper:search-template-wave-2026-07-16",
+          "paper:search-template-wave-4-2026-07-16",
+          "paper:search-template-wave-5-2026-07-16",
+          "paper:search-template-wave-6-2026-07-17",
+          "paper:search-template-wave-7-2026-07-17",
+          "paper:section-presets",
+          "paper:self-update-epic-wave-2026-07-11",
+          "paper:self-update-epic-wave-2026-07-11-reconcile",
+          "paper:self-update-from-nag-to-product",
+          "paper:shared-cells",
+          "paper:shared-storm",
+          "paper:site-autodeploy-vercel-gap-analysis",
+          "paper:site-spawner-wave-2026-07-13",
+          "paper:sobelow-baseline-drift",
+          "paper:soc2-controls-mapping",
+          "paper:source-of-truth-grip-wave-2-2026-07-20",
+          "paper:source-of-truth-grip-wave-2026-07-20",
+          "paper:source-of-truth-grip-wave-3-2026-07-21",
+          "paper:source-of-truth-grip-wave-4-2026-07-21",
+          "paper:source-of-truth-grip-wave-5-2026-07-21",
+          "paper:source-of-truth-grip-wave-6-2026-07-21",
+          "paper:source-of-truth-grip-wave-7-2026-07-21",
+          "paper:source-of-truth-grip-wave-8-2026-07-21",
+          "paper:sp-cond-format",
+          "paper:sp-sort-filter",
+          "paper:spd-b39-residue-wave-2026-07-22",
+          "paper:spd-inspector-exemption-paid-wave-12-2026-07-20",
+          "paper:spd-inspector-shape-harden-wave-2026-07-21",
+          "paper:spd-inspector-shape-wave-11-2026-07-20",
+          "paper:spd-inspector-successor-wave-2026-07-20",
+          "paper:spd-round-trip-fidelity-wave-2026-07-21",
+          "paper:spd-standard-scrim-crush-wave-2026-07-21",
+          "paper:ssp-visual-addendum",
+          "paper:ssp-w2-visual-addendum-evidence",
+          "paper:studio-chat-w12-wave-2026-07-10",
+          "paper:studio-premium-wave-2026-07-14",
+          "paper:studio-responsive-desk-wave-2026-07-19",
+          "paper:studio-space-priority-desk-advance-2026-07-19",
+          "paper:studio-space-priority-desk-browser-2026-07-19",
+          "paper:studio-space-priority-desk-land-2026-07-19",
+          "paper:studio-space-priority-desk-prove-2026-07-19",
+          "paper:studio-space-priority-desk-ruling-2026-07-20",
+          "paper:studio-space-priority-desk-seal-2026-07-20",
+          "paper:studio-space-priority-desk-visible-2026-07-20",
+          "paper:studio-space-priority-desk-wave2-2026-07-19",
+          "paper:studio-structure-polish-wave-2026-07-16",
+          "paper:superfile-lessons-bp-tui",
+          "paper:support-tiers",
+          "paper:survey-once-build-forever",
+          "paper:task-components",
+          "paper:task-components-editable-demo",
+          "paper:task-lifecycle-visibility-wave-2026-07-19",
+          "paper:task-lifecycle-visibility-wave-2026-07-21",
+          "paper:task-lifecycle-visibility-wave-2026-07-21-correctness",
+          "paper:task-lifecycle-visibility-wave-2026-07-22-backlog-finish",
+          "paper:task-lifecycle-visibility-wave-2026-07-22-finishing",
+          "paper:task-obsession",
+          "paper:task-quality-build-wave-01-2026-07-18",
+          "paper:task-quality-build-wave-02-2026-07-18",
+          "paper:task-quality-build-wave-03-2026-07-18",
+          "paper:task-quality-build-wave-04-2026-07-18",
+          "paper:task-quality-build-wave-05-2026-07-18",
+          "paper:task-quality-build-wave-06-2026-07-18",
+          "paper:task-quality-build-wave-07-2026-07-18",
+          "paper:task-quality-build-wave-08-2026-07-18",
+          "paper:task-quality-build-wave-09-2026-07-18",
+          "paper:task-quality-build-wave-10-2026-07-18",
+          "paper:task-quality-experiment-round-01-baseline-2026-07-18",
+          "paper:task-quality-experiment-round-02-diverge-2026-07-18",
+          "paper:task-quality-experiment-round-03-attack-2026-07-18",
+          "paper:task-quality-experiment-round-04-converge-2026-07-18",
+          "paper:task-quality-experiment-round-05-pilot-2026-07-18",
+          "paper:task-quality-review-wave-01-2026-07-18",
+          "paper:task-quality-review-wave-02-2026-07-18",
+          "paper:task-quality-review-wave-03-2026-07-18",
+          "paper:task-quality-review-wave-04-2026-07-18",
+          "paper:task-quality-review-wave-05-2026-07-18",
+          "paper:task-quality-standard-chrono-wave-1-2026-07-18",
+          "paper:task-quality-standard-chrono-wave-3-2026-07-18",
+          "paper:task-quality-standard-chrono-wave-4-2026-07-19",
+          "paper:task-quality-standard-chrono-wave-5-2026-07-22",
+          "paper:task-quality-survey-digest-verify-plan-2026-07-18",
+          "paper:task-quality-survey-wave-01-2026-07-18",
+          "paper:task-quality-survey-wave-02-2026-07-18",
+          "paper:task-quality-survey-wave-03-2026-07-18",
+          "paper:task-quality-survey-wave-04-2026-07-18",
+          "paper:task-quality-survey-wave-05-2026-07-18",
+          "paper:task-quality-survey-wave-06-2026-07-18",
+          "paper:task-quality-survey-wave-07-2026-07-18",
+          "paper:task-quality-survey-wave-08-2026-07-18",
+          "paper:task-quality-survey-wave-09-2026-07-18",
+          "paper:task-quality-survey-wave-10-2026-07-18",
+          "paper:task-quality-survey-wave-11-2026-07-18",
+          "paper:task-quality-survey-wave-12-2026-07-18",
+          "paper:task-quality-survey-wave-13-2026-07-18",
+          "paper:task-quality-survey-wave-14-2026-07-18",
+          "paper:task-quality-survey-wave-15-2026-07-18",
+          "paper:task-quality-survey-wave-16-2026-07-18",
+          "paper:task-quality-survey-wave-17-2026-07-18",
+          "paper:task-quality-survey-wave-18-2026-07-18",
+          "paper:task-quality-survey-wave-19-2026-07-18",
+          "paper:task-quality-survey-wave-20-2026-07-18",
+          "paper:task-quality-verify-wave-01-2026-07-18",
+          "paper:task-quality-verify-wave-02-2026-07-18",
+          "paper:task-quality-verify-wave-03-2026-07-18",
+          "paper:task-quality-verify-wave-04-2026-07-18",
+          "paper:task-quality-verify-wave-05-2026-07-18",
+          "paper:task-quality-verify-wave-06-2026-07-18",
+          "paper:task-quality-verify-wave-07-2026-07-18",
+          "paper:task-quality-verify-wave-08-2026-07-18",
+          "paper:task-quality-verify-wave-09-2026-07-18",
+          "paper:task-quality-verify-wave-10-2026-07-18",
+          "paper:task-tui-glyph-unify-wave-2026-07-16",
+          "paper:task-tui-wave-2026-07-23",
+          "paper:task-tui-wave-2026-07-23b",
+          "paper:telemetry-inventory",
+          "paper:terminal-layout-engine",
+          "paper:terminal-mermaid-diagrams",
+          "paper:the-80-column-standard",
+          "paper:the-picture-trick-plain-story",
+          "paper:theme-system",
+          "paper:tickets-epic-wish",
+          "paper:time-boxed-airdrop-grants",
+          "paper:ultragoal-queue-drain-progress-2026-07-13",
+          "paper:viable-everywhere-epic-wave-2026-07-11",
+          "paper:viable-everywhere-strategy",
+          "paper:view-vs-edit-parity",
+          "paper:vulnerability-disclosure-policy",
+          "paper:wave-deck",
+          "paper:wave-deck-strategy",
+          "paper:wave-deck-zen-handoff",
+          "paper:weaving-claude-codex",
+          "paper:welcome",
+          "paper:whole-corpus-oracle-verdict",
+          "paper:wild-bulk-quality-sweep-2026-07-16",
+          "paper:workspace-bundle-keystone",
+          "paper:wsc-steer-fleet-design",
+          "paper:wsc-wave-2026-07-16",
+          "paper:wsc-wave-2026-07-17",
+          "paper:wsc-wave-2026-07-17-ad",
+          "paper:wsc-wave-2026-07-17-ad-tui",
+          "paper:wsc-wave-2026-07-17-r2",
+          "paper:wsc-wave-2026-07-18"
+        ],
+        "unknown_assignment_unit_ids": [],
+        "unknown_outcome_unit_ids": [],
+        "wave_revision": "4ec4bf5a-0236-489d-ac4b-c226d46355ea"
+      },
+      "fleet": {
+        "build": {
+          "agent_type": "legendary-builder",
+          "assignments": [],
+          "completed": 0,
+          "effort": "medium",
+          "evidence_proofs": [],
+          "failed": 0,
+          "invalid_assignments": 0,
+          "missing": 15,
+          "planned": 15,
+          "started": 0,
+          "terminal_counts": {
+            "cancelled": 0,
+            "completed": 0,
+            "failed": 0,
+            "invalid": 0,
+            "missing": 0
+          },
+          "unresolved_failures": 0,
+          "unresolved_missing": 0
+        },
+        "experiment": {
+          "agent_type": "legendary-experimenter",
+          "assignments": [],
+          "completed": 0,
+          "effort": "medium",
+          "evidence_proofs": [],
+          "failed": 0,
+          "invalid_assignments": 0,
+          "missing": 15,
+          "planned": 15,
+          "started": 0,
+          "terminal_counts": {
+            "cancelled": 0,
+            "completed": 0,
+            "failed": 0,
+            "invalid": 0,
+            "missing": 0
+          },
+          "unresolved_failures": 0,
+          "unresolved_missing": 0
+        },
+        "review": {
+          "agent_type": "code-reviewer",
+          "assignments": [],
+          "completed": 0,
+          "effort": "high",
+          "evidence_proofs": [],
+          "failed": 0,
+          "invalid_assignments": 0,
+          "missing": 15,
+          "planned": 15,
+          "started": 0,
+          "terminal_counts": {
+            "cancelled": 0,
+            "completed": 0,
+            "failed": 0,
+            "invalid": 0,
+            "missing": 0
+          },
+          "unresolved_failures": 0,
+          "unresolved_missing": 0
+        },
+        "survey": {
+          "agent_type": "epic-surveyor",
+          "assignments": [],
+          "completed": 0,
+          "effort": "medium",
+          "evidence_proofs": [],
+          "failed": 0,
+          "invalid_assignments": 0,
+          "missing": 60,
+          "planned": 60,
+          "started": 0,
+          "terminal_counts": {
+            "cancelled": 0,
+            "completed": 0,
+            "failed": 0,
+            "invalid": 0,
+            "missing": 0
+          },
+          "unresolved_failures": 0,
+          "unresolved_missing": 0
+        },
+        "verify": {
+          "agent_type": "epic-verifier",
+          "assignments": [],
+          "completed": 0,
+          "effort": "medium",
+          "evidence_proofs": [],
+          "failed": 0,
+          "invalid_assignments": 0,
+          "missing": 30,
+          "planned": 30,
+          "started": 0,
+          "terminal_counts": {
+            "cancelled": 0,
+            "completed": 0,
+            "failed": 0,
+            "invalid": 0,
+            "missing": 0
+          },
+          "unresolved_failures": 0,
+          "unresolved_missing": 0
+        }
+      },
+      "id": "state",
+      "title": "STRATEGIZE · IMMUTABLE 526-PAPER WAVE",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "wish-h",
+      "level": 2,
+      "text": "User wish — verbatim",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Please review the best papers - the high quality ones - learn from these - learn the patterns - update papers that feel bloaty and inhumnan and make them beautiful - all of them - make them all perfect"
+        }
+      ],
+      "id": "wish",
+      "title": "The quality target",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "direction-h",
+      "level": 2,
+      "text": "Strategic direction",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Start with the strongest verified Papers and learn their transferable patterns: a clear promise, a deliberate reading path, concrete evidence, useful structure, and prose that sounds written for a person. Then inspect every frozen Paper, delete empty or repetitive scaffolding, rewrite only where meaning becomes clearer, and prove that the repaired document keeps its facts and survives every supported reader."
+        }
+      ],
+      "id": "direction",
+      "type": "paragraph"
+    },
+    {
+      "id": "direction-rules",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Beauty means clarity, rhythm, hierarchy, restraint, and reader confidence—not decorating every Paper with more block types."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Compression is successful only when the Paper loses friction without losing facts, decisions, provenance, or useful nuance."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "No score can certify quality. Scores select review order; revision-pinned evidence and an editorial review determine the verdict."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "A repair is not complete until a second identical pass is a no-op and Studio, TUI, email, public, and CLI/API remain semantically aligned."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "scale-h",
+      "level": 2,
+      "text": "Scale profile",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Field"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Frozen value"
+          }
+        ]
+      ],
+      "id": "scale",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Epic Task"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "task-f5cbd8be8f278caf"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Wave Paper"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "paper-perfection-wave-2026-07-23"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Unit"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one published Paper at one immutable revision"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Inventory"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "526 Papers · SHA-256 5a9d723b3237745b8e870dd19d0f0fdf6d0f0071e6bc363b2ff88237aaa3cb83"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Readers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Studio, TUI at 80 columns, email, public reader, CLI/API"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Failure threshold"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Concurrency"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3 typed workers plus leader"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Build sizing"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "max(15, ceil(526 / proven pilot batch capacity))"
+            }
+          ]
+        ]
+      ],
+      "scale_profile": {
+        "build_formula": "max(15, ceil(unit_count / proven_batch_capacity))",
+        "concurrency_width": 3,
+        "excluded_inventory": [],
+        "failure_threshold": 0,
+        "inventory_evidence": "Published production Paper census frozen from guerrilla; 526 unique revision-pinned units; canonical inventory SHA-256 5a9d723b3237745b8e870dd19d0f0fdf6d0f0071e6bc363b2ff88237aaa3cb83.",
+        "minimum_multiplier": 5,
+        "planned_build_assignments": 15,
+        "quality_rubric": {
+          "block_fitness_and_accessibility": "Every block earns its role and remains usable nonvisually.",
+          "compression_and_restraint": "No empty, duplicate, throat-clearing, or ornamental scaffolding.",
+          "evidence_and_truth": "Facts, provenance, decisions, uncertainty, and authored meaning survive.",
+          "hard_gate": "Any truth, preservation, accessibility, schema, reader, or idempotence failure caps the verdict at repair or quarantine.",
+          "human_voice_and_precision": "Concrete, natural prose without generic AI cadence or inflated claims.",
+          "idempotence_and_revision_proof": "Preimage, mutation, postimage, revision, and no-op rerun are recorded.",
+          "narrative_and_hierarchy": "Sections form an argument; heading order is valid.",
+          "purpose_and_opening": "Reader, problem, and promise are clear immediately.",
+          "reader_fidelity": "Studio, TUI, email, public, and CLI/API are non-empty and semantically equivalent."
+        },
+        "target_surfaces": [
+          "Studio",
+          "TUI at 80 columns",
+          "email",
+          "public reader",
+          "CLI/API"
+        ],
+        "unit_count": 526,
+        "unit_definition": "One published Barkpark Paper identified by paper:<document_id> and pinned to document_rev."
+      },
+      "type": "table"
+    },
+    {
+      "id": "fleet-h",
+      "level": 2,
+      "text": "Agent fleet",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Phase"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Typed role"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Planned"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "State"
+          }
+        ]
+      ],
+      "id": "fleet-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Build"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "legendary-builder"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "15"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0 complete · 15 missing"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Experiment"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "legendary-experimenter"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "15"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0 complete · 15 missing"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Review"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "code-reviewer"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "15"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0 complete · 15 missing"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Survey"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "epic-surveyor"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "60"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0 complete · 60 missing"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Verify"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "epic-verifier"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "30"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "0 complete · 30 missing"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "patterns-h",
+      "level": 2,
+      "text": "Patterns to learn from the best",
+      "type": "heading"
+    },
+    {
+      "id": "patterns",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Lead with the reader's question or promise; do not spend the opening announcing the document's machinery."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Use headings to create an argument, not a filing cabinet. Each section should answer the question raised by the one before it."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Let tables compare, callouts change attention, code prove behavior, and diagrams explain relationships. Delete blocks that only decorate."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Prefer specific verbs, concrete nouns, short transitions, and evidence near the claim. Remove throat-clearing, grandiosity, and repeated conclusions."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "End with the decision, consequence, or next move the Paper was created to make possible."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Declared exemplars: component-reference, choosing-your-site-framework, wave-deck. Baseline candidates: portabledoc-showcase, gui-tui-parity-page, personal-dev-fleet-mvp, main-frame-constellation-plan, desktop-fleets-brainstorm, composition-showcase, desktop-fleets-masterplan, personal-dev-fleet-field-guide. They are starting points, not untouchable gold."
+        }
+      ],
+      "id": "exemplars",
+      "title": "Exemplar cohort — hypotheses until reader verification",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "component-reference, choosing-your-site-framework, wave-deck, portabledoc-showcase, gui-tui-parity-page, composition-showcase, wave-deck-zen-handoff, and shared-cells each returned CLI exit 0, zero overflow lines at 80 columns, HTTP 200 from the public reader, HTTP 200 from the email proxy, and HTTP 200 from the source endpoint. This proves reader viability, not editorial gold: authenticated Studio and a delivered real-client email remain unverified."
+        }
+      ],
+      "id": "exemplar-proof",
+      "title": "Eight exemplar candidates are reader-viable",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "rubric-h",
+      "level": 2,
+      "text": "Editorial and proof rubric",
+      "type": "heading"
+    },
+    {
+      "id": "rubric",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Purpose and opening (15): the intended reader, problem, and promise become clear immediately."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Narrative and hierarchy (15): headings and transitions form a coherent reading path with no level jumps or filing-cabinet sections."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Human voice and precision (15): concrete, natural prose; no generic AI cadence, inflated claims, or meta commentary."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Compression and restraint (15): no empty scaffolding, duplicate points, ornamental blocks, or paragraphs that should be split or deleted."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Evidence and truth (15): claims retain facts, provenance, decisions, and uncertainty; no invented completion or softened contradiction."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Block fitness and accessibility (10): each block earns its role; headings, links, tables, media, and nonvisual order remain usable."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Cross-reader fidelity (10): Studio, 80-column TUI, email, public, and CLI/API are non-empty and semantically equivalent."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Idempotence and revision proof (5): preimage, mutation, postimage, checked revision, and no-op second pass are recorded."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "survey-h",
+      "level": 2,
+      "text": "Survey",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Survey must cover all 526 revision-pinned units exactly once, compare weak and strong examples, and return observed facts separately from editorial inferences. The first automated baseline found structural signals only; the canonical 60 typed survey assignments have not begun."
+        }
+      ],
+      "id": "survey",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "This Codex surface can create child agents but cannot set the required agent_type. The Legendary contract forbids substituting untyped reviews for epic-surveyor evidence. Prime and Strategize are complete; canonical Survey resumes only on a typed OMX/team execution surface."
+        }
+      ],
+      "id": "survey-capability",
+      "title": "CAPABILITY GATE · typed Survey remains 0/60",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The frozen manifest is partitioned into 20 ordered waves of three epic-surveyor assignments: 46 assignments own 9 Papers and 14 own 8 Papers. Coverage is 526 occurrences, 526 unique units, 0 duplicate, 0 unknown, and 0 missing. Primary reader lenses are balanced at 12 assignments each across Studio, 80-column TUI, email, public, and CLI/API; every assignment must still check all five readers."
+        }
+      ],
+      "id": "survey-map",
+      "title": "DISPATCH READY · exact 60-assignment Survey map",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The baseline found two exact-normalized-body groups covering six Papers, one exact-title group, and three normalized title families of at least three Papers. Four lvd-demo Paper A fixtures share one body; task-quality-standard-chrono waves 3 and 4 share another despite different authority titles. These are consolidation signals only: chronology, links, lifecycle authority, and provenance must be checked before any redirect, retirement, or deletion."
+        }
+      ],
+      "id": "duplicate-signals",
+      "title": "Duplicate signals require provenance review",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "id": "baseline",
+      "items": [
+        {
+          "label": "Frozen Papers",
+          "value": "526"
+        },
+        {
+          "label": "Empty paragraphs",
+          "value": "426"
+        },
+        {
+          "label": "Heading jumps",
+          "value": "2"
+        },
+        {
+          "label": "Long paragraphs",
+          "value": "2158"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "id": "gate-h",
+      "level": 2,
+      "text": "Strategize gate",
+      "type": "heading"
+    },
+    {
+      "code": "python3 .codex/skills/legendary-cycle/scripts/validate_legendary_cycle.py --task task-f5cbd8be8f278caf --paper paper-perfection-wave-2026-07-23 --worker paper-perfection-conductor --phase strategize --workspace default --project default --wish-file .omx/state/paper-perfection-2026-07-23/wish.txt",
+      "id": "gate",
+      "language": "bash",
+      "type": "code"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "title",
+        "level": 1,
+        "text": "Paper Perfection — learn from the best, then repair every Paper",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Legendary CycleFleet 4ec4bf5a-0236-489d-ac4b-c226d46355ea: 526 inventoried, 0 assigned, 0 shipped, 0 stalled, 0 excluded; exact reconciliation false. The corpus is frozen by document revision. Automated measurements prioritize attention; human editorial judgment and five-reader proof decide what is actually excellent."
+          }
+        ],
+        "cycle_ledger": {
+          "assigned_count": 0,
+          "assigned_occurrences": 0,
+          "capacity": {
+            "chosen_format": null,
+            "failure_rate": null,
+            "failure_threshold": null,
+            "golden_fixtures": null,
+            "proven_batch_capacity": null,
+            "quality_rubric": null,
+            "sealed": false
+          },
+          "correction_ancestry": [],
+          "correction_of": null,
+          "correction_of_digest": null,
+          "correction_of_wave_revision": null,
+          "correction_receipt": null,
+          "correction_receipt_digest": null,
+          "duplicate_assignment_unit_ids": [],
+          "exact": false,
+          "excluded_count": 0,
+          "experiment": {
+            "complete?": false,
+            "missing_rounds": [
+              "baseline",
+              "diverge",
+              "attack",
+              "converge",
+              "pilot"
+            ],
+            "required?": true,
+            "round_counts": {
+              "attack": 0,
+              "baseline": 0,
+              "converge": 0,
+              "diverge": 0,
+              "pilot": 0
+            }
+          },
+          "fleet_complete": false,
+          "fleet_counts": {
+            "completed": 0,
+            "failed": 0,
+            "invalid_assignments": 0,
+            "invalid_results": 0,
+            "missing": 135,
+            "planned": 135,
+            "started": 0
+          },
+          "invalid_build_assignment_ids": [],
+          "invalid_build_result_assignment_ids": [],
+          "inventory_count": 526,
+          "inventory_digest": "0b21e73da210e1b2ce7be49eeb010fcb5cc1665d0e6a2276f6ecf3532c463702",
+          "live_authority_digest": "8f79e317aef819bca5d18da4e062a4186866ca0383121dedf6f3fe2a7e2aae7c",
+          "outcome_overlap_unit_ids": [],
+          "outcome_ownership_violation_unit_ids": [],
+          "plan_digest": "9997fc50db5f1b83f1f53e33bd45dd111b2b06402b07a78b0673d2048f299e45",
+          "planned_builders": 15,
+          "profile": "legendary",
+          "reconciliation_digest": "203977572e186ccd21da4807d762a78461de775303908b0ed4dae53ab75cc41d",
+          "scale_contract": {
+            "build_formula": "max(15, ceil(unit_count / proven_batch_capacity))",
+            "concurrency_width": 3,
+            "excluded_inventory": [],
+            "failure_threshold": 0,
+            "inventory_evidence": "Published production Paper census frozen from guerrilla; 526 unique revision-pinned units; canonical inventory SHA-256 5a9d723b3237745b8e870dd19d0f0fdf6d0f0071e6bc363b2ff88237aaa3cb83.",
+            "minimum_multiplier": 5,
+            "quality_rubric": {
+              "block_fitness_and_accessibility": "Every block earns its role and remains usable nonvisually.",
+              "compression_and_restraint": "No empty, duplicate, throat-clearing, or ornamental scaffolding.",
+              "evidence_and_truth": "Facts, provenance, decisions, uncertainty, and authored meaning survive.",
+              "hard_gate": "Any truth, preservation, accessibility, schema, reader, or idempotence failure caps the verdict at repair or quarantine.",
+              "human_voice_and_precision": "Concrete, natural prose without generic AI cadence or inflated claims.",
+              "idempotence_and_revision_proof": "Preimage, mutation, postimage, revision, and no-op rerun are recorded.",
+              "narrative_and_hierarchy": "Sections form an argument; heading order is valid.",
+              "purpose_and_opening": "Reader, problem, and promise are clear immediately.",
+              "reader_fidelity": "Studio, TUI, email, public, and CLI/API are non-empty and semantically equivalent."
+            },
+            "target_surfaces": [
+              "Studio",
+              "TUI at 80 columns",
+              "email",
+              "public reader",
+              "CLI/API"
+            ],
+            "unit_count": 526,
+            "unit_definition": "One published Barkpark Paper identified by paper:<document_id> and pinned to document_rev."
+          },
+          "scope": {
+            "epic_id": "task-f5cbd8be8f278caf",
+            "project_id": "e5153f64-fd55-4bfa-89fe-b8046886463b",
+            "wave_id": "paper-perfection-wave-2026-07-23",
+            "workspace_id": "03e3d6d9-d123-4557-9c06-ae4382a20626"
+          },
+          "shipped_count": 0,
+          "stalled_count": 0,
+          "unaccounted_unit_ids": [
+            "paper:2026-06-29-concepts-and-details-truth-fabric",
+            "paper:2026-07-10-barkpark-greatest-weaknesses",
+            "paper:aesthetic-unification-epic-wave-2026-07-11",
+            "paper:agency-closeout-work-order",
+            "paper:agent-epistemics-portabledoc-2026-07",
+            "paper:agent-flight-recorder-charter",
+            "paper:agent-onramps-epic-wave-2026-07-11",
+            "paper:agent-onramps-epic-wave-2026-07-13",
+            "paper:agent-onramps-epic-wave-2026-07-16",
+            "paper:airdrop-grants-wave-2026-07-10-close",
+            "paper:authoring-excellence",
+            "paper:authoring-excellence-d10-reconcile-2026-07-14",
+            "paper:authoring-excellence-wave-2026-07-10",
+            "paper:authoring-excellence-wave-2026-07-12",
+            "paper:authoring-excellence-wave-2026-07-12b",
+            "paper:authoring-excellence-wave-2026-07-13",
+            "paper:authoring-excellence-wave-2026-07-13b",
+            "paper:authoring-excellence-wave-2026-07-13c",
+            "paper:authoring-excellence-wave-2026-07-13d",
+            "paper:authoring-excellence-wave-2026-07-14",
+            "paper:authoring-excellence-wave-2026-07-15",
+            "paper:authoring-excellence-wave-2026-07-16",
+            "paper:authoring-excellence-wave-2026-07-22",
+            "paper:authoring-excellence-wave-2026-07-23",
+            "paper:autodeploy-target-ui-approved",
+            "paper:autorebuild-proof-164347",
+            "paper:axi-agent-ergonomics-review",
+            "paper:axi-brief-views-wave-2026-07-18",
+            "paper:axi-brief-views-wave-2026-07-19",
+            "paper:azure-hetzner-hosting-epic-wave-2026-07-11",
+            "paper:barkpark-chat-tui",
+            "paper:barkpark-chat-tui-wave-2026-07-12",
+            "paper:barkpark-cli-reliability-wave-2026-07-22",
+            "paper:barkpark-efficiency-ledger",
+            "paper:barkpark-estate",
+            "paper:barkpark-onboarding-painpoint-audit-2026-07-13",
+            "paper:barkpark-tasks-mobile-capstone",
+            "paper:barkpark-tasks-mobile-chat-third-client",
+            "paper:barkpark-tasks-mobile-identity-cascade",
+            "paper:barkpark-tasks-mobile-product-shapes",
+            "paper:barkpark-tasks-mobile-shell-and-cache",
+            "paper:barkpark-tasks-mobile-tasks-papers-reading",
+            "paper:barkpark-tasks-mobile-wave-2026-07-23",
+            "paper:block-wishlist-100",
+            "paper:block-wishlist-100-review",
+            "paper:block-wishlist-wave-2026-07-17",
+            "paper:block-wishlist-wave-2026-07-18",
+            "paper:bp-chat-tui-wave-2026-07-13",
+            "paper:bp-chat-tui-wave-2026-07-16",
+            "paper:bp-chat-tui-wave-2026-07-23-r2",
+            "paper:bp-chat-tui-wave-2026-07-23-r3",
+            "paper:bp-cloud-build-wave-2026-07-13",
+            "paper:bp-cloud-build-wave-2026-07-15",
+            "paper:bp-cloud-build-wave-6-2026-07-14",
+            "paper:bp-mcp-serve-epic-wave-2026-07-11",
+            "paper:bp-onboarding-composition-wave-2026-07-13",
+            "paper:bp-scaffy-wave-2026-07-16",
+            "paper:bp-scaffy-wave-2026-07-23",
+            "paper:bp-scaffy-wave-2026-07-23-d58",
+            "paper:bp-scaffy-wave2-2026-07-16",
+            "paper:bp-scaffy-wave3-2026-07-16",
+            "paper:bp-scaffy-wave4-2026-07-16",
+            "paper:bp-scaffy-wave5-2026-07-17",
+            "paper:bp-scaffy-wave6-2026-07-17",
+            "paper:bp-scaffy-wave7-2026-07-17",
+            "paper:chat-herd-layer",
+            "paper:chat-herd-wave-2026-07-18",
+            "paper:chat-herd-wave2-2026-07-18",
+            "paper:chat-local-cloud-context-wave-3-2026-07-15",
+            "paper:chat-plan-050c647a4c8c",
+            "paper:chat-plan-091648d6fc0e",
+            "paper:chat-plan-1caa96602607",
+            "paper:chat-plan-40bf61f3ace0",
+            "paper:chat-plan-651c5eb5b064",
+            "paper:chat-plan-83959fbd5740",
+            "paper:chat-plan-841f9346140d",
+            "paper:chat-plan-8576b1edc5a7",
+            "paper:chat-provider-runtime-parity-wave-2-2026-07-14",
+            "paper:chat-task-hands-wave-2026-07-11",
+            "paper:choosing-your-site-framework",
+            "paper:cli-reliability-wave-2026-07-23",
+            "paper:cloud-console-epic-wish",
+            "paper:cloud-console-hardening-dashboard",
+            "paper:cloud-console-hardening-wave-2-2026-07-21",
+            "paper:cloud-console-hardening-wave-2026-07-21",
+            "paper:cloud-console-hardening-wave-3-2026-07-21",
+            "paper:cloud-console-hardening-wave-4-2026-07-21",
+            "paper:cloud-console-hardening-wave-5-2026-07-21",
+            "paper:cloud-console-wave-2026-07-11",
+            "paper:cloud-gui-remake-designer-handover",
+            "paper:cloud-gui-remake-feedback-round-1",
+            "paper:cloud-gui-remake-feedback-round-2",
+            "paper:cloud-gui-remake-feedback-round-3",
+            "paper:cloud-gui-remake-wave-2026-07-18",
+            "paper:cloud-gui-remake-wave-2026-07-19",
+            "paper:cloud-gui-remake-wave-2026-07-19-p3",
+            "paper:cloud-gui-remake-wave-2026-07-19-p4",
+            "paper:cloud-gui-remake-wave-2026-07-19-p5",
+            "paper:cloud-gui-remake-wave-2026-07-19-p5r2",
+            "paper:cloud-gui-remake-wave-2026-07-19-p5r3",
+            "paper:cloud-gui-remake-wave-2026-07-19-p5r4",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal-r10",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal-r2",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal-r3",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal-r4",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal-r5",
+            "paper:cloud-gui-remake-wave-2026-07-21-r12",
+            "paper:cloud-gui-remake-wave-2026-07-21-seal",
+            "paper:cloud-site-spawner-cf-wave-2026-07-14",
+            "paper:cloud-site-spawner-node-wave-2026-07-15",
+            "paper:cloud-site-spawner-wave-2026-07-14",
+            "paper:cloud-site-spawner-wave-3-2026-07-14",
+            "paper:cloud-site-spawner-wave-4-2026-07-14",
+            "paper:cloud-site-spawner-wave-5-2026-07-14",
+            "paper:cmux-bridge",
+            "paper:codex-epic-cycle-wave-1-2026-07-14",
+            "paper:codex-epic-cycle-wave-2-2026-07-15",
+            "paper:codex-epic-cycle-wave-3-real-corpus-usage-join-2026-07-15",
+            "paper:codex-epic-cycle-wave-3-takeover-2026-07-15",
+            "paper:compact-grep-vs-optical-archive",
+            "paper:compact-vs-image-blur-budget",
+            "paper:component-reference",
+            "paper:composition-doctrine-plan",
+            "paper:composition-doctrine-wave-2026-07-10",
+            "paper:composition-doctrine-wave-2026-07-13",
+            "paper:composition-showcase",
+            "paper:confusion-pattern-sweep-2026-07",
+            "paper:connectors-wave-10-2026-07-15",
+            "paper:connectors-wave-11-2026-07-16",
+            "paper:connectors-wave-12-2026-07-16",
+            "paper:connectors-wave-13-2026-07-16",
+            "paper:connectors-wave-14-2026-07-16",
+            "paper:connectors-wave-15-2026-07-16",
+            "paper:connectors-wave-16-2026-07-16",
+            "paper:connectors-wave-17-2026-07-16",
+            "paper:connectors-wave-18-2026-07-16",
+            "paper:connectors-wave-19-2026-07-16",
+            "paper:connectors-wave-2-2026-07-13",
+            "paper:connectors-wave-20-2026-07-16",
+            "paper:connectors-wave-2026-07-13",
+            "paper:connectors-wave-2026-07-22",
+            "paper:connectors-wave-21-2026-07-17",
+            "paper:connectors-wave-22-2026-07-17",
+            "paper:connectors-wave-23-2026-07-17",
+            "paper:connectors-wave-24-2026-07-17",
+            "paper:connectors-wave-25-2026-07-17",
+            "paper:connectors-wave-26-2026-07-18",
+            "paper:connectors-wave-27-2026-07-18",
+            "paper:connectors-wave-28-2026-07-18",
+            "paper:connectors-wave-29-2026-07-18",
+            "paper:connectors-wave-3-2026-07-14",
+            "paper:connectors-wave-30-2026-07-21",
+            "paper:connectors-wave-31-2026-07-22",
+            "paper:connectors-wave-33-2026-07-23",
+            "paper:connectors-wave-34-2026-07-23",
+            "paper:connectors-wave-4-2026-07-14",
+            "paper:connectors-wave-5-2026-07-14",
+            "paper:connectors-wave-6-2026-07-14",
+            "paper:connectors-wave-7-2026-07-14",
+            "paper:connectors-wave-8-2026-07-15",
+            "paper:connectors-wave-9-2026-07-15",
+            "paper:console-gui-build-outline",
+            "paper:console-remake-design-phase-closed-2026-07-18",
+            "paper:console-stress-screens-review-2026-07-18",
+            "paper:context-compression-benchmark",
+            "paper:context-compression-benchmark-gen1",
+            "paper:criminality-constraint-frontiers-draft",
+            "paper:deploy-with-barkpark",
+            "paper:design-engagement-accepted",
+            "paper:desk-structure-bp-tui",
+            "paper:desktop-fleets-brainstorm",
+            "paper:desktop-fleets-masterplan",
+            "paper:dispatch-frontier",
+            "paper:dispatch-frontier-wave-2026-07-10",
+            "paper:dpa-template",
+            "paper:edge-cache-share",
+            "paper:enterprise-auth-build-retro",
+            "paper:enterprise-auth-gates-debrief",
+            "paper:enterprise-ready-auth-wave-2026-07-10",
+            "paper:enterprise-ready-auth-wave-2026-07-10-w9",
+            "paper:enterprise-ready-auth-wave-2026-07-11",
+            "paper:enterprise-ready-barkpark",
+            "paper:epic-cycle-docs-index-wave-2026-07-11",
+            "paper:epic-cycle-research-graduation-wave-2026-07-22",
+            "paper:epic-cycle-research-program-abcde",
+            "paper:epic-cycle-session-card",
+            "paper:expressive-agent-loops-wave-2026-07-11",
+            "paper:felix-findings-boundaries-plugins",
+            "paper:felix-findings-liveview-collections",
+            "paper:felix-findings-liveview-tracking",
+            "paper:felix-findings-otp-supervision",
+            "paper:felix-findings-plug-router",
+            "paper:felix-findings-queries-indexes",
+            "paper:felix-findings-realtime",
+            "paper:felix-findings-schemas-changesets",
+            "paper:felix-findings-security-tenancy",
+            "paper:felix-findings-telemetry",
+            "paper:felix-findings-test-doctrine",
+            "paper:felix-findings-transactions",
+            "paper:felix-pristine-charter",
+            "paper:felix-pristine-part-xi-verdict-table",
+            "paper:felix-pristine-wave-10-2026-07-13",
+            "paper:felix-pristine-wave-12-2026-07-16",
+            "paper:felix-pristine-wave-13-2026-07-21",
+            "paper:felix-pristine-wave-14-2026-07-22",
+            "paper:felix-pristine-wave-15-2026-07-22",
+            "paper:felix-pristine-wave-16-2026-07-22",
+            "paper:felix-pristine-wave-17-2026-07-22",
+            "paper:felix-pristine-wave-18-2026-07-22",
+            "paper:felix-pristine-wave-18-2026-07-23",
+            "paper:felix-pristine-wave-19-2026-07-23",
+            "paper:felix-pristine-wave-20-2026-07-23",
+            "paper:felix-pristine-wave-2026-07-13",
+            "paper:felix-pristine-wave-2026-07-16",
+            "paper:felix-pristine-wave-21-2026-07-23",
+            "paper:felix-pristine-wave-22-2026-07-23",
+            "paper:felix-pristine-wave-5-2026-07-13",
+            "paper:felix-pristine-wave-6-2026-07-13",
+            "paper:felix-pristine-wave-7-2026-07-13",
+            "paper:felix-pristine-wave-8-2026-07-13",
+            "paper:felix-pristine-wave-9-2026-07-13",
+            "paper:fleet-audit",
+            "paper:fleet-primer-proof",
+            "paper:gates-tell-the-truth-wave-2026-07-20",
+            "paper:github-bridge",
+            "paper:github-bridge-wave-2026-07-13",
+            "paper:grill-truth-fabric-masterplan",
+            "paper:gui-premium-w5-wave-2026-07-10",
+            "paper:gui-premium-wave-2026-07-10",
+            "paper:gui-tui-parity-page",
+            "paper:headroom-context-compression-study",
+            "paper:herd-layer-wave-2026-07-21",
+            "paper:herd-layer-wave4-2026-07-22",
+            "paper:host-tenancy-caddy-probe",
+            "paper:hyperquiz-architecture",
+            "paper:hyperquiz-content-model",
+            "paper:hyperquiz-decisions",
+            "paper:hyperquiz-epic-wave-2026-07-12",
+            "paper:hyperquiz-epic-wave-3-2026-07-12",
+            "paper:hyperquiz-realtime-protocol",
+            "paper:hyperquiz-risks",
+            "paper:hyperquiz-scaling",
+            "paper:hyperquiz-vision",
+            "paper:intuition-atlas-verdict",
+            "paper:legendary-paper-task-quality-takeover-2026-07-15",
+            "paper:legendary-paper-task-quality-takeover-wave-2-2026-07-16",
+            "paper:legendary-quality-remediation-wave-1-2026-07-16",
+            "paper:lets-play-in-the-barkpark",
+            "paper:live-migrate-cutover-timing",
+            "paper:living-values-demo",
+            "paper:living-values-demo-2",
+            "paper:living-values-demo-script",
+            "paper:lvd-demo-1782953634-paper-a",
+            "paper:lvd-demo-1782953634-paper-b",
+            "paper:lvd-demo-1782953683-paper-a",
+            "paper:lvd-demo-1782953683-paper-b",
+            "paper:lvd-demo-1782953727-paper-a",
+            "paper:lvd-demo-1782953727-paper-b",
+            "paper:lvd-demo-1782953763-paper-a",
+            "paper:lvd-demo-1782953763-paper-b",
+            "paper:lvd-t5-paper-a",
+            "paper:lvd-t5-paper-b",
+            "paper:main-frame-constellation-plan",
+            "paper:mechanical-spacing-doctrine",
+            "paper:media-webhook-retry-durable-vs-pool",
+            "paper:n-screens-interactive-walkthrough",
+            "paper:netlify-vercel-next-screen-asks",
+            "paper:nextgen-wiki-living-values-v1",
+            "paper:noo-noo-disk-guardian-wave-2026-07-15",
+            "paper:noo-noo-disk-guardian-wave2-2026-07-15",
+            "paper:onboarding-composition-wave-2026-07-14",
+            "paper:onboarding-composition-wave-2026-07-16",
+            "paper:onboarding-wallclock",
+            "paper:one-shot-onboarding",
+            "paper:optical-bundles-across-models",
+            "paper:optical-bundles-task-ab-prereg",
+            "paper:optical-bundles-task-ab-results",
+            "paper:optical-compression-at-scale",
+            "paper:optical-compression-experiment-protocol",
+            "paper:optical-compression-findings-illustrated",
+            "paper:optical-compression-in-graphs",
+            "paper:optical-compression-novelty-audit",
+            "paper:optical-compression-research-report",
+            "paper:optical-compression-text-as-image-tokens",
+            "paper:optical-duels-prereg",
+            "paper:optical-duels-results",
+            "paper:p-quality-gate-wave1-debrief",
+            "paper:paper-cross-reader-reliability-wave-1-2026-07-17",
+            "paper:paper-cross-reader-reliability-wave-2-2026-07-17",
+            "paper:papers-pro-toolkit-capstone",
+            "paper:papers-pro-toolkit-crown-and-toolkit",
+            "paper:papers-pro-toolkit-evidence-record",
+            "paper:papers-pro-toolkit-living-data-forms",
+            "paper:papers-pro-toolkit-notation-typesetting",
+            "paper:papers-pro-toolkit-profession-atlas",
+            "paper:parity-page-wave-2026-07-11",
+            "paper:parity-state",
+            "paper:pbp-tui-creative-slate",
+            "paper:pd-everything-editable-wave-2026-07-11",
+            "paper:pd-feedback-demo",
+            "paper:pd-layout-engine-wave-2026-07-11",
+            "paper:pdd-t11-mainline-gap-audit",
+            "paper:pdrender-block-parity-plan",
+            "paper:pds-crown-transcript-cold-beam-2026-07-20",
+            "paper:pds-wave-10-2026-07-20",
+            "paper:pds-wave-11-2026-07-20",
+            "paper:pds-wave-12-2026-07-21",
+            "paper:pds-wave-13-2026-07-21",
+            "paper:pds-wave-14-2026-07-21",
+            "paper:pds-wave-15-2026-07-21",
+            "paper:pds-wave-16-2026-07-21",
+            "paper:pds-wave-17-2026-07-21",
+            "paper:pds-wave-18-2026-07-21",
+            "paper:pds-wave-19-2026-07-21",
+            "paper:pds-wave-2-2026-07-19",
+            "paper:pds-wave-20-2026-07-21",
+            "paper:pds-wave-2026-07-19",
+            "paper:pds-wave-21-2026-07-21",
+            "paper:pds-wave-3-2026-07-19",
+            "paper:pds-wave-4-2026-07-19",
+            "paper:pds-wave-5-2026-07-20",
+            "paper:pds-wave-6-2026-07-20",
+            "paper:pds-wave-7-2026-07-20",
+            "paper:pds-wave-8-2026-07-20",
+            "paper:pds-wave-9-2026-07-20",
+            "paper:pds-wave-9-verdict-2026-07-20",
+            "paper:pds-wave-9r-2026-07-20",
+            "paper:perfect-plan-build-w2-2026-07-13",
+            "paper:perfect-plan-build-wave-2026-07-13",
+            "paper:perfect-plan-build-wave-3-2026-07-13",
+            "paper:perfect-plan-build-wave-4-2026-07-13",
+            "paper:perfect-plan-build-wave-5-2026-07-14",
+            "paper:perfect-plan-readiness-ledger",
+            "paper:perfect-plan-research-wave-2026-07-12",
+            "paper:perfect-portabledoc-blog-next-astro-phoenix",
+            "paper:personal-agent-provider-bridge",
+            "paper:personal-dev-fleet-build-plan",
+            "paper:personal-dev-fleet-field-guide",
+            "paper:personal-dev-fleet-gui-plan",
+            "paper:personal-dev-fleet-mvp",
+            "paper:personal-dev-fleet-status-2026-07-23",
+            "paper:personal-dev-fleet-strategy",
+            "paper:personal-dev-fleet-wave-2026-07-22",
+            "paper:personal-dev-fleet-wave-2026-07-22-r2",
+            "paper:personal-dev-fleet-wave-b-2026-07-22",
+            "paper:personal-dev-fleet-wave-b-2026-07-22-r2",
+            "paper:personal-dev-fleet-wave-b-r2-2026-07-22",
+            "paper:personal-dev-fleet-wave-c-2026-07-23",
+            "paper:personal-dev-fleet-wave-c-2026-07-23-r2",
+            "paper:personal-dev-fleet-wave-c-2026-07-23-r3",
+            "paper:personal-dev-fleet-worker-protocol",
+            "paper:personal-development-server-plan",
+            "paper:phoenix-mastery-corpus",
+            "paper:playground-tenancy-cost",
+            "paper:portabledoc-blog-wave-1-2026-07-15",
+            "paper:portabledoc-code-story",
+            "paper:portabledoc-critique-verified-2026-07",
+            "paper:portabledoc-doctrine",
+            "paper:portabledoc-inline-liveref-taskchip-wire",
+            "paper:portabledoc-potential-study",
+            "paper:portabledoc-render-unification-w3-2026-07-16",
+            "paper:portabledoc-render-unification-w4-2026-07-16",
+            "paper:portabledoc-render-unification-w5-2026-07-16",
+            "paper:portabledoc-render-unification-w6-2026-07-16",
+            "paper:portabledoc-render-unification-w7-2026-07-16",
+            "paper:portabledoc-render-unification-wave-2026-07-16",
+            "paper:portabledoc-showcase",
+            "paper:preview-contract",
+            "paper:production-truth-wave-2026-07-20",
+            "paper:provider-horizon",
+            "paper:query-blocks-cookbook",
+            "paper:quota-suspend-seams",
+            "paper:rail-awareness",
+            "paper:ratify-workflow-capability-tier",
+            "paper:scaffy-benchmark",
+            "paper:scaffy-command-footprints",
+            "paper:scaffy-command-showcase",
+            "paper:scaffy-commands-as-content",
+            "paper:scaffy-duels-prereg",
+            "paper:scaffy-loop-bench-status",
+            "paper:scaffy-reversibility-proof",
+            "paper:search-template-wave-2-2026-07-16",
+            "paper:search-template-wave-2026-07-16",
+            "paper:search-template-wave-4-2026-07-16",
+            "paper:search-template-wave-5-2026-07-16",
+            "paper:search-template-wave-6-2026-07-17",
+            "paper:search-template-wave-7-2026-07-17",
+            "paper:section-presets",
+            "paper:self-update-epic-wave-2026-07-11",
+            "paper:self-update-epic-wave-2026-07-11-reconcile",
+            "paper:self-update-from-nag-to-product",
+            "paper:shared-cells",
+            "paper:shared-storm",
+            "paper:site-autodeploy-vercel-gap-analysis",
+            "paper:site-spawner-wave-2026-07-13",
+            "paper:sobelow-baseline-drift",
+            "paper:soc2-controls-mapping",
+            "paper:source-of-truth-grip-wave-2-2026-07-20",
+            "paper:source-of-truth-grip-wave-2026-07-20",
+            "paper:source-of-truth-grip-wave-3-2026-07-21",
+            "paper:source-of-truth-grip-wave-4-2026-07-21",
+            "paper:source-of-truth-grip-wave-5-2026-07-21",
+            "paper:source-of-truth-grip-wave-6-2026-07-21",
+            "paper:source-of-truth-grip-wave-7-2026-07-21",
+            "paper:source-of-truth-grip-wave-8-2026-07-21",
+            "paper:sp-cond-format",
+            "paper:sp-sort-filter",
+            "paper:spd-b39-residue-wave-2026-07-22",
+            "paper:spd-inspector-exemption-paid-wave-12-2026-07-20",
+            "paper:spd-inspector-shape-harden-wave-2026-07-21",
+            "paper:spd-inspector-shape-wave-11-2026-07-20",
+            "paper:spd-inspector-successor-wave-2026-07-20",
+            "paper:spd-round-trip-fidelity-wave-2026-07-21",
+            "paper:spd-standard-scrim-crush-wave-2026-07-21",
+            "paper:ssp-visual-addendum",
+            "paper:ssp-w2-visual-addendum-evidence",
+            "paper:studio-chat-w12-wave-2026-07-10",
+            "paper:studio-premium-wave-2026-07-14",
+            "paper:studio-responsive-desk-wave-2026-07-19",
+            "paper:studio-space-priority-desk-advance-2026-07-19",
+            "paper:studio-space-priority-desk-browser-2026-07-19",
+            "paper:studio-space-priority-desk-land-2026-07-19",
+            "paper:studio-space-priority-desk-prove-2026-07-19",
+            "paper:studio-space-priority-desk-ruling-2026-07-20",
+            "paper:studio-space-priority-desk-seal-2026-07-20",
+            "paper:studio-space-priority-desk-visible-2026-07-20",
+            "paper:studio-space-priority-desk-wave2-2026-07-19",
+            "paper:studio-structure-polish-wave-2026-07-16",
+            "paper:superfile-lessons-bp-tui",
+            "paper:support-tiers",
+            "paper:survey-once-build-forever",
+            "paper:task-components",
+            "paper:task-components-editable-demo",
+            "paper:task-lifecycle-visibility-wave-2026-07-19",
+            "paper:task-lifecycle-visibility-wave-2026-07-21",
+            "paper:task-lifecycle-visibility-wave-2026-07-21-correctness",
+            "paper:task-lifecycle-visibility-wave-2026-07-22-backlog-finish",
+            "paper:task-lifecycle-visibility-wave-2026-07-22-finishing",
+            "paper:task-obsession",
+            "paper:task-quality-build-wave-01-2026-07-18",
+            "paper:task-quality-build-wave-02-2026-07-18",
+            "paper:task-quality-build-wave-03-2026-07-18",
+            "paper:task-quality-build-wave-04-2026-07-18",
+            "paper:task-quality-build-wave-05-2026-07-18",
+            "paper:task-quality-build-wave-06-2026-07-18",
+            "paper:task-quality-build-wave-07-2026-07-18",
+            "paper:task-quality-build-wave-08-2026-07-18",
+            "paper:task-quality-build-wave-09-2026-07-18",
+            "paper:task-quality-build-wave-10-2026-07-18",
+            "paper:task-quality-experiment-round-01-baseline-2026-07-18",
+            "paper:task-quality-experiment-round-02-diverge-2026-07-18",
+            "paper:task-quality-experiment-round-03-attack-2026-07-18",
+            "paper:task-quality-experiment-round-04-converge-2026-07-18",
+            "paper:task-quality-experiment-round-05-pilot-2026-07-18",
+            "paper:task-quality-review-wave-01-2026-07-18",
+            "paper:task-quality-review-wave-02-2026-07-18",
+            "paper:task-quality-review-wave-03-2026-07-18",
+            "paper:task-quality-review-wave-04-2026-07-18",
+            "paper:task-quality-review-wave-05-2026-07-18",
+            "paper:task-quality-standard-chrono-wave-1-2026-07-18",
+            "paper:task-quality-standard-chrono-wave-3-2026-07-18",
+            "paper:task-quality-standard-chrono-wave-4-2026-07-19",
+            "paper:task-quality-standard-chrono-wave-5-2026-07-22",
+            "paper:task-quality-survey-digest-verify-plan-2026-07-18",
+            "paper:task-quality-survey-wave-01-2026-07-18",
+            "paper:task-quality-survey-wave-02-2026-07-18",
+            "paper:task-quality-survey-wave-03-2026-07-18",
+            "paper:task-quality-survey-wave-04-2026-07-18",
+            "paper:task-quality-survey-wave-05-2026-07-18",
+            "paper:task-quality-survey-wave-06-2026-07-18",
+            "paper:task-quality-survey-wave-07-2026-07-18",
+            "paper:task-quality-survey-wave-08-2026-07-18",
+            "paper:task-quality-survey-wave-09-2026-07-18",
+            "paper:task-quality-survey-wave-10-2026-07-18",
+            "paper:task-quality-survey-wave-11-2026-07-18",
+            "paper:task-quality-survey-wave-12-2026-07-18",
+            "paper:task-quality-survey-wave-13-2026-07-18",
+            "paper:task-quality-survey-wave-14-2026-07-18",
+            "paper:task-quality-survey-wave-15-2026-07-18",
+            "paper:task-quality-survey-wave-16-2026-07-18",
+            "paper:task-quality-survey-wave-17-2026-07-18",
+            "paper:task-quality-survey-wave-18-2026-07-18",
+            "paper:task-quality-survey-wave-19-2026-07-18",
+            "paper:task-quality-survey-wave-20-2026-07-18",
+            "paper:task-quality-verify-wave-01-2026-07-18",
+            "paper:task-quality-verify-wave-02-2026-07-18",
+            "paper:task-quality-verify-wave-03-2026-07-18",
+            "paper:task-quality-verify-wave-04-2026-07-18",
+            "paper:task-quality-verify-wave-05-2026-07-18",
+            "paper:task-quality-verify-wave-06-2026-07-18",
+            "paper:task-quality-verify-wave-07-2026-07-18",
+            "paper:task-quality-verify-wave-08-2026-07-18",
+            "paper:task-quality-verify-wave-09-2026-07-18",
+            "paper:task-quality-verify-wave-10-2026-07-18",
+            "paper:task-tui-glyph-unify-wave-2026-07-16",
+            "paper:task-tui-wave-2026-07-23",
+            "paper:task-tui-wave-2026-07-23b",
+            "paper:telemetry-inventory",
+            "paper:terminal-layout-engine",
+            "paper:terminal-mermaid-diagrams",
+            "paper:the-80-column-standard",
+            "paper:the-picture-trick-plain-story",
+            "paper:theme-system",
+            "paper:tickets-epic-wish",
+            "paper:time-boxed-airdrop-grants",
+            "paper:ultragoal-queue-drain-progress-2026-07-13",
+            "paper:viable-everywhere-epic-wave-2026-07-11",
+            "paper:viable-everywhere-strategy",
+            "paper:view-vs-edit-parity",
+            "paper:vulnerability-disclosure-policy",
+            "paper:wave-deck",
+            "paper:wave-deck-strategy",
+            "paper:wave-deck-zen-handoff",
+            "paper:weaving-claude-codex",
+            "paper:welcome",
+            "paper:whole-corpus-oracle-verdict",
+            "paper:wild-bulk-quality-sweep-2026-07-16",
+            "paper:workspace-bundle-keystone",
+            "paper:wsc-steer-fleet-design",
+            "paper:wsc-wave-2026-07-16",
+            "paper:wsc-wave-2026-07-17",
+            "paper:wsc-wave-2026-07-17-ad",
+            "paper:wsc-wave-2026-07-17-ad-tui",
+            "paper:wsc-wave-2026-07-17-r2",
+            "paper:wsc-wave-2026-07-18"
+          ],
+          "unassigned_unit_ids": [
+            "paper:2026-06-29-concepts-and-details-truth-fabric",
+            "paper:2026-07-10-barkpark-greatest-weaknesses",
+            "paper:aesthetic-unification-epic-wave-2026-07-11",
+            "paper:agency-closeout-work-order",
+            "paper:agent-epistemics-portabledoc-2026-07",
+            "paper:agent-flight-recorder-charter",
+            "paper:agent-onramps-epic-wave-2026-07-11",
+            "paper:agent-onramps-epic-wave-2026-07-13",
+            "paper:agent-onramps-epic-wave-2026-07-16",
+            "paper:airdrop-grants-wave-2026-07-10-close",
+            "paper:authoring-excellence",
+            "paper:authoring-excellence-d10-reconcile-2026-07-14",
+            "paper:authoring-excellence-wave-2026-07-10",
+            "paper:authoring-excellence-wave-2026-07-12",
+            "paper:authoring-excellence-wave-2026-07-12b",
+            "paper:authoring-excellence-wave-2026-07-13",
+            "paper:authoring-excellence-wave-2026-07-13b",
+            "paper:authoring-excellence-wave-2026-07-13c",
+            "paper:authoring-excellence-wave-2026-07-13d",
+            "paper:authoring-excellence-wave-2026-07-14",
+            "paper:authoring-excellence-wave-2026-07-15",
+            "paper:authoring-excellence-wave-2026-07-16",
+            "paper:authoring-excellence-wave-2026-07-22",
+            "paper:authoring-excellence-wave-2026-07-23",
+            "paper:autodeploy-target-ui-approved",
+            "paper:autorebuild-proof-164347",
+            "paper:axi-agent-ergonomics-review",
+            "paper:axi-brief-views-wave-2026-07-18",
+            "paper:axi-brief-views-wave-2026-07-19",
+            "paper:azure-hetzner-hosting-epic-wave-2026-07-11",
+            "paper:barkpark-chat-tui",
+            "paper:barkpark-chat-tui-wave-2026-07-12",
+            "paper:barkpark-cli-reliability-wave-2026-07-22",
+            "paper:barkpark-efficiency-ledger",
+            "paper:barkpark-estate",
+            "paper:barkpark-onboarding-painpoint-audit-2026-07-13",
+            "paper:barkpark-tasks-mobile-capstone",
+            "paper:barkpark-tasks-mobile-chat-third-client",
+            "paper:barkpark-tasks-mobile-identity-cascade",
+            "paper:barkpark-tasks-mobile-product-shapes",
+            "paper:barkpark-tasks-mobile-shell-and-cache",
+            "paper:barkpark-tasks-mobile-tasks-papers-reading",
+            "paper:barkpark-tasks-mobile-wave-2026-07-23",
+            "paper:block-wishlist-100",
+            "paper:block-wishlist-100-review",
+            "paper:block-wishlist-wave-2026-07-17",
+            "paper:block-wishlist-wave-2026-07-18",
+            "paper:bp-chat-tui-wave-2026-07-13",
+            "paper:bp-chat-tui-wave-2026-07-16",
+            "paper:bp-chat-tui-wave-2026-07-23-r2",
+            "paper:bp-chat-tui-wave-2026-07-23-r3",
+            "paper:bp-cloud-build-wave-2026-07-13",
+            "paper:bp-cloud-build-wave-2026-07-15",
+            "paper:bp-cloud-build-wave-6-2026-07-14",
+            "paper:bp-mcp-serve-epic-wave-2026-07-11",
+            "paper:bp-onboarding-composition-wave-2026-07-13",
+            "paper:bp-scaffy-wave-2026-07-16",
+            "paper:bp-scaffy-wave-2026-07-23",
+            "paper:bp-scaffy-wave-2026-07-23-d58",
+            "paper:bp-scaffy-wave2-2026-07-16",
+            "paper:bp-scaffy-wave3-2026-07-16",
+            "paper:bp-scaffy-wave4-2026-07-16",
+            "paper:bp-scaffy-wave5-2026-07-17",
+            "paper:bp-scaffy-wave6-2026-07-17",
+            "paper:bp-scaffy-wave7-2026-07-17",
+            "paper:chat-herd-layer",
+            "paper:chat-herd-wave-2026-07-18",
+            "paper:chat-herd-wave2-2026-07-18",
+            "paper:chat-local-cloud-context-wave-3-2026-07-15",
+            "paper:chat-plan-050c647a4c8c",
+            "paper:chat-plan-091648d6fc0e",
+            "paper:chat-plan-1caa96602607",
+            "paper:chat-plan-40bf61f3ace0",
+            "paper:chat-plan-651c5eb5b064",
+            "paper:chat-plan-83959fbd5740",
+            "paper:chat-plan-841f9346140d",
+            "paper:chat-plan-8576b1edc5a7",
+            "paper:chat-provider-runtime-parity-wave-2-2026-07-14",
+            "paper:chat-task-hands-wave-2026-07-11",
+            "paper:choosing-your-site-framework",
+            "paper:cli-reliability-wave-2026-07-23",
+            "paper:cloud-console-epic-wish",
+            "paper:cloud-console-hardening-dashboard",
+            "paper:cloud-console-hardening-wave-2-2026-07-21",
+            "paper:cloud-console-hardening-wave-2026-07-21",
+            "paper:cloud-console-hardening-wave-3-2026-07-21",
+            "paper:cloud-console-hardening-wave-4-2026-07-21",
+            "paper:cloud-console-hardening-wave-5-2026-07-21",
+            "paper:cloud-console-wave-2026-07-11",
+            "paper:cloud-gui-remake-designer-handover",
+            "paper:cloud-gui-remake-feedback-round-1",
+            "paper:cloud-gui-remake-feedback-round-2",
+            "paper:cloud-gui-remake-feedback-round-3",
+            "paper:cloud-gui-remake-wave-2026-07-18",
+            "paper:cloud-gui-remake-wave-2026-07-19",
+            "paper:cloud-gui-remake-wave-2026-07-19-p3",
+            "paper:cloud-gui-remake-wave-2026-07-19-p4",
+            "paper:cloud-gui-remake-wave-2026-07-19-p5",
+            "paper:cloud-gui-remake-wave-2026-07-19-p5r2",
+            "paper:cloud-gui-remake-wave-2026-07-19-p5r3",
+            "paper:cloud-gui-remake-wave-2026-07-19-p5r4",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal-r10",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal-r2",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal-r3",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal-r4",
+            "paper:cloud-gui-remake-wave-2026-07-20-seal-r5",
+            "paper:cloud-gui-remake-wave-2026-07-21-r12",
+            "paper:cloud-gui-remake-wave-2026-07-21-seal",
+            "paper:cloud-site-spawner-cf-wave-2026-07-14",
+            "paper:cloud-site-spawner-node-wave-2026-07-15",
+            "paper:cloud-site-spawner-wave-2026-07-14",
+            "paper:cloud-site-spawner-wave-3-2026-07-14",
+            "paper:cloud-site-spawner-wave-4-2026-07-14",
+            "paper:cloud-site-spawner-wave-5-2026-07-14",
+            "paper:cmux-bridge",
+            "paper:codex-epic-cycle-wave-1-2026-07-14",
+            "paper:codex-epic-cycle-wave-2-2026-07-15",
+            "paper:codex-epic-cycle-wave-3-real-corpus-usage-join-2026-07-15",
+            "paper:codex-epic-cycle-wave-3-takeover-2026-07-15",
+            "paper:compact-grep-vs-optical-archive",
+            "paper:compact-vs-image-blur-budget",
+            "paper:component-reference",
+            "paper:composition-doctrine-plan",
+            "paper:composition-doctrine-wave-2026-07-10",
+            "paper:composition-doctrine-wave-2026-07-13",
+            "paper:composition-showcase",
+            "paper:confusion-pattern-sweep-2026-07",
+            "paper:connectors-wave-10-2026-07-15",
+            "paper:connectors-wave-11-2026-07-16",
+            "paper:connectors-wave-12-2026-07-16",
+            "paper:connectors-wave-13-2026-07-16",
+            "paper:connectors-wave-14-2026-07-16",
+            "paper:connectors-wave-15-2026-07-16",
+            "paper:connectors-wave-16-2026-07-16",
+            "paper:connectors-wave-17-2026-07-16",
+            "paper:connectors-wave-18-2026-07-16",
+            "paper:connectors-wave-19-2026-07-16",
+            "paper:connectors-wave-2-2026-07-13",
+            "paper:connectors-wave-20-2026-07-16",
+            "paper:connectors-wave-2026-07-13",
+            "paper:connectors-wave-2026-07-22",
+            "paper:connectors-wave-21-2026-07-17",
+            "paper:connectors-wave-22-2026-07-17",
+            "paper:connectors-wave-23-2026-07-17",
+            "paper:connectors-wave-24-2026-07-17",
+            "paper:connectors-wave-25-2026-07-17",
+            "paper:connectors-wave-26-2026-07-18",
+            "paper:connectors-wave-27-2026-07-18",
+            "paper:connectors-wave-28-2026-07-18",
+            "paper:connectors-wave-29-2026-07-18",
+            "paper:connectors-wave-3-2026-07-14",
+            "paper:connectors-wave-30-2026-07-21",
+            "paper:connectors-wave-31-2026-07-22",
+            "paper:connectors-wave-33-2026-07-23",
+            "paper:connectors-wave-34-2026-07-23",
+            "paper:connectors-wave-4-2026-07-14",
+            "paper:connectors-wave-5-2026-07-14",
+            "paper:connectors-wave-6-2026-07-14",
+            "paper:connectors-wave-7-2026-07-14",
+            "paper:connectors-wave-8-2026-07-15",
+            "paper:connectors-wave-9-2026-07-15",
+            "paper:console-gui-build-outline",
+            "paper:console-remake-design-phase-closed-2026-07-18",
+            "paper:console-stress-screens-review-2026-07-18",
+            "paper:context-compression-benchmark",
+            "paper:context-compression-benchmark-gen1",
+            "paper:criminality-constraint-frontiers-draft",
+            "paper:deploy-with-barkpark",
+            "paper:design-engagement-accepted",
+            "paper:desk-structure-bp-tui",
+            "paper:desktop-fleets-brainstorm",
+            "paper:desktop-fleets-masterplan",
+            "paper:dispatch-frontier",
+            "paper:dispatch-frontier-wave-2026-07-10",
+            "paper:dpa-template",
+            "paper:edge-cache-share",
+            "paper:enterprise-auth-build-retro",
+            "paper:enterprise-auth-gates-debrief",
+            "paper:enterprise-ready-auth-wave-2026-07-10",
+            "paper:enterprise-ready-auth-wave-2026-07-10-w9",
+            "paper:enterprise-ready-auth-wave-2026-07-11",
+            "paper:enterprise-ready-barkpark",
+            "paper:epic-cycle-docs-index-wave-2026-07-11",
+            "paper:epic-cycle-research-graduation-wave-2026-07-22",
+            "paper:epic-cycle-research-program-abcde",
+            "paper:epic-cycle-session-card",
+            "paper:expressive-agent-loops-wave-2026-07-11",
+            "paper:felix-findings-boundaries-plugins",
+            "paper:felix-findings-liveview-collections",
+            "paper:felix-findings-liveview-tracking",
+            "paper:felix-findings-otp-supervision",
+            "paper:felix-findings-plug-router",
+            "paper:felix-findings-queries-indexes",
+            "paper:felix-findings-realtime",
+            "paper:felix-findings-schemas-changesets",
+            "paper:felix-findings-security-tenancy",
+            "paper:felix-findings-telemetry",
+            "paper:felix-findings-test-doctrine",
+            "paper:felix-findings-transactions",
+            "paper:felix-pristine-charter",
+            "paper:felix-pristine-part-xi-verdict-table",
+            "paper:felix-pristine-wave-10-2026-07-13",
+            "paper:felix-pristine-wave-12-2026-07-16",
+            "paper:felix-pristine-wave-13-2026-07-21",
+            "paper:felix-pristine-wave-14-2026-07-22",
+            "paper:felix-pristine-wave-15-2026-07-22",
+            "paper:felix-pristine-wave-16-2026-07-22",
+            "paper:felix-pristine-wave-17-2026-07-22",
+            "paper:felix-pristine-wave-18-2026-07-22",
+            "paper:felix-pristine-wave-18-2026-07-23",
+            "paper:felix-pristine-wave-19-2026-07-23",
+            "paper:felix-pristine-wave-20-2026-07-23",
+            "paper:felix-pristine-wave-2026-07-13",
+            "paper:felix-pristine-wave-2026-07-16",
+            "paper:felix-pristine-wave-21-2026-07-23",
+            "paper:felix-pristine-wave-22-2026-07-23",
+            "paper:felix-pristine-wave-5-2026-07-13",
+            "paper:felix-pristine-wave-6-2026-07-13",
+            "paper:felix-pristine-wave-7-2026-07-13",
+            "paper:felix-pristine-wave-8-2026-07-13",
+            "paper:felix-pristine-wave-9-2026-07-13",
+            "paper:fleet-audit",
+            "paper:fleet-primer-proof",
+            "paper:gates-tell-the-truth-wave-2026-07-20",
+            "paper:github-bridge",
+            "paper:github-bridge-wave-2026-07-13",
+            "paper:grill-truth-fabric-masterplan",
+            "paper:gui-premium-w5-wave-2026-07-10",
+            "paper:gui-premium-wave-2026-07-10",
+            "paper:gui-tui-parity-page",
+            "paper:headroom-context-compression-study",
+            "paper:herd-layer-wave-2026-07-21",
+            "paper:herd-layer-wave4-2026-07-22",
+            "paper:host-tenancy-caddy-probe",
+            "paper:hyperquiz-architecture",
+            "paper:hyperquiz-content-model",
+            "paper:hyperquiz-decisions",
+            "paper:hyperquiz-epic-wave-2026-07-12",
+            "paper:hyperquiz-epic-wave-3-2026-07-12",
+            "paper:hyperquiz-realtime-protocol",
+            "paper:hyperquiz-risks",
+            "paper:hyperquiz-scaling",
+            "paper:hyperquiz-vision",
+            "paper:intuition-atlas-verdict",
+            "paper:legendary-paper-task-quality-takeover-2026-07-15",
+            "paper:legendary-paper-task-quality-takeover-wave-2-2026-07-16",
+            "paper:legendary-quality-remediation-wave-1-2026-07-16",
+            "paper:lets-play-in-the-barkpark",
+            "paper:live-migrate-cutover-timing",
+            "paper:living-values-demo",
+            "paper:living-values-demo-2",
+            "paper:living-values-demo-script",
+            "paper:lvd-demo-1782953634-paper-a",
+            "paper:lvd-demo-1782953634-paper-b",
+            "paper:lvd-demo-1782953683-paper-a",
+            "paper:lvd-demo-1782953683-paper-b",
+            "paper:lvd-demo-1782953727-paper-a",
+            "paper:lvd-demo-1782953727-paper-b",
+            "paper:lvd-demo-1782953763-paper-a",
+            "paper:lvd-demo-1782953763-paper-b",
+            "paper:lvd-t5-paper-a",
+            "paper:lvd-t5-paper-b",
+            "paper:main-frame-constellation-plan",
+            "paper:mechanical-spacing-doctrine",
+            "paper:media-webhook-retry-durable-vs-pool",
+            "paper:n-screens-interactive-walkthrough",
+            "paper:netlify-vercel-next-screen-asks",
+            "paper:nextgen-wiki-living-values-v1",
+            "paper:noo-noo-disk-guardian-wave-2026-07-15",
+            "paper:noo-noo-disk-guardian-wave2-2026-07-15",
+            "paper:onboarding-composition-wave-2026-07-14",
+            "paper:onboarding-composition-wave-2026-07-16",
+            "paper:onboarding-wallclock",
+            "paper:one-shot-onboarding",
+            "paper:optical-bundles-across-models",
+            "paper:optical-bundles-task-ab-prereg",
+            "paper:optical-bundles-task-ab-results",
+            "paper:optical-compression-at-scale",
+            "paper:optical-compression-experiment-protocol",
+            "paper:optical-compression-findings-illustrated",
+            "paper:optical-compression-in-graphs",
+            "paper:optical-compression-novelty-audit",
+            "paper:optical-compression-research-report",
+            "paper:optical-compression-text-as-image-tokens",
+            "paper:optical-duels-prereg",
+            "paper:optical-duels-results",
+            "paper:p-quality-gate-wave1-debrief",
+            "paper:paper-cross-reader-reliability-wave-1-2026-07-17",
+            "paper:paper-cross-reader-reliability-wave-2-2026-07-17",
+            "paper:papers-pro-toolkit-capstone",
+            "paper:papers-pro-toolkit-crown-and-toolkit",
+            "paper:papers-pro-toolkit-evidence-record",
+            "paper:papers-pro-toolkit-living-data-forms",
+            "paper:papers-pro-toolkit-notation-typesetting",
+            "paper:papers-pro-toolkit-profession-atlas",
+            "paper:parity-page-wave-2026-07-11",
+            "paper:parity-state",
+            "paper:pbp-tui-creative-slate",
+            "paper:pd-everything-editable-wave-2026-07-11",
+            "paper:pd-feedback-demo",
+            "paper:pd-layout-engine-wave-2026-07-11",
+            "paper:pdd-t11-mainline-gap-audit",
+            "paper:pdrender-block-parity-plan",
+            "paper:pds-crown-transcript-cold-beam-2026-07-20",
+            "paper:pds-wave-10-2026-07-20",
+            "paper:pds-wave-11-2026-07-20",
+            "paper:pds-wave-12-2026-07-21",
+            "paper:pds-wave-13-2026-07-21",
+            "paper:pds-wave-14-2026-07-21",
+            "paper:pds-wave-15-2026-07-21",
+            "paper:pds-wave-16-2026-07-21",
+            "paper:pds-wave-17-2026-07-21",
+            "paper:pds-wave-18-2026-07-21",
+            "paper:pds-wave-19-2026-07-21",
+            "paper:pds-wave-2-2026-07-19",
+            "paper:pds-wave-20-2026-07-21",
+            "paper:pds-wave-2026-07-19",
+            "paper:pds-wave-21-2026-07-21",
+            "paper:pds-wave-3-2026-07-19",
+            "paper:pds-wave-4-2026-07-19",
+            "paper:pds-wave-5-2026-07-20",
+            "paper:pds-wave-6-2026-07-20",
+            "paper:pds-wave-7-2026-07-20",
+            "paper:pds-wave-8-2026-07-20",
+            "paper:pds-wave-9-2026-07-20",
+            "paper:pds-wave-9-verdict-2026-07-20",
+            "paper:pds-wave-9r-2026-07-20",
+            "paper:perfect-plan-build-w2-2026-07-13",
+            "paper:perfect-plan-build-wave-2026-07-13",
+            "paper:perfect-plan-build-wave-3-2026-07-13",
+            "paper:perfect-plan-build-wave-4-2026-07-13",
+            "paper:perfect-plan-build-wave-5-2026-07-14",
+            "paper:perfect-plan-readiness-ledger",
+            "paper:perfect-plan-research-wave-2026-07-12",
+            "paper:perfect-portabledoc-blog-next-astro-phoenix",
+            "paper:personal-agent-provider-bridge",
+            "paper:personal-dev-fleet-build-plan",
+            "paper:personal-dev-fleet-field-guide",
+            "paper:personal-dev-fleet-gui-plan",
+            "paper:personal-dev-fleet-mvp",
+            "paper:personal-dev-fleet-status-2026-07-23",
+            "paper:personal-dev-fleet-strategy",
+            "paper:personal-dev-fleet-wave-2026-07-22",
+            "paper:personal-dev-fleet-wave-2026-07-22-r2",
+            "paper:personal-dev-fleet-wave-b-2026-07-22",
+            "paper:personal-dev-fleet-wave-b-2026-07-22-r2",
+            "paper:personal-dev-fleet-wave-b-r2-2026-07-22",
+            "paper:personal-dev-fleet-wave-c-2026-07-23",
+            "paper:personal-dev-fleet-wave-c-2026-07-23-r2",
+            "paper:personal-dev-fleet-wave-c-2026-07-23-r3",
+            "paper:personal-dev-fleet-worker-protocol",
+            "paper:personal-development-server-plan",
+            "paper:phoenix-mastery-corpus",
+            "paper:playground-tenancy-cost",
+            "paper:portabledoc-blog-wave-1-2026-07-15",
+            "paper:portabledoc-code-story",
+            "paper:portabledoc-critique-verified-2026-07",
+            "paper:portabledoc-doctrine",
+            "paper:portabledoc-inline-liveref-taskchip-wire",
+            "paper:portabledoc-potential-study",
+            "paper:portabledoc-render-unification-w3-2026-07-16",
+            "paper:portabledoc-render-unification-w4-2026-07-16",
+            "paper:portabledoc-render-unification-w5-2026-07-16",
+            "paper:portabledoc-render-unification-w6-2026-07-16",
+            "paper:portabledoc-render-unification-w7-2026-07-16",
+            "paper:portabledoc-render-unification-wave-2026-07-16",
+            "paper:portabledoc-showcase",
+            "paper:preview-contract",
+            "paper:production-truth-wave-2026-07-20",
+            "paper:provider-horizon",
+            "paper:query-blocks-cookbook",
+            "paper:quota-suspend-seams",
+            "paper:rail-awareness",
+            "paper:ratify-workflow-capability-tier",
+            "paper:scaffy-benchmark",
+            "paper:scaffy-command-footprints",
+            "paper:scaffy-command-showcase",
+            "paper:scaffy-commands-as-content",
+            "paper:scaffy-duels-prereg",
+            "paper:scaffy-loop-bench-status",
+            "paper:scaffy-reversibility-proof",
+            "paper:search-template-wave-2-2026-07-16",
+            "paper:search-template-wave-2026-07-16",
+            "paper:search-template-wave-4-2026-07-16",
+            "paper:search-template-wave-5-2026-07-16",
+            "paper:search-template-wave-6-2026-07-17",
+            "paper:search-template-wave-7-2026-07-17",
+            "paper:section-presets",
+            "paper:self-update-epic-wave-2026-07-11",
+            "paper:self-update-epic-wave-2026-07-11-reconcile",
+            "paper:self-update-from-nag-to-product",
+            "paper:shared-cells",
+            "paper:shared-storm",
+            "paper:site-autodeploy-vercel-gap-analysis",
+            "paper:site-spawner-wave-2026-07-13",
+            "paper:sobelow-baseline-drift",
+            "paper:soc2-controls-mapping",
+            "paper:source-of-truth-grip-wave-2-2026-07-20",
+            "paper:source-of-truth-grip-wave-2026-07-20",
+            "paper:source-of-truth-grip-wave-3-2026-07-21",
+            "paper:source-of-truth-grip-wave-4-2026-07-21",
+            "paper:source-of-truth-grip-wave-5-2026-07-21",
+            "paper:source-of-truth-grip-wave-6-2026-07-21",
+            "paper:source-of-truth-grip-wave-7-2026-07-21",
+            "paper:source-of-truth-grip-wave-8-2026-07-21",
+            "paper:sp-cond-format",
+            "paper:sp-sort-filter",
+            "paper:spd-b39-residue-wave-2026-07-22",
+            "paper:spd-inspector-exemption-paid-wave-12-2026-07-20",
+            "paper:spd-inspector-shape-harden-wave-2026-07-21",
+            "paper:spd-inspector-shape-wave-11-2026-07-20",
+            "paper:spd-inspector-successor-wave-2026-07-20",
+            "paper:spd-round-trip-fidelity-wave-2026-07-21",
+            "paper:spd-standard-scrim-crush-wave-2026-07-21",
+            "paper:ssp-visual-addendum",
+            "paper:ssp-w2-visual-addendum-evidence",
+            "paper:studio-chat-w12-wave-2026-07-10",
+            "paper:studio-premium-wave-2026-07-14",
+            "paper:studio-responsive-desk-wave-2026-07-19",
+            "paper:studio-space-priority-desk-advance-2026-07-19",
+            "paper:studio-space-priority-desk-browser-2026-07-19",
+            "paper:studio-space-priority-desk-land-2026-07-19",
+            "paper:studio-space-priority-desk-prove-2026-07-19",
+            "paper:studio-space-priority-desk-ruling-2026-07-20",
+            "paper:studio-space-priority-desk-seal-2026-07-20",
+            "paper:studio-space-priority-desk-visible-2026-07-20",
+            "paper:studio-space-priority-desk-wave2-2026-07-19",
+            "paper:studio-structure-polish-wave-2026-07-16",
+            "paper:superfile-lessons-bp-tui",
+            "paper:support-tiers",
+            "paper:survey-once-build-forever",
+            "paper:task-components",
+            "paper:task-components-editable-demo",
+            "paper:task-lifecycle-visibility-wave-2026-07-19",
+            "paper:task-lifecycle-visibility-wave-2026-07-21",
+            "paper:task-lifecycle-visibility-wave-2026-07-21-correctness",
+            "paper:task-lifecycle-visibility-wave-2026-07-22-backlog-finish",
+            "paper:task-lifecycle-visibility-wave-2026-07-22-finishing",
+            "paper:task-obsession",
+            "paper:task-quality-build-wave-01-2026-07-18",
+            "paper:task-quality-build-wave-02-2026-07-18",
+            "paper:task-quality-build-wave-03-2026-07-18",
+            "paper:task-quality-build-wave-04-2026-07-18",
+            "paper:task-quality-build-wave-05-2026-07-18",
+            "paper:task-quality-build-wave-06-2026-07-18",
+            "paper:task-quality-build-wave-07-2026-07-18",
+            "paper:task-quality-build-wave-08-2026-07-18",
+            "paper:task-quality-build-wave-09-2026-07-18",
+            "paper:task-quality-build-wave-10-2026-07-18",
+            "paper:task-quality-experiment-round-01-baseline-2026-07-18",
+            "paper:task-quality-experiment-round-02-diverge-2026-07-18",
+            "paper:task-quality-experiment-round-03-attack-2026-07-18",
+            "paper:task-quality-experiment-round-04-converge-2026-07-18",
+            "paper:task-quality-experiment-round-05-pilot-2026-07-18",
+            "paper:task-quality-review-wave-01-2026-07-18",
+            "paper:task-quality-review-wave-02-2026-07-18",
+            "paper:task-quality-review-wave-03-2026-07-18",
+            "paper:task-quality-review-wave-04-2026-07-18",
+            "paper:task-quality-review-wave-05-2026-07-18",
+            "paper:task-quality-standard-chrono-wave-1-2026-07-18",
+            "paper:task-quality-standard-chrono-wave-3-2026-07-18",
+            "paper:task-quality-standard-chrono-wave-4-2026-07-19",
+            "paper:task-quality-standard-chrono-wave-5-2026-07-22",
+            "paper:task-quality-survey-digest-verify-plan-2026-07-18",
+            "paper:task-quality-survey-wave-01-2026-07-18",
+            "paper:task-quality-survey-wave-02-2026-07-18",
+            "paper:task-quality-survey-wave-03-2026-07-18",
+            "paper:task-quality-survey-wave-04-2026-07-18",
+            "paper:task-quality-survey-wave-05-2026-07-18",
+            "paper:task-quality-survey-wave-06-2026-07-18",
+            "paper:task-quality-survey-wave-07-2026-07-18",
+            "paper:task-quality-survey-wave-08-2026-07-18",
+            "paper:task-quality-survey-wave-09-2026-07-18",
+            "paper:task-quality-survey-wave-10-2026-07-18",
+            "paper:task-quality-survey-wave-11-2026-07-18",
+            "paper:task-quality-survey-wave-12-2026-07-18",
+            "paper:task-quality-survey-wave-13-2026-07-18",
+            "paper:task-quality-survey-wave-14-2026-07-18",
+            "paper:task-quality-survey-wave-15-2026-07-18",
+            "paper:task-quality-survey-wave-16-2026-07-18",
+            "paper:task-quality-survey-wave-17-2026-07-18",
+            "paper:task-quality-survey-wave-18-2026-07-18",
+            "paper:task-quality-survey-wave-19-2026-07-18",
+            "paper:task-quality-survey-wave-20-2026-07-18",
+            "paper:task-quality-verify-wave-01-2026-07-18",
+            "paper:task-quality-verify-wave-02-2026-07-18",
+            "paper:task-quality-verify-wave-03-2026-07-18",
+            "paper:task-quality-verify-wave-04-2026-07-18",
+            "paper:task-quality-verify-wave-05-2026-07-18",
+            "paper:task-quality-verify-wave-06-2026-07-18",
+            "paper:task-quality-verify-wave-07-2026-07-18",
+            "paper:task-quality-verify-wave-08-2026-07-18",
+            "paper:task-quality-verify-wave-09-2026-07-18",
+            "paper:task-quality-verify-wave-10-2026-07-18",
+            "paper:task-tui-glyph-unify-wave-2026-07-16",
+            "paper:task-tui-wave-2026-07-23",
+            "paper:task-tui-wave-2026-07-23b",
+            "paper:telemetry-inventory",
+            "paper:terminal-layout-engine",
+            "paper:terminal-mermaid-diagrams",
+            "paper:the-80-column-standard",
+            "paper:the-picture-trick-plain-story",
+            "paper:theme-system",
+            "paper:tickets-epic-wish",
+            "paper:time-boxed-airdrop-grants",
+            "paper:ultragoal-queue-drain-progress-2026-07-13",
+            "paper:viable-everywhere-epic-wave-2026-07-11",
+            "paper:viable-everywhere-strategy",
+            "paper:view-vs-edit-parity",
+            "paper:vulnerability-disclosure-policy",
+            "paper:wave-deck",
+            "paper:wave-deck-strategy",
+            "paper:wave-deck-zen-handoff",
+            "paper:weaving-claude-codex",
+            "paper:welcome",
+            "paper:whole-corpus-oracle-verdict",
+            "paper:wild-bulk-quality-sweep-2026-07-16",
+            "paper:workspace-bundle-keystone",
+            "paper:wsc-steer-fleet-design",
+            "paper:wsc-wave-2026-07-16",
+            "paper:wsc-wave-2026-07-17",
+            "paper:wsc-wave-2026-07-17-ad",
+            "paper:wsc-wave-2026-07-17-ad-tui",
+            "paper:wsc-wave-2026-07-17-r2",
+            "paper:wsc-wave-2026-07-18"
+          ],
+          "unknown_assignment_unit_ids": [],
+          "unknown_outcome_unit_ids": [],
+          "wave_revision": "4ec4bf5a-0236-489d-ac4b-c226d46355ea"
+        },
+        "fleet": {
+          "build": {
+            "agent_type": "legendary-builder",
+            "assignments": [],
+            "completed": 0,
+            "effort": "medium",
+            "evidence_proofs": [],
+            "failed": 0,
+            "invalid_assignments": 0,
+            "missing": 15,
+            "planned": 15,
+            "started": 0,
+            "terminal_counts": {
+              "cancelled": 0,
+              "completed": 0,
+              "failed": 0,
+              "invalid": 0,
+              "missing": 0
+            },
+            "unresolved_failures": 0,
+            "unresolved_missing": 0
+          },
+          "experiment": {
+            "agent_type": "legendary-experimenter",
+            "assignments": [],
+            "completed": 0,
+            "effort": "medium",
+            "evidence_proofs": [],
+            "failed": 0,
+            "invalid_assignments": 0,
+            "missing": 15,
+            "planned": 15,
+            "started": 0,
+            "terminal_counts": {
+              "cancelled": 0,
+              "completed": 0,
+              "failed": 0,
+              "invalid": 0,
+              "missing": 0
+            },
+            "unresolved_failures": 0,
+            "unresolved_missing": 0
+          },
+          "review": {
+            "agent_type": "code-reviewer",
+            "assignments": [],
+            "completed": 0,
+            "effort": "high",
+            "evidence_proofs": [],
+            "failed": 0,
+            "invalid_assignments": 0,
+            "missing": 15,
+            "planned": 15,
+            "started": 0,
+            "terminal_counts": {
+              "cancelled": 0,
+              "completed": 0,
+              "failed": 0,
+              "invalid": 0,
+              "missing": 0
+            },
+            "unresolved_failures": 0,
+            "unresolved_missing": 0
+          },
+          "survey": {
+            "agent_type": "epic-surveyor",
+            "assignments": [],
+            "completed": 0,
+            "effort": "medium",
+            "evidence_proofs": [],
+            "failed": 0,
+            "invalid_assignments": 0,
+            "missing": 60,
+            "planned": 60,
+            "started": 0,
+            "terminal_counts": {
+              "cancelled": 0,
+              "completed": 0,
+              "failed": 0,
+              "invalid": 0,
+              "missing": 0
+            },
+            "unresolved_failures": 0,
+            "unresolved_missing": 0
+          },
+          "verify": {
+            "agent_type": "epic-verifier",
+            "assignments": [],
+            "completed": 0,
+            "effort": "medium",
+            "evidence_proofs": [],
+            "failed": 0,
+            "invalid_assignments": 0,
+            "missing": 30,
+            "planned": 30,
+            "started": 0,
+            "terminal_counts": {
+              "cancelled": 0,
+              "completed": 0,
+              "failed": 0,
+              "invalid": 0,
+              "missing": 0
+            },
+            "unresolved_failures": 0,
+            "unresolved_missing": 0
+          }
+        },
+        "id": "state",
+        "title": "STRATEGIZE · IMMUTABLE 526-PAPER WAVE",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "wish-h",
+        "level": 2,
+        "text": "User wish — verbatim",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Please review the best papers - the high quality ones - learn from these - learn the patterns - update papers that feel bloaty and inhumnan and make them beautiful - all of them - make them all perfect"
+          }
+        ],
+        "id": "wish",
+        "title": "The quality target",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "direction-h",
+        "level": 2,
+        "text": "Strategic direction",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Start with the strongest verified Papers and learn their transferable patterns: a clear promise, a deliberate reading path, concrete evidence, useful structure, and prose that sounds written for a person. Then inspect every frozen Paper, delete empty or repetitive scaffolding, rewrite only where meaning becomes clearer, and prove that the repaired document keeps its facts and survives every supported reader."
+          }
+        ],
+        "id": "direction",
+        "type": "paragraph"
+      },
+      {
+        "id": "direction-rules",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Beauty means clarity, rhythm, hierarchy, restraint, and reader confidence—not decorating every Paper with more block types."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Compression is successful only when the Paper loses friction without losing facts, decisions, provenance, or useful nuance."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "No score can certify quality. Scores select review order; revision-pinned evidence and an editorial review determine the verdict."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A repair is not complete until a second identical pass is a no-op and Studio, TUI, email, public, and CLI/API remain semantically aligned."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "scale-h",
+        "level": 2,
+        "text": "Scale profile",
+        "type": "heading"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "Field"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Frozen value"
+            }
+          ]
+        ],
+        "id": "scale",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Epic Task"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "task-f5cbd8be8f278caf"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Wave Paper"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "paper-perfection-wave-2026-07-23"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Unit"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "one published Paper at one immutable revision"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Inventory"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "526 Papers · SHA-256 5a9d723b3237745b8e870dd19d0f0fdf6d0f0071e6bc363b2ff88237aaa3cb83"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Readers"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Studio, TUI at 80 columns, email, public reader, CLI/API"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Failure threshold"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "0"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Concurrency"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "3 typed workers plus leader"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Build sizing"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "max(15, ceil(526 / proven pilot batch capacity))"
+              }
+            ]
+          ]
+        ],
+        "scale_profile": {
+          "build_formula": "max(15, ceil(unit_count / proven_batch_capacity))",
+          "concurrency_width": 3,
+          "excluded_inventory": [],
+          "failure_threshold": 0,
+          "inventory_evidence": "Published production Paper census frozen from guerrilla; 526 unique revision-pinned units; canonical inventory SHA-256 5a9d723b3237745b8e870dd19d0f0fdf6d0f0071e6bc363b2ff88237aaa3cb83.",
+          "minimum_multiplier": 5,
+          "planned_build_assignments": 15,
+          "quality_rubric": {
+            "block_fitness_and_accessibility": "Every block earns its role and remains usable nonvisually.",
+            "compression_and_restraint": "No empty, duplicate, throat-clearing, or ornamental scaffolding.",
+            "evidence_and_truth": "Facts, provenance, decisions, uncertainty, and authored meaning survive.",
+            "hard_gate": "Any truth, preservation, accessibility, schema, reader, or idempotence failure caps the verdict at repair or quarantine.",
+            "human_voice_and_precision": "Concrete, natural prose without generic AI cadence or inflated claims.",
+            "idempotence_and_revision_proof": "Preimage, mutation, postimage, revision, and no-op rerun are recorded.",
+            "narrative_and_hierarchy": "Sections form an argument; heading order is valid.",
+            "purpose_and_opening": "Reader, problem, and promise are clear immediately.",
+            "reader_fidelity": "Studio, TUI, email, public, and CLI/API are non-empty and semantically equivalent."
+          },
+          "target_surfaces": [
+            "Studio",
+            "TUI at 80 columns",
+            "email",
+            "public reader",
+            "CLI/API"
+          ],
+          "unit_count": 526,
+          "unit_definition": "One published Barkpark Paper identified by paper:<document_id> and pinned to document_rev."
+        },
+        "type": "table"
+      },
+      {
+        "id": "fleet-h",
+        "level": 2,
+        "text": "Agent fleet",
+        "type": "heading"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "Phase"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Typed role"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Planned"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "State"
+            }
+          ]
+        ],
+        "id": "fleet-table",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Build"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "legendary-builder"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "15"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "0 complete · 15 missing"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Experiment"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "legendary-experimenter"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "15"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "0 complete · 15 missing"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Review"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "code-reviewer"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "15"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "0 complete · 15 missing"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Survey"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "epic-surveyor"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "60"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "0 complete · 60 missing"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Verify"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "epic-verifier"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "30"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "0 complete · 30 missing"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "patterns-h",
+        "level": 2,
+        "text": "Patterns to learn from the best",
+        "type": "heading"
+      },
+      {
+        "id": "patterns",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Lead with the reader's question or promise; do not spend the opening announcing the document's machinery."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Use headings to create an argument, not a filing cabinet. Each section should answer the question raised by the one before it."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Let tables compare, callouts change attention, code prove behavior, and diagrams explain relationships. Delete blocks that only decorate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Prefer specific verbs, concrete nouns, short transitions, and evidence near the claim. Remove throat-clearing, grandiosity, and repeated conclusions."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "End with the decision, consequence, or next move the Paper was created to make possible."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Declared exemplars: component-reference, choosing-your-site-framework, wave-deck. Baseline candidates: portabledoc-showcase, gui-tui-parity-page, personal-dev-fleet-mvp, main-frame-constellation-plan, desktop-fleets-brainstorm, composition-showcase, desktop-fleets-masterplan, personal-dev-fleet-field-guide. They are starting points, not untouchable gold."
+          }
+        ],
+        "id": "exemplars",
+        "title": "Exemplar cohort — hypotheses until reader verification",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "component-reference, choosing-your-site-framework, wave-deck, portabledoc-showcase, gui-tui-parity-page, composition-showcase, wave-deck-zen-handoff, and shared-cells each returned CLI exit 0, zero overflow lines at 80 columns, HTTP 200 from the public reader, HTTP 200 from the email proxy, and HTTP 200 from the source endpoint. This proves reader viability, not editorial gold: authenticated Studio and a delivered real-client email remain unverified."
+          }
+        ],
+        "id": "exemplar-proof",
+        "title": "Eight exemplar candidates are reader-viable",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "id": "rubric-h",
+        "level": 2,
+        "text": "Editorial and proof rubric",
+        "type": "heading"
+      },
+      {
+        "id": "rubric",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Purpose and opening (15): the intended reader, problem, and promise become clear immediately."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Narrative and hierarchy (15): headings and transitions form a coherent reading path with no level jumps or filing-cabinet sections."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Human voice and precision (15): concrete, natural prose; no generic AI cadence, inflated claims, or meta commentary."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Compression and restraint (15): no empty scaffolding, duplicate points, ornamental blocks, or paragraphs that should be split or deleted."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Evidence and truth (15): claims retain facts, provenance, decisions, and uncertainty; no invented completion or softened contradiction."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Block fitness and accessibility (10): each block earns its role; headings, links, tables, media, and nonvisual order remain usable."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Cross-reader fidelity (10): Studio, 80-column TUI, email, public, and CLI/API are non-empty and semantically equivalent."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Idempotence and revision proof (5): preimage, mutation, postimage, checked revision, and no-op second pass are recorded."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "survey-h",
+        "level": 2,
+        "text": "Survey",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Survey must cover all 526 revision-pinned units exactly once, compare weak and strong examples, and return observed facts separately from editorial inferences. The first automated baseline found structural signals only; the canonical 60 typed survey assignments have not begun."
+          }
+        ],
+        "id": "survey",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "This Codex surface can create child agents but cannot set the required agent_type. The Legendary contract forbids substituting untyped reviews for epic-surveyor evidence. Prime and Strategize are complete; canonical Survey resumes only on a typed OMX/team execution surface."
+          }
+        ],
+        "id": "survey-capability",
+        "title": "CAPABILITY GATE · typed Survey remains 0/60",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The frozen manifest is partitioned into 20 ordered waves of three epic-surveyor assignments: 46 assignments own 9 Papers and 14 own 8 Papers. Coverage is 526 occurrences, 526 unique units, 0 duplicate, 0 unknown, and 0 missing. Primary reader lenses are balanced at 12 assignments each across Studio, 80-column TUI, email, public, and CLI/API; every assignment must still check all five readers."
+          }
+        ],
+        "id": "survey-map",
+        "title": "DISPATCH READY · exact 60-assignment Survey map",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The baseline found two exact-normalized-body groups covering six Papers, one exact-title group, and three normalized title families of at least three Papers. Four lvd-demo Paper A fixtures share one body; task-quality-standard-chrono waves 3 and 4 share another despite different authority titles. These are consolidation signals only: chronology, links, lifecycle authority, and provenance must be checked before any redirect, retirement, or deletion."
+          }
+        ],
+        "id": "duplicate-signals",
+        "title": "Duplicate signals require provenance review",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "id": "baseline",
+        "items": [
+          {
+            "label": "Frozen Papers",
+            "value": "526"
+          },
+          {
+            "label": "Empty paragraphs",
+            "value": "426"
+          },
+          {
+            "label": "Heading jumps",
+            "value": "2"
+          },
+          {
+            "label": "Long paragraphs",
+            "value": "2158"
+          }
+        ],
+        "type": "stats"
+      },
+      {
+        "id": "gate-h",
+        "level": 2,
+        "text": "Strategize gate",
+        "type": "heading"
+      },
+      {
+        "code": "python3 .codex/skills/legendary-cycle/scripts/validate_legendary_cycle.py --task task-f5cbd8be8f278caf --paper paper-perfection-wave-2026-07-23 --worker paper-perfection-conductor --phase strategize --workspace default --project default --wish-file .omx/state/paper-perfection-2026-07-23/wish.txt",
+        "id": "gate",
+        "language": "bash",
+        "type": "code"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Paper Perfection — learn from the best, then repair every Paper</h1><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">STRATEGIZE · IMMUTABLE 526-PAPER WAVE</div><span>Legendary CycleFleet 4ec4bf5a-0236-489d-ac4b-c226d46355ea: 526 inventoried, 0 assigned, 0 shipped, 0 stalled, 0 excluded; exact reconciliation false. The corpus is frozen by document revision. Automated measurements prioritize attention; human editorial judgment and five-reader proof decide what is actually excellent.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">User wish — verbatim</h2><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">The quality target</div><span>Please review the best papers - the high quality ones - learn from these - learn the patterns - update papers that feel bloaty and inhumnan and make them beautiful - all of them - make them all perfect</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Strategic direction</h2><p>Start with the strongest verified Papers and learn their transferable patterns: a clear promise, a deliberate reading path, concrete evidence, useful structure, and prose that sounds written for a person. Then inspect every frozen Paper, delete empty or repetitive scaffolding, rewrite only where meaning becomes clearer, and prove that the repaired document keeps its facts and survives every supported reader.</p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Beauty means clarity, rhythm, hierarchy, restraint, and reader confidence—not decorating every Paper with more block types.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Compression is successful only when the Paper loses friction without losing facts, decisions, provenance, or useful nuance.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>No score can certify quality. Scores select review order; revision-pinned evidence and an editorial review determine the verdict.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>A repair is not complete until a second identical pass is a no-op and Studio, TUI, email, public, and CLI/API remain semantically aligned.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Scale profile</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Field</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Frozen value</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Epic Task</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>task-f5cbd8be8f278caf</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Wave Paper</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>paper-perfection-wave-2026-07-23</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Unit</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>one published Paper at one immutable revision</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Inventory</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>526 Papers · SHA-256 5a9d723b3237745b8e870dd19d0f0fdf6d0f0071e6bc363b2ff88237aaa3cb83</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Readers</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Studio, TUI at 80 columns, email, public reader, CLI/API</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Failure threshold</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>0</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Concurrency</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>3 typed workers plus leader</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Build sizing</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>max(15, ceil(526 / proven pilot batch capacity))</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Agent fleet</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Phase</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Typed role</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Planned</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>State</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Build</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>legendary-builder</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>15</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>0 complete · 15 missing</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Experiment</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>legendary-experimenter</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>15</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>0 complete · 15 missing</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Review</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>code-reviewer</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>15</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>0 complete · 15 missing</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Survey</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>epic-surveyor</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>60</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>0 complete · 60 missing</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Verify</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>epic-verifier</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>30</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>0 complete · 30 missing</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Patterns to learn from the best</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Lead with the reader&#39;s question or promise; do not spend the opening announcing the document&#39;s machinery.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Use headings to create an argument, not a filing cabinet. Each section should answer the question raised by the one before it.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Let tables compare, callouts change attention, code prove behavior, and diagrams explain relationships. Delete blocks that only decorate.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Prefer specific verbs, concrete nouns, short transitions, and evidence near the claim. Remove throat-clearing, grandiosity, and repeated conclusions.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>End with the decision, consequence, or next move the Paper was created to make possible.</span></div></div><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">Exemplar cohort — hypotheses until reader verification</div><span>Declared exemplars: component-reference, choosing-your-site-framework, wave-deck. Baseline candidates: portabledoc-showcase, gui-tui-parity-page, personal-dev-fleet-mvp, main-frame-constellation-plan, desktop-fleets-brainstorm, composition-showcase, desktop-fleets-masterplan, personal-dev-fleet-field-guide. They are starting points, not untouchable gold.</span></div><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">Eight exemplar candidates are reader-viable</div><span>component-reference, choosing-your-site-framework, wave-deck, portabledoc-showcase, gui-tui-parity-page, composition-showcase, wave-deck-zen-handoff, and shared-cells each returned CLI exit 0, zero overflow lines at 80 columns, HTTP 200 from the public reader, HTTP 200 from the email proxy, and HTTP 200 from the source endpoint. This proves reader viability, not editorial gold: authenticated Studio and a delivered real-client email remain unverified.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Editorial and proof rubric</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Purpose and opening (15): the intended reader, problem, and promise become clear immediately.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Narrative and hierarchy (15): headings and transitions form a coherent reading path with no level jumps or filing-cabinet sections.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Human voice and precision (15): concrete, natural prose; no generic AI cadence, inflated claims, or meta commentary.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Compression and restraint (15): no empty scaffolding, duplicate points, ornamental blocks, or paragraphs that should be split or deleted.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Evidence and truth (15): claims retain facts, provenance, decisions, and uncertainty; no invented completion or softened contradiction.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Block fitness and accessibility (10): each block earns its role; headings, links, tables, media, and nonvisual order remain usable.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Cross-reader fidelity (10): Studio, 80-column TUI, email, public, and CLI/API are non-empty and semantically equivalent.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Idempotence and revision proof (5): preimage, mutation, postimage, checked revision, and no-op second pass are recorded.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Survey</h2><p>Survey must cover all 526 revision-pinned units exactly once, compare weak and strong examples, and return observed facts separately from editorial inferences. The first automated baseline found structural signals only; the canonical 60 typed survey assignments have not begun.</p><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#8a6420;font-weight:600;margin:0 0 6px\">CAPABILITY GATE · typed Survey remains 0/60</div><span>This Codex surface can create child agents but cannot set the required agent_type. The Legendary contract forbids substituting untyped reviews for epic-surveyor evidence. Prime and Strategize are complete; canonical Survey resumes only on a typed OMX/team execution surface.</span></div><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">DISPATCH READY · exact 60-assignment Survey map</div><span>The frozen manifest is partitioned into 20 ordered waves of three epic-surveyor assignments: 46 assignments own 9 Papers and 14 own 8 Papers. Coverage is 526 occurrences, 526 unique units, 0 duplicate, 0 unknown, and 0 missing. Primary reader lenses are balanced at 12 assignments each across Studio, 80-column TUI, email, public, and CLI/API; every assignment must still check all five readers.</span></div><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#8a6420;font-weight:600;margin:0 0 6px\">Duplicate signals require provenance review</div><span>The baseline found two exact-normalized-body groups covering six Papers, one exact-title group, and three normalized title families of at least three Papers. Four lvd-demo Paper A fixtures share one body; task-quality-standard-chrono waves 3 and 4 share another despite different authority titles. These are consolidation signals only: chronology, links, lifecycle authority, and provenance must be checked before any redirect, retirement, or deletion.</span></div><div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">526</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Frozen Papers</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">426</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Empty paragraphs</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">2</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Heading jumps</div></div><div style=\"display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top\"><div style=\"font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1\">2158</div><div style=\"font-size:12px;color:#55635e;margin-top:2px\">Long paragraphs</div></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Strategize gate</h2><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span></div>"
+  },
+  "body_html": "<h1>Paper Perfection — learn from the best, then repair every Paper</h1><div class=\"bp-callout bp-callout--info\"><strong>STRATEGIZE · IMMUTABLE 526-PAPER WAVE</strong> <span>Legendary CycleFleet 4ec4bf5a-0236-489d-ac4b-c226d46355ea: 526 inventoried, 0 assigned, 0 shipped, 0 stalled, 0 excluded; exact reconciliation false. The corpus is frozen by document revision. Automated measurements prioritize attention; human editorial judgment and five-reader proof decide what is actually excellent.</span></div><h2>User wish — verbatim</h2><div class=\"bp-callout bp-callout--info\"><strong>The quality target</strong> <span>Please review the best papers - the high quality ones - learn from these - learn the patterns - update papers that feel bloaty and inhumnan and make them beautiful - all of them - make them all perfect</span></div><h2>Strategic direction</h2><p>Start with the strongest verified Papers and learn their transferable patterns: a clear promise, a deliberate reading path, concrete evidence, useful structure, and prose that sounds written for a person. Then inspect every frozen Paper, delete empty or repetitive scaffolding, rewrite only where meaning becomes clearer, and prove that the repaired document keeps its facts and survives every supported reader.</p><ul><li><span>Beauty means clarity, rhythm, hierarchy, restraint, and reader confidence—not decorating every Paper with more block types.</span></li><li><span>Compression is successful only when the Paper loses friction without losing facts, decisions, provenance, or useful nuance.</span></li><li><span>No score can certify quality. Scores select review order; revision-pinned evidence and an editorial review determine the verdict.</span></li><li><span>A repair is not complete until a second identical pass is a no-op and Studio, TUI, email, public, and CLI/API remain semantically aligned.</span></li></ul><h2>Scale profile</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Field</span></th><th class=\"bp-table__th\"><span>Frozen value</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>Epic Task</span></td><td class=\"bp-table__td\"><span>task-f5cbd8be8f278caf</span></td></tr><tr><td class=\"bp-table__td\"><span>Wave Paper</span></td><td class=\"bp-table__td\"><span>paper-perfection-wave-2026-07-23</span></td></tr><tr><td class=\"bp-table__td\"><span>Unit</span></td><td class=\"bp-table__td\"><span>one published Paper at one immutable revision</span></td></tr><tr><td class=\"bp-table__td\"><span>Inventory</span></td><td class=\"bp-table__td\"><span>526 Papers · SHA-256 5a9d723b3237745b8e870dd19d0f0fdf6d0f0071e6bc363b2ff88237aaa3cb83</span></td></tr><tr><td class=\"bp-table__td\"><span>Readers</span></td><td class=\"bp-table__td\"><span>Studio, TUI at 80 columns, email, public reader, CLI/API</span></td></tr><tr><td class=\"bp-table__td\"><span>Failure threshold</span></td><td class=\"bp-table__td\"><span>0</span></td></tr><tr><td class=\"bp-table__td\"><span>Concurrency</span></td><td class=\"bp-table__td\"><span>3 typed workers plus leader</span></td></tr><tr><td class=\"bp-table__td\"><span>Build sizing</span></td><td class=\"bp-table__td\"><span>max(15, ceil(526 / proven pilot batch capacity))</span></td></tr></tbody></table><h2>Agent fleet</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Phase</span></th><th class=\"bp-table__th\"><span>Typed role</span></th><th class=\"bp-table__th\"><span>Planned</span></th><th class=\"bp-table__th\"><span>State</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>Build</span></td><td class=\"bp-table__td\"><span>legendary-builder</span></td><td class=\"bp-table__td\"><span>15</span></td><td class=\"bp-table__td\"><span>0 complete · 15 missing</span></td></tr><tr><td class=\"bp-table__td\"><span>Experiment</span></td><td class=\"bp-table__td\"><span>legendary-experimenter</span></td><td class=\"bp-table__td\"><span>15</span></td><td class=\"bp-table__td\"><span>0 complete · 15 missing</span></td></tr><tr><td class=\"bp-table__td\"><span>Review</span></td><td class=\"bp-table__td\"><span>code-reviewer</span></td><td class=\"bp-table__td\"><span>15</span></td><td class=\"bp-table__td\"><span>0 complete · 15 missing</span></td></tr><tr><td class=\"bp-table__td\"><span>Survey</span></td><td class=\"bp-table__td\"><span>epic-surveyor</span></td><td class=\"bp-table__td\"><span>60</span></td><td class=\"bp-table__td\"><span>0 complete · 60 missing</span></td></tr><tr><td class=\"bp-table__td\"><span>Verify</span></td><td class=\"bp-table__td\"><span>epic-verifier</span></td><td class=\"bp-table__td\"><span>30</span></td><td class=\"bp-table__td\"><span>0 complete · 30 missing</span></td></tr></tbody></table><h2>Patterns to learn from the best</h2><ul><li><span>Lead with the reader&#39;s question or promise; do not spend the opening announcing the document&#39;s machinery.</span></li><li><span>Use headings to create an argument, not a filing cabinet. Each section should answer the question raised by the one before it.</span></li><li><span>Let tables compare, callouts change attention, code prove behavior, and diagrams explain relationships. Delete blocks that only decorate.</span></li><li><span>Prefer specific verbs, concrete nouns, short transitions, and evidence near the claim. Remove throat-clearing, grandiosity, and repeated conclusions.</span></li><li><span>End with the decision, consequence, or next move the Paper was created to make possible.</span></li></ul><div class=\"bp-callout bp-callout--success\"><strong>Exemplar cohort — hypotheses until reader verification</strong> <span>Declared exemplars: component-reference, choosing-your-site-framework, wave-deck. Baseline candidates: portabledoc-showcase, gui-tui-parity-page, personal-dev-fleet-mvp, main-frame-constellation-plan, desktop-fleets-brainstorm, composition-showcase, desktop-fleets-masterplan, personal-dev-fleet-field-guide. They are starting points, not untouchable gold.</span></div><div class=\"bp-callout bp-callout--success\"><strong>Eight exemplar candidates are reader-viable</strong> <span>component-reference, choosing-your-site-framework, wave-deck, portabledoc-showcase, gui-tui-parity-page, composition-showcase, wave-deck-zen-handoff, and shared-cells each returned CLI exit 0, zero overflow lines at 80 columns, HTTP 200 from the public reader, HTTP 200 from the email proxy, and HTTP 200 from the source endpoint. This proves reader viability, not editorial gold: authenticated Studio and a delivered real-client email remain unverified.</span></div><h2>Editorial and proof rubric</h2><ul><li><span>Purpose and opening (15): the intended reader, problem, and promise become clear immediately.</span></li><li><span>Narrative and hierarchy (15): headings and transitions form a coherent reading path with no level jumps or filing-cabinet sections.</span></li><li><span>Human voice and precision (15): concrete, natural prose; no generic AI cadence, inflated claims, or meta commentary.</span></li><li><span>Compression and restraint (15): no empty scaffolding, duplicate points, ornamental blocks, or paragraphs that should be split or deleted.</span></li><li><span>Evidence and truth (15): claims retain facts, provenance, decisions, and uncertainty; no invented completion or softened contradiction.</span></li><li><span>Block fitness and accessibility (10): each block earns its role; headings, links, tables, media, and nonvisual order remain usable.</span></li><li><span>Cross-reader fidelity (10): Studio, 80-column TUI, email, public, and CLI/API are non-empty and semantically equivalent.</span></li><li><span>Idempotence and revision proof (5): preimage, mutation, postimage, checked revision, and no-op second pass are recorded.</span></li></ul><h2>Survey</h2><p>Survey must cover all 526 revision-pinned units exactly once, compare weak and strong examples, and return observed facts separately from editorial inferences. The first automated baseline found structural signals only; the canonical 60 typed survey assignments have not begun.</p><div class=\"bp-callout bp-callout--warning\"><strong>CAPABILITY GATE · typed Survey remains 0/60</strong> <span>This Codex surface can create child agents but cannot set the required agent_type. The Legendary contract forbids substituting untyped reviews for epic-surveyor evidence. Prime and Strategize are complete; canonical Survey resumes only on a typed OMX/team execution surface.</span></div><div class=\"bp-callout bp-callout--success\"><strong>DISPATCH READY · exact 60-assignment Survey map</strong> <span>The frozen manifest is partitioned into 20 ordered waves of three epic-surveyor assignments: 46 assignments own 9 Papers and 14 own 8 Papers. Coverage is 526 occurrences, 526 unique units, 0 duplicate, 0 unknown, and 0 missing. Primary reader lenses are balanced at 12 assignments each across Studio, 80-column TUI, email, public, and CLI/API; every assignment must still check all five readers.</span></div><div class=\"bp-callout bp-callout--warning\"><strong>Duplicate signals require provenance review</strong> <span>The baseline found two exact-normalized-body groups covering six Papers, one exact-title group, and three normalized title families of at least three Papers. Four lvd-demo Paper A fixtures share one body; task-quality-standard-chrono waves 3 and 4 share another despite different authority titles. These are consolidation signals only: chronology, links, lifecycle authority, and provenance must be checked before any redirect, retirement, or deletion.</span></div><div class=\"bp-stats\"><div class=\"bp-stat\"><div class=\"bp-stat__v\">526</div><div class=\"bp-stat__l\">Frozen Papers</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">426</div><div class=\"bp-stat__l\">Empty paragraphs</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">2</div><div class=\"bp-stat__l\">Heading jumps</div></div><div class=\"bp-stat\"><div class=\"bp-stat__v\">2158</div><div class=\"bp-stat__l\">Long paragraphs</div></div></div><h2>Strategize gate</h2><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\"></pre>",
+  "body_html_sv": "60615667ab8f806eab2292f52a3d3561d4d1911d4a4ca590dcbfb7f1603b8f6e",
+  "description": "The immutable strategy and evidence spine for reviewing all 526 published Papers, learning from verified exemplars, removing bloat and inhuman prose, and proving each repair across every supported reader.",
+  "main_tag": "personal-agent",
+  "preview": {
+    "description": "The immutable strategy and evidence spine for reviewing all 526 published Papers, learning from verified…",
+    "extensions": {
+      "tags": [
+        "personal-agent",
+        "testing",
+        "wave-paper"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/paper-perfection-wave-2026-07-23"
+  },
+  "rev": 4,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "Typed editorial agents own the revision-pinned quality campaign.",
+      "strength": 95,
+      "tag": "personal-agent"
+    },
+    {
+      "rationale": "Every judgment and repair requires reproducible reader evidence.",
+      "strength": 90,
+      "tag": "testing"
+    },
+    {
+      "rationale": "This Paper is the durable strategy and evidence spine for the wave.",
+      "strength": 85,
+      "tag": "wave-paper"
+    }
+  ],
+  "title": "Paper Perfection — learn from the best, then repair every Paper"
+}

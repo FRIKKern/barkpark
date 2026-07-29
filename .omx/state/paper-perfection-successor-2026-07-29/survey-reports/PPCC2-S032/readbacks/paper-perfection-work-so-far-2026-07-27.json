@@ -1,0 +1,464 @@
+{
+  "_createdAt": "2026-07-27T13:01:52.787599Z",
+  "_draft": false,
+  "_id": "paper-perfection-work-so-far-2026-07-27",
+  "_publishedId": "paper-perfection-work-so-far-2026-07-27",
+  "_rev": "280c030d2b9c0517babb822ae476fe7b",
+  "_type": "paper",
+  "_updatedAt": "2026-07-27T13:01:52.787599Z",
+  "blocks": [
+    {
+      "id": "eyebrow",
+      "text": "PAPER QUALITY CAMPAIGN · WORK SO FAR · 27 JULY 2026",
+      "type": "eyebrow"
+    },
+    {
+      "id": "title",
+      "level": 1,
+      "text": "We checked every Paper—and stopped before the dangerous part",
+      "type": "heading"
+    },
+    {
+      "id": "byline",
+      "items": [
+        "549 immutable Paper revisions surveyed",
+        "105/135 typed CycleFleet assignments complete",
+        "Production Papers changed: 0"
+      ],
+      "type": "byline"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The goal is not to make Barkpark’s Papers shorter for its own sake. It is to make each Paper explain what it is for, why it matters inside the larger goal, what evidence supports it, and what the reader should do next—without losing provenance, uncertainty, or meaning in Studio, terminal, email, public, or API readers. We inspected the entire frozen corpus, proved that the quality problem is real, and then refused to mass-rewrite it when the pilot exposed unsafe reader and rollback behavior."
+        }
+      ],
+      "id": "opening",
+      "type": "ingress"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Survey is complete at 60/60, covering all 549 frozen Papers. Verify is complete at 30/30. Experiment is complete at 15/15. CycleFleet records 105/135 completed, 0 failed assignments, and 0 invalid results. Build and Review account for the remaining 30 assignments, but Build is correctly blocked because the proven safe batch capacity is 0."
+        }
+      ],
+      "id": "status",
+      "title": "THE RESULT SO FAR · 78% OF THE LEGENDARY FLEET",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "standard-heading",
+      "level": 2,
+      "text": "What “up to standard” means",
+      "type": "heading"
+    },
+    {
+      "id": "standard",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "The first screen names the reader, the purpose, the real WHY, and the consequence."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The outline forms an argument instead of replaying task chronology."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Evidence sits beside claims; status, uncertainty, decisions, and provenance remain explicit."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Every block earns its space, uses a human voice, and remains accessible."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Studio, 80-column TUI, email, public reader, and CLI/API preserve the same meaning."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "A repair is revision-fenced, idempotent, reversible, and proven against golden fixtures."
+          }
+        ]
+      ],
+      "style": "bullet",
+      "type": "list"
+    },
+    {
+      "id": "findings-heading",
+      "level": 2,
+      "text": "What the corpus taught us",
+      "type": "heading"
+    },
+    {
+      "id": "findings",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "The strongest Papers answer early, distinguish outcomes from gates, and end with one bounded next move."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The dominant failure is the lifecycle archive: useful evidence is buried beneath waves, agents, task machinery, and repeated status narration. The recurring repair is a concise reader-facing result plus a revision-linked evidence appendix."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Some records need more than editing. We found stale-status openings, mismatched identities, consolidation candidates, split candidates, and Papers that should be quarantined until their truth is reassociated."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Reader fidelity is not cosmetic. Verification found source content disappearing from public and terminal readers, including lists, tables, status boundaries, and exact source passages."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "A separate post-freeze audit checked all three changed revisions—two additions and one revision. All three require repair; the frozen 549-Paper ledger remained unchanged."
+          }
+        ]
+      ],
+      "style": "bullet",
+      "type": "list"
+    },
+    {
+      "id": "pilot-heading",
+      "level": 2,
+      "text": "Why the pilot said no",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Several compressed candidates scored 92–95 and rendered within 80 columns, yet the full gate still failed. Email lost semantic lists. Some candidates produced duplicate H1 headings, accepted stale revisions, lost exact payloads, or lacked an integrated verified rollback. Authenticated Studio and live candidate envelopes were also unavailable for parts of the pilot. Under the zero-hard-failure rule, those are stop conditions—not details to average away."
+        }
+      ],
+      "id": "pilot",
+      "title": "GOOD PROSE WAS NOT ENOUGH · SAFE CAPACITY 0",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "id": "recovery-heading",
+      "level": 2,
+      "text": "What is already repaired locally",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Local recovery work now restores semantic email lists, proves Studio heading/list/link/status/keyboard structure, and binds public plus CLI/API link parity and rollback. Fresh checks pass 233 email-renderer tests, 59 Studio tests, 10 release-gate tests, and the full internal/cli Go package. That is strong engineering evidence, but it is not production evidence: the recovery has not been deployed, the failed immutable pilot cannot be rewritten, and no production Paper has been changed."
+        }
+      ],
+      "id": "recovery",
+      "type": "paragraph"
+    },
+    {
+      "id": "next-heading",
+      "level": 2,
+      "text": "The next move",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "First deploy and validate the renderer recovery on the real target surfaces. Then open a new immutable correction wave and rerun three disjoint pilots with link-bearing, accessibility, stale-revision, rollback, and live-reader proof. Only a zero-hard-failure pilot may establish nonzero batch capacity, seal the format, shard all 549 revisions exactly once, and authorize the remaining Build and Review fleet."
+        }
+      ],
+      "id": "next",
+      "title": "DEPLOY THE READER RECOVERY, THEN OPEN A CORRECTION WAVE",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "evidence-heading",
+      "level": 2,
+      "text": "Evidence boundary",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Canonical campaign: paper-perfection-wave-2026-07-26. Root task: task-f5cbd8be8f278caf. CycleFleet wave: 807b46cf-2f66-4c55-8f58-28602accaad3. Frozen inventory: 549 revision-pinned Papers, SHA-256 3efe7a74b61867f2901d848b71767263285af6bd2ff8b179e2750faec999bdb9. This Paper summarizes the latest live CycleFleet readback: 105 completed, 30 missing, experiment 15/15, capacity unsealed."
+        }
+      ],
+      "id": "evidence",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "eyebrow",
+        "text": "PAPER QUALITY CAMPAIGN · WORK SO FAR · 27 JULY 2026",
+        "type": "eyebrow"
+      },
+      {
+        "id": "title",
+        "level": 1,
+        "text": "We checked every Paper—and stopped before the dangerous part",
+        "type": "heading"
+      },
+      {
+        "id": "byline",
+        "items": [
+          "549 immutable Paper revisions surveyed",
+          "105/135 typed CycleFleet assignments complete",
+          "Production Papers changed: 0"
+        ],
+        "type": "byline"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The goal is not to make Barkpark’s Papers shorter for its own sake. It is to make each Paper explain what it is for, why it matters inside the larger goal, what evidence supports it, and what the reader should do next—without losing provenance, uncertainty, or meaning in Studio, terminal, email, public, or API readers. We inspected the entire frozen corpus, proved that the quality problem is real, and then refused to mass-rewrite it when the pilot exposed unsafe reader and rollback behavior."
+          }
+        ],
+        "id": "opening",
+        "type": "ingress"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Survey is complete at 60/60, covering all 549 frozen Papers. Verify is complete at 30/30. Experiment is complete at 15/15. CycleFleet records 105/135 completed, 0 failed assignments, and 0 invalid results. Build and Review account for the remaining 30 assignments, but Build is correctly blocked because the proven safe batch capacity is 0."
+          }
+        ],
+        "id": "status",
+        "title": "THE RESULT SO FAR · 78% OF THE LEGENDARY FLEET",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "standard-heading",
+        "level": 2,
+        "text": "What “up to standard” means",
+        "type": "heading"
+      },
+      {
+        "id": "standard",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "The first screen names the reader, the purpose, the real WHY, and the consequence."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The outline forms an argument instead of replaying task chronology."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Evidence sits beside claims; status, uncertainty, decisions, and provenance remain explicit."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Every block earns its space, uses a human voice, and remains accessible."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Studio, 80-column TUI, email, public reader, and CLI/API preserve the same meaning."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A repair is revision-fenced, idempotent, reversible, and proven against golden fixtures."
+            }
+          ]
+        ],
+        "style": "bullet",
+        "type": "list"
+      },
+      {
+        "id": "findings-heading",
+        "level": 2,
+        "text": "What the corpus taught us",
+        "type": "heading"
+      },
+      {
+        "id": "findings",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "The strongest Papers answer early, distinguish outcomes from gates, and end with one bounded next move."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The dominant failure is the lifecycle archive: useful evidence is buried beneath waves, agents, task machinery, and repeated status narration. The recurring repair is a concise reader-facing result plus a revision-linked evidence appendix."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Some records need more than editing. We found stale-status openings, mismatched identities, consolidation candidates, split candidates, and Papers that should be quarantined until their truth is reassociated."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reader fidelity is not cosmetic. Verification found source content disappearing from public and terminal readers, including lists, tables, status boundaries, and exact source passages."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A separate post-freeze audit checked all three changed revisions—two additions and one revision. All three require repair; the frozen 549-Paper ledger remained unchanged."
+            }
+          ]
+        ],
+        "style": "bullet",
+        "type": "list"
+      },
+      {
+        "id": "pilot-heading",
+        "level": 2,
+        "text": "Why the pilot said no",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Several compressed candidates scored 92–95 and rendered within 80 columns, yet the full gate still failed. Email lost semantic lists. Some candidates produced duplicate H1 headings, accepted stale revisions, lost exact payloads, or lacked an integrated verified rollback. Authenticated Studio and live candidate envelopes were also unavailable for parts of the pilot. Under the zero-hard-failure rule, those are stop conditions—not details to average away."
+          }
+        ],
+        "id": "pilot",
+        "title": "GOOD PROSE WAS NOT ENOUGH · SAFE CAPACITY 0",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "id": "recovery-heading",
+        "level": 2,
+        "text": "What is already repaired locally",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Local recovery work now restores semantic email lists, proves Studio heading/list/link/status/keyboard structure, and binds public plus CLI/API link parity and rollback. Fresh checks pass 233 email-renderer tests, 59 Studio tests, 10 release-gate tests, and the full internal/cli Go package. That is strong engineering evidence, but it is not production evidence: the recovery has not been deployed, the failed immutable pilot cannot be rewritten, and no production Paper has been changed."
+          }
+        ],
+        "id": "recovery",
+        "type": "paragraph"
+      },
+      {
+        "id": "next-heading",
+        "level": 2,
+        "text": "The next move",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "First deploy and validate the renderer recovery on the real target surfaces. Then open a new immutable correction wave and rerun three disjoint pilots with link-bearing, accessibility, stale-revision, rollback, and live-reader proof. Only a zero-hard-failure pilot may establish nonzero batch capacity, seal the format, shard all 549 revisions exactly once, and authorize the remaining Build and Review fleet."
+          }
+        ],
+        "id": "next",
+        "title": "DEPLOY THE READER RECOVERY, THEN OPEN A CORRECTION WAVE",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "id": "evidence-heading",
+        "level": 2,
+        "text": "Evidence boundary",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Canonical campaign: paper-perfection-wave-2026-07-26. Root task: task-f5cbd8be8f278caf. CycleFleet wave: 807b46cf-2f66-4c55-8f58-28602accaad3. Frozen inventory: 549 revision-pinned Papers, SHA-256 3efe7a74b61867f2901d848b71767263285af6bd2ff8b179e2750faec999bdb9. This Paper summarizes the latest live CycleFleet readback: 105 completed, 30 missing, experiment 15/15, capacity unsealed."
+          }
+        ],
+        "id": "evidence",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">PAPER QUALITY CAMPAIGN · WORK SO FAR · 27 JULY 2026</p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">We checked every Paper—and stopped before the dangerous part</h1><p style=\"border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px\">549 immutable Paper revisions surveyed · 105/135 typed CycleFleet assignments complete · Production Papers changed: 0</p><p style=\"margin:0 0 10px;line-height:1.55;font-size:18px\">The goal is not to make Barkpark’s Papers shorter for its own sake. It is to make each Paper explain what it is for, why it matters inside the larger goal, what evidence supports it, and what the reader should do next—without losing provenance, uncertainty, or meaning in Studio, terminal, email, public, or API readers. We inspected the entire frozen corpus, proved that the quality problem is real, and then refused to mass-rewrite it when the pilot exposed unsafe reader and rollback behavior.</p><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">THE RESULT SO FAR · 78% OF THE LEGENDARY FLEET</div><span>Survey is complete at 60/60, covering all 549 frozen Papers. Verify is complete at 30/30. Experiment is complete at 15/15. CycleFleet records 105/135 completed, 0 failed assignments, and 0 invalid results. Build and Review account for the remaining 30 assignments, but Build is correctly blocked because the proven safe batch capacity is 0.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What “up to standard” means</h2><ul style=\"margin:0 0 24px;padding-left:24px;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.7\"><li style=\"margin:4pt 0 0\"><span>The first screen names the reader, the purpose, the real WHY, and the consequence.</span></li><li style=\"margin:4pt 0 0\"><span>The outline forms an argument instead of replaying task chronology.</span></li><li style=\"margin:4pt 0 0\"><span>Evidence sits beside claims; status, uncertainty, decisions, and provenance remain explicit.</span></li><li style=\"margin:4pt 0 0\"><span>Every block earns its space, uses a human voice, and remains accessible.</span></li><li style=\"margin:4pt 0 0\"><span>Studio, 80-column TUI, email, public reader, and CLI/API preserve the same meaning.</span></li><li style=\"margin:4pt 0 0\"><span>A repair is revision-fenced, idempotent, reversible, and proven against golden fixtures.</span></li></ul><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What the corpus taught us</h2><ul style=\"margin:0 0 24px;padding-left:24px;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.7\"><li style=\"margin:4pt 0 0\"><span>The strongest Papers answer early, distinguish outcomes from gates, and end with one bounded next move.</span></li><li style=\"margin:4pt 0 0\"><span>The dominant failure is the lifecycle archive: useful evidence is buried beneath waves, agents, task machinery, and repeated status narration. The recurring repair is a concise reader-facing result plus a revision-linked evidence appendix.</span></li><li style=\"margin:4pt 0 0\"><span>Some records need more than editing. We found stale-status openings, mismatched identities, consolidation candidates, split candidates, and Papers that should be quarantined until their truth is reassociated.</span></li><li style=\"margin:4pt 0 0\"><span>Reader fidelity is not cosmetic. Verification found source content disappearing from public and terminal readers, including lists, tables, status boundaries, and exact source passages.</span></li><li style=\"margin:4pt 0 0\"><span>A separate post-freeze audit checked all three changed revisions—two additions and one revision. All three require repair; the frozen 549-Paper ledger remained unchanged.</span></li></ul><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Why the pilot said no</h2><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#8a6420;font-weight:600;margin:0 0 6px\">GOOD PROSE WAS NOT ENOUGH · SAFE CAPACITY 0</div><span>Several compressed candidates scored 92–95 and rendered within 80 columns, yet the full gate still failed. Email lost semantic lists. Some candidates produced duplicate H1 headings, accepted stale revisions, lost exact payloads, or lacked an integrated verified rollback. Authenticated Studio and live candidate envelopes were also unavailable for parts of the pilot. Under the zero-hard-failure rule, those are stop conditions—not details to average away.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What is already repaired locally</h2><p>Local recovery work now restores semantic email lists, proves Studio heading/list/link/status/keyboard structure, and binds public plus CLI/API link parity and rollback. Fresh checks pass 233 email-renderer tests, 59 Studio tests, 10 release-gate tests, and the full internal/cli Go package. That is strong engineering evidence, but it is not production evidence: the recovery has not been deployed, the failed immutable pilot cannot be rewritten, and no production Paper has been changed.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The next move</h2><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">DEPLOY THE READER RECOVERY, THEN OPEN A CORRECTION WAVE</div><span>First deploy and validate the renderer recovery on the real target surfaces. Then open a new immutable correction wave and rerun three disjoint pilots with link-bearing, accessibility, stale-revision, rollback, and live-reader proof. Only a zero-hard-failure pilot may establish nonzero batch capacity, seal the format, shard all 549 revisions exactly once, and authorize the remaining Build and Review fleet.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Evidence boundary</h2><p>Canonical campaign: paper-perfection-wave-2026-07-26. Root task: task-f5cbd8be8f278caf. CycleFleet wave: 807b46cf-2f66-4c55-8f58-28602accaad3. Frozen inventory: 549 revision-pinned Papers, SHA-256 3efe7a74b61867f2901d848b71767263285af6bd2ff8b179e2750faec999bdb9. This Paper summarizes the latest live CycleFleet readback: 105 completed, 30 missing, experiment 15/15, capacity unsealed.</p>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\">PAPER QUALITY CAMPAIGN · WORK SO FAR · 27 JULY 2026</p><h1>We checked every Paper—and stopped before the dangerous part</h1><p class=\"bp-role-byline\">549 immutable Paper revisions surveyed · 105/135 typed CycleFleet assignments complete · Production Papers changed: 0</p><p class=\"bp-role-ingress\">The goal is not to make Barkpark’s Papers shorter for its own sake. It is to make each Paper explain what it is for, why it matters inside the larger goal, what evidence supports it, and what the reader should do next—without losing provenance, uncertainty, or meaning in Studio, terminal, email, public, or API readers. We inspected the entire frozen corpus, proved that the quality problem is real, and then refused to mass-rewrite it when the pilot exposed unsafe reader and rollback behavior.</p><div class=\"bp-callout bp-callout--info\"><strong>THE RESULT SO FAR · 78% OF THE LEGENDARY FLEET</strong> <span>Survey is complete at 60/60, covering all 549 frozen Papers. Verify is complete at 30/30. Experiment is complete at 15/15. CycleFleet records 105/135 completed, 0 failed assignments, and 0 invalid results. Build and Review account for the remaining 30 assignments, but Build is correctly blocked because the proven safe batch capacity is 0.</span></div><h2>What “up to standard” means</h2><ul><li><span>The first screen names the reader, the purpose, the real WHY, and the consequence.</span></li><li><span>The outline forms an argument instead of replaying task chronology.</span></li><li><span>Evidence sits beside claims; status, uncertainty, decisions, and provenance remain explicit.</span></li><li><span>Every block earns its space, uses a human voice, and remains accessible.</span></li><li><span>Studio, 80-column TUI, email, public reader, and CLI/API preserve the same meaning.</span></li><li><span>A repair is revision-fenced, idempotent, reversible, and proven against golden fixtures.</span></li></ul><h2>What the corpus taught us</h2><ul><li><span>The strongest Papers answer early, distinguish outcomes from gates, and end with one bounded next move.</span></li><li><span>The dominant failure is the lifecycle archive: useful evidence is buried beneath waves, agents, task machinery, and repeated status narration. The recurring repair is a concise reader-facing result plus a revision-linked evidence appendix.</span></li><li><span>Some records need more than editing. We found stale-status openings, mismatched identities, consolidation candidates, split candidates, and Papers that should be quarantined until their truth is reassociated.</span></li><li><span>Reader fidelity is not cosmetic. Verification found source content disappearing from public and terminal readers, including lists, tables, status boundaries, and exact source passages.</span></li><li><span>A separate post-freeze audit checked all three changed revisions—two additions and one revision. All three require repair; the frozen 549-Paper ledger remained unchanged.</span></li></ul><h2>Why the pilot said no</h2><div class=\"bp-callout bp-callout--warning\"><strong>GOOD PROSE WAS NOT ENOUGH · SAFE CAPACITY 0</strong> <span>Several compressed candidates scored 92–95 and rendered within 80 columns, yet the full gate still failed. Email lost semantic lists. Some candidates produced duplicate H1 headings, accepted stale revisions, lost exact payloads, or lacked an integrated verified rollback. Authenticated Studio and live candidate envelopes were also unavailable for parts of the pilot. Under the zero-hard-failure rule, those are stop conditions—not details to average away.</span></div><h2>What is already repaired locally</h2><p>Local recovery work now restores semantic email lists, proves Studio heading/list/link/status/keyboard structure, and binds public plus CLI/API link parity and rollback. Fresh checks pass 233 email-renderer tests, 59 Studio tests, 10 release-gate tests, and the full internal/cli Go package. That is strong engineering evidence, but it is not production evidence: the recovery has not been deployed, the failed immutable pilot cannot be rewritten, and no production Paper has been changed.</p><h2>The next move</h2><div class=\"bp-callout bp-callout--success\"><strong>DEPLOY THE READER RECOVERY, THEN OPEN A CORRECTION WAVE</strong> <span>First deploy and validate the renderer recovery on the real target surfaces. Then open a new immutable correction wave and rerun three disjoint pilots with link-bearing, accessibility, stale-revision, rollback, and live-reader proof. Only a zero-hard-failure pilot may establish nonzero batch capacity, seal the format, shard all 549 revisions exactly once, and authorize the remaining Build and Review fleet.</span></div><h2>Evidence boundary</h2><p>Canonical campaign: paper-perfection-wave-2026-07-26. Root task: task-f5cbd8be8f278caf. CycleFleet wave: 807b46cf-2f66-4c55-8f58-28602accaad3. Frozen inventory: 549 revision-pinned Papers, SHA-256 3efe7a74b61867f2901d848b71767263285af6bd2ff8b179e2750faec999bdb9. This Paper summarizes the latest live CycleFleet readback: 105 completed, 30 missing, experiment 15/15, capacity unsealed.</p>",
+  "body_html_sv": "c18f53335d0cddd150ef2c1749afc3f83072e9160a011cac63d103bd03fdd308",
+  "description": "A concise account of Barkpark’s 549-Paper quality campaign: what is proven, what failed, why production rewriting remains blocked, and what must happen next.",
+  "main_tag": "authoring-excellence",
+  "preview": {
+    "description": "A concise account of Barkpark’s 549-Paper quality campaign: what is proven, what failed, why production…",
+    "extensions": {
+      "tags": [
+        "authoring-excellence",
+        "epic-cycle",
+        "portabledoc",
+        "research-note"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/paper-perfection-work-so-far-2026-07-27"
+  },
+  "rev": 1,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "The work defines and tests a reader-first quality standard across the complete frozen Paper corpus.",
+      "strength": 100,
+      "tag": "authoring-excellence"
+    },
+    {
+      "rationale": "The evidence comes from the Legendary CycleFleet campaign and its immutable 549-revision inventory.",
+      "strength": 82,
+      "tag": "epic-cycle"
+    },
+    {
+      "rationale": "Reader fidelity, semantic structure, revision safety, and rollback are hard gates for every repair.",
+      "strength": 68,
+      "tag": "portabledoc"
+    },
+    {
+      "rationale": "This Paper summarizes completed survey, verification, and experiment evidence without claiming unfinished production outcomes.",
+      "strength": 52,
+      "tag": "research-note"
+    }
+  ],
+  "title": "We checked every Paper—and stopped before the dangerous part"
+}

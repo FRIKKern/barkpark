@@ -1,0 +1,264 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report-validation/v1",
+  "assignment_id": "PPCC2-S032",
+  "valid": true,
+  "checks": [
+    {
+      "name": "bound-snapshot-sha",
+      "status": "PASS",
+      "evidence": "a3ecfefb6576297f38d42dda344db275cf0a6aeddfe6a299c9ea05fdca764854"
+    },
+    {
+      "name": "source-snapshot-sha",
+      "status": "PASS",
+      "evidence": "2937789e47780a1cf974e0e1e3d7f299570a766370c15465b2dac8be5fb09c09"
+    },
+    {
+      "name": "bound-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S032",
+        "status": "cyclefleet_bound",
+        "unit_count": 9
+      }
+    },
+    {
+      "name": "immutable-wave-binding",
+      "status": "PASS",
+      "evidence": {
+        "status": "cyclefleet_bound",
+        "wave_id": "paper-perfection-successor-wave-2026-07-29",
+        "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+        "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+        "source_snapshot_sha256": "2937789e47780a1cf974e0e1e3d7f299570a766370c15465b2dac8be5fb09c09"
+      }
+    },
+    {
+      "name": "report-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S032",
+        "worker": "worker-2"
+      }
+    },
+    {
+      "name": "ordered-checked-unit-ids",
+      "status": "PASS",
+      "evidence": [
+        "paper:paper-perfection-reader-harness-wave-2026-07-28",
+        "paper:paper-perfection-recovery-wave-2026-07-27",
+        "paper:paper-perfection-wave-2026-07-23",
+        "paper:paper-perfection-wave-2026-07-26",
+        "paper:paper-perfection-work-so-far-2026-07-27",
+        "paper:papers-pro-toolkit-capstone",
+        "paper:papers-pro-toolkit-crown-and-toolkit",
+        "paper:papers-pro-toolkit-evidence-record",
+        "paper:papers-pro-toolkit-living-data-forms"
+      ]
+    },
+    {
+      "name": "one-verdict-per-unit",
+      "status": "PASS",
+      "evidence": 9
+    },
+    {
+      "name": "verdict-metadata-pinned",
+      "status": "PASS",
+      "evidence": "all document ids and immutable revisions match"
+    },
+    {
+      "name": "allowed-verdicts-and-counts",
+      "status": "PASS",
+      "evidence": {
+        "keep": 4,
+        "repair": 1,
+        "superseded": 4
+      }
+    },
+    {
+      "name": "editorial-dimensions-complete",
+      "status": "PASS",
+      "evidence": [
+        "compression_and_restraint",
+        "duplicate_disposition",
+        "evidence_and_truth",
+        "human_voice_and_precision",
+        "opening_and_criteria",
+        "outline_and_hierarchy",
+        "purpose_and_larger_goal",
+        "rationale"
+      ]
+    },
+    {
+      "name": "specific-existing-evidence-refs",
+      "status": "PASS",
+      "evidence": [
+        {
+          "document_id": "paper-perfection-reader-harness-wave-2026-07-28",
+          "ref": "blocks[51]",
+          "exists": true
+        },
+        {
+          "document_id": "paper-perfection-reader-harness-wave-2026-07-28",
+          "ref": "blocks[18]",
+          "exists": true
+        },
+        {
+          "document_id": "paper-perfection-recovery-wave-2026-07-27",
+          "ref": "blocks[38]",
+          "exists": true
+        },
+        {
+          "document_id": "paper-perfection-recovery-wave-2026-07-27",
+          "ref": "blocks[37]",
+          "exists": true
+        },
+        {
+          "document_id": "paper-perfection-wave-2026-07-23",
+          "ref": "blocks[6]",
+          "exists": true
+        },
+        {
+          "document_id": "paper-perfection-wave-2026-07-23",
+          "ref": "blocks[1]",
+          "exists": true
+        },
+        {
+          "document_id": "paper-perfection-wave-2026-07-26",
+          "ref": "blocks[182]",
+          "exists": true
+        },
+        {
+          "document_id": "paper-perfection-wave-2026-07-26",
+          "ref": "blocks[4]",
+          "exists": true
+        },
+        {
+          "document_id": "paper-perfection-work-so-far-2026-07-27",
+          "ref": "blocks[10]",
+          "exists": true
+        },
+        {
+          "document_id": "paper-perfection-work-so-far-2026-07-27",
+          "ref": "blocks[14]",
+          "exists": true
+        },
+        {
+          "document_id": "papers-pro-toolkit-capstone",
+          "ref": "blocks[14]",
+          "exists": true
+        },
+        {
+          "document_id": "papers-pro-toolkit-capstone",
+          "ref": "blocks[97]",
+          "exists": true
+        },
+        {
+          "document_id": "papers-pro-toolkit-crown-and-toolkit",
+          "ref": "blocks[31]",
+          "exists": true
+        },
+        {
+          "document_id": "papers-pro-toolkit-crown-and-toolkit",
+          "ref": "blocks[51]",
+          "exists": true
+        },
+        {
+          "document_id": "papers-pro-toolkit-evidence-record",
+          "ref": "blocks[33]",
+          "exists": true
+        },
+        {
+          "document_id": "papers-pro-toolkit-evidence-record",
+          "ref": "blocks[4]",
+          "exists": true
+        },
+        {
+          "document_id": "papers-pro-toolkit-living-data-forms",
+          "ref": "blocks[28]",
+          "exists": true
+        },
+        {
+          "document_id": "papers-pro-toolkit-living-data-forms",
+          "ref": "blocks[33]",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "five-reader-risks",
+      "status": "PASS",
+      "evidence": [
+        "CLI/API",
+        "Studio",
+        "TUI80",
+        "email",
+        "public"
+      ]
+    },
+    {
+      "name": "read-only-mutation-attestation",
+      "status": "PASS",
+      "evidence": {
+        "production_papers_mutated": false,
+        "cyclefleet_mutated": false,
+        "bp_cycle_assign_called": false,
+        "bp_cycle_result_called": false
+      }
+    },
+    {
+      "name": "unvisited-scope-empty",
+      "status": "PASS",
+      "evidence": []
+    },
+    {
+      "name": "readbacks-exact-and-hashed",
+      "status": "PASS",
+      "evidence": "all 9 raw ids/revisions and SHA-256 receipts match"
+    },
+    {
+      "name": "native-and-legacy-representation",
+      "status": "PASS",
+      "evidence": {
+        "native_block_total": 596
+      }
+    },
+    {
+      "name": "purpose-based-duplicate-analysis",
+      "status": "PASS",
+      "evidence": [
+        {
+          "candidate_set": [
+            "paper-perfection-wave-2026-07-23",
+            "paper-perfection-wave-2026-07-26",
+            "paper-perfection-work-so-far-2026-07-27",
+            "paper-perfection-recovery-wave-2026-07-27",
+            "paper-perfection-reader-harness-wave-2026-07-28"
+          ],
+          "basis": "These are successive immutable stages of one Paper-perfection program: initial doctrine/capacity failure, expanded survey, interim synthesis, recovery gate, and installed-reader harness authority.",
+          "disposition": "Do not merge ledgers. Mark the first four superseded for current status, preserve their distinct failed-gate evidence, and make the 2026-07-28 harness paper the repaired current authority with reciprocal successor links."
+        },
+        {
+          "candidate_set": [
+            "papers-pro-toolkit-capstone",
+            "papers-pro-toolkit-crown-and-toolkit"
+          ],
+          "basis": "Both use the engine-versus-door thesis, but the capstone owns cross-lane product synthesis while crown/toolkit owns the exhaustive renderer and insertion census.",
+          "disposition": "Keep separate, deduplicate repeated thesis prose, and cross-link synthesis to census evidence."
+        },
+        {
+          "candidate_set": [
+            "papers-pro-toolkit-evidence-record",
+            "papers-pro-toolkit-living-data-forms"
+          ],
+          "basis": "Both discuss source blocks and resolved values, but one owns editor/integration seams while the other owns living-data/form lifecycle and provenance.",
+          "disposition": "Keep separate and cross-link the shared resolution doctrine; do not merge distinct evidence boundaries."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  }
+}
