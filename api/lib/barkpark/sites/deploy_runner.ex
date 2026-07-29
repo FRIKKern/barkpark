@@ -1461,6 +1461,11 @@ defmodule Barkpark.Sites.DeployRunner do
         _ = File.rm(manifest_path(dir, m.slug))
         _ = m.status_file && File.rm(m.status_file)
         _ = m.log_file && File.rm(m.log_file)
+        # The staged prebuilt tree is the BIGGEST thing a run leaves behind (up
+        # to the 64 MiB extraction cap, against a 3.8 GB box), so it is swept
+        # with the rest of the quartet rather than living forever after a
+        # one-shot slug.
+        _ = m.prebuilt_dir && File.rm_rf(m.prebuilt_dir)
         _ = unlink_env(m)
       end
     end

@@ -141,6 +141,21 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
       assert File.exists?(Path.join(dest, "index.html"))
     end
 
+    test "accepts the `./` root entry a plain `tar czf - -C dist .` emits", %{dest: dest} do
+      tar =
+        tarball([
+          dir_entry("."),
+          file_entry("./index.html", "<!doctype html><title>bp</title>"),
+          dir_entry("./_astro"),
+          file_entry("./_astro/app.css", "body{margin:0}")
+        ])
+
+      assert {:ok, summary} = stage(tar, dest)
+      assert summary.entries == 4
+      assert File.read!(Path.join(dest, "index.html")) =~ "bp"
+      assert File.read!(Path.join(dest, "_astro/app.css")) == "body{margin:0}"
+    end
+
     test "leaves no staging siblings behind", %{base: base, dest: dest} do
       assert {:ok, _} = stage(astro_dist(), dest)
       refute Enum.any?(File.ls!(base), &String.contains?(&1, ".staging-"))

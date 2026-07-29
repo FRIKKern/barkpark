@@ -406,10 +406,16 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
          {:ok, type} <- type(header),
          :ok <- mode_bits(header),
          {:ok, size} <- size(header, type, state),
-         {:ok, path} <- safe_path(name, state) do
-      case type do
-        :dir -> place_dir(path, state)
-        :regular -> place_file(path, size, state)
+         {:ok, path} <- safe_path(name, type, state) do
+      case {type, path} do
+        # `tar czf - -C dist .` emits the root itself as a `./` DIRECTORY entry.
+        # It is not an escape and it is not a file to write — it is the staging
+        # dir this module already created, so it is counted and skipped. Without
+        # this, a perfectly ordinary hand-rolled tarball is refused as
+        # "escapes the artifact root", which is both wrong and unactionable.
+        {:dir, :root} -> count_entry(state)
+        {:dir, path} -> place_dir(path, state)
+        {:regular, path} -> place_file(path, size, state)
       end
     end
   end
@@ -538,7 +544,10 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # header name. `Path.expand/1` resolves `.`/`..` textually, so an entry
   # survives only if the place it would actually land is strictly under the
   # staging root.
-  defp safe_path(name, state) do
+  # Returns `{:ok, :root}` for the archive's own root DIRECTORY entry (`.` /
+  # `./`), which is not a path to write; every other accepted entry returns the
+  # absolute path it will occupy.
+  defp safe_path(name, type, state) do
     cond do
       String.starts_with?(name, "/") ->
         {:error, "E_ABSOLUTE_PATH", "entry #{inspect(name)} is an absolute path — refused"}
@@ -548,12 +557,22 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
       true ->
         joined = Path.expand(Path.join(state.root, name))
+        root = String.trim_trailing(state.root_prefix, "/")
 
-        if String.starts_with?(joined, state.root_prefix) do
-          {:ok, joined}
-        else
-          {:error, "E_PATH_TRAVERSAL",
-           "entry #{inspect(name)} resolves outside the artifact root"}
+        cond do
+          String.starts_with?(joined, state.root_prefix) ->
+            {:ok, joined}
+
+          joined == root and type == :dir ->
+            {:ok, :root}
+
+          joined == root ->
+            {:error, "E_BAD_NAME",
+             "entry #{inspect(name)} names the artifact root itself as a file"}
+
+          true ->
+            {:error, "E_PATH_TRAVERSAL",
+             "entry #{inspect(name)} resolves outside the artifact root"}
         end
     end
   end
