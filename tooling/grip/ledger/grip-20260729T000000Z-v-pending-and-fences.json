@@ -1,0 +1,68 @@
+{
+  "lane": "v-pending-and-fences",
+  "wave": "studio-space-priority-desk-wave-2026-07-29",
+  "anchor_task": "task-f559f7c508527010",
+  "recorded_at": "2026-07-29T00:00:00Z",
+  "rows": [
+    {
+      "claim": "phx-disable-with DOES fire for a plain phx-click on a non-form button — the JS client applies it inside View#putRef, which View#pushEvent calls for every click; it is NOT gated on being inside a form (disableForm is a separate, additional path).",
+      "evidence": "view.js:1668-1673 pushEvent -> putRef([{el, loading:true, lock:true}], phxEvent, type); view.js:1434-1492 putRef reads binding(PHX_DISABLE_WITH) off the element and sets textContent + disabled for ANY element carrying it.",
+      "rerun": "sed -n '1434,1495p;1665,1690p' /Volumes/SATECHI/github/barkpark/api/deps/phoenix_live_view/assets/js/phoenix_live_view/view.js"
+    },
+    {
+      "claim": "A LiveView test can NEVER prove phx-disable-with fires — LiveViewTest does not run the JS client. Post-click server HTML carries no disabled, no text swap, no phx-click-loading. Only the ATTRIBUTE's presence is assertable offline.",
+      "evidence": "probe run output: PROBE after_click html: <div><button type=\"button\" id=\"probe-btn\" phx-click=\"go\" phx-disable-with=\"Working…\"> Add block </button><span id=\"state\">clicked</span></div>  /  contains 'disabled': false / 'Working…' as text: false / 'phx-click-loading': false. 1 test, 0 failures.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && MIX_ENV=test mix test ../tooling/grip/ledger/_probe_disable_with_liveviewtest.exs"
+    },
+    {
+      "claim": "A socket-assign pending state (the api_tester_live.ex `running` shape) IS fully observable in LiveViewTest — disabled, aria-busy and the label swap all appear in the server-rendered HTML after render_click.",
+      "evidence": "probe run output: PROBE2 after_click html: <div><button type=\"button\" id=\"probe-btn\" phx-click=\"go\" disabled=\"\" aria-busy=\"true\"> Working… </button></div>. 1 test, 0 failures.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && MIX_ENV=test mix test ../tooling/grip/ledger/_probe_socket_assign_pending.exs"
+    },
+    {
+      "claim": "phx-disable-with is UNSAFE on the desk '+' button: it is icon-only (an <svg>), and the client sets PHX_DISABLE_WITH_RESTORE to el.textContent (empty) then assigns el.textContent = disableText, destroying the SVG; the undo path restores textContent = '' leaving the button permanently blank.",
+      "evidence": "view.js:1478-1486 (RESTORE := el.textContent; el.textContent = disableText) + element_ref.js:154-157 (el.textContent = disableRestore). Button markup: components.ex:990-994 <button class=\"pane-add-btn\" phx-click=\"new-document\" ...><.icon name=\"plus\" size={14} /></button> — no text child, no aria-label, no title.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:api/lib/barkpark_web/live/studio/studio_live/components.ex | sed -n '985,996p'; sed -n '150,160p' api/deps/phoenix_live_view/assets/js/phoenix_live_view/element_ref.js"
+    },
+    {
+      "claim": "PR #6055 is NOT conflicted with origin/main. gh reports MERGEABLE (mergeStateStatus BLOCKED = a required gate, not a conflict) and git merge-tree --write-tree exits 0 producing a clean tree.",
+      "evidence": "gh: {\"m\":\"MERGEABLE\",\"s\":\"BLOCKED\",\"n\":6055}. git merge-tree --write-tree --name-only origin/main dfaed2684 -> exit=0, tree 0fd169ad5132c670689e53a1fa11e7f2c529fe35, no conflict section.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && gh pr view 6055 --json mergeable,mergeStateStatus && git merge-tree --write-tree --name-only origin/main $(gh pr view 6055 --json headRefOid -q .headRefOid); echo exit=$?"
+    },
+    {
+      "claim": "The assignment's MUST-RUN conflict probe is SELF-POISONING: both of its two '<<<<' hits are inside tooling/grip/ledger/grip-20260724T090000Z-v-r3-live-fire-status.json, a prior ledger row whose own documented `rerun` string contains the literal '<<<<<<<'. The probe measures the ledger's prose, not a merge conflict.",
+      "evidence": "line 140813 file=tooling/grip/ledger/grip-20260724T090000Z-v-r3-live-fire-status.json ... \"rerun\": \"... | grep -c '<<<<<<<'\"",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git merge-tree $(git merge-base origin/main origin/HEAD) origin/main $(gh pr view 6055 --json headRefOid -q .headRefOid) | grep -n '<<<<'"
+    },
+    {
+      "claim": "PR #6055 does not touch the create seam. Its only paper.ex change is a 9-line dataset-threading edit at :374 (task-embed preview); setup_paper_view/clear_paper_view (~:639/:701) are untouched.",
+      "evidence": "git diff 4b46ccbe6..dfaed2684 --stat -> papers.ex 2, query.ex 62, shared/paper.ex 9, query_rows_test.exs 113; the paper.ex hunk header is @@ -374,7 +374,14 @@.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git diff $(git merge-base origin/main dfaed2684)..dfaed2684 -- api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex"
+    },
+    {
+      "claim": "There are 1605 registered worktrees, not 13. Fourteen of them hold uncommitted edits under api/lib/barkpark_web/live/studio; NONE touches handlers/fields.ex, pane_builder.ex or shared/paper.ex.",
+      "evidence": "git worktree list --porcelain | grep -c '^worktree ' -> 1605. Per-worktree status yields 19 dirty studio paths across 14 worktrees; the create-seam-scoped sweep prints nothing.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git worktree list --porcelain | grep -c '^worktree '; for w in $(git worktree list --porcelain | awk '/^worktree /{print $2}'); do s=$(git -C $w status --porcelain -- api/lib/barkpark_web/live/studio/studio_live/handlers/fields.ex api/lib/barkpark_web/live/studio/studio_live/pane_builder.ex api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex 2>/dev/null); [ -n \"$s\" ] && echo \"$w :: $s\"; done; echo '(end)'"
+    },
+    {
+      "claim": "Two live worktrees already carry RIVAL uncommitted prototype fixes to defect 1 (seed_new_doc_content/1) — wf_5fcb049f-069-18 seeds %{\"blocks\" => []}, wf_5fcb049f-069-22 seeds one paragraph block with a generated id. Both are gated on Barkpark.Content.blocks_type?/1, which exists on origin/main.",
+      "evidence": "git -C .claude/worktrees/wf_5fcb049f-069-22 diff shows +%{\"blocks\" => [%{\"id\" => \"b-\" <> Integer.to_string(System.unique_integer([:positive])), \"type\" => \"paragraph\", \"content\" => []}]}. origin/main:api/lib/barkpark/content/papers/block_ops.ex:50: def blocks_type?(type), do: type in @blocks_types",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git -C .claude/worktrees/wf_5fcb049f-069-18 diff -- api/lib/barkpark_web/live/studio/studio_live/shared.ex; git -C .claude/worktrees/wf_5fcb049f-069-22 diff -- api/lib/barkpark_web/live/studio/studio_live/shared.ex; git grep -n 'def blocks_type?' origin/main -- api/lib"
+    },
+    {
+      "claim": "The sibling charter .claude/workflows/bp-studio-structure-polish-charter.md carries NO ruling on desk row semantics, the + button, keyboard focus, tabindex, role or aria — zero matches across all 24 decisions. It DOES carry D19, which CUTS a tree-side empty-state ROW as structurally impossible; that constrains the desk tree only, not the editor pane's never-blank state.",
+      "evidence": "grep -n -i 'tabindex|role=\"button\"|<button|focusable|keyboard|aria-|pane_item|phx-disable-with|accessible name' -> no output. D19 text: 'The tree-side empty-state row is structurally impossible ... CUT — do not retry in a future wave.'",
+      "rerun": "grep -n -iE 'tabindex|role=\"button\"|<button|focusable|keyboard|aria-|pane_item|phx-disable-with|accessible name' /Volumes/SATECHI/github/barkpark/.claude/workflows/bp-studio-structure-polish-charter.md; grep -n '^19\\.' /Volumes/SATECHI/github/barkpark/.claude/workflows/bp-studio-structure-polish-charter.md"
+    },
+    {
+      "claim": "aria-busy appears ZERO times in api/lib, and design/tokens.json carries no pending/busy/loading token. The only pending affordance shipped repo-wide is the .phx-click-loading/.phx-submit-loading opacity 0.6 + pointer-events:none rule in root.html.heex:3752.",
+      "evidence": "grep -rn 'aria-busy' api/lib -> no output; grep -n -i 'pending|busy|loading' design/tokens.json -> no output; root.html.heex:3752 '.phx-click-loading, .phx-submit-loading { pointer-events: none; opacity: 0.6; }'",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -rn 'aria-busy' api/lib; grep -n -iE 'pending|busy|loading' design/tokens.json; grep -n 'phx-click-loading' api/lib/barkpark_web/layouts/root.html.heex"
+    },
+    {
+      "claim": "bp search is DOWN for this lane — every `bp search query` call times out acquiring the manifest from guerrilla. Barkpark prior art on pending feedback is UNCHECKED, not absent.",
+      "evidence": "bp: acquire manifest from https://guerrilla.barkpark.cloud/v1/capabilities: fetch manifest: ... context deadline exceeded (Client.Timeout exceeded while awaiting headers)",
+      "rerun": "bp search query \"phx-disable-with pending feedback button\""
+    }
+  ]
+}
