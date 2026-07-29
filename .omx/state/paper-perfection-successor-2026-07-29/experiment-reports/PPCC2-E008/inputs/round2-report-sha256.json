@@ -1,0 +1,51 @@
+{
+  "PPCC2-E004": {
+    "direct_answer": "The runnable verdict-first candidate cleared all hard gates on 9/9 fixtures; Round 3 must still attack hydrated Studio behavior, hostile clients, and stale-authority cases.",
+    "next_round_decision": {
+      "attack_targets": [
+        "hydrated Studio View/Edit DOM and focus/reading order",
+        "Gmail, Outlook, and Apple Mail behavior",
+        "stale or conflicting authority/status language",
+        "malformed legacy wrappers, missing fields, very long tokens, and nested blocks",
+        "verdict freshness and semantic accuracy independent of structural pass rates"
+      ],
+      "decision": "ELIGIBLE_FOR_ROUND_3_ATTACK",
+      "reason": "This isolated format is sufficiently runnable for hostile-reader testing, but Round 2 cannot select a winner or substitute for Round 3.",
+      "round_3_started": false,
+      "winner_declared": false
+    },
+    "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E004/report.json",
+    "sha256": "3fe960aedbe599c947c591d93404f9bc5853f86d645a6f17c797fcb226342120",
+    "status": "completed"
+  },
+  "PPCC2-E005": {
+    "direct_answer": "9/9 isolated evidence-matrix candidates passed all hard gates, including the exact production PortableDoc article/email renderer, native pdrender at 80/40, deterministic candidate JSON, sealed frozen source authority, and repeated live read-only checks where the remote reader completed. No candidate was published.",
+    "next_round_decision": {
+      "decision": "advance_with_caveats",
+      "recommendation": "Make PPCC2-E005 eligible for leader comparison in Round 2 only. If selected for later attack work, challenge authenticated Studio hydration, real mail clients, semantic extract quality, and very long chronology behavior. This assignment does not start Round 3."
+    },
+    "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E005/report.json",
+    "sha256": "86ea6cbaeed713430881b2c7480dac436159ca95da8beb7f6e151824740c7330",
+    "status": "completed"
+  },
+  "PPCC2-E006": {
+    "direct_answer": "The isolated reader-adaptive candidate passed 9/9 frozen fixtures, 45 deterministic surface projections, and 63/63 applicable Round-2 hard checks. TUI max widths were exactly 80 and 40 with zero overflow; all local Studio/email projections had one H1 and preserved every canonical authored segment; CLI/API canonical JSON was byte-stable. This is divergent-candidate evidence only, not a winner or pilot seal.",
+    "next_round_decision": {
+      "decision": "ELIGIBLE_FOR_ROUND_3_ATTACK_WITHOUT_SELECTION",
+      "pilot_started": false,
+      "rationale": "The candidate cleared the declared Round-2 harness, but generic semantic extraction and real-client behavior remain attack surfaces. The leader should compare all three divergent candidates before dispatching immutable Round 3.",
+      "recommended_attacks": [
+        "malformed and missing fields",
+        "unknown and deeply nested block shapes",
+        "real hydrated Studio DOM",
+        "real mail clients and relative-link handling",
+        "semantic intelligibility of linearized tables/grids/folds/diagrams"
+      ],
+      "round_3_started": false,
+      "winner_declared": false
+    },
+    "path": "/Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E006/report.json",
+    "sha256": "df6a91f99c900aba702fc1af605d830600e7ab7bf96a3914ce1dee9822b3f756",
+    "status": "completed"
+  }
+}

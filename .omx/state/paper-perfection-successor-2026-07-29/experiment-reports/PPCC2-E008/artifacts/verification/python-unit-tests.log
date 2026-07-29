@@ -1,0 +1,10 @@
+test_display_width_counts_wide_and_combining_characters (test_attack.AttackHarnessTest) ... ok
+test_hostile_document_is_copy_and_contains_all_attack_shapes (test_attack.AttackHarnessTest) ... ok
+test_html_probe_accepts_escaped_hostile_text (test_attack.AttackHarnessTest) ... ok
+test_html_probe_detects_active_script_and_unsafe_attributes (test_attack.AttackHarnessTest) ... ok
+test_marker_order_rejects_reordering (test_attack.AttackHarnessTest) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.007s
+
+OK

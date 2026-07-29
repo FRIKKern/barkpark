@@ -1,0 +1,33 @@
+{
+  "assignment_id": "PPCC2-E008",
+  "by_candidate": {
+    "PPCC2-E004": {
+      "hard_checks_passed": 54,
+      "hard_checks_total": 63,
+      "observed_failure_rate": 0.142857,
+      "units_attempted": 9,
+      "units_passing_all_hard_gates": 0
+    },
+    "PPCC2-E005": {
+      "hard_checks_passed": 54,
+      "hard_checks_total": 63,
+      "observed_failure_rate": 0.142857,
+      "units_attempted": 9,
+      "units_passing_all_hard_gates": 0
+    },
+    "PPCC2-E006": {
+      "hard_checks_passed": 54,
+      "hard_checks_total": 63,
+      "observed_failure_rate": 0.142857,
+      "units_attempted": 9,
+      "units_passing_all_hard_gates": 0
+    }
+  },
+  "candidates": 3,
+  "cases": 27,
+  "fixtures": 9,
+  "hard_failures": 27,
+  "observed_failure_rate": 0.142857,
+  "run_summary_sha256": "d845667ea1ab84eed84b5f834435841d6971fca9b5ae4a4051a07795bb11dc39",
+  "wall_seconds": 36.022376
+}
