@@ -75,3 +75,42 @@ before it was run:
    required context RENDERED on this head; one of them was red. Present is not
    the same as green, and the deadlock detector is deliberately silent about the
    difference — that is `gh pr checks`'s job, which is why the advice names both.
+
+## What the merge itself measured — appended after the fact
+
+This section did not exist when the PR was opened; it records what happened
+when the PR was actually merged, because the merge found a defect in the merge
+verb and a record that stopped at the prediction would be a lie.
+
+Both required contexts went green after the `Task:` trailer was added
+(`Elixir gate: pass`, `PR references an active task: pass`). `scripts/bp-merge.sh`
+was then run, argument-free, from this branch's own worktree. It printed:
+
+```
+bp-merge: REFUSED — UNRECOGNISED
+  gh said, verbatim:
+    failed to run git: fatal: 'main' is already checked out at '/Volumes/SATECHI/github/barkpark'
+```
+
+**And the merge had already landed.** `mergedAt 2026-07-28T22:54:25Z`, merge
+commit `98f95be6`. `gh pr merge --squash --delete-branch` merged server-side and
+then exited 1 on its LOCAL post-merge step: `--delete-branch` tries to check the
+base branch out in the current checkout, and in this fleet `main` is permanently
+checked out by the primary worktree while every agent works in another one.
+
+Two things are true at once and both matter:
+
+* The classifier behaved correctly. An unmeasured string got `UNRECOGNISED` and
+  a refusal, not a guess. That is the arm the harness exists for.
+* It was still a FALSE STALL, and on a worktree fleet it would have fired on
+  every successful merge — the artifact's first live exercise, breaking on its
+  own house style.
+
+The fix is NOT another row in the refusal table. Whether a merge landed is a
+question for the API, and a message-shaped guess about it is the vacuous pass
+pointing the other way. `merge_loop` now reads `gh pr view --json state` before
+classifying any string; on `MERGED` it reports success, quotes gh's local error
+underneath so nothing is hidden, and deletes the remote head branch through the
+API where no local checkout is involved. Pinned by `scripts/bp-merge.test.sh`
+assertions 28-31, including one that the state read happens BEFORE
+`classify_refusal` — after it, `refuse()` exits first and the stall survives.

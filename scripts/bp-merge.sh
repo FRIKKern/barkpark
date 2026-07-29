@@ -56,7 +56,10 @@
 #   level. Re-run first. It is thirty seconds and it is right most of the time.
 #
 # EXIT CODES (this script's own; unrelated to gh's, which is always 1)
-#   0 merged · 1 refused (see the quoted message) · 2 over budget
+#   0 merged (INCLUDING the case where gh exited non-zero on its own local
+#     post-merge step after the server-side merge landed — the state is read
+#     back from the API, never inferred from the exit code; see merge_loop)
+#   1 refused (see the quoted message) · 2 over budget
 #   3 the PRE-FLIGHT or the set-difference detector refused: this head can never
 #     go green as it stands (DEADLOCK, or a required context concluded in a
 #     state nothing re-reports). Precise scope, stated because it is easy to
@@ -109,8 +112,17 @@ refusal_advice() {
   local state="$1" pr="${2:-<pr>}" sha="${3:-<sha>}"
   case "$state" in
     CLIENT_BLOCK)
-      printf 'gh blocked this CLIENT-SIDE from its own read of the base branch policy; the merge API was never called.\n'
-      printf 'RESOLVE: gh pr view %s --json mergeStateStatus,mergeable,statusCheckRollup\n' "$pr"
+      # THE DOMINANT POST-FLIP ARM (D79). gh reads `mergeStateStatus: BLOCKED`
+      # from its own GraphQL query and refuses locally, so the merge API is
+      # never called and the server never gets to say WHICH context blocked.
+      # A JSON dump is not advice: `statusCheckRollup` lists every check on the
+      # head, advisory ones included, and says nothing about which of them the
+      # branch actually requires. The set difference against the committed spec
+      # is the only thing that answers that, exactly as for DEADLOCK and PLURAL.
+      printf 'gh blocked this CLIENT-SIDE from its own read of the base branch policy; the merge API was never called,\n'
+      printf 'so nothing here names the blocking context. This is the most common refusal under branch protection.\n'
+      printf 'RESOLVE: scripts/required-checks-verify.sh --deadlock --sha %s\n' "$sha"
+      printf 'THEN:    gh pr checks %s          # for a required context that rendered but is red or still running\n' "$pr"
       ;;
     PLURAL)
       printf 'A plural refusal carries COUNTS and CATEGORIES, never names — and the categories DO NOT SUM\n'
@@ -199,6 +211,29 @@ resolve_plural() {
   esac
 }
 
+# THE COUNTER-LINE (honest-gates D78). gh's own refusal is quoted VERBATIM
+# above — that is the whole point of this wrapper, and it must never be edited
+# or filtered. But `viewerCanAdminister` is true for every agent in this fleet,
+# so gh appends its own suggestion to override the branch policy and merge now.
+# Under `enforce_admins: true` that suggestion is dead: the server refuses the
+# override too. Without a line saying so, bp-merge's refusal — the very artifact
+# this epic produces as evidence — would itself teach the verb the epic
+# abolished, in gh's voice, right where an agent is looking for what to do next.
+#
+# The counter-line deliberately does NOT spell the flag. `scripts/bp-merge.test.sh`
+# ratchets that no executable line of this file emits it, and a wrapper that has
+# to print a string to argue against printing it has lost the argument.
+counter_line() {
+  local msg="$1"
+  case "$msg" in
+    *admin*|*override*)
+      printf 'NOTE: gh suggested an admin override above. It is DEAD — under enforce_admins:true the server\n'
+      printf '      refuses it exactly like the merge itself, and it is no longer this repo'"'"'s merge protocol.\n'
+      printf '      The merge verb is this script. Fix the required context named below, then run it again.\n'
+      ;;
+  esac
+}
+
 refuse() {
   local state="$1" msg="$2"
   {
@@ -206,12 +241,75 @@ refuse() {
     echo "bp-merge: REFUSED — $state"
     echo "  gh said, verbatim:"
     printf '%s\n' "$msg" | sed 's/^/    /'
+    counter_line "$msg" | sed 's/^/    /'
     echo
     refusal_advice "$state" "$PR_NUMBER" "$HEAD_SHA" | sed 's/^/  /'
     echo
     echo "  PR: $PR_URL"
   } >&2
   exit 1
+}
+
+# VERIFY THE STATE, NEVER THE EXIT CODE. Measured on this script's own first
+# live merge (PR #6924, mergedAt 2026-07-28T22:54:25Z, merge commit 98f95be6):
+# `gh pr merge --squash --delete-branch` merged SERVER-SIDE and then exited 1 on
+# its LOCAL post-merge step —
+#
+#   failed to run git: fatal: 'main' is already checked out at '/…/barkpark'
+#
+# — because `--delete-branch` tries to switch the local checkout to the base
+# branch, and in this fleet `main` is permanently checked out by the primary
+# worktree while every agent works in another one. So the exit code said REFUSED
+# about a merge that had already landed, and the classifier honestly reported
+# UNRECOGNISED (the right failure direction, and exactly the arm that exists for
+# strings nobody measured). It is still a FALSE STALL: on a worktree fleet it
+# would fire on every successful merge. The fix is to ask the server what
+# happened rather than to add another string to the table — a message-shaped
+# guess about whether a merge landed is the vacuous pass in the other direction.
+pr_state() {
+  gh pr view "$PR_NUMBER" --json state --jq '.state' 2>/dev/null || printf 'UNKNOWN\n'
+}
+
+merged_despite_error() {
+  local out="$1"
+  [ "$(pr_state)" = "MERGED" ] || return 1
+  {
+    echo
+    echo "bp-merge: MERGED #$PR_NUMBER (squash) — the server-side merge LANDED."
+    echo "  gh then exited non-zero on its LOCAL post-merge step, and said, verbatim:"
+    printf '%s\n' "$out" | sed 's/^/    /'
+    echo "  This is not a refusal: 'gh pr view --json state' reads MERGED. The exit code was"
+    echo "  about gh's attempt to update this checkout, not about the merge."
+  } >&2
+  # gh's --delete-branch never reached the remote either, so finish the job
+  # through the API, where no local checkout is involved.
+  #
+  # THE DELETE IS FENCED, because this is a WRITE on an error path and the
+  # obvious form of it deletes the wrong branch. `headRefName` is a bare branch
+  # name with no repository in it. On a CROSS-REPOSITORY (fork) PR that name
+  # belongs to the FORK, while the DELETE below is addressed to the BASE repo —
+  # so a fork PR from a branch called `staging` would delete THIS repo's
+  # `staging`, which the merge had nothing to do with. Likewise a head that
+  # equals the base branch is never ours to remove. Both are refusals, not
+  # warnings: an unrecoverable write must not proceed on a guess.
+  local head base cross
+  head="$(gh pr view "$PR_NUMBER" --json headRefName --jq '.headRefName' 2>/dev/null || true)"
+  base="$(gh pr view "$PR_NUMBER" --json baseRefName --jq '.baseRefName' 2>/dev/null || true)"
+  cross="$(gh pr view "$PR_NUMBER" --json isCrossRepository --jq '.isCrossRepository' 2>/dev/null || printf 'true\n')"
+  if [ "$cross" != "false" ]; then
+    echo "bp-merge: head branch '$head' lives in a FORK (or the repository could not be" >&2
+    echo "          determined) — NOT deleting it: that name resolves to a different branch" >&2
+    echo "          in this repo. Delete it in the fork if you want it gone." >&2
+  elif [ "$head" = "$base" ]; then
+    echo "bp-merge: head and base are both '$head' — refusing to delete the base branch." >&2
+  elif [ -n "$head" ] && [ "$head" != "null" ]; then
+    if gh api -X DELETE "repos/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/git/refs/heads/$head" >/dev/null 2>&1; then
+      echo "bp-merge: deleted the remote head branch '$head'." >&2
+    else
+      echo "bp-merge: could NOT delete the remote head branch '$head' — remove it by hand." >&2
+    fi
+  fi
+  return 0
 }
 
 merge_loop() {
@@ -222,6 +320,10 @@ merge_loop() {
     out="$(gh pr merge "$PR_NUMBER" --squash --delete-branch 2>&1)" || rc=$?
     if [ "$rc" -eq 0 ]; then
       echo "bp-merge: MERGED #$PR_NUMBER (squash, branch deleted)."
+      return 0
+    fi
+    # Before classifying a single string: did it merge anyway?
+    if merged_despite_error "$out"; then
       return 0
     fi
     state="$(classify_refusal "$out")"

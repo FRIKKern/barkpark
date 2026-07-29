@@ -114,7 +114,7 @@ compare_protection() {
   # read the wrong state. Every read-back probe in this file is null-tested.
   ea="$(printf '%s' "$actual" | jq -r '.enforce_admins.enabled | if . == null then "MISSING" else tostring end')"
   if [ "$ea" != "true" ]; then
-    echo "  DRIFT  enforce_admins.enabled = $ea (spec: true) — every merge in this repo is --admin, so a false here is a gate that cannot block" >&2
+    echo "  DRIFT  enforce_admins.enabled = $ea (spec: true) — a false here means an admin can merge straight past the required set, i.e. a gate that cannot block. Merge with scripts/bp-merge.sh; restore with: gh api -X POST repos/$(spec_repo)/branches/$(spec_branch)/protection/enforce_admins" >&2
     failures=$((failures + 1))
   else
     say "  ok     enforce_admins.enabled = true"
