@@ -4026,7 +4026,7 @@ defmodule Barkpark.CycleFleet do
         round
 
       is_integer(round) and round >= 1 and round <= length(rounds) ->
-        round_name = value(payload, :round_name)
+        round_name = value(payload, :round_name) || value(payload, :round_key)
         if Enum.at(rounds, round - 1) == round_name, do: round_name
 
       true ->
