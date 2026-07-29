@@ -50,7 +50,14 @@ jobs:
       # fixture release dirs in a tmpdir, no npm/caddy/systemd needed). It is
       # worthless unless it actually RUNS — an untested deploy engine is the
       # weakest link in the deploy path, so gate it here alongside its siblings.
+      # BARKPARK_SELFTEST_REQUIRE_E2E=1: the engine-e2e block (stage protocol,
+      # content-truth HEALTH gate, "the box ran no npm" on a prebuilt deploy)
+      # SKIPS itself when python3/curl are absent — and the run then prints PASS
+      # and exits 0 with this engine's central claims untested. In CI that skip
+      # is a green vacuum, so make it a hard failure here.
       - name: Site deploy engine self-test
+        env:
+          BARKPARK_SELFTEST_REQUIRE_E2E: "1"
         run: bash deploy/site-deploy.sh --self-test
       # The Node-engine deploy path ships its own offline proof (--self-test:
       # fixture release dirs in a tmpdir, no npm/caddy/systemd needed) covering

@@ -14,7 +14,11 @@
 # STATE MACHINE (deploy mode):
 #   PLAN   build_id is passed in by the caller; if it is already the live
 #          release, exit 0 no-op (the sites(site_id,build_id) unique index makes
-#          this idempotent upstream — this is the on-box mirror).
+#          this idempotent upstream — this is the on-box mirror).  PLAN is
+#          TRI-STATE (D88/D89 — the build leaves the serving box): it picks
+#          PLAN_MODE=build (npm on this box), PLAN_MODE=prebuilt (bytes built
+#          ELSEWHERE and uploaded — BUILD is skipped, STAGE still runs) or
+#          PLAN_MODE=staged (the release dir is already there — re-gate it).
 #   BUILD  npm ci && npm run build in the site source dir, wrapped in
 #          `systemd-run --scope -p MemoryMax=1500M -p CPUQuota=150%` and a
 #          SCRUBBED env — only the injected BARKPARK_* build vars, NOTHING
@@ -22,7 +26,9 @@
 #          BARKPARK_TOKEN/URL silently shadows the per-site token (live-proven
 #          failure mode) — hence the scrub.
 #   STAGE  copy ONLY dist/ (12-16K) into releases/<build_id>/; node_modules
-#          (~148M) stays in the ephemeral build sandbox.
+#          (~148M) stays in the ephemeral build sandbox.  In PREBUILT mode the
+#          copy source is PREBUILT_DIR (the tree the box's Elixir side already
+#          digest-verified and extracted) — same .partial-then-rename idiom.
 #   HEALTH throwaway static file server on a loopback ephemeral port rooted at
 #          releases/<build_id>/: assert HTTP 200 AND that the bp-build-id /
 #          bp-content-rev / bp-doc-id <meta> markers in the SERVED bytes carry
@@ -51,7 +57,7 @@
 #     (npm/Vite, e.g. `FATAL: 401 Unauthorized … the site read token is invalid`)
 #     is merged onto stdout for the same reason, and its last error line becomes
 #     the detail.
-#   * The three paths that used to be SILENT — a PLAN no-op, a SKIP_BUILD
+#   * The three paths that used to be SILENT — a PLAN no-op, an already-staged
 #     redeploy, a RETIRE that removes nothing — all speak.  Nothing hangs a
 #     stage-watching orchestrator.
 #
@@ -95,6 +101,17 @@
 #   BARKPARK_API_URL / BARKPARK_TOKEN / BARKPARK_DATASET /
 #   BARKPARK_WORKSPACE / BARKPARK_PROJECT   the ONLY vars passed into BUILD.
 #   CONTENT_REV        dataset revision read at build (baked as bp-content-rev).
+#   PREBUILT_DIR       optional. A tree of ALREADY-BUILT static bytes the box's
+#                      Elixir side extracted from an uploaded artifact and
+#                      validated (path/symlink/size refusals live there — this
+#                      script never unpacks a tarball).  Set => PLAN_MODE=prebuilt:
+#                      NO npm runs on this box.
+#   PREBUILT_SHA256    required WITH PREBUILT_DIR. The 64-hex digest the CP
+#                      verified for the uploaded artifact.  It is an IDENTITY
+#                      record, not a re-hash of the tree: this script records it
+#                      in releases/<build_id>/.bp-prebuilt-sha256 and compares it
+#                      on a retry, so "which bytes are staged" is answerable
+#                      without trusting dir-existence.
 #   BARKPARK_CADDYFILE Caddyfile to arm. Default /etc/caddy/Caddyfile
 #   BARKPARK_HEALTH_HOST  live FQDN (for logging). Default guerrilla.barkpark.cloud
 set -uo pipefail
@@ -117,6 +134,13 @@ RETAIN="${BARKPARK_SITE_RETAIN:-5}"
 # delete (it is the live or the rollback target).  PLAN refuses to re-gate a
 # release carrying it — it rebuilds instead.  See purge_failed_release.
 HEALTH_FAIL_MARK=".bp-health-failed"
+# Dropped inside a release dir STAGED FROM UPLOADED BYTES (PLAN_MODE=prebuilt),
+# carrying the digest the CP verified for that artifact.  It is the only on-box
+# record of "these bytes did not come from this box's source tree", and two
+# decisions read it: PLAN refuses to rebuild such a release from the provisioned
+# template (that rebuild passes HEALTH on genuine markers and goes live with the
+# WRONG bytes), and purge_failed_release refuses to delete it into one.
+PREBUILT_MARK=".bp-prebuilt-sha256"
 # log() and emit() (the BPSTAGE machine protocol) live in the common lib.
 
 # ---- Mode dispatch ---------------------------------------------------------
@@ -354,8 +378,8 @@ PY
   return 0
 }
 
-# A HEALTH-failed release must NEVER stay staged (D26).  PLAN's SKIP_BUILD test
-# is "the dir exists and has an index.html" — which a broken release satisfies —
+# A HEALTH-failed release must NEVER stay staged (D26).  PLAN's already-staged
+# test is "the dir exists and has an index.html" — which a broken release satisfies —
 # so leaving it behind POISONED the build_id: every retry re-gated the same
 # broken bytes and failed 14 forever, with no way back short of a manual rm.
 # Purge it.  The one exception is a release that is ALSO the live or the
@@ -365,6 +389,16 @@ PY
 # REBUILDS from source.
 purge_failed_release() {
   local livecur="" prev=""
+  # A PREBUILT release has NO source on this box.  Purging it would drop it into
+  # the `else` arm of PLAN — a rebuild from the PROVISIONED TEMPLATE, which bakes
+  # genuine bp-build-id/bp-content-rev markers, passes HEALTH and goes live with
+  # bytes that are not the ones anybody uploaded.  Fail closed: keep the tree
+  # (marker and all) and say what the operator actually has to do.
+  if [ -f "$RELDIR/$PREBUILT_MARK" ]; then
+    : > "$RELDIR/$HEALTH_FAIL_MARK" 2>/dev/null || true
+    log "HEALTH: release $BUILD_ID was staged from UPLOADED prebuilt bytes — this box has no source to rebuild it from, so its bytes are KEPT and marked health-failed: re-upload required (a template rebuild would pass HEALTH on genuine markers and go live with the WRONG bytes)"
+    return 0
+  fi
   [ -L "$CURRENT" ] && livecur="$(basename "$(readlink "$CURRENT")")"
   [ -f "$ROOT/.previous" ] && prev="$(cat "$ROOT/.previous" 2>/dev/null || true)"
   if [ -d "$RELDIR" ] && { [ "$BUILD_ID" = "$livecur" ] || [ "$BUILD_ID" = "$prev" ]; }; then
@@ -374,6 +408,35 @@ purge_failed_release() {
   fi
   rm -rf "$RELDIR"
   log "HEALTH: purged releases/$BUILD_ID — a redeploy of this build_id rebuilds from source instead of re-gating broken bytes"
+}
+
+# STAGE's one copy idiom, shared by the two arms that produce bytes (a local
+# build's dist/, and an uploaded prebuilt tree).  Stage into a .partial dir then
+# rename, so a crash mid-copy never leaves a half-populated releases/<build_id>/
+# that a later PLAN mistakes for staged.  cp/mv carry no forensic of their own —
+# capture the exit code + a disk read (the copy that fails on a real box almost
+# always fails on a full /opt) so the detail names the next move instead of a
+# bare "copy failed".  Exits 13 (STAGE failed) on either failure, after emitting.
+stage_dir_into_release() { # <srcdir> <what> [prebuilt_sha256]
+  local src="$1" what="$2" sha="${3:-}" cp_rc mv_rc disk
+  rm -rf "$RELDIR" "$RELDIR.partial"
+  mkdir -p "$RELDIR.partial"
+  cp -a "$src/." "$RELDIR.partial/"; cp_rc=$?
+  if [ "$cp_rc" -ne 0 ]; then
+    disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
+    DETAIL="copy of $what into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
+    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+  fi
+  # The provenance marker rides INSIDE the atomic rename — a release dir never
+  # exists without it, so no reader can see prebuilt bytes as locally built.
+  [ -n "$sha" ] && printf '%s\n' "$sha" > "$RELDIR.partial/$PREBUILT_MARK"
+  mv "$RELDIR.partial" "$RELDIR"; mv_rc=$?
+  if [ "$mv_rc" -ne 0 ]; then
+    rm -rf "$RELDIR.partial"
+    DETAIL="rename into releases/$BUILD_ID failed (mv exit $mv_rc) — expected an atomic move within the releases dir; check the target isn't a non-empty dir or a mountpoint, and its ownership"
+    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -648,6 +711,15 @@ RCF
   # health server needs python3; without it the block skips honestly.
   # -------------------------------------------------------------------------
   if ! command -v python3 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+    # A SKIP here is honest on a laptop and DANGEROUS in CI: everything this
+    # block proves — the stage protocol, the content-truth gate, "the box ran no
+    # npm" — would silently not run while the self-test still printed PASS and
+    # exited 0.  CI sets BARKPARK_SELFTEST_REQUIRE_E2E=1 so a runner without
+    # python3/curl is a HARD failure instead of a green vacuum.
+    if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+      echo "[selftest] FAIL - engine e2e is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but python3 and/or curl are missing from PATH — install them on this runner; a skipped e2e block proves NOTHING and must not report PASS"
+      exit 1
+    fi
     echo "[selftest] SKIP engine e2e — needs python3 + curl (the throwaway health server)"
   else
     E2E="$TD/e2e"; FAKEBIN="$E2E/bin"; SRC="$E2E/src"
@@ -897,6 +969,158 @@ FAKENPM
       test -s "$R_LOG"
     check "reattach: the log carries RAW child output, not BPSTAGE lines" \
       sh -c "grep -q 'building the site' '$R_LOG' && ! grep -q '^BPSTAGE' '$R_LOG'"
+
+    # -----------------------------------------------------------------------
+    # PREBUILT — THE BUILD LEAVES THE SERVING BOX (D88/D89).  Its own slug, its
+    # own source dir and therefore its OWN .npm-calls sentinel: sharing the
+    # skip-build slot above would let a regression in one mask the other.
+    # Exit 0, HEALTH ok and SWITCH ok ALL SURVIVE deleting the prebuilt branch
+    # (the fallback rebuild produces genuine markers), so the only assertions
+    # that discriminate are the two facts below: the box ran NO npm, and the
+    # bytes that went live are the ones that were uploaded.
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: a PREBUILT deploy STAGEs uploaded bytes with NO npm on this box"
+    PSRC="$E2E/psrc"; PB="$E2E/prebuilt"; PB_SITE="$E2E/sites/prebuilt"
+    mkdir -p "$PSRC" "$PB"
+    printf '{"name":"selftest-prebuilt","private":true}\n' > "$PSRC/package.json"
+    # Opaque 64-hex identities (the CP verifies the real digest; this engine
+    # RECORDS and COMPARES it — it never re-hashes the tree, and must not claim to).
+    SHA_A="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    SHA_B="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+    SHA_C="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+    pb_livenow() { readlink "$PB_SITE/current" 2>/dev/null || true; }
+    pb_deploy() { # <build_id> [prebuilt_dir] [sha256] -> exit code; stdout at $E2E/pb.out
+      env PATH="$FAKEBIN:$PATH" \
+        SITE_SLUG=prebuilt BUILD_ID="$1" CONTENT_REV=rev-1 SITE_SRC="$PSRC" \
+        PREBUILT_DIR="${2:-}" PREBUILT_SHA256="${3:-}" \
+        BARKPARK_SITES_DIR="$E2E/sites" BARKPARK_CADDYFILE="$E2E/absent-caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$E2E/prebuilt.lock" BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$E2E/pb.out" 2> "$E2E/pb.err"
+      echo $?
+    }
+    pb_saw() { grep -q "^BPSTAGE name=$1 status=$2 build_id=$3" "$E2E/pb.out"; }
+    pb_grep() { grep -q "$1" "$E2E/pb.out"; }
+    pb_absent() { ! grep -q "$1" "$E2E/pb.out"; }
+    # Every stage NAME and STATUS on the wire must be one the control plane's
+    # closed whitelists accept (@stage_names/@stage_statuses in deploy_runner.ex):
+    # an invented word is silently DROPPED, and an unknown status renders as
+    # 'pending' — a stage bar stuck forever with the deploy long finished.
+    pb_wire_whitelisted() {
+      ! grep '^BPSTAGE ' "$E2E/pb.out" \
+        | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |$)'
+    }
+    mk_prebuilt() { # <dir> <build_id> <body-marker>
+      rm -rf "$1"; mkdir -p "$1"
+      { printf '<!doctype html><html><head>\n'
+        printf '<meta name="bp-build-id" content="%s">\n' "$2"
+        printf '<meta name="bp-content-rev" content="rev-1">\n'
+        printf '<meta name="bp-doc-id" content="doc-42">\n'
+        printf '</head><body><h1>%s</h1></body></html>\n' "$3"
+      } > "$1/index.html"
+    }
+
+    # POSITIVE CONTROL — this sentinel CAN fire.  Without it, "no npm ran" is
+    # indistinguishable from "the sentinel was never wired up".
+    rm -f "$PSRC/.npm-calls"
+    rc="$(pb_deploy pb0)"
+    check "positive control: a source deploy on this slug exits 0"  [ "$rc" = 0 ]
+    check "positive control: the prebuilt slug's OWN npm sentinel FIRES" [ -s "$PSRC/.npm-calls" ]
+
+    mk_prebuilt "$PB" pb1 "UPLOADED-BYTES-pb1-v1"
+    : > "$PSRC/.npm-calls"
+    rc="$(pb_deploy pb1 "$PB" "$SHA_A")"
+    check "prebuilt deploy exit 0"                    [ "$rc" = 0 ]
+    check "PLAN ok"                                   pb_saw PLAN ok pb1
+    check "BUILD skipped SAYS prebuilt and NAMES the digest" \
+      grep -qE '^BPSTAGE name=BUILD status=skipped build_id=pb1 detail="prebuilt bytes \(.*, sha256 0123456789ab\) - no build ran on this box"' "$E2E/pb.out"
+    check "STAGE genuinely RAN (started)"             pb_saw STAGE started pb1
+    check "STAGE ok names the prebuilt digest" \
+      grep -qE '^BPSTAGE name=STAGE status=ok build_id=pb1 detail="prebuilt bytes -> releases/pb1 \(.*sha256 0123456789ab\)"' "$E2E/pb.out"
+    check "HEALTH ok"                                 pb_saw HEALTH ok pb1
+    check "SWITCH ok"                                 pb_saw SWITCH ok pb1
+    check "current -> releases/pb1"                   [ "$(pb_livenow)" = releases/pb1 ]
+    check "THE BOX RAN NO NPM (its own sentinel is empty)" [ ! -s "$PSRC/.npm-calls" ]
+    check "THE UPLOADED BYTES ARE WHAT IS LIVE" \
+      grep -q 'UPLOADED-BYTES-pb1-v1' "$PB_SITE/current/index.html"
+    check "the release records WHICH bytes it carries (.bp-prebuilt-sha256)" \
+      [ "$(cat "$PB_SITE/releases/pb1/.bp-prebuilt-sha256" 2>/dev/null)" = "$SHA_A" ]
+    check "every BPSTAGE name+status on the wire is whitelisted" pb_wire_whitelisted
+
+    echo "[selftest] e2e: a RE-UPLOAD over an existing release dir stages the NEW bytes"
+    # pb1's dir now exists and has an index.html — exactly what the already-staged
+    # arm accepts.  Tested below the PREBUILT arm, this run would re-gate the STALE
+    # tree, exit 0, and serve v1 while the operator watched a v2 upload succeed.
+    mk_prebuilt "$E2E/prebuilt2" pb2 "UPLOADED-BYTES-pb2"
+    rc="$(pb_deploy pb2 "$E2E/prebuilt2" "$SHA_B")"
+    check "second prebuilt build goes live"           [ "$rc" = 0 ]
+    mk_prebuilt "$PB" pb1 "UPLOADED-BYTES-pb1-v2"
+    : > "$PSRC/.npm-calls"
+    rc="$(pb_deploy pb1 "$PB" "$SHA_C")"
+    check "re-upload exit 0"                          [ "$rc" = 0 ]
+    check "re-upload did NOT take the already-staged arm" \
+      pb_absent 'status=skipped build_id=pb1 detail="release pb1 is already staged"'
+    check "re-upload RE-STAGED (STAGE ran, not skipped)" pb_saw STAGE ok pb1
+    check "re-upload log names the digest MISMATCH it replaced" \
+      pb_grep 'REPLACING the staged tree'
+    check "the NEW uploaded bytes are live"           grep -q 'UPLOADED-BYTES-pb1-v2' "$PB_SITE/current/index.html"
+    check "the STALE bytes are gone"                  sh -c "! grep -q 'UPLOADED-BYTES-pb1-v1' '$PB_SITE/current/index.html'"
+    check "the marker now records the NEW digest" \
+      [ "$(cat "$PB_SITE/releases/pb1/.bp-prebuilt-sha256" 2>/dev/null)" = "$SHA_C" ]
+    check "the re-upload still ran no npm"            [ ! -s "$PSRC/.npm-calls" ]
+
+    echo "[selftest] e2e: a HEALTH-failed PREBUILT release FAILS CLOSED (never a template rebuild)"
+    mk_prebuilt "$E2E/prebuilt3" TOTALLY-WRONG "UPLOADED-BYTES-pb3"
+    : > "$PSRC/.npm-calls"
+    rc="$(pb_deploy pb3 "$E2E/prebuilt3" "$SHA_B")"
+    check "lying prebuilt bytes exit 14"              [ "$rc" = 14 ]
+    check "HEALTH failed"                             pb_saw HEALTH failed pb3
+    check "its bytes are KEPT, not purged into a rebuild" [ -d "$PB_SITE/releases/pb3" ]
+    check "it is marked health-failed"                [ -f "$PB_SITE/releases/pb3/.bp-health-failed" ]
+    check "it KEEPS its prebuilt marker (the only record it was uploaded)" \
+      [ -f "$PB_SITE/releases/pb3/.bp-prebuilt-sha256" ]
+    check "the log says re-upload required"           pb_grep 're-upload required'
+    check "the log does NOT promise a rebuild from source" pb_absent 'rebuilds from source'
+    check "current unmoved (still pb1)"               [ "$(pb_livenow)" = releases/pb1 ]
+    # And the redeploy WITHOUT an artifact refuses instead of rebuilding the
+    # provisioned template — that rebuild passes HEALTH on genuine markers and
+    # would put bytes nobody uploaded in front of users.
+    : > "$PSRC/.npm-calls"
+    rc="$(pb_deploy pb3)"
+    check "redeploy with no artifact exits 11"        [ "$rc" = 11 ]
+    check "PLAN failed (fail closed)"                 pb_saw PLAN failed pb3
+    check "it names the RE-UPLOAD as the next move"   pb_grep 'RE-UPLOAD the artifact'
+    check "the refusal ran no npm"                    [ ! -s "$PSRC/.npm-calls" ]
+    check "current STILL unmoved (still pb1)"         [ "$(pb_livenow)" = releases/pb1 ]
+
+    echo "[selftest] e2e: prebuilt bytes this box cannot NAME are refused"
+    : > "$PSRC/.npm-calls"
+    rc="$(pb_deploy pb4 "$PB" "not-a-digest")"
+    check "a malformed PREBUILT_SHA256 exits 11"      [ "$rc" = 11 ]
+    check "PLAN failed"                               pb_saw PLAN failed pb4
+    check "no release dir left behind"                [ ! -d "$PB_SITE/releases/pb4" ]
+    check "a missing PREBUILT_DIR tree exits 11" \
+      sh -c "[ \"\$(env PATH='$FAKEBIN:$PATH' SITE_SLUG=prebuilt BUILD_ID=pb5 CONTENT_REV=rev-1 SITE_SRC='$PSRC' PREBUILT_DIR='$E2E/absent-prebuilt' PREBUILT_SHA256='$SHA_A' BARKPARK_SITES_DIR='$E2E/sites' BARKPARK_CADDYFILE='$E2E/absent-caddyfile' BARKPARK_SITE_DEPLOY_LOCK='$E2E/prebuilt.lock' BARKPARK_CADDYFILE_LOCK='$E2E/caddyfile.lock' BARKPARK_SITE_NO_CAP=1 bash '$SELF' >/dev/null 2>&1; echo \$?)\" = 11 ]"
+    check "current unmoved after both refusals"       [ "$(pb_livenow)" = releases/pb1 ]
+
+    echo "[selftest] e2e: the already-live no-op is DIGEST-AWARE for prebuilt bytes"
+    # pb1 is live carrying SHA_C.  The build_id no-op is keyed on build_id, and
+    # build_id does NOT determine prebuilt bytes — so a same-id upload of a
+    # DIFFERENT digest must not exit 0 reporting "already live".
+    mk_prebuilt "$E2E/prebuilt6" pb1 "UPLOADED-BYTES-pb1-v3"
+    : > "$PSRC/.npm-calls"
+    rc="$(pb_deploy pb1 "$E2E/prebuilt6" "$SHA_B")"
+    check "a same-build_id upload of DIFFERENT bytes is refused (exit 11)" [ "$rc" = 11 ]
+    check "PLAN failed, not noop"                     pb_saw PLAN failed pb1
+    check "the refusal names a NEW deployment as the move" pb_grep 'mint a NEW deployment'
+    check "the LIVE bytes are untouched"              grep -q 'UPLOADED-BYTES-pb1-v2' "$PB_SITE/current/index.html"
+    check "the live release keeps its own digest" \
+      [ "$(cat "$PB_SITE/releases/pb1/.bp-prebuilt-sha256" 2>/dev/null)" = "$SHA_C" ]
+    check "the refusal ran no npm"                    [ ! -s "$PSRC/.npm-calls" ]
+    # And re-uploading the SAME digest for the live build IS still a clean no-op.
+    rc="$(pb_deploy pb1 "$PB" "$SHA_C")"
+    check "a same-digest redeploy of the live build is a no-op (exit 0)" [ "$rc" = 0 ]
+    check "PLAN noop"                                 pb_saw PLAN noop pb1
   fi
 
   echo ""
@@ -1105,32 +1329,89 @@ fi
 # This path used to print ONE prose line and exit 0 — no SWITCH, no HEALTHY, no
 # stage words at all.  It now speaks for every stage: PLAN noop, the rest skipped.
 emit PLAN started
+RELDIR="$RELEASES/$BUILD_ID"
+PREBUILT_DIR="${PREBUILT_DIR:-}"
+PREBUILT_SHA256="${PREBUILT_SHA256:-}"
+PREBUILT_SHORT=""
+PREBUILT_SIZE=""
 if [ "$(live_build)" = "$BUILD_ID" ]; then
+  # The no-op is keyed on build_id, and for a PREBUILT deploy build_id does not
+  # determine the bytes: two different `dist/` uploads for the same
+  # site+content+config mint the SAME id (the control plane nonces the mint
+  # precisely because of this, D87).  So a prebuilt run whose digest disagrees
+  # with what the live release records is NOT a no-op — exiting 0 there would
+  # report success while serving bytes nobody uploaded, the same hazard the
+  # PREBUILT arm's ordering closes, one gate earlier.  It is refused rather than
+  # re-staged: RELDIR is the LIVE tree here, and tearing it down to replace it
+  # would 404 the site mid-deploy.  A fresh mint (the normal path) has a fresh
+  # build_id and never reaches this line.
+  staged_sha="$(cat "$RELDIR/$PREBUILT_MARK" 2>/dev/null || true)"
+  if [ -n "$PREBUILT_DIR" ] && [ "$staged_sha" != "$PREBUILT_SHA256" ]; then
+    DETAIL="build $BUILD_ID is already LIVE carrying prebuilt '${staged_sha:-<none>}', but this upload declares ${PREBUILT_SHA256:0:12} — refusing to report a no-op over bytes that are not the ones uploaded; mint a NEW deployment for this artifact (a prebuilt mint is nonced for exactly this reason) and redeploy"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+  fi
   log "PLAN: build_id $BUILD_ID is already live for '$SITE_SLUG' — nothing to do"
   emit PLAN noop "build $BUILD_ID is already live"
   for s in BUILD STAGE HEALTH SWITCH RETIRE; do emit "$s" skipped "build $BUILD_ID is already live"; done
   exit 0
 fi
-RELDIR="$RELEASES/$BUILD_ID"
-if [ -f "$RELDIR/$HEALTH_FAIL_MARK" ]; then
+# PLAN is tri-state (D88/D89).  ORDER IS LOAD-BEARING: the PREBUILT arm is tested
+# FIRST — before the already-staged arm and before the health-failed arm.  Below
+# the already-staged gate, a RE-UPLOAD of a build_id whose release dir happens to
+# exist would exit 0 having re-gated and switched to the STALE tree, i.e. the box
+# would serve bytes nobody uploaded and report success.  "Rebuild from source" is
+# not a move a prebuilt site has, so neither of the two arms below it can be
+# allowed to claim this run.
+if [ -n "$PREBUILT_DIR" ]; then
+  PLAN_MODE=prebuilt
+  if ! printf '%s' "$PREBUILT_SHA256" | grep -qE '^[0-9a-f]{64}$'; then
+    DETAIL="PREBUILT_DIR is set but PREBUILT_SHA256 is '${PREBUILT_SHA256:-<missing>}' (want 64 lowercase hex) — refusing to stage bytes this box cannot name; the caller must pass the digest it verified for the artifact"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+  fi
+  if [ ! -d "$PREBUILT_DIR" ] || [ ! -f "$PREBUILT_DIR/index.html" ]; then
+    DETAIL="PREBUILT_DIR '$PREBUILT_DIR' is not a directory with an index.html — expected the VALIDATED tree the box extracted from the uploaded artifact; check the ingest step ran and named this dir"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+  fi
+  PREBUILT_SHORT="${PREBUILT_SHA256:0:12}"
+  PREBUILT_SIZE="$(du -sh "$PREBUILT_DIR" 2>/dev/null | cut -f1 || echo '?')"
+  # RE-VERIFY on a retry instead of leaning on dir-existence (D77's shape): a dir
+  # that is there says NOTHING about WHICH bytes are in it.  The staged marker is
+  # compared to the digest this run was handed, and either way the tree is
+  # RE-STAGED — a mismatch must never be re-gated as if it were this upload.
+  if [ -f "$RELDIR/$PREBUILT_MARK" ]; then
+    staged_sha="$(cat "$RELDIR/$PREBUILT_MARK" 2>/dev/null || true)"
+    if [ "$staged_sha" = "$PREBUILT_SHA256" ]; then
+      log "PLAN: releases/$BUILD_ID already carries prebuilt $PREBUILT_SHORT — re-staging the uploaded bytes anyway (dir-existence is not a proof of which bytes are staged)"
+    else
+      log "PLAN: releases/$BUILD_ID carries prebuilt '${staged_sha:-<none>}' but this upload is $PREBUILT_SHORT — REPLACING the staged tree (never re-gating the stale one)"
+    fi
+  fi
+  log "PLAN: release $BUILD_ID ships UPLOADED prebuilt bytes ($PREBUILT_SIZE, sha256 $PREBUILT_SHORT) — no build will run on this box"
+elif [ -f "$RELDIR/$PREBUILT_MARK" ] && [ -f "$RELDIR/$HEALTH_FAIL_MARK" ]; then
+  # Prebuilt bytes that failed HEALTH, and no artifact on THIS run.  The other
+  # arms would rebuild from the provisioned template: genuine markers, HEALTH
+  # green, WRONG bytes live.  Fail closed — the only real fix is another upload.
+  DETAIL="release $BUILD_ID was staged from UPLOADED prebuilt bytes and FAILED health — this box has no source for it, and a rebuild from the provisioned template would pass HEALTH on genuine markers and go live with the WRONG bytes; RE-UPLOAD the artifact for this build_id and redeploy"
+  log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+elif [ -f "$RELDIR/$HEALTH_FAIL_MARK" ]; then
   # A release we could not delete (it is the live/rollback target) but whose
   # bytes FAILED health.  Never re-gate poison — rebuild it.
   log "PLAN: release $BUILD_ID is marked health-failed — rebuilding from source (never re-gating broken bytes)"
-  SKIP_BUILD=0
+  PLAN_MODE=build
 elif [ -d "$RELDIR" ] && [ -f "$RELDIR/index.html" ]; then
   # A previously-staged but not-live build (e.g. a rollback target): skip the
   # rebuild, re-health-gate + switch straight to it.
   log "PLAN: release $BUILD_ID already staged — re-gating, skipping BUILD/STAGE"
-  SKIP_BUILD=1
+  PLAN_MODE=staged
 else
-  SKIP_BUILD=0
+  PLAN_MODE=build
 fi
 log "PLAN: deploy '$SITE_SLUG' build $BUILD_ID (live now: $(live_build))"
-if [ "$SKIP_BUILD" = 1 ]; then
-  emit PLAN ok "release $BUILD_ID is already staged — BUILD and STAGE will be skipped"
-else
-  emit PLAN ok "building '$SITE_SLUG' build $BUILD_ID from source"
-fi
+case "$PLAN_MODE" in
+  staged)   emit PLAN ok "release $BUILD_ID is already staged — BUILD and STAGE will be skipped" ;;
+  prebuilt) emit PLAN ok "staging uploaded prebuilt bytes for build $BUILD_ID (sha256 $PREBUILT_SHORT) — BUILD will be skipped, STAGE will run" ;;
+  *)        emit PLAN ok "building '$SITE_SLUG' build $BUILD_ID from source" ;;
+esac
 
 # ---- BUILD -----------------------------------------------------------------
 # Serialized (flock, above).  Resource-capped + env-scrubbed OUTSIDE this script
@@ -1157,7 +1438,7 @@ build_failure_reason() { # <build-log>
   printf '%s' "$r"
 }
 
-if [ "$SKIP_BUILD" = 0 ]; then
+if [ "$PLAN_MODE" = build ]; then
   emit BUILD started
   if [ ! -d "$SITE_SRC" ]; then
     DETAIL="no site source dir $SITE_SRC — expected a checked-out app there; check the deploy payload's repo+ref and that the clone/checkout step actually populated it"
@@ -1234,30 +1515,22 @@ if [ "$SKIP_BUILD" = 0 ]; then
     DETAIL="dist/ has no index.html — expected a root document; check the build emitted a top-level index.html (a trailingSlash/base config can nest it under a subdir)"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
-  # Stage into a .partial dir then rename, so a crash mid-copy never leaves a
-  # half-populated releases/<build_id>/ that a later PLAN mistakes for staged.
-  rm -rf "$RELDIR" "$RELDIR.partial"
-  mkdir -p "$RELDIR.partial"
-  # cp/mv carry no forensic of their own — capture the exit code + a disk read
-  # (the copy that fails on a real box almost always fails on a full /opt) so the
-  # detail names the next move instead of a bare "copy failed".
-  cp -a "$SITE_SRC/dist/." "$RELDIR.partial/"; cp_rc=$?
-  if [ "$cp_rc" -ne 0 ]; then
-    disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
-    DETAIL="copy of dist/ into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership"
-    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
-  fi
-  mv "$RELDIR.partial" "$RELDIR"; mv_rc=$?
-  if [ "$mv_rc" -ne 0 ]; then
-    rm -rf "$RELDIR.partial"
-    DETAIL="rename into releases/$BUILD_ID failed (mv exit $mv_rc) — expected an atomic move within the releases dir; check the target isn't a non-empty dir or a mountpoint, and its ownership"
-    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
-  fi
+  stage_dir_into_release "$SITE_SRC/dist" "dist/"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: dist/ -> releases/$BUILD_ID/ ($staged_size)"
   emit STAGE ok "dist/ -> releases/$BUILD_ID ($staged_size)"
+elif [ "$PLAN_MODE" = prebuilt ]; then
+  # THE BUILD LEFT THE BOX (D88).  No npm, no node_modules, no CPU contention
+  # with the API that serves this site — just the shippable output, staged.
+  emit BUILD skipped "prebuilt bytes ($PREBUILT_SIZE, sha256 $PREBUILT_SHORT) - no build ran on this box"
+  log "BUILD: skipped — build $BUILD_ID ships uploaded prebuilt bytes ($PREBUILT_SIZE, sha256 $PREBUILT_SHORT); nothing is compiled on this box"
+  emit STAGE started
+  stage_dir_into_release "$PREBUILT_DIR" "prebuilt bytes" "$PREBUILT_SHA256"
+  staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
+  log "STAGE: prebuilt bytes -> releases/$BUILD_ID/ ($staged_size, sha256 $PREBUILT_SHORT)"
+  emit STAGE ok "prebuilt bytes -> releases/$BUILD_ID ($staged_size, sha256 $PREBUILT_SHORT)"
 else
-  # A SKIP_BUILD redeploy used to emit NEITHER a BUILD nor a STAGE line — the
+  # An already-staged redeploy used to emit NEITHER a BUILD nor a STAGE line — the
   # second path that hung a stage-watching orchestrator forever.
   emit BUILD skipped "release $BUILD_ID is already staged"
   emit STAGE skipped "release $BUILD_ID is already staged"
