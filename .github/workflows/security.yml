@@ -140,23 +140,37 @@ jobs:
     # supposed to speak — and a baseline carrying the same finding swallows it.
     # Honest Gates D29.
     #
-    # This job carries BOTH text-only baseline ratchets (the job id/name is
-    # unchanged because it is referenced by name). The second one is
-    # orthogonal: the overlap check is span-based and baseline-driven, so it
-    # PASSES for a row that drifted out of its annotation span, for a moved
-    # file, and for a file with annotations and zero rows. The staleness check
-    # never looks at annotations — it asks whether each entry's file:line still
-    # holds a construct of its own detector type. Also ~1s, no BEAM. Both its
-    # SELFTEST and its run against the real baseline are blocking as of wave 24
-    # — the residue reached zero; see the measured numbers on that step.
+    # This job carries THREE text-only ratchets (the job id/name is unchanged
+    # because it is referenced by name). They are mutually orthogonal — each
+    # PASSES on the shape the other two catch — so none of them is redundant:
+    #
+    #   1. OVERLAP    a baseline row and an inline annotation waiving the same
+    #                 finding. Span-based and baseline-driven, so it PASSES for
+    #                 a row that drifted out of its annotation span, for a moved
+    #                 file, and for a file with annotations and zero rows.
+    #   2. BINDING    an annotation that waives something other than what its
+    #                 author wrote it for — misspelled past parse.ex:61, bound
+    #                 to no def, left at the old indent, or parked on one clause
+    #                 of a group. Added by wave 24; it rides the SAME script and
+    #                 the SAME two steps below, because both ratchets run on the
+    #                 script's DEFAULT invocation. If those steps ever red with
+    #                 MISSPELL / DETACHED / INDENT / MULTICLAUSE, that is this
+    #                 ratchet, not the overlap one.
+    #   3. STALENESS  a baseline row whose file:line no longer holds a construct
+    #                 of its own detector type. Never looks at annotations at
+    #                 all. Its SELFTEST and its run against the real baseline
+    #                 are BOTH blocking as of wave 24 — the residue reached
+    #                 zero; see the measured numbers on that step.
+    #
+    # All three are ~1s, no BEAM, no deps.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Selftest (the ratchet must be able to fail)
+      - name: Selftest (the overlap + binding ratchets must be able to fail)
         run: bash api/scripts/sobelow-inline-overlap-check.sh --selftest
 
-      - name: No baseline entry duplicates an inline waiver
+      - name: No baseline entry duplicates an inline waiver, and every annotation is bound to its def
         run: bash api/scripts/sobelow-inline-overlap-check.sh
 
       - name: Selftest (the staleness ratchet must be able to fail)
