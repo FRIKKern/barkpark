@@ -189,7 +189,14 @@ defmodule BarkparkWeb.Icons do
     "sticky-note" =>
       ~s(<path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h9.5L21 15.5V5a2 2 0 0 0-2-2z"/><path d="M15 21v-5a1 1 0 0 1 1-1h5"/>),
     "messages-square" =>
-      ~s(<path d="M16 10a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>)
+      ~s(<path d="M16 10a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>),
+    # Field-group tab glyphs shipped by the media plugin's schemas
+    # (media_asset "rights", media_collection "sharing"). Both were named in
+    # priv/ and drawn nowhere — see the priv/ scan in icons_tripwire_test.exs.
+    "shield" =>
+      ~s(<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>),
+    "link" =>
+      ~s(<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>)
   }
 
   @emoji_map %{

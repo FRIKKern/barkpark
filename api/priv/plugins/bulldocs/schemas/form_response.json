@@ -1,7 +1,7 @@
 {
   "name": "form_response",
   "title": "Form responses",
-  "icon": "🗳️",
+  "icon": "clipboard-list",
   "visibility": "private",
   "fields": [
     { "name": "title", "title": "Title", "type": "string", "surface": "body" },
