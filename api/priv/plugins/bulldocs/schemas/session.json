@@ -1,7 +1,7 @@
 {
   "name": "session",
   "title": "Session",
-  "icon": "🧵",
+  "icon": "messages-square",
   "visibility": "private",
   "fields": [
     {"name": "title", "title": "Title", "type": "string", "group": "meta",
