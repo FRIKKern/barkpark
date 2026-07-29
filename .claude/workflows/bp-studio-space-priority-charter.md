@@ -2130,8 +2130,28 @@ anywhere-match with an `or`, the same shape as the stale assertion the slice del
 The reproduction is L1; the fix is proven offline. Anchor criteria 1–4 (`task-f559f7c508527010`) stay
 open with honest `--miss` notes, and the browser-journey slice is what closes them. The format leg of
 every gate exits 1 on this host on 88 untouched files — Elixir 1.19.5 installed against a pinned
-1.18.4 — verified differentially, not waved through.
+1.18.4 — verified differentially against main's own red Format job on the real 1.18.1 toolchain, which
+lists 94 files and none of this wave's, so no PR introduces one.
+
+**And CI caught a real one.** #7566's guard was green on the scoped studio suite three times and RED on
+all three arms in the full CI run — a process-global `BARKPARK_PAPER_CANVAS` leak from four sibling
+suites. Reproduced locally, fixed by pinning the flag, re-pushed. See D233; that is the wave's own
+lesson landing on the wave.
 
 **D232.** A schema's icon is a shipped product string, not source, and `priv/` was a fourth hole in a
 tripwire whose own moduledoc named three. Three schemas were wrong at once. The scan is the fix; the
 two edits were the symptom.
+
+**D233 — a scoped `mix test` is not the suite, and this wave proved it on itself.** The journey guard
+was green on `test/barkpark_web/live/studio` three separate times and went **RED on all three arms** in
+CI's full 12,971-test run, on exactly one line: `assert html =~ data-test-id="studio-paper-block-editor"`.
+Cause, reproduced locally rather than guessed: `BARKPARK_PAPER_CANVAS` is read from the
+**process-global** environment at render time, and four sibling suites deliberately set it to `"0"` to
+pin the legacy opt-out (`paper_editor_test_helpers.ex`, `studio_live_paper_canvas_test.exs`,
+`paper_canvas_test.exs`, `studio_live_paper_test.exs`). Running the guard with `BARKPARK_PAPER_CANVAS=0`
+reproduces CI byte for byte. Note what stayed GREEN under the hostile env: `refute html =~ "Select a
+document to edit"` — the owner's bug is fixed either way; a paper inheriting the OFF flag opens into the
+read-only View pane plus the toggle. **The defect was in the guard, not in the fix.** The guard now pins
+the flag ON (the mainline default per D7/D9) with the same `prev`/`put`/`on_exit` idiom the OFF suites
+use. Any future test whose assertion depends on `BARKPARK_PAPER_CANVAS` must pin it; inheriting it is
+an order-dependent green.
