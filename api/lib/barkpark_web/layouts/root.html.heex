@@ -1548,10 +1548,15 @@
        a.pane-item.nav-plugin-entry link variant keeps the same rhythm.
        `width: 100%` is not optional — .pane-body is a plain block container,
        so a button inside it would otherwise shrink-to-fit its label.
+       `line-height: inherit` and `margin: 0` are part of the reset for the
+       same reason: the UA `button { font: 400 13.33px … }` shorthand resets
+       line-height to `normal` (~1.2), and these rows inherited body's 1.6 as
+       divs — without it every desk row silently tightens on conversion.
        Reset idiom copied from .pane-section-header below. */
     .pane-item {
-      background: none; border: 0; width: 100%; text-align: left;
-      font-family: inherit; appearance: none; -webkit-appearance: none;
+      background: none; border: 0; margin: 0; width: 100%; text-align: left;
+      font-family: inherit; line-height: inherit;
+      appearance: none; -webkit-appearance: none;
       display: flex; align-items: center; gap: 10px;
       padding: 8px 16px; cursor: pointer;
       border-left: 3px solid transparent; color: var(--fg-muted);
@@ -3458,9 +3463,9 @@
        outer .pane-doc-item stays a div because it hosts the bulk-publish
        checkbox as a sibling. UA reset first, same order rule as .pane-item. */
     .bp-doc-row-body {
-      background: none; border: 0; text-align: left; color: inherit;
-      font-family: inherit; font-size: inherit; appearance: none;
-      -webkit-appearance: none;
+      background: none; border: 0; margin: 0; text-align: left; color: inherit;
+      font-family: inherit; font-size: inherit; line-height: inherit;
+      appearance: none; -webkit-appearance: none;
       flex: 1; min-width: 0; cursor: pointer; padding: 10px 16px;
       display: flex; align-items: center; gap: 8px;
     }

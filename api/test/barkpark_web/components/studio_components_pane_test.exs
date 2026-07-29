@@ -421,8 +421,13 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
       assert html =~ ~s(<span class="pane-doc-title">)
       assert html =~ ~s(<span class="pane-doc-sub">)
       # the OUTER row stays a div: it hosts the bulk-publish checkbox as a
-      # sibling, and a button may not contain a button.
-      assert html =~ ~s(<div id=) or html =~ ~s(<div class="pane-doc-item)
+      # sibling, and a button may not contain a button. Asserted on the
+      # ROOT element, not with a `=~ "<div"` anywhere-match — the anywhere
+      # form is the shape of the stale assertion this diff deletes, and it
+      # would stay green if the outer row became a <button> tomorrow.
+      assert html |> String.trim_leading() |> String.starts_with?("<div"),
+             "the outer .pane-doc-item must stay a div (it hosts the checkbox " <>
+               "as a sibling); got: #{html |> String.trim_leading() |> String.slice(0, 60)}"
     end
 
     test "selected doc row states selection with aria-current, never aria-selected" do
