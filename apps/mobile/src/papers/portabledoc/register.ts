@@ -36,6 +36,40 @@ export interface BlockCtx extends InlineCtx {
  * this shape would not compile. */
 export type Render = (b: Block, ctx: BlockCtx, key: number) => ReactNode
 
+/* ── the degrade-card marker ────────────────────────────────────────────────── */
+//
+// It lives HERE, in the cycle-free chrome module, and not next to DEGRADE_ONLY
+// in registry.tsx — deliberately. A family module calls `degradeCard()` while
+// its OWN module body evaluates, and registry.tsx is inside the import cycle
+// (registry → blocks/* → registry). Depending on hoisting to survive a
+// module-eval-time call across a cycle is a bet on the bundler; `register.ts`
+// imports nothing from the families, so there is no cycle to survive.
+
+interface DegradeMarked {
+  readonly __bpDegradeCard?: true
+}
+
+/** Mark a renderer as a DEGRADE CARD — a labeled box that states its ceiling
+ * instead of playing the content (video, asciicast; blocks/core-media.tsx
+ * carries the doctrine). The mark is what `DEGRADE_ONLY` is derived FROM, so
+ * wrapping a new card is the whole registration: nothing else needs editing,
+ * and nothing else can go stale. Read the DEGRADE_ONLY comment before adding a
+ * third — a degrade card counts as UNrenderable at turn level, which is a
+ * deliberate subtraction and not an oversight.
+ *
+ * `configurable` so wrapping the same function twice (a renderer aliased under
+ * two type keys, as `stats`/`stat-grid` already are) re-marks instead of
+ * throwing a TypeError at module-eval time. */
+export function degradeCard<R extends Render>(render: R): R {
+  Object.defineProperty(render, '__bpDegradeCard', { value: true, configurable: true })
+  return render
+}
+
+/** Does this renderer carry the degrade-card marker? */
+export function isDegradeCard(render: Render | undefined): boolean {
+  return (render as (Render & DegradeMarked) | undefined)?.__bpDegradeCard === true
+}
+
 /* ── registers ──────────────────────────────────────────────────────────────── */
 
 // The serif face is no longer named here: it rides the token that needs it

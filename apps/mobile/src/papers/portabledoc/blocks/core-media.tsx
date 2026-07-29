@@ -3,9 +3,12 @@
 // asciicast (D46d/D47). MermaidIsland (a WebView island) is the one stateful
 // leaf, mounted as a component element the test walker treats as a leaf.
 //
-// Metro TDZ law (D49): this module imports renderBlockNative ONLY — never
-// BLOCK_RENDERERS, which is a const assembled from spreads and therefore
-// undefined while the family modules evaluate.
+// Metro TDZ law (D49): this module imports `renderBlockNative` from ../registry
+// (a hoisted function declaration, and only ever CALLED at render time) and
+// never BLOCK_RENDERERS, which is a const assembled from spreads and therefore
+// undefined while the family modules evaluate. `degradeCard` is called at THIS
+// module's EVAL time — a strictly stronger requirement — so it is imported from
+// ../register, which is outside the registry↔families cycle entirely.
 import type { ReactNode } from 'react'
 import { Image, Linking, Pressable, ScrollView, Text, View } from 'react-native'
 
@@ -13,7 +16,7 @@ import type { Theme } from '../../../ui/theme'
 import { roles, scale } from '../../../ui/typography'
 import { MermaidIsland } from '../MermaidIsland'
 import { asList, num, openableUrl, str, isMap, type Block } from '../model'
-import { MONO, type BlockCtx, type Render } from '../register'
+import { degradeCard, MONO, type BlockCtx, type Render } from '../register'
 import { renderBlockNative } from '../registry'
 
 // The paper register frames code as a quoted passage (surface slab + accent
@@ -228,7 +231,7 @@ function cardFrame(children: ReactNode, ctx: BlockCtx, terminal: boolean): React
 // first `video` block appearing in a corpus census. Until then the poster IS the
 // render and the tap hands off to the platform player, which is a better video
 // experience than an in-app <video> would be anyway.
-const video: Render = (b, ctx, key) => {
+const video: Render = degradeCard((b, ctx, key) => {
   const src = str(b.src).trim()
   // THE PARITY LAW: a src-less video renders NOTHING — not a dashed box, not an
   // empty card. Both twins agree (react's `video` returns '', videoRenderer
@@ -283,13 +286,13 @@ const video: Render = (b, ctx, key) => {
       {figcaption(str(b.caption), ctx.theme, 'cap')}
     </View>
   )
-}
+})
 
 // FLIP TRIGGER — none. A real `.cast` player is an asciinema-player WebView
 // island, and D42 ruled WebView islands out for anything but the Mermaid one
 // that already exists. There is no native path, so this card IS the ceiling
 // rather than a stop on the way to one.
-const asciicast: Render = (b, ctx, key) => {
+const asciicast: Render = degradeCard((b, ctx, key) => {
   const src = str(b.src).trim()
   const url = resolveImageSrc(src, ctx)
 
@@ -325,7 +328,7 @@ const asciicast: Render = (b, ctx, key) => {
       {figcaption(str(b.caption), ctx.theme, 'cap')}
     </View>
   )
-}
+})
 
 export const coreMediaRenderers: Record<string, Render> = {
   code,

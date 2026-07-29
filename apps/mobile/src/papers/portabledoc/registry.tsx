@@ -28,7 +28,7 @@ import { tableRenderers } from './blocks/table'
 import { taskboardRenderers } from './blocks/taskboard'
 import { CHAT_RENDERERS } from './chat'
 import { isMap, str, type Block } from './model'
-import type { BlockCtx, Render } from './register'
+import { isDegradeCard, type BlockCtx, type Render } from './register'
 
 /* ── unknown-block degrade — honest, labeled, logged ONCE per type ──────────── */
 
@@ -87,6 +87,9 @@ export const BLOCK_RENDERERS: Record<string, Render> = {
 
 /* ── the degrade-only set (charter D47) ─────────────────────────────────────── */
 
+// `degradeCard` / `isDegradeCard` live in ./register (the cycle-free chrome
+// module) — see the note there. This module only DERIVES from the marker.
+
 /** The registered types whose renderer is a DEGRADE CARD rather than a render:
  * a labeled box that states its ceiling (`video`, `asciicast` — D46d). They ARE
  * in BLOCK_RENDERERS, so a block of one still draws its card wherever the
@@ -108,8 +111,19 @@ export const BLOCK_RENDERERS: Record<string, Render> = {
  * degrade-only turn stays on the text path, and a MIXED turn takes the document
  * path and draws the card next to the prose. Gating the dispatch instead would
  * have been the worse fix — the mixed turn would lose its card to an
- * "Unsupported block" box, which is a lie about a type we support. */
-export const DEGRADE_ONLY: ReadonlySet<string> = new Set(['video', 'asciicast'])
+ * "Unsupported block" box, which is a lie about a type we support.
+ *
+ * DERIVED, not hand-kept. A two-literal Set said nothing about the renderers it
+ * claimed to describe: a THIRD degrade card could be written and registered
+ * without touching this line, and the turn-level subtraction would silently
+ * stop covering it — the exact information-loss regression this set exists to
+ * prevent, reintroduced by omission. The marker rides the renderer itself, so
+ * the set cannot be out of date with the register. */
+export const DEGRADE_ONLY: ReadonlySet<string> = new Set(
+  Object.entries(BLOCK_RENDERERS)
+    .filter(([, render]) => isDegradeCard(render))
+    .map(([type]) => type),
+)
 
 /** Render one type-keyed block to a ReactNode. Unknown/malformed blocks
  * degrade to the labeled fallback — never a throw, never a silent hole

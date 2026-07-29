@@ -320,9 +320,31 @@ function statCard(item: Record<string, unknown>, ctx: BlockCtx, key: number): Re
   if (value === '') return null
   const denom = str(item.denom)
   const label = str(item.label)
+  // THE BAR'S LAW, canonical in react (blocks/dataviz.ts statHtml) and agreed by
+  // Go (stat.go): the track EXISTS whenever `max` is above zero REGARDLESS of
+  // value, and the fill is a STRICT numeric parse of value else zero, clamped
+  // to 0..1. Three divergences from that law rode this one expression and are
+  // fixed TOGETHER, because fixing either alone trades one bug for another:
+  //
+  //   • THE ZERO-DROP (real, painted). `num()` is undefined for anything at or
+  //     below zero, so a stat of `0` dropped the whole track where react paints
+  //     an empty one. "0 of 10" is information; a missing bar is not.
+  //   • THE LOWER CLAMP (latent). `num()` hid negatives too, so main could not
+  //     paint a negative width — by ACCIDENT, not by law. Reading value through
+  //     a wider parse (which the zero-drop fix requires) arms that trap
+  //     immediately: without the lower clamp, -5 of 10 is `width: '-50%'`.
+  //     `clamp(…, 0, 1)` makes the floor structural.
+  //   • STRICTNESS (real, painted). A stat `value` is a PRE-FORMATTED DISPLAY
+  //     STRING by the pdrender contract, so a lenient `parseFloat` read
+  //     `"1.24M"` as 1.24 and painted 62% of a max of 2 where react paints 0%.
+  //     `numeric` is this file's strict twin of react's own parse: a string
+  //     that is not wholly a number is NOT a quantity.
+  //
+  // `num()` itself is UNCHANGED and stays the reader for `max` (and for cell
+  // spans elsewhere): its above-zero law is right there — a max of zero has no
+  // bar to denominate — and rewriting it would move those callers too.
   const max = num(item.max)
-  const nv = num(value)
-  const fill = max !== undefined && max > 0 && nv !== undefined ? Math.min(nv / max, 1) : undefined
+  const fill = max === undefined ? undefined : clamp((numeric(value) ?? 0) / max, 0, 1)
   return (
     <View
       key={key}
@@ -747,13 +769,42 @@ export function chartSpan(series: Series[], axes: Record<string, unknown>): [num
  * new `info` token this wave, so the ladder is the theme's own four tones.
  * theme.ts ships `success` at the SAME hex as `accent` in BOTH palettes, so
  * taken literally a 2-series chart would paint two identical lines; a repeat
- * falls back to `textMuted` — still a theme-owned tone, no colour invented. */
+ * falls back to `textMuted` — still a theme-owned tone, no colour invented.
+ *
+ * KNOWN DEFECT, PINNED AS TODAY'S BEHAVIOUR (charter D74, amending D56). That
+ * fallback means SERIES 2 WEARS THE APPARATUS COLOUR: `textMuted` is also the
+ * chart's tick and baseline-axis ink, so a two-series chart draws one of its
+ * lines in the same grey as the furniture around it. That is a real legibility
+ * violation and it PAINTS at n=2 — it is not hypothetical. Closing it needs a
+ * FIFTH theme token (the web resolves series 2 to `--bp-tone-info-fg`; mobile
+ * has no `info` token and no `derive()` — its theme is literal hex), and
+ * choosing hexes against `#1f6f4a`/`#3fa374` by eye is exactly the judgment
+ * D74 CUT for want of a visual reviewer. So this function ships the assertable
+ * half only — pairwise distinctness and a stable prefix, both mutation-killable
+ * — and the colour choice stays visibly parked. Do NOT "fix" this by inventing
+ * an info hex: a green that hides the defect is worse than the defect.
+ *
+ * The n>4 half of the distinctness pin is UNREACHABLE by construction — the
+ * chart renderer slices `series` to four before it asks for colours — so it is
+ * a defensive pin, and nobody may claim it fixed a rendering bug. */
 export function seriesColors(theme: Theme, n: number): string[] {
   const ladder = [theme.accent, theme.success, theme.warn, theme.danger]
+  // The dedup spares, in order, all theme-owned: textMuted FIRST so today's
+  // n=2 answer is byte-unchanged (see the D74 note above), then the remaining
+  // distinct tones, which only a series 5+ could ever reach.
+  const spares = [theme.textMuted, theme.text, theme.codeFg, theme.border, theme.bubble]
   const out: string[] = []
   for (let i = 0; i < n; i++) {
     const want = ladder[i % 4]!
-    out.push(out.includes(want) ? theme.textMuted : want)
+    if (!out.includes(want)) {
+      out.push(want)
+      continue
+    }
+    // The ladder repeats (or collides with itself, as success/accent do): take
+    // the first spare not already on the chart. Exhausting nine distinct tones
+    // would need a 10-series chart, which cannot exist — the renderer slices to
+    // four — so the last resort repeats textMuted rather than inventing a hex.
+    out.push(spares.find((c) => !out.includes(c)) ?? theme.textMuted)
   }
   return out
 }

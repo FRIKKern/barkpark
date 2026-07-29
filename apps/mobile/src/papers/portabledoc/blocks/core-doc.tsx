@@ -76,9 +76,27 @@ const ROLE_BY_NAME: Record<string, StatusRole> = Object.fromEntries(
   STATUS_ROLES.map((r) => [r.role, r]),
 )
 
+/** The canonical manifest ladder — the EIGHT roles design/status-manifest.json
+ * carries today, named positively (js/packages/react/src/inline.tsx
+ * MANIFEST_LADDER twin). An ALLOWLIST, not a blocklist: subtracting `unknown`
+ * admitted anything ELSE a future hand-edit added to STATUS_ROLES into the
+ * cross-surface legend key silently, which is the one place drift must not be
+ * able to enter unannounced. What is not on the manifest is not a legend row. */
+const MANIFEST_LADDER: ReadonlySet<string> = new Set([
+  'open',
+  'ready',
+  'progress',
+  'blocked',
+  'done',
+  'cancel',
+  'considering',
+  'researching',
+])
+
 /** The legend key: the EIGHT canonical manifest states, byte-frozen to what the
- * Elixir StatusVocab emits. `unknown` is JS/RN-only and held out. */
-export const LEGEND_ROLES: readonly StatusRole[] = STATUS_ROLES.filter((r) => r.role !== 'unknown')
+ * Elixir StatusVocab emits. `unknown` is JS/RN-only and held out — it is not on
+ * the ladder above, so the filter drops it without naming it. */
+export const LEGEND_ROLES: readonly StatusRole[] = STATUS_ROLES.filter((r) => MANIFEST_LADDER.has(r.role))
 
 /** A persisted status → its role. Absent/empty stays `open` (nothing about a
  * blank-status row changes); an unrecognized non-empty status fails open to
